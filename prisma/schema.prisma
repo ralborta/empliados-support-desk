@@ -1,0 +1,147 @@
+// Prisma schema para Empliados Support Desk
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AgentRole {
+  ADMIN
+  SUPPORT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketCategory {
+  TECH_SUPPORT
+  BILLING
+  SALES
+  OTHER
+}
+
+enum TicketChannel {
+  WHATSAPP
+  EMAIL
+  WEB
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL_NOTE
+}
+
+enum MessageFrom {
+  CUSTOMER
+  BOT
+  HUMAN
+}
+
+enum TicketEventType {
+  STATUS_CHANGED
+  ASSIGNED
+  TAGGED
+  PRIORITY_CHANGED
+  AUTO_REPLY
+  ESCALATED
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String?
+  tickets   Ticket[]
+  createdAt DateTime @default(now())
+}
+
+model AgentUser {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String
+  role      AgentRole
+  tickets   Ticket[]  @relation("AgentAssignments")
+  createdAt DateTime  @default(now())
+}
+
+model Ticket {
+  id                String          @id @default(cuid())
+  code              String          @unique
+  customerId        String
+  customer          Customer        @relation(fields: [customerId], references: [id])
+  title             String
+  status            TicketStatus
+  priority          TicketPriority
+  category          TicketCategory
+  channel           TicketChannel
+  assignedToUserId  String?
+  assignedTo        AgentUser?      @relation("AgentAssignments", fields: [assignedToUserId], references: [id])
+  lastMessageAt     DateTime        @default(now())
+  messages          TicketMessage[]
+  events            TicketEvent[]
+  tags              TicketTag[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([status])
+  @@index([priority])
+  @@index([customerId])
+  @@index([assignedToUserId])
+  @@index([lastMessageAt])
+}
+
+model TicketMessage {
+  id                String           @id @default(cuid())
+  ticketId          String
+  ticket            Ticket           @relation(fields: [ticketId], references: [id])
+  direction         MessageDirection
+  from              MessageFrom
+  text              String
+  rawPayload        Json
+  externalMessageId String?          @unique
+  createdAt         DateTime         @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+model TicketEvent {
+  id        String           @id @default(cuid())
+  ticketId  String
+  ticket    Ticket           @relation(fields: [ticketId], references: [id])
+  type      TicketEventType
+  payload   Json
+  createdAt DateTime         @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+model Tag {
+  id        String      @id @default(cuid())
+  name      String      @unique
+  tickets   TicketTag[]
+  createdAt DateTime    @default(now())
+}
+
+model TicketTag {
+  ticketId String
+  tagId    String
+  ticket   Ticket @relation(fields: [ticketId], references: [id])
+  tag      Tag    @relation(fields: [tagId], references: [id])
+
+  @@id([ticketId, tagId])
+}
