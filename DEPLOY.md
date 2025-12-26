@@ -1,7 +1,17 @@
 # Guía de Deploy - Empliados Support Desk
 
-## ✅ Migración completada
-La base de datos en Railway ya tiene las tablas creadas.
+## ✅ Estado Actual
+- ✅ Base de datos en Railway con migración aplicada
+- ✅ Código en GitHub: https://github.com/ralborta/empliados-support-desk
+- ✅ Build local exitoso (Next.js 16 + Prisma 6)
+- ⏳ Esperando deploy en Vercel
+
+## 📦 Stack Técnico
+- **Frontend/Backend**: Next.js 16.1.1 (App Router, TypeScript, Tailwind)
+- **Base de Datos**: PostgreSQL en Railway
+- **ORM**: Prisma 6.19.1 (downgrade desde v7 por compatibilidad)
+- **Auth**: iron-session
+- **Deployment**: Vercel
 
 ## Variables de Entorno para Vercel
 
