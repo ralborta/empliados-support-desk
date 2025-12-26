@@ -5,12 +5,10 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { generateTicketCode } from "@/lib/tickets";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import { TicketPriority, TicketStatus, TicketCategory } from "@/generated/prisma";
-
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const status = searchParams.get("status") as TicketStatus | null;
-  const priority = searchParams.get("priority") as TicketPriority | null;
+  const status = searchParams.get("status") as "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED" | null;
+  const priority = searchParams.get("priority") as "LOW" | "NORMAL" | "HIGH" | "URGENT" | null;
   const q = searchParams.get("q") || undefined;
 
   const where = {
@@ -41,12 +39,12 @@ const createTicketSchema = z.object({
   title: z.string().min(3),
   customerPhone: z.string().min(5),
   customerName: z.string().optional(),
-  priority: z.nativeEnum(TicketPriority).optional(),
-  category: z.nativeEnum(TicketCategory).optional(),
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+  category: z.enum(["TECH_SUPPORT", "BILLING", "SALES", "OTHER"]).optional(),
 });
 
 export async function POST(req: Request) {
-  const session = await getIronSession<SessionData>(cookies(), sessionOptions);
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
   if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const json = await req.json().catch(() => null);
@@ -68,9 +66,9 @@ export async function POST(req: Request) {
       code: generateTicketCode(),
       title,
       customerId: customer.id,
-      status: TicketStatus.OPEN,
-      priority: priority || TicketPriority.NORMAL,
-      category: category || TicketCategory.TECH_SUPPORT,
+      status: "OPEN",
+      priority: priority || "NORMAL",
+      category: category || "TECH_SUPPORT",
       channel: "WEB",
     },
   });

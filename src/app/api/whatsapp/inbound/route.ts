@@ -3,16 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { autoReplyActionPlan, escalationActionPlan, neutralActionPlan } from "@/lib/whatsapp/actionPlan";
 import { generateTicketCode } from "@/lib/tickets";
-import {
-  MessageDirection,
-  MessageFrom,
-  TicketCategory,
-  TicketChannel,
-  TicketEventType,
-  TicketPriority,
-  TicketStatus,
-} from "@/generated/prisma";
-import type { Prisma } from "@/generated/prisma";
+// Using string literals instead of Prisma enums for compatibility
 
 const inboundSchema = z.object({
   phone: z.string().min(5),
@@ -20,7 +11,7 @@ const inboundSchema = z.object({
   text: z.string().min(1),
   messageId: z.string().optional(),
   timestamp: z.union([z.string(), z.number()]).optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
   auth: z.string().optional(),
 });
 
@@ -66,7 +57,7 @@ export async function POST(req: Request) {
   let ticket = await prisma.ticket.findFirst({
     where: {
       customerId: customer.id,
-      status: { in: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CUSTOMER] },
+      status: { in: ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"] },
       lastMessageAt: { gte: cutoff },
     },
     orderBy: { lastMessageAt: "desc" },
@@ -78,10 +69,10 @@ export async function POST(req: Request) {
         code: generateTicketCode(),
         customerId: customer.id,
         title: data.text.split(" ").slice(0, 8).join(" ") || "Consulta",
-        status: TicketStatus.OPEN,
-        priority: TicketPriority.NORMAL,
+        status: "OPEN",
+        priority: "NORMAL",
         category: inferCategory(data.text),
-        channel: TicketChannel.WHATSAPP,
+        channel: "WHATSAPP",
       },
     });
   }
@@ -95,13 +86,13 @@ export async function POST(req: Request) {
     previousMessages: await prisma.ticketMessage.count({ where: { ticketId: ticket.id } }),
   });
 
-  const rawPayload: Prisma.InputJsonValue = data;
+  const rawPayload = data as any;
 
   await prisma.ticketMessage.create({
     data: {
       ticketId: ticket.id,
-      direction: MessageDirection.INBOUND,
-      from: MessageFrom.CUSTOMER,
+      direction: "INBOUND",
+      from: "CUSTOMER",
       text: data.text,
       rawPayload,
       externalMessageId: data.messageId,
@@ -121,7 +112,7 @@ export async function POST(req: Request) {
   await prisma.ticketEvent.create({
     data: {
       ticketId: ticket.id,
-      type: actionPlan.needsHuman ? TicketEventType.ESCALATED : TicketEventType.AUTO_REPLY,
+      type: actionPlan.needsHuman ? "ESCALATED" : "AUTO_REPLY",
       payload: {
         metadata: data.metadata || null,
         actionPlan,
@@ -135,39 +126,39 @@ export async function POST(req: Request) {
 function inferPriorityAndCategory(
   text: string,
   metadata: Record<string, unknown> | undefined,
-  currentPriority: TicketPriority,
-  currentCategory: TicketCategory,
+  currentPriority: string,
+  currentCategory: string,
 ) {
   const lower = text.toLowerCase();
-  let priority = currentPriority;
-  let category = currentCategory;
+  let priority: string = currentPriority;
+  let category: string = currentCategory;
 
   if (/(urgente|producci[óo]n|ca[ií]do|no anda|error)/.test(lower)) {
-    priority = TicketPriority.HIGH;
+    priority = "HIGH";
   }
   if (/(amenaza|legal|fraude|cliente enojado)/.test(lower)) {
-    priority = TicketPriority.URGENT;
+    priority = "URGENT";
   }
   if (/(factura|pago|precio)/.test(lower)) {
-    category = TicketCategory.BILLING;
+    category = "BILLING";
   }
   if (/(walter|emilia|silvia|oscar|max)/.test(lower)) {
-    category = TicketCategory.TECH_SUPPORT;
+    category = "TECH_SUPPORT";
   }
   if (metadata && typeof metadata["priority"] === "string") {
     const metaPriority = metadata["priority"] as string;
     if (metaPriority.toLowerCase() === "urgent") {
-      priority = TicketPriority.URGENT;
+      priority = "URGENT";
     }
   }
   return { priority, category };
 }
 
-function inferCategory(text: string): TicketCategory {
+function inferCategory(text: string): string {
   const lower = text.toLowerCase();
-  if (/(factura|pago|precio)/.test(lower)) return TicketCategory.BILLING;
-  if (/(walter|emilia|silvia|oscar|max)/.test(lower)) return TicketCategory.TECH_SUPPORT;
-  return TicketCategory.TECH_SUPPORT;
+  if (/(factura|pago|precio)/.test(lower)) return "BILLING";
+  if (/(walter|emilia|silvia|oscar|max)/.test(lower)) return "TECH_SUPPORT";
+  return "TECH_SUPPORT";
 }
 
 function decideNextAction({
@@ -177,7 +168,7 @@ function decideNextAction({
   previousMessages,
 }: {
   text: string;
-  priority: TicketPriority;
+  priority: string;
   metadata?: Record<string, unknown>;
   previousMessages: number;
 }) {
@@ -185,7 +176,7 @@ function decideNextAction({
   const confidence = typeof metadata?.confidence === "number" ? metadata.confidence : 0;
 
   const shouldEscalate =
-    priority === TicketPriority.URGENT ||
+    priority === "URGENT" ||
     /(amenaza|legal|fraude|cliente enojado|escala|denuncia)/.test(lower) ||
     previousMessages >= 3;
 

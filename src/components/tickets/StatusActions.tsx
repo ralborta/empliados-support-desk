@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { TicketStatus } from "@/generated/prisma";
+import type { TicketStatus } from "@/lib/types";
 
 export function StatusActions({
   ticketId,

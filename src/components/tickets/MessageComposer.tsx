@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { MessageDirection, MessageFrom } from "@/generated/prisma";
+import type { MessageDirection, MessageFrom } from "@/lib/types";
 
 export function MessageComposer({ ticketId }: { ticketId: string }) {
   const router = useRouter();
@@ -23,7 +23,7 @@ export function MessageComposer({ ticketId }: { ticketId: string }) {
         body: JSON.stringify({
           text,
           direction,
-          from: direction === "OUTBOUND" ? MessageFrom.HUMAN : MessageFrom.HUMAN,
+          from: "HUMAN" as MessageFrom,
         }),
       });
       if (!res.ok) {

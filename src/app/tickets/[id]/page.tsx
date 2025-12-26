@@ -7,14 +7,15 @@ import {
   statusLabels,
   fromLabels,
 } from "@/lib/tickets";
-import { TicketStatus } from "@/generated/prisma";
+type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 import { MessageComposer } from "@/components/tickets/MessageComposer";
 import { StatusActions } from "@/components/tickets/StatusActions";
 
-export default async function TicketDetail({ params }: { params: { id: string } }) {
+export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
+  const { id } = await params;
   const ticket = await prisma.ticket.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       customer: true,
       assignedTo: true,
@@ -43,11 +44,11 @@ export default async function TicketDetail({ params }: { params: { id: string } 
             <div className="inline-flex items-center gap-2">
               <span className="text-sm font-semibold text-slate-700">Estado:</span>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-800">
-                {statusLabels[ticket.status]}
+                {statusLabels[ticket.status as TicketStatus]}
               </span>
               <span className="text-sm font-semibold text-slate-700">Prioridad:</span>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-800">
-                {priorityLabels[ticket.priority]}
+                {priorityLabels[ticket.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT"]}
               </span>
             </div>
             <StatusActions ticketId={ticket.id} currentStatus={ticket.status as TicketStatus} />
@@ -62,10 +63,10 @@ export default async function TicketDetail({ params }: { params: { id: string } 
                 {conversation.length === 0 ? (
                   <div className="text-sm text-slate-500">Sin mensajes aún.</div>
                 ) : (
-                  conversation.map((msg) => (
+                  conversation.map((msg: { id: string; from: string; text: string; createdAt: Date }) => (
                     <div key={msg.id} className="flex flex-col gap-1">
                       <div className="text-xs text-slate-500">
-                        {fromLabels[msg.from]} · {msg.createdAt.toLocaleString("es-AR")}
+                        {fromLabels[msg.from as "CUSTOMER" | "BOT" | "HUMAN"]} · {msg.createdAt.toLocaleString("es-AR")}
                       </div>
                       <div
                         className={`max-w-2xl rounded-2xl px-4 py-3 text-sm shadow-sm ${

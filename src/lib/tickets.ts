@@ -1,11 +1,9 @@
-import {
-  TicketPriority,
-  TicketStatus,
-  TicketCategory,
-  TicketChannel,
-  MessageDirection,
-  MessageFrom,
-} from "@/generated/prisma";
+type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
+type TicketPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+type TicketCategory = "TECH_SUPPORT" | "BILLING" | "SALES" | "OTHER";
+type TicketChannel = "WHATSAPP" | "EMAIL" | "WEB";
+type MessageDirection = "INBOUND" | "OUTBOUND" | "INTERNAL_NOTE";
+type MessageFrom = "CUSTOMER" | "BOT" | "HUMAN";
 
 export function generateTicketCode(date = new Date()) {
   const year = date.getFullYear();

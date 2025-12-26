@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Credenciales inválidas" }, { status: 401 });
   }
 
-  const session = await getIronSession<SessionData>(cookies(), sessionOptions);
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
   session.user = {
     id: "admin",
     role: "ADMIN",

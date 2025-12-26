@@ -4,23 +4,19 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import {
-  MessageDirection,
-  MessageFrom,
-  TicketStatus,
-} from "@/generated/prisma";
 
 const messageSchema = z.object({
   text: z.string().min(1),
-  direction: z.nativeEnum(MessageDirection).default(MessageDirection.OUTBOUND),
-  from: z.nativeEnum(MessageFrom).default(MessageFrom.HUMAN),
-  rawPayload: z.record(z.any()).optional(),
+  direction: z.enum(["INBOUND", "OUTBOUND", "INTERNAL_NOTE"]).default("OUTBOUND"),
+  from: z.enum(["CUSTOMER", "BOT", "HUMAN"]).default("HUMAN"),
+  rawPayload: z.record(z.string(), z.any()).optional(),
 });
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const session = await getIronSession<SessionData>(cookies(), sessionOptions);
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
   if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const { id } = await params;
   const json = await req.json().catch(() => null);
   const parsed = messageSchema.safeParse(json);
   if (!parsed.success) {
@@ -31,7 +27,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const message = await prisma.ticketMessage.create({
     data: {
-      ticketId: params.id,
+      ticketId: id,
       direction,
       from,
       text,
@@ -40,10 +36,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   });
 
   await prisma.ticket.update({
-    where: { id: params.id },
+    where: { id },
     data: {
       lastMessageAt: new Date(),
-      status: direction === MessageDirection.OUTBOUND ? TicketStatus.WAITING_CUSTOMER : undefined,
+      status: direction === "OUTBOUND" ? "WAITING_CUSTOMER" : undefined,
     },
   });
 

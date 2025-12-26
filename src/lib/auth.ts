@@ -1,4 +1,4 @@
-import { getIronSession, type IronSessionOptions } from "iron-session";
+import { getIronSession, type SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -15,7 +15,7 @@ export type SessionData = {
 
 const fallbackPassword = "change-this-session-password-in-env-please";
 
-export const sessionOptions: IronSessionOptions = {
+export const sessionOptions: SessionOptions = {
   cookieName: "empliados_support_session",
   password: process.env.SESSION_PASSWORD || fallbackPassword,
   cookieOptions: {
@@ -26,7 +26,7 @@ export const sessionOptions: IronSessionOptions = {
 };
 
 export async function getSession() {
-  return getIronSession<SessionData>(cookies(), sessionOptions);
+  return getIronSession<SessionData>(await cookies(), sessionOptions);
 }
 
 export async function requireSession() {

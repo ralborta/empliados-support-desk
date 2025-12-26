@@ -5,7 +5,8 @@ import {
   priorityLabels,
   statusLabels
 } from "@/lib/tickets";
-import { TicketPriority, TicketStatus } from "@/generated/prisma";
+type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
+type TicketPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 
 function statusBadgeClass(status: TicketStatus) {
   switch (status) {
@@ -72,10 +73,10 @@ export default async function TicketsPage({
   ]);
 
   const statusCountMap = Object.fromEntries(
-    statusCounts.map((c) => [c.status, c._count._all])
+    statusCounts.map((c: { status: string; _count: { _all: number } }) => [c.status as TicketStatus, c._count._all])
   ) as Partial<Record<TicketStatus, number>>;
   const priorityCountMap = Object.fromEntries(
-    priorityCounts.map((c) => [c.priority, c._count._all])
+    priorityCounts.map((c: { priority: string; _count: { _all: number } }) => [c.priority as TicketPriority, c._count._all])
   ) as Partial<Record<TicketPriority, number>>;
 
   return (
@@ -142,7 +143,7 @@ export default async function TicketsPage({
               {tickets.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-slate-500">No hay tickets con estos filtros.</div>
               ) : (
-                tickets.map((ticket) => (
+                tickets.map((ticket: { id: string; code: string; title: string; status: string; priority: string; customer: { phone?: string; name?: string } | null; assignedTo: { name?: string } | null }) => (
                   <div key={ticket.id} className="grid grid-cols-12 items-center px-4 py-3 hover:bg-slate-50">
                     <div className="col-span-2 text-sm font-semibold text-slate-800">{ticket.code}</div>
                     <div className="col-span-3">
@@ -156,13 +157,13 @@ export default async function TicketsPage({
                     </div>
                     <div className="col-span-2 text-sm text-slate-700">{ticket.customer?.name || "Cliente"}</div>
                     <div className="col-span-2">
-                      <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(ticket.status)}`}>
-                        {statusLabels[ticket.status]}
+                      <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(ticket.status as TicketStatus)}`}>
+                        {statusLabels[ticket.status as TicketStatus]}
                       </span>
                     </div>
                     <div className="col-span-2">
-                      <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${priorityBadgeClass(ticket.priority)}`}>
-                        {priorityLabels[ticket.priority]}
+                      <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${priorityBadgeClass(ticket.priority as TicketPriority)}`}>
+                        {priorityLabels[ticket.priority as TicketPriority]}
                       </span>
                     </div>
                     <div className="col-span-1 text-sm text-slate-700">
