@@ -10,6 +10,7 @@ import {
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 import { MessageComposer } from "@/components/tickets/MessageComposer";
 import { StatusActions } from "@/components/tickets/StatusActions";
+import { ConversationSummary } from "@/components/tickets/ConversationSummary";
 
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
@@ -96,6 +97,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
                 <div><span className="font-semibold">Asignado:</span> {ticket.assignedTo?.name || "Sin asignar"}</div>
               </div>
             </div>
+            <ConversationSummary ticketId={ticket.id} initialSummary={ticket.aiSummary} />
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
               <div className="text-sm font-semibold text-slate-800">Acciones rápidas</div>
               <div className="mt-2 space-y-2 text-sm text-slate-600">

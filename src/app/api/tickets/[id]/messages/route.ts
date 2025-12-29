@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
+import { summarizeConversation } from "@/lib/openai";
 
 const messageSchema = z.object({
   text: z.string().min(1),
@@ -76,6 +77,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       status: direction === "OUTBOUND" ? "WAITING_CUSTOMER" : undefined,
     },
   });
+
+  // Actualizar resumen con IA después de agregar el mensaje
+  try {
+    const allMessages = await prisma.ticketMessage.findMany({
+      where: { ticketId: id },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const conversationMessages = allMessages.map((msg) => ({
+      from: msg.from,
+      text: msg.text,
+      createdAt: msg.createdAt,
+    }));
+
+    const aiSummary = await summarizeConversation(conversationMessages);
+
+    await prisma.ticket.update({
+      where: { id },
+      data: { aiSummary },
+    });
+
+    console.log(`[Messages] ✅ Resumen actualizado para ticket ${id}`);
+  } catch (error: any) {
+    console.error(`[Messages] ⚠️ Error al actualizar resumen:`, error.message);
+    // No fallar si el resumen falla, el mensaje ya se guardó
+  }
 
   return NextResponse.json({ message, sent: direction === "OUTBOUND" });
 }
