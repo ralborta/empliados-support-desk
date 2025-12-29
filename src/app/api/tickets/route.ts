@@ -39,6 +39,7 @@ const createTicketSchema = z.object({
   title: z.string().min(3),
   customerPhone: z.string().min(5),
   customerName: z.string().optional(),
+  contactName: z.string().optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
   category: z.enum(["TECH_SUPPORT", "BILLING", "SALES", "OTHER"]).optional(),
 });
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { title, customerPhone, customerName, priority, category } = parsed.data;
+  const { title, customerPhone, customerName, contactName, priority, category } = parsed.data;
 
   const customer = await prisma.customer.upsert({
     where: { phone: customerPhone },
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
       code: generateTicketCode(),
       title,
       customerId: customer.id,
+      contactName: contactName || customerName || "Sin nombre",
       status: "OPEN",
       priority: priority || "NORMAL",
       category: category || "TECH_SUPPORT",
