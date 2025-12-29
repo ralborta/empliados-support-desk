@@ -11,6 +11,7 @@ type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "
 import { MessageComposer } from "@/components/tickets/MessageComposer";
 import { StatusActions } from "@/components/tickets/StatusActions";
 import { ConversationSummary } from "@/components/tickets/ConversationSummary";
+import { AssignAgentDropdown } from "@/components/tickets/AssignAgentDropdown";
 
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
@@ -27,6 +28,16 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
   if (!ticket) {
     notFound();
   }
+
+  // Obtener lista de agentes para el dropdown
+  const agentes = await prisma.agentUser.findMany({
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  });
 
   const conversation = ticket.messages;
 
@@ -90,12 +101,18 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
 
           <div className="space-y-3">
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-              <div className="text-sm font-semibold text-slate-800">Datos del cliente</div>
-              <div className="mt-2 text-sm text-slate-600">
+              <div className="text-sm font-semibold text-slate-800 mb-3">Datos del cliente</div>
+              <div className="space-y-2 text-sm text-slate-600">
                 <div><span className="font-semibold">Nombre:</span> {ticket.customer?.name || "No especificado"}</div>
                 <div><span className="font-semibold">Teléfono:</span> {ticket.customer?.phone}</div>
-                <div><span className="font-semibold">Asignado:</span> {ticket.assignedTo?.name || "Sin asignar"}</div>
               </div>
+            </div>
+            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+              <AssignAgentDropdown 
+                ticketId={ticket.id} 
+                currentAgentId={ticket.assignedToUserId} 
+                agentes={agentes}
+              />
             </div>
             <ConversationSummary ticketId={ticket.id} initialSummary={ticket.aiSummary} />
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
