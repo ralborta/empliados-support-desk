@@ -24,13 +24,16 @@ function TicketsSidebar() {
         </Link>
       </div>
       <nav className="space-y-1 px-2 pb-6 text-sm">
-        <SectionTitle>Todos los Tickets</SectionTitle>
+        <SectionTitle>Inicio</SectionTitle>
+        <NavLink label="📊 Dashboard" href="/dashboard" />
+        <NavLink label="🎫 Todos los Tickets" href="/tickets" />
+        <SectionTitle>Por Estado</SectionTitle>
         <NavLink label="Abiertos" href="/tickets/abiertos" />
         <NavLink label="En Progreso" href="/tickets/en-progreso" />
         <NavLink label="Esperando Cliente" href="/tickets/esperando-cliente" />
         <NavLink label="Resueltos" href="/tickets/resueltos" />
         <NavLink label="Cerrados" href="/tickets/cerrados" />
-        <SectionTitle>Prioridad</SectionTitle>
+        <SectionTitle>Por Prioridad</SectionTitle>
         <NavLink label="Urgente" href="/tickets/urgentes" indicator="bg-rose-500" />
         <NavLink label="Alta" href="/tickets/alta" indicator="bg-amber-500" />
         <NavLink label="Normal" href="/tickets/normal" indicator="bg-emerald-500" />
