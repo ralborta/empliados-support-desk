@@ -92,6 +92,10 @@ model Ticket {
   assignedToUserId  String?
   assignedTo        AgentUser?      @relation("AgentAssignments", fields: [assignedToUserId], references: [id])
   lastMessageAt     DateTime        @default(now())
+  // AI-generated summaries
+  aiSummary         String?         // Resumen de la conversación generado por IA
+  resolution        String?         // Conclusión de cómo se resolvió el caso
+  resolvedByAI      Boolean         @default(false) // Si fue resuelto automáticamente por IA
   messages          TicketMessage[]
   events            TicketEvent[]
   tags              TicketTag[]
