@@ -24,11 +24,13 @@ SESSION_PASSWORD=empliados-session-secret-key-32-chars-minimum-required-for-secu
 BUILDERBOT_BOT_ID=7d4339ee-2a9b-424e-92f6-ad7790c1662f
 BUILDERBOT_API_KEY=bb-04c2baf7-5db2-4c43-9cfc-35bbbb660812
 BUILDERBOT_BASE_URL=https://app.builderbot.cloud
+OPENAI_API_KEY=sk-proj-...tu-api-key...
 ```
 
 **IMPORTANTE:** 
 - Las contraseñas pueden cambiarse por otras más seguras si lo deseas
 - El `BUILDERBOT_BOT_ID` y `BUILDERBOT_API_KEY` son los que te proporciona BuilderBot.cloud
+- El `OPENAI_API_KEY` es necesario para generar resúmenes automáticos de las conversaciones
 
 ## Pasos para Deploy en Vercel
 
@@ -118,3 +120,85 @@ Debería:
 2. Guardar el mensaje en la base de datos
 3. Responder con un JSON indicando éxito
 4. (Si está bien configurado) Enviar mensaje automático al cliente por WhatsApp
+
+---
+
+## 🤖 Gestión de Mensajes Temporales y Resúmenes con IA
+
+### Ciclo de vida de los mensajes:
+
+**FASE 1: Conversación Activa**
+- Los mensajes se almacenan temporalmente en `TicketMessage`
+- Permiten tracking en tiempo real de la conversación
+
+**FASE 2: Cierre con Resumen**
+- Cuando se cierra o escala un caso, OpenAI resume toda la conversación
+- El resumen se guarda en `Ticket.aiSummary` y `Ticket.resolution`
+- Los mensajes temporales se **BORRAN** para ahorrar espacio
+- Solo queda el resumen en el ticket
+
+### Endpoints para cerrar casos:
+
+#### 1. Escalar a Soporte Humano
+
+```bash
+POST /api/tickets/{ticketId}/escalate
+```
+
+**¿Cuándo usar?**
+- El Agente IA no puede resolver el problema
+- Cliente insiste después de 3+ mensajes
+- Detecta keywords críticas: "urgente", "no funciona", etc.
+
+**Respuesta:**
+```json
+{
+  "ok": true,
+  "ticketCode": "TKT-20241229-ABC123",
+  "aiSummary": "Cliente reporta que Walter no responde desde hace 1h...",
+  "resolution": "Escalado a soporte humano para atención inmediata.",
+  "messagesDeleted": 5
+}
+```
+
+#### 2. Cerrar Caso Resuelto por IA
+
+```bash
+POST /api/tickets/{ticketId}/close-by-ai
+```
+
+**¿Cuándo usar?**
+- El Agente IA resolvió completamente el problema
+- Cliente satisfecho con la respuesta automática
+- No requiere intervención humana
+
+**Respuesta:**
+```json
+{
+  "ok": true,
+  "ticketCode": "TKT-20241229-ABC123",
+  "aiSummary": "Cliente preguntó por horarios de atención.",
+  "resolution": "Se informó horario de lunes a viernes 9-18hs. Cliente satisfecho.",
+  "messagesDeleted": 3
+}
+```
+
+### Ventajas del sistema:
+
+✅ **Ahorro de espacio:** Solo guarda resúmenes, no conversaciones completas  
+✅ **Contexto claro:** Agentes humanos ven resumen conciso, no mensajes dispersos  
+✅ **Métricas precisas:** Distingue casos resueltos por IA vs escalados  
+✅ **Auditoría:** Registro de qué pasó sin data innecesaria  
+
+### Ejemplo de flujo completo:
+
+```
+1. Cliente envía 5 mensajes → BuilderBot → Webhook
+2. Tu backend guarda 5 mensajes temporales en DB
+3. Agente IA decide: "Necesita escalar"
+4. POST /api/tickets/{id}/escalate
+5. OpenAI resume: "Cliente reporta Walter no responde. Urgente."
+6. Se guarda el resumen en Ticket
+7. Se BORRAN los 5 mensajes temporales
+8. Agente humano ve solo el resumen
+```
