@@ -22,7 +22,17 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
     include: {
       customer: true,
       assignedTo: true,
-      messages: { orderBy: { createdAt: "asc" } },
+      messages: { 
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          direction: true,
+          from: true,
+          text: true,
+          attachments: true,
+          createdAt: true,
+        },
+      },
     },
   });
 
