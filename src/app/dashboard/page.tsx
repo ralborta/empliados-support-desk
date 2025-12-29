@@ -1,21 +1,159 @@
 import { requireSession } from "@/lib/auth";
 import { statusLabels, priorityLabels } from "@/lib/tickets";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
+import { prisma } from "@/lib/db";
 
 async function getDashboardStats() {
-  const baseUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000";
-  
-  const res = await fetch(`${baseUrl}/api/dashboard/stats`, {
-    cache: "no-store",
-  });
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-  if (!res.ok) {
+    const totalTickets = await prisma.ticket.count();
+
+    const ticketsByStatus = await prisma.ticket.groupBy({
+      by: ["status"],
+      _count: true,
+    });
+
+    const ticketsByPriority = await prisma.ticket.groupBy({
+      by: ["priority"],
+      _count: true,
+    });
+
+    const ticketsToday = await prisma.ticket.count({
+      where: { createdAt: { gte: today } },
+    });
+
+    const resolvedToday = await prisma.ticket.count({
+      where: {
+        status: "RESOLVED",
+        updatedAt: { gte: today },
+      },
+    });
+
+    const resolvedTickets = await prisma.ticket.findMany({
+      where: {
+        status: { in: ["RESOLVED", "CLOSED"] },
+      },
+      select: {
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const avgResolutionTime = resolvedTickets.length > 0
+      ? resolvedTickets.reduce((acc, t) => {
+          const diff = t.updatedAt.getTime() - t.createdAt.getTime();
+          return acc + diff / (1000 * 60 * 60);
+        }, 0) / resolvedTickets.length
+      : 0;
+
+    const urgentUnassigned = await prisma.ticket.count({
+      where: {
+        priority: "URGENT",
+        assignedToUserId: null,
+        status: { notIn: ["RESOLVED", "CLOSED"] },
+      },
+    });
+
+    const topAgents = await prisma.agentUser.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        _count: {
+          select: {
+            tickets: {
+              where: {
+                status: { notIn: ["CLOSED"] },
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        tickets: {
+          _count: "desc",
+        },
+      },
+      take: 5,
+    });
+
+    const last7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+      
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+
+      const count = await prisma.ticket.count({
+        where: {
+          createdAt: {
+            gte: date,
+            lt: nextDate,
+          },
+        },
+      });
+
+      last7Days.push({
+        date: date.toISOString().split("T")[0],
+        count,
+      });
+    }
+
+    const topCompanies = await prisma.customer.findMany({
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        _count: {
+          select: {
+            tickets: true,
+          },
+        },
+      },
+      orderBy: {
+        tickets: {
+          _count: "desc",
+        },
+      },
+      take: 5,
+    });
+
+    return {
+      totalTickets,
+      ticketsToday,
+      resolvedToday,
+      avgResolutionTime: Math.round(avgResolutionTime * 10) / 10,
+      urgentUnassigned,
+      ticketsByStatus: ticketsByStatus.map((s) => ({
+        status: s.status,
+        count: s._count,
+      })),
+      ticketsByPriority: ticketsByPriority.map((p) => ({
+        priority: p.priority,
+        count: p._count,
+      })),
+      topAgents: topAgents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        email: a.email,
+        activeTickets: a._count.tickets,
+      })),
+      last7Days,
+      topCompanies: topCompanies.map((c) => ({
+        id: c.id,
+        name: c.name || c.phone,
+        phone: c.phone,
+        totalTickets: c._count.tickets,
+      })),
+    };
+  } catch (error: any) {
+    console.error("[Dashboard] Error al cargar stats:", error);
     return null;
   }
-
-  return res.json();
 }
 
 export default async function DashboardPage() {
