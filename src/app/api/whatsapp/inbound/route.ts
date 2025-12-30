@@ -13,6 +13,7 @@ const builderbotWebhookSchema = z.object({
     name: z.string().optional(),
     from: z.string(),
     attachment: z.array(z.any()).optional(),
+    urlTempFile: z.string().optional(), // URL temporal para archivos multimedia
     projectId: z.string().optional(),
   }),
 });
@@ -43,13 +44,24 @@ export async function POST(req: Request) {
   const customerPhone = data.from;
   const customerName = data.name; // Nombre de WhatsApp (la persona que escribe)
   const attachments = data.attachment || [];
+  const urlTempFile = data.urlTempFile; // URL temporal de BuilderBot para multimedia
 
   // Procesar attachments (imágenes, videos, documentos)
-  const processedAttachments = attachments.map((att: any) => ({
+  let processedAttachments = attachments.map((att: any) => ({
     url: att.url || att,
     type: att.mimetype || getFileTypeFromUrl(att.url || att),
     name: att.filename || "archivo",
   }));
+
+  // Si viene urlTempFile pero no attachments, agregar el archivo temporal
+  if (urlTempFile && processedAttachments.length === 0) {
+    processedAttachments.push({
+      url: urlTempFile,
+      type: getFileTypeFromUrl(urlTempFile),
+      name: "Archivo multimedia",
+    });
+    console.log(`📎 Archivo temporal detectado: ${urlTempFile}`);
+  }
 
   if (!messageText && processedAttachments.length === 0) {
     console.warn("⚠️ Mensaje sin texto ni attachments");
