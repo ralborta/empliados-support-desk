@@ -188,7 +188,10 @@ export async function POST(req: Request) {
   });
 
   if (processedAttachments.length > 0) {
-    console.log(`📎 ${processedAttachments.length} archivo(s) adjunto(s) guardado(s)`);
+    console.log(`📎 ${processedAttachments.length} archivo(s) adjunto(s) guardado(s):`);
+    processedAttachments.forEach((att, idx) => {
+      console.log(`  ${idx + 1}. ${att.name} (${att.type}): ${att.url}`);
+    });
   }
 
   await prisma.ticket.update({
