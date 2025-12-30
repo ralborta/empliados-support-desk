@@ -38,12 +38,26 @@ export async function uploadToBlob(tempUrl: string, filename?: string): Promise<
     });
 
     console.log(`✅ Imagen subida a Blob: ${url}`);
+    
+    // Validar que la URL sea absoluta
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      console.error(`❌ URL de Blob no es absoluta: ${url}`);
+      throw new Error("URL de Blob no es absoluta");
+    }
+    
     return url;
   } catch (error: any) {
     console.error(`❌ Error al subir a Blob:`, error.message);
     console.error(`❌ Stack:`, error.stack);
-    // Si falla, devolver la URL original como fallback
-    return tempUrl;
+    
+    // Si la URL temporal es absoluta, usarla como fallback
+    if (tempUrl && (tempUrl.startsWith("http://") || tempUrl.startsWith("https://"))) {
+      console.warn(`⚠️ Usando URL temporal como fallback: ${tempUrl}`);
+      return tempUrl;
+    }
+    
+    // Si no es absoluta, lanzar error para que no se guarde una ruta relativa
+    throw new Error(`URL temporal no es absoluta y Blob falló: ${tempUrl}`);
   }
 }
 

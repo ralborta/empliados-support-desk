@@ -68,16 +68,27 @@ export async function POST(req: Request) {
   if (urlTempFile && processedAttachments.length === 0) {
     console.log(`📎 Archivo temporal detectado: ${urlTempFile}`);
     
-    // Subir a Vercel Blob
-    const permanentUrl = await uploadToBlob(urlTempFile, `media-${Date.now()}.${getFileExtension(urlTempFile)}`);
-    
-    processedAttachments.push({
-      url: permanentUrl,
-      type: getFileTypeFromUrl(urlTempFile),
-      name: "Archivo multimedia",
-    });
-    
-    console.log(`✅ Archivo subido a Blob: ${permanentUrl}`);
+    // Validar que sea URL absoluta
+    if (!urlTempFile.startsWith("http://") && !urlTempFile.startsWith("https://")) {
+      console.error(`❌ urlTempFile no es URL absoluta: ${urlTempFile}`);
+      // No agregar si no es absoluta
+    } else {
+      try {
+        // Subir a Vercel Blob
+        const permanentUrl = await uploadToBlob(urlTempFile, `media-${Date.now()}.${getFileExtension(urlTempFile)}`);
+        
+        processedAttachments.push({
+          url: permanentUrl,
+          type: getFileTypeFromUrl(urlTempFile),
+          name: "Archivo multimedia",
+        });
+        
+        console.log(`✅ Archivo subido a Blob: ${permanentUrl}`);
+      } catch (error: any) {
+        console.error(`❌ Error al procesar urlTempFile:`, error.message);
+        // No agregar el attachment si falla
+      }
+    }
   }
 
   if (!messageText && processedAttachments.length === 0) {
