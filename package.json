@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.1",
+    "@vercel/blob": "^2.0.0",
     "axios": "^1.13.2",
     "iron-session": "^8.0.4",
     "lucide-react": "^0.562.0",

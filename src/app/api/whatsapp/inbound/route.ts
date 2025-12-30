@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { generateTicketCode } from "@/lib/tickets";
+import { uploadToBlob, getFileExtension } from "@/lib/blob";
 // Using string literals instead of Prisma enums for compatibility
 
 // Schema para el formato de BuilderBot.cloud
@@ -47,20 +48,36 @@ export async function POST(req: Request) {
   const urlTempFile = data.urlTempFile; // URL temporal de BuilderBot para multimedia
 
   // Procesar attachments (imágenes, videos, documentos)
-  let processedAttachments = attachments.map((att: any) => ({
-    url: att.url || att,
-    type: att.mimetype || getFileTypeFromUrl(att.url || att),
-    name: att.filename || "archivo",
-  }));
+  let processedAttachments = await Promise.all(
+    attachments.map(async (att: any) => {
+      const tempUrl = att.url || att;
+      const fileType = att.mimetype || getFileTypeFromUrl(tempUrl);
+      
+      // Subir a Vercel Blob para persistencia
+      const permanentUrl = await uploadToBlob(tempUrl, `attachment-${Date.now()}.${getFileExtension(tempUrl)}`);
+      
+      return {
+        url: permanentUrl,
+        type: fileType,
+        name: att.filename || "archivo",
+      };
+    })
+  );
 
   // Si viene urlTempFile pero no attachments, agregar el archivo temporal
   if (urlTempFile && processedAttachments.length === 0) {
+    console.log(`📎 Archivo temporal detectado: ${urlTempFile}`);
+    
+    // Subir a Vercel Blob
+    const permanentUrl = await uploadToBlob(urlTempFile, `media-${Date.now()}.${getFileExtension(urlTempFile)}`);
+    
     processedAttachments.push({
-      url: urlTempFile,
+      url: permanentUrl,
       type: getFileTypeFromUrl(urlTempFile),
       name: "Archivo multimedia",
     });
-    console.log(`📎 Archivo temporal detectado: ${urlTempFile}`);
+    
+    console.log(`✅ Archivo subido a Blob: ${permanentUrl}`);
   }
 
   if (!messageText && processedAttachments.length === 0) {
