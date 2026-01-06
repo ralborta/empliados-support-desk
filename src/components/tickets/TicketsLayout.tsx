@@ -40,6 +40,7 @@ function TicketsSidebar() {
         <NavLink label="Baja" href="/tickets/baja" indicator="bg-slate-400" />
         <SectionTitle>Gestión</SectionTitle>
         <NavLink label="👥 Agentes" href="/agentes" />
+        <NavLink label="⚙️ Configuración" href="/configuracion" />
       </nav>
     </aside>
   );
