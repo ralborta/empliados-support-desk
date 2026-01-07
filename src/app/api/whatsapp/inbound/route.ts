@@ -35,11 +35,20 @@ export async function POST(req: Request) {
 
   const { eventName, data } = parsed.data;
 
-  // Solo procesar mensajes entrantes
-  if (eventName !== "message.incoming") {
+  // Procesar mensajes entrantes y salientes
+  if (eventName === "message.incoming") {
+    // Procesar mensaje entrante del cliente
+    return await processIncomingMessage(parsed.data);
+  } else if (eventName === "message.outgoing") {
+    // Procesar mensaje saliente del agente desde BuilderBot
+    return await processOutgoingMessage(parsed.data);
+  } else {
     console.log(`ℹ️ Evento ignorado: ${eventName}`);
     return NextResponse.json({ ok: true, message: `Evento ${eventName} recibido pero no procesado` });
   }
+}
+
+async function processIncomingMessage({ eventName, data }: { eventName: string; data: any }) {
 
   const messageText = data.body || "";
   const customerPhone = data.from;
@@ -184,7 +193,7 @@ export async function POST(req: Request) {
     previousMessages: previousMessagesCount,
   });
 
-  const rawPayload = payload as any;
+  const rawPayload = { eventName, data };
 
   await prisma.ticketMessage.create({
     data: {
@@ -272,6 +281,133 @@ export async function POST(req: Request) {
     ticketCode: ticket.code,
     escalated: shouldEscalate,
     autoReplySent: !!autoReplyMessage,
+  });
+}
+
+async function processOutgoingMessage({ eventName, data }: { eventName: string; data: any }) {
+  const messageText = data.body || "";
+  // En mensajes salientes, el destinatario puede estar en 'to', 'remoteJid', o 'key.remoteJid'
+  const customerPhone = data.to || data.remoteJid || data.key?.remoteJid || data.from;
+  const attachments = data.attachment || [];
+  const urlTempFile = data.urlTempFile;
+
+  if (!customerPhone) {
+    console.warn("⚠️ Mensaje saliente sin destinatario");
+    return NextResponse.json({ ok: true, message: "Mensaje saliente sin destinatario, ignorado" });
+  }
+
+  if (!messageText && attachments.length === 0 && !urlTempFile) {
+    console.warn("⚠️ Mensaje saliente sin texto ni attachments");
+    return NextResponse.json({ ok: true, message: "Mensaje saliente vacío, ignorado" });
+  }
+
+  // Procesar attachments si los hay
+  let processedAttachments = await Promise.all(
+    attachments.map(async (att: any) => {
+      const tempUrl = att.url || att;
+      const fileType = att.mimetype || getFileTypeFromUrl(tempUrl);
+      
+      const permanentUrl = await uploadToBlob(tempUrl, `attachment-${Date.now()}.${getFileExtension(tempUrl)}`);
+      
+      return {
+        url: permanentUrl,
+        type: fileType,
+        name: att.filename || "archivo",
+      };
+    })
+  );
+
+  if (urlTempFile && processedAttachments.length === 0) {
+    if (urlTempFile.startsWith("http://") || urlTempFile.startsWith("https://")) {
+      try {
+        const permanentUrl = await uploadToBlob(urlTempFile, `media-${Date.now()}.${getFileExtension(urlTempFile)}`);
+        processedAttachments.push({
+          url: permanentUrl,
+          type: getFileTypeFromUrl(urlTempFile),
+          name: "Archivo multimedia",
+        });
+      } catch (error: any) {
+        console.error(`❌ Error al procesar urlTempFile:`, error.message);
+      }
+    }
+  }
+
+  // Buscar el ticket activo para este cliente
+  const customer = await prisma.customer.findUnique({
+    where: { phone: customerPhone },
+  });
+
+  if (!customer) {
+    console.log(`ℹ️ Cliente no encontrado para ${customerPhone}, ignorando mensaje saliente`);
+    return NextResponse.json({ ok: true, message: "Cliente no encontrado" });
+  }
+
+  // Buscar ticket activo (últimas 48 horas)
+  const cutoff = new Date(Date.now() - 1000 * 60 * 60 * 48);
+  const ticket = await prisma.ticket.findFirst({
+    where: {
+      customerId: customer.id,
+      status: { in: ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"] },
+      lastMessageAt: { gte: cutoff },
+    },
+    orderBy: { lastMessageAt: "desc" },
+  });
+
+  if (!ticket) {
+    console.log(`ℹ️ No hay ticket activo para ${customerPhone}, ignorando mensaje saliente`);
+    return NextResponse.json({ ok: true, message: "No hay ticket activo" });
+  }
+
+  // Generar messageId único
+  const messageId = `outgoing-${customerPhone}-${Date.now()}`;
+
+  // Verificar idempotencia
+  const existing = await prisma.ticketMessage.findFirst({
+    where: { 
+      externalMessageId: messageId,
+    },
+  });
+  
+  if (existing) {
+    console.log("ℹ️ Mensaje saliente duplicado, ignorando");
+    return NextResponse.json({
+      ok: true,
+      ticketId: existing.ticketId,
+      idempotent: true,
+    });
+  }
+
+  const rawPayload = { eventName, data };
+
+  // Guardar el mensaje saliente del agente
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "HUMAN", // Mensaje enviado por agente desde BuilderBot
+      text: messageText || "[Archivo adjunto]",
+      attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
+      rawPayload,
+      externalMessageId: messageId,
+    },
+  });
+
+  // Actualizar el ticket
+  await prisma.ticket.update({
+    where: { id: ticket.id },
+    data: {
+      lastMessageAt: new Date(),
+      status: "WAITING_CUSTOMER", // El agente envió un mensaje, ahora esperamos respuesta del cliente
+    },
+  });
+
+  console.log(`✅ Mensaje saliente del agente guardado en ticket ${ticket.code}`);
+
+  return NextResponse.json({ 
+    ok: true, 
+    ticketId: ticket.id, 
+    ticketCode: ticket.code,
+    messageSaved: true,
   });
 }
 
