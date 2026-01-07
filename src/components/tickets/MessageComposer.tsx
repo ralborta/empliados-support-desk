@@ -31,7 +31,8 @@ export function MessageComposer({ ticketId }: { ticketId: string }) {
         setError(data.error || "No se pudo guardar el mensaje");
       } else {
         setText("");
-        router.refresh();
+        // Forzar recarga completa de la página para mostrar el nuevo mensaje
+        window.location.reload();
       }
     } catch {
       setError("Error de red");
