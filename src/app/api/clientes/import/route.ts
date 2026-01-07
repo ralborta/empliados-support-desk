@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 
 export async function POST(req: NextRequest) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
