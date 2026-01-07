@@ -21,17 +21,21 @@ interface CustomersListProps {
 export function CustomersList({ initialCustomers, initialTotal }: CustomersListProps) {
   const [customers, setCustomers] = useState(initialCustomers);
   const [searchQuery, setSearchQuery] = useState("");
+  const [hasTicketsFilter, setHasTicketsFilter] = useState<string>("all");
   const [loading, setLoading] = useState(false);
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setCustomers(initialCustomers);
-      return;
-    }
-
     setLoading(true);
     try {
-      const res = await fetch(`/api/clientes?q=${encodeURIComponent(searchQuery)}`);
+      const params = new URLSearchParams();
+      if (searchQuery.trim()) {
+        params.append("q", searchQuery);
+      }
+      if (hasTicketsFilter !== "all") {
+        params.append("hasTickets", hasTicketsFilter);
+      }
+
+      const res = await fetch(`/api/clientes?${params.toString()}`);
       const data = await res.json();
       setCustomers(data.customers || []);
     } catch {
@@ -39,6 +43,12 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFilterChange = (value: string) => {
+    setHasTicketsFilter(value);
+    // Aplicar filtro automáticamente
+    setTimeout(() => handleSearch(), 100);
   };
 
   const handleDelete = async (id: string, phone: string) => {
@@ -68,7 +78,7 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
             {initialTotal} {initialTotal === 1 ? "cliente" : "clientes"} en total
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
             <input
               type="text"
@@ -80,6 +90,15 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           </div>
+          <select
+            value={hasTicketsFilter}
+            onChange={(e) => handleFilterChange(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white"
+          >
+            <option value="all">Todos los clientes</option>
+            <option value="true">Con tickets</option>
+            <option value="false">Sin tickets</option>
+          </select>
           <button
             onClick={handleSearch}
             disabled={loading}

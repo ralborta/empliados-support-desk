@@ -16,11 +16,12 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") || undefined;
+  const hasTickets = searchParams.get("hasTickets"); // "true", "false", o null
   const page = parseInt(searchParams.get("page") || "1");
   const limit = parseInt(searchParams.get("limit") || "50");
   const skip = (page - 1) * limit;
 
-  const where = q
+  const where: any = q
     ? {
         OR: [
           { name: { contains: q, mode: "insensitive" as const } },
@@ -28,6 +29,13 @@ export async function GET(req: NextRequest) {
         ],
       }
     : {};
+
+  // Filtrar por tickets
+  if (hasTickets === "true") {
+    where.tickets = { some: {} }; // Tiene al menos un ticket
+  } else if (hasTickets === "false") {
+    where.tickets = { none: {} }; // No tiene tickets
+  }
 
   const [customers, total] = await Promise.all([
     prisma.customer.findMany({
