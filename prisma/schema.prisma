@@ -63,11 +63,13 @@ enum TicketEventType {
 }
 
 model Customer {
-  id        String   @id @default(cuid())
-  phone     String   @unique
-  name      String?
-  tickets   Ticket[]
-  createdAt DateTime @default(now())
+  id          String    @id @default(cuid())
+  phone       String    @unique
+  name        String?
+  /// Si está seteado, Atilio no envía auto-respuestas; el agente responde manual por el panel/WhatsApp
+  botPausedAt DateTime?
+  tickets     Ticket[]
+  createdAt   DateTime  @default(now())
 }
 
 model AgentUser {

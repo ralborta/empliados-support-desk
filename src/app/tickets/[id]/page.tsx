@@ -184,7 +184,11 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
                 )}
               </div>
             </div>
-            <MessageComposer ticketId={ticket.id} />
+            <MessageComposer
+              ticketId={ticket.id}
+              customerId={ticket.customerId}
+              botPaused={!!ticket.customer?.botPausedAt}
+            />
           </div>
 
           <div className="space-y-3 xl:col-span-3">

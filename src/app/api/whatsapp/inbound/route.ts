@@ -304,17 +304,23 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     },
   });
 
-  // Decidir si enviar respuesta automática
+  // Decidir si enviar respuesta automática (no enviar si Atilio está pausado para este cliente)
   let autoReplyMessage: string | null = null;
 
-  // Verificar si el mensaje solicita contacto con agente de soporte
-  const messageLower = actualMessage.toLowerCase();
-  const solicitaAgente = /tenponder en contacto con un agente de soporte|poner en contacto con un agente|contactar con un agente|hablar con un agente|necesito hablar con un agente/i.test(messageLower);
+  if (customer.botPausedAt) {
+    console.log(`⏸️ Cliente ${customerPhone} con Atilio pausado; no se envía auto-respuesta`);
+  } else {
+    const messageLower = actualMessage.toLowerCase();
+    const solicitaAgente =
+      /tenponder en contacto con un agente de soporte|poner en contacto con un agente|contactar con un agente|hablar con un agente|necesito hablar con un agente/i.test(
+        messageLower
+      );
 
-  if (shouldEscalate && solicitaAgente) {
-    autoReplyMessage = `Hola! Tu consulta ha sido escalada a nuestro equipo. Ticket: *${ticket.code}*. Te responderemos pronto.`;
-  } else if (isNewTicket) {
-    autoReplyMessage = `Hola! Hemos recibido tu mensaje. Ticket: *${ticket.code}*. Un agente lo revisará pronto.`;
+    if (shouldEscalate && solicitaAgente) {
+      autoReplyMessage = `Hola! Tu consulta ha sido escalada a nuestro equipo. Ticket: *${ticket.code}*. Te responderemos pronto.`;
+    } else if (isNewTicket) {
+      autoReplyMessage = `Hola! Hemos recibido tu mensaje. Ticket: *${ticket.code}*. Un agente lo revisará pronto.`;
+    }
   }
 
   // Enviar respuesta automática si corresponde

@@ -1,11 +1,18 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { MessageDirection } from "@/lib/types";
+import { BotPausedToggle } from "./BotPausedToggle";
 
-export function MessageComposer({ ticketId }: { ticketId: string }) {
-  const router = useRouter();
+export function MessageComposer({
+  ticketId,
+  customerId,
+  botPaused = false,
+}: {
+  ticketId: string;
+  customerId?: string | null;
+  botPaused?: boolean;
+}) {
   const [text, setText] = useState("");
   const [direction, setDirection] = useState<MessageDirection>("OUTBOUND");
   const [file, setFile] = useState<File | null>(null);
@@ -71,14 +78,19 @@ export function MessageComposer({ ticketId }: { ticketId: string }) {
         />
       </div>
       {error ? <p className="text-xs text-red-600">{error}</p> : null}
-      <div className="flex justify-end gap-2">
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-800 disabled:opacity-60"
-        >
-          {loading ? "Guardando..." : direction === "OUTBOUND" ? "Responder" : "Guardar nota"}
-        </button>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {customerId ? (
+          <BotPausedToggle customerId={customerId} initialPaused={botPaused} />
+        ) : null}
+        <div className="flex justify-end sm:ml-auto">
+          <button
+            type="submit"
+            disabled={loading}
+            className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-800 disabled:opacity-60"
+          >
+            {loading ? "Guardando..." : direction === "OUTBOUND" ? "Responder" : "Guardar nota"}
+          </button>
+        </div>
       </div>
     </form>
   );
