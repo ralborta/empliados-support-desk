@@ -68,3 +68,29 @@ export function getFileExtension(url: string): string {
   const match = url.match(/\.([a-z0-9]+)(\?|$)/i);
   return match ? match[1] : "jpg";
 }
+
+/**
+ * Sube un File (FormData) a Vercel Blob y devuelve URL pública.
+ */
+export async function uploadFileToBlob(file: File): Promise<string> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
+    throw new Error("BLOB_READ_WRITE_TOKEN no configurado. No se pueden subir adjuntos.");
+  }
+
+  const safeName = (file.name || "archivo").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filename = `ticket-${Date.now()}-${safeName}`;
+  const contentType = file.type || "application/octet-stream";
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  const { url } = await put(filename, buffer, {
+    access: "public",
+    contentType,
+  });
+
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    throw new Error("URL de Blob no es absoluta");
+  }
+  return url;
+}

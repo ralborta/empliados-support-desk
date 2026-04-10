@@ -124,3 +124,39 @@ Conclusión:`;
       : 'Escalado a soporte humano';
   }
 }
+
+/**
+ * Transcribe audio file from URL using Whisper.
+ */
+export async function transcribeAudio(audioUrl: string): Promise<string | null> {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+  if (!audioUrl?.startsWith("http://") && !audioUrl?.startsWith("https://")) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(audioUrl);
+    if (!response.ok) {
+      throw new Error(`No se pudo descargar audio (${response.status})`);
+    }
+    const contentType = response.headers.get("content-type") || "audio/ogg";
+    const ext =
+      contentType.includes("mpeg") ? "mp3" :
+      contentType.includes("mp4") ? "m4a" :
+      contentType.includes("wav") ? "wav" : "ogg";
+    const blob = await response.blob();
+    const file = new File([blob], `voice-note.${ext}`, { type: contentType });
+
+    const transcription = await openai.audio.transcriptions.create({
+      file,
+      model: "whisper-1",
+      language: "es",
+    });
+    return transcription.text?.trim() || null;
+  } catch (error: any) {
+    console.error("[OpenAI] Error al transcribir audio:", error.message);
+    return null;
+  }
+}

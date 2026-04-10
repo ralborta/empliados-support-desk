@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { generateTicketCode } from "@/lib/tickets";
 import { uploadToBlob, getFileExtension } from "@/lib/blob";
+import { transcribeAudio } from "@/lib/openai";
 import {
   detectIncidentType,
   detectMissingData,
@@ -17,13 +18,13 @@ import {
 const builderbotWebhookSchema = z.object({
   eventName: z.string(),
   data: z.object({
-    body: z.string().optional(),
-    name: z.string().optional(),
-    from: z.string(),
+    body: z.union([z.string(), z.number()]).optional(),
+    name: z.union([z.string(), z.number()]).optional(),
+    from: z.union([z.string(), z.number()]).transform(String),
     attachment: z.array(z.any()).optional(),
     urlTempFile: z.string().optional(), // URL temporal para archivos multimedia
     projectId: z.string().optional(),
-  }),
+  }).passthrough(),
 });
 
 export async function POST(req: Request) {
@@ -56,29 +57,41 @@ export async function POST(req: Request) {
 }
 
 async function processIncomingMessage({ eventName, data }: { eventName: string; data: any }) {
-
-  const messageText = data.body || "";
+  let messageText = data.body != null ? String(data.body) : "";
   const customerPhone = data.from;
-  const customerName = data.name; // Nombre de WhatsApp (la persona que escribe)
+  const customerName = data.name != null ? String(data.name) : undefined; // Nombre de WhatsApp (la persona que escribe)
   const attachments = data.attachment || [];
   const urlTempFile = data.urlTempFile; // URL temporal de BuilderBot para multimedia
+  const trimmedBody = (messageText || "").trim();
+  const isVoiceNote = /^_event_voice_note__/i.test(trimmedBody);
+  const isAudioEvent = /^_event_audio__/i.test(trimmedBody);
+  const isMediaEvent = /^_event_(document|image|video|audio)__/i.test(trimmedBody);
+  if ((isMediaEvent || isVoiceNote) && attachments.length > 0) {
+    messageText = "";
+  }
+  const isAbsoluteUrl = (u: unknown) =>
+    typeof u === "string" && (u.startsWith("http://") || u.startsWith("https://"));
 
   // Procesar attachments (imágenes, videos, documentos)
-  let processedAttachments = await Promise.all(
-    attachments.map(async (att: any) => {
-      const tempUrl = att.url || att;
-      const fileType = att.mimetype || getFileTypeFromUrl(tempUrl);
-      
-      // Subir a Vercel Blob para persistencia
-      const permanentUrl = await uploadToBlob(tempUrl, `attachment-${Date.now()}.${getFileExtension(tempUrl)}`);
-      
-      return {
-        url: permanentUrl,
-        type: fileType,
-        name: att.filename || "archivo",
-      };
-    })
-  );
+  let processedAttachments = (
+    await Promise.all(
+      attachments.map(async (att: any) => {
+        const tempUrl = att.url || att;
+        if (!isAbsoluteUrl(tempUrl)) return null;
+        const fileType = att.mimetype || getFileTypeFromUrl(tempUrl);
+        try {
+          const permanentUrl = await uploadToBlob(tempUrl, `attachment-${Date.now()}.${getFileExtension(tempUrl)}`);
+          return {
+            url: permanentUrl,
+            type: fileType,
+            name: att.filename || "archivo",
+          };
+        } catch {
+          return null;
+        }
+      })
+    )
+  ).filter((a): a is { url: string; type: string; name: string } => a != null);
 
   // Si viene urlTempFile pero no attachments, agregar el archivo temporal
   if (urlTempFile && processedAttachments.length === 0) {
@@ -93,10 +106,11 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         // Subir a Vercel Blob
         const permanentUrl = await uploadToBlob(urlTempFile, `media-${Date.now()}.${getFileExtension(urlTempFile)}`);
         
+        const fileType = (isVoiceNote || isAudioEvent) ? "audio" : getFileTypeFromUrl(urlTempFile);
         processedAttachments.push({
           url: permanentUrl,
-          type: getFileTypeFromUrl(urlTempFile),
-          name: "Archivo multimedia",
+          type: fileType,
+          name: (isVoiceNote || isAudioEvent || fileType === "audio") ? "Nota de voz" : "Archivo multimedia",
         });
         
         console.log(`✅ Archivo subido a Blob: ${permanentUrl}`);
@@ -104,6 +118,20 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         console.error(`❌ Error al procesar urlTempFile:`, error.message);
         // No agregar el attachment si falla
       }
+    }
+  }
+
+  // Transcripción automática de nota de voz
+  if ((isVoiceNote || isAudioEvent) && !messageText) {
+    const audioUrl =
+      (urlTempFile && isAbsoluteUrl(urlTempFile))
+        ? urlTempFile
+        : processedAttachments.find((a) => a.type === "audio")?.url || null;
+    if (audioUrl) {
+      const transcription = await transcribeAudio(audioUrl);
+      messageText = transcription || "[Nota de voz - no se pudo transcribir]";
+    } else {
+      messageText = "[Nota de voz]";
     }
   }
 
@@ -322,11 +350,13 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
 }
 
 async function processOutgoingMessage({ eventName, data }: { eventName: string; data: any }) {
-  const messageText = data.body || "";
+  const messageText = data.body != null ? String(data.body) : "";
   // En mensajes salientes, el destinatario puede estar en 'to', 'remoteJid', o 'key.remoteJid'
   const customerPhone = data.to || data.remoteJid || data.key?.remoteJid || data.from;
   const attachments = data.attachment || [];
   const urlTempFile = data.urlTempFile;
+  const isAbsoluteUrl = (u: unknown) =>
+    typeof u === "string" && (u.startsWith("http://") || u.startsWith("https://"));
 
   if (!customerPhone) {
     console.warn("⚠️ Mensaje saliente sin destinatario");
@@ -339,23 +369,28 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
   }
 
   // Procesar attachments si los hay
-  let processedAttachments = await Promise.all(
-    attachments.map(async (att: any) => {
-      const tempUrl = att.url || att;
-      const fileType = att.mimetype || getFileTypeFromUrl(tempUrl);
-      
-      const permanentUrl = await uploadToBlob(tempUrl, `attachment-${Date.now()}.${getFileExtension(tempUrl)}`);
-      
-      return {
-        url: permanentUrl,
-        type: fileType,
-        name: att.filename || "archivo",
-      };
-    })
-  );
+  let processedAttachments = (
+    await Promise.all(
+      attachments.map(async (att: any) => {
+        const tempUrl = att.url || att;
+        if (!isAbsoluteUrl(tempUrl)) return null;
+        const fileType = att.mimetype || getFileTypeFromUrl(tempUrl);
+        try {
+          const permanentUrl = await uploadToBlob(tempUrl, `attachment-${Date.now()}.${getFileExtension(tempUrl)}`);
+          return {
+            url: permanentUrl,
+            type: fileType,
+            name: att.filename || "archivo",
+          };
+        } catch {
+          return null;
+        }
+      })
+    )
+  ).filter((a): a is { url: string; type: string; name: string } => a != null);
 
   if (urlTempFile && processedAttachments.length === 0) {
-    if (urlTempFile.startsWith("http://") || urlTempFile.startsWith("https://")) {
+    if (isAbsoluteUrl(urlTempFile)) {
       try {
         const permanentUrl = await uploadToBlob(urlTempFile, `media-${Date.now()}.${getFileExtension(urlTempFile)}`);
         processedAttachments.push({

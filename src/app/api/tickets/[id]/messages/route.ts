@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { summarizeConversation } from "@/lib/openai";
+import { uploadFileToBlob } from "@/lib/blob";
 
 const messageSchema = z.object({
   text: z.string().min(1),
@@ -14,18 +15,63 @@ const messageSchema = z.object({
   rawPayload: z.record(z.string(), z.any()).optional(),
 });
 
+function getMimeTypeLabel(mime: string): string {
+  if (!mime) return "document";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
   if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const json = await req.json().catch(() => null);
-  const parsed = messageSchema.safeParse(json);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
+  let text = "";
+  let direction: "INBOUND" | "OUTBOUND" | "INTERNAL_NOTE" = "OUTBOUND";
+  let from: "CUSTOMER" | "BOT" | "HUMAN" = "HUMAN";
+  let rawPayload: Record<string, unknown> = {};
+  let attachments: { url: string; type: string; name: string }[] = [];
+
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await req.formData();
+    text = (formData.get("text") as string)?.trim() || "";
+    direction = (formData.get("direction") as typeof direction) || "OUTBOUND";
+    from = (formData.get("from") as typeof from) || "HUMAN";
+    const file = formData.get("file") as File | null;
+    if (file && file.size > 0) {
+      try {
+        const url = await uploadFileToBlob(file);
+        attachments.push({
+          url,
+          type: getMimeTypeLabel(file.type),
+          name: file.name || "archivo",
+        });
+      } catch (uploadErr: any) {
+        return NextResponse.json(
+          { error: "No se pudo subir el archivo", details: uploadErr?.message || "Error de upload" },
+          { status: 500 }
+        );
+      }
+    }
+  } else {
+    const json = await req.json().catch(() => null);
+    const parsed = messageSchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
+    }
+    text = parsed.data.text;
+    direction = parsed.data.direction;
+    from = parsed.data.from;
+    rawPayload = parsed.data.rawPayload || {};
   }
 
-  const { text, direction, from, rawPayload } = parsed.data;
+  const messageText = text.trim() || (attachments.length > 0 ? "[Archivo adjunto]" : "");
+  if (!messageText) {
+    return NextResponse.json({ error: "Escribe un mensaje o adjunta un archivo" }, { status: 400 });
+  }
 
   // Si es un mensaje OUTBOUND, enviarlo a BuilderBot primero
   if (direction === "OUTBOUND") {
@@ -47,9 +93,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     try {
       await sendWhatsAppMessage({
         number: ticket.customer.phone,
-        message: text,
+        message: text.trim() || " ",
+        mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
       });
-      console.log(`[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}`);
+      console.log(`[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`);
     } catch (error: any) {
       console.error(`[Messages] ❌ Error al enviar mensaje:`, error);
       return NextResponse.json({ 
@@ -65,10 +112,33 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       ticketId: id,
       direction,
       from,
-      text,
-      rawPayload: rawPayload || {},
+      text: messageText,
+      attachments: attachments.length > 0 ? (attachments as any) : undefined,
+      rawPayload: (rawPayload || {}) as any,
     },
   });
+
+  // Si ya se guardó el mismo mensaje saliente como BOT por webhook, eliminar duplicado.
+  if (direction === "OUTBOUND" && from === "HUMAN") {
+    const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+    const normalized = (messageText || "").trim().replace(/\s+/g, " ");
+    const botDuplicates = await prisma.ticketMessage.findMany({
+      where: {
+        ticketId: id,
+        from: "BOT",
+        direction: "OUTBOUND",
+        createdAt: { gte: twoMinAgo },
+        id: { not: message.id },
+      },
+    });
+    for (const botMsg of botDuplicates) {
+      const botText = (botMsg.text || "").trim().replace(/\s+/g, " ");
+      if (botText === normalized || botText.includes(normalized) || normalized.includes(botText)) {
+        await prisma.ticketMessage.delete({ where: { id: botMsg.id } });
+        break;
+      }
+    }
+  }
 
   await prisma.ticket.update({
     where: { id },

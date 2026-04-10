@@ -2,35 +2,37 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { MessageDirection, MessageFrom } from "@/lib/types";
+import type { MessageDirection } from "@/lib/types";
 
 export function MessageComposer({ ticketId }: { ticketId: string }) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [direction, setDirection] = useState<MessageDirection>("OUTBOUND");
+  const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim()) return;
+    if (!text.trim() && !file) return;
     setLoading(true);
     setError(null);
     try {
+      const formData = new FormData();
+      formData.append("text", text);
+      formData.append("direction", direction);
+      formData.append("from", "HUMAN");
+      if (file) formData.append("file", file);
       const res = await fetch(`/api/tickets/${ticketId}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          direction,
-          from: "HUMAN" as MessageFrom,
-        }),
+        body: formData,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setError(data.error || "No se pudo guardar el mensaje");
       } else {
         setText("");
+        setFile(null);
         // Forzar recarga completa de la página para mostrar el nuevo mensaje
         window.location.reload();
       }
@@ -61,6 +63,13 @@ export function MessageComposer({ ticketId }: { ticketId: string }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      <div className="flex items-center gap-2 text-xs text-slate-600">
+        <input
+          type="file"
+          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          className="block w-full cursor-pointer rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-rose-50 file:px-2 file:py-1 file:text-rose-700"
+        />
+      </div>
       {error ? <p className="text-xs text-red-600">{error}</p> : null}
       <div className="flex justify-end gap-2">
         <button
