@@ -19,6 +19,7 @@ const updateSchema = z.object({
   status: z.enum(["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"]).optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
   assignedToUserId: z.string().optional().nullable(),
+  resolution: z.string().optional().nullable(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

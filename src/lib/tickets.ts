@@ -13,9 +13,9 @@ export function generateTicketCode(date = new Date()) {
 }
 
 export const statusLabels: Record<TicketStatus, string> = {
-  OPEN: "Abierto",
-  IN_PROGRESS: "En Progreso",
-  WAITING_CUSTOMER: "Esperando Cliente",
+  OPEN: "Nuevo",
+  IN_PROGRESS: "En análisis",
+  WAITING_CUSTOMER: "Esperando datos del cliente",
   RESOLVED: "Resuelto",
   CLOSED: "Cerrado",
 };
@@ -28,10 +28,10 @@ export const priorityLabels: Record<TicketPriority, string> = {
 };
 
 export const categoryLabels: Record<TicketCategory, string> = {
-  TECH_SUPPORT: "Soporte Técnico",
-  BILLING: "Facturación",
-  SALES: "Ventas",
-  OTHER: "Otro",
+  TECH_SUPPORT: "Consulta técnica general",
+  BILLING: "Cambio de odómetro",
+  SALES: "Emisión de certificado",
+  OTHER: "Derivación administrativa",
 };
 
 export const channelLabels: Record<TicketChannel, string> = {

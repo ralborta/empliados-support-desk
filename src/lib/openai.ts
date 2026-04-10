@@ -29,15 +29,15 @@ export async function summarizeConversation(
     .map((msg) => `[${msg.from}]: ${msg.text}`)
     .join('\n');
 
-  const prompt = `Eres un asistente de soporte técnico. Resume la siguiente conversación en máximo 2-3 líneas, enfocándote en:
-1. El problema principal del cliente
-2. Información clave mencionada
-3. Urgencia o impacto
+  const prompt = `Eres un asistente operativo de mesa de ayuda Wara. Resume la conversación en este formato exacto de 4 líneas:
+Motivo: ...
+Datos clave capturados: ...
+Urgencia sugerida: ...
+Próximo paso: ...
 
 Conversación:
 ${conversationText}
-
-Resumen conciso:`;
+`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -46,7 +46,7 @@ Resumen conciso:`;
         {
           role: 'system',
           content:
-            'Eres un asistente experto en resumir conversaciones de soporte técnico de forma concisa y clara.',
+            'Eres un asistente experto en soporte operativo. Debes responder siempre con 4 líneas fijas y sin texto adicional.',
         },
         {
           role: 'user',

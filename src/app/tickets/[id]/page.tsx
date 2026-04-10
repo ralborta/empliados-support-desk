@@ -6,6 +6,7 @@ import {
   priorityLabels,
   statusLabels,
   fromLabels,
+  categoryLabels,
 } from "@/lib/tickets";
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 import { MessageComposer } from "@/components/tickets/MessageComposer";
@@ -13,6 +14,8 @@ import { StatusActions } from "@/components/tickets/StatusActions";
 import { ConversationSummary } from "@/components/tickets/ConversationSummary";
 import { AssignAgentDropdown } from "@/components/tickets/AssignAgentDropdown";
 import { MessageAttachments } from "@/components/tickets/MessageAttachments";
+import { QuickActionsPanel } from "@/components/tickets/QuickActionsPanel";
+import { resolutionModeLabels } from "@/lib/wara";
 
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
@@ -44,13 +47,14 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
   });
 
   const conversation = ticket.messages || [];
-
-  // Debug: verificar que los mensajes se carguen
-  console.log(`[TicketDetail] Ticket ${ticket.code}: ${conversation.length} mensajes cargados`);
+  const lastInboundWithWara = [...conversation]
+    .reverse()
+    .find((msg: any) => msg?.rawPayload?.wara);
+  const wara = (lastInboundWithWara as any)?.rawPayload?.wara;
 
   return (
     <div className="min-h-screen p-6">
-      <div className="mx-auto flex max-w-6xl flex-col gap-4">
+      <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>
             <Link href="/tickets" className="text-sm text-indigo-600 hover:underline">
@@ -78,8 +82,35 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-4">
+        <div className="grid gap-4 xl:grid-cols-12">
+          <div className="space-y-4 xl:col-span-3">
+            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+              <div className="mb-3 text-sm font-semibold text-slate-800">Datos operativos del caso</div>
+              <div className="space-y-2 text-sm text-slate-700">
+                <div><span className="font-semibold">Tipo de incidente:</span> {wara?.incidentTypeLabel || categoryLabels[ticket.category as keyof typeof categoryLabels]}</div>
+                <div><span className="font-semibold">Matrícula:</span> {wara?.plate || "Sin informar"}</div>
+                <div><span className="font-semibold">Razón social:</span> {ticket.customer?.name || "Sin informar"}</div>
+                <div><span className="font-semibold">Modo resolución:</span> {ticket.resolution ? (resolutionModeLabels as any)[ticket.resolution] || ticket.resolution : "Sin definir"}</div>
+                <div><span className="font-semibold">Creado:</span> {ticket.createdAt.toLocaleString("es-AR")}</div>
+                <div><span className="font-semibold">Última actividad:</span> {ticket.lastMessageAt.toLocaleString("es-AR")}</div>
+              </div>
+              {wara?.missingData?.length > 0 && (
+                <div className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+                  Faltan datos: {wara.missingData.join(", ")}
+                </div>
+              )}
+            </div>
+            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+              <div className="text-sm font-semibold text-slate-800 mb-3">Datos del contacto</div>
+              <div className="space-y-2 text-sm text-slate-600">
+                <div><span className="font-semibold">Nombre:</span> {ticket.contactName || "No especificado"}</div>
+                <div><span className="font-semibold">Empresa:</span> {ticket.customer?.name || "No especificado"}</div>
+                <div><span className="font-semibold">Teléfono:</span> {ticket.customer?.phone}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 xl:col-span-6">
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
               <div className="text-sm font-semibold text-slate-800">Conversación</div>
               <div className="mt-3 space-y-3">
@@ -122,14 +153,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
             <MessageComposer ticketId={ticket.id} />
           </div>
 
-          <div className="space-y-3">
-            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-              <div className="text-sm font-semibold text-slate-800 mb-3">Datos del cliente</div>
-              <div className="space-y-2 text-sm text-slate-600">
-                <div><span className="font-semibold">Nombre:</span> {ticket.customer?.name || "No especificado"}</div>
-                <div><span className="font-semibold">Teléfono:</span> {ticket.customer?.phone}</div>
-              </div>
-            </div>
+          <div className="space-y-3 xl:col-span-3">
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
               <AssignAgentDropdown 
                 ticketId={ticket.id} 
@@ -138,12 +162,11 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
               />
             </div>
             <ConversationSummary ticketId={ticket.id} initialSummary={ticket.aiSummary} />
-            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-              <div className="text-sm font-semibold text-slate-800">Acciones rápidas</div>
-              <div className="mt-2 space-y-2 text-sm text-slate-600">
-                <p>Define notas internas, cambia estado o responde al cliente.</p>
-              </div>
-            </div>
+            <QuickActionsPanel
+              ticketId={ticket.id}
+              currentPriority={ticket.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT"}
+              currentResolution={ticket.resolution}
+            />
           </div>
         </div>
       </div>

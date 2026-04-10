@@ -4,6 +4,13 @@ import { prisma } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { generateTicketCode } from "@/lib/tickets";
 import { uploadToBlob, getFileExtension } from "@/lib/blob";
+import {
+  detectIncidentType,
+  detectMissingData,
+  suggestPriority,
+  toLegacyCategory,
+  waraIncidentLabels,
+} from "@/lib/wara";
 // Using string literals instead of Prisma enums for compatibility
 
 // Schema para el formato de BuilderBot.cloud
@@ -153,15 +160,26 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     create: { phone: customerPhone, name: companyName },
   });
 
+  const incidentType = detectIncidentType(actualMessage);
+  const { plate, missing } = detectMissingData(actualMessage, incidentType, companyName);
+  const suggestedPriority = suggestPriority(actualMessage, incidentType);
   const cutoff = new Date(Date.now() - 1000 * 60 * 60 * 48);
-  let ticket = await prisma.ticket.findFirst({
+  const recentTickets = await prisma.ticket.findMany({
     where: {
       customerId: customer.id,
       status: { in: ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"] },
       lastMessageAt: { gte: cutoff },
     },
     orderBy: { lastMessageAt: "desc" },
+    take: 20,
   });
+  // Reutiliza ticket si coincide matrícula (o si no hay matrícula detectada, usa el más reciente)
+  let ticket =
+    recentTickets.find((t) => {
+      if (!plate) return true;
+      const normalizedTitle = (t.title || "").toUpperCase();
+      return normalizedTitle.includes(plate);
+    }) || null;
 
   const isNewTicket = !ticket;
 
@@ -171,10 +189,10 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         code: generateTicketCode(),
         customerId: customer.id,
         contactName: contactName,
-        title: actualMessage.split(" ").slice(0, 8).join(" ") || "Consulta",
+        title: `${waraIncidentLabels[incidentType]}${plate ? ` · ${plate}` : ""}`,
         status: "OPEN",
-        priority: "NORMAL",
-        category: inferCategory(actualMessage) as "TECH_SUPPORT" | "BILLING" | "SALES" | "OTHER",
+        priority: suggestedPriority,
+        category: toLegacyCategory(incidentType),
         channel: "WHATSAPP",
       },
     });
@@ -183,13 +201,11 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     console.log(`🎫 Ticket existente: ${ticket.code}`);
   }
 
-  const heuristics = inferPriorityAndCategory(actualMessage, undefined, ticket.priority, ticket.category);
-
   const previousMessagesCount = await prisma.ticketMessage.count({ where: { ticketId: ticket.id } });
 
   const shouldEscalate = decideShouldEscalate({
     text: actualMessage,
-    priority: heuristics.priority,
+    priority: suggestedPriority,
     previousMessages: previousMessagesCount,
   });
 
@@ -202,7 +218,17 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       from: "CUSTOMER",
       text: actualMessage || "[Archivo adjunto]",
       attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
-      rawPayload,
+      rawPayload: {
+        ...rawPayload,
+        wara: {
+          incidentType,
+          incidentTypeLabel: waraIncidentLabels[incidentType],
+          suggestedPriority,
+          plate,
+          companyName,
+          missingData: missing,
+        },
+      },
       externalMessageId: messageId,
     },
   });
@@ -217,10 +243,18 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   await prisma.ticket.update({
     where: { id: ticket.id },
     data: {
-      priority: heuristics.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT",
-      category: heuristics.category as "TECH_SUPPORT" | "BILLING" | "SALES" | "OTHER",
+      priority: suggestedPriority,
+      category: toLegacyCategory(incidentType),
       status: shouldEscalate ? "IN_PROGRESS" : ticket.status,
       lastMessageAt: new Date(),
+      title: `${waraIncidentLabels[incidentType]}${plate ? ` · ${plate}` : ""}`,
+      aiSummary: buildOperationalSummary({
+        incidentType: waraIncidentLabels[incidentType],
+        plate,
+        companyName,
+        priority: suggestedPriority,
+        missing,
+      }),
     },
   });
 
@@ -233,6 +267,9 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         company: companyName,
         contact: contactName,
         escalated: shouldEscalate,
+        incidentType,
+        plate,
+        missingData: missing,
       },
     },
   });
@@ -436,43 +473,25 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     messageSaved: true,
   });
 }
-
-function inferPriorityAndCategory(
-  text: string,
-  metadata: Record<string, unknown> | undefined,
-  currentPriority: string,
-  currentCategory: string,
-) {
-  const lower = text.toLowerCase();
-  let priority: string = currentPriority;
-  let category: string = currentCategory;
-
-  if (/(urgente|producci[óo]n|ca[ií]do|no anda|error)/.test(lower)) {
-    priority = "HIGH";
-  }
-  if (/(amenaza|legal|fraude|cliente enojado)/.test(lower)) {
-    priority = "URGENT";
-  }
-  if (/(factura|pago|precio)/.test(lower)) {
-    category = "BILLING";
-  }
-  if (/(walter|emilia|silvia|oscar|max)/.test(lower)) {
-    category = "TECH_SUPPORT";
-  }
-  if (metadata && typeof metadata["priority"] === "string") {
-    const metaPriority = metadata["priority"] as string;
-    if (metaPriority.toLowerCase() === "urgent") {
-      priority = "URGENT";
-    }
-  }
-  return { priority, category };
-}
-
-function inferCategory(text: string): string {
-  const lower = text.toLowerCase();
-  if (/(factura|pago|precio)/.test(lower)) return "BILLING";
-  if (/(walter|emilia|silvia|oscar|max)/.test(lower)) return "TECH_SUPPORT";
-  return "TECH_SUPPORT";
+function buildOperationalSummary({
+  incidentType,
+  plate,
+  companyName,
+  priority,
+  missing,
+}: {
+  incidentType: string;
+  plate: string | null;
+  companyName: string;
+  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  missing: string[];
+}) {
+  return [
+    `Motivo: ${incidentType}`,
+    `Datos clave: matrícula ${plate || "sin informar"}, empresa ${companyName || "sin informar"}`,
+    `Urgencia sugerida: ${priority}`,
+    `Próximo paso: ${missing.length > 0 ? `solicitar ${missing.join(", ")}` : "continuar análisis interno / derivación"}`,
+  ].join("\n");
 }
 
 function decideShouldEscalate({

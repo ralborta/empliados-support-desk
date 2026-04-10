@@ -5,4 +5,10 @@ export type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLV
 export type TicketPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 export type TicketCategory = "TECH_SUPPORT" | "BILLING" | "SALES" | "OTHER";
 export type TicketChannel = "WHATSAPP" | "EMAIL" | "WEB";
+export type ResolutionMode =
+  | "CHAT_RESOLVED"
+  | "PENDING_VALIDATION"
+  | "BACKOFFICE_DERIVED"
+  | "TECH_ESCALATED"
+  | "CLOSED_NO_ACTION";
 
