@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
@@ -16,6 +17,7 @@ import { AssignAgentDropdown } from "@/components/tickets/AssignAgentDropdown";
 import { MessageAttachments } from "@/components/tickets/MessageAttachments";
 import { QuickActionsPanel } from "@/components/tickets/QuickActionsPanel";
 import { resolutionModeLabels, waraIncidentLabels, type WaraIncidentType } from "@/lib/wara";
+import { User } from "lucide-react";
 
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
@@ -131,8 +133,34 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
                     
                     return (
                       <div key={msg.id} className="flex flex-col gap-1">
-                        <div className="text-xs text-slate-500">
-                          {fromLabel} · {createdAt.toLocaleString("es-AR")}
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          {msg.from === "BOT" ? (
+                            <>
+                              <Image
+                                src="/atilio-logo.png"
+                                alt=""
+                                width={22}
+                                height={22}
+                                className="h-[22px] w-[22px] shrink-0 rounded-md object-contain ring-1 ring-rose-200/80"
+                                aria-hidden
+                              />
+                              <span className="font-medium text-slate-700">{fromLabel}</span>
+                            </>
+                          ) : msg.from === "CUSTOMER" ? (
+                            <>
+                              <span
+                                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md bg-slate-200/90 text-slate-600 ring-1 ring-slate-300/70"
+                                aria-hidden
+                              >
+                                <User className="h-3.5 w-3.5" strokeWidth={2.25} />
+                              </span>
+                              <span className="font-medium text-slate-700">{fromLabel}</span>
+                            </>
+                          ) : (
+                            <span>{fromLabel}</span>
+                          )}
+                          <span className="text-slate-400">·</span>
+                          <span>{createdAt.toLocaleString("es-AR")}</span>
                         </div>
                         <div>
                           <div

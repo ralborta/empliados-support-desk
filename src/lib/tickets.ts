@@ -42,12 +42,12 @@ export const channelLabels: Record<TicketChannel, string> = {
 
 export const directionLabels: Record<MessageDirection, string> = {
   INBOUND: "Cliente",
-  OUTBOUND: "Bot/Agente",
+  OUTBOUND: "Atilio / Agente",
   INTERNAL_NOTE: "Nota Interna",
 };
 
 export const fromLabels: Record<MessageFrom, string> = {
   CUSTOMER: "Cliente",
-  BOT: "Bot",
+  BOT: "Atilio",
   HUMAN: "Agente",
 };
