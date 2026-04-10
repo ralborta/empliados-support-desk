@@ -8,7 +8,7 @@ export function TicketsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <TicketsSidebar />
-      <main className="flex-1 p-6">{children}</main>
+      <main className="flex-1 bg-rose-50/60 p-6">{children}</main>
     </div>
   );
 }
@@ -74,7 +74,7 @@ function NavLink({
       href={href}
       className={`group flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${
         active
-          ? "bg-gradient-to-r from-rose-700 to-rose-600 text-white shadow-lg shadow-rose-900/40"
+          ? "bg-white text-slate-900 shadow-lg"
           : "text-slate-300 hover:bg-white/5 hover:text-white"
       }`}
     >
@@ -85,7 +85,7 @@ function NavLink({
       )}
       <span>{label}</span>
       {active && (
-        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+        <span className="ml-auto h-1.5 w-1.5 animate-pulse rounded-full bg-slate-900"></span>
       )}
     </Link>
   );

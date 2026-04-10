@@ -54,13 +54,13 @@ export default async function TicketsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-4xl font-bold text-slate-900 flex items-center gap-3">
-              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg">
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-700 to-rose-600 text-white shadow-lg">
                 🎫
               </span>
               Todos los Tickets
             </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Vista general de <span className="font-semibold text-indigo-600">{totalCount}</span>{" "}
+              Vista general de <span className="font-semibold text-rose-700">{totalCount}</span>{" "}
               {totalCount === 1 ? "ticket" : "tickets"} en el sistema
             </p>
           </div>
@@ -70,7 +70,7 @@ export default async function TicketsPage() {
           <SummaryCard
             label="Abiertos"
             value={statusCountMap.OPEN || 0}
-            color="blue"
+            color="stone"
             icon="📋"
             description="Tickets pendientes de atención"
           />
@@ -84,7 +84,7 @@ export default async function TicketsPage() {
           <SummaryCard
             label="Esperando Cliente"
             value={statusCountMap.WAITING_CUSTOMER || 0}
-            color="lime"
+            color="sky"
             icon="⏳"
             description="Aguardando respuesta"
           />
@@ -123,11 +123,11 @@ function SummaryCard({
   description?: string;
 }) {
   const colorClasses: Record<string, { bg: string; text: string; ring: string; iconBg: string }> = {
-    blue: {
-      bg: "bg-gradient-to-br from-blue-50 to-blue-100",
-      text: "text-blue-700",
-      ring: "ring-blue-200",
-      iconBg: "bg-blue-500",
+    stone: {
+      bg: "bg-gradient-to-br from-stone-50 to-stone-100",
+      text: "text-stone-700",
+      ring: "ring-stone-200",
+      iconBg: "bg-stone-500",
     },
     amber: {
       bg: "bg-gradient-to-br from-amber-50 to-amber-100",
@@ -135,11 +135,11 @@ function SummaryCard({
       ring: "ring-amber-200",
       iconBg: "bg-amber-500",
     },
-    lime: {
-      bg: "bg-gradient-to-br from-lime-50 to-lime-100",
-      text: "text-lime-700",
-      ring: "ring-lime-200",
-      iconBg: "bg-lime-500",
+    sky: {
+      bg: "bg-gradient-to-br from-sky-50 to-sky-100",
+      text: "text-sky-700",
+      ring: "ring-sky-200",
+      iconBg: "bg-sky-500",
     },
     rose: {
       bg: "bg-gradient-to-br from-rose-50 to-rose-100",
@@ -149,7 +149,7 @@ function SummaryCard({
     },
   };
 
-  const colors = colorClasses[color] || colorClasses.blue;
+  const colors = colorClasses[color] || colorClasses.stone;
 
   return (
     <div className={`rounded-2xl p-6 ring-2 ${colors.bg} ${colors.ring} shadow-md hover:shadow-lg transition-all`}>

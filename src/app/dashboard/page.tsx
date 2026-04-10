@@ -188,25 +188,25 @@ export default async function DashboardPage() {
             title="Total Tickets"
             value={stats.totalTickets}
             icon="🎫"
-            color="bg-blue-50 text-blue-600"
+            color="bg-stone-100 text-stone-700"
           />
           <KPICard
             title="Creados Hoy"
             value={stats.ticketsToday}
             icon="📥"
-            color="bg-emerald-50 text-emerald-600"
+            color="bg-sky-100 text-sky-700"
           />
           <KPICard
             title="Resueltos Hoy"
             value={stats.resolvedToday}
             icon="✅"
-            color="bg-green-50 text-green-600"
+            color="bg-emerald-100 text-emerald-700"
           />
           <KPICard
             title="Tiempo Promedio"
             value={`${stats.avgResolutionTime}h`}
             icon="⏱️"
-            color="bg-amber-50 text-amber-600"
+            color="bg-amber-100 text-amber-700"
           />
         </div>
 
@@ -280,7 +280,7 @@ export default async function DashboardPage() {
                       {day.count}
                     </div>
                     <div
-                      className="w-full bg-indigo-500 rounded-t-lg transition-all"
+                      className="w-full bg-rose-400 rounded-t-lg transition-all"
                       style={{ height: `${height}%`, minHeight: day.count > 0 ? "8px" : "2px" }}
                     />
                     <div className="mt-2 text-xs text-slate-500">
@@ -304,7 +304,7 @@ export default async function DashboardPage() {
                 stats.topAgents.map((agent: any, index: number) => (
                   <div key={agent.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-sm font-semibold text-rose-700">
                         #{index + 1}
                       </span>
                       <div>
@@ -333,11 +333,11 @@ export default async function DashboardPage() {
                 stats.topCompanies.map((company: any, index: number) => (
                   <div
                     key={company.id}
-                    className="rounded-xl border border-slate-200 p-4 hover:border-indigo-300 hover:shadow-md transition-all"
+                    className="rounded-xl border border-slate-200 p-4 transition-all hover:border-rose-300 hover:shadow-md"
                   >
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-2xl">#{index + 1}</span>
-                      <span className="text-xl font-bold text-indigo-600">
+                      <span className="text-xl font-bold text-rose-700">
                         {company.totalTickets}
                       </span>
                     </div>

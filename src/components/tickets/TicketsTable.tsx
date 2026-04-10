@@ -104,7 +104,7 @@ export function TicketsTable({ tickets }: { tickets: Ticket[] }) {
                 return (
                   <tr
                     key={ticket.id}
-                    className="hover:bg-indigo-50/30 transition-colors cursor-pointer"
+                    className="cursor-pointer transition-colors hover:bg-rose-50/40"
                     onClick={() => router.push(`/tickets/${ticket.id}`)}
                   >
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -113,7 +113,7 @@ export function TicketsTable({ tickets }: { tickets: Ticket[] }) {
                     <td className="px-6 py-4">
                       <Link
                         href={`/tickets/${ticket.id}`}
-                        className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 hover:underline block"
+                        className="block text-sm font-semibold text-rose-700 hover:text-rose-900 hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {ticket.title.length > 60 ? `${ticket.title.substring(0, 60)}...` : ticket.title}
@@ -143,8 +143,8 @@ export function TicketsTable({ tickets }: { tickets: Ticket[] }) {
                     <td className="px-6 py-4 whitespace-nowrap">
                       {ticket.assignedTo ? (
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                            <span className="text-xs font-bold text-indigo-700">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100">
+                            <span className="text-xs font-bold text-rose-700">
                               {ticket.assignedTo.name.charAt(0).toUpperCase()}
                             </span>
                           </div>
