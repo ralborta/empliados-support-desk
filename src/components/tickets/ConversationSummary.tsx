@@ -40,7 +40,7 @@ export function ConversationSummary({ ticketId, initialSummary }: ConversationSu
           <h3 className="text-sm font-semibold text-slate-700">📋 Resumen de la conversación</h3>
           <button
             onClick={refreshSummary}
-            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+            className="text-xs text-rose-700 hover:text-rose-800 font-medium"
           >
             Generar
           </button>
@@ -53,20 +53,20 @@ export function ConversationSummary({ ticketId, initialSummary }: ConversationSu
   }
 
   return (
-    <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50 p-4 shadow-sm">
+    <div className="rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-red-50 p-4 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-indigo-900">📋 Resumen IA</h3>
+        <h3 className="text-sm font-semibold text-rose-900">📋 Resumen IA</h3>
         <button
           onClick={refreshSummary}
           disabled={loading}
-          className="text-xs text-indigo-600 hover:text-indigo-700 font-medium disabled:opacity-50"
+          className="text-xs text-rose-700 hover:text-rose-800 font-medium disabled:opacity-50"
         >
           {loading ? "⏳" : "🔄"}
         </button>
       </div>
       {loading ? (
-        <div className="flex items-center gap-2 text-xs text-indigo-600">
-          <div className="animate-spin h-4 w-4 border-2 border-indigo-600 border-t-transparent rounded-full"></div>
+        <div className="flex items-center gap-2 text-xs text-rose-700">
+          <div className="animate-spin h-4 w-4 border-2 border-rose-700 border-t-transparent rounded-full"></div>
           <span>Generando resumen...</span>
         </div>
       ) : (
@@ -74,8 +74,8 @@ export function ConversationSummary({ ticketId, initialSummary }: ConversationSu
           {summary}
         </p>
       )}
-      <div className="mt-3 pt-3 border-t border-indigo-100">
-        <p className="text-xs text-indigo-600">
+      <div className="mt-3 pt-3 border-t border-rose-100">
+        <p className="text-xs text-rose-700">
           💡 Se actualiza automáticamente con cada mensaje
         </p>
       </div>

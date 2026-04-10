@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -14,15 +15,13 @@ export function TicketsLayout({ children }: { children: React.ReactNode }) {
 
 function TicketsSidebar() {
   return (
-    <aside className="w-72 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-white shadow-2xl border-r border-slate-700/50">
+    <aside className="w-72 bg-gradient-to-b from-rose-950 via-rose-900 to-rose-950 text-white shadow-2xl border-r border-rose-800/50">
       <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-700/50">
         <Link href="/tickets" className="flex items-center gap-3 hover:opacity-90 transition">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg text-xl">
-            🎧
-          </span>
+          <Image src="/wara-logo.png" alt="Soporte" width={120} height={48} priority />
           <div>
             <span className="text-lg font-bold block">Soporte</span>
-            <span className="text-xs text-slate-400">Empliados</span>
+            <span className="text-xs text-rose-200">Mesa operativa</span>
           </div>
         </Link>
       </div>
@@ -33,7 +32,7 @@ function TicketsSidebar() {
         <SectionTitle>Por Estado</SectionTitle>
         <NavLink label="Abiertos" href="/tickets/abiertos" />
         <NavLink label="En Progreso" href="/tickets/en-progreso" />
-        <NavLink label="Esperando Cliente" href="/tickets/esperando-cliente" />
+        <NavLink label="Esperando datos del cliente" href="/tickets/esperando-cliente" />
         <NavLink label="Resueltos" href="/tickets/resueltos" />
         <NavLink label="Cerrados" href="/tickets/cerrados" />
         <SectionTitle>Por Prioridad</SectionTitle>
@@ -75,7 +74,7 @@ function NavLink({
       href={href}
       className={`group flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${
         active
-          ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/30"
+          ? "bg-gradient-to-r from-rose-700 to-rose-600 text-white shadow-lg shadow-rose-900/40"
           : "text-slate-300 hover:bg-white/5 hover:text-white"
       }`}
     >

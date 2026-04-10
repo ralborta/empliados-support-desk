@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Empliados Support Desk",
-  description: "WhatsApp + ticketing para agentes Empliados",
+  title: "Soporte",
+  description: "Plataforma de soporte por WhatsApp y tickets",
 };
 
 export default function RootLayout({

@@ -48,14 +48,14 @@ export function MessageComposer({ ticketId }: { ticketId: string }) {
         <select
           value={direction}
           onChange={(e) => setDirection(e.target.value as MessageDirection)}
-          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:border-indigo-500 focus:outline-none"
+          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:border-rose-500 focus:outline-none"
         >
           <option value="OUTBOUND">Respuesta al cliente</option>
           <option value="INTERNAL_NOTE">Nota interna</option>
         </select>
       </div>
       <textarea
-        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
+        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-rose-500 focus:outline-none"
         rows={3}
         placeholder="Escribe una nota..."
         value={text}
@@ -66,7 +66,7 @@ export function MessageComposer({ ticketId }: { ticketId: string }) {
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60"
+          className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-800 disabled:opacity-60"
         >
           {loading ? "Guardando..." : direction === "OUTBOUND" ? "Responder" : "Guardar nota"}
         </button>
