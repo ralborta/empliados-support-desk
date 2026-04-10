@@ -90,6 +90,8 @@ model Ticket {
   status            TicketStatus
   priority          TicketPriority
   category          TicketCategory
+  /// Clave Wara (MISSING_REPORT, ODOMETER_CHANGE, …) inferida del último mensaje del cliente
+  incidentType      String?
   channel           TicketChannel
   assignedToUserId  String?
   assignedTo        AgentUser?      @relation("AgentAssignments", fields: [assignedToUserId], references: [id])

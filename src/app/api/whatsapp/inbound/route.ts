@@ -221,6 +221,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         status: "OPEN",
         priority: suggestedPriority,
         category: toLegacyCategory(incidentType),
+        incidentType,
         channel: "WHATSAPP",
       },
     });
@@ -273,6 +274,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     data: {
       priority: suggestedPriority,
       category: toLegacyCategory(incidentType),
+      incidentType,
       status: shouldEscalate ? "IN_PROGRESS" : ticket.status,
       lastMessageAt: new Date(),
       title: `${waraIncidentLabels[incidentType]}${plate ? ` · ${plate}` : ""}`,

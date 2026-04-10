@@ -15,7 +15,7 @@ import { ConversationSummary } from "@/components/tickets/ConversationSummary";
 import { AssignAgentDropdown } from "@/components/tickets/AssignAgentDropdown";
 import { MessageAttachments } from "@/components/tickets/MessageAttachments";
 import { QuickActionsPanel } from "@/components/tickets/QuickActionsPanel";
-import { resolutionModeLabels } from "@/lib/wara";
+import { resolutionModeLabels, waraIncidentLabels, type WaraIncidentType } from "@/lib/wara";
 
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
@@ -52,6 +52,12 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
     .find((msg: any) => msg?.rawPayload?.wara);
   const wara = (lastInboundWithWara as any)?.rawPayload?.wara;
 
+  const incidentTypeKey = ticket.incidentType;
+  const incidentTypeLabel =
+    incidentTypeKey && incidentTypeKey in waraIncidentLabels
+      ? waraIncidentLabels[incidentTypeKey as WaraIncidentType]
+      : wara?.incidentTypeLabel || categoryLabels[ticket.category as keyof typeof categoryLabels];
+
   return (
     <div className="min-h-screen p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
@@ -87,7 +93,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
               <div className="mb-3 text-sm font-semibold text-slate-800">Datos operativos del caso</div>
               <div className="space-y-2 text-sm text-slate-700">
-                <div><span className="font-semibold">Tipo de incidente:</span> {wara?.incidentTypeLabel || categoryLabels[ticket.category as keyof typeof categoryLabels]}</div>
+                <div><span className="font-semibold">Tipo de incidente:</span> {incidentTypeLabel}</div>
                 <div><span className="font-semibold">Matrícula:</span> {wara?.plate || "Sin informar"}</div>
                 <div><span className="font-semibold">Razón social:</span> {ticket.customer?.name || "Sin informar"}</div>
                 <div><span className="font-semibold">Modo resolución:</span> {ticket.resolution ? (resolutionModeLabels as any)[ticket.resolution] || ticket.resolution : "Sin definir"}</div>

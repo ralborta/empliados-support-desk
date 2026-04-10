@@ -39,18 +39,27 @@ export function QuickActionsPanel({
     });
   };
 
-  const addTemplateNote = (text: string) => {
+  type QuickAction =
+    | "request_data"
+    | "in_analysis"
+    | "derive"
+    | "resolve"
+    | "close"
+    | "internal_note";
+
+  const runQuickAction = (action: QuickAction) => {
     startTransition(async () => {
-      await fetch(`/api/tickets/${ticketId}/messages`, {
+      const res = await fetch(`/api/tickets/${ticketId}/quick-action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          direction: "INTERNAL_NOTE",
-          from: "HUMAN",
-          rawPayload: { simulated: true },
-        }),
+        body: JSON.stringify({ action }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("Acción rápida:", err);
+        alert(err?.error || "No se pudo completar la acción");
+        return;
+      }
       router.refresh();
     });
   };
@@ -59,12 +68,12 @@ export function QuickActionsPanel({
     <div className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
       <div className="text-sm font-semibold text-slate-800">Acciones rápidas</div>
       <div className="grid grid-cols-2 gap-2">
-        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => patchTicket({ status: "WAITING_CUSTOMER" })}>Solicitar más datos</button>
-        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => patchTicket({ status: "IN_PROGRESS" })}>Marcar en análisis</button>
-        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => patchTicket({ status: "IN_PROGRESS", resolution: "BACKOFFICE_DERIVED" })}>Derivar</button>
-        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => patchTicket({ status: "RESOLVED", resolution: "CHAT_RESOLVED" })}>Resolver</button>
-        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => patchTicket({ status: "CLOSED", resolution: "CLOSED_NO_ACTION" })}>Cerrar</button>
-        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => addTemplateNote("[Acción manual pendiente] Se requiere validación interna.")}>Nota interna</button>
+        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => runQuickAction("request_data")}>Solicitar más datos</button>
+        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => runQuickAction("in_analysis")}>Marcar en análisis</button>
+        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => runQuickAction("derive")}>Derivar</button>
+        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => runQuickAction("resolve")}>Resolver</button>
+        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => runQuickAction("close")}>Cerrar</button>
+        <button className="rounded-lg border px-3 py-2 text-xs" disabled={isPending} onClick={() => runQuickAction("internal_note")}>Nota interna</button>
       </div>
 
       <div className="space-y-2 border-t pt-3">
