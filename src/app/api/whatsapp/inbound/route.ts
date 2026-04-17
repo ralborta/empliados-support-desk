@@ -12,6 +12,7 @@ import {
   toLegacyCategory,
   waraIncidentLabels,
 } from "@/lib/wara";
+import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 // Using string literals instead of Prisma enums for compatibility
 
 // Schema para el formato de BuilderBot.cloud
@@ -191,23 +192,16 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   const incidentType = detectIncidentType(actualMessage);
   const { plate, missing } = detectMissingData(actualMessage, incidentType, companyName);
   const suggestedPriority = suggestPriority(actualMessage, incidentType);
-  const cutoff = new Date(Date.now() - 1000 * 60 * 60 * 48);
-  const recentTickets = await prisma.ticket.findMany({
+
+  // Un solo hilo por cliente: reutilizar cualquier ticket abierto (más reciente por actividad).
+  // Antes: ventana 48h + matrícula en título generaba tickets duplicados para el mismo usuario.
+  let ticket = await prisma.ticket.findFirst({
     where: {
       customerId: customer.id,
-      status: { in: ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"] },
-      lastMessageAt: { gte: cutoff },
+      status: { in: OPEN_TICKET_THREAD_STATUSES },
     },
     orderBy: { lastMessageAt: "desc" },
-    take: 20,
   });
-  // Reutiliza ticket si coincide matrícula (o si no hay matrícula detectada, usa el más reciente)
-  let ticket =
-    recentTickets.find((t) => {
-      if (!plate) return true;
-      const normalizedTitle = (t.title || "").toUpperCase();
-      return normalizedTitle.includes(plate);
-    }) || null;
 
   const isNewTicket = !ticket;
 
@@ -422,13 +416,11 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     return NextResponse.json({ ok: true, message: "Cliente no encontrado" });
   }
 
-  // Buscar ticket activo (últimas 48 horas)
-  const cutoff = new Date(Date.now() - 1000 * 60 * 60 * 48);
+  // Misma regla que mensajes entrantes: ticket abierto más reciente del cliente (sin ventana 48h)
   const ticket = await prisma.ticket.findFirst({
     where: {
       customerId: customer.id,
-      status: { in: ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"] },
-      lastMessageAt: { gte: cutoff },
+      status: { in: OPEN_TICKET_THREAD_STATUSES },
     },
     orderBy: { lastMessageAt: "desc" },
   });

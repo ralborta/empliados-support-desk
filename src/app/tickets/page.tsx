@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { TicketsTable } from "@/components/tickets/TicketsTable";
+import { MergeDuplicateOpenTicketsButton } from "@/components/tickets/MergeDuplicateOpenTicketsButton";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 type TicketPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -51,7 +52,7 @@ export default async function TicketsPage() {
   return (
     <TicketsLayout>
       <div className="w-full space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-4xl font-bold text-slate-900 flex items-center gap-3">
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-700 to-rose-600 text-white shadow-lg">
@@ -63,7 +64,13 @@ export default async function TicketsPage() {
               Vista general de <span className="font-semibold text-rose-700">{totalCount}</span>{" "}
               {totalCount === 1 ? "ticket" : "tickets"} en el sistema
             </p>
+            <p className="mt-1 max-w-2xl text-xs text-slate-500">
+              <span className="font-semibold text-slate-600">Regla de conversación:</span> un solo
+              hilo abierto por cliente (teléfono): los mensajes nuevos van al ticket abierto más reciente;
+              no se abre otro por matrícula distinta mientras siga abierto el caso.
+            </p>
           </div>
+          <MergeDuplicateOpenTicketsButton />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
