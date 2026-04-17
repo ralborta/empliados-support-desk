@@ -7,12 +7,26 @@ import type { SessionUser } from "@/lib/auth";
  * PANEL_USER_WARA_EMAIL + PANEL_USER_WARA_PASSWORD → rol SUPPORT (mesa / test cliente)
  * PANEL_USER_ADMIN_EMAIL + PANEL_USER_ADMIN_PASSWORD → rol ADMIN
  */
+/** Al menos una cuenta completa (email + password) por pareja. Podés definir solo admin o solo Wara. */
 export function panelAuthConfigured(): boolean {
-  return !!(
-    process.env.PANEL_USER_WARA_EMAIL?.trim() &&
-    process.env.PANEL_USER_WARA_PASSWORD &&
-    process.env.PANEL_USER_ADMIN_EMAIL?.trim() &&
-    process.env.PANEL_USER_ADMIN_PASSWORD
+  const waraOk =
+    !!process.env.PANEL_USER_WARA_EMAIL?.trim() && !!process.env.PANEL_USER_WARA_PASSWORD;
+  const adminOk =
+    !!process.env.PANEL_USER_ADMIN_EMAIL?.trim() && !!process.env.PANEL_USER_ADMIN_PASSWORD;
+  return waraOk || adminOk;
+}
+
+/** Texto para mensajes de error (sin exponer secretos). */
+export function panelAuthMissingDescription(): string {
+  const waraOk =
+    !!process.env.PANEL_USER_WARA_EMAIL?.trim() && !!process.env.PANEL_USER_WARA_PASSWORD;
+  const adminOk =
+    !!process.env.PANEL_USER_ADMIN_EMAIL?.trim() && !!process.env.PANEL_USER_ADMIN_PASSWORD;
+  if (waraOk || adminOk) return "";
+  return (
+    "Definí al menos una cuenta en Vercel (Settings → Environment Variables): " +
+    "pareja Wara (PANEL_USER_WARA_EMAIL + PANEL_USER_WARA_PASSWORD) y/o " +
+    "pareja admin (PANEL_USER_ADMIN_EMAIL + PANEL_USER_ADMIN_PASSWORD). Luego redeploy."
   );
 }
 

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import { panelAuthConfigured, tryPanelLogin } from "@/lib/panelAuth";
+import { panelAuthConfigured, panelAuthMissingDescription, tryPanelLogin } from "@/lib/panelAuth";
 
 const bodySchema = z.object({
   email: z.string().email(),
@@ -14,8 +14,7 @@ export async function POST(req: Request) {
   if (!panelAuthConfigured()) {
     return NextResponse.json(
       {
-        error:
-          "Acceso no configurado: definí PANEL_USER_WARA_EMAIL, PANEL_USER_WARA_PASSWORD, PANEL_USER_ADMIN_EMAIL y PANEL_USER_ADMIN_PASSWORD en el entorno.",
+        error: panelAuthMissingDescription(),
       },
       { status: 503 }
     );
