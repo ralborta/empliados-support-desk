@@ -8,7 +8,7 @@ type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "
 type TicketPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 
 export default async function TicketsPage() {
-  await requireSession();
+  const session = await requireSession();
 
   const tickets = await prisma.ticket.findMany({
     select: {
@@ -70,7 +70,7 @@ export default async function TicketsPage() {
               no se abre otro por matrícula distinta mientras siga abierto el caso.
             </p>
           </div>
-          <MergeDuplicateOpenTicketsButton />
+          <MergeDuplicateOpenTicketsButton visible={session.user?.role === "ADMIN"} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

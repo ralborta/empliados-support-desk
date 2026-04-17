@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { setBuilderBotCloudBlacklist, setBotBlacklist } from "@/lib/builderbot";
+import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 const updateCustomerSchema = z.object({
   phone: z.string().min(5).optional(),
@@ -62,7 +63,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const updateData: Record<string, unknown> = {};
   if (phone !== undefined) {
-    updateData.phone = phone.replace(/\s|-/g, "");
+    updateData.phone = normalizeWhatsAppPhone(phone) || phone.replace(/\s|-/g, "");
   }
   if (name !== undefined) {
     updateData.name = name || null;

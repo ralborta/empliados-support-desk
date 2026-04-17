@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { sessionOptions, type SessionData } from "@/lib/auth";
+import { requireAdminApi } from "@/lib/apiAuth";
 
 const updateAgentSchema = z.object({
   name: z.string().min(1).optional(),
@@ -12,18 +10,12 @@ const updateAgentSchema = z.object({
 });
 
 // DELETE /api/agentes/[id] - Eliminar agente
-export async function DELETE(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdminApi();
+  if (!auth.ok) return auth.response;
 
   const { id } = await params;
 
-  // Verificar si tiene tickets asignados
   const agente = await prisma.agentUser.findUnique({
     where: { id },
     include: {
@@ -37,7 +29,6 @@ export async function DELETE(
     return NextResponse.json({ error: "Agente no encontrado" }, { status: 404 });
   }
 
-  // Si tiene tickets asignados, desasignarlos primero
   if (agente._count.tickets > 0) {
     await prisma.ticket.updateMany({
       where: { assignedToUserId: id },
@@ -56,24 +47,22 @@ export async function DELETE(
 }
 
 // PATCH /api/agentes/[id] - Actualizar agente
-export async function PATCH(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdminApi();
+  if (!auth.ok) return auth.response;
 
   const { id } = await params;
   const json = await req.json().catch(() => null);
   const parsed = updateAgentSchema.safeParse(json);
 
   if (!parsed.success) {
-    return NextResponse.json({ 
-      error: "Formato inválido", 
-      details: parsed.error.flatten() 
-    }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: "Formato inválido",
+        details: parsed.error.flatten(),
+      },
+      { status: 400 }
+    );
   }
 
   const agente = await prisma.agentUser.update({

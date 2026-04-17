@@ -37,8 +37,11 @@ export async function requireSession() {
   return session;
 }
 
-export function ensureAppPasswordConfigured() {
-  if (!process.env.APP_PASSWORD) {
-    throw new Error("APP_PASSWORD no está configurada en el entorno");
+/** Solo rol ADMIN (páginas de gestión del sistema). */
+export async function requireAdminSession() {
+  const session = await requireSession();
+  if (!session.user || session.user.role !== "ADMIN") {
+    redirect("/acceso-denegado");
   }
+  return session;
 }

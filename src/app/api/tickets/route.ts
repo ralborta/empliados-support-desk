@@ -4,6 +4,7 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { generateTicketCode } from "@/lib/tickets";
+import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -54,7 +55,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { title, customerPhone, customerName, contactName, priority, category } = parsed.data;
+  const { title, customerPhone: rawPhone, customerName, contactName, priority, category } = parsed.data;
+  const customerPhone = normalizeWhatsAppPhone(rawPhone) || rawPhone.replace(/\s|-/g, "");
 
   const customer = await prisma.customer.upsert({
     where: { phone: customerPhone },

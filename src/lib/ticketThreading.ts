@@ -3,6 +3,9 @@ import type { PrismaClient, TicketStatus } from "@prisma/client";
 /**
  * ## Regla de conversación (WhatsApp / soporte)
  *
+ * **Teléfono canónico:** el número de WhatsApp se guarda solo con dígitos (sin `@s.whatsapp.net`),
+ * para que el mismo contacto no genere dos filas `Customer` por formato distinto.
+ *
  * **Un solo hilo activo por cliente (teléfono):** mientras exista al menos un ticket
  * en estado abierto (`OPEN`, `IN_PROGRESS`, `WAITING_CUSTOMER`), los mensajes entrantes
  * y salientes se asocian a **ese** ticket — el de **última actividad** (`lastMessageAt`).

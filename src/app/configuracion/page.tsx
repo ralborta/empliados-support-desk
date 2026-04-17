@@ -1,10 +1,10 @@
-import { requireSession } from "@/lib/auth";
+import { requireAdminSession } from "@/lib/auth";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import KnowledgeFilesList from "@/components/configuracion/KnowledgeFilesList";
 import AgentConfig from "@/components/configuracion/AgentConfig";
 
 export default async function ConfiguracionPage() {
-  await requireSession();
+  await requireAdminSession();
 
   return (
     <TicketsLayout>

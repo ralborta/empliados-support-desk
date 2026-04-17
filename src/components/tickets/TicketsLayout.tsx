@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export function TicketsLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -14,6 +15,15 @@ export function TicketsLayout({ children }: { children: React.ReactNode }) {
 }
 
 function TicketsSidebar() {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((r) => r.json())
+      .then((d) => setIsAdmin(d?.user?.role === "ADMIN"))
+      .catch(() => setIsAdmin(false));
+  }, []);
+
   return (
     <aside className="w-72 bg-gradient-to-b from-rose-950 via-rose-900 to-rose-950 text-white shadow-2xl border-r border-rose-800/50">
       <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-700/50">
@@ -41,8 +51,12 @@ function TicketsSidebar() {
         <NavLink label="Normal" href="/tickets/normal" indicator="bg-emerald-500" />
         <NavLink label="Baja" href="/tickets/baja" indicator="bg-slate-400" />
         <SectionTitle>Gestión</SectionTitle>
-        <NavLink label="👥 Agentes" href="/agentes" />
-        <NavLink label="⚙️ Configuración" href="/configuracion" />
+        {isAdmin ? (
+          <>
+            <NavLink label="👥 Agentes" href="/agentes" />
+            <NavLink label="⚙️ Configuración" href="/configuracion" />
+          </>
+        ) : null}
         <NavLink label="👤 Clientes" href="/clientes" />
       </nav>
     </aside>

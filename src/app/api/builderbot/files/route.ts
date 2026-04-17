@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { getIronSession } from "iron-session";
-import { sessionOptions, type SessionData } from "@/lib/auth";
+import { requireAdminApi } from "@/lib/apiAuth";
 
 const BUILDERBOT_API_URL = process.env.BUILDERBOT_API_URL || "https://app.builderbot.cloud";
 const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
 const API_KEY = process.env.BUILDERBOT_API_KEY || "";
 
 export async function GET(request: NextRequest) {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireAdminApi();
+  if (!auth.ok) return auth.response;
 
   if (!BOT_ID || !API_KEY) {
     return NextResponse.json(
@@ -43,8 +41,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireAdminApi();
+  if (!auth.ok) return auth.response;
 
   if (!BOT_ID || !API_KEY) {
     return NextResponse.json(
@@ -98,8 +96,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireAdminApi();
+  if (!auth.ok) return auth.response;
 
   if (!BOT_ID || !API_KEY) {
     return NextResponse.json(

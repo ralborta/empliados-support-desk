@@ -1,11 +1,11 @@
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/auth";
+import { requireAdminSession } from "@/lib/auth";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { CreateAgentForm } from "@/components/agentes/CreateAgentForm";
 import { AgentsList } from "@/components/agentes/AgentsList";
 
 export default async function AgentesPage() {
-  await requireSession();
+  await requireAdminSession();
 
   const agentes = await prisma.agentUser.findMany({
     orderBy: { createdAt: "desc" },

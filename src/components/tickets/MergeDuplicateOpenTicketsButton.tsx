@@ -5,8 +5,10 @@ import { useState } from "react";
 
 /**
  * Ejecuta POST /api/admin/merge-duplicate-open-tickets (ver `ticketThreading.ts` para la regla).
+ * Solo administradores (`visible`).
  */
-export function MergeDuplicateOpenTicketsButton() {
+export function MergeDuplicateOpenTicketsButton({ visible = true }: { visible?: boolean }) {
+  if (!visible) return null;
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [lastMessage, setLastMessage] = useState<string | null>(null);

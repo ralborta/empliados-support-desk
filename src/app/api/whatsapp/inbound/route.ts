@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { generateTicketCode } from "@/lib/tickets";
@@ -13,6 +14,7 @@ import {
   waraIncidentLabels,
 } from "@/lib/wara";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone, resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 // Using string literals instead of Prisma enums for compatibility
 
 // Schema para el formato de BuilderBot.cloud
@@ -59,7 +61,8 @@ export async function POST(req: Request) {
 
 async function processIncomingMessage({ eventName, data }: { eventName: string; data: any }) {
   let messageText = data.body != null ? String(data.body) : "";
-  const customerPhone = data.from;
+  const customerPhoneRaw = String(data.from);
+  const customerPhone = normalizeWhatsAppPhone(customerPhoneRaw) || customerPhoneRaw;
   const customerName = data.name != null ? String(data.name) : undefined; // Nombre de WhatsApp (la persona que escribe)
   const attachments = data.attachment || [];
   const urlTempFile = data.urlTempFile; // URL temporal de BuilderBot para multimedia
@@ -182,47 +185,51 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  // Upsert customer: el nombre es la EMPRESA
-  const customer = await prisma.customer.upsert({
-    where: { phone: customerPhone },
-    update: { name: companyName },
-    create: { phone: customerPhone, name: companyName },
+  // Mismo contacto = mismo Customer (teléfono canónico; corrige formatos viejos tipo JID @s.whatsapp.net)
+  const customer = await resolveCustomerByWhatsAppNumber(prisma, customerPhoneRaw, {
+    name: companyName,
   });
 
   const incidentType = detectIncidentType(actualMessage);
   const { plate, missing } = detectMissingData(actualMessage, incidentType, companyName);
   const suggestedPriority = suggestPriority(actualMessage, incidentType);
 
-  // Un solo hilo por cliente: reutilizar cualquier ticket abierto (más reciente por actividad).
-  // Antes: ventana 48h + matrícula en título generaba tickets duplicados para el mismo usuario.
-  let ticket = await prisma.ticket.findFirst({
-    where: {
-      customerId: customer.id,
-      status: { in: OPEN_TICKET_THREAD_STATUSES },
+  // Un solo hilo por cliente + transacción Serializable para evitar dos tickets si llegan 2 webhooks a la vez.
+  const { ticket, isNewTicket } = await prisma.$transaction(
+    async (tx) => {
+      let t = await tx.ticket.findFirst({
+        where: {
+          customerId: customer.id,
+          status: { in: OPEN_TICKET_THREAD_STATUSES },
+        },
+        orderBy: { lastMessageAt: "desc" },
+      });
+      if (!t) {
+        t = await tx.ticket.create({
+          data: {
+            code: generateTicketCode(),
+            customerId: customer.id,
+            contactName: contactName,
+            title: `${waraIncidentLabels[incidentType]}${plate ? ` · ${plate}` : ""}`,
+            status: "OPEN",
+            priority: suggestedPriority,
+            category: toLegacyCategory(incidentType),
+            incidentType,
+            channel: "WHATSAPP",
+          },
+        });
+        console.log(`🎫 Nuevo ticket creado: ${t.code} - Empresa: ${companyName}, Contacto: ${contactName}`);
+        return { ticket: t, isNewTicket: true };
+      }
+      console.log(`🎫 Ticket existente: ${t.code}`);
+      return { ticket: t, isNewTicket: false };
     },
-    orderBy: { lastMessageAt: "desc" },
-  });
-
-  const isNewTicket = !ticket;
-
-  if (!ticket) {
-    ticket = await prisma.ticket.create({
-      data: {
-        code: generateTicketCode(),
-        customerId: customer.id,
-        contactName: contactName,
-        title: `${waraIncidentLabels[incidentType]}${plate ? ` · ${plate}` : ""}`,
-        status: "OPEN",
-        priority: suggestedPriority,
-        category: toLegacyCategory(incidentType),
-        incidentType,
-        channel: "WHATSAPP",
-      },
-    });
-    console.log(`🎫 Nuevo ticket creado: ${ticket.code} - Empresa: ${companyName}, Contacto: ${contactName}`);
-  } else {
-    console.log(`🎫 Ticket existente: ${ticket.code}`);
-  }
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5000,
+      timeout: 15000,
+    }
+  );
 
   const previousMessagesCount = await prisma.ticketMessage.count({ where: { ticketId: ticket.id } });
 
@@ -406,13 +413,10 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     }
   }
 
-  // Buscar el ticket activo para este cliente
-  const customer = await prisma.customer.findUnique({
-    where: { phone: customerPhone },
-  });
+  const customer = await findCustomerByWhatsAppNumber(prisma, String(customerPhone));
 
   if (!customer) {
-    console.log(`ℹ️ Cliente no encontrado para ${customerPhone}, ignorando mensaje saliente`);
+    console.log(`ℹ️ Cliente no encontrado para ${String(customerPhone)}, ignorando mensaje saliente`);
     return NextResponse.json({ ok: true, message: "Cliente no encontrado" });
   }
 

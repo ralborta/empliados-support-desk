@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { sessionOptions, type SessionData } from "@/lib/auth";
+import { requireAdminApi } from "@/lib/apiAuth";
 
 const createAgentSchema = z.object({
   name: z.string().min(1),
@@ -12,12 +10,10 @@ const createAgentSchema = z.object({
   role: z.enum(["ADMIN", "SUPPORT"]).default("SUPPORT"),
 });
 
-// GET /api/agentes - Listar todos los agentes
+// GET /api/agentes - Listar todos los agentes (solo admin)
 export async function GET() {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireAdminApi();
+  if (!auth.ok) return auth.response;
 
   const agentes = await prisma.agentUser.findMany({
     orderBy: { createdAt: "desc" },
@@ -33,32 +29,35 @@ export async function GET() {
 
 // POST /api/agentes - Crear nuevo agente
 export async function POST(req: Request) {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireAdminApi();
+  if (!auth.ok) return auth.response;
 
   const json = await req.json().catch(() => null);
   const parsed = createAgentSchema.safeParse(json);
-  
+
   if (!parsed.success) {
-    return NextResponse.json({ 
-      error: "Formato inválido", 
-      details: parsed.error.flatten() 
-    }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: "Formato inválido",
+        details: parsed.error.flatten(),
+      },
+      { status: 400 }
+    );
   }
 
   const { name, email, phone, role } = parsed.data;
 
-  // Verificar si ya existe
   const existing = await prisma.agentUser.findUnique({
     where: { email },
   });
 
   if (existing) {
-    return NextResponse.json({ 
-      error: "Ya existe un agente con ese email" 
-    }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: "Ya existe un agente con ese email",
+      },
+      { status: 400 }
+    );
   }
 
   const agente = await prisma.agentUser.create({
