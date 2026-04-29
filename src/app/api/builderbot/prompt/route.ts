@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
   try {
     let fullContent = "";
     let source: "assistant" | "global" = "global";
+    let warning: string | null = null;
 
     if (ANSWER_ID) {
       const assistantResponse = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/answer/${ANSWER_ID}`, {
@@ -45,6 +46,8 @@ export async function GET(request: NextRequest) {
         const assistantData = await assistantResponse.json();
         fullContent = extractAssistantInstructions(assistantData);
         source = "assistant";
+      } else {
+        warning = `No se pudo leer assistant prompt (${assistantResponse.status}), usando fallback global.`;
       }
     }
 
@@ -53,10 +56,19 @@ export async function GET(request: NextRequest) {
         method: "GET",
         headers: baseHeaders(),
       });
-      if (!response.ok) throw new Error("Error fetching prompt");
-      const data = await response.json();
-      fullContent = String(data?.content || "");
-      source = "global";
+      if (response.ok) {
+        const data = await response.json();
+        fullContent = String(data?.content || "");
+        source = "global";
+      } else {
+        warning =
+          warning ||
+          `No se pudo leer prompt global (${response.status}). Se carga bloque editable vacío.`;
+      }
+    }
+
+    if (!fullContent) {
+      fullContent = composePrompt("");
     }
 
     return NextResponse.json({
@@ -64,11 +76,20 @@ export async function GET(request: NextRequest) {
       fullContent,
       usesTemplate: hasTemplateMarkers(fullContent),
       source,
+      warning,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Error in GET /api/builderbot/prompt:", error);
-    return NextResponse.json({ error: "No se pudo leer el prompt desde BuilderBot" }, { status: 502 });
+    const fullContent = composePrompt("");
+    return NextResponse.json({
+      content: "",
+      fullContent,
+      usesTemplate: true,
+      source: "global",
+      warning: "No se pudo leer BuilderBot. Se cargó un bloque editable vacío para continuar.",
+      updatedAt: new Date().toISOString(),
+    });
   }
 }
 

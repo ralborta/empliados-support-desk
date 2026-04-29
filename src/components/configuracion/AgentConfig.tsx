@@ -66,6 +66,9 @@ export default function AgentConfig() {
       setPrompt(data.content || "");
       setFullPrompt(data.fullContent || "");
       setUsesTemplate(!!data.usesTemplate);
+      if (data.warning) {
+        setMessage({ type: "error", text: String(data.warning) });
+      }
     } catch (error) {
       console.error("Error loading prompt:", error);
       setMessage({
