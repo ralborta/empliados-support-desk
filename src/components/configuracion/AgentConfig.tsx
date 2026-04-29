@@ -90,7 +90,7 @@ export default function AgentConfig() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ content: prompt }),
+        body: JSON.stringify({ content: prompt, existingFullContent: fullPrompt }),
       });
 
       if (!response.ok) {

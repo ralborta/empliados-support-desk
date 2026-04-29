@@ -18,10 +18,10 @@ Reglas críticas:
 - Si hay adjuntos interpretados, usa su contenido sin inventar datos.
 `;
 
-export function composePrompt(customPrompt: string): string {
+export function composePrompt(customPrompt: string, basePrompt = BASE_PROMPT): string {
   const cleanCustom = (customPrompt || "").trim();
   return [
-    BASE_PROMPT.trim(),
+    (basePrompt || BASE_PROMPT).trim(),
     "",
     CUSTOM_BLOCK_START,
     cleanCustom,
@@ -48,4 +48,12 @@ export function extractCustomPrompt(fullPrompt: string): string {
 export function hasTemplateMarkers(fullPrompt: string): boolean {
   if (!fullPrompt) return false;
   return fullPrompt.includes(CUSTOM_BLOCK_START) && fullPrompt.includes(CUSTOM_BLOCK_END);
+}
+
+export function extractBasePrompt(fullPrompt: string): string {
+  if (!fullPrompt) return BASE_PROMPT.trim();
+  if (!hasTemplateMarkers(fullPrompt)) return fullPrompt.trim();
+
+  const startIdx = fullPrompt.indexOf(CUSTOM_BLOCK_START);
+  return fullPrompt.slice(0, startIdx).trim();
 }

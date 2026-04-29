@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/apiAuth";
-import { composePrompt, extractCustomPrompt, hasTemplateMarkers } from "@/lib/promptTemplate";
+import { composePrompt, extractBasePrompt, extractCustomPrompt, hasTemplateMarkers } from "@/lib/promptTemplate";
 
 const BUILDERBOT_API_URL = process.env.BUILDERBOT_API_URL || "https://app.builderbot.cloud";
 const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
@@ -101,7 +101,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     prompt = body.content || body.prompt || "";
-    const finalPrompt = composePrompt(prompt);
+    const existingFullContent = typeof body.existingFullContent === "string" ? body.existingFullContent : "";
+    const basePromptForCompose = existingFullContent ? extractBasePrompt(existingFullContent) : undefined;
+    const finalPrompt = composePrompt(prompt, basePromptForCompose);
 
     if (!BOT_ID || !API_KEY) {
       return NextResponse.json({ error: "Faltan variables BUILDERBOT_BOT_ID / BUILDERBOT_API_KEY" }, { status: 500 });
