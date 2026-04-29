@@ -38,24 +38,36 @@ export async function POST(req: Request) {
 
   console.log("📩 Webhook recibido de BuilderBot:", JSON.stringify(payload, null, 2));
 
+  const eventName = typeof payload?.eventName === "string" ? payload.eventName : "";
+  // BuilderBot envía eventos de estado (ej. status.ready) que no deben romper el webhook.
+  if (eventName !== "message.incoming" && eventName !== "message.outgoing") {
+    console.log(`ℹ️ Evento no-mensaje ignorado: ${eventName || "sin eventName"}`);
+    return NextResponse.json({ ok: true, message: "Evento ignorado" });
+  }
+
   const parsed = builderbotWebhookSchema.safeParse(payload);
   if (!parsed.success) {
     console.error("❌ Formato inválido:", parsed.error.flatten());
-    return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
+    // Para eventos de mensajería con formato inesperado, no devolvemos 400 para evitar
+    // que BuilderBot marque el endpoint como fallido por payloads no críticos.
+    return NextResponse.json(
+      { ok: true, message: "Formato no reconocido, evento ignorado", details: parsed.error.flatten() },
+      { status: 200 }
+    );
   }
 
-  const { eventName, data } = parsed.data;
+  const { eventName: parsedEventName } = parsed.data;
 
   // Procesar mensajes entrantes y salientes
-  if (eventName === "message.incoming") {
+  if (parsedEventName === "message.incoming") {
     // Procesar mensaje entrante del cliente
     return await processIncomingMessage(parsed.data);
-  } else if (eventName === "message.outgoing") {
+  } else if (parsedEventName === "message.outgoing") {
     // Procesar mensaje saliente del agente desde BuilderBot
     return await processOutgoingMessage(parsed.data);
   } else {
-    console.log(`ℹ️ Evento ignorado: ${eventName}`);
-    return NextResponse.json({ ok: true, message: `Evento ${eventName} recibido pero no procesado` });
+    console.log(`ℹ️ Evento ignorado: ${parsedEventName}`);
+    return NextResponse.json({ ok: true, message: `Evento ${parsedEventName} recibido pero no procesado` });
   }
 }
 
