@@ -69,7 +69,7 @@ export default function AgentConfig() {
       setUsesTemplate(!!data.usesTemplate);
       setAssistantApiUnsupported(!!data.assistantApiUnsupported);
       if (data.warning) {
-        setMessage({ type: "error", text: String(data.warning) });
+        console.warn("Prompt warning:", data.warning);
       }
     } catch (error) {
       console.error("Error loading prompt:", error);
@@ -238,15 +238,6 @@ export default function AgentConfig() {
           Escribe solo instrucciones de interacción básica (saludo, tono y estilo). No pegues aquí el prompt final completo.
         </p>
       </div>
-      {assistantApiUnsupported && (
-        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-          <p className="font-semibold">Modo manual requerido para assistant prompt</p>
-          <p className="mt-1">
-            Este entorno no permite actualizar el assistant por API. Usa <strong>Copiar prompt final</strong> y pégalo en BuilderBot (answer ChatPDF).
-          </p>
-        </div>
-      )}
-
       {message && (
         <div
           className={`mb-6 p-4 rounded-xl flex items-center gap-3 ${

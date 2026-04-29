@@ -121,67 +121,69 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
           <div className="space-y-4 xl:col-span-6">
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
               <div className="text-sm font-semibold text-slate-800">Conversación</div>
-              <div className="mt-3 space-y-3">
-                {conversation.length === 0 ? (
-                  <div className="text-sm text-slate-500">Sin mensajes aún.</div>
-                ) : (
-                  conversation.map((msg: any) => {
-                    const createdAt = msg.createdAt instanceof Date 
-                      ? msg.createdAt 
-                      : new Date(msg.createdAt);
-                    const fromLabel = fromLabels[msg.from as "CUSTOMER" | "BOT" | "HUMAN"] || msg.from;
-                    
-                    return (
-                      <div key={msg.id} className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          {msg.from === "BOT" ? (
-                            <>
-                              <Image
-                                src="/atilio-logo.png"
-                                alt=""
-                                width={22}
-                                height={22}
-                                className="h-[22px] w-[22px] shrink-0 rounded-md object-contain ring-1 ring-rose-200/80"
-                                aria-hidden
-                              />
-                              <span className="font-medium text-slate-700">{fromLabel}</span>
-                            </>
-                          ) : msg.from === "CUSTOMER" ? (
-                            <>
-                              <span
-                                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md bg-slate-200/90 text-slate-600 ring-1 ring-slate-300/70"
-                                aria-hidden
-                              >
-                                <User className="h-3.5 w-3.5" strokeWidth={2.25} />
-                              </span>
-                              <span className="font-medium text-slate-700">{fromLabel}</span>
-                            </>
-                          ) : (
-                            <span>{fromLabel}</span>
-                          )}
-                          <span className="text-slate-400">·</span>
-                          <span>{createdAt.toLocaleString("es-AR")}</span>
-                        </div>
-                        <div>
-                          <div
-                            className={`max-w-2xl rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                              msg.from === "CUSTOMER"
-                                ? "bg-slate-100 text-slate-800"
-                                : msg.from === "BOT"
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : "bg-blue-100 text-blue-900"
-                            }`}
-                          >
-                            {msg.text || "[Sin texto]"}
+              <div className="mt-3 max-h-[calc(100vh-300px)] overflow-y-auto pr-1">
+                <div className="space-y-3">
+                  {conversation.length === 0 ? (
+                    <div className="text-sm text-slate-500">Sin mensajes aún.</div>
+                  ) : (
+                    conversation.map((msg: any) => {
+                      const createdAt = msg.createdAt instanceof Date 
+                        ? msg.createdAt 
+                        : new Date(msg.createdAt);
+                      const fromLabel = fromLabels[msg.from as "CUSTOMER" | "BOT" | "HUMAN"] || msg.from;
+                      
+                      return (
+                        <div key={msg.id} className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            {msg.from === "BOT" ? (
+                              <>
+                                <Image
+                                  src="/atilio-logo.png"
+                                  alt=""
+                                  width={22}
+                                  height={22}
+                                  className="h-[22px] w-[22px] shrink-0 rounded-md object-contain ring-1 ring-rose-200/80"
+                                  aria-hidden
+                                />
+                                <span className="font-medium text-slate-700">{fromLabel}</span>
+                              </>
+                            ) : msg.from === "CUSTOMER" ? (
+                              <>
+                                <span
+                                  className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md bg-slate-200/90 text-slate-600 ring-1 ring-slate-300/70"
+                                  aria-hidden
+                                >
+                                  <User className="h-3.5 w-3.5" strokeWidth={2.25} />
+                                </span>
+                                <span className="font-medium text-slate-700">{fromLabel}</span>
+                              </>
+                            ) : (
+                              <span>{fromLabel}</span>
+                            )}
+                            <span className="text-slate-400">·</span>
+                            <span>{createdAt.toLocaleString("es-AR")}</span>
                           </div>
-                          {msg.attachments && (
-                            <MessageAttachments attachments={msg.attachments as any} />
-                          )}
+                          <div>
+                            <div
+                              className={`max-w-2xl rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                                msg.from === "CUSTOMER"
+                                  ? "bg-slate-100 text-slate-800"
+                                  : msg.from === "BOT"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-blue-100 text-blue-900"
+                              }`}
+                            >
+                              {msg.text || "[Sin texto]"}
+                            </div>
+                            {msg.attachments && (
+                              <MessageAttachments attachments={msg.attachments as any} />
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })
-                )}
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
             <MessageComposer
