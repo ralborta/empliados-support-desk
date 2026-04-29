@@ -14,6 +14,45 @@ function baseHeaders() {
   };
 }
 
+function buildApiV2Base(url: string): string {
+  const clean = (url || "").replace(/\/$/, "");
+  return clean.endsWith("/api/v2") ? clean : `${clean}/api/v2`;
+}
+
+function buildApiLegacyBase(url: string): string {
+  return (url || "").replace(/\/$/, "");
+}
+
+async function requestAssistantEndpoint(
+  method: "GET" | "POST",
+  answerId: string,
+  payload?: Record<string, unknown>
+) {
+  const v2Base = buildApiV2Base(BUILDERBOT_API_URL);
+  const legacyBase = buildApiLegacyBase(BUILDERBOT_API_URL);
+  const v2Url =
+    method === "GET"
+      ? `${v2Base}/${BOT_ID}/answer/${answerId}`
+      : `${v2Base}/${BOT_ID}/answer/${answerId}/plugin/assistant`;
+  const legacyUrl =
+    method === "GET"
+      ? `${legacyBase}/${BOT_ID}/answer/${answerId}`
+      : `${legacyBase}/${BOT_ID}/answer/${answerId}/plugin/assistant`;
+
+  const reqInit: RequestInit = {
+    method,
+    headers: baseHeaders(),
+    body: method === "POST" ? JSON.stringify(payload || {}) : undefined,
+  };
+
+  const first = await fetch(v2Url, reqInit);
+  if (first.ok || first.status !== 404) {
+    return { response: first, tried: "v2" as const };
+  }
+  const second = await fetch(legacyUrl, reqInit);
+  return { response: second, tried: "legacy" as const };
+}
+
 function extractAssistantInstructions(payload: any): string {
   return String(
     payload?.instructions ??
@@ -38,16 +77,13 @@ export async function GET(request: NextRequest) {
     let warning: string | null = null;
 
     if (ANSWER_ID) {
-      const assistantResponse = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/answer/${ANSWER_ID}`, {
-        method: "GET",
-        headers: baseHeaders(),
-      });
+      const { response: assistantResponse, tried } = await requestAssistantEndpoint("GET", ANSWER_ID);
       if (assistantResponse.ok) {
         const assistantData = await assistantResponse.json();
         fullContent = extractAssistantInstructions(assistantData);
         source = "assistant";
       } else {
-        warning = `No se pudo leer assistant prompt (${assistantResponse.status}), usando fallback global.`;
+        warning = `No se pudo leer assistant prompt (${assistantResponse.status}, ruta ${tried}), usando fallback global.`;
       }
     }
 
@@ -113,11 +149,8 @@ export async function POST(request: NextRequest) {
     let source: "assistant" | "global" = "global";
     if (ANSWER_ID) {
       source = "assistant";
-      response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/answer/${ANSWER_ID}/plugin/assistant`, {
-        method: "POST",
-        headers: baseHeaders(),
-        body: JSON.stringify({ instructions: finalPrompt }),
-      });
+      const assistantReq = await requestAssistantEndpoint("POST", ANSWER_ID, { instructions: finalPrompt });
+      response = assistantReq.response;
     } else {
       response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/prompt`, {
         method: "POST",
