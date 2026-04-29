@@ -206,6 +206,12 @@ export default function AgentConfig() {
           ? "Modo plantilla activo: se combina Prompt Base + tu bloque editable."
           : "Prompt sin plantilla detectado: al guardar se migrará automáticamente al nuevo formato."}
       </div>
+      <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">
+        <p className="font-semibold">Guía rápida del bloque editable</p>
+        <p className="mt-1">
+          Escribe solo instrucciones de interacción básica (saludo, tono y estilo). No pegues aquí el prompt final completo.
+        </p>
+      </div>
 
       {message && (
         <div
@@ -228,7 +234,7 @@ export default function AgentConfig() {
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Escribe aquí las instrucciones editables para la interacción básica..."
+          placeholder={`Ejemplo:\n- Saluda según la hora y preséntate como Atilio una sola vez.\n- Mantén respuestas breves, claras y profesionales.\n- Si hay {aiImage}, úsala como contexto sin inventar datos.\n- Si no hay datos suficientes, pide solo lo mínimo necesario.`}
           className="w-full h-80 p-5 border-2 border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 resize-none text-sm bg-slate-50/50 transition-all font-mono"
           disabled={isSaving}
         />
