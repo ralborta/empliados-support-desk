@@ -170,10 +170,10 @@ export function QuickActionsPanel({
       </div>
 
       <div className="space-y-1 border-t border-slate-100 pt-3 text-xs text-slate-600">
-        <div className="font-semibold">Etiquetas demo</div>
-        <div>Diagnóstico simulado</div>
-        <div>Certificado simulado</div>
-        <div>Escalado simulado</div>
+        <div className="font-semibold">Etiquetas sugeridas</div>
+        <div>Diagnóstico técnico</div>
+        <div>Certificado</div>
+        <div>Escalado</div>
         <div>Acción manual pendiente</div>
       </div>
     </div>
