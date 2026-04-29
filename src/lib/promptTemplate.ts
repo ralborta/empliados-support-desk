@@ -18,10 +18,29 @@ Reglas críticas:
 - Si hay adjuntos interpretados, usa su contenido sin inventar datos.
 `;
 
+function applyIdentityOverride(basePrompt: string, customPrompt: string): string {
+  const cleanBase = (basePrompt || "").trim();
+  const cleanCustom = (customPrompt || "").trim();
+  if (!cleanCustom) return cleanBase;
+
+  const customLines = cleanCustom.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (customLines.length === 0) return cleanBase;
+
+  // Caso principal del prompt maestro de Wara: reemplazar la línea de identidad "Eres Atilio..."
+  const identityRegex = /^Eres Atilio[^\n]*$/m;
+  if (identityRegex.test(cleanBase)) {
+    return cleanBase.replace(identityRegex, customLines.join("\n"));
+  }
+
+  // Fallback: si no encontramos esa línea exacta, dejamos el bloque custom al inicio para que prevalezca.
+  return `${customLines.join("\n")}\n\n${cleanBase}`;
+}
+
 export function composePrompt(customPrompt: string, basePrompt = BASE_PROMPT): string {
   const cleanCustom = (customPrompt || "").trim();
+  const baseWithOverride = applyIdentityOverride(basePrompt || BASE_PROMPT, cleanCustom);
   return [
-    (basePrompt || BASE_PROMPT).trim(),
+    baseWithOverride.trim(),
     "",
     CUSTOM_BLOCK_START,
     cleanCustom,
