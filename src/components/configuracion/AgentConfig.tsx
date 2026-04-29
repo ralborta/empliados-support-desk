@@ -316,10 +316,7 @@ export default function AgentConfig() {
         </div>
 
         <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
-          <p className="font-semibold mb-2">Respaldo en este navegador (sin base de datos)</p>
-          <p className="text-xs text-amber-900/90 mb-3">
-            Se guarda solo en el almacenamiento local del navegador. Otro equipo u otro navegador no lo ve. Limpiar datos del sitio borra este respaldo.
-          </p>
+          <p className="font-semibold mb-2">Respaldo</p>
           {localBackupAt && (
             <p className="text-xs text-amber-900/80 mb-3">
               Último respaldo local:{" "}
