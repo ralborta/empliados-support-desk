@@ -1,19 +1,58 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Loader2, CheckCircle2, AlertCircle, Brain, Save } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Loader2, CheckCircle2, AlertCircle, Brain, Save, Archive, RotateCcw } from "lucide-react";
+
+const LOCAL_BACKUP_KEY = "empliados-support-desk:agent-prompt-local-backup:v1";
+
+type LocalPromptBackupV1 = {
+  v: 1;
+  savedAt: string;
+  editable: string;
+  fullContent: string;
+  usesTemplate: boolean;
+};
+
+function readLocalBackup(): LocalPromptBackupV1 | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as LocalPromptBackupV1;
+    if (data.v !== 1 || typeof data.editable !== "string" || typeof data.fullContent !== "string") {
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalBackup(data: LocalPromptBackupV1) {
+  localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(data));
+}
 
 export default function AgentConfig() {
   const [prompt, setPrompt] = useState("");
   const [fullPrompt, setFullPrompt] = useState("");
   const [usesTemplate, setUsesTemplate] = useState(false);
+  const [localBackupAt, setLocalBackupAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const refreshLocalBackupMeta = useCallback(() => {
+    const b = readLocalBackup();
+    setLocalBackupAt(b?.savedAt ?? null);
+  }, []);
+
   useEffect(() => {
     loadPrompt();
   }, []);
+
+  useEffect(() => {
+    refreshLocalBackupMeta();
+  }, [refreshLocalBackupMeta]);
 
   const loadPrompt = async () => {
     setIsLoading(true);
@@ -85,6 +124,55 @@ export default function AgentConfig() {
     downloadBackup(prompt || "", `prompt-editable-${stamp}.txt`);
   };
 
+  const handleSaveLocalBackup = () => {
+    try {
+      const savedAt = new Date().toISOString();
+      writeLocalBackup({
+        v: 1,
+        savedAt,
+        editable: prompt,
+        fullContent: fullPrompt || "",
+        usesTemplate,
+      });
+      refreshLocalBackupMeta();
+      setMessage({
+        type: "success",
+        text: "Respaldo guardado en este navegador (no en servidor ni base de datos).",
+      });
+      setTimeout(() => setMessage(null), 4000);
+    } catch {
+      setMessage({
+        type: "error",
+        text: "No se pudo guardar el respaldo local (p. ej. almacenamiento lleno o privado).",
+      });
+      setTimeout(() => setMessage(null), 5000);
+    }
+  };
+
+  const handleRestoreLocalBackup = () => {
+    const b = readLocalBackup();
+    if (!b) {
+      setMessage({ type: "error", text: "No hay respaldo local en este navegador." });
+      setTimeout(() => setMessage(null), 4000);
+      return;
+    }
+    if (
+      !window.confirm(
+        "¿Recuperar el respaldo local? Se reemplaza lo que ves en pantalla (no se envía a BuilderBot hasta que pulses Guardar cambios)."
+      )
+    ) {
+      return;
+    }
+    setPrompt(b.editable);
+    setFullPrompt(b.fullContent);
+    setUsesTemplate(b.usesTemplate);
+    setMessage({
+      type: "success",
+      text: "Respaldo recuperado en pantalla. Revisá el texto y pulsá Guardar cambios para subirlo a BuilderBot.",
+    });
+    setTimeout(() => setMessage(null), 5000);
+  };
+
   if (isLoading) {
     return (
       <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -149,41 +237,75 @@ export default function AgentConfig() {
         </div>
       </div>
 
-      <div className="mt-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="mt-6 flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleDownloadEditablePrompt}
+              type="button"
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Descargar bloque editable
+            </button>
+            <button
+              onClick={handleDownloadFinalPrompt}
+              type="button"
+              disabled={!fullPrompt}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Descargar prompt final
+            </button>
+          </div>
           <button
-            onClick={handleDownloadEditablePrompt}
-            type="button"
-            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            onClick={handleSave}
+            disabled={isSaving}
+            className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm hover:shadow-md"
           >
-            Descargar bloque editable
-          </button>
-          <button
-            onClick={handleDownloadFinalPrompt}
-            type="button"
-            disabled={!fullPrompt}
-            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Descargar prompt final
+            {isSaving ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Guardando...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-5 h-5" />
+                <span>Guardar Cambios</span>
+              </>
+            )}
           </button>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm hover:shadow-md"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>Guardando...</span>
-            </>
-          ) : (
-            <>
-              <Save className="w-5 h-5" />
-              <span>Guardar Cambios</span>
-            </>
+
+        <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
+          <p className="font-semibold mb-2">Respaldo en este navegador (sin base de datos)</p>
+          <p className="text-xs text-amber-900/90 mb-3">
+            Se guarda solo en el almacenamiento local del navegador. Otro equipo u otro navegador no lo ve. Limpiar datos del sitio borra este respaldo.
+          </p>
+          {localBackupAt && (
+            <p className="text-xs text-amber-900/80 mb-3">
+              Último respaldo local:{" "}
+              <span className="font-mono">{new Date(localBackupAt).toLocaleString()}</span>
+            </p>
           )}
-        </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleSaveLocalBackup}
+              className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-50"
+            >
+              <Archive className="h-4 w-4 shrink-0" />
+              Guardar respaldo local
+            </button>
+            <button
+              type="button"
+              onClick={handleRestoreLocalBackup}
+              disabled={!localBackupAt}
+              className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RotateCcw className="h-4 w-4 shrink-0" />
+              Recuperar respaldo local
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
