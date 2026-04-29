@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Loader2, CheckCircle2, AlertCircle, Brain, Save, Archive, RotateCcw } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Brain, Save, Archive, RotateCcw, ClipboardCopy } from "lucide-react";
 
 const LOCAL_BACKUP_KEY = "empliados-support-desk:agent-prompt-local-backup:v1";
 
@@ -36,6 +36,7 @@ export default function AgentConfig() {
   const [prompt, setPrompt] = useState("");
   const [fullPrompt, setFullPrompt] = useState("");
   const [usesTemplate, setUsesTemplate] = useState(false);
+  const [assistantApiUnsupported, setAssistantApiUnsupported] = useState(false);
   const [localBackupAt, setLocalBackupAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -66,6 +67,7 @@ export default function AgentConfig() {
       setPrompt(data.content || "");
       setFullPrompt(data.fullContent || "");
       setUsesTemplate(!!data.usesTemplate);
+      setAssistantApiUnsupported(!!data.assistantApiUnsupported);
       if (data.warning) {
         setMessage({ type: "error", text: String(data.warning) });
       }
@@ -101,6 +103,7 @@ export default function AgentConfig() {
       const data = await response.json();
       setFullPrompt(data.fullContent || "");
       setUsesTemplate(!!data.usesTemplate);
+      setAssistantApiUnsupported(!!data.assistantApiUnsupported);
       setMessage({ type: "success", text: "Prompt actualizado correctamente" });
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
@@ -133,6 +136,18 @@ export default function AgentConfig() {
   const handleDownloadEditablePrompt = () => {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     downloadBackup(prompt || "", `prompt-editable-${stamp}.txt`);
+  };
+
+  const handleCopyFinalPrompt = async () => {
+    if (!fullPrompt) return;
+    try {
+      await navigator.clipboard.writeText(fullPrompt);
+      setMessage({ type: "success", text: "Prompt final copiado al portapapeles" });
+      setTimeout(() => setMessage(null), 2500);
+    } catch {
+      setMessage({ type: "error", text: "No se pudo copiar al portapapeles" });
+      setTimeout(() => setMessage(null), 4000);
+    }
   };
 
   const handleSaveLocalBackup = () => {
@@ -223,6 +238,14 @@ export default function AgentConfig() {
           Escribe solo instrucciones de interacción básica (saludo, tono y estilo). No pegues aquí el prompt final completo.
         </p>
       </div>
+      {assistantApiUnsupported && (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-semibold">Modo manual requerido para assistant prompt</p>
+          <p className="mt-1">
+            Este entorno no permite actualizar el assistant por API. Usa <strong>Copiar prompt final</strong> y pégalo en BuilderBot (answer ChatPDF).
+          </p>
+        </div>
+      )}
 
       {message && (
         <div
@@ -271,6 +294,15 @@ export default function AgentConfig() {
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Descargar prompt final
+            </button>
+            <button
+              onClick={handleCopyFinalPrompt}
+              type="button"
+              disabled={!fullPrompt}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ClipboardCopy className="h-4 w-4 shrink-0" />
+              Copiar prompt final
             </button>
           </div>
           <button

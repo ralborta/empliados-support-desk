@@ -50,7 +50,11 @@ async function requestAssistantEndpoint(
     return { response: first, tried: "v2" as const };
   }
   const second = await fetch(legacyUrl, reqInit);
-  return { response: second, tried: "legacy" as const };
+  return {
+    response: second,
+    tried: "legacy" as const,
+    notFoundInBoth: second.status === 404,
+  };
 }
 
 function extractAssistantInstructions(payload: any): string {
@@ -75,19 +79,26 @@ export async function GET(request: NextRequest) {
     let fullContent = "";
     let source: "assistant" | "global" = "global";
     let warning: string | null = null;
+    let assistantApiUnsupported = false;
 
     if (ANSWER_ID) {
-      const { response: assistantResponse, tried } = await requestAssistantEndpoint("GET", ANSWER_ID);
+      const { response: assistantResponse, tried, notFoundInBoth } = await requestAssistantEndpoint("GET", ANSWER_ID);
       if (assistantResponse.ok) {
         const assistantData = await assistantResponse.json();
         fullContent = extractAssistantInstructions(assistantData);
         source = "assistant";
       } else {
-        warning = `No se pudo leer assistant prompt (${assistantResponse.status}, ruta ${tried}), usando fallback global.`;
+        if (notFoundInBoth) {
+          assistantApiUnsupported = true;
+          warning =
+            "Este entorno no soporta lectura de assistant prompt por API. Puedes editar y copiar el prompt final para pegarlo manualmente en BuilderBot.";
+        } else {
+          warning = `No se pudo leer assistant prompt (${assistantResponse.status}, ruta ${tried}), usando fallback global.`;
+        }
       }
     }
 
-    if (!fullContent) {
+    if (!fullContent && !assistantApiUnsupported) {
       const response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/prompt`, {
         method: "GET",
         headers: baseHeaders(),
@@ -113,6 +124,7 @@ export async function GET(request: NextRequest) {
       usesTemplate: hasTemplateMarkers(fullContent),
       source,
       warning,
+      assistantApiUnsupported,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -150,6 +162,18 @@ export async function POST(request: NextRequest) {
     if (ANSWER_ID) {
       source = "assistant";
       const assistantReq = await requestAssistantEndpoint("POST", ANSWER_ID, { instructions: finalPrompt });
+      if (assistantReq.notFoundInBoth) {
+        return NextResponse.json(
+          {
+            error:
+              "Este entorno no soporta actualización del assistant por API. Copia el prompt final y pégalo manualmente en BuilderBot.",
+            assistantApiUnsupported: true,
+            fullContent: finalPrompt,
+            content: prompt,
+          },
+          { status: 409 }
+        );
+      }
       response = assistantReq.response;
     } else {
       response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/prompt`, {
