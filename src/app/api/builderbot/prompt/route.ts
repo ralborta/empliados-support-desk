@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/apiAuth";
+import { composePrompt, extractCustomPrompt, hasTemplateMarkers } from "@/lib/promptTemplate";
 
 const BUILDERBOT_API_URL = process.env.BUILDERBOT_API_URL || "https://app.builderbot.cloud";
 const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
@@ -10,10 +11,12 @@ export async function GET(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   if (!BOT_ID || !API_KEY) {
+    const fullContent = composePrompt("");
     return NextResponse.json(
       {
-        content:
-          "Eres un asistente virtual amigable y profesional. Ayuda a los usuarios con sus consultas de manera clara y concisa.",
+        content: "",
+        fullContent,
+        usesTemplate: true,
         updatedAt: new Date().toISOString(),
       },
       { status: 200 }
@@ -34,13 +37,21 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json();
-    return NextResponse.json(data);
+    const fullContent = String(data?.content || "");
+    return NextResponse.json({
+      ...data,
+      content: extractCustomPrompt(fullContent),
+      fullContent,
+      usesTemplate: hasTemplateMarkers(fullContent),
+    });
   } catch (error) {
     console.error("Error in GET /api/builderbot/prompt:", error);
     // Retornar prompt por defecto si la API no está disponible
+    const fullContent = composePrompt("");
     return NextResponse.json({
-      content:
-        "Eres un asistente virtual amigable y profesional. Ayuda a los usuarios con sus consultas de manera clara y concisa.",
+      content: "",
+      fullContent,
+      usesTemplate: true,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -54,15 +65,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     prompt = body.content || body.prompt || "";
-
-    if (!prompt) {
-      return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
-    }
+    const finalPrompt = composePrompt(prompt);
 
     if (!BOT_ID || !API_KEY) {
       // Si no está configurado, simular éxito
       return NextResponse.json({
         content: prompt,
+        fullContent: finalPrompt,
+        usesTemplate: true,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -73,7 +83,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         "x-api-builderbot": API_KEY,
       },
-      body: JSON.stringify({ content: prompt }),
+      body: JSON.stringify({ content: finalPrompt }),
     });
 
     if (!response.ok) {
@@ -81,12 +91,20 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json();
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ...data,
+      content: prompt,
+      fullContent: String(data?.content || finalPrompt),
+      usesTemplate: hasTemplateMarkers(String(data?.content || finalPrompt)),
+    });
   } catch (error: any) {
     console.error("Error in POST /api/builderbot/prompt:", error);
     // Simular éxito si la API no está disponible
+    const finalPrompt = composePrompt(prompt);
     return NextResponse.json({
       content: prompt,
+      fullContent: finalPrompt,
+      usesTemplate: true,
       updatedAt: new Date().toISOString(),
     });
   }

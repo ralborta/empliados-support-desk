@@ -3,11 +3,10 @@
 import { useState, useEffect } from "react";
 import { Loader2, CheckCircle2, AlertCircle, Brain, Save } from "lucide-react";
 
-const DEFAULT_PROMPT =
-  "Eres un asistente virtual amigable y profesional. Ayuda a los usuarios con sus consultas de manera clara y concisa. Responde siempre de forma útil y respetuosa.";
-
 export default function AgentConfig() {
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [prompt, setPrompt] = useState("");
+  const [fullPrompt, setFullPrompt] = useState("");
+  const [usesTemplate, setUsesTemplate] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -21,9 +20,9 @@ export default function AgentConfig() {
     try {
       const response = await fetch("/api/builderbot/prompt");
       const data = await response.json();
-      if (data.content) {
-        setPrompt(data.content);
-      }
+      setPrompt(data.content || "");
+      setFullPrompt(data.fullContent || "");
+      setUsesTemplate(!!data.usesTemplate);
     } catch (error) {
       console.error("Error loading prompt:", error);
     } finally {
@@ -32,12 +31,6 @@ export default function AgentConfig() {
   };
 
   const handleSave = async () => {
-    if (!prompt.trim()) {
-      setMessage({ type: "error", text: "El prompt no puede estar vacío" });
-      setTimeout(() => setMessage(null), 3000);
-      return;
-    }
-
     setIsSaving(true);
     setMessage(null);
 
@@ -55,7 +48,10 @@ export default function AgentConfig() {
         throw new Error(errorData.error || "No se pudo guardar");
       }
 
-      setMessage({ type: "success", text: "Configuración guardada correctamente" });
+      const data = await response.json();
+      setFullPrompt(data.fullContent || "");
+      setUsesTemplate(!!data.usesTemplate);
+      setMessage({ type: "success", text: "Prompt actualizado correctamente" });
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       setMessage({
@@ -66,6 +62,27 @@ export default function AgentConfig() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const downloadBackup = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadFinalPrompt = () => {
+    if (!fullPrompt) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadBackup(fullPrompt, `prompt-final-${stamp}.txt`);
+  };
+
+  const handleDownloadEditablePrompt = () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadBackup(prompt || "", `prompt-editable-${stamp}.txt`);
   };
 
   if (isLoading) {
@@ -92,8 +109,14 @@ export default function AgentConfig() {
         </div>
         <div>
           <h2 className="text-xl font-bold text-slate-900">Configuración del Agente</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Configura cómo debe comportarse tu asistente de IA</p>
+          <p className="text-sm text-slate-500 mt-0.5">Edita solo el bloque personalizado; el prompt base queda protegido</p>
         </div>
+      </div>
+
+      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+        {usesTemplate
+          ? "Modo plantilla activo: se combina Prompt Base + tu bloque editable."
+          : "Prompt sin plantilla detectado: al guardar se migrará automáticamente al nuevo formato."}
       </div>
 
       {message && (
@@ -117,7 +140,7 @@ export default function AgentConfig() {
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Escribe aquí las instrucciones para el asistente de IA..."
+          placeholder="Escribe aquí las instrucciones editables para la interacción básica..."
           className="w-full h-80 p-5 border-2 border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 resize-none text-sm bg-slate-50/50 transition-all font-mono"
           disabled={isSaving}
         />
@@ -126,7 +149,24 @@ export default function AgentConfig() {
         </div>
       </div>
 
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownloadEditablePrompt}
+            type="button"
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Descargar bloque editable
+          </button>
+          <button
+            onClick={handleDownloadFinalPrompt}
+            type="button"
+            disabled={!fullPrompt}
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Descargar prompt final
+          </button>
+        </div>
         <button
           onClick={handleSave}
           disabled={isSaving}
