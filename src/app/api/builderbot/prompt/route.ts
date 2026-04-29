@@ -5,55 +5,70 @@ import { composePrompt, extractCustomPrompt, hasTemplateMarkers } from "@/lib/pr
 const BUILDERBOT_API_URL = process.env.BUILDERBOT_API_URL || "https://app.builderbot.cloud";
 const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
 const API_KEY = process.env.BUILDERBOT_API_KEY || "";
+const ANSWER_ID = process.env.BUILDERBOT_ANSWER_ID || "";
+
+function baseHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "x-api-builderbot": API_KEY,
+  };
+}
+
+function extractAssistantInstructions(payload: any): string {
+  return String(
+    payload?.instructions ??
+      payload?.assistantInstructions ??
+      payload?.plugins?.openai?.assistantInstructions ??
+      payload?.answer?.plugins?.openai?.assistantInstructions ??
+      ""
+  );
+}
 
 export async function GET(request: NextRequest) {
   const auth = await requireAdminApi();
   if (!auth.ok) return auth.response;
 
   if (!BOT_ID || !API_KEY) {
-    const fullContent = composePrompt("");
-    return NextResponse.json(
-      {
-        content: "",
-        fullContent,
-        usesTemplate: true,
-        updatedAt: new Date().toISOString(),
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({ error: "Faltan variables BUILDERBOT_BOT_ID / BUILDERBOT_API_KEY" }, { status: 500 });
   }
 
   try {
-    const response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/prompt`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-builderbot": API_KEY,
-      },
-    });
+    let fullContent = "";
+    let source: "assistant" | "global" = "global";
 
-    if (!response.ok) {
-      throw new Error("Error fetching prompt");
+    if (ANSWER_ID) {
+      const assistantResponse = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/answer/${ANSWER_ID}`, {
+        method: "GET",
+        headers: baseHeaders(),
+      });
+      if (assistantResponse.ok) {
+        const assistantData = await assistantResponse.json();
+        fullContent = extractAssistantInstructions(assistantData);
+        source = "assistant";
+      }
     }
 
-    const data = await response.json();
-    const fullContent = String(data?.content || "");
+    if (!fullContent) {
+      const response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/prompt`, {
+        method: "GET",
+        headers: baseHeaders(),
+      });
+      if (!response.ok) throw new Error("Error fetching prompt");
+      const data = await response.json();
+      fullContent = String(data?.content || "");
+      source = "global";
+    }
+
     return NextResponse.json({
-      ...data,
       content: extractCustomPrompt(fullContent),
       fullContent,
       usesTemplate: hasTemplateMarkers(fullContent),
+      source,
+      updatedAt: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Error in GET /api/builderbot/prompt:", error);
-    // Retornar prompt por defecto si la API no está disponible
-    const fullContent = composePrompt("");
-    return NextResponse.json({
-      content: "",
-      fullContent,
-      usesTemplate: true,
-      updatedAt: new Date().toISOString(),
-    });
+    return NextResponse.json({ error: "No se pudo leer el prompt desde BuilderBot" }, { status: 502 });
   }
 }
 
@@ -68,44 +83,44 @@ export async function POST(request: NextRequest) {
     const finalPrompt = composePrompt(prompt);
 
     if (!BOT_ID || !API_KEY) {
-      // Si no está configurado, simular éxito
-      return NextResponse.json({
-        content: prompt,
-        fullContent: finalPrompt,
-        usesTemplate: true,
-        updatedAt: new Date().toISOString(),
+      return NextResponse.json({ error: "Faltan variables BUILDERBOT_BOT_ID / BUILDERBOT_API_KEY" }, { status: 500 });
+    }
+
+    let response: Response;
+    let source: "assistant" | "global" = "global";
+    if (ANSWER_ID) {
+      source = "assistant";
+      response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/answer/${ANSWER_ID}/plugin/assistant`, {
+        method: "POST",
+        headers: baseHeaders(),
+        body: JSON.stringify({ instructions: finalPrompt }),
+      });
+    } else {
+      response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/prompt`, {
+        method: "POST",
+        headers: baseHeaders(),
+        body: JSON.stringify({ content: finalPrompt }),
       });
     }
 
-    const response = await fetch(`${BUILDERBOT_API_URL}/api/v2/${BOT_ID}/prompt`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-builderbot": API_KEY,
-      },
-      body: JSON.stringify({ content: finalPrompt }),
-    });
-
     if (!response.ok) {
-      throw new Error("Error saving prompt");
+      const errorText = await response.text().catch(() => "");
+      return NextResponse.json(
+        { error: "Error guardando prompt en BuilderBot", details: errorText || response.statusText },
+        { status: 502 }
+      );
     }
 
     const data = await response.json();
     return NextResponse.json({
       ...data,
       content: prompt,
-      fullContent: String(data?.content || finalPrompt),
-      usesTemplate: hasTemplateMarkers(String(data?.content || finalPrompt)),
-    });
-  } catch (error: any) {
-    console.error("Error in POST /api/builderbot/prompt:", error);
-    // Simular éxito si la API no está disponible
-    const finalPrompt = composePrompt(prompt);
-    return NextResponse.json({
-      content: prompt,
       fullContent: finalPrompt,
-      usesTemplate: true,
-      updatedAt: new Date().toISOString(),
+      usesTemplate: hasTemplateMarkers(finalPrompt),
+      source,
     });
+  } catch (error) {
+    console.error("Error in POST /api/builderbot/prompt:", error);
+    return NextResponse.json({ error: "No se pudo guardar el prompt en BuilderBot" }, { status: 502 });
   }
 }

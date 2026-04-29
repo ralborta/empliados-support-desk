@@ -58,12 +58,20 @@ export default function AgentConfig() {
     setIsLoading(true);
     try {
       const response = await fetch("/api/builderbot/prompt");
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.error || "No se pudo cargar el prompt");
+      }
       const data = await response.json();
       setPrompt(data.content || "");
       setFullPrompt(data.fullContent || "");
       setUsesTemplate(!!data.usesTemplate);
     } catch (error) {
       console.error("Error loading prompt:", error);
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "No se pudo cargar el prompt",
+      });
     } finally {
       setIsLoading(false);
     }
