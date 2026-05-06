@@ -319,6 +319,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
 
   // Decidir si enviar respuesta automática (no enviar si Atilio está pausado para este cliente)
   let autoReplyMessage: string | null = null;
+  let autoReplyKind: "escalation" | "new_ticket" | "ticket_on_request" | undefined;
 
   if (customer.botPausedAt) {
     console.log(`⏸️ Cliente ${customerPhone} con Atilio pausado; no se envía auto-respuesta`);
@@ -329,10 +330,17 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         messageLower
       );
 
+    const pideNumeroTicket = messageAsksForTicketCode(messageLower);
+
     if (shouldEscalate && solicitaAgente) {
       autoReplyMessage = `Hola! Tu consulta ha sido escalada a nuestro equipo. Ticket: *${ticket.code}*. Te responderemos pronto.`;
+      autoReplyKind = "escalation";
     } else if (isNewTicket) {
       autoReplyMessage = `Hola! Hemos recibido tu mensaje. Ticket: *${ticket.code}*. Un agente lo revisará pronto.`;
+      autoReplyKind = "new_ticket";
+    } else if (pideNumeroTicket) {
+      autoReplyMessage = `Tu número de caso (ticket) es *${ticket.code}*.`;
+      autoReplyKind = "ticket_on_request";
     }
   }
 
@@ -352,7 +360,11 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
           direction: "OUTBOUND",
           from: "BOT",
           text: autoReplyMessage,
-          rawPayload: { autoReply: true, timestamp: new Date().toISOString() },
+          rawPayload: {
+            autoReply: true,
+            ...(autoReplyKind ? { autoReplyKind } : {}),
+            timestamp: new Date().toISOString(),
+          },
         },
       });
     } catch (error) {
@@ -361,12 +373,25 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     }
   }
 
+  // Código de caso al despedirse (solo si el texto parece cierre; igual que Mis Reclamos)
+  const textForFarewell = (actualMessage || "").trim();
+  if (!customer.botPausedAt && textForFarewell && isDespedidaWara(textForFarewell)) {
+    await sendTicketCodeAtFarewellWara({
+      ticketId: ticket.id,
+      ticketCode: ticket.code,
+      customerPhone,
+      peerText: textForFarewell,
+      rawExtra: { atClienteDespedida: true },
+    });
+  }
+
   return NextResponse.json({ 
     ok: true, 
     ticketId: ticket.id, 
     ticketCode: ticket.code,
     escalated: shouldEscalate,
     autoReplySent: !!autoReplyMessage,
+    autoReplyKind: autoReplyKind ?? null,
   });
 }
 
@@ -515,6 +540,20 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     },
   });
 
+  const phoneOut =
+    normalizeWhatsAppPhone(String(customer.phone || customerPhone)) ||
+    String(customerPhone);
+  if (messageText && isDespedidaWara(messageText)) {
+    await sendTicketCodeAtFarewellWara({
+      ticketId: ticket.id,
+      ticketCode: ticket.code,
+      customerPhone: phoneOut,
+      peerText: String(messageText || ""),
+      rawExtra: { atDespedidaOutgoing: true },
+      botPaused: !!customer.botPausedAt,
+    });
+  }
+
   console.log(`✅ Mensaje saliente del agente guardado en ticket ${ticket.code}`);
 
   return NextResponse.json({ 
@@ -543,6 +582,154 @@ function buildOperationalSummary({
     `Urgencia sugerida: ${priority}`,
     `Próximo paso: ${missing.length > 0 ? `solicitar ${missing.join(", ")}` : "continuar análisis interno / derivación"}`,
   ].join("\n");
+}
+
+/** El cliente pide explícitamente el código / número de caso o ticket (respuesta automática con el código). */
+function messageAsksForTicketCode(messageLower: string): boolean {
+  const t = messageLower.trim();
+  if (t.length < 6) return false;
+  return (
+    /cu[aá]l\s+es\s+(mi|el)\s+(n[uú]mero\s+)?(de\s+)?(ticket|caso|reclamo)/.test(t) ||
+    /cu[aá]l\s+es\s+mi\s+n[uú]mero/.test(t) ||
+    /n[uú]mero\s+(de|del)\s+(ticket|caso|reclamo)/.test(t) ||
+    /c[oó]digo\s+(de|del)\s+(ticket|caso|reclamo)/.test(t) ||
+    /(pasame|pas[aá]me|dame|dec[ií]me)\s+(el\s+)?(n[uú]mero|ticket|c[oó]digo)(\s+de)?/.test(t) ||
+    /referencia\s+(del\s+)?(caso|ticket)/.test(t) ||
+    /(necesito|quiero)\s+(el|mi)\s+(n[uú]mero|c[oó]digo)\s+(de|del)?\s*(ticket|caso|reclamo)/.test(t)
+  );
+}
+
+/** Despedida / cierre (cliente o bot Wara) → puede enviarse el código de caso por WhatsApp. */
+function isDespedidaWara(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  const t = text.toLowerCase().trim();
+  if (/\b(chau|chao)\b|nos vemos|que estés bien|que te vaya bien|cuídate|hasta luego|hasta pronto/i.test(t)) {
+    return true;
+  }
+  if (t.length <= 88 && /^(ok\s*)?(no\s*,?\s*)?(nada\s*)?(gracias|muchas gracias|te agradezco)[\s!.,¡¿]*$/i.test(t)) {
+    return true;
+  }
+  if (t.length <= 48 && /^(ok\s*)?(chau|chao|nos vemos)[\s!.,¡¿]*$/i.test(t)) {
+    return true;
+  }
+  return (
+    /(te )?responderemos pronto|nos pondremos en contacto|equipo.*contact|un agente.*contact|agente.*revis|revisar[aá].*pronto|mesa de ayuda/i.test(t) ||
+    /(gracias por (contactar|escribir|comunicarte)|cualquier cosa escrib|cualquier cosa.*escrib)/i.test(t) ||
+    /(despedida|hasta luego|que tengas buen)/i.test(t) ||
+    /(ticket|caso|consulta).*(revisar|revisar[aá].*pronto)/i.test(t) ||
+    /(quedamos a disposici[oó]n|ante cualquier duda|saludos cordiales)/i.test(t) ||
+    /(en breve|a la brevedad|nos comunicaremos|te contactaremos)/i.test(t) ||
+    /(tu consulta|tu mensaje).*(recibid|registrad|derivad)/i.test(t) ||
+    /(perfecto|listo|de nada|con gusto)[^.]{0,40}(gracias|saludo)/i.test(t)
+  );
+}
+
+/**
+ * Solo mensajes dedicados de cierre (no cuenta el auto-reply "Ticket: *…*" ni otros OUTBOUND genéricos).
+ * Si usáramos "cualquier OUTBOUND que contiene el código", después del primer auto-reply nunca saldría
+ * el texto "Tu número de caso…" ni el recordatorio.
+ */
+const dedicatedFarewellCaseCodeNeedle = "número de caso";
+
+async function outboundAlreadySentDedicatedFarewellCaseCode(ticketId: string): Promise<boolean> {
+  const found = await prisma.ticketMessage.findFirst({
+    where: {
+      ticketId,
+      direction: "OUTBOUND",
+      text: { contains: dedicatedFarewellCaseCodeNeedle, mode: Prisma.QueryMode.insensitive },
+    },
+  });
+  return !!found;
+}
+
+async function recentOutboundDedicatedFarewellCaseCode(
+  ticketId: string,
+  minutesAgo: number
+): Promise<boolean> {
+  const since = new Date(Date.now() - minutesAgo * 60 * 1000);
+  const found = await prisma.ticketMessage.findFirst({
+    where: {
+      ticketId,
+      direction: "OUTBOUND",
+      text: { contains: dedicatedFarewellCaseCodeNeedle, mode: Prisma.QueryMode.insensitive },
+      createdAt: { gte: since },
+    },
+  });
+  return !!found;
+}
+
+const firstFarewellTicketCodeMessageWara = (code: string) =>
+  `Tu número de caso es *${code}*. Guardalo para cualquier consulta con Mesa de Ayuda.`;
+
+const reminderTicketCodeMessageWara = (code: string) =>
+  `Recordatorio: tu número de caso es *${code}*. Guardalo para cualquier consulta.`;
+
+async function sendTicketCodeAtFarewellWara(opts: {
+  ticketId: string;
+  ticketCode: string;
+  customerPhone: string;
+  peerText: string;
+  rawExtra: Record<string, unknown>;
+  botPaused?: boolean;
+}): Promise<void> {
+  const { ticketId, ticketCode, customerPhone, peerText, rawExtra, botPaused } = opts;
+  if (botPaused) return;
+
+  const yaHayMensajeCierre = await outboundAlreadySentDedicatedFarewellCaseCode(ticketId);
+  if (!yaHayMensajeCierre) {
+    const msg = firstFarewellTicketCodeMessageWara(ticketCode);
+    try {
+      await sendWhatsAppMessage({ number: customerPhone, message: msg });
+      await prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          direction: "OUTBOUND",
+          from: "BOT",
+          text: msg,
+          rawPayload: {
+            autoReply: true,
+            autoReplyKind: "farewell_ticket_code",
+            ...rawExtra,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      console.log(`✅ Código de caso (mensaje dedicado de cierre) enviado (${ticketCode})`);
+    } catch (err) {
+      console.error("❌ Error al enviar número de caso al cierre:", err);
+    }
+    return;
+  }
+
+  // Recordatorio: misma clase de despedida que Mis Reclamos (gracias, chau, texto de bot, etc.),
+  // sin esperar solo "chau"; evitar spam si ya mandamos cierre/reminder dedicado hace muy poco.
+  if (
+    isDespedidaWara(peerText) &&
+    !(await recentOutboundDedicatedFarewellCaseCode(ticketId, 6))
+  ) {
+    const reminder = reminderTicketCodeMessageWara(ticketCode);
+    try {
+      await sendWhatsAppMessage({ number: customerPhone, message: reminder });
+      await prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          direction: "OUTBOUND",
+          from: "BOT",
+          text: reminder,
+          rawPayload: {
+            autoReply: true,
+            autoReplyKind: "farewell_ticket_reminder",
+            recordatorioCodigo: true,
+            ...rawExtra,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      console.log(`✅ Recordatorio de número de caso enviado (${ticketCode})`);
+    } catch (err) {
+      console.error("❌ Error al enviar recordatorio de código:", err);
+    }
+  }
 }
 
 function decideShouldEscalate({
