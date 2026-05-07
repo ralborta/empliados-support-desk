@@ -612,8 +612,12 @@ function isDespedidaWara(text: string): boolean {
   if (t.length <= 48 && /^(ok\s*)?(chau|chao|nos vemos)[\s!.,¡¿]*$/i.test(t)) {
     return true;
   }
+  // No usar solo "mesa de ayuda": aparece en el saludo operativo ("Atilio de Mesa de Ayuda Wara")
+  // y haría que processOutgoingMessage dispare recordatorio de ticket en cada reapertura.
   return (
-    /(te )?responderemos pronto|nos pondremos en contacto|equipo.*contact|un agente.*contact|agente.*revis|revisar[aá].*pronto|mesa de ayuda/i.test(t) ||
+    /(te )?responderemos pronto|nos pondremos en contacto|equipo.*contact|un agente.*contact|agente.*revis|revisar[aá].*pronto/i.test(t) ||
+    /mesa de ayuda.{0,120}(contact|comunic|deriv|atender|responder|revis)/i.test(t) ||
+    /(derivad[oa]|escalad[oa]|pasad[oa]).{0,60}mesa de ayuda/i.test(t) ||
     /(gracias por (contactar|escribir|comunicarte)|cualquier cosa escrib|cualquier cosa.*escrib)/i.test(t) ||
     /(despedida|hasta luego|que tengas buen)/i.test(t) ||
     /(ticket|caso|consulta).*(revisar|revisar[aá].*pronto)/i.test(t) ||
