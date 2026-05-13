@@ -14,7 +14,7 @@ import {
   waraIncidentLabels,
 } from "@/lib/wara";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
-import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone, resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 // Using string literals instead of Prisma enums for compatibility
 
 /** Campos para variables BuilderBot (reglas HTTP / mapeo de respuesta del webhook). */
@@ -215,13 +215,8 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  // Solo clientes ya dados de alta (panel / import). Si WHATSAPP_AUTO_REGISTER_CUSTOMERS=true, se recupera el alta automática legacy.
-  const autoRegister = process.env.WHATSAPP_AUTO_REGISTER_CUSTOMERS === "true";
-  const customer = autoRegister
-    ? await resolveCustomerByWhatsAppNumber(prisma, customerPhoneRaw, {
-        name: companyName,
-      })
-    : existingForPanel;
+  // Soporte: solo clientes dados de alta en el panel o por import Excel. Nunca se crea Customer desde WhatsApp.
+  const customer = existingForPanel;
 
   if (!customer) {
     console.log(

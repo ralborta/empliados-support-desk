@@ -15,6 +15,9 @@ export function normalizeWhatsAppPhone(raw: string): string {
 /**
  * Busca Customer por teléfono canónico; si en DB hay un formato viejo (JID, +, espacios),
  * lo encuentra por comparación numérica y opcionalmente actualiza `phone` al valor normalizado.
+ *
+ * **Puede crear** una fila `Customer` si no existe. El producto de soporte (WhatsApp / tickets)
+ * no debe usar esta función para altas: solo `findCustomerByWhatsAppNumber` + alta en panel/import.
  */
 export async function resolveCustomerByWhatsAppNumber(
   prisma: PrismaClient,

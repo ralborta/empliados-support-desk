@@ -78,20 +78,31 @@ export async function POST(req: Request) {
       licensePlate.replace(/\s+/g, " ").trim()
     : null;
 
-  const customer = await prisma.customer.upsert({
+  const customer = await prisma.customer.findUnique({
     where: { phone: customerPhone },
-    update: {
-      ...(customerName !== undefined && { name: customerName?.trim() || null }),
-      ...(companyName !== undefined && { companyName: companyName?.trim() || null }),
-      ...(licensePlate !== undefined && { licensePlate: plate }),
-    },
-    create: {
-      phone: customerPhone,
-      name: customerName?.trim() || null,
-      companyName: companyName?.trim() || null,
-      licensePlate: plate,
-    },
   });
+  if (!customer) {
+    return NextResponse.json(
+      {
+        error:
+          "Ese teléfono no está registrado como cliente. Agregalo en Clientes o importá Excel antes de crear el ticket.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const hasCustomerPatch =
+    customerName !== undefined || companyName !== undefined || licensePlate !== undefined;
+  if (hasCustomerPatch) {
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: {
+        ...(customerName !== undefined && { name: customerName?.trim() || null }),
+        ...(companyName !== undefined && { companyName: companyName?.trim() || null }),
+        ...(licensePlate !== undefined && { licensePlate: plate }),
+      },
+    });
+  }
 
   const ticket = await prisma.ticket.create({
     data: {
