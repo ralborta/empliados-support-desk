@@ -17,6 +17,14 @@ import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone, resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 // Using string literals instead of Prisma enums for compatibility
 
+/** Campos para variables BuilderBot (reglas HTTP / mapeo de respuesta del webhook). */
+function builderBotRegistrationFields(registered: boolean) {
+  return {
+    registered,
+    registered_s: registered ? ("true" as const) : ("false" as const),
+  };
+}
+
 // Schema para el formato de BuilderBot.cloud
 const builderbotWebhookSchema = z.object({
   eventName: z.string(),
@@ -75,6 +83,11 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   let messageText = data.body != null ? String(data.body) : "";
   const customerPhoneRaw = String(data.from);
   const customerPhone = normalizeWhatsAppPhone(customerPhoneRaw) || customerPhoneRaw;
+  const existingForPanel =
+    normalizeWhatsAppPhone(customerPhoneRaw).length >= 8
+      ? await findCustomerByWhatsAppNumber(prisma, customerPhoneRaw)
+      : null;
+  const registeredInPanel = !!existingForPanel;
   const customerName = data.name != null ? String(data.name) : undefined; // Nombre de WhatsApp (la persona que escribe)
   const attachments = data.attachment || [];
   const urlTempFile = data.urlTempFile; // URL temporal de BuilderBot para multimedia
@@ -153,7 +166,11 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
 
   if (!messageText && processedAttachments.length === 0) {
     console.warn("⚠️ Mensaje sin texto ni attachments");
-    return NextResponse.json({ ok: true, message: "Mensaje vacío, ignorado" });
+    return NextResponse.json({
+      ok: true,
+      message: "Mensaje vacío, ignorado",
+      ...builderBotRegistrationFields(registeredInPanel),
+    });
   }
 
   // Parsear el mensaje inicial de BuilderBot
@@ -194,6 +211,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       ok: true,
       ticketId: existing.ticketId,
       idempotent: true,
+      ...builderBotRegistrationFields(registeredInPanel),
     });
   }
 
@@ -203,7 +221,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     ? await resolveCustomerByWhatsAppNumber(prisma, customerPhoneRaw, {
         name: companyName,
       })
-    : await findCustomerByWhatsAppNumber(prisma, customerPhoneRaw);
+    : existingForPanel;
 
   if (!customer) {
     console.log(
@@ -213,6 +231,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       ok: true,
       message: "Número no registrado en el sistema; mensaje no asociado a un caso",
       skippedUnknownCustomer: true,
+      ...builderBotRegistrationFields(false),
     });
   }
 
@@ -399,13 +418,14 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  return NextResponse.json({ 
-    ok: true, 
-    ticketId: ticket.id, 
+  return NextResponse.json({
+    ok: true,
+    ticketId: ticket.id,
     ticketCode: ticket.code,
     escalated: shouldEscalate,
     autoReplySent: !!autoReplyMessage,
     autoReplyKind: autoReplyKind ?? null,
+    ...builderBotRegistrationFields(true),
   });
 }
 
