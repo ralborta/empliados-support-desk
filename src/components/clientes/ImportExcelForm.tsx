@@ -116,7 +116,6 @@ export function ImportExcelForm() {
       )}
 
       <input
-        ref={fileInputRef}
         type="file"
         id="excel-upload"
         onChange={handleFileSelect}
