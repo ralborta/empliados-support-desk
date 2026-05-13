@@ -120,16 +120,49 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   const { id } = await params;
 
+  const existing = await prisma.customer.findUnique({
+    where: { id },
+    select: { id: true, phone: true, botPausedAt: true },
+  });
+  if (!existing) {
+    return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 });
+  }
+
   try {
-    await prisma.customer.delete({
-      where: { id },
-    });
+    await prisma.$transaction(
+      async (tx) => {
+        const tickets = await tx.ticket.findMany({
+          where: { customerId: id },
+          select: { id: true },
+        });
+        const ticketIds = tickets.map((t) => t.id);
+        if (ticketIds.length > 0) {
+          await tx.ticketMessage.deleteMany({ where: { ticketId: { in: ticketIds } } });
+          await tx.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
+          await tx.ticketTag.deleteMany({ where: { ticketId: { in: ticketIds } } });
+          await tx.ticket.deleteMany({ where: { customerId: id } });
+        }
+        await tx.customer.delete({ where: { id } });
+      },
+      { timeout: 120_000 }
+    );
+
+    if (existing.botPausedAt && existing.phone) {
+      await setBuilderBotCloudBlacklist(existing.phone, "remove").catch((err: unknown) => {
+        console.error("[Clientes] Blacklist Cloud al borrar:", err instanceof Error ? err.message : err);
+      });
+      await setBotBlacklist(existing.phone, "remove").catch((err: unknown) => {
+        console.error("[Clientes] Blacklist self-hosted al borrar:", err instanceof Error ? err.message : err);
+      });
+    }
 
     return NextResponse.json({ ok: true });
-  } catch (error: any) {
-    if (error.code === "P2025") {
-      return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 });
-    }
-    return NextResponse.json({ error: "Error al eliminar cliente", details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido";
+    console.error("[Clientes] DELETE:", error);
+    return NextResponse.json(
+      { error: "No se pudo eliminar el cliente. Si el problema continúa, contactá al administrador.", details: msg },
+      { status: 500 }
+    );
   }
 }
