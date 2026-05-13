@@ -7,7 +7,10 @@ import { sessionOptions, type SessionData } from "@/lib/auth";
 
 const createCustomerSchema = z.object({
   phone: z.string().min(5),
+  /** Nombre de la persona */
   name: z.string().optional(),
+  companyName: z.string().optional(),
+  licensePlate: z.string().optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -25,6 +28,8 @@ export async function GET(req: NextRequest) {
     ? {
         OR: [
           { name: { contains: q, mode: "insensitive" as const } },
+          { companyName: { contains: q, mode: "insensitive" as const } },
+          { licensePlate: { contains: q, mode: "insensitive" as const } },
           { phone: { contains: q, mode: "insensitive" as const } },
         ],
       }
@@ -73,16 +78,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { phone, name } = parsed.data;
+  const { phone, name, companyName, licensePlate } = parsed.data;
 
   // Normalizar teléfono (quitar espacios, guiones, etc.)
   const normalizedPhone = phone.replace(/\s|-/g, "");
+  const plate =
+    licensePlate != null && String(licensePlate).trim() !== ""
+      ? String(licensePlate).replace(/\s+/g, " ").trim()
+      : null;
 
   try {
     const customer = await prisma.customer.create({
       data: {
         phone: normalizedPhone,
-        name: name || null,
+        name: name?.trim() || null,
+        companyName: companyName?.trim() || null,
+        licensePlate: plate,
       },
       include: {
         _count: {

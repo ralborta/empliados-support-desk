@@ -26,18 +26,27 @@ export default async function ClientesPage() {
         <div>
           <h1 className="text-3xl font-bold text-slate-900">👤 Clientes</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Gestiona los clientes y sus datos de contacto
+            Alta manual, <strong className="text-slate-700">edición / eliminación</strong> en la tabla y{" "}
+            <strong className="text-slate-700">carga masiva por Excel</strong> (arriba). Solo los números dados de
+            alta reciben casos por WhatsApp.
           </p>
         </div>
 
+        <section
+          className="rounded-2xl border-2 border-indigo-200 bg-gradient-to-b from-indigo-50/80 to-white p-5 shadow-sm ring-1 ring-indigo-100"
+          aria-labelledby="import-excel-heading"
+        >
+          <h2 id="import-excel-heading" className="sr-only">
+            Importar clientes desde Excel
+          </h2>
+          <ImportExcelForm />
+        </section>
+
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Formularios */}
-          <div className="lg:col-span-1 space-y-6">
+          <div className="lg:col-span-1">
             <CreateCustomerForm />
-            <ImportExcelForm />
           </div>
 
-          {/* Lista de clientes */}
           <div className="lg:col-span-2">
             <CustomersList initialCustomers={customers as any} initialTotal={totalCustomers} />
           </div>

@@ -107,6 +107,7 @@ async function getDashboardStats() {
       select: {
         id: true,
         name: true,
+        companyName: true,
         phone: true,
         _count: {
           select: {
@@ -145,7 +146,7 @@ async function getDashboardStats() {
       last7Days,
       topCompanies: topCompanies.map((c) => ({
         id: c.id,
-        name: c.name || c.phone,
+        name: c.companyName?.trim() || c.name?.trim() || c.phone,
         phone: c.phone,
         totalTickets: c._count.tickets,
       })),

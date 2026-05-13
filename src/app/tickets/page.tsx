@@ -23,6 +23,8 @@ export default async function TicketsPage() {
       customer: {
         select: {
           name: true,
+          companyName: true,
+          licensePlate: true,
           phone: true,
         },
       },

@@ -1,17 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Trash2, Edit2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, Trash2, Pencil } from "lucide-react";
+import { EditCustomerModal, type CustomerRow } from "@/components/clientes/EditCustomerModal";
 
-interface Customer {
-  id: string;
-  phone: string;
-  name: string | null;
-  createdAt: string;
-  _count: {
-    tickets: number;
-  };
-}
+interface Customer extends CustomerRow {}
 
 interface CustomersListProps {
   initialCustomers: Customer[];
@@ -19,10 +13,12 @@ interface CustomersListProps {
 }
 
 export function CustomersList({ initialCustomers, initialTotal }: CustomersListProps) {
+  const router = useRouter();
   const [customers, setCustomers] = useState(initialCustomers);
   const [searchQuery, setSearchQuery] = useState("");
   const [hasTicketsFilter, setHasTicketsFilter] = useState<string>("all");
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState<Customer | null>(null);
 
   const handleSearch = async () => {
     setLoading(true);
@@ -61,12 +57,18 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
 
       if (res.ok) {
         setCustomers((prev) => prev.filter((c) => c.id !== id));
+        router.refresh();
       } else {
         alert("Error al eliminar cliente");
       }
     } catch {
       alert("Error de red");
     }
+  };
+
+  const handleSaved = (updated: Customer) => {
+    setCustomers((prev) => prev.map((c) => (c.id === updated.id ? { ...updated } : c)));
+    router.refresh();
   };
 
   return (
@@ -86,7 +88,7 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Buscar por teléfono o nombre..."
+                placeholder="Buscar por teléfono, persona, empresa o patente..."
                 className="w-full sm:w-auto pl-10 pr-4 py-2 rounded-lg border border-slate-300 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               />
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -116,7 +118,9 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
           <thead>
             <tr className="border-b border-slate-200">
               <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Teléfono</th>
-              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Nombre / Empresa</th>
+              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Persona</th>
+              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Empresa</th>
+              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Patente</th>
               <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Tickets</th>
               <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Fecha</th>
               <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Acciones</th>
@@ -125,7 +129,7 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
           <tbody>
             {customers.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-slate-500">
+                <td colSpan={7} className="py-8 text-center text-slate-500">
                   No se encontraron clientes
                 </td>
               </tr>
@@ -133,7 +137,9 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
               customers.map((customer) => (
                 <tr key={customer.id} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="py-3 px-4 text-sm text-slate-900 font-medium">{customer.phone}</td>
-                  <td className="py-3 px-4 text-sm text-slate-700">{customer.name || "Sin nombre"}</td>
+                  <td className="py-3 px-4 text-sm text-slate-700">{customer.name || "—"}</td>
+                  <td className="py-3 px-4 text-sm text-slate-700">{customer.companyName || "—"}</td>
+                  <td className="py-3 px-4 text-sm text-slate-700 font-mono">{customer.licensePlate || "—"}</td>
                   <td className="py-3 px-4 text-sm text-slate-600">
                     <span className="inline-flex items-center px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
                       {customer._count.tickets}
@@ -143,13 +149,26 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
                     {new Date(customer.createdAt).toLocaleDateString("es-AR")}
                   </td>
                   <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={() => handleDelete(customer.id, customer.phone)}
-                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition"
-                      title="Eliminar"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="inline-flex flex-wrap items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(customer)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        title="Editar cliente"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Editar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(customer.id, customer.phone)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-100 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                        title="Eliminar cliente"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Eliminar</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -157,6 +176,8 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
           </tbody>
         </table>
       </div>
+
+      <EditCustomerModal customer={editing} onClose={() => setEditing(null)} onSaved={handleSaved} />
     </div>
   );
 }

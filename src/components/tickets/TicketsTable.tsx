@@ -18,6 +18,8 @@ interface Ticket {
   createdAt: Date | string;
   customer?: {
     name: string | null;
+    companyName: string | null;
+    licensePlate: string | null;
     phone: string;
   } | null;
   assignedTo?: {
@@ -122,9 +124,17 @@ export function TicketsTable({ tickets }: { tickets: Ticket[] }) {
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-medium text-slate-900">
-                        {ticket.customer?.name || "Empresa desconocida"}
+                        {ticket.customer?.companyName?.trim() ||
+                          ticket.customer?.name?.trim() ||
+                          "Sin datos"}
                       </div>
+                      {ticket.customer?.companyName && ticket.customer?.name && (
+                        <div className="text-xs text-slate-500 mt-0.5">{ticket.customer.name}</div>
+                      )}
                       <div className="text-xs text-slate-500 mt-1">👤 {ticket.contactName}</div>
+                      {ticket.customer?.licensePlate && (
+                        <div className="text-xs text-slate-500">🚗 {ticket.customer.licensePlate}</div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span

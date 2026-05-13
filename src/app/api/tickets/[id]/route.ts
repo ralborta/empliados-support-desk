@@ -69,7 +69,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const summary = ticket.aiSummary || "No hay resumen disponible aún.";
       const message = `🎫 *Nuevo ticket asignado*\n\n` +
         `Ticket: *${ticket.code}*\n` +
-        `Cliente: ${ticket.customer?.name || ticket.customer?.phone}\n` +
+        `Cliente: ${[ticket.customer?.companyName, ticket.customer?.name].filter(Boolean).join(" — ") || ticket.customer?.phone}\n` +
         `Prioridad: ${ticket.priority}\n` +
         `Estado: ${ticket.status}\n\n` +
         `📋 *Resumen:*\n${summary}\n\n` +

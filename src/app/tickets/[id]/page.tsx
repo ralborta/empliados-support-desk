@@ -70,10 +70,18 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
             </Link>
             <h1 className="text-2xl font-semibold text-slate-900">Ticket {ticket.code}</h1>
             <p className="text-sm text-slate-600">
-              <span className="font-medium">Empresa:</span> {ticket.customer?.name || "Desconocida"} • 
-              <span className="font-medium"> Contacto:</span> {ticket.contactName}
+              <span className="font-medium">Empresa:</span>{" "}
+              {ticket.customer?.companyName?.trim() || "—"} •{" "}
+              <span className="font-medium">Persona (cuenta):</span>{" "}
+              {ticket.customer?.name?.trim() || "—"} •{" "}
+              <span className="font-medium">Contacto (ticket):</span> {ticket.contactName}
             </p>
-            <p className="text-xs text-slate-500">📱 {ticket.customer?.phone}</p>
+            <p className="text-xs text-slate-500">
+              📱 {ticket.customer?.phone}
+              {ticket.customer?.licensePlate ?
+                ` • 🚗 ${ticket.customer.licensePlate}`
+              : ""}
+            </p>
           </div>
           <div className="flex flex-col items-end gap-2">
             <div className="inline-flex items-center gap-2">
@@ -96,8 +104,16 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
               <div className="mb-3 text-sm font-semibold text-slate-800">Datos operativos del caso</div>
               <div className="space-y-2 text-sm text-slate-700">
                 <div><span className="font-semibold">Tipo de incidente:</span> {incidentTypeLabel}</div>
-                <div><span className="font-semibold">Matrícula:</span> {wara?.plate || "Sin informar"}</div>
-                <div><span className="font-semibold">Razón social:</span> {ticket.customer?.name || "Sin informar"}</div>
+                <div>
+                  <span className="font-semibold">Matrícula:</span>{" "}
+                  {ticket.customer?.licensePlate?.trim() || wara?.plate || "Sin informar"}
+                </div>
+                <div>
+                  <span className="font-semibold">Razón social:</span>{" "}
+                  {ticket.customer?.companyName?.trim() ||
+                    ticket.customer?.name?.trim() ||
+                    "Sin informar"}
+                </div>
                 <div><span className="font-semibold">Modo resolución:</span> {ticket.resolution ? (resolutionModeLabels as any)[ticket.resolution] || ticket.resolution : "Sin definir"}</div>
                 <div><span className="font-semibold">Creado:</span> {ticket.createdAt.toLocaleString("es-AR")}</div>
                 <div><span className="font-semibold">Última actividad:</span> {ticket.lastMessageAt.toLocaleString("es-AR")}</div>
@@ -111,8 +127,22 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
               <div className="text-sm font-semibold text-slate-800 mb-3">Datos del contacto</div>
               <div className="space-y-2 text-sm text-slate-600">
-                <div><span className="font-semibold">Nombre:</span> {ticket.contactName || "No especificado"}</div>
-                <div><span className="font-semibold">Empresa:</span> {ticket.customer?.name || "No especificado"}</div>
+                <div>
+                  <span className="font-semibold">Nombre (persona):</span>{" "}
+                  {ticket.customer?.name?.trim() || "No especificado"}
+                </div>
+                <div>
+                  <span className="font-semibold">Empresa:</span>{" "}
+                  {ticket.customer?.companyName?.trim() || "No especificado"}
+                </div>
+                <div>
+                  <span className="font-semibold">Patente:</span>{" "}
+                  {ticket.customer?.licensePlate?.trim() || "No especificado"}
+                </div>
+                <div>
+                  <span className="font-semibold">Contacto (ticket):</span>{" "}
+                  {ticket.contactName || "No especificado"}
+                </div>
                 <div><span className="font-semibold">Teléfono:</span> {ticket.customer?.phone}</div>
               </div>
             </div>

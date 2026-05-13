@@ -197,10 +197,24 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  // Mismo contacto = mismo Customer (teléfono canónico; corrige formatos viejos tipo JID @s.whatsapp.net)
-  const customer = await resolveCustomerByWhatsAppNumber(prisma, customerPhoneRaw, {
-    name: companyName,
-  });
+  // Solo clientes ya dados de alta (panel / import). Si WHATSAPP_AUTO_REGISTER_CUSTOMERS=true, se recupera el alta automática legacy.
+  const autoRegister = process.env.WHATSAPP_AUTO_REGISTER_CUSTOMERS === "true";
+  const customer = autoRegister
+    ? await resolveCustomerByWhatsAppNumber(prisma, customerPhoneRaw, {
+        name: companyName,
+      })
+    : await findCustomerByWhatsAppNumber(prisma, customerPhoneRaw);
+
+  if (!customer) {
+    console.log(
+      `[WhatsApp] Número no registrado (${customerPhone}); no se crea cliente ni ticket. Dar de alta en Clientes o importar Excel.`
+    );
+    return NextResponse.json({
+      ok: true,
+      message: "Número no registrado en el sistema; mensaje no asociado a un caso",
+      skippedUnknownCustomer: true,
+    });
+  }
 
   const incidentType = detectIncidentType(actualMessage);
   const { plate, missing } = detectMissingData(actualMessage, incidentType, companyName);

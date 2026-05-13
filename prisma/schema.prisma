@@ -63,9 +63,14 @@ enum TicketEventType {
 }
 
 model Customer {
-  id          String    @id @default(cuid())
-  phone       String    @unique
-  name        String?
+  id        String    @id @default(cuid())
+  phone     String    @unique
+  /// Nombre de la persona (contacto en CRM)
+  name          String?
+  /// Nombre de la empresa / razón social
+  companyName   String?
+  /// Matrícula o patente asociada al cliente
+  licensePlate  String?
   /// Si está seteado, Atilio no envía auto-respuestas; el agente responde manual por el panel/WhatsApp
   botPausedAt DateTime?
   tickets     Ticket[]

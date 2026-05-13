@@ -9,7 +9,9 @@ import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 const updateCustomerSchema = z.object({
   phone: z.string().min(5).optional(),
-  name: z.string().optional(),
+  name: z.string().optional().nullable(),
+  companyName: z.string().optional().nullable(),
+  licensePlate: z.string().optional().nullable(),
   /** true = pausar Atilio para este cliente (agente responde manual), false = reactivar */
   botPaused: z.boolean().optional(),
 });
@@ -59,14 +61,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { phone, name, botPaused } = parsed.data;
+  const { phone, name, companyName, licensePlate, botPaused } = parsed.data;
 
   const updateData: Record<string, unknown> = {};
   if (phone !== undefined) {
     updateData.phone = normalizeWhatsAppPhone(phone) || phone.replace(/\s|-/g, "");
   }
   if (name !== undefined) {
-    updateData.name = name || null;
+    updateData.name = name?.trim() ? name.trim() : null;
+  }
+  if (companyName !== undefined) {
+    updateData.companyName = companyName?.trim() ? companyName.trim() : null;
+  }
+  if (licensePlate !== undefined) {
+    const p = licensePlate?.trim();
+    updateData.licensePlate = p ? p.replace(/\s+/g, " ") : null;
   }
   if (botPaused !== undefined) {
     updateData.botPausedAt = botPaused ? new Date() : null;

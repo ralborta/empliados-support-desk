@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export function ImportExcelForm() {
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
@@ -59,15 +58,28 @@ export function ImportExcelForm() {
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-          <FileSpreadsheet className="w-5 h-5 text-indigo-600" />
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+            <FileSpreadsheet className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">Carga desde Excel</h3>
+            <p className="text-xs text-indigo-900/70">
+              Actualiza o crea muchos clientes en un solo archivo (.xlsx / .xls)
+            </p>
+          </div>
         </div>
-        <h3 className="text-lg font-semibold text-slate-900">Importar desde Excel</h3>
+        <span className="inline-flex w-fit items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-800">
+          Recomendado para listados grandes
+        </span>
       </div>
 
       <p className="text-sm text-slate-600 mb-4">
-        Sube un archivo Excel (.xlsx o .xls) con columnas: <strong>Teléfono</strong> y <strong>Nombre</strong>
+        Columnas esperadas (encabezados):{" "}
+        <strong>nombre de la persona</strong>, <strong>nombre de la empresa</strong>,{" "}
+        <strong>numero de telefono</strong>, <strong>Matricula/Patente</strong>. También se aceptan
+        formatos antiguos con Teléfono y Nombre.
       </p>
 
       {error && (

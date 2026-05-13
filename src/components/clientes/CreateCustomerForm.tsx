@@ -7,6 +7,8 @@ export function CreateCustomerForm() {
   const router = useRouter();
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [licensePlate, setLicensePlate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -26,7 +28,12 @@ export function CreateCustomerForm() {
       const res = await fetch("/api/clientes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, name: name || undefined }),
+        body: JSON.stringify({
+          phone,
+          name: name.trim() || undefined,
+          companyName: companyName.trim() || undefined,
+          licensePlate: licensePlate.trim() || undefined,
+        }),
       });
 
       if (!res.ok) {
@@ -38,6 +45,8 @@ export function CreateCustomerForm() {
       setSuccess(true);
       setPhone("");
       setName("");
+      setCompanyName("");
+      setLicensePlate("");
       router.refresh();
 
       setTimeout(() => setSuccess(false), 3000);
@@ -67,13 +76,13 @@ export function CreateCustomerForm() {
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
-            Teléfono <span className="text-red-500">*</span>
+            Número de teléfono <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            placeholder="+5491112345678"
+            placeholder="+54 9 2615 35-9001"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
             required
             disabled={loading}
@@ -81,12 +90,36 @@ export function CreateCustomerForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Nombre / Empresa</label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Nombre de la persona</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre de la empresa o contacto"
+            placeholder="Ej. Fernando Cantos"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            disabled={loading}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Nombre de la empresa</label>
+          <input
+            type="text"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="Ej. Bioterra S.R.L."
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            disabled={loading}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Matrícula / Patente</label>
+          <input
+            type="text"
+            value={licensePlate}
+            onChange={(e) => setLicensePlate(e.target.value)}
+            placeholder="Ej. KDN278 o AC 190 KT"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
             disabled={loading}
           />
