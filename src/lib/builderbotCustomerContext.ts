@@ -4,7 +4,13 @@ import { prisma } from "@/lib/db";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 function acceptedSecrets(): string[] {
-  const raw = [process.env.BUILDERBOT_CONTEXT_API_KEY, process.env.API_KEY, process.env.N8N_API_KEY];
+  const raw = [
+    process.env.BUILDERBOT_CONTEXT_API_KEY,
+    process.env.API_KEY,
+    process.env.N8N_API_KEY,
+    /** Misma clave que ya usás para mensajes BuilderBot en Vercel (opcional, para no duplicar secretos). */
+    process.env.BUILDERBOT_API_KEY,
+  ];
   return [
     ...new Set(
       raw
@@ -20,6 +26,7 @@ function getProvidedKey(req: NextRequest): string | undefined {
     req.headers.get("X-API-Key") ??
     req.headers.get("x_api_key") ??
     req.headers.get("X_API_KEY") ??
+    req.headers.get("apikey") ??
     req.headers.get("pulze-api-key");
   if (h?.trim()) return h.trim();
   const auth = req.headers.get("authorization");
@@ -37,14 +44,22 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
     return NextResponse.json(
       {
         error:
-          "Definí BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY) en el servidor para esta consulta desde BuilderBot.",
+          "Definí BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY / BUILDERBOT_API_KEY) en el servidor para esta consulta desde BuilderBot.",
       },
       { status: 503 }
     );
   }
   const provided = getProvidedKey(req);
   if (!provided || !accepted.includes(provided)) {
-    return NextResponse.json({ error: "API key inválida o faltante" }, { status: 401 });
+    return NextResponse.json(
+      {
+        error: "API key inválida o faltante",
+        hint: !provided
+          ? "No llegó ninguna clave. En GET: header x-api-key o x_api_key, Authorization: Bearer …, o query ?api_key= (mismo valor que en Vercel: BUILDERBOT_CONTEXT_API_KEY, API_KEY, N8N_API_KEY o BUILDERBOT_API_KEY)."
+          : "La clave enviada no coincide con ninguna de las variables en Vercel. Revisá que sea exactamente la misma (sin espacios de más), que FlutterFlow envíe el header en esta petición GET y que hayas hecho redeploy tras cambiar env.",
+      },
+      { status: 401 }
+    );
   }
   return null;
 }
