@@ -18,6 +18,8 @@ function getProvidedKey(req: NextRequest): string | undefined {
   const h =
     req.headers.get("x-api-key") ??
     req.headers.get("X-API-Key") ??
+    req.headers.get("x_api_key") ??
+    req.headers.get("X_API_KEY") ??
     req.headers.get("pulze-api-key");
   if (h?.trim()) return h.trim();
   const auth = req.headers.get("authorization");
