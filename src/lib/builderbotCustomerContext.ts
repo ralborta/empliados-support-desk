@@ -52,6 +52,11 @@ export function acceptedCustomerContextSecretCount(): number {
   return acceptedSecrets().length;
 }
 
+/** Longitudes de los secretos activos (solo números; para ver si hubo truncado vs lo enviado). */
+export function acceptedContextSecretLengths(): number[] {
+  return [...new Set(acceptedSecrets().map((s) => s.length))].sort((a, b) => a - b);
+}
+
 /** Nombres de env que tienen secreto (no expone valores). Para depurar 401. */
 export function configuredContextSecretEnvNames(): string[] {
   const n: string[] = [];
@@ -174,19 +179,26 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
         ? " Tenés varias claves distintas en Vercel; BuilderBot tiene que enviar exactamente el valor de UNA de ellas (carácter a carácter)."
         : "";
     const probe = contextAuthProbe(req);
+    const configuredLengths = acceptedContextSecretLengths();
+    const providedLen = normalizedContextKeyLength(provided ?? "");
+    const lengthMismatch = providedLen > 0 && !configuredLengths.includes(providedLen);
     return NextResponse.json(
       {
         error: "API key inválida o faltante",
         receivedKey: !!provided,
         acceptedSecretsCount: accepted.length,
         envVarsWithSecrets: envNames,
-        providedKeyLength: normalizedContextKeyLength(provided ?? ""),
+        providedKeyLength: providedLen,
+        configuredSecretLengths: configuredLengths,
+        lengthMismatch,
         authProbe: probe,
         hint: !provided
           ? probe.authorizationShape === "basic"
             ? "Llegó Authorization: Basic sin una clave reconocible: poné el secreto de Vercel como contraseña (usuario vacío o cualquier valor), o usá header x-api-key / ?api_key= en la URL."
             : "No llegó clave usable. Como Pulze: header x-api-key = mismo texto que en Vercel. Alternativa: ?api_key=… en la URL, o POST …/api/builderbot/customer-registered/check con JSON."
-          : `La clave enviada no coincide con ninguna variable activa.${multi} Re-copiá desde Vercel (sin comillas ni espacio al final).`,
+          : lengthMismatch
+            ? `La clave que llega tiene ${providedLen} caracteres; en Vercel el secreto activo mide ${configuredLengths.join(" o ")}. No es “muy larga”: o está truncada o no es el mismo valor (re-copiá desde Settings → Environment).`
+            : `La clave enviada no coincide (mismo largo ${providedLen} pero distinto contenido). Re-copiá BUILDERBOT_CONTEXT_API_KEY desde Vercel sin comillas.${multi}`,
       },
       { status: 401 }
     );

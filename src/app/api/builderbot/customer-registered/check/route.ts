@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  acceptedContextSecretLengths,
   acceptedCustomerContextSecretCount,
   configuredContextSecretEnvNames,
   customerRegisteredContextResponse,
@@ -58,6 +59,9 @@ export async function POST(req: NextRequest) {
   const keyRaw = parsed.data.api_key ?? parsed.data.apiKey ?? parsed.data.key ?? parsed.data.token;
   if (!validateContextSecret(keyRaw)) {
     const accepted = acceptedCustomerContextSecretCount();
+    const configuredLengths = acceptedContextSecretLengths();
+    const providedLen = normalizedContextKeyLength(keyRaw);
+    const lengthMismatch = providedLen > 0 && !configuredLengths.includes(providedLen);
     const multi =
       accepted > 1
         ? " Varias claves en Vercel: el body tiene que repetir exactamente UNA de ellas."
@@ -68,10 +72,14 @@ export async function POST(req: NextRequest) {
         receivedKey: !!keyRaw?.trim(),
         acceptedSecretsCount: accepted,
         envVarsWithSecrets: configuredContextSecretEnvNames(),
-        providedKeyLength: normalizedContextKeyLength(keyRaw),
+        providedKeyLength: providedLen,
+        configuredSecretLengths: configuredLengths,
+        lengthMismatch,
         hint: !keyRaw?.trim()
           ? "Falta api_key (o key / token) en el JSON con el mismo texto que en Vercel."
-          : `La clave del JSON no coincide.${multi} No uses BUILDERBOT_API_KEY (bb-…).`,
+          : lengthMismatch
+            ? `La clave en el JSON tiene ${providedLen} caracteres; en Vercel el secreto mide ${configuredLengths.join(" o ")}. Re-copiá el valor completo.`
+            : `La clave del JSON no coincide (mismo largo ${providedLen}, contenido distinto).${multi} No uses BUILDERBOT_API_KEY (bb-…).`,
       },
       { status: 401 }
     );
