@@ -11,6 +11,8 @@ const bodySchema = z.object({
   phone: z.string().min(8),
   api_key: z.string().min(1).optional(),
   apiKey: z.string().min(1).optional(),
+  key: z.string().min(1).optional(),
+  token: z.string().min(1).optional(),
 });
 
 /**
@@ -18,7 +20,7 @@ const bodySchema = z.object({
  * Misma respuesta que GET …/:phone/context, pero la clave va en el JSON (útil si FlutterFlow
  * no envía headers custom en GET).
  *
- * Body: { "phone": "54911…", "api_key": "…" } o "apiKey".
+ * Body: { "phone": "54911…", "api_key": "…" } o apiKey / key / token.
  */
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
@@ -37,14 +39,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Body inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const key = parsed.data.api_key ?? parsed.data.apiKey;
+  const key = parsed.data.api_key ?? parsed.data.apiKey ?? parsed.data.key ?? parsed.data.token;
   if (!validateContextSecret(key)) {
     return NextResponse.json(
       {
         error: "API key inválida o faltante",
         receivedKey: !!key?.trim(),
         acceptedSecretsCount: acceptedCustomerContextSecretCount(),
-        hint: "Enviá api_key en el JSON con el mismo valor que BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY) en Vercel — no la clave bb-… de BuilderBot.",
+        hint: "Enviá en el JSON api_key (o key / token) con el mismo valor que BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY) en Vercel — no la clave bb-… de BuilderBot.",
       },
       { status: 401 }
     );
