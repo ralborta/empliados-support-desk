@@ -92,7 +92,7 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
         receivedKey: !!provided,
         acceptedSecretsCount: accepted.length,
         hint: !provided
-          ? "No llegó ninguna clave. En GET: agregá ?api_key=TU_SECRETO (o ?key= / ?token=) a la URL, o header x-api-key. En FlutterFlow muchas veces conviene POST a …/customer-registered/check con body JSON { \"phone\": \"…\", \"api_key\": \"…\" }."
+          ? "No llegó ninguna clave. En GET: agregá ?api_key=TU_SECRETO (o ?key= / ?token=) a la URL, o header x-api-key. POST …/customer-registered/check con JSON { \"phone\" o \"from\": \"…\", \"api_key\": \"…\" } (BuilderBot: mapeá {from} al campo from)."
           : "La clave no coincide con BUILDERBOT_CONTEXT_API_KEY, API_KEY ni N8N_API_KEY en Vercel (revisá espacios al pegar). No es la clave bb-… de BuilderBot; creá una variable aparte y usá el mismo valor en FlutterFlow.",
       },
       { status: 401 }

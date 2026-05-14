@@ -7,20 +7,28 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 
-const bodySchema = z.object({
-  phone: z.string().min(8),
-  api_key: z.string().min(1).optional(),
-  apiKey: z.string().min(1).optional(),
-  key: z.string().min(1).optional(),
-  token: z.string().min(1).optional(),
-});
+const bodySchema = z
+  .object({
+    /** Número del contacto (FlutterFlow, etc.) */
+    phone: z.string().min(8).optional(),
+    /** Mismo dato que envía BuilderBot en webhooks (`data.from`) — podés mapear la variable {from} acá. */
+    from: z.string().min(8).optional(),
+    api_key: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+    key: z.string().min(1).optional(),
+    token: z.string().min(1).optional(),
+  })
+  .refine((d) => {
+    const p = (d.phone ?? d.from ?? "").trim();
+    return p.length >= 8;
+  }, "Indicá phone o from con el número (mín. 8 caracteres).");
 
 /**
  * POST /api/builderbot/customer-registered/check
  * Misma respuesta que GET …/:phone/context, pero la clave va en el JSON (útil si FlutterFlow
  * no envía headers custom en GET).
  *
- * Body: { "phone": "54911…", "api_key": "…" } o apiKey / key / token.
+ * Body: { "phone": "54911…", "api_key": "…" } o usá "from" con el valor de BuilderBot {from}.
  */
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
@@ -39,6 +47,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Body inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
+  const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
+  if (!rawPhone) {
+    return NextResponse.json({ error: "Falta phone o from" }, { status: 400 });
+  }
+
   const key = parsed.data.api_key ?? parsed.data.apiKey ?? parsed.data.key ?? parsed.data.token;
   if (!validateContextSecret(key)) {
     return NextResponse.json(
@@ -52,5 +65,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return customerRegisteredContextResponse(parsed.data.phone);
+  return customerRegisteredContextResponse(rawPhone);
 }
