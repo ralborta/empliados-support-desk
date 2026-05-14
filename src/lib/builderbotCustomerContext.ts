@@ -3,37 +3,72 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
+/** Evita fallos por espacio final / BOM / CRLF al pegar en Vercel o en el cliente. */
+function normalizeSecret(s: string): string {
+  return s.replace(/^\uFEFF/, "").trim().replace(/\r\n/g, "\n").trim();
+}
+
 function acceptedSecrets(): string[] {
   const raw = [
     process.env.BUILDERBOT_CONTEXT_API_KEY,
     process.env.API_KEY,
     process.env.N8N_API_KEY,
-    /** Misma clave que ya usás para mensajes BuilderBot en Vercel (opcional, para no duplicar secretos). */
     process.env.BUILDERBOT_API_KEY,
   ];
   return [
     ...new Set(
       raw
         .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-        .map((s) => s.trim())
+        .map((s) => normalizeSecret(s))
     ),
   ];
 }
 
+export function validateContextSecret(provided: string | undefined | null): boolean {
+  if (provided == null || !String(provided).trim()) return false;
+  const p = normalizeSecret(String(provided));
+  return acceptedSecrets().some((a) => a === p);
+}
+
+export function isCustomerContextAuthConfigured(): boolean {
+  return acceptedSecrets().length > 0;
+}
+
+export function acceptedCustomerContextSecretCount(): number {
+  return acceptedSecrets().length;
+}
+
 function getProvidedKey(req: NextRequest): string | undefined {
+  const tryHeader = (name: string) => {
+    const v = req.headers.get(name);
+    return v?.trim() ? normalizeSecret(v) : undefined;
+  };
+
   const h =
-    req.headers.get("x-api-key") ??
-    req.headers.get("X-API-Key") ??
-    req.headers.get("x_api_key") ??
-    req.headers.get("X_API_KEY") ??
-    req.headers.get("apikey") ??
-    req.headers.get("pulze-api-key");
-  if (h?.trim()) return h.trim();
+    tryHeader("x-api-key") ??
+    tryHeader("x_api_key") ??
+    tryHeader("apikey") ??
+    tryHeader("pulze-api-key");
+  if (h) return h;
+
   const auth = req.headers.get("authorization");
-  if (auth?.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    const t = auth.slice(7).trim();
+    if (t) return normalizeSecret(t);
+  }
+
+  for (const [k, v] of req.headers.entries()) {
+    if (!v?.trim()) continue;
+    const low = k.toLowerCase();
+    if (/api[_-]?key|x[_-]?api[_-]?key/.test(low)) {
+      return normalizeSecret(v);
+    }
+  }
+
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("api_key") ?? searchParams.get("apiKey");
-  if (q?.trim()) return q.trim();
+  if (q?.trim()) return normalizeSecret(q);
+
   return undefined;
 }
 
@@ -50,13 +85,15 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
     );
   }
   const provided = getProvidedKey(req);
-  if (!provided || !accepted.includes(provided)) {
+  if (!validateContextSecret(provided)) {
     return NextResponse.json(
       {
         error: "API key inválida o faltante",
+        receivedKey: !!provided,
+        acceptedSecretsCount: accepted.length,
         hint: !provided
-          ? "No llegó ninguna clave. En GET: header x-api-key o x_api_key, Authorization: Bearer …, o query ?api_key= (mismo valor que en Vercel: BUILDERBOT_CONTEXT_API_KEY, API_KEY, N8N_API_KEY o BUILDERBOT_API_KEY)."
-          : "La clave enviada no coincide con ninguna de las variables en Vercel. Revisá que sea exactamente la misma (sin espacios de más), que FlutterFlow envíe el header en esta petición GET y que hayas hecho redeploy tras cambiar env.",
+          ? "No llegó ninguna clave. Probá: query ?api_key= en la URL, header x-api-key, o POST /api/builderbot/customer-registered/check con JSON { phone, api_key } (FlutterFlow a veces no envía headers en GET)."
+          : "La clave no coincide con ninguna variable en Vercel (revisá espacios/BOM al pegar). Si usás BUILDERBOT_API_KEY debe ser el valor completo (ej. bb-…).",
       },
       { status: 401 }
     );
