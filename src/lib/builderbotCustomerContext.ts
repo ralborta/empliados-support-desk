@@ -78,7 +78,15 @@ function decodeBasicAuthPayload(b64: string): string {
   }
 }
 
-function getProvidedKey(req: NextRequest): string | undefined {
+/** Candidatos de clave en orden; se acepta el primero que coincida con Vercel. */
+function collectContextKeyCandidates(req: NextRequest): string[] {
+  const out: string[] = [];
+  const push = (s: string | undefined) => {
+    if (s == null || !String(s).trim()) return;
+    const n = normalizeSecret(String(s));
+    if (n && !out.includes(n)) out.push(n);
+  };
+
   const tryHeader = (name: string) => {
     const v = req.headers.get(name);
     return v?.trim() ? normalizeSecret(v) : undefined;
@@ -89,25 +97,31 @@ function getProvidedKey(req: NextRequest): string | undefined {
     tryHeader("x_api_key") ??
     tryHeader("apikey") ??
     tryHeader("pulze-api-key");
-  if (h) return h;
+  if (h) push(h);
 
   const auth = req.headers.get("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) {
     const t = auth.slice(7).trim();
-    if (t) return normalizeSecret(t);
+    if (t) push(t);
   }
 
-  /** FlutterFlow / BuilderBot a veces mandan la clave como “usuario y contraseña” (Basic Auth). */
+  /**
+   * Basic Auth: FlutterFlow / BuilderBot a veces parten un hex largo en
+   * “usuario” (1 carácter) + “contraseña” (64) → solo la contraseña no matchea con Vercel (65).
+   * Probamos contraseña, usuario+contraseña, y usuario.
+   */
   if (auth?.toLowerCase().startsWith("basic ")) {
     const decoded = decodeBasicAuthPayload(auth.slice(6).trim());
     const colon = decoded.indexOf(":");
     if (colon >= 0) {
       const userPart = normalizeSecret(decoded.slice(0, colon));
       const passPart = normalizeSecret(decoded.slice(colon + 1));
-      if (passPart) return passPart;
-      if (userPart) return userPart;
+      const combined = normalizeSecret(userPart + passPart);
+      push(passPart);
+      if (userPart && passPart && combined !== passPart) push(combined);
+      push(userPart);
     } else if (decoded.trim()) {
-      return normalizeSecret(decoded);
+      push(decoded);
     }
   }
 
@@ -115,7 +129,7 @@ function getProvidedKey(req: NextRequest): string | undefined {
     if (!v?.trim()) continue;
     const low = k.toLowerCase();
     if (/api[_-]?key|x[_-]?api[_-]?key/.test(low)) {
-      return normalizeSecret(v);
+      push(v);
     }
   }
 
@@ -125,9 +139,9 @@ function getProvidedKey(req: NextRequest): string | undefined {
     searchParams.get("apiKey") ??
     searchParams.get("key") ??
     searchParams.get("token");
-  if (q?.trim()) return normalizeSecret(q);
+  if (q?.trim()) push(q);
 
-  return undefined;
+  return out;
 }
 
 /** Sin secretos: para ver si el cliente manda Basic vs x-api-key vs query. */
@@ -171,44 +185,49 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
       { status: 503 }
     );
   }
-  const provided = getProvidedKey(req);
-  if (!validateContextSecret(provided)) {
-    const envNames = configuredContextSecretEnvNames();
-    const multi =
-      accepted.length > 1
-        ? " Tenés varias claves distintas en Vercel; BuilderBot tiene que enviar exactamente el valor de UNA de ellas (carácter a carácter)."
-        : "";
-    const probe = contextAuthProbe(req);
-    const configuredLengths = acceptedContextSecretLengths();
-    const providedLen = normalizedContextKeyLength(provided ?? "");
-    const lengthMismatch = providedLen > 0 && !configuredLengths.includes(providedLen);
-    const likelyPasswordTruncation =
-      lengthMismatch && configuredLengths.some((l) => l === providedLen + 1);
-    return NextResponse.json(
-      {
-        error: "API key inválida o faltante",
-        receivedKey: !!provided,
-        acceptedSecretsCount: accepted.length,
-        envVarsWithSecrets: envNames,
-        providedKeyLength: providedLen,
-        configuredSecretLengths: configuredLengths,
-        lengthMismatch,
-        likelyPasswordFieldTruncation: likelyPasswordTruncation,
-        authProbe: probe,
-        hint: !provided
-          ? probe.authorizationShape === "basic"
-            ? "Llegó Authorization: Basic sin una clave reconocible: poné el secreto de Vercel como contraseña (usuario vacío o cualquier valor), o usá header x-api-key / ?api_key= en la URL."
-            : "No llegó clave usable. Como Pulze: header x-api-key = mismo texto que en Vercel. Alternativa: ?api_key=… en la URL, o POST …/api/builderbot/customer-registered/check con JSON."
-          : lengthMismatch
-            ? likelyPasswordTruncation
-              ? `El servidor espera ${configuredLengths.join("/")} caracteres y llegaron ${providedLen} (falta 1). Típico: FlutterFlow limita la “contraseña” del Basic Auth a 64. Poné en Vercel un secreto de exactamente 64 (openssl rand -hex 32), o mandá la clave en header x-api-key, ?api_key= en la URL, o POST JSON.`
-              : `La clave que llega tiene ${providedLen} caracteres; en Vercel el secreto activo mide ${configuredLengths.join(" o ")}. Re-copiá el valor completo desde Settings → Environment.`
-            : `La clave enviada no coincide (mismo largo ${providedLen} pero distinto contenido). Re-copiá BUILDERBOT_CONTEXT_API_KEY desde Vercel sin comillas.${multi}`,
-      },
-      { status: 401 }
-    );
+  const candidates = collectContextKeyCandidates(req);
+  if (candidates.some((c) => validateContextSecret(c))) {
+    return null;
   }
-  return null;
+  const receivedKey = candidates.length > 0;
+  const longest = candidates.length
+    ? candidates.reduce((a, b) => (a.length >= b.length ? a : b))
+    : "";
+  const providedLen = longest ? normalizedContextKeyLength(longest) : 0;
+  const envNames = configuredContextSecretEnvNames();
+  const multi =
+    accepted.length > 1
+      ? " Tenés varias claves distintas en Vercel; BuilderBot tiene que enviar exactamente el valor de UNA de ellas (carácter a carácter)."
+      : "";
+  const probe = contextAuthProbe(req);
+  const configuredLengths = acceptedContextSecretLengths();
+  const lengthMismatch = providedLen > 0 && !configuredLengths.includes(providedLen);
+  const likelyPasswordTruncation =
+    lengthMismatch && configuredLengths.some((l) => l === providedLen + 1);
+  return NextResponse.json(
+    {
+      error: "API key inválida o faltante",
+      receivedKey,
+      acceptedSecretsCount: accepted.length,
+      envVarsWithSecrets: envNames,
+      providedKeyLength: providedLen,
+      candidateKeyLengths: candidates.map((c) => c.length),
+      configuredSecretLengths: configuredLengths,
+      lengthMismatch,
+      likelyPasswordFieldTruncation: likelyPasswordTruncation,
+      authProbe: probe,
+      hint: !receivedKey
+        ? probe.authorizationShape === "basic"
+          ? "Llegó Authorization: Basic sin una clave reconocible: poné el secreto de Vercel como contraseña (usuario vacío o cualquier valor), o usá header x-api-key / ?api_key= en la URL."
+          : "No llegó clave usable. Como Pulze: header x-api-key = mismo texto que en Vercel. Alternativa: ?api_key=… en la URL, o POST …/api/builderbot/customer-registered/check con JSON."
+        : lengthMismatch
+          ? likelyPasswordTruncation
+            ? `El servidor espera ${configuredLengths.join("/")} caracteres y el/los intento(s) llegan hasta ${providedLen} car. Típico: FlutterFlow limita la “contraseña” a 64; el 1er carácter a veces queda en “usuario” (ya probamos usuario+contraseña). Si sigue mal: x-api-key, ?api_key=, o secreto de 64 en Vercel (openssl rand -hex 32).`
+            : `La clave que llega tiene ${providedLen} caracteres; en Vercel el secreto activo mide ${configuredLengths.join(" o ")}. Re-copiá el valor completo desde Settings → Environment.`
+          : `La clave enviada no coincide (mismo largo ${providedLen} pero distinto contenido). Re-copiá BUILDERBOT_CONTEXT_API_KEY desde Vercel sin comillas.${multi}`,
+    },
+    { status: 401 }
+  );
 }
 
 /**
