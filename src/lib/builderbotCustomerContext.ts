@@ -231,6 +231,33 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
 }
 
 /**
+ * True si el segmento de URL es un placeholder típico de BuilderBot sin sustituir
+ * (llega literal en vez del número).
+ */
+export function isLikelyBuilderBotPhonePlaceholder(segment: string): boolean {
+  const t = segment.trim();
+  if (!t) return false;
+  if (t.toLowerCase() === "{from}") return true;
+  if (/^\{\{\s*@?from\s*\}\}$/i.test(t)) return true;
+  if (/^\{\s*@?from\s*\}$/i.test(t)) return true;
+  if (/^@from$/i.test(t)) return true;
+  return false;
+}
+
+/**
+ * Teléfono del path; si el path es placeholder y viene `?phone=` o `?from=`, usa el query.
+ */
+export function resolveContextPhoneFromRequest(req: NextRequest, pathSegment: string | undefined): string {
+  const raw = decodeURIComponent(pathSegment ?? "").trim();
+  if (isLikelyBuilderBotPhonePlaceholder(raw)) {
+    const { searchParams } = new URL(req.url);
+    const q = (searchParams.get("phone") ?? searchParams.get("from") ?? "").trim();
+    if (q) return q;
+  }
+  return raw;
+}
+
+/**
  * JSON tipo Pulze GET /api/bot/users/:phone/context: registered, registered_s, phone normalizado.
  */
 export async function customerRegisteredContextResponse(rawPhone: string): Promise<NextResponse> {
@@ -241,7 +268,17 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
 
   const normalized = normalizeWhatsAppPhone(trimmed) || trimmed.replace(/\D/g, "");
   if (normalized.length < 8) {
-    return NextResponse.json({ error: "Teléfono inválido", received: trimmed }, { status: 400 });
+    const placeholderHint = isLikelyBuilderBotPhonePlaceholder(trimmed)
+      ? "El path llegó como texto literal (p. ej. {from}) sin reemplazar. En BuilderBot.cloud, en la URL del HTTP usá el asistente de variables para insertar el número del contacto (remitente), no escribas {from} a mano. Alternativas: GET …/customer-registered?phone=NUMERO&api_key=… o POST …/customer-registered/check con JSON \"from\"."
+      : undefined;
+    return NextResponse.json(
+      {
+        error: "Teléfono inválido",
+        received: trimmed,
+        ...(placeholderHint ? { hint: placeholderHint } : {}),
+      },
+      { status: 400 }
+    );
   }
 
   const customer = await findCustomerByWhatsAppNumber(prisma, trimmed);

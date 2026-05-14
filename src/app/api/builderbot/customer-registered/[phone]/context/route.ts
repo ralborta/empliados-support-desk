@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   customerRegisteredContextResponse,
   requireBuilderBotContextAuth,
+  resolveContextPhoneFromRequest,
 } from "@/lib/builderbotCustomerContext";
 
 /**
@@ -16,7 +17,7 @@ export async function GET(
   if (denied) return denied;
 
   const { phone: phoneSegment } = await params;
-  const raw = decodeURIComponent(phoneSegment ?? "").trim();
+  const raw = resolveContextPhoneFromRequest(req, phoneSegment);
   if (!raw) {
     return NextResponse.json({ error: "Falta teléfono en la URL" }, { status: 400 });
   }
