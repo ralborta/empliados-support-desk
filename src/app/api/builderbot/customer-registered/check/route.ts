@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
   acceptedCustomerContextSecretCount,
+  configuredContextSecretEnvNames,
   customerRegisteredContextResponse,
   isCustomerContextAuthConfigured,
+  normalizedContextKeyLength,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 
@@ -36,6 +38,7 @@ export async function POST(req: NextRequest) {
       {
         error:
           "Definí PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel. Es distinta de BUILDERBOT_API_KEY.",
+        envVarsWithSecrets: configuredContextSecretEnvNames(),
       },
       { status: 503 }
     );
@@ -52,14 +55,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Falta phone o from" }, { status: 400 });
   }
 
-  const key = parsed.data.api_key ?? parsed.data.apiKey ?? parsed.data.key ?? parsed.data.token;
-  if (!validateContextSecret(key)) {
+  const keyRaw = parsed.data.api_key ?? parsed.data.apiKey ?? parsed.data.key ?? parsed.data.token;
+  if (!validateContextSecret(keyRaw)) {
+    const accepted = acceptedCustomerContextSecretCount();
+    const multi =
+      accepted > 1
+        ? " Varias claves en Vercel: el body tiene que repetir exactamente UNA de ellas."
+        : "";
     return NextResponse.json(
       {
         error: "API key inválida o faltante",
-        receivedKey: !!key?.trim(),
-        acceptedSecretsCount: acceptedCustomerContextSecretCount(),
-        hint: "Enviá api_key (o key / token) con el mismo valor que PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel — no la bb-… de BuilderBot.",
+        receivedKey: !!keyRaw?.trim(),
+        acceptedSecretsCount: accepted,
+        envVarsWithSecrets: configuredContextSecretEnvNames(),
+        providedKeyLength: normalizedContextKeyLength(keyRaw),
+        hint: !keyRaw?.trim()
+          ? "Falta api_key (o key / token) en el JSON con el mismo texto que en Vercel."
+          : `La clave del JSON no coincide.${multi} No uses BUILDERBOT_API_KEY (bb-…).`,
       },
       { status: 401 }
     );

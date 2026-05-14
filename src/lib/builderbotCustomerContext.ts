@@ -3,9 +3,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
-/** Evita fallos por espacio final / BOM / CRLF al pegar en Vercel o en el cliente. */
+/** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
-  return s.replace(/^\uFEFF/, "").trim().replace(/\r\n/g, "\n").trim();
+  let t = String(s ?? "");
+  t = t.replace(/^\uFEFF/, "");
+  t = t.replace(/[\u200B-\u200D\uFEFF\u2060]/g, "");
+  t = t.replace(/\u00A0/g, " ");
+  return t.trim().replace(/\r\n/g, "\n").trim();
 }
 
 function acceptedSecrets(): string[] {
@@ -34,12 +38,28 @@ export function validateContextSecret(provided: string | undefined | null): bool
   return acceptedSecrets().some((a) => a === p);
 }
 
+/** Longitud del secreto normalizado (solo diagnóstico, sin exponer el valor). */
+export function normalizedContextKeyLength(raw: string | undefined | null): number {
+  if (raw == null || !String(raw).trim()) return 0;
+  return normalizeSecret(String(raw)).length;
+}
+
 export function isCustomerContextAuthConfigured(): boolean {
   return acceptedSecrets().length > 0;
 }
 
 export function acceptedCustomerContextSecretCount(): number {
   return acceptedSecrets().length;
+}
+
+/** Nombres de env que tienen secreto (no expone valores). Para depurar 401. */
+export function configuredContextSecretEnvNames(): string[] {
+  const n: string[] = [];
+  if (process.env.PULZE_API_KEY?.trim()) n.push("PULZE_API_KEY");
+  if (process.env.BUILDERBOT_CONTEXT_API_KEY?.trim()) n.push("BUILDERBOT_CONTEXT_API_KEY");
+  if (process.env.API_KEY?.trim()) n.push("API_KEY");
+  if (process.env.N8N_API_KEY?.trim()) n.push("N8N_API_KEY");
+  return n;
 }
 
 function getProvidedKey(req: NextRequest): string | undefined {
@@ -88,20 +108,28 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
       {
         error:
           "Definí PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel (un secreto largo, tipo Pulze). No uses BUILDERBOT_API_KEY (bb-…).",
+        envVarsWithSecrets: configuredContextSecretEnvNames(),
       },
       { status: 503 }
     );
   }
   const provided = getProvidedKey(req);
   if (!validateContextSecret(provided)) {
+    const envNames = configuredContextSecretEnvNames();
+    const multi =
+      accepted.length > 1
+        ? " Tenés varias claves distintas en Vercel; BuilderBot tiene que enviar exactamente el valor de UNA de ellas (carácter a carácter)."
+        : "";
     return NextResponse.json(
       {
         error: "API key inválida o faltante",
         receivedKey: !!provided,
         acceptedSecretsCount: accepted.length,
+        envVarsWithSecrets: envNames,
+        providedKeyLength: normalizedContextKeyLength(provided ?? ""),
         hint: !provided
-          ? "Como Pulze: header x-api-key con tu secreto de Vercel, GET …/api/bot/users/TU_NUMERO/context. Si el cliente no puede headers (p. ej. algunos GET en FlutterFlow): ?api_key=… o POST …/api/builderbot/customer-registered/check con JSON."
-          : "La clave no coincide con PULZE_API_KEY / BUILDERBOT_CONTEXT_API_KEY / API_KEY / N8N_API_KEY en Vercel (revisá espacios). No uses la bb-… de BuilderBot.",
+          ? "No llegó clave. Como Pulze: header x-api-key = mismo texto que en Vercel (una sola variable alcanza). Alternativa: ?api_key=… en la URL, o POST …/api/builderbot/customer-registered/check con JSON."
+          : `La clave enviada no coincide con ninguna variable activa.${multi} Re-copiá desde Vercel (sin comillas ni espacio al final).`,
       },
       { status: 401 }
     );
