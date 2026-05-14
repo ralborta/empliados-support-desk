@@ -9,12 +9,8 @@ function normalizeSecret(s: string): string {
 }
 
 function acceptedSecrets(): string[] {
-  const raw = [
-    process.env.BUILDERBOT_CONTEXT_API_KEY,
-    process.env.API_KEY,
-    process.env.N8N_API_KEY,
-    process.env.BUILDERBOT_API_KEY,
-  ];
+  /** Solo secretos “propios” del panel / n8n / FlutterFlow → Vercel. No mezclar con BUILDERBOT_API_KEY (eso es para la API de BuilderBot). */
+  const raw = [process.env.BUILDERBOT_CONTEXT_API_KEY, process.env.API_KEY, process.env.N8N_API_KEY];
   return [
     ...new Set(
       raw
@@ -79,7 +75,7 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
     return NextResponse.json(
       {
         error:
-          "Definí BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY / BUILDERBOT_API_KEY) en el servidor para esta consulta desde BuilderBot.",
+          "Definí BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY) en Vercel: es un secreto solo para llamar a este backend desde FlutterFlow/BuilderBot HTTP. No uses la misma clave que BUILDERBOT_API_KEY.",
       },
       { status: 503 }
     );
@@ -93,7 +89,7 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
         acceptedSecretsCount: accepted.length,
         hint: !provided
           ? "No llegó ninguna clave. Probá: query ?api_key= en la URL, header x-api-key, o POST /api/builderbot/customer-registered/check con JSON { phone, api_key } (FlutterFlow a veces no envía headers en GET)."
-          : "La clave no coincide con ninguna variable en Vercel (revisá espacios/BOM al pegar). Si usás BUILDERBOT_API_KEY debe ser el valor completo (ej. bb-…).",
+          : "La clave no coincide con BUILDERBOT_CONTEXT_API_KEY, API_KEY ni N8N_API_KEY en Vercel (revisá espacios al pegar). No es la clave bb-… de BuilderBot; creá una variable aparte y usá el mismo valor en FlutterFlow.",
       },
       { status: 401 }
     );
