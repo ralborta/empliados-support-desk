@@ -62,6 +62,17 @@ export function configuredContextSecretEnvNames(): string[] {
   return n;
 }
 
+function decodeBasicAuthPayload(b64: string): string {
+  try {
+    const clean = b64.replace(/\s/g, "");
+    const raw = atob(clean);
+    const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
 function getProvidedKey(req: NextRequest): string | undefined {
   const tryHeader = (name: string) => {
     const v = req.headers.get(name);
@@ -81,6 +92,20 @@ function getProvidedKey(req: NextRequest): string | undefined {
     if (t) return normalizeSecret(t);
   }
 
+  /** FlutterFlow / BuilderBot a veces mandan la clave como “usuario y contraseña” (Basic Auth). */
+  if (auth?.toLowerCase().startsWith("basic ")) {
+    const decoded = decodeBasicAuthPayload(auth.slice(6).trim());
+    const colon = decoded.indexOf(":");
+    if (colon >= 0) {
+      const userPart = normalizeSecret(decoded.slice(0, colon));
+      const passPart = normalizeSecret(decoded.slice(colon + 1));
+      if (passPart) return passPart;
+      if (userPart) return userPart;
+    } else if (decoded.trim()) {
+      return normalizeSecret(decoded);
+    }
+  }
+
   for (const [k, v] of req.headers.entries()) {
     if (!v?.trim()) continue;
     const low = k.toLowerCase();
@@ -98,6 +123,34 @@ function getProvidedKey(req: NextRequest): string | undefined {
   if (q?.trim()) return normalizeSecret(q);
 
   return undefined;
+}
+
+/** Sin secretos: para ver si el cliente manda Basic vs x-api-key vs query. */
+function contextAuthProbe(req: NextRequest): {
+  authorizationShape: "none" | "bearer" | "basic" | "other";
+  hasHeaderXApiKey: boolean;
+  hasQueryApiKey: boolean;
+} {
+  const auth = req.headers.get("authorization");
+  let authorizationShape: "none" | "bearer" | "basic" | "other" = "none";
+  if (auth?.trim()) {
+    const l = auth.toLowerCase();
+    if (l.startsWith("bearer ")) authorizationShape = "bearer";
+    else if (l.startsWith("basic ")) authorizationShape = "basic";
+    else authorizationShape = "other";
+  }
+  const url = new URL(req.url);
+  const hasQueryApiKey = !!(
+    url.searchParams.get("api_key")?.trim() ||
+    url.searchParams.get("apiKey")?.trim() ||
+    url.searchParams.get("key")?.trim() ||
+    url.searchParams.get("token")?.trim()
+  );
+  return {
+    authorizationShape,
+    hasHeaderXApiKey: !!req.headers.get("x-api-key")?.trim(),
+    hasQueryApiKey,
+  };
 }
 
 /** Auth para BuilderBot / n8n (misma idea que Pulze `requireApiKey`). */
@@ -120,6 +173,7 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
       accepted.length > 1
         ? " Tenés varias claves distintas en Vercel; BuilderBot tiene que enviar exactamente el valor de UNA de ellas (carácter a carácter)."
         : "";
+    const probe = contextAuthProbe(req);
     return NextResponse.json(
       {
         error: "API key inválida o faltante",
@@ -127,8 +181,11 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
         acceptedSecretsCount: accepted.length,
         envVarsWithSecrets: envNames,
         providedKeyLength: normalizedContextKeyLength(provided ?? ""),
+        authProbe: probe,
         hint: !provided
-          ? "No llegó clave. Como Pulze: header x-api-key = mismo texto que en Vercel (una sola variable alcanza). Alternativa: ?api_key=… en la URL, o POST …/api/builderbot/customer-registered/check con JSON."
+          ? probe.authorizationShape === "basic"
+            ? "Llegó Authorization: Basic sin una clave reconocible: poné el secreto de Vercel como contraseña (usuario vacío o cualquier valor), o usá header x-api-key / ?api_key= en la URL."
+            : "No llegó clave usable. Como Pulze: header x-api-key = mismo texto que en Vercel. Alternativa: ?api_key=… en la URL, o POST …/api/builderbot/customer-registered/check con JSON."
           : `La clave enviada no coincide con ninguna variable activa.${multi} Re-copiá desde Vercel (sin comillas ni espacio al final).`,
       },
       { status: 401 }
