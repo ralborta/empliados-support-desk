@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Falta query phone. Preferí GET /api/builderbot/customer-registered/{telefono}/context (como Pulze).",
+          "Falta query phone. Preferí GET /api/bot/users/{telefono}/context (como Pulze) o …/customer-registered/{tel}/context.",
       },
       { status: 400 }
     );

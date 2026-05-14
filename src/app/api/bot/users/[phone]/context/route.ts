@@ -5,8 +5,11 @@ import {
 } from "@/lib/builderbotCustomerContext";
 
 /**
- * GET /api/builderbot/customer-registered/:phone/context
- * Misma respuesta que GET /api/bot/users/:phone/context (patrón Pulze); esta ruta queda por compatibilidad.
+ * Mismo contrato que Pulze en BuilderBot.cloud:
+ * GET /api/bot/users/:phone/context
+ *
+ * - Teléfono (o JID tipo 549...@c.us) en el path; BuilderBot suele sustituir `@from` acá.
+ * - Auth: header `x-api-key` con el valor de `PULZE_API_KEY` o `BUILDERBOT_CONTEXT_API_KEY` en Vercel.
  */
 export async function GET(
   req: NextRequest,

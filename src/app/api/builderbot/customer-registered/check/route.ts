@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Definí BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY) en Vercel. Es distinta de BUILDERBOT_API_KEY.",
+          "Definí PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel. Es distinta de BUILDERBOT_API_KEY.",
       },
       { status: 503 }
     );
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
         error: "API key inválida o faltante",
         receivedKey: !!key?.trim(),
         acceptedSecretsCount: acceptedCustomerContextSecretCount(),
-        hint: "Enviá en el JSON api_key (o key / token) con el mismo valor que BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY) en Vercel — no la clave bb-… de BuilderBot.",
+        hint: "Enviá api_key (o key / token) con el mismo valor que PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel — no la bb-… de BuilderBot.",
       },
       { status: 401 }
     );

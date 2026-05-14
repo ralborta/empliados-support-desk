@@ -9,8 +9,16 @@ function normalizeSecret(s: string): string {
 }
 
 function acceptedSecrets(): string[] {
-  /** Solo secretos “propios” del panel / n8n / FlutterFlow → Vercel. No mezclar con BUILDERBOT_API_KEY (eso es para la API de BuilderBot). */
-  const raw = [process.env.BUILDERBOT_CONTEXT_API_KEY, process.env.API_KEY, process.env.N8N_API_KEY];
+  /**
+   * Secreto compartido Empliados ↔ BuilderBot / n8n (como Pulze con x-api-key).
+   * No usar BUILDERBOT_API_KEY (bb-…): eso es solo para la API de BuilderBot.cloud.
+   */
+  const raw = [
+    process.env.PULZE_API_KEY,
+    process.env.BUILDERBOT_CONTEXT_API_KEY,
+    process.env.API_KEY,
+    process.env.N8N_API_KEY,
+  ];
   return [
     ...new Set(
       raw
@@ -79,7 +87,7 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
     return NextResponse.json(
       {
         error:
-          "Definí BUILDERBOT_CONTEXT_API_KEY (o API_KEY / N8N_API_KEY) en Vercel: es un secreto solo para llamar a este backend desde FlutterFlow/BuilderBot HTTP. No uses la misma clave que BUILDERBOT_API_KEY.",
+          "Definí PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel (un secreto largo, tipo Pulze). No uses BUILDERBOT_API_KEY (bb-…).",
       },
       { status: 503 }
     );
@@ -92,8 +100,8 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
         receivedKey: !!provided,
         acceptedSecretsCount: accepted.length,
         hint: !provided
-          ? "No llegó ninguna clave. En GET: agregá ?api_key=TU_SECRETO (o ?key= / ?token=) a la URL, o header x-api-key. POST …/customer-registered/check con JSON { \"phone\" o \"from\": \"…\", \"api_key\": \"…\" } (BuilderBot: mapeá {from} al campo from)."
-          : "La clave no coincide con BUILDERBOT_CONTEXT_API_KEY, API_KEY ni N8N_API_KEY en Vercel (revisá espacios al pegar). No es la clave bb-… de BuilderBot; creá una variable aparte y usá el mismo valor en FlutterFlow.",
+          ? "Como Pulze: header x-api-key con tu secreto de Vercel, GET …/api/bot/users/TU_NUMERO/context. Si el cliente no puede headers (p. ej. algunos GET en FlutterFlow): ?api_key=… o POST …/api/builderbot/customer-registered/check con JSON."
+          : "La clave no coincide con PULZE_API_KEY / BUILDERBOT_CONTEXT_API_KEY / API_KEY / N8N_API_KEY en Vercel (revisá espacios). No uses la bb-… de BuilderBot.",
       },
       { status: 401 }
     );
@@ -102,7 +110,7 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
 }
 
 /**
- * JSON tipo Pulze GET …/users/:phone/context: registered, registered_s, phone normalizado.
+ * JSON tipo Pulze GET /api/bot/users/:phone/context: registered, registered_s, phone normalizado.
  */
 export async function customerRegisteredContextResponse(rawPhone: string): Promise<NextResponse> {
   const trimmed = rawPhone.trim();
