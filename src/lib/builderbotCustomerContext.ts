@@ -182,6 +182,8 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
     const configuredLengths = acceptedContextSecretLengths();
     const providedLen = normalizedContextKeyLength(provided ?? "");
     const lengthMismatch = providedLen > 0 && !configuredLengths.includes(providedLen);
+    const likelyPasswordTruncation =
+      lengthMismatch && configuredLengths.some((l) => l === providedLen + 1);
     return NextResponse.json(
       {
         error: "API key inválida o faltante",
@@ -191,13 +193,16 @@ export function requireBuilderBotContextAuth(req: NextRequest): NextResponse | n
         providedKeyLength: providedLen,
         configuredSecretLengths: configuredLengths,
         lengthMismatch,
+        likelyPasswordFieldTruncation: likelyPasswordTruncation,
         authProbe: probe,
         hint: !provided
           ? probe.authorizationShape === "basic"
             ? "Llegó Authorization: Basic sin una clave reconocible: poné el secreto de Vercel como contraseña (usuario vacío o cualquier valor), o usá header x-api-key / ?api_key= en la URL."
             : "No llegó clave usable. Como Pulze: header x-api-key = mismo texto que en Vercel. Alternativa: ?api_key=… en la URL, o POST …/api/builderbot/customer-registered/check con JSON."
           : lengthMismatch
-            ? `La clave que llega tiene ${providedLen} caracteres; en Vercel el secreto activo mide ${configuredLengths.join(" o ")}. No es “muy larga”: o está truncada o no es el mismo valor (re-copiá desde Settings → Environment).`
+            ? likelyPasswordTruncation
+              ? `El servidor espera ${configuredLengths.join("/")} caracteres y llegaron ${providedLen} (falta 1). Típico: FlutterFlow limita la “contraseña” del Basic Auth a 64. Poné en Vercel un secreto de exactamente 64 (openssl rand -hex 32), o mandá la clave en header x-api-key, ?api_key= en la URL, o POST JSON.`
+              : `La clave que llega tiene ${providedLen} caracteres; en Vercel el secreto activo mide ${configuredLengths.join(" o ")}. Re-copiá el valor completo desde Settings → Environment.`
             : `La clave enviada no coincide (mismo largo ${providedLen} pero distinto contenido). Re-copiá BUILDERBOT_CONTEXT_API_KEY desde Vercel sin comillas.${multi}`,
       },
       { status: 401 }

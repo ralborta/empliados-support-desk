@@ -62,6 +62,8 @@ export async function POST(req: NextRequest) {
     const configuredLengths = acceptedContextSecretLengths();
     const providedLen = normalizedContextKeyLength(keyRaw);
     const lengthMismatch = providedLen > 0 && !configuredLengths.includes(providedLen);
+    const likelyPasswordTruncation =
+      lengthMismatch && configuredLengths.some((l) => l === providedLen + 1);
     const multi =
       accepted > 1
         ? " Varias claves en Vercel: el body tiene que repetir exactamente UNA de ellas."
@@ -75,10 +77,13 @@ export async function POST(req: NextRequest) {
         providedKeyLength: providedLen,
         configuredSecretLengths: configuredLengths,
         lengthMismatch,
+        likelyPasswordFieldTruncation: likelyPasswordTruncation,
         hint: !keyRaw?.trim()
           ? "Falta api_key (o key / token) en el JSON con el mismo texto que en Vercel."
           : lengthMismatch
-            ? `La clave en el JSON tiene ${providedLen} caracteres; en Vercel el secreto mide ${configuredLengths.join(" o ")}. Re-copiá el valor completo.`
+            ? likelyPasswordTruncation
+              ? `El JSON trae ${providedLen} caracteres y Vercel tiene ${configuredLengths.join("/")} (falta 1). Si el campo tiene límite 64, usá en Vercel openssl rand -hex 32 (64 chars) o enviá la clave por header/query sin truncar.`
+              : `La clave en el JSON tiene ${providedLen} caracteres; en Vercel el secreto mide ${configuredLengths.join(" o ")}. Re-copiá el valor completo.`
             : `La clave del JSON no coincide (mismo largo ${providedLen}, contenido distinto).${multi} No uses BUILDERBOT_API_KEY (bb-…).`,
       },
       { status: 401 }
