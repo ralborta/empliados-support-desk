@@ -87,6 +87,49 @@ export function isPhoneAllowedForTesting(rawPhone: string): boolean {
   return false;
 }
 
+/**
+ * Mapa opcional de impersonación para pruebas internas.
+ * Sintaxis: <miNumero>=<numeroDePrueba>,<otroMiNumero>=<otroDePrueba>
+ * Cuando llega un mensaje desde "miNumero", el sistema lo procesa como si fuera "numeroDePrueba"
+ * (validación Wara, whitelist, ticket). WhatsApp sigue respondiéndole al número real.
+ * Pensado para que un dev pueda escribir desde su WhatsApp personal y probar el flujo del cliente.
+ */
+function impersonationMap(): Map<string, string> {
+  const raw = process.env.WARA_TEST_IMPERSONATE_MAP?.trim() || "";
+  const map = new Map<string, string>();
+  if (!raw) return map;
+  for (const entry of raw.split(/[,;\n]+/)) {
+    const [from, to] = entry.split("=").map((s) => s?.trim() ?? "");
+    const fromN = normalizeWhatsAppPhone(from);
+    const toN = normalizeWhatsAppPhone(to);
+    if (fromN.length >= 8 && toN.length >= 8) map.set(fromN, toN);
+  }
+  return map;
+}
+
+export function getImpersonatedPhone(rawPhone: string): {
+  effective: string;
+  original: string;
+  impersonated: boolean;
+} {
+  const original = normalizeWhatsAppPhone(rawPhone);
+  const map = impersonationMap();
+  if (map.size === 0 || !original) {
+    return { effective: original, original, impersonated: false };
+  }
+  if (map.has(original)) {
+    return { effective: map.get(original)!, original, impersonated: true };
+  }
+  if (original.startsWith("549")) {
+    const without9 = "54" + original.slice(3);
+    if (map.has(without9)) return { effective: map.get(without9)!, original, impersonated: true };
+  } else if (original.startsWith("54")) {
+    const with9 = "549" + original.slice(2);
+    if (map.has(with9)) return { effective: map.get(with9)!, original, impersonated: true };
+  }
+  return { effective: original, original, impersonated: false };
+}
+
 function waraApiBaseUrl(): string {
   const raw =
     process.env.WARA_API_BASE_URL?.trim() ||
@@ -500,6 +543,13 @@ export async function resolveCustomerByWaraPhone(
   rawPhone: string,
   opts?: { contactName?: string }
 ): Promise<WaraCustomerResolution> {
+  const impersonation = getImpersonatedPhone(rawPhone);
+  if (impersonation.impersonated) {
+    console.log(
+      `[WaraAPI] Impersonación de prueba: ${impersonation.original} -> ${impersonation.effective}`
+    );
+    rawPhone = impersonation.effective;
+  }
   const normalized = normalizeWhatsAppPhone(rawPhone);
   if (normalized.length < 8) {
     return {
@@ -645,6 +695,10 @@ export async function selectCompanyForCustomer(
   matchedContact?: WaraEmpresaContact;
   contacts?: WaraEmpresaContact[];
 }> {
+  const impersonation = getImpersonatedPhone(rawPhone);
+  if (impersonation.impersonated) {
+    rawPhone = impersonation.effective;
+  }
   const normalized = normalizeWhatsAppPhone(rawPhone);
   if (normalized.length < 8) {
     return { ok: false, customer: null, status: 400, error: "Teléfono inválido" };
