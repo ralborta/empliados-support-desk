@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
 
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
@@ -281,14 +282,32 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
     );
   }
 
-  const customer = await findCustomerByWhatsAppNumber(prisma, trimmed);
-  const registered = !!customer;
+  const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+  const customer = resolution.customer;
+  const registered = resolution.registered;
+  const contacts = resolution.lookup?.contactos ?? [];
+  const requiresCompanySelection = resolution.requiresCompanySelection;
+  // Mostramos al cliente la razón social (empresa). Si por algún motivo no viene, caemos al
+  // nombre del contacto para no quedar con un guión vacío.
+  const waraContactsText = contacts
+    .map((c, idx) => `${idx + 1}. ${c.empresa || c.nombre}`)
+    .join("\n");
 
   return NextResponse.json({
     registered,
     registered_s: registered ? "true" : "false",
     phone: normalized,
     name: customer?.name?.trim() || "",
-    companyName: customer?.companyName?.trim() || "",
+    companyName: resolution.selectedCompanyName ?? customer?.companyName?.trim() ?? "",
+    validationSource: resolution.source,
+    waraLookupConfigured: resolution.lookup?.configured ?? false,
+    waraContactsCount: contacts.length,
+    waraContactId: contacts[0]?.id ?? null,
+    waraContacts: contacts,
+    waraContactsText,
+    requiresCompanySelection,
+    requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
+    testBlocked: resolution.testBlocked ?? false,
+    testBlocked_s: resolution.testBlocked ? "true" : "false",
   });
 }

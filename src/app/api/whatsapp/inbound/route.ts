@@ -15,6 +15,7 @@ import {
 } from "@/lib/wara";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
 // Using string literals instead of Prisma enums for compatibility
 
 /** Campos para variables BuilderBot (reglas HTTP / mapeo de respuesta del webhook). */
@@ -83,12 +84,12 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   let messageText = data.body != null ? String(data.body) : "";
   const customerPhoneRaw = String(data.from);
   const customerPhone = normalizeWhatsAppPhone(customerPhoneRaw) || customerPhoneRaw;
-  const existingForPanel =
-    normalizeWhatsAppPhone(customerPhoneRaw).length >= 8
-      ? await findCustomerByWhatsAppNumber(prisma, customerPhoneRaw)
-      : null;
-  const registeredInPanel = !!existingForPanel;
   const customerName = data.name != null ? String(data.name) : undefined; // Nombre de WhatsApp (la persona que escribe)
+  const customerResolution = await resolveCustomerByWaraPhone(prisma, customerPhoneRaw, {
+    contactName: customerName,
+  });
+  const existingForPanel = customerResolution.customer;
+  const registeredInPanel = customerResolution.registered;
   const attachments = data.attachment || [];
   const urlTempFile = data.urlTempFile; // URL temporal de BuilderBot para multimedia
   const trimmedBody = (messageText || "").trim();
@@ -179,7 +180,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   // Línea 2: Nombre y rol del contacto
   // Línea 3+: Problema/consulta
   const lines = messageText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0);
-  let companyName = customerName || "Empresa desconocida";
+  let companyName = existingForPanel?.companyName || customerName || "Empresa desconocida";
   let contactName = customerName || "Sin nombre";
   let actualMessage = messageText;
 
@@ -215,17 +216,29 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  // Soporte: solo clientes dados de alta en el panel o por import Excel. Nunca se crea Customer desde WhatsApp.
+  // Wara es la fuente de verdad: Customer local queda como espejo para tickets, historial y pausa del bot.
   const customer = existingForPanel;
 
   if (!customer) {
-    console.log(
-      `[WhatsApp] Número no registrado (${customerPhone}); no se crea cliente ni ticket. Dar de alta en Clientes o importar Excel.`
-    );
+    if (customerResolution.testBlocked) {
+      console.log(
+        `[WhatsApp] ${customerPhone} fuera de WARA_TEST_ALLOWED_PHONES; ignorado (modo whitelist).`
+      );
+    } else {
+      console.log(
+        `[WhatsApp] Número no validado por Wara (${customerPhone}); no se crea cliente ni ticket.`
+      );
+    }
     return NextResponse.json({
       ok: true,
-      message: "Número no registrado en el sistema; mensaje no asociado a un caso",
+      message: customerResolution.testBlocked
+        ? "Número fuera de la lista de prueba (WARA_TEST_ALLOWED_PHONES); mensaje ignorado"
+        : "Número no validado por Wara; mensaje no asociado a un caso",
       skippedUnknownCustomer: true,
+      testBlocked: customerResolution.testBlocked ?? false,
+      validationSource: customerResolution.source,
+      waraLookupConfigured: customerResolution.lookup?.configured ?? false,
+      waraLookupError: customerResolution.lookup?.error ?? null,
       ...builderBotRegistrationFields(false),
     });
   }
