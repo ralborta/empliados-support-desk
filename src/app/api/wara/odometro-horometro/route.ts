@@ -48,11 +48,26 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
   );
 }
 
-function fechaUtc(value: string | undefined): string {
-  if (!value?.trim()) return new Date().toISOString();
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString();
+function fechaWara(value: string | undefined, timezone?: string): string {
+  const target = value?.trim() ? new Date(value) : new Date();
+  if (Number.isNaN(target.getTime())) return "";
+  const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
+  try {
+    const parts = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(target);
+    const pick = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+    return `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}`;
+  } catch {
+    return target.toISOString().slice(0, 19);
+  }
 }
 
 function parseNumber(value: string | undefined): number | undefined {
@@ -133,16 +148,12 @@ export async function POST(req: NextRequest) {
 
   const fromText = parseFromText(parsed.data.rawText ?? "");
   const patente = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? fromText.patente ?? "");
-  const fecha = fechaUtc(parsed.data.fecha ?? parsed.data.date);
   const odometro = parsed.data.odometro ?? parsed.data.odometer ?? fromText.odometro;
   const horometro = parsed.data.horometro ?? parsed.data.hourmeter ?? fromText.horometro;
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
 
   if (!patente) {
     return NextResponse.json({ ok: false, error: "Patente inválida", message: "Necesito una patente válida para registrar el cambio." }, { status: 400 });
-  }
-  if (!fecha) {
-    return NextResponse.json({ ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." }, { status: 400 });
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "Necesito el valor de odómetro y/o horómetro para registrar el cambio." }, { status: 400 });
@@ -156,7 +167,6 @@ export async function POST(req: NextRequest) {
       patente,
       odometro,
       horometro,
-      fecha,
     }, { status: 409 });
   }
 
@@ -174,6 +184,16 @@ export async function POST(req: NextRequest) {
         testBlocked: session.testBlocked ?? false,
       },
       { status: session.status }
+    );
+  }
+
+  const customerTz =
+    session.lookup?.customerTimezone || session.lookup?.userTimezone || "America/Argentina/Buenos_Aires";
+  const fecha = fechaWara(parsed.data.fecha ?? parsed.data.date, customerTz);
+  if (!fecha) {
+    return NextResponse.json(
+      { ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." },
+      { status: 400 }
     );
   }
 
