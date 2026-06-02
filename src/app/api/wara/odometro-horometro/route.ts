@@ -6,7 +6,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone } from "@/lib/waraApi";
-import { normalizePlate } from "@/lib/wara";
+import { detectPlate, normalizePlate } from "@/lib/wara";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
   const n = typeof value === "number" ? value : Number(value.replace(",", ".").trim());
@@ -25,6 +25,9 @@ const bodySchema = z
     odometer: numericValue.optional(),
     horometro: numericValue.optional(),
     hourmeter: numericValue.optional(),
+    rawText: z.string().optional(),
+    confirm: z.string().optional(),
+    confirmation: z.string().optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -32,15 +35,7 @@ const bodySchema = z
   })
   .refine((d) => (d.phone ?? d.from ?? "").trim().length >= 8, {
     message: "Indicá phone o from con el número.",
-  })
-  .refine((d) => (d.patente ?? d.plate ?? "").trim().length >= 2, {
-    message: "Indicá patente/plate.",
-  })
-  .refine((d) => {
-    const odo = d.odometro ?? d.odometer;
-    const horo = d.horometro ?? d.hourmeter;
-    return (typeof odo === "number" && Number.isFinite(odo)) || (typeof horo === "number" && Number.isFinite(horo));
-  }, "Debe enviar al menos odometro/odometer u horometro/hourmeter.");
+  });
 
 function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): string | undefined {
   return (
@@ -60,23 +55,53 @@ function fechaUtc(value: string | undefined): string {
   return date.toISOString();
 }
 
-/**
- * POST /api/wara/odometro-horometro
- *
- * Body:
- * {
- *   "phone": "5492613867127",
- *   "patente": "AA815XW",
- *   "odometro": 900000,
- *   "horometro": 6100,    // opcional
- *   "fecha": "2026-05-11T13:40:00Z", // opcional, default ahora
- *   "api_key": "..."      // o header x-api-key
- * }
- */
+function parseNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const n = Number(value.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseFromText(rawText: string): {
+  patente?: string;
+  odometro?: number;
+  horometro?: number;
+} {
+  const text = rawText || "";
+  const patente = detectPlate(text) ?? undefined;
+  const kmMatch =
+    text.match(/(?:od[oó]metro|kilometraje|km|kil[oó]metros?)\D{0,20}(\d[\d.,]*)/i) ||
+    text.match(/(\d[\d.,]*)\s*(?:km|kil[oó]metros?)/i);
+  const horoMatch =
+    text.match(/(?:hor[oó]metro|horas?)\D{0,20}(\d[\d.,]*)/i) ||
+    text.match(/(\d[\d.,]*)\s*(?:hs|h|horas?)/i);
+  return {
+    patente,
+    odometro: parseNumber(kmMatch?.[1]),
+    horometro: parseNumber(horoMatch?.[1]),
+  };
+}
+
+function isConfirmed(value: string | undefined): boolean {
+  if (!value?.trim()) return false;
+  return /^(si|sí|s|confirmo|confirmar|ok|dale|correcto)$/i.test(value.trim());
+}
+
+function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>>, patente: string): string {
+  if (!result.ok) return result.error || "No pude registrar el cambio en Wara.";
+  const parts = [`Listo, registré el cambio para la unidad ${patente}.`];
+  if (result.odometro?.valor_nuevo_km != null) {
+    parts.push(`Odómetro nuevo: ${result.odometro.valor_nuevo_km} km.`);
+  }
+  if (result.horometro?.valor_nuevo_horas != null) {
+    parts.push(`Horómetro nuevo: ${result.horometro.valor_nuevo_horas} h.`);
+  }
+  return parts.join(" ");
+}
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
-      { ok: false, error: "BUILDERBOT_CONTEXT_API_KEY/PULZE_API_KEY no configurado" },
+      { ok: false, error: "BUILDERBOT_CONTEXT_API_KEY/PULZE_API_KEY no configurado", message: "No pude autenticar la solicitud interna." },
       { status: 503 }
     );
   }
@@ -84,20 +109,40 @@ export async function POST(req: NextRequest) {
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: "Body inválido", details: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Body inválido", message: "Faltan datos para registrar el cambio.", details: parsed.error.flatten() }, { status: 400 });
   }
 
   if (!validateContextSecret(keyFromRequest(req, parsed.data))) {
-    return NextResponse.json({ ok: false, error: "API key inválida o faltante" }, { status: 401 });
+    return NextResponse.json({ ok: false, error: "API key inválida o faltante", message: "No pude autenticar la solicitud interna." }, { status: 401 });
   }
 
-  const patente = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? "");
+  const fromText = parseFromText(parsed.data.rawText ?? "");
+  const patente = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? fromText.patente ?? "");
   const fecha = fechaUtc(parsed.data.fecha ?? parsed.data.date);
+  const odometro = parsed.data.odometro ?? parsed.data.odometer ?? fromText.odometro;
+  const horometro = parsed.data.horometro ?? parsed.data.hourmeter ?? fromText.horometro;
+  const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
+
   if (!patente) {
-    return NextResponse.json({ ok: false, error: "Patente inválida" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Patente inválida", message: "Necesito una patente válida para registrar el cambio." }, { status: 400 });
   }
   if (!fecha) {
-    return NextResponse.json({ ok: false, error: "Fecha inválida" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." }, { status: 400 });
+  }
+  if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
+    return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "Necesito el valor de odómetro y/o horómetro para registrar el cambio." }, { status: 400 });
+  }
+  if (!isConfirmed(confirmation)) {
+    return NextResponse.json({
+      ok: false,
+      confirmationRequired: true,
+      error: "Falta confirmación",
+      message: `Antes de registrar en Wara, confirmá si querés aplicar este cambio: patente ${patente}${typeof odometro === "number" ? `, odómetro ${odometro} km` : ""}${typeof horometro === "number" ? `, horómetro ${horometro} h` : ""}. Respondé CONFIRMO para continuar.`,
+      patente,
+      odometro,
+      horometro,
+      fecha,
+    }, { status: 409 });
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
@@ -107,6 +152,9 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error: session.error,
+        message: session.requiresCompanySelection
+          ? "Antes de registrar el cambio necesito que elijas la empresa asociada a este número."
+          : "No pude validar la sesión con Wara para registrar el cambio. Te derivo con un agente.",
         requiresCompanySelection: session.requiresCompanySelection ?? false,
         testBlocked: session.testBlocked ?? false,
       },
@@ -114,8 +162,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const odometro = parsed.data.odometro ?? parsed.data.odometer;
-  const horometro = parsed.data.horometro ?? parsed.data.hourmeter;
   const result = await registrarCambioOdometroHorometro(session.sessionToken, {
     patente,
     fecha,
@@ -130,6 +176,7 @@ export async function POST(req: NextRequest) {
       fecha,
       companyName: session.companyName ?? "",
       contactName: session.contactName ?? "",
+      message: formatSuccessMessage(result, patente),
     },
     { status: result.ok ? 200 : result.status }
   );
