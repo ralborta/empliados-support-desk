@@ -32,7 +32,8 @@ export const resolutionModeLabels: Record<ResolutionMode, string> = {
   CLOSED_NO_ACTION: "Cerrado sin acción",
 };
 
-const PLATE_REGEX = /\b([A-Z]{2}\d{3}[A-Z]{2}|[A-Z]{3}\d{3})\b/i;
+const PLATE_REGEX =
+  /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/i;
 
 export function normalizePlate(value: string | null | undefined): string | null {
   if (!value) return null;

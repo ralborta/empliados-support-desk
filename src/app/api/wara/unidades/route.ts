@@ -5,7 +5,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { normalizePlate } from "@/lib/wara";
+import { detectPlate, normalizePlate } from "@/lib/wara";
 import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
 
 const bodySchema = z
@@ -14,6 +14,7 @@ const bodySchema = z
     from: z.string().min(8).optional(),
     patente: z.string().min(2).optional(),
     plate: z.string().min(2).optional(),
+    rawText: z.string().optional(),
     unidad: z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]).optional(),
     unidades: z.array(z.union([z.number(), z.string()])).optional(),
     api_key: z.string().min(1).optional(),
@@ -99,17 +100,30 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await consultarEstadoUnidades(session.sessionToken, parseUnitIds(parsed.data));
-  const wantedPlate = normalizeLoosePlate(parsed.data.patente ?? parsed.data.plate ?? "");
+  const wantedPlate = normalizeLoosePlate(
+    parsed.data.patente ?? parsed.data.plate ?? detectPlate(parsed.data.rawText ?? "") ?? ""
+  );
   const filtered = wantedPlate
     ? result.unidades.filter((u) => normalizeLoosePlate(u.patente).includes(wantedPlate) || wantedPlate.includes(normalizeLoosePlate(u.patente)))
     : result.unidades;
+  const buildManyUnitsText = (units: WaraUnidadEstado[]): string => {
+    const cliente = session.companyName || result.cliente || "este cliente";
+    const max = 8;
+    const labels = units
+      .map((u) => (u.patente || u.unidad || "").trim())
+      .filter((label) => label.length > 0);
+    const head = labels.slice(0, max).join(", ");
+    const remainder = labels.length - max;
+    const suffix = remainder > 0 ? ` y ${remainder} más` : "";
+    return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una patente puntual para ver su estado.`;
+  };
   const summaryText = !result.ok
     ? result.error || "No pude consultar las unidades en Wara."
     : filtered.length === 0
       ? `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
       : filtered.length === 1
         ? summarizeUnit(filtered[0])
-        : `Encontré ${filtered.length} unidades para ${session.companyName || result.cliente || "este cliente"}: ${filtered.map((u) => u.patente || u.unidad).join(", ")}.`;
+        : buildManyUnitsText(filtered);
 
   return NextResponse.json(
     {

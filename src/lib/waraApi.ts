@@ -133,7 +133,7 @@ export function getImpersonatedPhone(rawPhone: string): {
 function waraApiBaseUrl(): string {
   const raw =
     process.env.WARA_API_BASE_URL?.trim() ||
-    "https://apps.visionblo.com/rb/app/api_interna";
+    "https://staging.visionblo.com/rb/app/api_interna";
   return raw.replace(/\/+$/, "");
 }
 
@@ -141,7 +141,7 @@ function waraMaintenanceApiBaseUrl(): string {
   const raw =
     process.env.WARA_MAINTENANCE_API_BASE_URL?.trim() ||
     process.env.WARA_API_BASE_URL?.trim() ||
-    "https://apps.visionblo.com/rb/app/api_interna";
+    "https://staging.visionblo.com/rb/app/api_interna";
   return raw.replace(/\/+$/, "");
 }
 

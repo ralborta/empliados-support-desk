@@ -68,22 +68,37 @@ function parseFromText(rawText: string): {
 } {
   const text = rawText || "";
   const patente = detectPlate(text) ?? undefined;
-  const kmMatch =
-    text.match(/(?:od[oó]metro|kilometraje|km|kil[oó]metros?)\D{0,20}(\d[\d.,]*)/i) ||
-    text.match(/(\d[\d.,]*)\s*(?:km|kil[oó]metros?)/i);
-  const horoMatch =
-    text.match(/(?:hor[oó]metro|horas?)\D{0,20}(\d[\d.,]*)/i) ||
-    text.match(/(\d[\d.,]*)\s*(?:hs|h|horas?)/i);
+  const cleaned = patente
+    ? text.replace(new RegExp(patente.replace(/(.)/g, "$1\\s?"), "gi"), " ")
+    : text;
+  const kmCandidates: string[] = [];
+  const horoCandidates: string[] = [];
+  const kmRegex = /(?:od[oó]metro|kilometraje|kil[oó]metros?|km)[^\d]{0,20}(\d[\d.\s,]*\d|\d)/gi;
+  const kmTrailRegex = /(\d[\d.\s,]*\d|\d)\s*(?:km|kil[oó]metros?)\b/gi;
+  const horoRegex = /(?:hor[oó]metro|horas?)[^\d]{0,20}(\d[\d.\s,]*\d|\d)/gi;
+  const horoTrailRegex = /(\d[\d.\s,]*\d|\d)\s*(?:hs|h|horas?)\b/gi;
+  for (const m of cleaned.matchAll(kmRegex)) if (m[1]) kmCandidates.push(m[1]);
+  for (const m of cleaned.matchAll(kmTrailRegex)) if (m[1]) kmCandidates.push(m[1]);
+  for (const m of cleaned.matchAll(horoRegex)) if (m[1]) horoCandidates.push(m[1]);
+  for (const m of cleaned.matchAll(horoTrailRegex)) if (m[1]) horoCandidates.push(m[1]);
+  const pickLargest = (values: string[]): number | undefined => {
+    let best: number | undefined;
+    for (const v of values) {
+      const n = parseNumber(v.replace(/\s+/g, ""));
+      if (typeof n === "number" && (best === undefined || n > best)) best = n;
+    }
+    return best;
+  };
   return {
     patente,
-    odometro: parseNumber(kmMatch?.[1]),
-    horometro: parseNumber(horoMatch?.[1]),
+    odometro: pickLargest(kmCandidates),
+    horometro: pickLargest(horoCandidates),
   };
 }
 
 function isConfirmed(value: string | undefined): boolean {
   if (!value?.trim()) return false;
-  return /^(si|sí|s|confirmo|confirmar|ok|dale|correcto)$/i.test(value.trim());
+  return /^confirmo$/i.test(value.trim());
 }
 
 function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>>, patente: string): string {
