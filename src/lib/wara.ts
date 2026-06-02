@@ -45,6 +45,23 @@ export function detectPlate(text: string): string | null {
   return normalizePlate(match?.[1] || null);
 }
 
+/**
+ * Formatea una patente argentina con espacios, como Wara espera recibirla:
+ *   - Formato Mercosur: "AD 427 MC" (2 letras + 3 dígitos + 2 letras)
+ *   - Formato anterior: "ABC 123"   (3 letras + 3 dígitos)
+ * Si no matchea ninguno de los dos formatos, devuelve la patente normalizada
+ * (sin espacios) tal cual.
+ */
+export function formatPlateWithSpaces(value: string | null | undefined): string | null {
+  const compact = normalizePlate(value);
+  if (!compact) return null;
+  const mercosur = compact.match(/^([A-Z]{2})(\d{3})([A-Z]{2})$/);
+  if (mercosur) return `${mercosur[1]} ${mercosur[2]} ${mercosur[3]}`;
+  const legacy = compact.match(/^([A-Z]{3})(\d{3})$/);
+  if (legacy) return `${legacy[1]} ${legacy[2]}`;
+  return compact;
+}
+
 export function detectIncidentType(text: string): WaraIncidentType {
   const lower = text.toLowerCase();
   if (/(no reporta|offline|sin señal|no actualiza|última señal|ultima señal|no registra ubicación)/.test(lower)) {

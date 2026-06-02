@@ -6,7 +6,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone } from "@/lib/waraApi";
-import { detectPlate, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
   const n = typeof value === "number" ? value : Number(value.replace(",", ".").trim());
@@ -197,8 +197,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const patenteParaWara = formatPlateWithSpaces(patente) ?? patente;
   const result = await registrarCambioOdometroHorometro(session.sessionToken, {
-    patente,
+    patente: patenteParaWara,
     fecha,
     ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
     ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
