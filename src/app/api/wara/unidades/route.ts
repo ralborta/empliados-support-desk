@@ -104,7 +104,11 @@ export async function POST(req: NextRequest) {
     parsed.data.patente ?? parsed.data.plate ?? detectPlate(parsed.data.rawText ?? "") ?? ""
   );
   const filtered = wantedPlate
-    ? result.unidades.filter((u) => normalizeLoosePlate(u.patente).includes(wantedPlate) || wantedPlate.includes(normalizeLoosePlate(u.patente)))
+    ? result.unidades.filter((u) => {
+        const plate = normalizeLoosePlate(u.patente);
+        if (!plate) return false;
+        return plate === wantedPlate || plate.includes(wantedPlate);
+      })
     : result.unidades;
   const buildManyUnitsText = (units: WaraUnidadEstado[]): string => {
     const cliente = session.companyName || result.cliente || "este cliente";
