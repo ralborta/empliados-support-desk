@@ -64,22 +64,27 @@ function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
 
+// BuilderBot Cloud solo mapea el body (p.ej. {summaryText_s}) cuando el status es 2xx.
+// Este endpoint lo consume exclusivamente BuilderBot: SIEMPRE respondemos 200 y dejamos
+// el estado real en `ok` + el texto en `summaryText`.
+const BB_STATUS = 200;
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
       { ok: false, error: "BUILDERBOT_CONTEXT_API_KEY/PULZE_API_KEY no configurado", summaryText: "No pude autenticar la consulta interna." },
-      { status: 503 }
+      { status: BB_STATUS }
     );
   }
 
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: "Body inválido", summaryText: "Faltan datos para consultar la unidad.", details: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Body inválido", summaryText: "Faltan datos para consultar la unidad.", details: parsed.error.flatten() }, { status: BB_STATUS });
   }
 
   if (!validateContextSecret(keyFromRequest(req, parsed.data))) {
-    return NextResponse.json({ ok: false, error: "API key inválida o faltante", summaryText: "No pude autenticar la consulta interna." }, { status: 401 });
+    return NextResponse.json({ ok: false, error: "API key inválida o faltante", summaryText: "No pude autenticar la consulta interna." }, { status: BB_STATUS });
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
@@ -95,7 +100,7 @@ export async function POST(req: NextRequest) {
         requiresCompanySelection: session.requiresCompanySelection ?? false,
         testBlocked: session.testBlocked ?? false,
       },
-      { status: session.status }
+      { status: BB_STATUS }
     );
   }
 
@@ -138,6 +143,6 @@ export async function POST(req: NextRequest) {
       unidadesCount: filtered.length,
       summaryText,
     },
-    { status: result.ok ? 200 : result.status }
+    { status: BB_STATUS }
   );
 }

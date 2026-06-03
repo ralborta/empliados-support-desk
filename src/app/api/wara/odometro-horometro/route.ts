@@ -128,22 +128,27 @@ function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioO
   return parts.join(" ");
 }
 
+// BuilderBot Cloud solo mapea el body de la respuesta (p.ej. {message_s}) cuando el
+// status HTTP es 2xx. Como estos endpoints los consume exclusivamente BuilderBot,
+// SIEMPRE respondemos 200 y dejamos el estado real en `ok` + el texto en `message`.
+const BB_STATUS = 200;
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
       { ok: false, error: "BUILDERBOT_CONTEXT_API_KEY/PULZE_API_KEY no configurado", message: "No pude autenticar la solicitud interna." },
-      { status: 503 }
+      { status: BB_STATUS }
     );
   }
 
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: "Body inválido", message: "Faltan datos para registrar el cambio.", details: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Body inválido", message: "Faltan datos para registrar el cambio.", details: parsed.error.flatten() }, { status: BB_STATUS });
   }
 
   if (!validateContextSecret(keyFromRequest(req, parsed.data))) {
-    return NextResponse.json({ ok: false, error: "API key inválida o faltante", message: "No pude autenticar la solicitud interna." }, { status: 401 });
+    return NextResponse.json({ ok: false, error: "API key inválida o faltante", message: "No pude autenticar la solicitud interna." }, { status: BB_STATUS });
   }
 
   const fromText = parseFromText(parsed.data.rawText ?? "");
@@ -153,10 +158,10 @@ export async function POST(req: NextRequest) {
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
 
   if (!patente) {
-    return NextResponse.json({ ok: false, error: "Patente inválida", message: "Necesito una patente válida para registrar el cambio." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Patente inválida", message: "Necesito una patente válida para registrar el cambio." }, { status: BB_STATUS });
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
-    return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "Necesito el valor de odómetro y/o horómetro para registrar el cambio." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "Necesito el valor de odómetro y/o horómetro para registrar el cambio." }, { status: BB_STATUS });
   }
   if (!isConfirmed(confirmation)) {
     return NextResponse.json({
@@ -167,7 +172,7 @@ export async function POST(req: NextRequest) {
       patente,
       odometro,
       horometro,
-    }, { status: 409 });
+    }, { status: BB_STATUS });
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
@@ -183,7 +188,7 @@ export async function POST(req: NextRequest) {
         requiresCompanySelection: session.requiresCompanySelection ?? false,
         testBlocked: session.testBlocked ?? false,
       },
-      { status: session.status }
+      { status: BB_STATUS }
     );
   }
 
@@ -193,7 +198,7 @@ export async function POST(req: NextRequest) {
   if (!fecha) {
     return NextResponse.json(
       { ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." },
-      { status: 400 }
+      { status: BB_STATUS }
     );
   }
 
@@ -214,6 +219,6 @@ export async function POST(req: NextRequest) {
       contactName: session.contactName ?? "",
       message: formatSuccessMessage(result, patente),
     },
-    { status: result.ok ? 200 : result.status }
+    { status: BB_STATUS }
   );
 }
