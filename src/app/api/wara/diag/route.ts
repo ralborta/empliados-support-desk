@@ -44,7 +44,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "API key inválida o faltante" }, { status: 401 });
   }
 
-  const phone = (new URL(req.url).searchParams.get("phone") ?? "").trim();
+  const url = new URL(req.url);
+  const phone = (url.searchParams.get("phone") ?? "").trim();
+  const skipImpersonation =
+    url.searchParams.get("raw") === "1" ||
+    url.searchParams.get("noimpersonate") === "1";
 
   const config = {
     waraEmpresaLookupConfigured: isWaraEmpresaLookupConfigured(),
@@ -62,7 +66,11 @@ export async function GET(req: NextRequest) {
   }
 
   const impersonation = getImpersonatedPhone(phone);
-  const effective = impersonation.impersonated ? impersonation.effective : impersonation.original;
+  const effective = skipImpersonation
+    ? impersonation.original
+    : impersonation.impersonated
+      ? impersonation.effective
+      : impersonation.original;
 
   let lookup: Awaited<ReturnType<typeof obtenerEmpresaPorNumero>> | null = null;
   let lookupError: string | null = null;
@@ -76,6 +84,8 @@ export async function GET(req: NextRequest) {
     ok: true,
     config,
     phoneInput: phone,
+    skipImpersonation,
+    queriedPhone: effective,
     impersonation: {
       original: impersonation.original,
       effective: impersonation.effective,
