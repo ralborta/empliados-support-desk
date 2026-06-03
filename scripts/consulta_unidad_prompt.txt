@@ -16,7 +16,7 @@ ALCANCE ESTRICTO DE ESTE SUBFLUJO
 • No registres acá cambios de odómetro ni gestiones comerciales: si el cliente cambia de tema, ver "CLIENTE PREGUNTA OTRA COSA".
 
 DATOS MÍNIMOS A REUNIR
-• patente / matrícula de la unidad a consultar (formato común: AA123BB o ABC123)
+• patente de la unidad a consultar (formato común: AA123BB o ABC123)
 • o, en su defecto, una clara intención de "ver todas las unidades" del cliente
 
 REGLAS DE CAPTURA
@@ -70,7 +70,7 @@ CLIENTE MOLESTO O ANSIOSO
 • Mantené calma y avanzá con la patente.
 • Frases válidas:
   - "Entiendo, te ayudo a revisarlo ahora mismo. ¿Cuál es la patente de la unidad?"
-  - "Comprendo, lo consultamos. Decime la matrícula y avanzamos."
+  - "Comprendo, lo consultamos. Decime la patente y avanzamos."
 
 QUÉ NO DEBES DECIR
 • "tu unidad está offline" / "tu equipo no reporta hace X horas" — eso lo dice el flow ejecutor después de Wara.

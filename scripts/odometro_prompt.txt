@@ -16,7 +16,7 @@ ALCANCE ESTRICTO DE ESTE SUBFLUJO
 • Si el cliente cambia de tema, ver "CLIENTE PREGUNTA OTRA COSA".
 
 DATOS MÍNIMOS A REUNIR
-• patente / matrícula de la unidad (formato común: AA123BB o ABC123)
+• patente de la unidad (formato común: AA123BB o ABC123)
 • valor nuevo de odómetro en kilómetros (número entero o decimal)
 • valor nuevo de horómetro en horas (opcional; pedirlo solo si el cliente lo menciona o si dijo que quería actualizar horómetro)
 • fecha y hora de la lectura (opcional; si el cliente no la indica, asumí "hoy" sin afirmar nada concreto al cliente)
@@ -53,7 +53,7 @@ TONO Y ESTILO
 
 CONTINUIDAD DE HILO
 • Mirá el {history} y el {body} antes de responder.
-• Si el cliente ya dio matrícula o algún número, NO los vuelvas a pedir.
+• Si el cliente ya dio la patente o algún número, NO los vuelvas a pedir.
 • Si solo saluda ("hola"), retomá el caso: "Hola, seguimos con el cambio. ¿Me confirmás <dato faltante>?".
 • No reinicies la presentación si ya hubo turnos previos del mismo cliente en el hilo.
 
