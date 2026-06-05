@@ -360,12 +360,18 @@ async function createChatBotToken(contactId: number): Promise<{
     cache: "no-store",
   });
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  const sessionToken =
-    typeof json?.SessionToken === "string"
-      ? json.SessionToken
-      : typeof json?.sessionToken === "string"
-      ? json.sessionToken
-      : undefined;
+  const data = waraData(json);
+  const pickString = (key: string): string | undefined => {
+    if (typeof json?.[key] === "string") return json[key] as string;
+    if (typeof data[key] === "string") return data[key] as string;
+    return undefined;
+  };
+  const pickNumber = (key: string): number | undefined => {
+    if (typeof json?.[key] === "number") return json[key] as number;
+    if (typeof data[key] === "number") return data[key] as number;
+    return undefined;
+  };
+  const sessionToken = pickString("SessionToken") ?? pickString("sessionToken");
 
   if (!res.ok || !sessionToken) {
     return {
@@ -382,11 +388,10 @@ async function createChatBotToken(contactId: number): Promise<{
     ok: true,
     status: res.status,
     sessionToken,
-    customerId: typeof json?.CustomerID === "number" ? json.CustomerID : undefined,
-    customerName: typeof json?.CustomerName === "string" ? json.CustomerName : undefined,
-    userTimezone: typeof json?.UserTimezone === "string" ? json.UserTimezone : undefined,
-    customerTimezone:
-      typeof json?.CustomerTimezone === "string" ? json.CustomerTimezone : undefined,
+    customerId: pickNumber("CustomerID"),
+    customerName: pickString("CustomerName"),
+    userTimezone: pickString("UserTimezone"),
+    customerTimezone: pickString("CustomerTimezone"),
   };
 }
 
@@ -505,6 +510,18 @@ function errorFromWara(json: Record<string, unknown> | null, fallback: string): 
   return typeof json?.error === "string" ? json.error : fallback;
 }
 
+/**
+ * Wara envuelve el contenido útil en `data` (p. ej. ConsultarEstadoUnidades responde
+ * { ok: true, data: { cliente, unidades: [...] } }). Esta función devuelve el objeto
+ * `data` si existe, o el propio json como fallback para compatibilidad.
+ */
+function waraData(json: Record<string, unknown> | null): Record<string, unknown> {
+  if (json && typeof json.data === "object" && json.data !== null) {
+    return json.data as Record<string, unknown>;
+  }
+  return json ?? {};
+}
+
 export async function consultarEstadoUnidades(
   sessionToken: string,
   patentes: string[] = []
@@ -529,11 +546,12 @@ export async function consultarEstadoUnidades(
     };
   }
 
+  const data = waraData(json);
   return {
     ok: json?.ok !== false,
     status: res.status,
-    cliente: typeof json?.cliente === "string" ? json.cliente : undefined,
-    unidades: Array.isArray(json?.unidades) ? (json.unidades as WaraUnidadEstado[]) : [],
+    cliente: typeof data.cliente === "string" ? data.cliente : undefined,
+    unidades: Array.isArray(data.unidades) ? (data.unidades as WaraUnidadEstado[]) : [],
     error: json?.ok === false ? errorFromWara(json, "Wara no devolvió unidades") : undefined,
   };
 }
@@ -574,17 +592,18 @@ export async function registrarCambioOdometroHorometro(
     };
   }
 
+  const data = waraData(json);
   return {
     ok: json?.ok !== false,
     status: res.status,
-    movil_id: typeof json?.movil_id === "number" ? json.movil_id : undefined,
+    movil_id: typeof data.movil_id === "number" ? data.movil_id : undefined,
     odometro:
-      json?.odometro && typeof json.odometro === "object"
-        ? (json.odometro as WaraRegistrarCambioResult["odometro"])
+      data.odometro && typeof data.odometro === "object"
+        ? (data.odometro as WaraRegistrarCambioResult["odometro"])
         : undefined,
     horometro:
-      json?.horometro && typeof json.horometro === "object"
-        ? (json.horometro as WaraRegistrarCambioResult["horometro"])
+      data.horometro && typeof data.horometro === "object"
+        ? (data.horometro as WaraRegistrarCambioResult["horometro"])
         : undefined,
     error: json?.ok === false ? errorFromWara(json, "Wara no registró el cambio") : undefined,
   };

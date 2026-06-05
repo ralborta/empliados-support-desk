@@ -130,11 +130,12 @@ export async function GET(req: NextRequest) {
       if (sessionToken) {
         const r3 = await call("ConsultarEstadoUnidades", { token: sessionToken, patentes: [] }, sessionToken);
         const j3 = r3.json ?? {};
-        const unidades = (Array.isArray(j3.unidades) ? j3.unidades : []) as Array<Record<string, unknown>>;
+        const d3 = (j3.data && typeof j3.data === "object" ? j3.data : j3) as Record<string, unknown>;
+        const unidades = (Array.isArray(d3.unidades) ? d3.unidades : []) as Array<Record<string, unknown>>;
         steps.consultarEstadoUnidades = {
           status: r3.status,
           error: j3.error ?? null,
-          cliente: j3.cliente ?? null,
+          cliente: d3.cliente ?? null,
           unidadesCount: unidades.length,
           patentes: unidades.map((u) => u.patente).slice(0, 20),
         };
