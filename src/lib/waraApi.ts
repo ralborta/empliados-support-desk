@@ -133,7 +133,7 @@ export function getImpersonatedPhone(rawPhone: string): {
 function waraApiBaseUrl(): string {
   const raw =
     process.env.WARA_API_BASE_URL?.trim() ||
-    "https://staging.visionblo.com/rb/app/api_interna";
+    "https://apps.visionblo.com/rb/app/api_interna";
   return raw.replace(/\/+$/, "");
 }
 
@@ -141,7 +141,7 @@ function waraMaintenanceApiBaseUrl(): string {
   const raw =
     process.env.WARA_MAINTENANCE_API_BASE_URL?.trim() ||
     process.env.WARA_API_BASE_URL?.trim() ||
-    "https://staging.visionblo.com/rb/app/api_interna";
+    "https://apps.visionblo.com/rb/app/api_interna";
   return raw.replace(/\/+$/, "");
 }
 
@@ -334,28 +334,29 @@ export async function obtenerEmpresaPorNumero(rawPhone: string): Promise<WaraEmp
   };
 }
 
-async function createWaraSessionToken(): Promise<{
+async function createChatBotToken(contactId: number): Promise<{
   ok: boolean;
   status: number;
   sessionToken?: string;
+  customerId?: number;
+  customerName?: string;
+  userTimezone?: string;
+  customerTimezone?: string;
   error?: string;
 }> {
-  const user = process.env.WARA_SESSION_USER?.trim() || "";
-  const password = process.env.WARA_SESSION_PASSWORD?.trim() || "";
-  const maxIdle = process.env.WARA_SESSION_MAX_IDLE?.trim() || "15m";
-
-  if (!user || !password) {
+  const token = obtenerEmpresaToken();
+  if (!token) {
     return {
       ok: false,
       status: 503,
-      error: "WARA_SESSION_USER/WARA_SESSION_PASSWORD no configurados",
+      error: "WARA_OBTENER_EMPRESA_TOKEN no configurado",
     };
   }
 
-  const res = await fetch(`${waraMaintenanceApiBaseUrl()}/CreateSessionToken`, {
+  const res = await fetch(`${waraApiBaseUrl()}/CreateChatBotToken`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user, password, maxIdle }),
+    body: JSON.stringify({ token, contacto_id: contactId }),
     cache: "no-store",
   });
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
@@ -373,11 +374,36 @@ async function createWaraSessionToken(): Promise<{
       error:
         typeof json?.error === "string"
           ? json.error
-          : `Wara respondió HTTP ${res.status} al crear sesión`,
+          : `Wara respondió HTTP ${res.status} al crear sesión del chatbot`,
     };
   }
 
-  return { ok: true, status: res.status, sessionToken };
+  return {
+    ok: true,
+    status: res.status,
+    sessionToken,
+    customerId: typeof json?.CustomerID === "number" ? json.CustomerID : undefined,
+    customerName: typeof json?.CustomerName === "string" ? json.CustomerName : undefined,
+    userTimezone: typeof json?.UserTimezone === "string" ? json.UserTimezone : undefined,
+    customerTimezone:
+      typeof json?.CustomerTimezone === "string" ? json.CustomerTimezone : undefined,
+  };
+}
+
+function findContactForCompany(
+  contacts: WaraEmpresaContact[],
+  companyName: string | null | undefined
+): WaraEmpresaContact | null {
+  if (contacts.length === 1) return contacts[0];
+  const selected = companyName?.trim();
+  if (!selected) return null;
+  return (
+    contacts.find(
+      (c) =>
+        c.empresa.localeCompare(selected, "es", { sensitivity: "accent" }) === 0 ||
+        c.nombre.localeCompare(selected, "es", { sensitivity: "accent" }) === 0
+    ) ?? null
+  );
 }
 
 export async function resolveWaraSessionByPhone(
@@ -424,16 +450,30 @@ export async function resolveWaraSessionByPhone(
     };
   }
 
-  // Fallback opcional para endpoints clásicos de mantenimiento si Wara no entrega SessionToken
-  // junto con la validación por teléfono.
-  const created = await createWaraSessionToken();
+  // Si hay múltiples contactos, la documentación nueva indica que hay que crear
+  // el SessionToken con token ATILIO + contacto_id seleccionado.
+  const selectedContact = findContactForCompany(
+    resolution.lookup.contactos,
+    resolution.selectedCompanyName ?? resolution.customer?.companyName
+  );
+  if (!selectedContact) {
+    return {
+      ok: false,
+      status: 409,
+      error: "No pude determinar el contacto de Wara para crear el SessionToken",
+      requiresCompanySelection: true,
+      lookup: resolution.lookup,
+    };
+  }
+
+  const created = await createChatBotToken(selectedContact.id);
   if (!created.ok || !created.sessionToken) {
     return {
       ok: false,
       status: created.status,
       error:
         created.error ||
-        "Wara no devolvió SessionToken para este teléfono y no hay credenciales de sesión configuradas",
+        "Wara no devolvió SessionToken para el contacto seleccionado",
       lookup: resolution.lookup,
     };
   }
@@ -442,10 +482,22 @@ export async function resolveWaraSessionByPhone(
     ok: true,
     status: 200,
     sessionToken: created.sessionToken,
-    customerName: resolution.lookup.customerName,
-    companyName: resolution.selectedCompanyName ?? resolution.customer?.companyName?.trim() ?? "",
-    contactName: resolution.customer?.name?.trim() || "",
-    lookup: resolution.lookup,
+    customerName: created.customerName ?? resolution.lookup.customerName,
+    companyName:
+      created.customerName ??
+      resolution.selectedCompanyName ??
+      resolution.customer?.companyName?.trim() ??
+      selectedContact.empresa ??
+      "",
+    contactName: resolution.customer?.name?.trim() || selectedContact.nombre || "",
+    lookup: {
+      ...resolution.lookup,
+      sessionToken: created.sessionToken,
+      customerId: created.customerId ?? resolution.lookup.customerId,
+      customerName: created.customerName ?? resolution.lookup.customerName,
+      userTimezone: created.userTimezone ?? resolution.lookup.userTimezone,
+      customerTimezone: created.customerTimezone ?? resolution.lookup.customerTimezone,
+    },
   };
 }
 
@@ -455,7 +507,7 @@ function errorFromWara(json: Record<string, unknown> | null, fallback: string): 
 
 export async function consultarEstadoUnidades(
   sessionToken: string,
-  unidad: number[] = []
+  patentes: string[] = []
 ): Promise<WaraConsultarEstadoUnidadesResult> {
   const res = await fetch(`${waraMaintenanceApiBaseUrl()}/ConsultarEstadoUnidades`, {
     method: "POST",
@@ -463,7 +515,7 @@ export async function consultarEstadoUnidades(
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
     },
-    body: JSON.stringify({ token: sessionToken, unidad }),
+    body: JSON.stringify({ token: sessionToken, patentes }),
     cache: "no-store",
   });
 

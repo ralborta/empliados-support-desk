@@ -5,7 +5,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
 import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
 
 const bodySchema = z
@@ -17,6 +17,7 @@ const bodySchema = z
     rawText: z.string().optional(),
     unidad: z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]).optional(),
     unidades: z.array(z.union([z.number(), z.string()])).optional(),
+    patentes: z.array(z.string()).optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -37,13 +38,6 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
   );
 }
 
-function parseUnitIds(body: z.infer<typeof bodySchema>): number[] {
-  const raw = body.unidades ?? (Array.isArray(body.unidad) ? body.unidad : body.unidad != null ? [body.unidad] : []);
-  return raw
-    .map((value) => (typeof value === "number" ? value : Number(value.trim())))
-    .filter((value) => Number.isFinite(value));
-}
-
 function minutesAgo(seconds: number | undefined): string {
   if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "sin dato";
   if (seconds < 90) return "menos de 2 minutos";
@@ -62,6 +56,19 @@ function summarizeUnit(unit: WaraUnidadEstado): string {
 
 function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
+}
+
+function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
+  const explicit = body.patentes ?? [];
+  const single = body.patente ?? body.plate ?? detectPlate(body.rawText ?? "") ?? "";
+  const raw = [...explicit, single].filter((value) => value.trim().length > 0);
+  return Array.from(
+    new Set(
+      raw
+        .map((value) => formatPlateWithSpaces(value) ?? normalizePlate(value) ?? "")
+        .filter((value) => value.length > 0)
+    )
+  );
 }
 
 // BuilderBot Cloud solo mapea el body (p.ej. {summaryText_s}) cuando el status es 2xx.
@@ -104,7 +111,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await consultarEstadoUnidades(session.sessionToken, parseUnitIds(parsed.data));
+  const requestedPlates = parseRequestedPlates(parsed.data);
+  const result = await consultarEstadoUnidades(session.sessionToken, requestedPlates);
   const wantedPlate = normalizeLoosePlate(
     parsed.data.patente ?? parsed.data.plate ?? detectPlate(parsed.data.rawText ?? "") ?? ""
   );

@@ -54,24 +54,106 @@ export async function GET(req: NextRequest) {
     waraEmpresaLookupConfigured: isWaraEmpresaLookupConfigured(),
     obtenerEmpresaTokenSet: !!process.env.WARA_OBTENER_EMPRESA_TOKEN?.trim(),
     obtenerEmpresaTokenLength: (process.env.WARA_OBTENER_EMPRESA_TOKEN?.trim() || "").length,
-    sessionUserSet: !!process.env.WARA_SESSION_USER?.trim(),
-    sessionPasswordSet: !!process.env.WARA_SESSION_PASSWORD?.trim(),
     impersonateMap: envFlag("WARA_TEST_IMPERSONATE_MAP"),
     allowedPhones: envFlag("WARA_TEST_ALLOWED_PHONES"),
     whitelistEnabled: isTestWhitelistEnabled(),
     apiBaseUrlSet: !!process.env.WARA_API_BASE_URL?.trim(),
-    apiBaseUrl: process.env.WARA_API_BASE_URL?.trim() || "(default staging)",
+    apiBaseUrl:
+      process.env.WARA_API_BASE_URL?.trim() ||
+      "https://apps.visionblo.com/rb/app/api_interna",
   };
 
+  const baseOverride =
+    url.searchParams.get("base") === "prod"
+      ? "https://apps.visionblo.com/rb/app/api_interna"
+      : url.searchParams.get("base") === "staging"
+        ? "https://staging.visionblo.com/rb/app/api_interna"
+        : null;
+
   if (!phone) {
-    return NextResponse.json({ ok: true, config, hint: "Pasá ?phone=NUMERO para ver el lookup." });
+    return NextResponse.json({ ok: true, config, hint: "Pasá ?phone=NUMERO para ver el lookup. ?base=prod|staging para forzar ambiente. ?chain=1 para correr toda la cadena." });
+  }
+
+  // Cadena completa con el token REAL del env: Obtener -> CreateChatBotToken -> ConsultarEstadoUnidades.
+  if (url.searchParams.get("chain") === "1") {
+    const token = process.env.WARA_OBTENER_EMPRESA_TOKEN?.trim() || "";
+    const base = (
+      baseOverride ||
+      process.env.WARA_API_BASE_URL?.trim() ||
+      "https://apps.visionblo.com/rb/app/api_interna"
+    ).replace(/\/+$/, "");
+    const imp = getImpersonatedPhone(phone);
+    const eff = skipImpersonation ? imp.original : imp.impersonated ? imp.effective : imp.original;
+    const steps: Record<string, unknown> = { base, queriedPhone: eff };
+    const call = async (path: string, payload: Record<string, unknown>, bearer?: string) => {
+      const res = await fetch(`${base}/${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
+      const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      return { status: res.status, json };
+    };
+    try {
+      const r1 = await call("ObtenerContactosPorNumero", { token, telefono: eff });
+      const j1 = r1.json ?? {};
+      const contactos = (Array.isArray(j1.contactos) ? j1.contactos : []) as Array<Record<string, unknown>>;
+      steps.obtener = {
+        status: r1.status,
+        error: j1.error ?? null,
+        encontrado: j1.encontrado ?? null,
+        contactosCount: contactos.length,
+        contactos: contactos.map((c) => ({ id: c.contacto_id ?? c.id, empresa: c.empresa ?? c.nombre })),
+        hasInlineSession: typeof j1.SessionToken === "string",
+      };
+      const first = contactos[0];
+      const contactId = first ? (first.contacto_id ?? first.id) : null;
+      let sessionToken = typeof j1.SessionToken === "string" ? (j1.SessionToken as string) : undefined;
+      if (!sessionToken && contactId != null) {
+        const r2 = await call("CreateChatBotToken", { token, contacto_id: contactId });
+        const j2 = r2.json ?? {};
+        sessionToken =
+          (typeof j2.SessionToken === "string" && (j2.SessionToken as string)) ||
+          (typeof j2.sessionToken === "string" && (j2.sessionToken as string)) ||
+          undefined;
+        steps.createChatBotToken = {
+          status: r2.status,
+          error: j2.error ?? null,
+          hasSession: !!sessionToken,
+          customer: j2.CustomerName ?? j2.customerName ?? null,
+        };
+      }
+      if (sessionToken) {
+        const r3 = await call("ConsultarEstadoUnidades", { token: sessionToken, patentes: [] }, sessionToken);
+        const j3 = r3.json ?? {};
+        const unidades = (Array.isArray(j3.unidades) ? j3.unidades : []) as Array<Record<string, unknown>>;
+        steps.consultarEstadoUnidades = {
+          status: r3.status,
+          error: j3.error ?? null,
+          cliente: j3.cliente ?? null,
+          unidadesCount: unidades.length,
+          patentes: unidades.map((u) => u.patente).slice(0, 20),
+        };
+      }
+      return NextResponse.json({ ok: true, config, chain: steps });
+    } catch (e) {
+      return NextResponse.json({ ok: false, config, chain: steps, error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   // Volcado crudo (redactado) de ObtenerContactosPorNumero para inspeccionar si Wara
   // entrega SessionToken (top-level o por contacto) cuando hay múltiples contactos.
   if (url.searchParams.get("dump") === "1") {
     const token = process.env.WARA_OBTENER_EMPRESA_TOKEN?.trim() || "";
-    const base = (process.env.WARA_API_BASE_URL?.trim() || "https://staging.visionblo.com/rb/app/api_interna").replace(/\/+$/, "");
+    const base = (
+      baseOverride ||
+      process.env.WARA_API_BASE_URL?.trim() ||
+      "https://apps.visionblo.com/rb/app/api_interna"
+    ).replace(/\/+$/, "");
     const imp = getImpersonatedPhone(phone);
     const eff = skipImpersonation ? imp.original : imp.impersonated ? imp.effective : imp.original;
     try {

@@ -108,7 +108,7 @@ export function detectMissingData(text: string, incidentType: WaraIncidentType, 
   const missing: string[] = [];
 
   if (!plate) {
-    missing.push("matrícula");
+    missing.push("patente");
   }
 
   if (incidentType === "MISSING_REPORT") {
