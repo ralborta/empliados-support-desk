@@ -285,6 +285,21 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
   const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
   const customer = resolution.customer;
   const registered = resolution.registered;
+  const lastTicket = customer
+    ? await prisma.ticket.findFirst({
+        where: { customerId: customer.id },
+        orderBy: { updatedAt: "desc" },
+        select: {
+          code: true,
+          status: true,
+          category: true,
+          priority: true,
+          title: true,
+          aiSummary: true,
+          updatedAt: true,
+        },
+      })
+    : null;
   const contacts = resolution.lookup?.contactos ?? [];
   const requiresCompanySelection = resolution.requiresCompanySelection;
   // Mostramos al cliente la razón social (empresa). Si por algún motivo no viene, caemos al
@@ -292,6 +307,13 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
   const waraContactsText = contacts
     .map((c, idx) => `${idx + 1}. ${c.empresa || c.nombre}`)
     .join("\n");
+  const lastTicketSummary = lastTicket?.aiSummary?.trim() || "";
+  const lastTicketTitle = lastTicket?.title?.trim() || "";
+  const lastTicketContextText = lastTicket
+    ? `Último ticket: ${lastTicket.code} (${lastTicket.status})` +
+      `${lastTicketTitle ? ` - ${lastTicketTitle}` : ""}` +
+      `${lastTicketSummary ? `. Resumen: ${lastTicketSummary}` : ""}`
+    : "";
 
   return NextResponse.json({
     registered,
@@ -305,6 +327,16 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
     waraContactId: contacts[0]?.id ?? null,
     waraContacts: contacts,
     waraContactsText,
+    lastTicketCode: lastTicket?.code ?? "",
+    lastTicketStatus: lastTicket?.status ?? "",
+    lastTicketCategory: lastTicket?.category ?? "",
+    lastTicketPriority: lastTicket?.priority ?? "",
+    lastTicketTitle,
+    lastTicketSummary,
+    lastTicketUpdatedAt: lastTicket?.updatedAt?.toISOString() ?? "",
+    hasLastTicket: !!lastTicket,
+    hasLastTicket_s: lastTicket ? "true" : "false",
+    lastTicketContextText,
     requiresCompanySelection,
     requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
     testBlocked: resolution.testBlocked ?? false,
