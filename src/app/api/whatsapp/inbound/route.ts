@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
@@ -26,28 +25,6 @@ function builderBotRegistrationFields(registered: boolean) {
   };
 }
 
-// Schema para el formato de BuilderBot.cloud
-const builderbotWebhookSchema = z.object({
-  eventName: z.string(),
-  data: z.object({
-    body: z.union([z.string(), z.number()]).optional(),
-    name: z.union([z.string(), z.number()]).optional(),
-    from: z.union([z.string(), z.number()]).transform(String).optional(),
-    to: z.union([z.string(), z.number()]).transform(String).optional(),
-    remoteJid: z.union([z.string(), z.number()]).transform(String).optional(),
-    key: z
-      .object({
-        remoteJid: z.union([z.string(), z.number()]).transform(String).optional(),
-        participant: z.union([z.string(), z.number()]).transform(String).optional(),
-      })
-      .partial()
-      .optional(),
-    attachment: z.array(z.any()).optional(),
-    urlTempFile: z.string().optional(), // URL temporal para archivos multimedia
-    projectId: z.string().optional(),
-  }).passthrough(),
-});
-
 export async function POST(req: Request) {
   const payload = await req.json().catch(() => null);
   if (!payload) {
@@ -70,26 +47,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, message: "Evento ignorado" });
   }
 
-  const parsed = builderbotWebhookSchema.safeParse(payload);
-  if (!parsed.success) {
-    console.error("❌ Formato inválido:", parsed.error.flatten());
-    // Para eventos de mensajería con formato inesperado, no devolvemos 400 para evitar
-    // que BuilderBot marque el endpoint como fallido por payloads no críticos.
-    return NextResponse.json(
-      { ok: true, message: "Formato no reconocido, evento ignorado", details: parsed.error.flatten() },
-      { status: 200 }
-    );
+  const rawData = payload?.data;
+  if (!rawData || typeof rawData !== "object") {
+    console.warn("⚠️ Webhook sin data objeto, ignorado");
+    return NextResponse.json({ ok: true, message: "Payload sin data objeto, ignorado" });
   }
-
-  const { eventName: parsedEventName } = parsed.data;
+  const parsedEventName = eventName;
+  const data = rawData as Record<string, unknown>;
 
   // Procesar mensajes entrantes y salientes
   if (incomingEvents.has(parsedEventName)) {
     // Procesar mensaje entrante del cliente
-    return await processIncomingMessage(parsed.data);
+    return await processIncomingMessage({ eventName: parsedEventName, data });
   } else if (outgoingEvents.has(parsedEventName)) {
     // Procesar mensaje saliente del agente desde BuilderBot
-    return await processOutgoingMessage(parsed.data);
+    return await processOutgoingMessage({ eventName: parsedEventName, data });
   } else {
     console.log(`ℹ️ Evento ignorado: ${parsedEventName}`);
     return NextResponse.json({ ok: true, message: `Evento ${parsedEventName} recibido pero no procesado` });
