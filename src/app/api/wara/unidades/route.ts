@@ -87,10 +87,16 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
     where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
     orderBy: { lastMessageAt: "desc" },
   });
-  if (!ticket) return;
+  const targetTicket =
+    ticket ??
+    (await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    }));
+  if (!targetTicket) return;
   const recent = await prisma.ticketMessage.findFirst({
     where: {
-      ticketId: ticket.id,
+      ticketId: targetTicket.id,
       direction: "OUTBOUND",
       from: "BOT",
       text: message,
@@ -100,7 +106,7 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
   if (recent) return;
   await prisma.ticketMessage.create({
     data: {
-      ticketId: ticket.id,
+      ticketId: targetTicket.id,
       direction: "OUTBOUND",
       from: "BOT",
       text: message,
@@ -108,7 +114,7 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
     },
   });
   await prisma.ticket.update({
-    where: { id: ticket.id },
+    where: { id: targetTicket.id },
     data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
   });
 }

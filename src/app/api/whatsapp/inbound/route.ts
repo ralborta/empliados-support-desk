@@ -547,10 +547,16 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     },
     orderBy: { lastMessageAt: "desc" },
   });
+  const targetTicket =
+    ticket ??
+    (await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    }));
 
-  if (!ticket) {
-    console.log(`ℹ️ No hay ticket activo para ${customerPhone}, ignorando mensaje saliente`);
-    return NextResponse.json({ ok: true, message: "No hay ticket activo" });
+  if (!targetTicket) {
+    console.log(`ℹ️ No hay ticket para ${customerPhone}, ignorando mensaje saliente`);
+    return NextResponse.json({ ok: true, message: "No hay ticket" });
   }
 
   // Verificar si ya existe un mensaje similar reciente (para evitar duplicados cuando se envía desde la plataforma)
@@ -558,7 +564,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
   const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
   const existingMessage = await prisma.ticketMessage.findFirst({
     where: {
-      ticketId: ticket.id,
+      ticketId: targetTicket.id,
       direction: "OUTBOUND",
       text: messageText || "[Archivo adjunto]",
       createdAt: {
@@ -572,8 +578,8 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     console.log(`ℹ️ Mensaje saliente ya existe (probablemente enviado desde la plataforma), ignorando duplicado`);
     return NextResponse.json({
       ok: true,
-      ticketId: ticket.id,
-      ticketCode: ticket.code,
+      ticketId: targetTicket.id,
+      ticketCode: targetTicket.code,
       duplicate: true,
       existingMessageId: existingMessage.id,
     });
@@ -603,7 +609,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
   // Guardar el mensaje saliente del agente desde BuilderBot
   await prisma.ticketMessage.create({
     data: {
-      ticketId: ticket.id,
+      ticketId: targetTicket.id,
       direction: "OUTBOUND",
       from: "BOT", // Mensaje enviado por agente desde BuilderBot, se muestra como bot (verde)
       text: messageText || "[Archivo adjunto]",
@@ -615,7 +621,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
 
   // Actualizar el ticket
   await prisma.ticket.update({
-    where: { id: ticket.id },
+    where: { id: targetTicket.id },
     data: {
       lastMessageAt: new Date(),
       status: "WAITING_CUSTOMER", // El agente envió un mensaje, ahora esperamos respuesta del cliente
@@ -627,8 +633,8 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     String(customerPhone);
   if (messageText && isDespedidaWara(messageText)) {
     await sendTicketCodeAtFarewellWara({
-      ticketId: ticket.id,
-      ticketCode: ticket.code,
+      ticketId: targetTicket.id,
+      ticketCode: targetTicket.code,
       customerPhone: phoneOut,
       peerText: String(messageText || ""),
       rawExtra: { atDespedidaOutgoing: true },
@@ -636,12 +642,12 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  console.log(`✅ Mensaje saliente del agente guardado en ticket ${ticket.code}`);
+  console.log(`✅ Mensaje saliente del agente guardado en ticket ${targetTicket.code}`);
 
   return NextResponse.json({ 
     ok: true, 
-    ticketId: ticket.id, 
-    ticketCode: ticket.code,
+    ticketId: targetTicket.id, 
+    ticketCode: targetTicket.code,
     messageSaved: true,
   });
 }
