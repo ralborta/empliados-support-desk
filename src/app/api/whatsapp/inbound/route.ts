@@ -32,7 +32,16 @@ const builderbotWebhookSchema = z.object({
   data: z.object({
     body: z.union([z.string(), z.number()]).optional(),
     name: z.union([z.string(), z.number()]).optional(),
-    from: z.union([z.string(), z.number()]).transform(String),
+    from: z.union([z.string(), z.number()]).transform(String).optional(),
+    to: z.union([z.string(), z.number()]).transform(String).optional(),
+    remoteJid: z.union([z.string(), z.number()]).transform(String).optional(),
+    key: z
+      .object({
+        remoteJid: z.union([z.string(), z.number()]).transform(String).optional(),
+        participant: z.union([z.string(), z.number()]).transform(String).optional(),
+      })
+      .partial()
+      .optional(),
     attachment: z.array(z.any()).optional(),
     urlTempFile: z.string().optional(), // URL temporal para archivos multimedia
     projectId: z.string().optional(),
@@ -89,6 +98,10 @@ export async function POST(req: Request) {
 
 async function processIncomingMessage({ eventName, data }: { eventName: string; data: any }) {
   let messageText = data.body != null ? String(data.body) : "";
+  if (!data.from) {
+    console.warn("⚠️ message.incoming sin data.from, ignorando");
+    return NextResponse.json({ ok: true, message: "Incoming sin remitente, ignorado" });
+  }
   const customerPhoneRaw = String(data.from);
   const customerPhone = normalizeWhatsAppPhone(customerPhoneRaw) || customerPhoneRaw;
   const customerName = data.name != null ? String(data.name) : undefined; // Nombre de WhatsApp (la persona que escribe)
