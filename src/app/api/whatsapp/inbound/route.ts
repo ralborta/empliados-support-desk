@@ -501,15 +501,63 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     }
   }
 
-  let customer = await findCustomerByWhatsAppNumber(prisma, String(customerPhone));
-  if (!customer) {
-    for (const candidate of outgoingCandidates.slice(1)) {
-      customer = await findCustomerByWhatsAppNumber(prisma, candidate);
-      if (customer) break;
+  let chosen:
+    | {
+        customer: Awaited<ReturnType<typeof findCustomerByWhatsAppNumber>>;
+        candidate: string;
+        openTicketId?: string;
+        openTicketCode?: string;
+        openTicketLastMessageAt?: Date;
+        anyTicketId?: string;
+        anyTicketCode?: string;
+        anyTicketLastMessageAt?: Date;
+        score: number;
+      }
+    | undefined;
+
+  for (const candidate of Array.from(new Set(outgoingCandidates))) {
+    const found = await findCustomerByWhatsAppNumber(prisma, candidate);
+    if (!found) continue;
+    const openTicket = await prisma.ticket.findFirst({
+      where: { customerId: found.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+      orderBy: { lastMessageAt: "desc" },
+      select: { id: true, code: true, lastMessageAt: true },
+    });
+    const anyTicket = await prisma.ticket.findFirst({
+      where: { customerId: found.id },
+      orderBy: { lastMessageAt: "desc" },
+      select: { id: true, code: true, lastMessageAt: true },
+    });
+    const score = openTicket ? 3 : anyTicket ? 2 : 1;
+    const current = {
+      customer: found,
+      candidate,
+      openTicketId: openTicket?.id,
+      openTicketCode: openTicket?.code,
+      openTicketLastMessageAt: openTicket?.lastMessageAt,
+      anyTicketId: anyTicket?.id,
+      anyTicketCode: anyTicket?.code,
+      anyTicketLastMessageAt: anyTicket?.lastMessageAt,
+      score,
+    };
+    if (!chosen) {
+      chosen = current;
+      continue;
+    }
+    const chosenDate =
+      chosen.openTicketLastMessageAt ??
+      chosen.anyTicketLastMessageAt ??
+      new Date(0);
+    const currentDate =
+      current.openTicketLastMessageAt ??
+      current.anyTicketLastMessageAt ??
+      new Date(0);
+    if (current.score > chosen.score || (current.score === chosen.score && currentDate > chosenDate)) {
+      chosen = current;
     }
   }
 
-  if (!customer) {
+  if (!chosen?.customer) {
     console.log(
       `ℹ️ Cliente no encontrado para salida. candidatos=${JSON.stringify(outgoingCandidates)}`
     );
@@ -519,24 +567,25 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
       outgoingCandidates,
     });
   }
+  const customer = chosen.customer;
 
-  // Misma regla que mensajes entrantes: ticket abierto más reciente del cliente (sin ventana 48h)
-  const ticket = await prisma.ticket.findFirst({
-    where: {
-      customerId: customer.id,
-      status: { in: OPEN_TICKET_THREAD_STATUSES },
-    },
-    orderBy: { lastMessageAt: "desc" },
-  });
   const targetTicket =
-    ticket ??
-    (await prisma.ticket.findFirst({
-      where: { customerId: customer.id },
-      orderBy: { lastMessageAt: "desc" },
-    }));
+    chosen.openTicketId
+      ? {
+          id: chosen.openTicketId,
+          code: chosen.openTicketCode || "",
+        }
+      : chosen.anyTicketId
+        ? {
+            id: chosen.anyTicketId,
+            code: chosen.anyTicketCode || "",
+          }
+        : null;
 
   if (!targetTicket) {
-    console.log(`ℹ️ No hay ticket para ${customerPhone}, ignorando mensaje saliente`);
+    console.log(
+      `ℹ️ Cliente encontrado (${customer.phone}) por candidato ${chosen.candidate}, pero sin ticket asociado`
+    );
     return NextResponse.json({ ok: true, message: "No hay ticket" });
   }
 
