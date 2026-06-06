@@ -48,8 +48,15 @@ export async function POST(req: Request) {
   console.log("📩 Webhook recibido de BuilderBot:", JSON.stringify(payload, null, 2));
 
   const eventName = typeof payload?.eventName === "string" ? payload.eventName : "";
+  const incomingEvents = new Set(["message.incoming"]);
+  const outgoingEvents = new Set([
+    "message.outgoing",
+    "message.sent",
+    "message.send",
+    "message_outgoing",
+  ]);
   // BuilderBot envía eventos de estado (ej. status.ready) que no deben romper el webhook.
-  if (eventName !== "message.incoming" && eventName !== "message.outgoing") {
+  if (!incomingEvents.has(eventName) && !outgoingEvents.has(eventName)) {
     console.log(`ℹ️ Evento no-mensaje ignorado: ${eventName || "sin eventName"}`);
     return NextResponse.json({ ok: true, message: "Evento ignorado" });
   }
@@ -68,10 +75,10 @@ export async function POST(req: Request) {
   const { eventName: parsedEventName } = parsed.data;
 
   // Procesar mensajes entrantes y salientes
-  if (parsedEventName === "message.incoming") {
+  if (incomingEvents.has(parsedEventName)) {
     // Procesar mensaje entrante del cliente
     return await processIncomingMessage(parsed.data);
-  } else if (parsedEventName === "message.outgoing") {
+  } else if (outgoingEvents.has(parsedEventName)) {
     // Procesar mensaje saliente del agente desde BuilderBot
     return await processOutgoingMessage(parsed.data);
   } else {
@@ -439,8 +446,16 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
 
 async function processOutgoingMessage({ eventName, data }: { eventName: string; data: any }) {
   const messageText = data.body != null ? String(data.body) : "";
-  // En mensajes salientes, el destinatario puede estar en 'to', 'remoteJid', o 'key.remoteJid'
-  const customerPhone = data.to || data.remoteJid || data.key?.remoteJid || data.from;
+  const outgoingCandidates = [
+    data.to,
+    data.remoteJid,
+    data.key?.remoteJid,
+    data.key?.participant,
+    data.from,
+  ]
+    .filter((v) => typeof v === "string" && v.trim().length > 0)
+    .map((v) => String(v).trim());
+  const customerPhone = outgoingCandidates[0];
   const attachments = data.attachment || [];
   const urlTempFile = data.urlTempFile;
   const isAbsoluteUrl = (u: unknown) =>
@@ -492,11 +507,23 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     }
   }
 
-  const customer = await findCustomerByWhatsAppNumber(prisma, String(customerPhone));
+  let customer = await findCustomerByWhatsAppNumber(prisma, String(customerPhone));
+  if (!customer) {
+    for (const candidate of outgoingCandidates.slice(1)) {
+      customer = await findCustomerByWhatsAppNumber(prisma, candidate);
+      if (customer) break;
+    }
+  }
 
   if (!customer) {
-    console.log(`ℹ️ Cliente no encontrado para ${String(customerPhone)}, ignorando mensaje saliente`);
-    return NextResponse.json({ ok: true, message: "Cliente no encontrado" });
+    console.log(
+      `ℹ️ Cliente no encontrado para salida. candidatos=${JSON.stringify(outgoingCandidates)}`
+    );
+    return NextResponse.json({
+      ok: true,
+      message: "Cliente no encontrado",
+      outgoingCandidates,
+    });
   }
 
   // Misma regla que mensajes entrantes: ticket abierto más reciente del cliente (sin ventana 48h)
