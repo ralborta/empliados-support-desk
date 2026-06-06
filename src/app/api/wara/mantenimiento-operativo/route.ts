@@ -8,6 +8,8 @@ import {
 import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, normalizePlate } from "@/lib/wara";
 import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
+import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 
 const bodySchema = z
   .object({
@@ -67,6 +69,47 @@ function inferPriority(raw: string): Priority {
   return "NORMAL";
 }
 
+async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
+  const message = text?.trim();
+  if (!message) return;
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return;
+  const openTicket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  const targetTicket =
+    openTicket ??
+    (await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    }));
+  if (!targetTicket) return;
+  const recent = await prisma.ticketMessage.findFirst({
+    where: {
+      ticketId: targetTicket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+  });
+  if (recent) return;
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: targetTicket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      rawPayload: payload as any,
+    },
+  });
+  await prisma.ticket.update({
+    where: { id: targetTicket.id },
+    data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
+  });
+}
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
@@ -105,11 +148,17 @@ export async function POST(req: NextRequest) {
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const resolution = await resolveCustomerByWaraPhone(prisma, rawPhone);
   if (!resolution.registered || !resolution.customer) {
+    const message = "No pude validar este numero en Wara para gestionar mantenimiento.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      errorStage: "customer_validation",
+      testBlocked: resolution.testBlocked ?? false,
+    });
     return NextResponse.json(
       {
         ok: false,
         ok_s: "false",
-        message: "No pude validar este numero en Wara para gestionar mantenimiento.",
+        message,
         requiresCompanySelection: false,
         requiresCompanySelection_s: "false",
         testBlocked: resolution.testBlocked ?? false,
@@ -120,11 +169,16 @@ export async function POST(req: NextRequest) {
   }
 
   if (resolution.requiresCompanySelection) {
+    const message = "Antes de continuar, necesito que elijas la empresa asociada a este numero.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      errorStage: "requires_company_selection",
+    });
     return NextResponse.json(
       {
         ok: false,
         ok_s: "false",
-        message: "Antes de continuar, necesito que elijas la empresa asociada a este numero.",
+        message,
         requiresCompanySelection: true,
         requiresCompanySelection_s: "true",
       },

@@ -431,15 +431,24 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
 
 async function processOutgoingMessage({ eventName, data }: { eventName: string; data: any }) {
   const messageText = data.body != null ? String(data.body) : "";
+  const pick = (...vals: unknown[]) =>
+    vals
+      .filter((v) => typeof v === "string" && String(v).trim().length > 0)
+      .map((v) => String(v).trim());
   const outgoingCandidates = [
-    data.to,
-    data.remoteJid,
-    data.key?.remoteJid,
-    data.key?.participant,
-    data.from,
-  ]
-    .filter((v) => typeof v === "string" && v.trim().length > 0)
-    .map((v) => String(v).trim());
+    ...pick(
+      data.to,
+      data.remoteJid,
+      data.key?.remoteJid,
+      data.key?.participant,
+      data.chatId,
+      data.jid,
+      data.recipient,
+      data.recipientId,
+      data.author,
+      data.from
+    ),
+  ];
   const customerPhone = outgoingCandidates[0];
   const attachments = data.attachment || [];
   const urlTempFile = data.urlTempFile;
