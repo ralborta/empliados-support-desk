@@ -19,6 +19,23 @@ import { QuickActionsPanel } from "@/components/tickets/QuickActionsPanel";
 import { resolutionModeLabels, waraIncidentLabels, type WaraIncidentType } from "@/lib/wara";
 import { User } from "lucide-react";
 
+const DISPLAY_TZ = process.env.APP_TIMEZONE?.trim() || "America/Argentina/Buenos_Aires";
+
+function formatDateTimeAR(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("es-AR", {
+    timeZone: DISPLAY_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
   const { id } = await params;
@@ -115,8 +132,8 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
                     "Sin informar"}
                 </div>
                 <div><span className="font-semibold">Modo resolución:</span> {ticket.resolution ? (resolutionModeLabels as any)[ticket.resolution] || ticket.resolution : "Sin definir"}</div>
-                <div><span className="font-semibold">Creado:</span> {ticket.createdAt.toLocaleString("es-AR")}</div>
-                <div><span className="font-semibold">Última actividad:</span> {ticket.lastMessageAt.toLocaleString("es-AR")}</div>
+                <div><span className="font-semibold">Creado:</span> {formatDateTimeAR(ticket.createdAt)}</div>
+                <div><span className="font-semibold">Última actividad:</span> {formatDateTimeAR(ticket.lastMessageAt)}</div>
               </div>
               {wara?.missingData?.length > 0 && (
                 <div className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
@@ -157,8 +174,8 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
                     <div className="text-sm text-slate-500">Sin mensajes aún.</div>
                   ) : (
                     conversation.map((msg: any) => {
-                      const createdAt = msg.createdAt instanceof Date 
-                        ? msg.createdAt 
+                      const createdAt = msg.createdAt instanceof Date
+                        ? msg.createdAt
                         : new Date(msg.createdAt);
                       const fromLabel = fromLabels[msg.from as "CUSTOMER" | "BOT" | "HUMAN"] || msg.from;
                       
@@ -191,7 +208,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
                               <span>{fromLabel}</span>
                             )}
                             <span className="text-slate-400">·</span>
-                            <span>{createdAt.toLocaleString("es-AR")}</span>
+                            <span>{formatDateTimeAR(createdAt)}</span>
                           </div>
                           <div>
                             <div

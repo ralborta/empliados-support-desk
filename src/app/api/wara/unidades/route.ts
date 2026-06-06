@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
@@ -76,6 +78,41 @@ function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
 // el estado real en `ok` + el texto en `summaryText`.
 const BB_STATUS = 200;
 
+async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
+  const message = text?.trim();
+  if (!message) return;
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return;
+  const ticket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!ticket) return;
+  const recent = await prisma.ticketMessage.findFirst({
+    where: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+  });
+  if (recent) return;
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      rawPayload: payload as any,
+    },
+  });
+  await prisma.ticket.update({
+    where: { id: ticket.id },
+    data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
+  });
+}
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
@@ -141,6 +178,13 @@ export async function POST(req: NextRequest) {
       : filtered.length === 1
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);
+
+  await appendOutboundBotMessage(rawPhone, summaryText, {
+    source: "wara_unidades_response",
+    ok: result.ok,
+    unidadesCount: filtered.length,
+    companyName: session.companyName ?? result.cliente ?? "",
+  });
 
   return NextResponse.json(
     {

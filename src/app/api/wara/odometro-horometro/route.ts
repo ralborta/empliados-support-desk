@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
@@ -133,6 +135,41 @@ function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioO
 // SIEMPRE respondemos 200 y dejamos el estado real en `ok` + el texto en `message`.
 const BB_STATUS = 200;
 
+async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
+  const message = text?.trim();
+  if (!message) return;
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return;
+  const ticket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!ticket) return;
+  const recent = await prisma.ticketMessage.findFirst({
+    where: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+  });
+  if (recent) return;
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      rawPayload: payload as any,
+    },
+  });
+  await prisma.ticket.update({
+    where: { id: ticket.id },
+    data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
+  });
+}
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
@@ -210,6 +247,14 @@ export async function POST(req: NextRequest) {
     ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
   });
 
+  const responseMessage = formatSuccessMessage(result, patente);
+  await appendOutboundBotMessage(rawPhone, responseMessage, {
+    source: "wara_odometro_response",
+    ok: result.ok,
+    patente,
+    companyName: session.companyName ?? "",
+  });
+
   return NextResponse.json(
     {
       ...result,
@@ -217,7 +262,7 @@ export async function POST(req: NextRequest) {
       fecha,
       companyName: session.companyName ?? "",
       contactName: session.contactName ?? "",
-      message: formatSuccessMessage(result, patente),
+      message: responseMessage,
     },
     { status: BB_STATUS }
   );
