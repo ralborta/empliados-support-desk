@@ -202,6 +202,23 @@ export async function POST(req: NextRequest) {
   });
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
+  const responseMessage = `Perfecto, ya registre tu solicitud de ${service.toLowerCase()} para ${company}. Caso ${ticket.code}.`;
+
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: responseMessage,
+      rawPayload: {
+        source: "wara_mantenimiento_operativo",
+        generatedBy: "api_response",
+        service,
+        plate: plate ?? "",
+      },
+    },
+  });
+
   return NextResponse.json(
     {
       ok: true,
@@ -211,7 +228,7 @@ export async function POST(req: NextRequest) {
       service,
       plate: plate ?? "",
       companyName: company,
-      message: `Perfecto, ya registre tu solicitud de ${service.toLowerCase()} para ${company}. Caso ${ticket.code}.`,
+      message: responseMessage,
     },
     { status: BB_STATUS }
   );
