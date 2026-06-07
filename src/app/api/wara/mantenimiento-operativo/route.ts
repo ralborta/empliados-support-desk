@@ -22,6 +22,8 @@ const bodySchema = z
     patente: z.string().optional(),
     plate: z.string().optional(),
     rawText: z.string().optional(),
+    confirm: z.string().optional(),
+    confirmation: z.string().optional(),
     prioridad: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
     priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
     api_key: z.string().min(1).optional(),
@@ -68,6 +70,18 @@ function inferPriority(raw: string): Priority {
   if (/(alta|correctiv|falla|no funciona|error)/.test(text)) return "HIGH";
   if (/(baja|leve)/.test(text)) return "LOW";
   return "NORMAL";
+}
+
+function isConfirmed(value: string | undefined): boolean {
+  if (!value?.trim()) return false;
+  return /^confirmo$/i.test(value.trim());
+}
+
+function priorityLabel(priority: Priority): string {
+  if (priority === "URGENT") return "urgente";
+  if (priority === "HIGH") return "alta";
+  if (priority === "LOW") return "baja";
+  return "normal";
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -197,6 +211,7 @@ export async function POST(req: NextRequest) {
   const service = inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text}`);
   const priority = parsed.data.prioridad ?? parsed.data.priority ?? inferPriority(text);
   const plate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? detectPlate(text) ?? undefined);
+  const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
   if (!plate) {
     const message = "Me falta la patente para poder registrarlo.";
     await appendOutboundBotMessage(rawPhone, message, {
@@ -215,6 +230,30 @@ export async function POST(req: NextRequest) {
         missing_s: "patente",
         service,
         priority,
+      },
+      { status: BB_STATUS }
+    );
+  }
+  if (!isConfirmed(confirmation)) {
+    const message = `Voy a registrar:\nPatente: ${plate}\nTipo: ${service}\nPrioridad: ${priorityLabel(priority)}\nDetalle: ${text}\n\nSi esta correcto, responde CONFIRMO para registrarlo.`;
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "confirmation_required",
+      service,
+      priority,
+      plate,
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        confirmationRequired: true,
+        confirmationRequired_s: "true",
+        message,
+        service,
+        priority,
+        plate,
       },
       { status: BB_STATUS }
     );
