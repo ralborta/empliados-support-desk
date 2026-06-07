@@ -198,8 +198,7 @@ export async function POST(req: NextRequest) {
   const priority = parsed.data.prioridad ?? parsed.data.priority ?? inferPriority(text);
   const plate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? detectPlate(text) ?? undefined);
   if (!plate) {
-    const message =
-      "Para registrarlo bien me falta la patente. Enviame en un solo mensaje: patente + detalle de la tarea/correctivo + prioridad (normal/alta/urgente).";
+    const message = "Me falta la patente para poder registrarlo.";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
       errorStage: "missing_plate",
