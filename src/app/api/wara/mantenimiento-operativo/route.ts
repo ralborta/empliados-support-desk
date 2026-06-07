@@ -65,7 +65,8 @@ function inferService(raw: string): string {
 function inferPriority(raw: string): Priority {
   const text = raw.toLowerCase();
   if (/(urgente|cr[ií]tic|parad|detenid)/.test(text)) return "URGENT";
-  if (/(correctiv|falla|no funciona|error)/.test(text)) return "HIGH";
+  if (/(alta|correctiv|falla|no funciona|error)/.test(text)) return "HIGH";
+  if (/(baja|leve)/.test(text)) return "LOW";
   return "NORMAL";
 }
 
@@ -196,6 +197,29 @@ export async function POST(req: NextRequest) {
   const service = inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text}`);
   const priority = parsed.data.prioridad ?? parsed.data.priority ?? inferPriority(text);
   const plate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? detectPlate(text) ?? undefined);
+  if (!plate) {
+    const message =
+      "Para registrarlo bien me falta la patente. Enviame en un solo mensaje: patente + detalle de la tarea/correctivo + prioridad (normal/alta/urgente).";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      errorStage: "missing_plate",
+      service,
+      priority,
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        message,
+        missing: ["patente"],
+        missing_s: "patente",
+        service,
+        priority,
+      },
+      { status: BB_STATUS }
+    );
+  }
   const title = `${service}${plate ? ` · ${plate}` : ""}`;
 
   const currentTicket = await prisma.ticket.findFirst({
@@ -256,7 +280,7 @@ export async function POST(req: NextRequest) {
   });
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
-  const responseMessage = `Perfecto, ya registre tu solicitud de ${service.toLowerCase()} para ${company}. Caso ${ticket.code}.`;
+  const responseMessage = `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Caso ${ticket.code}.`;
 
   await prisma.ticketMessage.create({
     data: {
