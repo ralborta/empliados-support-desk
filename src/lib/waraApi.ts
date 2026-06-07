@@ -775,17 +775,24 @@ export async function selectCompanyForCustomer(
     return { ok: false, customer: null, status: 400, error: "Teléfono inválido" };
   }
 
-  const wantedName = selection.companyName?.trim() || "";
-  const wantedIndex =
-    wantedName && /^\d+$/.test(wantedName)
-      ? Number.parseInt(wantedName, 10) - 1
-      : null;
+  const wantedRaw = selection.companyName?.trim() || "";
+  // El cliente puede responder de varias formas: "1", "wara", "1 wara",
+  // "1. WARA", "opcion 2", "el cacique". Extraemos por separado el número
+  // de opción inicial (si lo hay) y la parte de texto del nombre.
+  const leadingNumberMatch = wantedRaw.match(/^\s*(?:opci[oó]n\s*)?(\d{1,3})\b/i);
+  const wantedIndex = leadingNumberMatch
+    ? Number.parseInt(leadingNumberMatch[1], 10) - 1
+    : null;
+  // Nombre = el texto sacando el número de opción inicial y separadores.
+  const wantedName = wantedRaw
+    .replace(/^\s*(?:opci[oó]n\s*)?\d{1,3}\s*[).\-:]?\s*/i, "")
+    .trim();
   const wantedId =
     typeof selection.waraContactId === "number" && Number.isFinite(selection.waraContactId)
       ? selection.waraContactId
       : null;
 
-  if (!wantedName && wantedId == null) {
+  if (!wantedName && wantedId == null && wantedIndex == null) {
     return {
       ok: false,
       customer: null,
@@ -821,17 +828,41 @@ export async function selectCompanyForCustomer(
     };
   }
 
-  const matched = lookup.contactos.find((c) => {
-    if (wantedId != null && c.id === wantedId) return true;
-    if (wantedIndex != null && lookup.contactos[wantedIndex]?.id === c.id) return true;
-    if (wantedName) {
-      const compare = (value: string) =>
-        value.localeCompare(wantedName, "es", { sensitivity: "accent" }) === 0;
-      if (compare(c.empresa)) return true;
-      if (compare(c.nombre)) return true;
-    }
-    return false;
-  });
+  // Normaliza para comparar sin acentos, sin mayúsculas y sin espacios extra.
+  const norm = (value: string) =>
+    (value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  const wantedNameNorm = norm(wantedName);
+
+  const matched =
+    // 1) Por id explícito
+    (wantedId != null
+      ? lookup.contactos.find((c) => c.id === wantedId)
+      : undefined) ??
+    // 2) Por número de opción (índice del menú)
+    (wantedIndex != null ? lookup.contactos[wantedIndex] : undefined) ??
+    // 3) Por nombre: exacto, contiene, o empieza con (tolerante)
+    (wantedNameNorm
+      ? lookup.contactos.find((c) => {
+          const empresa = norm(c.empresa);
+          const nombre = norm(c.nombre);
+          if (empresa === wantedNameNorm || nombre === wantedNameNorm) return true;
+          if (
+            empresa &&
+            (empresa.includes(wantedNameNorm) || wantedNameNorm.includes(empresa))
+          )
+            return true;
+          if (
+            nombre &&
+            (nombre.includes(wantedNameNorm) || wantedNameNorm.includes(nombre))
+          )
+            return true;
+          return false;
+        })
+      : undefined);
 
   if (!matched) {
     return {
