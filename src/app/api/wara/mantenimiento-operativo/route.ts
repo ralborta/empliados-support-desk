@@ -213,7 +213,8 @@ export async function POST(req: NextRequest) {
   const plate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? detectPlate(text) ?? undefined);
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
   if (!plate) {
-    const message = "Me falta la patente para poder registrarlo.";
+    const message =
+      "No pude reconocer una patente completa. Enviamela con formato AA123BB o ABC123 junto con el detalle y la prioridad.";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
       errorStage: "missing_plate",
