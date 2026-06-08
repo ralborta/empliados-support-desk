@@ -2,11 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import {
-  acceptedContextSecretLengths,
-  acceptedCustomerContextSecretCount,
-  configuredContextSecretEnvNames,
-  isCustomerContextAuthConfigured,
-  normalizedContextKeyLength,
+  requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { selectCompanyForCustomer } from "@/lib/waraApi";
@@ -62,17 +58,6 @@ function toContactId(value: unknown): number | undefined {
  * }
  */
 export async function POST(req: NextRequest) {
-  if (!isCustomerContextAuthConfigured()) {
-    return NextResponse.json(
-      {
-        error:
-          "Definí PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel. Es distinta de BUILDERBOT_API_KEY.",
-        envVarsWithSecrets: configuredContextSecretEnvNames(),
-      },
-      { status: 503 }
-    );
-  }
-
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
@@ -82,24 +67,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const keyRaw =
+  // BuilderBot manda el secreto en el header x-api-key (igual que /check).
+  // Aceptamos también api_key en el body por compatibilidad.
+  const bodyKey =
     parsed.data.api_key ?? parsed.data.apiKey ?? parsed.data.key ?? parsed.data.token;
-  if (!validateContextSecret(keyRaw)) {
-    const accepted = acceptedCustomerContextSecretCount();
-    const configuredLengths = acceptedContextSecretLengths();
-    const providedLen = normalizedContextKeyLength(keyRaw);
-    return NextResponse.json(
-      {
-        error: "API key inválida o faltante",
-        receivedKey: !!keyRaw?.trim(),
-        acceptedSecretsCount: accepted,
-        envVarsWithSecrets: configuredContextSecretEnvNames(),
-        providedKeyLength: providedLen,
-        configuredSecretLengths: configuredLengths,
-        hint: "Enviá api_key con el mismo valor que PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY en Vercel.",
-      },
-      { status: 401 }
-    );
+  if (!validateContextSecret(bodyKey)) {
+    const authError = requireBuilderBotContextAuth(req);
+    if (authError) return authError;
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
