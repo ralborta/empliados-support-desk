@@ -5,8 +5,8 @@ import {
   requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { selectCompanyForCustomer } from "@/lib/waraApi";
-import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import { obtenerEmpresaPorNumero, selectCompanyForCustomer } from "@/lib/waraApi";
+import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 const bodySchema = z
   .object({
@@ -16,6 +16,7 @@ const bodySchema = z
     company: z.string().min(1).optional(),
     waraContactId: z.union([z.number(), z.string()]).optional(),
     contactId: z.union([z.number(), z.string()]).optional(),
+    reset: z.union([z.boolean(), z.string()]).optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -27,6 +28,8 @@ const bodySchema = z
   }, "Indicá phone o from con el número (mín. 8 caracteres).")
   .refine(
     (d) =>
+      isResetFlag(d.reset) ||
+      isChangeCompanyPhrase(d.companyName ?? d.company) ||
       Boolean(
         (d.companyName ?? d.company ?? "").trim() ||
           d.waraContactId != null ||
@@ -34,6 +37,23 @@ const bodySchema = z
       ),
     "Indicá companyName/company o waraContactId/contactId."
   );
+
+function isResetFlag(value: unknown): boolean {
+  if (value === true) return true;
+  if (typeof value === "string") {
+    return ["1", "true", "reset", "si", "sí", "yes"].includes(value.trim().toLowerCase());
+  }
+  return false;
+}
+
+/** Detecta frases del cliente para volver a elegir empresa (ej. "cambiar empresa"). */
+function isChangeCompanyPhrase(value: string | undefined | null): boolean {
+  const t = (value ?? "").trim().toLowerCase();
+  if (!t) return false;
+  return /\b(cambiar|cambio|cambiá|otra|elegir|seleccionar)\b.*\bempresa\b|\bempresa\b.*\b(cambiar|equivocada|otra)\b|^cambiar empresa$/.test(
+    t
+  );
+}
 
 function toContactId(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -79,6 +99,39 @@ export async function POST(req: NextRequest) {
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const companyName = (parsed.data.companyName ?? parsed.data.company ?? "").trim();
   const waraContactId = toContactId(parsed.data.waraContactId ?? parsed.data.contactId);
+
+  // Modo "cambiar empresa": limpia la empresa guardada y devuelve el menú de opciones.
+  if (isResetFlag(parsed.data.reset) || isChangeCompanyPhrase(companyName)) {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (customer) {
+      await prisma.customer.update({
+        where: { id: customer.id },
+        data: { companyName: "" },
+      });
+    }
+    const lookup = await obtenerEmpresaPorNumero(rawPhone);
+    const contacts = lookup.contactos ?? [];
+    const waraContactsText = contacts
+      .map((c, i) => `${i + 1}. ${c.empresa || c.nombre}`)
+      .join("\n");
+    const multi = contacts.length > 1;
+    const message = multi
+      ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o el nombre de la empresa.`
+      : contacts.length === 1
+        ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}), así que sigo con esa. ¿En qué te puedo ayudar?`
+        : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;
+    return NextResponse.json({
+      ok: true,
+      reset: true,
+      requiresCompanySelection: multi,
+      requiresCompanySelection_s: multi ? "true" : "false",
+      phone: normalizeWhatsAppPhone(rawPhone),
+      companyName: "",
+      waraContactsText,
+      contacts,
+      message,
+    });
+  }
 
   const result = await selectCompanyForCustomer(prisma, rawPhone, {
     companyName: companyName || undefined,
