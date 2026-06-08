@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import {
@@ -20,6 +21,8 @@ const bodySchema = z
     rawText: z.string().optional(),
     detalle: z.string().optional(),
     detail: z.string().optional(),
+    confirm: z.string().optional(),
+    confirmation: z.string().optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -40,6 +43,11 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
     body.key ||
     body.token
   );
+}
+
+function isConfirmed(value: string | undefined): boolean {
+  if (!value?.trim()) return false;
+  return /^confirmo$/i.test(value.trim());
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -74,7 +82,7 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
       direction: "OUTBOUND",
       from: "BOT",
       text: message,
-      rawPayload: payload as any,
+      rawPayload: payload as Prisma.InputJsonObject,
     },
   });
   await prisma.ticket.update({
@@ -170,9 +178,11 @@ export async function POST(req: NextRequest) {
     parsed.data.detail?.trim() ||
     "Solicitud de certificado";
   const plate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? detectPlate(text) ?? undefined);
+  const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
 
   if (!plate) {
-    const message = "Me falta la patente para registrar la solicitud de certificado.";
+    const message =
+      "No pude reconocer una patente completa. Enviamela con formato AA123BB o ABC123 para registrar la solicitud de certificado.";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       errorStage: "missing_plate",
@@ -191,6 +201,29 @@ export async function POST(req: NextRequest) {
   }
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
+  if (!isConfirmed(confirmation)) {
+    const message = `Voy a registrar la solicitud de certificado:\nPatente: ${plate}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para registrarlo.`;
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      stage: "confirmation_required",
+      plate,
+      companyName: company,
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        confirmationRequired: true,
+        confirmationRequired_s: "true",
+        message,
+        plate,
+        companyName: company,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   const currentTicket = await prisma.ticket.findFirst({
     where: {
       customerId: resolution.customer.id,
