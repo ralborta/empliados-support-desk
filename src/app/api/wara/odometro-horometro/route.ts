@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: "Body inválido", message: "Faltan datos para registrar el cambio.", details: parsed.error.flatten() }, { status: BB_STATUS });
+    return NextResponse.json({ ok: false, error: "Body inválido", message: "Para registrar el cambio necesito la patente y el nuevo valor de odómetro (en km) o de horómetro (en horas). ¿Me los pasás?", details: parsed.error.flatten() }, { status: BB_STATUS });
   }
 
   if (!validateContextSecret(keyFromRequest(req, parsed.data))) {
@@ -201,10 +201,10 @@ export async function POST(req: NextRequest) {
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
 
   if (!patente) {
-    return NextResponse.json({ ok: false, error: "Patente inválida", message: "Necesito una patente válida para registrar el cambio." }, { status: BB_STATUS });
+    return NextResponse.json({ ok: false, error: "Patente inválida", message: "¿Me pasás la patente de la unidad? Por ejemplo AA123BB." }, { status: BB_STATUS });
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
-    return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "Necesito el valor de odómetro y/o horómetro para registrar el cambio." }, { status: BB_STATUS });
+    return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?" }, { status: BB_STATUS });
   }
   if (!isConfirmed(confirmation)) {
     return NextResponse.json({
