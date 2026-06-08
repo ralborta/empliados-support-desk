@@ -50,7 +50,24 @@ export async function GET(req: NextRequest) {
     url.searchParams.get("raw") === "1" ||
     url.searchParams.get("noimpersonate") === "1";
 
+  const appTimezone = process.env.APP_TIMEZONE?.trim() || "";
+  const effectiveTimezone = appTimezone || "America/Argentina/Buenos_Aires";
+  const nowUtc = new Date();
+  const timezoneInfo = {
+    appTimezoneEnvSet: !!appTimezone,
+    appTimezoneEnvValue: appTimezone || null,
+    effectiveTimezone,
+    serverNowUtcIso: nowUtc.toISOString(),
+    serverNowFormattedAR: new Intl.DateTimeFormat("es-AR", {
+      timeZone: effectiveTimezone,
+      dateStyle: "short",
+      timeStyle: "medium",
+      hour12: false,
+    }).format(nowUtc),
+  };
+
   const config = {
+    timezone: timezoneInfo,
     waraEmpresaLookupConfigured: isWaraEmpresaLookupConfigured(),
     obtenerEmpresaTokenSet: !!process.env.WARA_OBTENER_EMPRESA_TOKEN?.trim(),
     obtenerEmpresaTokenLength: (process.env.WARA_OBTENER_EMPRESA_TOKEN?.trim() || "").length,

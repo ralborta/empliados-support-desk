@@ -684,7 +684,18 @@ export async function resolveCustomerByWaraPhone(
     };
   }
 
-  if (!lookup.ok || !lookup.encontrado || lookup.contactos.length === 0) {
+  if (!lookup.ok) {
+    return {
+      customer: local,
+      registered: !!local,
+      source: local ? "local_fallback" : "wara",
+      lookup,
+      requiresCompanySelection: false,
+      selectedCompanyName: local?.companyName?.trim() || null,
+    };
+  }
+
+  if (!lookup.encontrado || lookup.contactos.length === 0) {
     return {
       customer: null,
       registered: false,
