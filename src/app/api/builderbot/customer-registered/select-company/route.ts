@@ -97,11 +97,20 @@ export async function POST(req: NextRequest) {
   }
 
   const customer = result.customer;
+  const selectedCompany = customer?.companyName?.trim() || "";
+  // Mensaje de cierre del paso "elegir empresa": confirma y vuelve a abrir el turno.
+  // El próximo mensaje del cliente entra de nuevo por Inicio -> Router con la empresa
+  // ya fijada, así no encadenamos un clasificador de intención sobre la opción ("1"/"2").
+  const message =
+    `Perfecto, sigo con ${selectedCompany || "tu empresa"}. ¿En qué te puedo ayudar?\n\n` +
+    `Puedo: consultar el estado de una unidad, registrar un cambio de odómetro/horómetro, ` +
+    `gestionar mantenimiento o solicitar un certificado.`;
   return NextResponse.json({
     ok: true,
     phone: normalizeWhatsAppPhone(rawPhone),
-    companyName: customer?.companyName?.trim() || "",
+    companyName: selectedCompany,
     waraContactId: result.matchedContact?.id ?? null,
     contacts: result.contacts ?? [],
+    message,
   });
 }
