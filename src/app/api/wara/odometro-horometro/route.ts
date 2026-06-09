@@ -118,6 +118,63 @@ function isConfirmed(value: string | undefined): boolean {
   return /^confirmo$/i.test(value.trim());
 }
 
+/** Primer número finito de una lista (los datos del body vienen como number|NaN). */
+function firstFiniteNumber(...vals: Array<number | undefined>): number | undefined {
+  for (const v of vals) {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Reconstruye el texto de la conversación reciente desde la base.
+ * BuilderBot manda {history} multilínea que rompe el JSON del body; en vez de eso,
+ * leemos lo que ya quedó persistido (mensajes del cliente y del bot) para parsear
+ * patente / odómetro / fecha del resumen "Voy a registrar:".
+ */
+async function recentThreadText(rawPhone: string): Promise<string> {
+  try {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (!customer) return "";
+    const ticket = await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    });
+    if (!ticket) return "";
+    const msgs = await prisma.ticketMessage.findMany({
+      where: { ticketId: ticket.id },
+      orderBy: { createdAt: "desc" },
+      take: 24,
+      select: { text: true },
+    });
+    return msgs
+      .reverse()
+      .map((m) => m.text)
+      .filter(Boolean)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada. */
+function parseFechaFromText(text: string): string | undefined {
+  const matches = [
+    ...(text || "").matchAll(
+      /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[\sT,]+(\d{1,2}):(\d{2}))?/g
+    ),
+  ];
+  if (matches.length === 0) return undefined;
+  const m = matches[matches.length - 1];
+  const dd = m[1].padStart(2, "0");
+  const mm = m[2].padStart(2, "0");
+  let year = Number(m[3]);
+  if (year < 100) year += 2000;
+  const hh = (m[4] ?? "00").padStart(2, "0");
+  const min = (m[5] ?? "00").padStart(2, "0");
+  return `${year}-${mm}-${dd}T${hh}:${min}:00`;
+}
+
 function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>>, patente: string): string {
   if (!result.ok) return result.error || "No pude registrar el cambio en Wara.";
   const parts = [`Listo, registré el cambio para la unidad ${patente}.`];
@@ -194,10 +251,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "API key inválida o faltante", message: "No pude autenticar la solicitud interna." }, { status: BB_STATUS });
   }
 
+  const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const fromText = parseFromText(parsed.data.rawText ?? "");
-  const patente = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? fromText.patente ?? "");
-  const odometro = parsed.data.odometro ?? parsed.data.odometer ?? fromText.odometro;
-  const horometro = parsed.data.horometro ?? parsed.data.hourmeter ?? fromText.horometro;
+  // No dependemos de {history} (rompe el JSON): reconstruimos el trámite desde la base.
+  const threadText = await recentThreadText(rawPhone);
+  const threadParsed = parseFromText(threadText);
+  const patente = normalizePlate(
+    parsed.data.patente ?? parsed.data.plate ?? fromText.patente ?? threadParsed.patente ?? ""
+  );
+  const odometro = firstFiniteNumber(
+    parsed.data.odometro,
+    parsed.data.odometer,
+    fromText.odometro,
+    threadParsed.odometro
+  );
+  const horometro = firstFiniteNumber(
+    parsed.data.horometro,
+    parsed.data.hourmeter,
+    fromText.horometro,
+    threadParsed.horometro
+  );
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
 
   if (!patente) {
@@ -218,7 +291,6 @@ export async function POST(req: NextRequest) {
     }, { status: BB_STATUS });
   }
 
-  const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);
   if (!session.ok || !session.sessionToken) {
     return NextResponse.json(
@@ -237,7 +309,10 @@ export async function POST(req: NextRequest) {
 
   const customerTz =
     session.lookup?.customerTimezone || session.lookup?.userTimezone || "America/Argentina/Buenos_Aires";
-  const fecha = fechaWara(parsed.data.fecha ?? parsed.data.date, customerTz);
+  const fecha = fechaWara(
+    parsed.data.fecha ?? parsed.data.date ?? parseFechaFromText(threadText),
+    customerTz
+  );
   if (!fecha) {
     return NextResponse.json(
       { ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." },
