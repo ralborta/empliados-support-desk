@@ -353,46 +353,68 @@ async function createChatBotToken(contactId: number): Promise<{
     };
   }
 
-  const res = await fetch(`${waraApiBaseUrl()}/CreateChatBotToken`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, contacto_id: contactId }),
-    cache: "no-store",
-  });
-  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  const data = waraData(json);
-  const pickString = (key: string): string | undefined => {
-    if (typeof json?.[key] === "string") return json[key] as string;
-    if (typeof data[key] === "string") return data[key] as string;
-    return undefined;
-  };
-  const pickNumber = (key: string): number | undefined => {
-    if (typeof json?.[key] === "number") return json[key] as number;
-    if (typeof data[key] === "number") return data[key] as number;
-    return undefined;
-  };
-  const sessionToken = pickString("SessionToken") ?? pickString("sessionToken");
+  // CreateChatBotToken es intermitente del lado de Wara. Reintentamos una vez
+  // ante fallo transitorio (red, 5xx o token vacío) antes de derivar a un agente.
+  const maxAttempts = 2;
+  let lastError = `Wara no devolvió SessionToken (contacto ${contactId})`;
+  let lastStatus = 503;
 
-  if (!res.ok || !sessionToken) {
-    return {
-      ok: false,
-      status: res.status,
-      error:
-        typeof json?.error === "string"
-          ? json.error
-          : `Wara respondió HTTP ${res.status} al crear sesión del chatbot`,
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    let json: Record<string, unknown> | null = null;
+    try {
+      res = await fetch(`${waraApiBaseUrl()}/CreateChatBotToken`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, contacto_id: contactId }),
+        cache: "no-store",
+      });
+      json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "Error de red llamando a CreateChatBotToken";
+      lastStatus = 502;
+      console.error(
+        `[WaraAPI] CreateChatBotToken intento ${attempt}/${maxAttempts} falló (red) contacto=${contactId}: ${lastError}`
+      );
+      continue;
+    }
+
+    const data = waraData(json);
+    const pickString = (key: string): string | undefined => {
+      if (typeof json?.[key] === "string") return json[key] as string;
+      if (typeof data[key] === "string") return data[key] as string;
+      return undefined;
     };
+    const pickNumber = (key: string): number | undefined => {
+      if (typeof json?.[key] === "number") return json[key] as number;
+      if (typeof data[key] === "number") return data[key] as number;
+      return undefined;
+    };
+    const sessionToken = pickString("SessionToken") ?? pickString("sessionToken");
+
+    if (res.ok && sessionToken) {
+      return {
+        ok: true,
+        status: res.status,
+        sessionToken,
+        customerId: pickNumber("CustomerID"),
+        customerName: pickString("CustomerName"),
+        userTimezone: pickString("UserTimezone"),
+        customerTimezone: pickString("CustomerTimezone"),
+      };
+    }
+
+    lastStatus = res.status;
+    lastError =
+      typeof json?.error === "string"
+        ? json.error
+        : `Wara respondió HTTP ${res.status} al crear sesión del chatbot`;
+    console.error(
+      `[WaraAPI] CreateChatBotToken intento ${attempt}/${maxAttempts} sin token contacto=${contactId} status=${res.status}: ${lastError}`
+    );
   }
 
-  return {
-    ok: true,
-    status: res.status,
-    sessionToken,
-    customerId: pickNumber("CustomerID"),
-    customerName: pickString("CustomerName"),
-    userTimezone: pickString("UserTimezone"),
-    customerTimezone: pickString("CustomerTimezone"),
-  };
+  return { ok: false, status: lastStatus, error: lastError };
 }
 
 function findContactForCompany(
@@ -473,6 +495,11 @@ export async function resolveWaraSessionByPhone(
 
   const created = await createChatBotToken(selectedContact.id);
   if (!created.ok || !created.sessionToken) {
+    console.error(
+      `[WaraAPI] No se pudo crear sesión Wara para empresa="${
+        resolution.selectedCompanyName ?? selectedContact.empresa ?? ""
+      }" contacto=${selectedContact.id}: ${created.error ?? "sin detalle"}`
+    );
     return {
       ok: false,
       status: created.status,
