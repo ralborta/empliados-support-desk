@@ -11,6 +11,7 @@
  *   ODOO_EMAIL            ej. soportewara@waragps.com
  *   ODOO_API_KEY          API key del usuario
  *   ODOO_HELPDESK_TEAM_ID (opcional) id del equipo de Helpdesk por defecto
+ *   ODOO_HELPDESK_STAGE_ID (opcional) id de la etapa inicial ("Sin categorizar")
  */
 
 export type OdooConfig = {
@@ -19,6 +20,7 @@ export type OdooConfig = {
   email: string;
   apiKey: string;
   helpdeskTeamId: number | null;
+  helpdeskStageId: number | null;
 };
 
 export type OdooConfigStatus = {
@@ -28,10 +30,16 @@ export type OdooConfigStatus = {
   db: string | null;
   email: string | null;
   helpdeskTeamId: number | null;
+  helpdeskStageId: number | null;
 };
 
 function readEnv(name: string): string {
   return (process.env[name] ?? "").trim();
+}
+
+function readNumberEnv(name: string): number | null {
+  const raw = readEnv(name);
+  return raw && Number.isFinite(Number(raw)) ? Number(raw) : null;
 }
 
 /** Devuelve la config si está completa; null si falta algo. */
@@ -41,9 +49,14 @@ export function getOdooConfig(): OdooConfig | null {
   const email = readEnv("ODOO_EMAIL");
   const apiKey = readEnv("ODOO_API_KEY");
   if (!url || !db || !email || !apiKey) return null;
-  const teamRaw = readEnv("ODOO_HELPDESK_TEAM_ID");
-  const teamId = teamRaw && Number.isFinite(Number(teamRaw)) ? Number(teamRaw) : null;
-  return { url, db, email, apiKey, helpdeskTeamId: teamId };
+  return {
+    url,
+    db,
+    email,
+    apiKey,
+    helpdeskTeamId: readNumberEnv("ODOO_HELPDESK_TEAM_ID"),
+    helpdeskStageId: readNumberEnv("ODOO_HELPDESK_STAGE_ID"),
+  };
 }
 
 /** Estado de configuración para diagnóstico (sin exponer la API key). */
@@ -52,7 +65,6 @@ export function getOdooConfigStatus(): OdooConfigStatus {
   const db = readEnv("ODOO_DB") || null;
   const email = readEnv("ODOO_EMAIL") || null;
   const apiKey = readEnv("ODOO_API_KEY");
-  const teamRaw = readEnv("ODOO_HELPDESK_TEAM_ID");
   const missing: string[] = [];
   if (!url) missing.push("ODOO_URL");
   if (!db) missing.push("ODOO_DB");
@@ -64,7 +76,8 @@ export function getOdooConfigStatus(): OdooConfigStatus {
     url,
     db,
     email,
-    helpdeskTeamId: teamRaw && Number.isFinite(Number(teamRaw)) ? Number(teamRaw) : null,
+    helpdeskTeamId: readNumberEnv("ODOO_HELPDESK_TEAM_ID"),
+    helpdeskStageId: readNumberEnv("ODOO_HELPDESK_STAGE_ID"),
   };
 }
 
@@ -172,8 +185,8 @@ export async function odooExecuteKw<T>(
   ]);
 }
 
-/** Mapea nuestra prioridad de ticket a la escala de Helpdesk (0=baja … 3=urgente). */
-function mapPriority(priority?: string | null): string {
+/** Mapea una prioridad explícita a la escala de Helpdesk (0=baja ... 3=urgente). */
+function mapPriority(priority: string): string {
   switch ((priority ?? "").toUpperCase()) {
     case "LOW":
       return "0";
@@ -195,9 +208,12 @@ export type CreateOdooTicketInput = {
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
+  companyName?: string;
   priority?: string | null;
   /** Sobrescribe el equipo de Helpdesk; si no, usa ODOO_HELPDESK_TEAM_ID. */
   teamId?: number | null;
+  /** Sobrescribe la etapa inicial; si no, usa ODOO_HELPDESK_STAGE_ID. */
+  stageId?: number | null;
   /** Campos extra crudos para el create de Odoo. */
   extra?: Record<string, unknown>;
 };
@@ -217,6 +233,55 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+function phoneSearchTerms(phone?: string): string[] {
+  const raw = phone?.trim();
+  if (!raw) return [];
+  const digits = raw.replace(/\D/g, "");
+  return Array.from(
+    new Set(
+      [
+        raw,
+        digits,
+        digits.length > 10 ? digits.slice(-10) : "",
+        digits.length > 8 ? digits.slice(-8) : "",
+      ].filter((term) => term.length >= 6)
+    )
+  );
+}
+
+async function findPartnerByPhone(
+  cfg: OdooConfig,
+  phone?: string
+): Promise<{ id: number; name?: string } | null> {
+  for (const term of phoneSearchTerms(phone)) {
+    const rows = await odooExecuteKw<Array<{ id: number; name?: string }>>(
+      cfg,
+      "res.partner",
+      "search_read",
+      [["|", ["phone", "ilike", term], ["mobile", "ilike", term]]],
+      { fields: ["id", "name"], limit: 1 }
+    );
+    if (rows?.[0]?.id) return rows[0];
+  }
+  return null;
+}
+
+async function findPartnerByName(
+  cfg: OdooConfig,
+  name?: string
+): Promise<{ id: number; name?: string } | null> {
+  const term = name?.trim();
+  if (!term) return null;
+  const rows = await odooExecuteKw<Array<{ id: number; name?: string }>>(
+    cfg,
+    "res.partner",
+    "search_read",
+    [[["name", "ilike", term]]],
+    { fields: ["id", "name"], limit: 1 }
+  );
+  return rows?.[0]?.id ? rows[0] : null;
+}
+
 /** Crea un ticket de reclamo en Helpdesk y devuelve su id + URL al backoffice. */
 export async function createHelpdeskTicket(
   cfg: OdooConfig,
@@ -226,16 +291,25 @@ export async function createHelpdeskTicket(
   if (!subject) throw new OdooError("El ticket necesita un asunto (subject).");
 
   const teamId = input.teamId ?? cfg.helpdeskTeamId ?? undefined;
+  const stageId = input.stageId ?? cfg.helpdeskStageId ?? undefined;
+  const partner =
+    (await findPartnerByPhone(cfg, input.customerPhone)) ??
+    (await findPartnerByName(cfg, input.companyName));
 
   const values: Record<string, unknown> = {
     name: subject,
-    priority: mapPriority(input.priority),
   };
   if (teamId != null) values.team_id = teamId;
+  if (stageId != null) values.stage_id = stageId;
+  if (input.priority?.trim()) values.priority = mapPriority(input.priority);
   if (input.description?.trim()) {
     values.description = `<p>${escapeHtml(input.description.trim()).replace(/\n/g, "<br/>")}</p>`;
   }
-  if (input.customerName?.trim()) values.partner_name = input.customerName.trim();
+  if (partner?.id) {
+    values.partner_id = partner.id;
+  } else if (input.companyName?.trim() || input.customerName?.trim()) {
+    values.partner_name = (input.companyName ?? input.customerName ?? "").trim();
+  }
   if (input.customerEmail?.trim()) values.partner_email = input.customerEmail.trim();
   if (input.customerPhone?.trim()) values.partner_phone = input.customerPhone.trim();
   if (input.extra) Object.assign(values, input.extra);
@@ -259,7 +333,7 @@ export async function createHelpdeskTicket(
     ok: true,
     ticketId,
     ref,
-    url: `${cfg.url}/odoo/helpdesk/${ticketId}`,
+    url: `${cfg.url}/odoo/all-tickets/${ticketId}`,
   };
 }
 
@@ -271,6 +345,11 @@ export async function odooDiagnostics(): Promise<{
   uid?: number;
   helpdeskAvailable?: boolean;
   teams?: Array<{ id: number; name: string }>;
+  stages?: Array<{ id: number; name: string }>;
+  suggested?: {
+    team?: { id: number; name: string } | null;
+    stage?: { id: number; name: string } | null;
+  };
   error?: string;
 }> {
   const status = getOdooConfigStatus();
@@ -281,6 +360,7 @@ export async function odooDiagnostics(): Promise<{
     const version = await odooVersion(cfg);
     const uid = await odooAuthenticate(cfg);
     let teams: Array<{ id: number; name: string }> | undefined;
+    let stages: Array<{ id: number; name: string }> | undefined;
     let helpdeskAvailable = false;
     try {
       teams = await odooExecuteKw<Array<{ id: number; name: string }>>(
@@ -290,11 +370,30 @@ export async function odooDiagnostics(): Promise<{
         [[]],
         { fields: ["id", "name"], limit: 50 }
       );
+      stages = await odooExecuteKw<Array<{ id: number; name: string }>>(
+        cfg,
+        "helpdesk.stage",
+        "search_read",
+        [[]],
+        { fields: ["id", "name"], limit: 80 }
+      );
       helpdeskAvailable = true;
     } catch {
       helpdeskAvailable = false;
     }
-    return { configured: true, config: status, version, uid, helpdeskAvailable, teams };
+    return {
+      configured: true,
+      config: status,
+      version,
+      uid,
+      helpdeskAvailable,
+      teams,
+      stages,
+      suggested: {
+        team: teams?.find((t) => /atenci[oó]n al cliente/i.test(t.name)) ?? null,
+        stage: stages?.find((s) => /sin categorizar/i.test(s.name)) ?? null,
+      },
+    };
   } catch (e) {
     return {
       configured: true,
