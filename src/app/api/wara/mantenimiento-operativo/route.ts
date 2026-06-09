@@ -72,9 +72,104 @@ function inferPriority(raw: string): Priority {
   return "NORMAL";
 }
 
+/**
+ * Confirmación tolerante: acepta CONFIRMO en cualquier capitalización, con acentos,
+ * espacios o puntuación de más, y también un "sí" claro (sí, dale, ok, listo, etc.).
+ * No exige mayúsculas ni la palabra exacta.
+ */
 function isConfirmed(value: string | undefined): boolean {
   if (!value?.trim()) return false;
-  return /^confirmo$/i.test(value.trim());
+  const t = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z]/g, "");
+  if (!t) return false;
+  const accepted = new Set([
+    "confirmo",
+    "confirmar",
+    "confirmado",
+    "confirma",
+    "siconfirmo",
+    "si",
+    "sii",
+    "sip",
+    "dale",
+    "dalesi",
+    "sidale",
+    "ok",
+    "oka",
+    "okey",
+    "okay",
+    "listo",
+    "correcto",
+    "deacuerdo",
+    "registra",
+    "registralo",
+    "hacelo",
+    "adelante",
+    "avanza",
+    "vamos",
+    "perfecto",
+  ]);
+  return accepted.has(t);
+}
+
+/**
+ * Reconstruye el texto de la conversación reciente desde la base.
+ * BuilderBot manda {history} multilínea que rompe el JSON del body; en vez de eso,
+ * leemos lo persistido para reconstruir patente / tipo / prioridad / detalle del
+ * resumen "Voy a registrar:" en el paso de CONFIRMO.
+ */
+async function recentThreadText(rawPhone: string): Promise<string> {
+  try {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (!customer) return "";
+    const ticket = await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    });
+    if (!ticket) return "";
+    const msgs = await prisma.ticketMessage.findMany({
+      where: { ticketId: ticket.id },
+      orderBy: { createdAt: "desc" },
+      take: 24,
+      select: { text: true },
+    });
+    return msgs
+      .reverse()
+      .map((m) => m.text)
+      .filter(Boolean)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/** Extrae los datos del resumen "Voy a registrar:" (Patente / Tipo / Prioridad / Detalle). */
+function parseMantenimientoSummary(text: string): {
+  patente?: string;
+  servicio?: string;
+  prioridad?: Priority;
+  detalle?: string;
+} {
+  const out: { patente?: string; servicio?: string; prioridad?: Priority; detalle?: string } = {};
+  const patenteM = text.match(/Patente:\s*([A-Za-z0-9 ]{5,12})/);
+  if (patenteM) out.patente = patenteM[1].trim();
+  const tipoM = text.match(/Tipo:\s*(.+)/);
+  if (tipoM) out.servicio = tipoM[1].trim();
+  const detalleM = text.match(/Detalle:\s*(.+)/);
+  if (detalleM) out.detalle = detalleM[1].trim();
+  const prioM = text.match(/Prioridad:\s*(\w+)/i);
+  if (prioM) {
+    const p = prioM[1].toLowerCase();
+    if (/urg/.test(p)) out.prioridad = "URGENT";
+    else if (/alt/.test(p)) out.prioridad = "HIGH";
+    else if (/baj/.test(p)) out.prioridad = "LOW";
+    else out.prioridad = "NORMAL";
+  }
+  return out;
 }
 
 function priorityLabel(priority: Priority): string {
@@ -201,17 +296,37 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
+  // No dependemos de {history} (rompe el JSON del body): reconstruimos el trámite
+  // desde lo persistido en la base, igual que en el flujo de odómetro.
+  const threadText = await recentThreadText(rawPhone);
+  const summary = parseMantenimientoSummary(threadText);
+
   const text =
     parsed.data.rawText?.trim() ||
     parsed.data.detalle?.trim() ||
     parsed.data.detail?.trim() ||
     parsed.data.servicio?.trim() ||
     parsed.data.service?.trim() ||
+    summary.detalle ||
+    summary.servicio ||
     "Solicitud de gestion de mantenimiento";
-  const service = inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text}`);
-  const priority = parsed.data.prioridad ?? parsed.data.priority ?? inferPriority(text);
-  const plate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? detectPlate(text) ?? undefined);
-  const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
+  const service =
+    summary.servicio ||
+    inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text}`);
+  const priority =
+    parsed.data.prioridad ??
+    parsed.data.priority ??
+    summary.prioridad ??
+    inferPriority(text);
+  const plate = normalizePlate(
+    parsed.data.patente ??
+      parsed.data.plate ??
+      detectPlate(text) ??
+      summary.patente ??
+      detectPlate(threadText) ??
+      undefined
+  );
   if (!plate) {
     const message =
       "No pude reconocer una patente completa. Enviamela con formato AA123BB o ABC123 junto con el detalle y la prioridad.";
