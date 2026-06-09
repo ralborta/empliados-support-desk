@@ -113,9 +113,48 @@ function parseFromText(rawText: string): {
   };
 }
 
+/**
+ * Confirmación tolerante: acepta CONFIRMO en cualquier capitalización, con acentos,
+ * espacios o puntuación de más (ej. "Confirm,o", "confirmo!"), y también un "sí" claro
+ * (sí, dale, ok, listo, correcto, etc.). No exige mayúsculas ni la palabra exacta.
+ */
 function isConfirmed(value: string | undefined): boolean {
   if (!value?.trim()) return false;
-  return /^confirmo$/i.test(value.trim());
+  const t = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z]/g, "");
+  if (!t) return false;
+  const accepted = new Set([
+    "confirmo",
+    "confirmar",
+    "confirmado",
+    "confirma",
+    "siconfirmo",
+    "si",
+    "sii",
+    "sip",
+    "dale",
+    "dalesi",
+    "sidale",
+    "ok",
+    "oka",
+    "okey",
+    "okay",
+    "listo",
+    "correcto",
+    "deacuerdo",
+    "registra",
+    "registralo",
+    "hacelo",
+    "adelante",
+    "avanza",
+    "vamos",
+    "perfecto",
+  ]);
+  return accepted.has(t);
 }
 
 /** Primer número finito de una lista (los datos del body vienen como number|NaN). */
@@ -328,7 +367,19 @@ export async function POST(req: NextRequest) {
     ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
   });
 
-  const responseMessage = formatSuccessMessage(result, patente);
+  let responseMessage = formatSuccessMessage(result, patente);
+  // Si Wara no encontró la unidad y el cliente tiene más de una empresa, avisamos
+  // en cuál estamos buscando y sugerimos cambiar de empresa (la patente puede ser de otra).
+  if (!result.ok) {
+    const companies = session.lookup?.contactos ?? [];
+    const activeCompany = session.companyName?.trim();
+    const notFound = /no se encontr|no encontr|veh[ií]culo|patente|unidad/i.test(result.error ?? "");
+    if (companies.length > 1 && notFound) {
+      responseMessage =
+        `${responseMessage}${activeCompany ? ` (busqué en ${activeCompany})` : ""}. ` +
+        `Si la unidad es de otra de tus empresas, escribí "cambiar empresa" y la registro ahí.`;
+    }
+  }
   await appendOutboundBotMessage(rawPhone, responseMessage, {
     source: "wara_odometro_response",
     ok: result.ok,
