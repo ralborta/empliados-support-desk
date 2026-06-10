@@ -110,8 +110,13 @@ async function recentThreadText(rawPhone: string): Promise<string> {
 }
 
 function extractPlateFromCertificateSummary(text: string): string | null {
-  const match = text.match(/Patente:\s*([A-Za-z0-9 ]{5,12})/);
-  return normalizePlate(match?.[1] ?? detectPlate(text) ?? undefined);
+  // Tomamos la mención de patente MÁS RECIENTE (la última en el hilo cronológico),
+  // para no agarrar una patente vieja de una solicitud anterior.
+  const labeled = [...text.matchAll(/Patente:\s*([A-Za-z0-9 ]{5,12})/g)];
+  if (labeled.length) return normalizePlate(labeled[labeled.length - 1][1]);
+  const plates = [...text.matchAll(/\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi)];
+  if (plates.length) return normalizePlate(plates[plates.length - 1][1]);
+  return null;
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
