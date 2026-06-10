@@ -6,7 +6,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
 import {
   obtenerCertificadoCobertura,
   resolveCustomerByWaraPhone,
@@ -319,7 +319,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await obtenerCertificadoCobertura(session.sessionToken, plate);
+  const plateForWara = formatPlateWithSpaces(plate) ?? plate;
+  const result = await obtenerCertificadoCobertura(session.sessionToken, plateForWara);
   if (!result.ok) {
     const message = `No pude generar el certificado de cobertura para ${plate}. ${result.error ?? "Wara no completó la solicitud."}`;
     await appendOutboundBotMessage(rawPhone, message, {
