@@ -8,9 +8,10 @@ import {
   getOdooConfigStatus,
   OdooError,
 } from "@/lib/odooApi";
-import { detectPlate, detectIncidentType, normalizePlate, waraIncidentLabels } from "@/lib/wara";
+import { detectPlate, detectIncidentType, formatPlateWithSpaces, normalizePlate, waraIncidentLabels } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { consultarEstadoUnidades, resolveWaraSessionByPhone } from "@/lib/waraApi";
 
 /**
  * Crea un ticket de reclamo/escalamiento en Odoo Helpdesk (equipo "Atención al cliente").
@@ -88,6 +89,46 @@ function buildEvent(explicit: string | undefined, rawText: string | undefined): 
     if (firstLine) return firstLine.length > 70 ? `${firstLine.slice(0, 67)}...` : firstLine;
   }
   return "Consulta/reclamo";
+}
+
+/** Convierte segundos en un texto legible: "18 h", "3 d 4 h", "45 min". */
+function humanizeElapsed(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  const totalMin = Math.floor(seconds / 60);
+  if (totalMin < 60) return `${totalMin} min`;
+  const totalHours = Math.floor(totalMin / 60);
+  if (totalHours < 24) return `${totalHours} h`;
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return hours > 0 ? `${days} d ${hours} h` : `${days} d`;
+}
+
+/**
+ * Consulta el estado real de la unidad en Wara para enriquecer el caso con el dato
+ * de la API (ej. "sin reporte hace 18 h"). Nunca bloquea la creación del ticket:
+ * ante cualquier error devuelve null.
+ */
+async function fetchUnitReportInfo(
+  rawPhone: string,
+  plateWithSpaces: string
+): Promise<{ lastReportElapsed?: string; lastReportDate?: string; unidad?: string } | null> {
+  try {
+    if (!rawPhone || !plateWithSpaces) return null;
+    const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+    if (!session.ok || !session.sessionToken) return null;
+    const result = await consultarEstadoUnidades(session.sessionToken, [plateWithSpaces]);
+    if (!result.ok || !result.unidades.length) return null;
+    const unidad = result.unidades[0];
+    const elapsed = unidad.ultimo_reporte?.hace_segundos;
+    return {
+      lastReportElapsed:
+        typeof elapsed === "number" ? humanizeElapsed(elapsed) : undefined,
+      lastReportDate: unidad.ultimo_reporte?.fecha,
+      unidad: unidad.unidad,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Reconstruye texto reciente de la conversación desde la base (fallback de patente). */
@@ -208,12 +249,21 @@ export async function POST(req: NextRequest) {
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
   const subject = explicitSubject || (plate ? `${plate} - ${event}` : event);
 
+  // Dato real de la API de Wara para enriquecer el evento (ej. "sin reporte hace 18 h").
+  const plateWithSpaces = plate ? formatPlateWithSpaces(plate) ?? plate : "";
+  const unitInfo = plateWithSpaces ? await fetchUnitReportInfo(rawPhone, plateWithSpaces) : null;
+  const eventWithData =
+    unitInfo?.lastReportElapsed && /falta de reporte|no reporta|sin reporte|offline/i.test(`${event} ${data.rawText ?? ""}`)
+      ? `${event} (sin reporte hace ${unitInfo.lastReportElapsed})`
+      : event;
+
   const descriptionLines = [
     data.description?.trim() || data.rawText?.trim() || "",
     data.aiSummary?.trim() ? `Resumen Atilio: ${data.aiSummary.trim()}` : "",
     companyName ? `Empresa Wara: ${companyName}` : "",
     plate ? `Patente: ${plate}` : "",
-    event ? `Evento: ${event}` : "",
+    `Evento: ${eventWithData}`,
+    unitInfo?.lastReportDate ? `Último reporte (Wara): ${unitInfo.lastReportDate}` : "",
     customerName ? `Contacto: ${customerName}` : "",
     rawPhone ? `WhatsApp: ${rawPhone}` : "",
     "Origen: Atilio / WhatsApp",

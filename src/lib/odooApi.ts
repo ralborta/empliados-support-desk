@@ -282,6 +282,35 @@ async function findPartnerByName(
   return rows?.[0]?.id ? rows[0] : null;
 }
 
+/**
+ * Resuelve el partner ("Cliente" del ticket): primero por teléfono, luego por nombre
+ * de empresa, y si no existe lo crea con la razón social real de Wara. Así el campo
+ * Cliente del ticket siempre queda con el nombre correcto (ej. "El Cacique S.A.").
+ */
+async function findOrCreatePartner(
+  cfg: OdooConfig,
+  opts: { companyName?: string; customerName?: string; phone?: string; email?: string }
+): Promise<{ id: number; name?: string } | null> {
+  const byPhone = await findPartnerByPhone(cfg, opts.phone);
+  if (byPhone?.id) return byPhone;
+
+  const companyName = opts.companyName?.trim();
+  if (companyName) {
+    const byName = await findPartnerByName(cfg, companyName);
+    if (byName?.id) return byName;
+    try {
+      const values: Record<string, unknown> = { name: companyName, is_company: true };
+      if (opts.phone?.trim()) values.phone = opts.phone.trim();
+      if (opts.email?.trim()) values.email = opts.email.trim();
+      const id = await odooExecuteKw<number>(cfg, "res.partner", "create", [values]);
+      if (id) return { id, name: companyName };
+    } catch {
+      // Si no se puede crear el partner, seguimos sin partner_id (se usa partner_name).
+    }
+  }
+  return null;
+}
+
 /** Crea un ticket de reclamo en Helpdesk y devuelve su id + URL al backoffice. */
 export async function createHelpdeskTicket(
   cfg: OdooConfig,
@@ -292,9 +321,12 @@ export async function createHelpdeskTicket(
 
   const teamId = input.teamId ?? cfg.helpdeskTeamId ?? undefined;
   const stageId = input.stageId ?? cfg.helpdeskStageId ?? undefined;
-  const partner =
-    (await findPartnerByPhone(cfg, input.customerPhone)) ??
-    (await findPartnerByName(cfg, input.companyName));
+  const partner = await findOrCreatePartner(cfg, {
+    companyName: input.companyName,
+    customerName: input.customerName,
+    phone: input.customerPhone,
+    email: input.customerEmail,
+  });
 
   const values: Record<string, unknown> = {
     name: subject,
