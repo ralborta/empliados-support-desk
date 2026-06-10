@@ -272,8 +272,9 @@ export async function POST(req: NextRequest) {
   }
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
+  const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
   if (!isConfirmed(confirmation)) {
-    const message = `Voy a generar el certificado de cobertura:\nPatente: ${plate}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.`;
+    const message = `Voy a generar el certificado de cobertura:\nPatente: ${plateDisplay}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       stage: "confirmation_required",
@@ -319,10 +320,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const plateForWara = formatPlateWithSpaces(plate) ?? plate;
-  const result = await obtenerCertificadoCobertura(session.sessionToken, plateForWara);
+  const result = await obtenerCertificadoCobertura(session.sessionToken, plateDisplay);
   if (!result.ok) {
-    const message = `No pude generar el certificado de cobertura para ${plate}. ${result.error ?? "Wara no completó la solicitud."}`;
+    const message = `No pude generar el certificado de cobertura para ${plateDisplay}. ${result.error ?? "Wara no completó la solicitud."}`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       errorStage: "certificadocobertura",
@@ -346,8 +346,8 @@ export async function POST(req: NextRequest) {
 
   const certUrl = result.downloadUrl ?? result.url;
   const responseMessage = certUrl
-    ? `Perfecto, generé el certificado de cobertura para ${company}, patente ${plate}.\n${certUrl}`
-    : `Perfecto, generé el certificado de cobertura para ${company}, patente ${plate}. ${result.message ?? "La solicitud fue procesada por Wara."}`;
+    ? `Perfecto, generé el certificado de cobertura para ${company}, patente ${plateDisplay}.\n${certUrl}`
+    : `Perfecto, generé el certificado de cobertura para ${company}, patente ${plateDisplay}. ${result.message ?? "La solicitud fue procesada por Wara."}`;
 
   await appendOutboundBotMessage(rawPhone, responseMessage, {
     source: "wara_certificados",
