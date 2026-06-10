@@ -88,6 +88,7 @@ function isConfirmed(value: string | undefined): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z]/g, "");
   if (!t) return false;
+  if (t.startsWith("conf")) return true;
   const accepted = new Set([
     "confirmo",
     "confirmar",

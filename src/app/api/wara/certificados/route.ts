@@ -57,6 +57,8 @@ function isConfirmed(value: string | undefined): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z]/g, "");
   if (!t) return false;
+  // Tolerante a errores de tipeo: cualquier "conf..." (confirmo, confirmado, confimado, conforme).
+  if (t.startsWith("conf")) return true;
   return new Set([
     "confirmo",
     "confirmar",
