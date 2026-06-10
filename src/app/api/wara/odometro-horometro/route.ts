@@ -8,7 +8,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone } from "@/lib/waraApi";
-import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
   const n = typeof value === "number" ? value : Number(value.replace(",", ".").trim());
@@ -197,6 +197,24 @@ async function recentThreadText(rawPhone: string): Promise<string> {
   }
 }
 
+/**
+ * Extrae la patente del resumen confirmado ("Voy a registrar:\n• Patente: AD 427 MC").
+ * Es la fuente más confiable: es el dato que el bot armó y el cliente confirmó.
+ * Ignora patentes de ejemplo. Toma la última ocurrencia (el resumen más reciente).
+ */
+function plateFromSummary(text: string): string | undefined {
+  const matches = [
+    ...(text || "").matchAll(
+      /patente[^\n:]*[:\-]\s*([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})/gi
+    ),
+  ];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(matches[i][1]);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
+  return undefined;
+}
+
 /** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada. */
 function parseFechaFromText(text: string): string | undefined {
   const matches = [
@@ -297,7 +315,12 @@ export async function POST(req: NextRequest) {
   const threadText = await recentThreadText(rawPhone);
   const threadParsed = parseFromText(threadText);
   const patente = normalizePlate(
-    parsed.data.patente ?? parsed.data.plate ?? fromText.patente ?? threadParsed.patente ?? ""
+    parsed.data.patente ??
+      parsed.data.plate ??
+      fromText.patente ??
+      plateFromSummary(threadText) ??
+      threadParsed.patente ??
+      ""
   );
   const odometro = firstFiniteNumber(
     parsed.data.odometro,

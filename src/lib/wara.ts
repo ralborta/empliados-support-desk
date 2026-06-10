@@ -32,17 +32,45 @@ export const resolutionModeLabels: Record<ResolutionMode, string> = {
   CLOSED_NO_ACTION: "Cerrado sin acción",
 };
 
-const PLATE_REGEX =
-  /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/i;
+const PLATE_REGEX_GLOBAL =
+  /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi;
+
+/**
+ * Patentes de EJEMPLO que aparecen en los textos del bot ("ej: AB123CD", "por
+ * ejemplo AA123BB"). Nunca son patentes reales del cliente; deben ignorarse al
+ * detectar la patente desde el historial, o se intentaría operar sobre un
+ * vehículo inexistente (Wara responde "No se encontró el vehículo con esa patente").
+ */
+export const EXAMPLE_PLATES = new Set([
+  "AB123CD",
+  "AA123BB",
+  "AA999AA",
+  "ABC123",
+  "AAA123",
+]);
 
 export function normalizePlate(value: string | null | undefined): string | null {
   if (!value) return null;
   return value.toUpperCase().replace(/\s+/g, "");
 }
 
+/** True si la patente normalizada es una de las usadas como ejemplo en los prompts. */
+export function isExamplePlate(value: string | null | undefined): boolean {
+  const compact = normalizePlate(value);
+  return compact ? EXAMPLE_PLATES.has(compact) : false;
+}
+
+/**
+ * Detecta la primera patente REAL en el texto, ignorando las patentes de ejemplo
+ * de los prompts. Si solo hay ejemplos, devuelve null.
+ */
 export function detectPlate(text: string): string | null {
-  const match = text.match(PLATE_REGEX);
-  return normalizePlate(match?.[1] || null);
+  if (!text) return null;
+  for (const match of text.matchAll(PLATE_REGEX_GLOBAL)) {
+    const plate = normalizePlate(match[1]);
+    if (plate && !EXAMPLE_PLATES.has(plate)) return plate;
+  }
+  return null;
 }
 
 /**
