@@ -13,6 +13,33 @@ export function normalizeWhatsAppPhone(raw: string): string {
 }
 
 /**
+ * True si el remitente NO es una persona/cliente real: canales (newsletter),
+ * listas de difusión, grupos, estados, o IDs imposibles para un número telefónico.
+ *
+ * Estos remitentes (p. ej. `120363169271016023@newsletter`, `status@broadcast`,
+ * `...@g.us`) deben IGNORARSE por completo: el bot no debe responderlos ni derivarlos.
+ * Un número E.164 válido tiene como máximo 15 dígitos; los IDs de canal/grupo
+ * son mucho más largos.
+ */
+export function isNonHumanWhatsAppSender(raw: string): boolean {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (
+    s.includes("@newsletter") ||
+    s.includes("@broadcast") ||
+    s.includes("@g.us") ||
+    s.includes("status@") ||
+    s.includes("@lid")
+  ) {
+    return true;
+  }
+  // ID puramente numérico pero demasiado largo para ser un teléfono real.
+  const digits = s.replace(/\D/g, "");
+  if (digits.length > 15) return true;
+  return false;
+}
+
+/**
  * Busca Customer por teléfono canónico; si en DB hay un formato viejo (JID, +, espacios),
  * lo encuentra por comparación numérica y opcionalmente actualiza `phone` al valor normalizado.
  *

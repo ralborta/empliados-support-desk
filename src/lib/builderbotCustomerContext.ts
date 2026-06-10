@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
 
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
@@ -267,6 +267,26 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
     return NextResponse.json({ error: "Teléfono vacío" }, { status: 400 });
   }
 
+  // Canales (newsletter), difusiones, grupos y estados NO son clientes: el bot debe
+  // ignorarlos por completo (ni responder ni derivar). Evita que una noticia reenviada
+  // por un canal dispare la derivación "el cliente requiere soporte".
+  if (isNonHumanWhatsAppSender(trimmed)) {
+    return NextResponse.json({
+      registered: false,
+      registered_s: "false",
+      ignore: true,
+      ignore_s: "true",
+      phone: normalizeWhatsAppPhone(trimmed) || trimmed,
+      name: "",
+      companyName: "",
+      validationSource: "non_human_sender",
+      requiresCompanySelection: false,
+      requiresCompanySelection_s: "false",
+      testBlocked: false,
+      testBlocked_s: "false",
+    });
+  }
+
   const normalized = normalizeWhatsAppPhone(trimmed) || trimmed.replace(/\D/g, "");
   if (normalized.length < 8) {
     const placeholderHint = isLikelyBuilderBotPhonePlaceholder(trimmed)
@@ -318,6 +338,8 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
   return NextResponse.json({
     registered,
     registered_s: registered ? "true" : "false",
+    ignore: false,
+    ignore_s: "false",
     phone: normalized,
     name: customer?.name?.trim() || "",
     companyName: resolution.selectedCompanyName ?? customer?.companyName?.trim() ?? "",
