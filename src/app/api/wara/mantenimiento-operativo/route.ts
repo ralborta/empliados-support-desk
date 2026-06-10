@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import {
@@ -10,6 +11,7 @@ import { detectPlate, normalizePlate } from "@/lib/wara";
 import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
 
 const bodySchema = z
   .object({
@@ -211,7 +213,7 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
       direction: "OUTBOUND",
       from: "BOT",
       text: message,
-      rawPayload: payload as any,
+      rawPayload: payload as Prisma.InputJsonObject,
     },
   });
   await prisma.ticket.update({
@@ -434,7 +436,49 @@ export async function POST(req: NextRequest) {
   });
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
-  const responseMessage = `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Caso ${ticket.code}.`;
+  let odooRef: string | null = null;
+  const odooCfg = getOdooConfig();
+  if (odooCfg) {
+    try {
+      const odoo = await createHelpdeskTicket(odooCfg, {
+        subject: `${plate} - ${service}`,
+        description: [
+          `Gestión de mantenimiento solicitada desde Atilio / WhatsApp.`,
+          `Empresa Wara: ${company}`,
+          `Patente: ${plate}`,
+          `Tipo: ${service}`,
+          `Prioridad: ${priorityLabel(priority)}`,
+          `Detalle: ${text}`,
+          `WhatsApp: ${rawPhone}`,
+          `Ticket local: ${ticket.code}`,
+        ].join("\n"),
+        customerName:
+          resolution.customer.name?.trim() ||
+          resolution.customer.companyName?.trim() ||
+          company,
+        customerPhone: rawPhone,
+        companyName: company,
+        priority,
+      });
+      odooRef = odoo.ref ?? String(odoo.ticketId);
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: {
+          aiSummary: `${service}${plate ? ` para ${plate}` : ""}. Cliente: ${company}. Odoo: ${odooRef}.`,
+        },
+      });
+    } catch (error) {
+      console.error(
+        `[Mantenimiento] No se pudo crear ticket Odoo para ${plate}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  const responseMessage = odooRef
+    ? `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Caso Odoo ${odooRef}.`
+    : `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Caso ${ticket.code}.`;
 
   await prisma.ticketMessage.create({
     data: {
@@ -447,6 +491,7 @@ export async function POST(req: NextRequest) {
         generatedBy: "api_response",
         service,
         plate: plate ?? "",
+        odooRef: odooRef ?? "",
       },
     },
   });
@@ -457,6 +502,7 @@ export async function POST(req: NextRequest) {
       ok_s: "true",
       ticketCode: ticket.code,
       ticketId: ticket.id,
+      odooRef,
       service,
       plate: plate ?? "",
       companyName: company,

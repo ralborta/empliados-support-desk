@@ -6,9 +6,12 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, normalizePlate } from "@/lib/wara";
-import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
+import {
+  obtenerCertificadoCobertura,
+  resolveCustomerByWaraPhone,
+  resolveWaraSessionByPhone,
+} from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 
@@ -47,7 +50,68 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
 
 function isConfirmed(value: string | undefined): boolean {
   if (!value?.trim()) return false;
-  return /^confirmo$/i.test(value.trim());
+  const t = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z]/g, "");
+  if (!t) return false;
+  return new Set([
+    "confirmo",
+    "confirmar",
+    "confirmado",
+    "confirma",
+    "siconfirmo",
+    "si",
+    "sii",
+    "sip",
+    "dale",
+    "dalesi",
+    "sidale",
+    "ok",
+    "oka",
+    "okey",
+    "okay",
+    "listo",
+    "correcto",
+    "deacuerdo",
+    "hacelo",
+    "adelante",
+    "avanza",
+    "vamos",
+    "perfecto",
+  ]).has(t);
+}
+
+async function recentThreadText(rawPhone: string): Promise<string> {
+  try {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (!customer) return "";
+    const ticket = await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    });
+    if (!ticket) return "";
+    const msgs = await prisma.ticketMessage.findMany({
+      where: { ticketId: ticket.id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { text: true },
+    });
+    return msgs
+      .reverse()
+      .map((m) => m.text)
+      .filter(Boolean)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function extractPlateFromCertificateSummary(text: string): string | null {
+  const match = text.match(/Patente:\s*([A-Za-z0-9 ]{5,12})/);
+  return normalizePlate(match?.[1] ?? detectPlate(text) ?? undefined);
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -177,7 +241,14 @@ export async function POST(req: NextRequest) {
     parsed.data.detalle?.trim() ||
     parsed.data.detail?.trim() ||
     "Solicitud de certificado";
-  const plate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? detectPlate(text) ?? undefined);
+  const threadText = await recentThreadText(rawPhone);
+  const plate = normalizePlate(
+    parsed.data.patente ??
+      parsed.data.plate ??
+      detectPlate(text) ??
+      extractPlateFromCertificateSummary(threadText) ??
+      undefined
+  );
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
 
   if (!plate) {
@@ -202,7 +273,7 @@ export async function POST(req: NextRequest) {
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
   if (!isConfirmed(confirmation)) {
-    const message = `Voy a registrar la solicitud de certificado:\nPatente: ${plate}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para registrarlo.`;
+    const message = `Voy a generar el certificado de cobertura:\nPatente: ${plate}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       stage: "confirmation_required",
@@ -224,86 +295,78 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const currentTicket = await prisma.ticket.findFirst({
-    where: {
-      customerId: resolution.customer.id,
-      status: { in: ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"] },
-      category: "SALES",
-      incidentType: "CERTIFICATE_ISSUE",
-    },
-    orderBy: { lastMessageAt: "desc" },
-  });
-
-  const title = `Certificado de monitoreo · ${plate}`;
-  const ticket =
-    currentTicket ??
-    (await prisma.ticket.create({
-      data: {
-        code: generateTicketCode(),
-        customerId: resolution.customer.id,
-        contactName:
-          resolution.customer.name?.trim() ||
-          resolution.selectedCompanyName?.trim() ||
-          "Sin nombre",
-        title,
-        status: "OPEN",
-        priority: "NORMAL",
-        category: "SALES",
-        incidentType: "CERTIFICATE_ISSUE",
-        channel: "WHATSAPP",
+  const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+  if (!session.ok || !session.sessionToken) {
+    const message = session.requiresCompanySelection
+      ? "Antes de continuar, necesito que elijas la empresa asociada a este numero."
+      : "No pude validar la sesión con Wara para generar el certificado. Intentá nuevamente en unos minutos.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      errorStage: "session_resolution",
+      detail: session.error ?? "",
+      plate,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        message,
+        requiresCompanySelection: session.requiresCompanySelection ?? false,
+        requiresCompanySelection_s: session.requiresCompanySelection ? "true" : "false",
+        error: session.error,
       },
-    }));
+      { status: BB_STATUS }
+    );
+  }
 
-  await prisma.ticketMessage.create({
-    data: {
-      ticketId: ticket.id,
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      text,
-      rawPayload: {
-        source: "builderbot_certificados",
+  const result = await obtenerCertificadoCobertura(session.sessionToken, plate);
+  if (!result.ok) {
+    const message = `No pude generar el certificado de cobertura para ${plate}. ${result.error ?? "Wara no completó la solicitud."}`;
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      errorStage: "certificadocobertura",
+      status: result.status,
+      error: result.error ?? "",
+      plate,
+      companyName: company,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        message,
+        plate,
         companyName: company,
-        plate,
-        phone: rawPhone,
+        error: result.error,
       },
-    },
-  });
+      { status: BB_STATUS }
+    );
+  }
 
-  await prisma.ticket.update({
-    where: { id: ticket.id },
-    data: {
-      title,
-      priority: "NORMAL",
-      status: ticket.status === "OPEN" ? "IN_PROGRESS" : ticket.status,
-      lastMessageAt: new Date(),
-      aiSummary: `Solicitud de certificado de monitoreo para ${plate}. Cliente: ${company}.`,
-    },
-  });
+  const certUrl = result.downloadUrl ?? result.url;
+  const responseMessage = certUrl
+    ? `Perfecto, generé el certificado de cobertura para ${company}, patente ${plate}.\n${certUrl}`
+    : `Perfecto, generé el certificado de cobertura para ${company}, patente ${plate}. ${result.message ?? "La solicitud fue procesada por Wara."}`;
 
-  const responseMessage = `Perfecto, deje registrada la solicitud de certificado para ${company}, patente ${plate}. Caso ${ticket.code}. Queda pendiente de validacion interna.`;
-
-  await prisma.ticketMessage.create({
-    data: {
-      ticketId: ticket.id,
-      direction: "OUTBOUND",
-      from: "BOT",
-      text: responseMessage,
-      rawPayload: {
-        source: "wara_certificados",
-        generatedBy: "api_response",
-        plate,
-      },
-    },
+  await appendOutboundBotMessage(rawPhone, responseMessage, {
+    source: "wara_certificados",
+    generatedBy: "wara_certificadocobertura",
+    plate,
+    companyName: company,
+    status: result.status,
+    hasUrl: Boolean(certUrl),
+    hasCertificatePayload: Boolean(result.certificado),
+    raw: result.raw ?? {},
   });
 
   return NextResponse.json(
     {
       ok: true,
       ok_s: "true",
-      ticketCode: ticket.code,
-      ticketId: ticket.id,
       plate,
       companyName: company,
+      url: certUrl,
+      filename: result.filename,
       message: responseMessage,
     },
     { status: BB_STATUS }

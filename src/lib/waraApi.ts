@@ -217,6 +217,18 @@ export type WaraRegistrarCambioResult = {
   error?: string;
 };
 
+export type WaraCertificadoCoberturaResult = {
+  ok: boolean;
+  status: number;
+  url?: string;
+  downloadUrl?: string;
+  certificado?: string;
+  filename?: string;
+  message?: string;
+  raw?: Record<string, unknown>;
+  error?: string;
+};
+
 function normalizeContact(raw: unknown): WaraEmpresaContact | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
@@ -633,6 +645,56 @@ export async function registrarCambioOdometroHorometro(
         ? (data.horometro as WaraRegistrarCambioResult["horometro"])
         : undefined,
     error: json?.ok === false ? errorFromWara(json, "Wara no registró el cambio") : undefined,
+  };
+}
+
+function firstString(data: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+export async function obtenerCertificadoCobertura(
+  sessionToken: string,
+  patente: string
+): Promise<WaraCertificadoCoberturaResult> {
+  const res = await fetch(`${waraMaintenanceApiBaseUrl()}/Certificadocobertura`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${sessionToken}`,
+    },
+    body: JSON.stringify({ token: sessionToken, patente }),
+    cache: "no-store",
+  });
+
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      error: errorFromWara(json, `Wara respondió HTTP ${res.status}`),
+      raw: json ?? undefined,
+    };
+  }
+
+  const data = waraData(json);
+  const url = firstString(data, ["url", "URL", "link", "Link", "certificado_url", "certificadoUrl", "archivo_url"]);
+  const certificado = firstString(data, ["certificado", "pdf", "base64", "archivo", "file", "documento"]);
+  const message = firstString(data, ["message", "mensaje", "detalle"]);
+
+  return {
+    ok: json?.ok !== false,
+    status: res.status,
+    url,
+    downloadUrl: firstString(data, ["downloadUrl", "download_url", "url_descarga"]),
+    certificado,
+    filename: firstString(data, ["filename", "fileName", "nombre_archivo"]),
+    message,
+    raw: data,
+    error: json?.ok === false ? errorFromWara(json, "Wara no generó el certificado") : undefined,
   };
 }
 
