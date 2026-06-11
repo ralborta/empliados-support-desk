@@ -246,7 +246,61 @@ function normalizeContact(raw: unknown): WaraEmpresaContact | null {
   return { id, nombre, empresa: empresa || nombre };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wara (sobre todo staging) es intermitente: para el MISMO número, una llamada puede
+ * devolver un `200` vacío (`encontrado:false`, 0 contactos) o un 5xx, y la siguiente
+ * devolver los contactos reales. Esa intermitencia es la causa de los mensajes
+ * "No encontré empresas asociadas" / "No pude consultar las unidades" que ve el cliente.
+ *
+ * Este wrapper reintenta unas pocas veces ante respuestas no útiles (error de red/HTTP
+ * o 200 vacío) con un backoff corto, antes de darse por vencido. No reintenta cuando el
+ * error es de pre-vuelo (token no configurado o teléfono inválido), porque ahí no hay nada
+ * que reintentar.
+ */
 export async function obtenerEmpresaPorNumero(rawPhone: string): Promise<WaraEmpresaLookupResult> {
+  const maxAttempts = 3;
+  const backoffMs = [300, 800];
+  let last: WaraEmpresaLookupResult | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let result: WaraEmpresaLookupResult;
+    try {
+      result = await obtenerEmpresaPorNumeroOnce(rawPhone);
+    } catch (error) {
+      if (attempt >= maxAttempts) throw error;
+      const message = error instanceof Error ? error.message : "error desconocido";
+      console.warn(
+        `[WaraAPI] ObtenerContactosPorNumero intento ${attempt}/${maxAttempts} lanzó excepción (${message}); reintento`
+      );
+      await sleep(backoffMs[attempt - 1] ?? 800);
+      continue;
+    }
+
+    last = result;
+
+    // Caso bueno: Wara respondió con contactos. Listo.
+    if (result.ok && result.encontrado && result.contactos.length > 0) return result;
+
+    // Fallos de pre-vuelo (no configurado o teléfono inválido): no hay nada que reintentar.
+    // Estos casos retornan sin `status` porque ni siquiera llegan a la red.
+    if (!result.configured || (result.status === undefined && !result.ok)) return result;
+
+    // Resto = intermitencia de staging (5xx/red o 200 vacío). Reintentamos si quedan intentos.
+    if (attempt < maxAttempts) {
+      console.warn(
+        `[WaraAPI] ObtenerContactosPorNumero intento ${attempt}/${maxAttempts} sin datos útiles ` +
+          `(ok=${result.ok}, encontrado=${result.encontrado}, contactos=${result.contactos.length}, status=${result.status ?? "-"}); reintento`
+      );
+      await sleep(backoffMs[attempt - 1] ?? 800);
+    }
+  }
+
+  return last as WaraEmpresaLookupResult;
+}
+
+async function obtenerEmpresaPorNumeroOnce(rawPhone: string): Promise<WaraEmpresaLookupResult> {
   const token = obtenerEmpresaToken();
   const telefono = normalizeWhatsAppPhone(rawPhone);
   if (!token) {
@@ -565,34 +619,78 @@ export async function consultarEstadoUnidades(
   sessionToken: string,
   patentes: string[] = []
 ): Promise<WaraConsultarEstadoUnidadesResult> {
-  const res = await fetch(`${waraMaintenanceApiBaseUrl()}/ConsultarEstadoUnidades`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${sessionToken}`,
-    },
-    body: JSON.stringify({ token: sessionToken, patentes }),
-    cache: "no-store",
-  });
+  // Igual que el lookup de empresa, ConsultarEstadoUnidades es intermitente en staging.
+  // Reintentamos ante error de red/HTTP antes de derivar a un agente.
+  const maxAttempts = 3;
+  const backoffMs = [300, 800];
+  let last: WaraConsultarEstadoUnidadesResult | null = null;
 
-  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!res.ok) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${waraMaintenanceApiBaseUrl()}/ConsultarEstadoUnidades`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionToken}`,
+        },
+        body: JSON.stringify({ token: sessionToken, patentes }),
+        cache: "no-store",
+      });
+    } catch (error) {
+      last = {
+        ok: false,
+        status: 502,
+        unidades: [],
+        error: error instanceof Error ? error.message : "Error de red llamando a Wara",
+      };
+      if (attempt < maxAttempts) {
+        console.warn(
+          `[WaraAPI] ConsultarEstadoUnidades intento ${attempt}/${maxAttempts} falló (red); reintento`
+        );
+        await sleep(backoffMs[attempt - 1] ?? 800);
+        continue;
+      }
+      return last;
+    }
+
+    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!res.ok) {
+      last = {
+        ok: false,
+        status: res.status,
+        unidades: [],
+        error: errorFromWara(json, `Wara respondió HTTP ${res.status}`),
+      };
+      // 5xx = transitorio, reintentamos; 4xx = problema real, no reintentamos.
+      if (res.status >= 500 && attempt < maxAttempts) {
+        console.warn(
+          `[WaraAPI] ConsultarEstadoUnidades intento ${attempt}/${maxAttempts} HTTP ${res.status}; reintento`
+        );
+        await sleep(backoffMs[attempt - 1] ?? 800);
+        continue;
+      }
+      return last;
+    }
+
+    const data = waraData(json);
     return {
-      ok: false,
+      ok: json?.ok !== false,
       status: res.status,
-      unidades: [],
-      error: errorFromWara(json, `Wara respondió HTTP ${res.status}`),
+      cliente: typeof data.cliente === "string" ? data.cliente : undefined,
+      unidades: Array.isArray(data.unidades) ? (data.unidades as WaraUnidadEstado[]) : [],
+      error: json?.ok === false ? errorFromWara(json, "Wara no devolvió unidades") : undefined,
     };
   }
 
-  const data = waraData(json);
-  return {
-    ok: json?.ok !== false,
-    status: res.status,
-    cliente: typeof data.cliente === "string" ? data.cliente : undefined,
-    unidades: Array.isArray(data.unidades) ? (data.unidades as WaraUnidadEstado[]) : [],
-    error: json?.ok === false ? errorFromWara(json, "Wara no devolvió unidades") : undefined,
-  };
+  return (
+    last ?? {
+      ok: false,
+      status: 502,
+      unidades: [],
+      error: "No se pudo consultar el estado de unidades en Wara",
+    }
+  );
 }
 
 export async function registrarCambioOdometroHorometro(
