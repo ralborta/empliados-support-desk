@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { generateTicketCode } from "@/lib/tickets";
 import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
 import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
+import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
 
 const bodySchema = z
   .object({
@@ -77,6 +80,7 @@ function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
 // Este endpoint lo consume exclusivamente BuilderBot: SIEMPRE respondemos 200 y dejamos
 // el estado real en `ok` + el texto en `summaryText`.
 const BB_STATUS = 200;
+const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 30 * 60;
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
   const message = text?.trim();
@@ -110,13 +114,143 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
       direction: "OUTBOUND",
       from: "BOT",
       text: message,
-      rawPayload: payload as any,
+      rawPayload: payload as Prisma.InputJsonObject,
     },
   });
   await prisma.ticket.update({
     where: { id: targetTicket.id },
     data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
   });
+}
+
+function reportElapsedSeconds(unit: WaraUnidadEstado): number | null {
+  const seconds = unit.ultimo_reporte?.hace_segundos;
+  return typeof seconds === "number" && Number.isFinite(seconds) ? seconds : null;
+}
+
+async function findRecentMissingReportTicket(rawPhone: string, plate: string) {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return null;
+  const ticket = await prisma.ticket.findFirst({
+    where: {
+      customerId: customer.id,
+      status: { in: OPEN_TICKET_THREAD_STATUSES },
+      incidentType: "MISSING_REPORT",
+      title: { contains: plate, mode: "insensitive" },
+    },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (ticket) return { ticket, customer };
+
+  return { ticket: null, customer };
+}
+
+async function createMissingReportTicket(params: {
+  rawPhone: string;
+  unit: WaraUnidadEstado;
+  companyName: string;
+  contactName: string;
+  elapsedText: string;
+}): Promise<{ ref: string; message: string; reused: boolean }> {
+  const plate = normalizeLoosePlate(params.unit.patente || params.unit.unidad || "");
+  const existing = await findRecentMissingReportTicket(params.rawPhone, plate);
+  if (!existing?.customer) {
+    return {
+      ref: "",
+      reused: false,
+      message: `La unidad ${params.unit.patente || params.unit.unidad} está sin reporte hace ${params.elapsedText}. No pude registrar el caso automáticamente, te derivo con un asesor para revisarlo.`,
+    };
+  }
+
+  if (existing.ticket) {
+    return {
+      ref: existing.ticket.code,
+      reused: true,
+      message: `La unidad ${params.unit.patente || params.unit.unidad} está sin reporte hace ${params.elapsedText}. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
+    };
+  }
+
+  const title = `${plate} - Unidad sin reporte hace ${params.elapsedText}`;
+  const localTicket = await prisma.ticket.create({
+    data: {
+      code: generateTicketCode(),
+      customerId: existing.customer.id,
+      contactName:
+        params.contactName ||
+        existing.customer.name?.trim() ||
+        params.companyName ||
+        "Sin nombre",
+      title,
+      status: "IN_PROGRESS",
+      priority: "HIGH",
+      category: "TECH_SUPPORT",
+      incidentType: "MISSING_REPORT",
+      channel: "WHATSAPP",
+      aiSummary: `Unidad ${plate} sin reporte hace ${params.elapsedText}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
+    },
+  });
+
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: localTicket.id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text: `Reclamo/consulta por unidad sin reporte: ${plate}`,
+      rawPayload: {
+        source: "wara_unidades_auto_ticket",
+        plate,
+        companyName: params.companyName,
+        elapsedText: params.elapsedText,
+        lastReportDate: params.unit.ultimo_reporte?.fecha ?? "",
+        phone: params.rawPhone,
+      } as Prisma.InputJsonObject,
+    },
+  });
+
+  let ref = localTicket.code;
+  const odooCfg = getOdooConfig();
+  if (odooCfg) {
+    try {
+      const odoo = await createHelpdeskTicket(odooCfg, {
+        subject: title,
+        description: [
+          `Unidad sin reporte detectada por Atilio / WhatsApp.`,
+          `Empresa Wara: ${params.companyName}`,
+          `Patente: ${plate}`,
+          `Unidad: ${params.unit.unidad || ""}`,
+          `Último reporte: hace ${params.elapsedText}`,
+          params.unit.ultimo_reporte?.fecha ? `Fecha último reporte (Wara): ${params.unit.ultimo_reporte.fecha}` : "",
+          `WhatsApp: ${params.rawPhone}`,
+          `Ticket local: ${localTicket.code}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        customerName: params.contactName || existing.customer.name || params.companyName,
+        customerPhone: params.rawPhone,
+        companyName: params.companyName,
+        priority: "HIGH",
+      });
+      ref = odoo.ref ?? String(odoo.ticketId);
+      await prisma.ticket.update({
+        where: { id: localTicket.id },
+        data: {
+          aiSummary: `Unidad ${plate} sin reporte hace ${params.elapsedText}. Odoo: ${ref}.`,
+        },
+      });
+    } catch (error) {
+      console.error(
+        `[Unidades] No se pudo crear caso Odoo para ${plate}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  return {
+    ref,
+    reused: false,
+    message: `La unidad ${params.unit.patente || params.unit.unidad} está sin reporte hace ${params.elapsedText}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -177,7 +311,9 @@ export async function POST(req: NextRequest) {
     const suffix = remainder > 0 ? ` y ${remainder} más` : "";
     return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una patente puntual para ver su estado.`;
   };
-  const summaryText = !result.ok
+  let action: "none" | "observation" | "ticket" = "none";
+  let ticketRef = "";
+  let summaryText = !result.ok
     ? result.error || "No pude consultar las unidades en Wara."
     : filtered.length === 0
       ? `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
@@ -185,11 +321,36 @@ export async function POST(req: NextRequest) {
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);
 
+  if (result.ok && filtered.length === 1) {
+    const unit = filtered[0];
+    const elapsedSeconds = reportElapsedSeconds(unit);
+    if (elapsedSeconds != null) {
+      const elapsedText = minutesAgo(elapsedSeconds);
+      if (elapsedSeconds < MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
+        action = "observation";
+        summaryText = `La unidad ${unit.patente || unit.unidad} tiene último reporte hace ${elapsedText}. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
+      } else {
+        action = "ticket";
+        const created = await createMissingReportTicket({
+          rawPhone,
+          unit,
+          companyName: session.companyName ?? result.cliente ?? "",
+          contactName: session.contactName ?? "",
+          elapsedText,
+        });
+        ticketRef = created.ref;
+        summaryText = created.message;
+      }
+    }
+  }
+
   await appendOutboundBotMessage(rawPhone, summaryText, {
     source: "wara_unidades_response",
     ok: result.ok,
     unidadesCount: filtered.length,
     companyName: session.companyName ?? result.cliente ?? "",
+    action,
+    ticketRef,
   });
 
   return NextResponse.json(
@@ -200,6 +361,8 @@ export async function POST(req: NextRequest) {
       contactName: session.contactName ?? "",
       unidadesCount: filtered.length,
       summaryText,
+      action,
+      ticketRef,
     },
     { status: BB_STATUS }
   );

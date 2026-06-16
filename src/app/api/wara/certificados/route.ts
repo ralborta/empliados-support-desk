@@ -86,6 +86,18 @@ function isConfirmed(value: string | undefined): boolean {
   ]).has(t);
 }
 
+function isExplicitCertificateResendRequest(value: string): boolean {
+  const t = value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, " ");
+  return (
+    /\b(reenvi|re envi|envia.*(otra vez|nuevamente|de nuevo)|mand(a|ame|alo).*(otra vez|nuevamente|de nuevo)|volver.*(enviar|mandar)|no me llego|no lo recibi|pasamelo de nuevo)\b/i.test(
+      t
+    ) && /\b(certificado|cobertura|archivo|pdf|link|url|documento|lo|me)\b/i.test(t)
+  );
+}
+
 async function recentThreadText(rawPhone: string): Promise<string> {
   try {
     const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
@@ -160,6 +172,41 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
     where: { id: targetTicket.id },
     data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
   });
+}
+
+async function findGeneratedCertificate(rawPhone: string, plate: string): Promise<{
+  url?: string;
+  message: string;
+} | null> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return null;
+  const ticket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!ticket) return null;
+  const recentMessages = await prisma.ticketMessage.findMany({
+    where: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+    select: { text: true, rawPayload: true },
+  });
+
+  for (const message of recentMessages) {
+    const payload = message.rawPayload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
+    const record = payload as Record<string, unknown>;
+    if (record.generatedBy !== "wara_certificadocobertura") continue;
+    if (typeof record.plate !== "string" || normalizePlate(record.plate) !== plate) continue;
+    const urlMatch = message.text.match(/https?:\/\/\S+/);
+    return { message: message.text, url: urlMatch?.[0] };
+  }
+  return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -280,7 +327,61 @@ export async function POST(req: NextRequest) {
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
   const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
-  if (!isConfirmed(confirmation)) {
+  const wantsExplicitResend = isExplicitCertificateResendRequest(
+    `${text}\n${confirmation ?? ""}`
+  );
+
+  if (isConfirmed(confirmation) && !wantsExplicitResend) {
+    const generated = await findGeneratedCertificate(rawPhone, plate);
+    if (generated) {
+      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_certificados",
+        stage: "already_generated",
+        plate,
+        companyName: company,
+        hasPreviousUrl: Boolean(generated.url),
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          alreadyGenerated: true,
+          alreadyGenerated_s: "true",
+          plate,
+          companyName: company,
+          message,
+        },
+        { status: BB_STATUS }
+      );
+    }
+  }
+
+  if (!isConfirmed(confirmation) && !wantsExplicitResend) {
+    const generated = await findGeneratedCertificate(rawPhone, plate);
+    if (generated) {
+      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_certificados",
+        stage: "already_generated",
+        plate,
+        companyName: company,
+        hasPreviousUrl: Boolean(generated.url),
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          alreadyGenerated: true,
+          alreadyGenerated_s: "true",
+          plate,
+          companyName: company,
+          message,
+        },
+        { status: BB_STATUS }
+      );
+    }
+
     const message = `Voy a generar el certificado de cobertura:\nPatente: ${plateDisplay}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
@@ -361,6 +462,7 @@ export async function POST(req: NextRequest) {
     generatedBy: "wara_certificadocobertura",
     plate,
     companyName: company,
+    wasExplicitResend: wantsExplicitResend,
     status: result.status,
     hasUrl: Boolean(certUrl),
     hasCertificatePayload: Boolean(result.certificado),

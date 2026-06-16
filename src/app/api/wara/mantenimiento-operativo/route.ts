@@ -74,6 +74,79 @@ function inferPriority(raw: string): Priority {
   return "NORMAL";
 }
 
+function isMaintenanceHowToRequest(raw: string): boolean {
+  const text = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|mantenimiento|preventiv|correctiv|combustible|rendimiento teorico|consumo)/.test(
+    text
+  );
+}
+
+function maintenanceHowToMessage(raw: string): string {
+  const text = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (/combustible|rendimiento/.test(text)) {
+    return [
+      "Te explico cómo configurar una unidad para seguimiento de consumo con rendimiento teórico en el módulo de mantenimiento:",
+      "",
+      "1. Ingresá al módulo de Mantenimiento.",
+      "2. Buscá la unidad que querés configurar.",
+      "3. Entrá a la configuración de consumo/rendimiento de la unidad.",
+      "4. Cargá el rendimiento teórico esperado según el tipo de unidad y combustible.",
+      "5. Guardá los cambios y verificá que la unidad quede asociada al plan o control correspondiente.",
+      "",
+      "Con eso el módulo puede usar ese valor como referencia para el control preventivo. Estos pasos son una guía inicial; si Emi valida algún nombre exacto de menú, lo ajusto con ese texto.",
+    ].join("\n");
+  }
+
+  if (/correctiv/.test(text)) {
+    return [
+      "Para una tarea correctiva en el módulo de mantenimiento:",
+      "",
+      "1. Ingresá al módulo de Mantenimiento.",
+      "2. Creá una nueva tarea u orden correctiva.",
+      "3. Seleccioná la unidad afectada.",
+      "4. Describí la falla o trabajo a realizar.",
+      "5. Asigná prioridad/responsable si el módulo lo permite.",
+      "6. Guardá y hacé seguimiento del estado hasta el cierre.",
+      "",
+      "La idea es registrar la acción correctiva para seguimiento interno, no manipular el equipo GPS desde el cliente.",
+    ].join("\n");
+  }
+
+  if (/preventiv|plan/.test(text)) {
+    return [
+      "Para una tarea preventiva en el módulo de mantenimiento:",
+      "",
+      "1. Ingresá al módulo de Mantenimiento.",
+      "2. Creá o seleccioná un plan preventivo.",
+      "3. Asociá las unidades que correspondan.",
+      "4. Definí la frecuencia o condición de disparo (por ejemplo, fecha, kilometraje u horas, según disponibilidad del módulo).",
+      "5. Guardá el plan y verificá que quede activo.",
+      "",
+      "Esto permite organizar mantenimientos programados sin abrir un reclamo técnico.",
+    ].join("\n");
+  }
+
+  return [
+    "El módulo de mantenimiento sirve para gestionar tareas preventivas y correctivas sobre las unidades.",
+    "",
+    "Como guía general:",
+    "1. Entrá al módulo de Mantenimiento.",
+    "2. Elegí si vas a trabajar con una tarea preventiva, correctiva o un plan.",
+    "3. Seleccioná la unidad o grupo de unidades.",
+    "4. Cargá la descripción, frecuencia o condición de control según corresponda.",
+    "5. Guardá y hacé seguimiento desde el estado de la tarea.",
+    "",
+    "No genero un ticket por esta consulta porque es una orientación de uso del módulo. Si necesitás una guía más puntual, decime qué querés configurar.",
+  ].join("\n");
+}
+
 /**
  * Confirmación tolerante: acepta CONFIRMO en cualquier capitalización, con acentos,
  * espacios o puntuación de más, y también un "sí" claro (sí, dale, ok, listo, etc.).
@@ -322,6 +395,28 @@ export async function POST(req: NextRequest) {
     parsed.data.priority ??
     summary.prioridad ??
     inferPriority(text);
+
+  if (isMaintenanceHowToRequest(text)) {
+    const message = maintenanceHowToMessage(text);
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "how_to",
+      service,
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        informational: true,
+        informational_s: "true",
+        message,
+        service,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   const plate = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
