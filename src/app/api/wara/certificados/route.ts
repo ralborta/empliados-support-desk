@@ -303,7 +303,10 @@ export async function POST(req: NextRequest) {
       extractPlateFromCertificateSummary(threadText) ??
       undefined
   );
-  const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
+  const confirmation =
+    parsed.data.confirm ??
+    parsed.data.confirmation ??
+    (/\bconf/i.test(text) && detectPlate(text) ? text : undefined);
 
   if (!plate) {
     const message =
