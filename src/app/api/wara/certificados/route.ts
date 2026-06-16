@@ -306,7 +306,7 @@ export async function POST(req: NextRequest) {
   const confirmation =
     parsed.data.confirm ??
     parsed.data.confirmation ??
-    (/\bconf/i.test(text) && plate ? text : undefined);
+    (/\bconf/i.test(text) && plate ? "confirmo" : undefined);
 
   if (!plate) {
     const message =
