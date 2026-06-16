@@ -14,6 +14,8 @@ import {
 } from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { generateTicketCode } from "@/lib/tickets";
+import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
 
 const bodySchema = z
   .object({
@@ -207,6 +209,98 @@ async function findGeneratedCertificate(rawPhone: string, plate: string): Promis
     return { message: message.text, url: urlMatch?.[0] };
   }
   return null;
+}
+
+/**
+ * Cuando Wara rechaza/no puede emitir el certificado, Atilio (que ES la mesa de ayuda)
+ * NO debe mandar al cliente "a otra mesa". Dejamos el caso registrado: ticket local y,
+ * si Odoo está configurado, ticket en "Atención al cliente" con el detalle de Wara.
+ */
+async function escalateCertificateFailure(params: {
+  rawPhone: string;
+  plate: string;
+  plateDisplay: string;
+  company: string;
+  contactName: string;
+  waraDetail: string;
+  status?: number;
+}): Promise<{ ref: string | null }> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, params.rawPhone);
+  if (!customer) return { ref: null };
+
+  const title = `${params.plate} - Certificado no emitido`;
+  const localTicket = await prisma.ticket.create({
+    data: {
+      code: generateTicketCode(),
+      customerId: customer.id,
+      contactName:
+        params.contactName || customer.name?.trim() || params.company || "Sin nombre",
+      title,
+      status: "IN_PROGRESS",
+      priority: "NORMAL",
+      category: "TECH_SUPPORT",
+      incidentType: "CERTIFICATE",
+      channel: "WHATSAPP",
+      aiSummary: `No se pudo emitir certificado para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}`,
+    },
+  });
+
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: localTicket.id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text: `Solicitud de certificado no emitida para ${params.plate}. Motivo Wara: ${params.waraDetail}`,
+      rawPayload: {
+        source: "wara_certificados_escalation",
+        plate: params.plate,
+        companyName: params.company,
+        waraDetail: params.waraDetail,
+        status: params.status ?? null,
+        phone: params.rawPhone,
+      } as Prisma.InputJsonObject,
+    },
+  });
+
+  let ref: string | null = localTicket.code;
+  const odooCfg = getOdooConfig();
+  if (odooCfg) {
+    try {
+      const odoo = await createHelpdeskTicket(odooCfg, {
+        subject: title,
+        description: [
+          `Certificado de cobertura no emitido (gestión vía Atilio / WhatsApp).`,
+          `Empresa Wara: ${params.company}`,
+          `Patente: ${params.plate}`,
+          `Motivo informado por Wara: ${params.waraDetail}`,
+          params.status ? `Estado Wara: ${params.status}` : "",
+          `WhatsApp: ${params.rawPhone}`,
+          `Ticket local: ${localTicket.code}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        customerName: params.contactName || customer.name || params.company,
+        customerPhone: params.rawPhone,
+        companyName: params.company,
+        priority: "NORMAL",
+      });
+      ref = odoo.ref ?? String(odoo.ticketId);
+      await prisma.ticket.update({
+        where: { id: localTicket.id },
+        data: {
+          aiSummary: `Certificado no emitido para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}. Odoo: ${ref}.`,
+        },
+      });
+    } catch (error) {
+      console.error(
+        `[Certificados] No se pudo crear caso Odoo para ${params.plate}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  return { ref };
 }
 
 export async function POST(req: NextRequest) {
@@ -433,7 +527,22 @@ export async function POST(req: NextRequest) {
 
   const result = await obtenerCertificadoCobertura(session.sessionToken, plateDisplay);
   if (!result.ok) {
-    const message = `No pude generar el certificado de cobertura para ${plateDisplay}. ${result.error ?? "Wara no completó la solicitud."}`;
+    // Wara rechazó la emisión (p. ej. la unidad no cumple requisitos) o falló.
+    // Atilio ES la mesa de ayuda: no mandamos al cliente "a otra mesa"; dejamos el caso
+    // registrado en Odoo con el contexto para que un asesor lo revise.
+    const waraDetail = result.error?.trim() || "Wara no completó la solicitud.";
+    const escalation = await escalateCertificateFailure({
+      rawPhone,
+      plate,
+      plateDisplay,
+      company,
+      contactName: session.contactName ?? "",
+      waraDetail,
+      status: result.status,
+    });
+    const message = escalation.ref
+      ? `No pude emitir el certificado de cobertura para ${plateDisplay}: ${waraDetail} Generé el caso N° ${escalation.ref} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
+      : `No pude emitir el certificado de cobertura para ${plateDisplay}: ${waraDetail} Dejé el caso registrado para que un asesor de Atención al cliente lo revise y te contacte por este medio.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       errorStage: "certificadocobertura",
@@ -441,6 +550,7 @@ export async function POST(req: NextRequest) {
       error: result.error ?? "",
       plate,
       companyName: company,
+      odooRef: escalation.ref ?? "",
     });
     return NextResponse.json(
       {
@@ -450,6 +560,9 @@ export async function POST(req: NextRequest) {
         plate,
         companyName: company,
         error: result.error,
+        escalated: true,
+        escalated_s: "true",
+        odooRef: escalation.ref ?? "",
       },
       { status: BB_STATUS }
     );
