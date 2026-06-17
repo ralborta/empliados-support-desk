@@ -62,7 +62,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        'La intención del cliente es CAMBIAR o ELEGIR otra de sus empresas asociadas. Aplica SOLO con frases explícitas como "cambiar empresa", "otra empresa", "me equivoqué de empresa", "elegir empresa". PROHIBIDO usar esta regla por audios transcritos, saludos, o porque el cliente nombró una empresa dentro de otra gestión (certificado, patente, consulta).',
+        'CAMBIAR DE EMPRESA — SOLO frases explícitas: "cambiar empresa", "cambiarme de empresa", "otra empresa", "me equivoqué de empresa", "elegir empresa". PROHIBIDO si el mensaje es solo un nombre de empresa (WARA, El Cacique, Cacique, Guara), un número de menú (1, 2), un saludo, o parte de otra gestión (certificado, patente, reporte, mantenimiento).',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.cambiarEmpresa,

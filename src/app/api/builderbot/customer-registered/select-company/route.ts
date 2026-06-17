@@ -8,6 +8,9 @@ import {
 import { obtenerEmpresaPorNumero, selectCompanyForCustomer } from "@/lib/waraApi";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
+/** BuilderBot solo interpola {message} y reglas HTTP cuando el status es 2xx. */
+const BB_STATUS = 200;
+
 const bodySchema = z
   .object({
     phone: z.string().min(8).optional(),
@@ -82,8 +85,8 @@ export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Body inválido", details: parsed.error.flatten() },
-      { status: 400 }
+      { ok: false, ok_s: "false", error: "Body inválido", details: parsed.error.flatten() },
+      { status: BB_STATUS }
     );
   }
 
@@ -127,17 +130,22 @@ export async function POST(req: NextRequest) {
       : contacts.length === 1
         ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}), así que sigo con esa. ¿En qué te puedo ayudar?`
         : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;
-    return NextResponse.json({
-      ok: true,
-      reset: true,
-      requiresCompanySelection: multi,
-      requiresCompanySelection_s: multi ? "true" : "false",
-      phone: normalizeWhatsAppPhone(rawPhone),
-      companyName: "",
-      waraContactsText,
-      contacts,
-      message,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        reset: true,
+        reset_s: "true",
+        requiresCompanySelection: multi,
+        requiresCompanySelection_s: multi ? "true" : "false",
+        phone: normalizeWhatsAppPhone(rawPhone),
+        companyName: "",
+        waraContactsText,
+        contacts,
+        message,
+      },
+      { status: BB_STATUS }
+    );
   }
 
   const result = await selectCompanyForCustomer(prisma, rawPhone, {
@@ -156,7 +164,7 @@ export async function POST(req: NextRequest) {
         requiresCompanySelection: true,
         requiresCompanySelection_s: "true",
       },
-      { status: result.status }
+      { status: BB_STATUS }
     );
   }
 
@@ -179,5 +187,5 @@ export async function POST(req: NextRequest) {
     message,
     requiresCompanySelection: false,
     requiresCompanySelection_s: "false",
-  });
+  }, { status: BB_STATUS });
 }

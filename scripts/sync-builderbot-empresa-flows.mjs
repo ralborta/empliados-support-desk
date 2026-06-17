@@ -32,26 +32,7 @@ function loadMcp() {
   };
 }
 
-const selectHttpRules = [
-  {
-    conditionRule: "ok_s",
-    conditionValue: "true",
-    condition: "===",
-    conditionFlowId: FLOWS.router,
-  },
-  {
-    conditionRule: "requiresCompanySelection_s",
-    conditionValue: "true",
-    condition: "===",
-    conditionFlowId: FLOWS.elegir,
-  },
-  {
-    conditionRule: "ok_s",
-    conditionValue: "false",
-    condition: "===",
-    conditionFlowId: FLOWS.elegir,
-  },
-];
+const selectHttpRules: never[] = [];
 
 async function listAnswers(client, flowId) {
   const r = await client.callTool({
