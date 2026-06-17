@@ -113,6 +113,20 @@ function extractLastPlateFromThread(text: string): string | null {
   return null;
 }
 
+/** Pide listado/flota sin patente puntual (no filtrar por patente vieja del hilo). */
+function looksLikeUnitListRequest(rawText: string | undefined | null): boolean {
+  const t = (rawText ?? "").trim();
+  if (!t) return true;
+  const norm = t
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (detectPlate(t)) return false;
+  return /\b(listado|mis unidades|todas las unidades|flota|cuantas unidades|ver unidades|mis camiones|que unidades)\b/.test(
+    norm
+  );
+}
+
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
   const message = text?.trim();
   if (!message) return;
@@ -322,13 +336,16 @@ export async function POST(req: NextRequest) {
 
   const requestedPlates = parseRequestedPlates(parsed.data);
   const result = await consultarEstadoUnidades(session.sessionToken, requestedPlates);
+  const rawText = parsed.data.rawText ?? "";
+  const explicitPlate =
+    parsed.data.patente ?? parsed.data.plate ?? detectPlate(rawText) ?? "";
+  const useThreadPlate =
+    !explicitPlate && !looksLikeUnitListRequest(rawText) && requestedPlates.length === 0;
   const wantedPlate = normalizeLoosePlate(
-    parsed.data.patente ??
-      parsed.data.plate ??
-      detectPlate(parsed.data.rawText ?? "") ??
-      extractLastPlateFromThread(threadText) ??
-      detectPlate(threadText) ??
-      ""
+    explicitPlate ||
+      (useThreadPlate
+        ? extractLastPlateFromThread(threadText) ?? detectPlate(threadText) ?? ""
+        : "")
   );
   const filtered = wantedPlate
     ? result.unidades.filter((u) => {
