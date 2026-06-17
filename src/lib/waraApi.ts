@@ -86,8 +86,56 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
     return false;
   }
   if (/^\d{1,2}$/.test(norm)) return true;
-  if (/\bwara\b|\bcacique\b|\bel cacique\b/.test(norm)) return true;
+  if (/\bwara\b|\bguara\b|\bcacique\b|\bel cacique\b/.test(norm)) return true;
   if (/^opcion\s*\d{1,2}$/i.test(t)) return true;
+  // Nombre de empresa suelto (ej. "WARA", "El Cacique S.A.")
+  if (/^[a-z0-9][a-z0-9 .\-]{1,40}$/i.test(t) && !/\b(certificado|patente|reporte|odometro|horometro)\b/.test(norm)) {
+    return true;
+  }
+  return false;
+}
+
+function normCompanyToken(value: string): string {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Alias frecuentes y typos al elegir empresa por chat. */
+function expandCompanyAliases(wanted: string): string[] {
+  const n = normCompanyToken(wanted);
+  const aliases: Record<string, string[]> = {
+    guara: ["wara"],
+    wara: ["wara"],
+    cacique: ["el cacique", "cacique"],
+    "el cacique": ["el cacique", "cacique"],
+  };
+  const base = aliases[n] ?? [n];
+  return Array.from(new Set([n, ...base]));
+}
+
+function contactMatchesSelection(
+  contact: WaraEmpresaContact,
+  wantedNameNorm: string
+): boolean {
+  if (!wantedNameNorm) return false;
+  const empresa = normCompanyToken(contact.empresa);
+  const nombre = normCompanyToken(contact.nombre);
+  const wantedVariants = expandCompanyAliases(wantedNameNorm);
+
+  for (const wanted of wantedVariants) {
+    if (!wanted) continue;
+    if (empresa === wanted || nombre === wanted) return true;
+    if (empresa && (empresa.includes(wanted) || wanted.includes(empresa))) return true;
+    if (nombre && (nombre.includes(wanted) || wanted.includes(nombre))) return true;
+    const empresaFirst = empresa.split(/\s+/)[0];
+    const wantedFirst = wanted.split(/\s+/)[0];
+    if (empresaFirst && wantedFirst && empresaFirst === wantedFirst) return true;
+    if (empresa.startsWith(wanted) || wanted.startsWith(empresaFirst)) return true;
+  }
   return false;
 }
 
@@ -1068,13 +1116,7 @@ export async function selectCompanyForCustomer(
   }
 
   // Normaliza para comparar sin acentos, sin mayúsculas y sin espacios extra.
-  const norm = (value: string) =>
-    (value || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim();
-  const wantedNameNorm = norm(wantedName);
+  const wantedNameNorm = normCompanyToken(wantedName);
 
   const matched =
     // 1) Por id explícito
@@ -1082,25 +1124,12 @@ export async function selectCompanyForCustomer(
       ? lookup.contactos.find((c) => c.id === wantedId)
       : undefined) ??
     // 2) Por número de opción (índice del menú)
-    (wantedIndex != null ? lookup.contactos[wantedIndex] : undefined) ??
-    // 3) Por nombre: exacto, contiene, o empieza con (tolerante)
+    (wantedIndex != null && wantedIndex >= 0 && wantedIndex < lookup.contactos.length
+      ? lookup.contactos[wantedIndex]
+      : undefined) ??
+    // 3) Por nombre: exacto, contiene, alias (guara→wara), primera palabra, etc.
     (wantedNameNorm
-      ? lookup.contactos.find((c) => {
-          const empresa = norm(c.empresa);
-          const nombre = norm(c.nombre);
-          if (empresa === wantedNameNorm || nombre === wantedNameNorm) return true;
-          if (
-            empresa &&
-            (empresa.includes(wantedNameNorm) || wantedNameNorm.includes(empresa))
-          )
-            return true;
-          if (
-            nombre &&
-            (nombre.includes(wantedNameNorm) || wantedNameNorm.includes(nombre))
-          )
-            return true;
-          return false;
-        })
+      ? lookup.contactos.find((c) => contactMatchesSelection(c, wantedNameNorm))
       : undefined);
 
   if (!matched) {

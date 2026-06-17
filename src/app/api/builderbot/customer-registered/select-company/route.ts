@@ -149,9 +149,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
+        ok_s: "false",
         error: result.error,
         contacts: result.contacts ?? [],
         message: result.menuMessage ?? result.error,
+        requiresCompanySelection: true,
+        requiresCompanySelection_s: "true",
       },
       { status: result.status }
     );
@@ -168,10 +171,13 @@ export async function POST(req: NextRequest) {
     `gestionar mantenimiento o solicitar un certificado.`;
   return NextResponse.json({
     ok: true,
+    ok_s: "true",
     phone: normalizeWhatsAppPhone(rawPhone),
     companyName: selectedCompany,
     waraContactId: result.matchedContact?.id ?? null,
     contacts: result.contacts ?? [],
     message,
+    requiresCompanySelection: false,
+    requiresCompanySelection_s: "false",
   });
 }
