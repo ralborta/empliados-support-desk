@@ -97,7 +97,14 @@ export async function POST(req: NextRequest) {
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
-  const companyName = (parsed.data.companyName ?? parsed.data.company ?? "").trim();
+  const companyName = (
+    parsed.data.companyName ??
+    parsed.data.company ??
+    (parsed.data as { body?: string; rawText?: string; selection?: string }).body ??
+    (parsed.data as { rawText?: string }).rawText ??
+    (parsed.data as { selection?: string }).selection ??
+    ""
+  ).trim();
   const waraContactId = toContactId(parsed.data.waraContactId ?? parsed.data.contactId);
 
   // Modo "cambiar empresa": limpia la empresa guardada y devuelve el menú de opciones.
@@ -144,6 +151,7 @@ export async function POST(req: NextRequest) {
         ok: false,
         error: result.error,
         contacts: result.contacts ?? [],
+        message: result.menuMessage ?? result.error,
       },
       { status: result.status }
     );

@@ -211,6 +211,35 @@ async function findGeneratedCertificate(rawPhone: string, plate: string): Promis
   return null;
 }
 
+/** Quita del texto de Wara frases que mandan al cliente a otra mesa de ayuda. */
+function sanitizeWaraDetailForUser(detail: string): string {
+  return detail
+    .replace(/\.?\s*por\s+m[aá]s\s+informaci[oó]n\s+comun[ií]quese\s+con\s+mesa\s+de\s+ayuda\.?/gi, "")
+    .replace(/\.?\s*comun[ií]quese\s+con\s+mesa\s+de\s+ayuda\.?/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Solo escalamos a Odoo cuando Wara rechaza por negocio, no por fallo técnico temporal. */
+function shouldEscalateCertificateToOdoo(params: {
+  status?: number;
+  error?: string;
+}): boolean {
+  const status = params.status ?? 0;
+  if (status >= 500) return false;
+  const err = (params.error ?? "").toLowerCase();
+  if (
+    /timeout|econnreset|fetch failed|network|sesi[oó]n|session|intent[aá] nuevamente|intermit|http 5|no disponible/i.test(
+      err
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Cuando Wara rechaza/no puede emitir el certificado, Atilio (que ES la mesa de ayuda)
  * NO debe mandar al cliente "a otra mesa". Dejamos el caso registrado: ticket local y,
@@ -224,9 +253,9 @@ async function escalateCertificateFailure(params: {
   contactName: string;
   waraDetail: string;
   status?: number;
-}): Promise<{ ref: string | null }> {
+}): Promise<{ odooRef: string | null; localRef: string | null }> {
   const customer = await findCustomerByWhatsAppNumber(prisma, params.rawPhone);
-  if (!customer) return { ref: null };
+  if (!customer) return { odooRef: null, localRef: null };
 
   const title = `${params.plate} - Certificado no emitido`;
   const localTicket = await prisma.ticket.create({
@@ -262,7 +291,7 @@ async function escalateCertificateFailure(params: {
     },
   });
 
-  let ref: string | null = localTicket.code;
+  let odooRef: string | null = null;
   const odooCfg = getOdooConfig();
   if (odooCfg) {
     try {
@@ -284,11 +313,11 @@ async function escalateCertificateFailure(params: {
         companyName: params.company,
         priority: "NORMAL",
       });
-      ref = odoo.ref ?? String(odoo.ticketId);
+      odooRef = odoo.ref ?? String(odoo.ticketId);
       await prisma.ticket.update({
         where: { id: localTicket.id },
         data: {
-          aiSummary: `Certificado no emitido para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}. Odoo: ${ref}.`,
+          aiSummary: `Certificado no emitido para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}. Odoo: ${odooRef}.`,
         },
       });
     } catch (error) {
@@ -300,7 +329,7 @@ async function escalateCertificateFailure(params: {
     }
   }
 
-  return { ref };
+  return { odooRef, localRef: localTicket.code };
 }
 
 export async function POST(req: NextRequest) {
@@ -501,7 +530,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+  const session = await (async () => {
+    let resolved = await resolveWaraSessionByPhone(prisma, rawPhone);
+    if ((!resolved.ok || !resolved.sessionToken) && !resolved.requiresCompanySelection) {
+      await sleep(700);
+      resolved = await resolveWaraSessionByPhone(prisma, rawPhone);
+    }
+    return resolved;
+  })();
   if (!session.ok || !session.sessionToken) {
     const message = session.requiresCompanySelection
       ? "Antes de continuar, necesito que elijas la empresa asociada a este numero."
@@ -527,6 +563,30 @@ export async function POST(req: NextRequest) {
 
   const result = await obtenerCertificadoCobertura(session.sessionToken, plateDisplay);
   if (!result.ok) {
+    if (!shouldEscalateCertificateToOdoo({ status: result.status, error: result.error })) {
+      const message = `No pude emitir el certificado de cobertura para ${plateDisplay} en este momento por un problema temporal con Wara. Intentá nuevamente en unos minutos.`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_certificados",
+        errorStage: "certificadocobertura_transient",
+        status: result.status,
+        error: result.error ?? "",
+        plate,
+        companyName: company,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          message,
+          plate,
+          companyName: company,
+          error: result.error,
+          transient: true,
+          transient_s: "true",
+        },
+        { status: BB_STATUS }
+      );
+    }
     // Wara rechazó la emisión (p. ej. la unidad no cumple requisitos) o falló.
     // Atilio ES la mesa de ayuda: no mandamos al cliente "a otra mesa"; dejamos el caso
     // registrado en Odoo con el contexto para que un asesor lo revise.
@@ -540,9 +600,10 @@ export async function POST(req: NextRequest) {
       waraDetail,
       status: result.status,
     });
-    const message = escalation.ref
-      ? `No pude emitir el certificado de cobertura para ${plateDisplay}: ${waraDetail} Generé el caso N° ${escalation.ref} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
-      : `No pude emitir el certificado de cobertura para ${plateDisplay}: ${waraDetail} Dejé el caso registrado para que un asesor de Atención al cliente lo revise y te contacte por este medio.`;
+    const userReason = sanitizeWaraDetailForUser(waraDetail);
+    const message = escalation.odooRef
+      ? `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason} Generé el caso N° ${escalation.odooRef} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
+      : `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason} Dejé el caso registrado para que un asesor de Atención al cliente lo revise y te contacte por este medio.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       errorStage: "certificadocobertura",
@@ -550,7 +611,7 @@ export async function POST(req: NextRequest) {
       error: result.error ?? "",
       plate,
       companyName: company,
-      odooRef: escalation.ref ?? "",
+      odooRef: escalation.odooRef ?? "",
     });
     return NextResponse.json(
       {
@@ -562,7 +623,7 @@ export async function POST(req: NextRequest) {
         error: result.error,
         escalated: true,
         escalated_s: "true",
-        odooRef: escalation.ref ?? "",
+        odooRef: escalation.odooRef ?? "",
       },
       { status: BB_STATUS }
     );

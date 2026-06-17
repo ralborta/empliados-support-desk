@@ -2,7 +2,11 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
-import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
+import {
+  looksLikeCompanySelection,
+  resolveCustomerByWaraPhone,
+  selectCompanyForCustomer,
+} from "@/lib/waraApi";
 
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
@@ -261,7 +265,10 @@ export function resolveContextPhoneFromRequest(req: NextRequest, pathSegment: st
 /**
  * JSON tipo Pulze GET /api/bot/users/:phone/context: registered, registered_s, phone normalizado.
  */
-export async function customerRegisteredContextResponse(rawPhone: string): Promise<NextResponse> {
+export async function customerRegisteredContextResponse(
+  rawPhone: string,
+  opts?: { selectionText?: string }
+): Promise<NextResponse> {
   const trimmed = rawPhone.trim();
   if (!trimmed) {
     return NextResponse.json({ error: "Teléfono vacío" }, { status: 400 });
@@ -302,12 +309,34 @@ export async function customerRegisteredContextResponse(rawPhone: string): Promi
     );
   }
 
-  const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+  let resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+  const selectionText = opts?.selectionText?.trim() || "";
+  if (
+    resolution.requiresCompanySelection &&
+    selectionText &&
+    looksLikeCompanySelection(selectionText)
+  ) {
+    const picked = await selectCompanyForCustomer(prisma, trimmed, {
+      companyName: selectionText,
+    });
+    if (picked.ok) {
+      resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+    }
+  }
+
   const customer = resolution.customer;
   const registered = resolution.registered;
   const lastTicket = customer
     ? await prisma.ticket.findFirst({
-        where: { customerId: customer.id },
+        where: {
+          customerId: customer.id,
+          NOT: {
+            AND: [
+              { title: { in: ["Otro", "Consulta/reclamo"] } },
+              { aiSummary: { contains: "matrícula sin informar" } },
+            ],
+          },
+        },
         orderBy: { updatedAt: "desc" },
         select: {
           code: true,

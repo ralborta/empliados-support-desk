@@ -22,5 +22,15 @@ export async function GET(
     return NextResponse.json({ error: "Falta teléfono en la URL" }, { status: 400 });
   }
 
-  return customerRegisteredContextResponse(raw);
+  const { searchParams } = new URL(req.url);
+  const selectionText = (
+    searchParams.get("selection") ??
+    searchParams.get("body") ??
+    searchParams.get("message") ??
+    ""
+  ).trim();
+
+  return customerRegisteredContextResponse(raw, {
+    selectionText: selectionText || undefined,
+  });
 }

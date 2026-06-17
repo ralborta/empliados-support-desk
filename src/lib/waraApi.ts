@@ -70,6 +70,27 @@ export function isTestWhitelistEnabled(): boolean {
   return testPhoneWhitelist().size > 0;
 }
 
+/** Respuesta corta que parece elegir empresa del menú (1/2, WARA, El Cacique, etc.). */
+export function looksLikeCompanySelection(text: string | undefined | null): boolean {
+  const t = (text ?? "").trim();
+  if (!t || t.length > 60) return false;
+  const norm = t
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (
+    /^(inicio|volver|hola|buenas|menu|ayuda|si|no|confirmo|gracias|buenos dias|buenas tardes|buenas noches)$/.test(
+      norm
+    )
+  ) {
+    return false;
+  }
+  if (/^\d{1,2}$/.test(norm)) return true;
+  if (/\bwara\b|\bcacique\b|\bel cacique\b/.test(norm)) return true;
+  if (/^opcion\s*\d{1,2}$/i.test(t)) return true;
+  return false;
+}
+
 export function isPhoneAllowedForTesting(rawPhone: string): boolean {
   const list = testPhoneWhitelist();
   if (list.size === 0) return true;
@@ -485,9 +506,14 @@ async function createChatBotToken(contactId: number): Promise<{
 
 function findContactForCompany(
   contacts: WaraEmpresaContact[],
-  companyName: string | null | undefined
+  companyName: string | null | undefined,
+  contactId?: number | null
 ): WaraEmpresaContact | null {
   if (contacts.length === 1) return contacts[0];
+  if (contactId != null && Number.isFinite(contactId)) {
+    const byId = contacts.find((c) => c.id === contactId);
+    if (byId) return byId;
+  }
   const selected = companyName?.trim();
   if (!selected) return null;
   return (
@@ -497,6 +523,16 @@ function findContactForCompany(
         c.nombre.localeCompare(selected, "es", { sensitivity: "accent" }) === 0
     ) ?? null
   );
+}
+
+/** Verifica que Wara pueda crear SessionToken para un contacto (multi-empresa). */
+export async function probeWaraContactSession(contactId: number): Promise<{
+  ok: boolean;
+  status: number;
+  error?: string;
+}> {
+  const created = await createChatBotToken(contactId);
+  return { ok: created.ok, status: created.status, error: created.error };
 }
 
 export async function resolveWaraSessionByPhone(
@@ -561,17 +597,21 @@ export async function resolveWaraSessionByPhone(
 
   const created = await createChatBotToken(selectedContact.id);
   if (!created.ok || !created.sessionToken) {
+    const companyLabel =
+      resolution.selectedCompanyName ?? selectedContact.empresa ?? "";
+    const errLower = (created.error ?? "").toLowerCase();
+    const userHint =
+      errLower.includes("inexistente") || errLower.includes("no autorizado")
+        ? `Wara no habilitó el acceso al chatbot para ${companyLabel || "esa empresa"}. Probá con otra empresa o escribí "cambiar empresa".`
+        : created.error ||
+          "Wara no devolvió SessionToken para el contacto seleccionado";
     console.error(
-      `[WaraAPI] No se pudo crear sesión Wara para empresa="${
-        resolution.selectedCompanyName ?? selectedContact.empresa ?? ""
-      }" contacto=${selectedContact.id}: ${created.error ?? "sin detalle"}`
+      `[WaraAPI] No se pudo crear sesión Wara para empresa="${companyLabel}" contacto=${selectedContact.id}: ${created.error ?? "sin detalle"}`
     );
     return {
       ok: false,
       status: created.status,
-      error:
-        created.error ||
-        "Wara no devolvió SessionToken para el contacto seleccionado",
+      error: userHint,
       lookup: resolution.lookup,
     };
   }
@@ -961,6 +1001,7 @@ export async function selectCompanyForCustomer(
   customer: Customer | null;
   status: number;
   error?: string;
+  menuMessage?: string;
   matchedContact?: WaraEmpresaContact;
   contacts?: WaraEmpresaContact[];
 }> {
@@ -1063,17 +1104,49 @@ export async function selectCompanyForCustomer(
       : undefined);
 
   if (!matched) {
+    const menu = lookup.contactos
+      .map((c, i) => `${i + 1}. ${c.empresa || c.nombre}`)
+      .join("\n");
     return {
       ok: false,
       customer: null,
       status: 409,
       error: "La empresa indicada no figura entre las asociadas a este teléfono",
       contacts: lookup.contactos,
+      menuMessage: menu
+        ? `No reconocí esa opción. ¿De cuál empresa escribís?\n\n${menu}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+        : undefined,
     };
   }
 
-  const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   const matchedCompany = matched.empresa || matched.nombre;
+
+  if (lookup.contactos.length > 1) {
+    const sessionProbe = await probeWaraContactSession(matched.id);
+    if (!sessionProbe.ok) {
+      const errLower = (sessionProbe.error ?? "").toLowerCase();
+      const menu = lookup.contactos
+        .map((c, i) => `${i + 1}. ${c.empresa || c.nombre}`)
+        .join("\n");
+      const hint =
+        errLower.includes("inexistente") || errLower.includes("no autorizado")
+          ? `Wara no habilitó el chatbot para "${matchedCompany}" con este número.`
+          : `No pude abrir sesión en Wara para "${matchedCompany}".`;
+      return {
+        ok: false,
+        customer: null,
+        status: sessionProbe.status >= 400 ? sessionProbe.status : 502,
+        error: sessionProbe.error || hint,
+        contacts: lookup.contactos,
+        matchedContact: matched,
+        menuMessage:
+          menu &&
+          `${hint} Elegí otra empresa si corresponde:\n\n${menu}\n\nRespondé con el número de la opción o el nombre de la empresa.`,
+      };
+    }
+  }
+
+  const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   const customer = local
     ? await prisma.customer.update({
         where: { id: local.id },

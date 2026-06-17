@@ -153,6 +153,46 @@ async function recentThreadText(rawPhone: string): Promise<string> {
   }
 }
 
+async function findRecentOdooRef(rawPhone: string, plate: string): Promise<string | null> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return null;
+  const msgs = await prisma.ticketMessage.findMany({
+    where: {
+      direction: "OUTBOUND",
+      from: "BOT",
+      createdAt: { gte: new Date(Date.now() - 15 * 60 * 1000) },
+      ticket: { customerId: customer.id },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 12,
+    select: { text: true, rawPayload: true },
+  });
+  const want = plate.replace(/\s+/g, "").toUpperCase();
+  for (const m of msgs) {
+    const payload = m.rawPayload as Record<string, unknown> | null;
+    if (payload?.source !== "odoo_ticket" && payload?.source !== "wara_unidades_auto_ticket") continue;
+    const msgPlate = String(payload.plate ?? "")
+      .replace(/\s+/g, "")
+      .toUpperCase();
+    if (want && msgPlate && msgPlate !== want) continue;
+    const ref = String(payload.ref ?? "");
+    if (ref && /^\d+$/.test(ref)) return ref;
+    const match = m.text?.match(/caso N[°º]\s*(\d+)/i);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+function extractLastPlateFromThread(text: string): string | null {
+  const labeled = [...text.matchAll(/Patente:\s*([A-Za-z0-9 ]{5,12})/gi)];
+  if (labeled.length) return normalizePlateForTitle(labeled[labeled.length - 1][1]);
+  const unitMention = [...text.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
+  if (unitMention.length) return normalizePlateForTitle(unitMention[unitMention.length - 1][1]);
+  const plates = [...text.matchAll(/\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi)];
+  if (plates.length) return normalizePlateForTitle(plates[plates.length - 1][1]);
+  return null;
+}
+
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
   const message = text?.trim();
   if (!message) return;
@@ -232,7 +272,11 @@ export async function POST(req: NextRequest) {
 
   // Enriquecemos empresa/contacto desde la base local (se persistió en el alta/selección de empresa).
   const localCustomer = rawPhone ? await findCustomerByWhatsAppNumber(prisma, rawPhone) : null;
-  const companyName = data.companyName?.trim() || localCustomer?.companyName?.trim() || "";
+  let companyName = data.companyName?.trim() || localCustomer?.companyName?.trim() || "";
+  if (rawPhone) {
+    const waraSession = await resolveWaraSessionByPhone(prisma, rawPhone);
+    if (waraSession.companyName?.trim()) companyName = waraSession.companyName.trim();
+  }
   const customerName = data.customerName?.trim() || localCustomer?.name?.trim() || "";
 
   // Patente: explícita -> detectada del mensaje -> historial reciente.
@@ -241,12 +285,52 @@ export async function POST(req: NextRequest) {
     data.plate ??
       data.patente ??
       detectPlate(data.rawText ?? "") ??
+      extractLastPlateFromThread(threadText) ??
       detectPlate(threadText) ??
       undefined
   );
 
   const event = buildEvent(data.event ?? data.evento, data.rawText);
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
+
+  if (!plate && !explicitSubject) {
+    const message =
+      "Para registrar el caso necesito la patente de la unidad y qué está pasando (ej: NKL 940 no reporta desde ayer).";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "odoo_ticket",
+      errorStage: "missing_plate",
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        message,
+        missing: ["patente"],
+        missing_s: "patente",
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  const existingRef = await findRecentOdooRef(rawPhone, plate);
+  if (existingRef) {
+    const message = `Ya existe un caso abierto (N° ${existingRef}) para este reclamo. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "odoo_ticket",
+      stage: "deduplicated",
+      ref: existingRef,
+      plate,
+    });
+    return NextResponse.json({
+      ok: true,
+      ok_s: "true",
+      ref: existingRef,
+      reused: true,
+      reused_s: "true",
+      message,
+    });
+  }
+
   const subject = explicitSubject || (plate ? `${plate} - ${event}` : event);
 
   // Dato real de la API de Wara para enriquecer el evento (ej. "sin reporte hace 18 h").

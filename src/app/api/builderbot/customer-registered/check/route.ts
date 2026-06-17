@@ -16,6 +16,10 @@ const bodySchema = z
     phone: z.string().min(8).optional(),
     /** Mismo dato que envía BuilderBot en webhooks (`data.from`) — podés mapear la variable {from} acá. */
     from: z.string().min(8).optional(),
+    rawText: z.string().optional(),
+    body: z.string().optional(),
+    selection: z.string().optional(),
+    message: z.string().optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -90,5 +94,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return customerRegisteredContextResponse(rawPhone);
+  return customerRegisteredContextResponse(rawPhone, {
+    selectionText:
+      (
+        parsed.data.body ??
+        parsed.data.rawText ??
+        parsed.data.selection ??
+        parsed.data.message ??
+        ""
+      ).trim() || undefined,
+  });
 }

@@ -291,10 +291,8 @@ async function findOrCreatePartner(
   cfg: OdooConfig,
   opts: { companyName?: string; customerName?: string; phone?: string; email?: string }
 ): Promise<{ id: number; name?: string } | null> {
-  const byPhone = await findPartnerByPhone(cfg, opts.phone);
-  if (byPhone?.id) return byPhone;
-
   const companyName = opts.companyName?.trim();
+  // Prioridad: razón social Wara (empresa del contacto), no un partner viejo por teléfono.
   if (companyName) {
     const byName = await findPartnerByName(cfg, companyName);
     if (byName?.id) return byName;
@@ -308,6 +306,10 @@ async function findOrCreatePartner(
       // Si no se puede crear el partner, seguimos sin partner_id (se usa partner_name).
     }
   }
+
+  const byPhone = await findPartnerByPhone(cfg, opts.phone);
+  if (byPhone?.id) return byPhone;
+
   return null;
 }
 

@@ -80,7 +80,38 @@ function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
 // Este endpoint lo consume exclusivamente BuilderBot: SIEMPRE respondemos 200 y dejamos
 // el estado real en `ok` + el texto en `summaryText`.
 const BB_STATUS = 200;
-const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 30 * 60;
+const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 60 * 60;
+
+async function recentThreadText(rawPhone: string): Promise<string> {
+  try {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (!customer) return "";
+    const ticket = await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    });
+    if (!ticket) return "";
+    const msgs = await prisma.ticketMessage.findMany({
+      where: { ticketId: ticket.id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { text: true },
+    });
+    return msgs.reverse().map((m) => m.text).filter(Boolean).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function extractLastPlateFromThread(text: string): string | null {
+  const labeled = [...text.matchAll(/Patente:\s*([A-Za-z0-9 ]{5,12})/gi)];
+  if (labeled.length) return normalizeLoosePlate(labeled[labeled.length - 1][1]);
+  const unitMention = [...text.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
+  if (unitMention.length) return normalizeLoosePlate(unitMention[unitMention.length - 1][1]);
+  const plates = [...text.matchAll(/\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi)];
+  if (plates.length) return normalizeLoosePlate(plates[plates.length - 1][1]);
+  return null;
+}
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
   const message = text?.trim();
@@ -272,6 +303,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
+  const threadText = await recentThreadText(rawPhone);
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);
   if (!session.ok || !session.sessionToken) {
     return NextResponse.json(
@@ -291,7 +323,12 @@ export async function POST(req: NextRequest) {
   const requestedPlates = parseRequestedPlates(parsed.data);
   const result = await consultarEstadoUnidades(session.sessionToken, requestedPlates);
   const wantedPlate = normalizeLoosePlate(
-    parsed.data.patente ?? parsed.data.plate ?? detectPlate(parsed.data.rawText ?? "") ?? ""
+    parsed.data.patente ??
+      parsed.data.plate ??
+      detectPlate(parsed.data.rawText ?? "") ??
+      extractLastPlateFromThread(threadText) ??
+      detectPlate(threadText) ??
+      ""
   );
   const filtered = wantedPlate
     ? result.unidades.filter((u) => {
@@ -321,7 +358,7 @@ export async function POST(req: NextRequest) {
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);
 
-  if (result.ok && filtered.length === 1) {
+  if (result.ok && filtered.length === 1 && wantedPlate) {
     const unit = filtered[0];
     const elapsedSeconds = reportElapsedSeconds(unit);
     if (elapsedSeconds != null) {
