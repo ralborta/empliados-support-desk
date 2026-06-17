@@ -32,7 +32,7 @@ function loadMcp() {
   };
 }
 
-const selectHttpRules: never[] = [];
+const selectHttpRules = [];
 
 async function listAnswers(client, flowId) {
   const r = await client.callTool({
