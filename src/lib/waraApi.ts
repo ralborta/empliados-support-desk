@@ -683,7 +683,8 @@ export async function buildCompanyMenuPayload(
     selectable,
     menuContacts,
     waraContactsText,
-    requiresSelection: menuContacts.length > 1,
+    /** Si Wara tiene más de un contacto, el usuario debe confirmar aunque solo uno sea usable. */
+    requiresSelection: contacts.length > 1 && menuContacts.length > 0,
   };
 }
 
@@ -1101,7 +1102,8 @@ export async function resolveCustomerByWaraPhone(
     )
   ) {
     chosenCompany = previouslySelected;
-  } else if (menuContacts.length === 1) {
+  } else if (menuContacts.length === 1 && lookup.contactos.length === 1) {
+    // Auto-selección solo si en Wara hay un único contacto real.
     chosenCompany = menuContacts[0].empresa || menuContacts[0].nombre;
   }
 

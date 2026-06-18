@@ -127,23 +127,17 @@ export async function POST(req: NextRequest) {
       ? await buildCompanyMenuPayload(contacts, normalizedPhone)
       : null;
     const waraContactsText = menu?.waraContactsText ?? "";
-    const multi = menu?.requiresSelection ?? contacts.length > 1;
+    const waraCount = contacts.length;
+    const selectableCount = menu?.menuContacts.length ?? 0;
+    // Varias empresas en Wara → siempre menú de confirmación (aunque solo una sea usable).
+    const multi = waraCount > 1 && selectableCount > 0;
     const message = multi
-      ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}`
-      : menu?.menuContacts.length === 1
-        ? (() => {
-            const only = menu.menuContacts[0].empresa || menu.menuContacts[0].nombre;
-            const blocked = (contacts ?? []).filter(
-              (c) => !menu.selectable.some((s) => s.id === c.id)
-            );
-            const blockedNote =
-              blocked.length > 0
-                ? ` (${blocked.map((c) => c.empresa || c.nombre).join(", ")} figura en Wara pero no está habilitada para el chatbot.)`
-                : "";
-            return `Tu número tiene una sola empresa disponible (${only})${blockedNote} ¿En qué te puedo ayudar?`;
-          })()
-        : contacts.length === 1
-          ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}), así que sigo con esa. ¿En qué te puedo ayudar?`
+      ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+      : selectableCount === 1 && waraCount === 1
+        ? `Tu número tiene una sola empresa asociada (${menu!.menuContacts[0].empresa || menu!.menuContacts[0].nombre}). ¿En qué te puedo ayudar?`
+        : selectableCount === 0 && waraCount > 0
+          ? waraContactsText ||
+            `Ninguna de tus empresas en Wara está habilitada para el chatbot en este ambiente. Te derivo con un agente.`
           : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;
     return NextResponse.json(
       {
