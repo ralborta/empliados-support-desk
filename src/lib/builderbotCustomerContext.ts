@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { ensureBuilderBotContactActive } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
   buildCompanyMenuPayload,
@@ -296,6 +297,9 @@ export async function customerRegisteredContextResponse(
   }
 
   const normalized = normalizeWhatsAppPhone(trimmed) || trimmed.replace(/\D/g, "");
+  // Cada mensaje humano válido debe poder hablar con el bot (evita quedar muteado 24h por un bug de flujo).
+  void ensureBuilderBotContactActive(normalized);
+
   if (normalized.length < 8) {
     const placeholderHint = isLikelyBuilderBotPhonePlaceholder(trimmed)
       ? "El path llegó como texto literal (p. ej. {from}) sin reemplazar. En BuilderBot.cloud, en la URL del HTTP usá el asistente de variables para insertar el número del contacto (remitente), no escribas {from} a mano. Alternativas: GET …/customer-registered?phone=NUMERO&api_key=… o POST …/customer-registered/check con JSON \"from\"."
@@ -374,6 +378,12 @@ export async function customerRegisteredContextResponse(
       `${waraContactsText}\n\n` +
       `Respondé con el número de la opción o con el nombre de la empresa.`;
   }
+  if (!responseMessage && registered && !requiresCompanySelection) {
+    const firstName = customer?.name?.trim().split(/\s+/)[0];
+    responseMessage = firstName
+      ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
+      : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+  }
 
   return NextResponse.json({
     registered,
@@ -401,7 +411,8 @@ export async function customerRegisteredContextResponse(
     lastTicketContextText,
     requiresCompanySelection,
     requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
-    selectionFailed_s: selectionMessage ? "true" : "false",
+    // No usar selectionFailed_s para rutear a mute/silencio: solo requiresCompanySelection + message.
+    selectionFailed_s: "false",
     message: responseMessage,
     testBlocked: resolution.testBlocked ?? false,
     testBlocked_s: resolution.testBlocked ? "true" : "false",

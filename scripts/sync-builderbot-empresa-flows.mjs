@@ -24,10 +24,13 @@ const FLOWS = {
   elegir: "c4b5127a-76fd-4cb2-8b43-d99685b5c50a",
   cambiar: "3693a7a9-b5f2-4a66-97f3-acef85dab201",
   router: "5895dde2-c0df-41c2-8a35-0895331aefbf",
+  ignorar: "03d37040-357d-4b17-9c23-2ba8ac706454",
 };
 
 const ANSWERS = {
+  inicioUnmute: "7bcb3e3a-0498-4c59-a9e9-2ffbdb756033",
   inicioHttp: "f9901e83-6dca-4bbe-897e-721acc5bd871",
+  ignorarMute: "87a1c31f-8278-4945-b446-2a3fbacb7e2f",
   elegirText: "753ea570-b8c5-4546-8bff-116a8f053551",
   elegirHttp: "682abeb0-2718-4a42-847f-9e972a8e90ef",
   cambiarReset: "c1891f82-32d9-4056-93d7-03739b45b496",
@@ -62,7 +65,35 @@ async function main() {
   const client = new Client({ name: "sync-empresa-flows", version: "1.0.0" });
   await client.connect(transport);
 
-  // Inicio: mostrar error de selección sin re-mandar al menú textual de Elegir.
+  // Inicio: desmutear siempre antes del HTTP (evita quedar callado 24h por un bug previo).
+  await client.callTool({
+    name: "builderbot_update_answer",
+    arguments: {
+      projectId: PROJECT_ID,
+      flowId: FLOWS.inicio,
+      answerId: ANSWERS.inicioUnmute,
+      type: "add_mute",
+      sort: 0,
+      options: { capture: false },
+      plugins: { mute: { status: false, gapTime: 0 } },
+    },
+  });
+
+  // Ignorar no-cliente: no volver a mutear 24h (solo ignorar canales/newsletter).
+  await client.callTool({
+    name: "builderbot_update_answer",
+    arguments: {
+      projectId: PROJECT_ID,
+      flowId: FLOWS.ignorar,
+      answerId: ANSWERS.ignorarMute,
+      type: "add_mute",
+      sort: 1,
+      options: { capture: false },
+      plugins: { mute: { status: false, gapTime: 0 } },
+    },
+  });
+
+  // Inicio HTTP: validar cliente y rutear (sin selectionFailed → mute).
   await client.callTool({
     name: "builderbot_update_answer",
     arguments: {
@@ -85,13 +116,7 @@ async function main() {
               conditionRule: "ignore_s",
               conditionValue: "true",
               condition: "===",
-              conditionFlowId: "03d37040-357d-4b17-9c23-2ba8ac706454",
-            },
-            {
-              conditionRule: "selectionFailed_s",
-              conditionValue: "true",
-              condition: "===",
-              conditionFlowId: FLOWS.elegir,
+              conditionFlowId: FLOWS.ignorar,
             },
             {
               conditionRule: "requiresCompanySelection_s",

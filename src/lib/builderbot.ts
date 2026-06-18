@@ -77,6 +77,48 @@ const BLACKLIST_SETTLE_MS = 800;
  * Pausa o reactiva el flujo del bot para un número vía BuilderBot Cloud API v2.
  * POST /api/v2/{botId}/blacklist con { number, intent: "add" | "remove" }.
  */
+/**
+ * Desmutear / mutear un contacto en BuilderBot Cloud (plugin add_mute del runtime).
+ * POST /api/v2/{botId}/mute con { number, status: boolean }.
+ */
+export async function setBuilderBotContactMute(
+  number: string,
+  muted: boolean
+): Promise<void> {
+  const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
+  const API_KEY = process.env.BUILDERBOT_API_KEY || "";
+  if (!BOT_ID || !API_KEY) return;
+
+  const normalizedNumber = String(number).replace(/\D/g, "");
+  if (normalizedNumber.length < 9) return;
+
+  const url = `${BUILDERBOT_BASE_URL.replace(/\/$/, "")}/api/v2/${BOT_ID}/mute`;
+  try {
+    const response = await axios.post(
+      url,
+      { number: normalizedNumber, status: muted },
+      {
+        headers: { "Content-Type": "application/json", "x-api-builderbot": API_KEY },
+        timeout: 15000,
+      }
+    );
+    console.log("[BuilderBot] Cloud mute OK", muted, normalizedNumber, response.data);
+  } catch (error: unknown) {
+    const err = error as { response?: { status?: number; data?: unknown }; message?: string };
+    console.error("[BuilderBot] Cloud mute falló", muted, normalizedNumber, {
+      status: err.response?.status,
+      data: err.response?.data,
+      message: err?.message,
+    });
+  }
+}
+
+/** Desmutear contacto en Cloud (mute + blacklist). Llamar al inicio de cada turno válido. */
+export async function ensureBuilderBotContactActive(number: string): Promise<void> {
+  await setBuilderBotContactMute(number, false);
+  await setBuilderBotCloudBlacklist(number, "remove");
+}
+
 export async function setBuilderBotCloudBlacklist(
   number: string,
   intent: "add" | "remove"
