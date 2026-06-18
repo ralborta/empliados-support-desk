@@ -56,7 +56,78 @@ function minutesAgo(seconds: number | undefined): string {
 function summarizeUnit(unit: WaraUnidadEstado): string {
   const ign = unit.ultima_ignicion?.estado === true ? "encendida" : unit.ultima_ignicion?.estado === false ? "apagada" : "sin dato";
   const volt = typeof unit.alimentacion_externa?.voltaje === "number" ? `${unit.alimentacion_externa.voltaje}V` : "sin dato";
-  return `Unidad ${unit.patente || unit.unidad}: último reporte hace ${minutesAgo(unit.ultimo_reporte?.hace_segundos)}, ignición ${ign}, alimentación ${volt}.`;
+  const pos = minutesAgo(unit.ultima_posicion?.hace_segundos);
+  return `Unidad ${unit.patente || unit.unidad}: último reporte hace ${minutesAgo(unit.ultimo_reporte?.hace_segundos)}, última posición hace ${pos}, ignición ${ign}, alimentación ${volt}.`;
+}
+
+/** Margen: si la posición es mucho más vieja que el reporte, el equipo no está reportando bien. */
+const POSITION_REPORT_DRIFT_SECONDS = 20 * 60;
+
+type ReportingAssessment =
+  | { status: "ok"; reportElapsed: number }
+  | { status: "missing_report"; reportElapsed: number }
+  | { status: "stale_position"; reportElapsed: number; positionElapsed: number | null; reason: string };
+
+function assessUnitReporting(unit: WaraUnidadEstado): ReportingAssessment | null {
+  const reportElapsed = reportElapsedSeconds(unit);
+  if (reportElapsed == null) return null;
+
+  const positionElapsed =
+    typeof unit.ultima_posicion?.hace_segundos === "number" &&
+    Number.isFinite(unit.ultima_posicion.hace_segundos)
+      ? unit.ultima_posicion.hace_segundos
+      : null;
+
+  if (reportElapsed >= MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
+    return { status: "missing_report", reportElapsed };
+  }
+
+  if (positionElapsed == null) {
+    return {
+      status: "stale_position",
+      reportElapsed,
+      positionElapsed: null,
+      reason: "no figura última posición en Wara",
+    };
+  }
+
+  if (positionElapsed >= MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
+    return {
+      status: "stale_position",
+      reportElapsed,
+      positionElapsed,
+      reason: `la última posición es de hace ${minutesAgo(positionElapsed)}`,
+    };
+  }
+
+  if (positionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) {
+    return {
+      status: "stale_position",
+      reportElapsed,
+      positionElapsed,
+      reason: `el reporte es reciente pero la posición quedó desactualizada (posición hace ${minutesAgo(positionElapsed)}, reporte hace ${minutesAgo(reportElapsed)})`,
+    };
+  }
+
+  const ignitionElapsed =
+    typeof unit.ultima_ignicion?.hace_segundos === "number" &&
+    Number.isFinite(unit.ultima_ignicion.hace_segundos)
+      ? unit.ultima_ignicion.hace_segundos
+      : null;
+  if (
+    ignitionElapsed != null &&
+    ignitionElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS &&
+    positionElapsed > ignitionElapsed + POSITION_REPORT_DRIFT_SECONDS
+  ) {
+    return {
+      status: "stale_position",
+      reportElapsed,
+      positionElapsed,
+      reason: `hay ignición reciente pero la posición no se actualiza (ignición hace ${minutesAgo(ignitionElapsed)}, posición hace ${minutesAgo(positionElapsed)})`,
+    };
+  }
+
+  return { status: "ok", reportElapsed };
 }
 
 function normalizeLoosePlate(value: string): string {
@@ -125,6 +196,26 @@ function looksLikeUnitListRequest(rawText: string | undefined | null): boolean {
   return /\b(listado|mis unidades|todas las unidades|flota|cuantas unidades|ver unidades|mis camiones|que unidades)\b/.test(
     norm
   );
+}
+
+/** El cliente habla de otra unidad distinta a la del hilo — no reutilizar patente anterior. */
+function looksLikeAnotherUnitRequest(rawText: string | undefined | null): boolean {
+  const norm = (rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(otra unidad|otro unidad|otro veh[ií]culo|otra patente|la otra unidad|segunda unidad|otra camioneta|tengo otra|otro m[oó]vil)\b/.test(
+    norm
+  );
+}
+
+function mentionsMissingReportWithoutPlate(rawText: string | undefined | null): boolean {
+  const norm = (rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (detectPlate(rawText ?? "")) return false;
+  return /\b(sin reporte|no reporta|no actualiza|offline|no reporta bien)\b/.test(norm);
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -196,14 +287,18 @@ async function createMissingReportTicket(params: {
   companyName: string;
   contactName: string;
   elapsedText: string;
+  issueDetail?: string;
 }): Promise<{ ref: string; message: string; reused: boolean }> {
   const plate = normalizeLoosePlate(params.unit.patente || params.unit.unidad || "");
+  const issueLabel = params.issueDetail
+    ? `problema de reporte (${params.issueDetail})`
+    : `sin reporte hace ${params.elapsedText}`;
   const existing = await findRecentMissingReportTicket(params.rawPhone, plate);
   if (!existing?.customer) {
     return {
       ref: "",
       reused: false,
-      message: `La unidad ${params.unit.patente || params.unit.unidad} está sin reporte hace ${params.elapsedText}. No pude registrar el caso automáticamente, te derivo con un asesor para revisarlo.`,
+      message: `La unidad ${params.unit.patente || params.unit.unidad} está ${issueLabel}. No pude registrar el caso automáticamente, te derivo con un asesor para revisarlo.`,
     };
   }
 
@@ -211,11 +306,13 @@ async function createMissingReportTicket(params: {
     return {
       ref: existing.ticket.code,
       reused: true,
-      message: `La unidad ${params.unit.patente || params.unit.unidad} está sin reporte hace ${params.elapsedText}. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
+      message: `La unidad ${params.unit.patente || params.unit.unidad} está ${issueLabel}. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
     };
   }
 
-  const title = `${plate} - Unidad sin reporte hace ${params.elapsedText}`;
+  const title = params.issueDetail
+    ? `${plate} - ${params.issueDetail}`
+    : `${plate} - Unidad sin reporte hace ${params.elapsedText}`;
   const localTicket = await prisma.ticket.create({
     data: {
       code: generateTicketCode(),
@@ -231,7 +328,7 @@ async function createMissingReportTicket(params: {
       category: "TECH_SUPPORT",
       incidentType: "MISSING_REPORT",
       channel: "WHATSAPP",
-      aiSummary: `Unidad ${plate} sin reporte hace ${params.elapsedText}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
+      aiSummary: `Unidad ${plate} con ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
     },
   });
 
@@ -294,7 +391,7 @@ async function createMissingReportTicket(params: {
   return {
     ref,
     reused: false,
-    message: `La unidad ${params.unit.patente || params.unit.unidad} está sin reporte hace ${params.elapsedText}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
+    message: `La unidad ${params.unit.patente || params.unit.unidad} está ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
   };
 }
 
@@ -318,6 +415,26 @@ export async function POST(req: NextRequest) {
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const threadText = await recentThreadText(rawPhone);
+  const rawText = parsed.data.rawText ?? "";
+  const explicitPlate =
+    parsed.data.patente ?? parsed.data.plate ?? detectPlate(rawText) ?? "";
+
+  if (
+    !explicitPlate &&
+    (looksLikeAnotherUnitRequest(rawText) || mentionsMissingReportWithoutPlate(rawText))
+  ) {
+    const askPlate =
+      "¿Cuál es la patente de esa unidad? Pasámela (por ejemplo AI 211 XK) y la consulto en Wara.";
+    await appendOutboundBotMessage(rawPhone, askPlate, {
+      source: "wara_unidades_ask_plate",
+      rawText,
+    });
+    return NextResponse.json(
+      { ok: true, summaryText: askPlate, action: "none" as const, unidadesCount: 0 },
+      { status: BB_STATUS }
+    );
+  }
+
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);
   if (!session.ok || !session.sessionToken) {
     return NextResponse.json(
@@ -336,11 +453,11 @@ export async function POST(req: NextRequest) {
 
   const requestedPlates = parseRequestedPlates(parsed.data);
   const result = await consultarEstadoUnidades(session.sessionToken, requestedPlates);
-  const rawText = parsed.data.rawText ?? "";
-  const explicitPlate =
-    parsed.data.patente ?? parsed.data.plate ?? detectPlate(rawText) ?? "";
   const useThreadPlate =
-    !explicitPlate && !looksLikeUnitListRequest(rawText) && requestedPlates.length === 0;
+    !explicitPlate &&
+    !looksLikeUnitListRequest(rawText) &&
+    !looksLikeAnotherUnitRequest(rawText) &&
+    requestedPlates.length === 0;
   const wantedPlate = normalizeLoosePlate(
     explicitPlate ||
       (useThreadPlate
@@ -370,19 +487,33 @@ export async function POST(req: NextRequest) {
   let summaryText = !result.ok
     ? result.error || "No pude consultar las unidades en Wara."
     : filtered.length === 0
-      ? `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
+      ? wantedPlate && !explicitPlate
+        ? "No encontré esa patente en tu empresa. ¿Podés confirmarme la patente exacta?"
+        : `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
       : filtered.length === 1
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);
 
   if (result.ok && filtered.length === 1 && wantedPlate) {
     const unit = filtered[0];
-    const elapsedSeconds = reportElapsedSeconds(unit);
-    if (elapsedSeconds != null) {
-      const elapsedText = minutesAgo(elapsedSeconds);
-      if (elapsedSeconds < MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
+    const assessment = assessUnitReporting(unit);
+    if (assessment) {
+      const elapsedText = minutesAgo(assessment.reportElapsed);
+      if (assessment.status === "ok") {
         action = "observation";
-        summaryText = `La unidad ${unit.patente || unit.unidad} tiene último reporte hace ${elapsedText}. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
+        summaryText = `La unidad ${unit.patente || unit.unidad} reportó hace ${elapsedText} y la posición también está al día. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
+      } else if (assessment.status === "stale_position") {
+        action = "ticket";
+        const created = await createMissingReportTicket({
+          rawPhone,
+          unit,
+          companyName: session.companyName ?? result.cliente ?? "",
+          contactName: session.contactName ?? "",
+          elapsedText: minutesAgo(assessment.reportElapsed),
+          issueDetail: assessment.reason,
+        });
+        ticketRef = created.ref;
+        summaryText = created.message;
       } else {
         action = "ticket";
         const created = await createMissingReportTicket({
