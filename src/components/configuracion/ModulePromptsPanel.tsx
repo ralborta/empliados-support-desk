@@ -17,8 +17,6 @@ type ModulePrompt = {
   flowLabel: string;
   content: string;
   sortOrder: number;
-  syncScriptKey: string | null;
-  hasDefaultFile: boolean;
   updatedAt: string;
 };
 
@@ -57,7 +55,7 @@ export default function ModulePromptsPanel() {
     } catch (error) {
       setMessage({
         type: "error",
-        text: error instanceof Error ? error.message : "Error al cargar prompts por módulo",
+        text: error instanceof Error ? error.message : "No se pudieron cargar los prompts",
       });
     } finally {
       setIsLoading(false);
@@ -83,7 +81,7 @@ export default function ModulePromptsPanel() {
     const currentDraft = selectedKey ? drafts[selectedKey] : null;
     if (currentDraft?.dirty) {
       const ok = window.confirm(
-        "Tenés cambios sin guardar en este prompt. ¿Cambiar de módulo igual? Se pierde lo editado en pantalla."
+        "Tenés cambios sin guardar. ¿Cambiar de módulo igual? Se pierde lo que editaste."
       );
       if (!ok) return;
       setDrafts((prev) => {
@@ -134,9 +132,9 @@ export default function ModulePromptsPanel() {
       }
       setMessage({
         type: "success",
-        text: `"${saved.name}" guardado en el panel. Sync a BuilderBot sigue siendo manual o por script.`,
+        text: `Cambios guardados en «${saved.name}».`,
       });
-      setTimeout(() => setMessage(null), 5000);
+      setTimeout(() => setMessage(null), 4000);
     } catch (error) {
       setMessage({
         type: "error",
@@ -153,7 +151,7 @@ export default function ModulePromptsPanel() {
     if (!draft?.content) return;
     try {
       await navigator.clipboard.writeText(draft.content);
-      setMessage({ type: "success", text: "Prompt copiado al portapapeles" });
+      setMessage({ type: "success", text: "Texto copiado al portapapeles" });
       setTimeout(() => setMessage(null), 2500);
     } catch {
       setMessage({ type: "error", text: "No se pudo copiar" });
@@ -169,7 +167,7 @@ export default function ModulePromptsPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `prompt-${mod.key}-${stamp}.txt`;
+    a.download = `atilio-${mod.key}-${stamp}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -181,7 +179,7 @@ export default function ModulePromptsPanel() {
           <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
             <Layers className="w-5 h-5 text-violet-600" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Prompts por módulo</h2>
+          <h2 className="text-xl font-bold text-slate-900">Prompts por trámite</h2>
         </div>
         <div className="flex items-center justify-center h-40">
           <Loader2 className="w-8 h-8 text-violet-600 animate-spin" />
@@ -197,21 +195,12 @@ export default function ModulePromptsPanel() {
           <Layers className="w-5 h-5 text-violet-600" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Prompts por módulo</h2>
+          <h2 className="text-xl font-bold text-slate-900">Prompts por trámite</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Elegí el subflujo que querés editar. Son prompts distintos al maestro de Atilio (arriba a la
-            izquierda).
+            Cada trámite (odómetro, consulta, certificados, etc.) tiene su propio texto. Elegí cuál querés
+            editar.
           </p>
         </div>
-      </div>
-
-      <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
-        <p className="font-semibold">Sync con BuilderBot (pendiente por API)</p>
-        <p className="mt-1 text-xs leading-relaxed">
-          Al guardar, el texto queda en la base de datos del panel y, cuando aplica, también en{" "}
-          <code className="rounded bg-amber-100 px-1">scripts/</code>. La publicación en BuilderBot sigue
-          siendo manual o por script MCP.
-        </p>
       </div>
 
       {message && (
@@ -232,7 +221,7 @@ export default function ModulePromptsPanel() {
       )}
 
       <label className="block mb-4">
-        <span className="text-sm font-semibold text-slate-800 mb-2 block">Módulo / subflujo</span>
+        <span className="text-sm font-semibold text-slate-800 mb-2 block">Trámite</span>
         <select
           value={selectedKey}
           onChange={(e) => handleSelectModule(e.target.value)}
@@ -254,22 +243,11 @@ export default function ModulePromptsPanel() {
               <p className="text-sm font-semibold text-slate-900">{selectedModule.flowLabel}</p>
               <p className="text-xs text-slate-600 mt-1">{selectedModule.description}</p>
             </div>
-            <div className="flex items-center gap-2">
-              {selectedDraft.dirty && (
-                <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                  Sin guardar
-                </span>
-              )}
-              {selectedModule.syncScriptKey ? (
-                <span className="text-xs font-medium text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
-                  Script sync
-                </span>
-              ) : (
-                <span className="text-xs font-medium text-slate-600 bg-slate-200 px-2 py-0.5 rounded-full">
-                  Solo panel
-                </span>
-              )}
-            </div>
+            {selectedDraft.dirty && (
+              <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                Sin guardar
+              </span>
+            )}
           </div>
 
           <textarea
@@ -286,7 +264,7 @@ export default function ModulePromptsPanel() {
                 onClick={() => handleDownload(selectedModule)}
                 className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
-                Descargar .txt
+                Descargar
               </button>
               <button
                 type="button"
@@ -311,14 +289,13 @@ export default function ModulePromptsPanel() {
               ) : (
                 <>
                   <Save className="w-4 h-4" />
-                  Guardar en panel
+                  Guardar cambios
                 </>
               )}
             </button>
           </div>
           <p className="mt-2 text-xs text-slate-400">
             Última actualización: {new Date(selectedModule.updatedAt).toLocaleString("es-AR")}
-            {selectedModule.hasDefaultFile ? " · Respaldo en scripts/ al guardar" : ""}
           </p>
         </div>
       )}

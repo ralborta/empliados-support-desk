@@ -36,7 +36,6 @@ export default function AgentConfig() {
   const [prompt, setPrompt] = useState("");
   const [fullPrompt, setFullPrompt] = useState("");
   const [usesTemplate, setUsesTemplate] = useState(false);
-  const [assistantApiUnsupported, setAssistantApiUnsupported] = useState(false);
   const [localBackupAt, setLocalBackupAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -67,7 +66,6 @@ export default function AgentConfig() {
       setPrompt(data.content || "");
       setFullPrompt(data.fullContent || "");
       setUsesTemplate(!!data.usesTemplate);
-      setAssistantApiUnsupported(!!data.assistantApiUnsupported);
       if (data.warning) {
         console.warn("Prompt warning:", data.warning);
       }
@@ -103,8 +101,7 @@ export default function AgentConfig() {
       const data = await response.json();
       setFullPrompt(data.fullContent || "");
       setUsesTemplate(!!data.usesTemplate);
-      setAssistantApiUnsupported(!!data.assistantApiUnsupported);
-      setMessage({ type: "success", text: "Prompt actualizado correctamente" });
+      setMessage({ type: "success", text: "Cambios guardados correctamente" });
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       setMessage({
@@ -142,7 +139,7 @@ export default function AgentConfig() {
     if (!fullPrompt) return;
     try {
       await navigator.clipboard.writeText(fullPrompt);
-      setMessage({ type: "success", text: "Prompt final copiado al portapapeles" });
+      setMessage({ type: "success", text: "Texto completo copiado al portapapeles" });
       setTimeout(() => setMessage(null), 2500);
     } catch {
       setMessage({ type: "error", text: "No se pudo copiar al portapapeles" });
@@ -163,7 +160,7 @@ export default function AgentConfig() {
       refreshLocalBackupMeta();
       setMessage({
         type: "success",
-        text: "Respaldo guardado en este navegador (no en servidor ni base de datos).",
+        text: "Respaldo guardado en este navegador.",
       });
       setTimeout(() => setMessage(null), 4000);
     } catch {
@@ -184,7 +181,7 @@ export default function AgentConfig() {
     }
     if (
       !window.confirm(
-        "¿Recuperar el respaldo local? Se reemplaza lo que ves en pantalla (no se envía a BuilderBot hasta que pulses Guardar cambios)."
+        "¿Recuperar el respaldo local? Se reemplaza lo que ves en pantalla hasta que guardes los cambios."
       )
     ) {
       return;
@@ -194,7 +191,7 @@ export default function AgentConfig() {
     setUsesTemplate(b.usesTemplate);
     setMessage({
       type: "success",
-      text: "Respaldo recuperado en pantalla. Revisá el texto y pulsá Guardar cambios para subirlo a BuilderBot.",
+      text: "Respaldo recuperado. Revisá el texto y pulsá Guardar cambios cuando esté listo.",
     });
     setTimeout(() => setMessage(null), 5000);
   };
@@ -206,7 +203,7 @@ export default function AgentConfig() {
           <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
             <Brain className="w-5 h-5 text-indigo-600" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Configuración del Agente</h2>
+          <h2 className="text-xl font-bold text-slate-900">Atilio — conversación general</h2>
         </div>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
@@ -222,20 +219,17 @@ export default function AgentConfig() {
           <Brain className="w-5 h-5 text-indigo-600" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Configuración del Agente</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Edita solo el bloque personalizado; el prompt base queda protegido</p>
+          <h2 className="text-xl font-bold text-slate-900">Atilio — conversación general</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Definí cómo saluda, el tono y el estilo de las respuestas. Las reglas base quedan protegidas.
+          </p>
         </div>
       </div>
 
-      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-        {usesTemplate
-          ? "Modo plantilla activo: se combina Prompt Base + tu bloque editable."
-          : "Prompt sin plantilla detectado: al guardar se migrará automáticamente al nuevo formato."}
-      </div>
       <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">
-        <p className="font-semibold">Guía rápida del bloque editable</p>
+        <p className="font-semibold">Qué podés editar acá</p>
         <p className="mt-1">
-          Escribe solo instrucciones de interacción básica (saludo, tono y estilo). No pegues aquí el prompt final completo.
+          Saludo, tono y forma de hablar. No hace falta pegar el texto completo del asistente.
         </p>
       </div>
       {message && (
@@ -276,7 +270,7 @@ export default function AgentConfig() {
               type="button"
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Descargar bloque editable
+              Descargar texto editable
             </button>
             <button
               onClick={handleDownloadFinalPrompt}
@@ -284,7 +278,7 @@ export default function AgentConfig() {
               disabled={!fullPrompt}
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Descargar prompt final
+              Descargar texto completo
             </button>
             <button
               onClick={handleCopyFinalPrompt}
@@ -293,7 +287,7 @@ export default function AgentConfig() {
               className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ClipboardCopy className="h-4 w-4 shrink-0" />
-              Copiar prompt final
+              Copiar texto completo
             </button>
           </div>
           <button

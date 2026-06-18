@@ -13,22 +13,22 @@ export default async function ConfiguracionPage() {
         <div>
           <h1 className="text-3xl font-bold text-slate-900">⚙️ Configuración</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Tres cosas distintas: prompt maestro de Atilio, base de conocimiento (PDFs) y prompts de cada
-            subflujo.
+            Configurá cómo responde Atilio: su tono general, los documentos de ayuda y el texto de cada
+            trámite.
           </p>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-600">
-              1 · Prompt maestro
+              1 · Conversación general
             </p>
             <AgentConfig />
           </div>
 
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-600">
-              2 · Base de conocimiento
+              2 · Documentos de ayuda
             </p>
             <KnowledgeFilesList />
           </div>
@@ -36,7 +36,7 @@ export default async function ConfiguracionPage() {
 
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-600">
-            3 · Prompts por módulo (elegir subflujo)
+            3 · Texto por trámite
           </p>
           <ModulePromptsPanel />
         </div>

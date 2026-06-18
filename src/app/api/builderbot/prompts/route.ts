@@ -8,12 +8,7 @@ export async function GET() {
 
   try {
     const modules = await listBotPromptModules();
-    return NextResponse.json({
-      modules,
-      assistantApiUnsupported: true,
-      syncNote:
-        "Los subflujos se guardan en el panel y en scripts/ cuando aplica. La publicación en BuilderBot Cloud sigue siendo manual o vía scripts/sync-builderbot-subflow-prompts.mjs.",
-    });
+    return NextResponse.json({ modules });
   } catch (error) {
     console.error("GET /api/builderbot/prompts:", error);
     return NextResponse.json({ error: "No se pudieron cargar los prompts por módulo" }, { status: 500 });

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
   if (!BOT_ID || !API_KEY) {
     return NextResponse.json(
-      { error: "BuilderBot no configurado", files: [] },
+      { error: "El servicio de archivos no está disponible", files: [] },
       { status: 503 }
     );
   }
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
 
   if (!BOT_ID || !API_KEY) {
     return NextResponse.json(
-      { error: "BuilderBot no configurado" },
+      { error: "El servicio de archivos no está disponible" },
       { status: 503 }
     );
   }
@@ -101,7 +101,7 @@ export async function DELETE(request: NextRequest) {
 
   if (!BOT_ID || !API_KEY) {
     return NextResponse.json(
-      { error: "BuilderBot no configurado" },
+      { error: "El servicio de archivos no está disponible" },
       { status: 503 }
     );
   }

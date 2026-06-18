@@ -129,18 +129,12 @@ export default function KnowledgeFilesList() {
           <FolderOpen className="w-5 h-5 text-indigo-600" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Base de Conocimiento</h2>
+          <h2 className="text-xl font-bold text-slate-900">Documentos de ayuda</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Subí PDFs o documentos (p. ej. manual de Mantenimiento Wara) para que Atilio los use como
-            referencia en BuilderBot.
+            Subí manuales o documentos para que Atilio los use al responder (por ejemplo, el módulo de
+            Mantenimiento Wara).
           </p>
         </div>
-      </div>
-
-      <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/80 p-3 text-xs text-indigo-900">
-        Los archivos se suben a BuilderBot y quedan disponibles para los nodos ChatPDF del bot. El PDF del
-        módulo de mantenimiento debe asociarse al flow &quot;Información Mantenimiento&quot; dentro de
-        BuilderBot si aún no está vinculado.
       </div>
 
       {error && (

@@ -16,7 +16,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     }
     return NextResponse.json({
       ...module,
-      assistantApiUnsupported: true,
     });
   } catch (error) {
     console.error(`GET /api/builderbot/prompts/${key}:`, error);
@@ -36,11 +35,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!saved) {
       return NextResponse.json({ error: "Módulo de prompt no encontrado" }, { status: 404 });
     }
-    return NextResponse.json({
-      ...saved,
-      assistantApiUnsupported: true,
-      message: "Prompt guardado en el panel. Para publicarlo en BuilderBot usá el script de sync o pegalo manualmente.",
-    });
+    return NextResponse.json(saved);
   } catch (error) {
     console.error(`POST /api/builderbot/prompts/${key}:`, error);
     return NextResponse.json({ error: "No se pudo guardar el prompt" }, { status: 500 });

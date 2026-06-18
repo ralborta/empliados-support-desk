@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         if (notFoundInBoth) {
           assistantApiUnsupported = true;
           warning =
-            "Este entorno no soporta lectura de assistant prompt por API. Puedes editar y copiar el prompt final para pegarlo manualmente en BuilderBot.";
+            "No pudimos leer el texto actual del bot. Podés editar y guardar igual, o usar Copiar texto completo.";
         } else {
           warning = `No se pudo leer assistant prompt (${assistantResponse.status}, ruta ${tried}), usando fallback global.`;
         }
@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
       fullContent,
       usesTemplate: true,
       source: "global",
-      warning: "No se pudo leer BuilderBot. Se cargó un bloque editable vacío para continuar.",
+      warning: "No pudimos cargar el texto guardado. Podés empezar a editar desde acá.",
       updatedAt: new Date().toISOString(),
     });
   }
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error:
-              "Este entorno no soporta actualización del assistant por API. Copia el prompt final y pégalo manualmente en BuilderBot.",
+              "No pudimos aplicar el cambio en el bot automáticamente. Usá «Copiar texto completo» si necesitás el texto actualizado.",
             assistantApiUnsupported: true,
             fullContent: finalPrompt,
             content: prompt,
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
       return NextResponse.json(
-        { error: "Error guardando prompt en BuilderBot", details: errorText || response.statusText },
+        { error: "No se pudieron guardar los cambios", details: errorText || response.statusText },
         { status: 502 }
       );
     }
@@ -201,6 +201,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Error in POST /api/builderbot/prompt:", error);
-    return NextResponse.json({ error: "No se pudo guardar el prompt en BuilderBot" }, { status: 502 });
+    return NextResponse.json({ error: "No se pudieron guardar los cambios" }, { status: 502 });
   }
 }

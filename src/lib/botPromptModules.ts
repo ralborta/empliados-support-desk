@@ -17,8 +17,8 @@ export const BOT_PROMPT_MODULES: BotPromptModuleDef[] = [
     key: "odometer",
     name: "Cambio Odómetro / Horómetro",
     description:
-      "Subflujo conversacional que reúne patente, odómetro/horómetro y confirmación CONFIRMO antes de ejecutar en Wara.",
-    flowLabel: "Cambio Odómetro → Ejecutar Odómetro",
+      "Cuando el cliente quiere cambiar odómetro u horómetro: patente, valores y confirmación.",
+    flowLabel: "Cambio de odómetro / horómetro",
     sortOrder: 10,
     defaultFile: "odometro_prompt.txt",
     builderbotFlowId: "ae2a5ae9-c289-448c-a068-3cb8c65a2e7f",
@@ -29,8 +29,8 @@ export const BOT_PROMPT_MODULES: BotPromptModuleDef[] = [
     key: "consulta",
     name: "Consultar Unidad",
     description:
-      "Subflujo que identifica patente o intención de consulta antes de llamar a la API de estado de unidades.",
-    flowLabel: "Consultar Unidad → Ejecutar Consulta Unidad",
+      "Cuando el cliente consulta estado de una unidad: patente, último reporte, ubicación, etc.",
+    flowLabel: "Consulta de unidades",
     sortOrder: 20,
     defaultFile: "consulta_unidad_prompt.txt",
     builderbotFlowId: "5939a04e-5a5a-4c59-83b6-31172eba4828",
@@ -41,8 +41,8 @@ export const BOT_PROMPT_MODULES: BotPromptModuleDef[] = [
     key: "mantenimiento_info",
     name: "Información Mantenimiento",
     description:
-      "FAQ del módulo de mantenimiento Wara (planes, tareas, preventivo/correctivo). Usa el PDF de conocimiento en BuilderBot.",
-    flowLabel: "Información Mantenimiento (ChatPDF)",
+      "Responde dudas sobre el módulo de mantenimiento: planes, tareas, preventivo y correctivo.",
+    flowLabel: "Consultas sobre mantenimiento",
     sortOrder: 30,
     builderbotFlowId: "069bcb65-7503-433c-a4ae-1dd89cd26471",
   },
@@ -50,8 +50,8 @@ export const BOT_PROMPT_MODULES: BotPromptModuleDef[] = [
     key: "certificados",
     name: "Certificados de cobertura",
     description:
-      "Instrucciones del subflujo que pide patente y confirma antes de generar el certificado en Wara.",
-    flowLabel: "Certificados → Ejecutar Certificados",
+      "Cuando piden certificado de cobertura: patente y confirmación antes de generarlo.",
+    flowLabel: "Certificados de cobertura",
     sortOrder: 40,
     builderbotFlowId: "fd2e658c-f547-4ec6-b64f-00815620bd6b",
   },
@@ -59,8 +59,8 @@ export const BOT_PROMPT_MODULES: BotPromptModuleDef[] = [
     key: "mantenimiento_operativo",
     name: "Gestión Mantenimiento",
     description:
-      "Subflujo operativo: patente, descripción de tarea/correctivo y confirmación antes de registrar la gestión.",
-    flowLabel: "Gestión Mantenimiento → Ejecutar Gestión Mantenimiento",
+      "Cuando gestionan una tarea o correctivo: patente, descripción y confirmación.",
+    flowLabel: "Gestión de mantenimiento operativo",
     sortOrder: 50,
     builderbotFlowId: "42b29014-7560-4a67-bc09-0201eb1efdd5",
   },
@@ -72,20 +72,19 @@ export function getBotPromptModuleDef(key: string): BotPromptModuleDef | undefin
 
 export function buildModulePlaceholder(def: BotPromptModuleDef): string {
   return [
-    `=== ATILIO_SUBFLUJO_${def.key.toUpperCase()} (BuilderBot Cloud SaaS) ===`,
-    "VERSIÓN: borrador-panel",
+    `=== ATILIO — ${def.name.toUpperCase()} ===`,
+    "VERSIÓN: borrador",
     `CONTEXTO: ${def.description}`,
-    "VERIFICACIÓN: editá este texto desde Configuración en el panel. La publicación en BuilderBot se hace por script MCP (sync automático pendiente).",
     "==================================================",
     "",
     "IDENTIDAD Y MISIÓN",
-    `Sos Atilio en el subflujo "${def.name}".`,
+    `Sos Atilio, agente de Mesa de Ayuda de Wara. Estás ayudando con: ${def.name}.`,
     "Conversá en español, breve y profesional.",
-    "Pedí solo los datos mínimos y no inventes resultados de APIs.",
+    "Pedí solo los datos necesarios y no inventes resultados.",
     "",
     "TONO",
     "- Una pregunta por turno.",
     "- Sin párrafos largos.",
-    "- Si el cliente cambia de tema, derivá al Router o al flujo correspondiente.",
+    "- Si el cliente cambia de tema, volvé al trámite o derivá a un asesor.",
   ].join("\n");
 }
