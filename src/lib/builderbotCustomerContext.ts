@@ -312,6 +312,7 @@ export async function customerRegisteredContextResponse(
 
   let resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
   const selectionText = opts?.selectionText?.trim() || "";
+  let selectionMessage = "";
   if (
     resolution.requiresCompanySelection &&
     selectionText &&
@@ -322,6 +323,8 @@ export async function customerRegisteredContextResponse(
     });
     if (picked.ok) {
       resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+    } else {
+      selectionMessage = picked.menuMessage ?? picked.error ?? "";
     }
   }
 
@@ -390,6 +393,8 @@ export async function customerRegisteredContextResponse(
     lastTicketContextText,
     requiresCompanySelection,
     requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
+    selectionFailed_s: selectionMessage ? "true" : "false",
+    message: selectionMessage,
     testBlocked: resolution.testBlocked ?? false,
     testBlocked_s: resolution.testBlocked ? "true" : "false",
   });

@@ -95,6 +95,25 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
   return false;
 }
 
+function looksLikeGreeting(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm) return true;
+  return /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|que tal|menu|inicio)$/.test(
+    norm
+  );
+}
+
+function companySelectionMenuMessage(
+  menu: string,
+  note: string,
+  opts?: { unrecognized?: boolean }
+): string {
+  const intro = opts?.unrecognized
+    ? "No reconocí esa opción. ¿De cuál empresa escribís?"
+    : "Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?";
+  return `${intro}\n\n${menu}${note}\n\nRespondé con el número de la opción o con el nombre de la empresa.`;
+}
+
 function normCompanyToken(value: string): string {
   return (value || "")
     .normalize("NFD")
@@ -1215,7 +1234,9 @@ export async function selectCompanyForCustomer(
       error: "La empresa indicada no figura entre las asociadas a este teléfono",
       contacts: lookup.contactos,
       menuMessage: menu
-        ? `No reconocí esa opción. ¿De cuál empresa escribís?\n\n${menu}${note}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+        ? companySelectionMenuMessage(menu, note, {
+            unrecognized: !looksLikeGreeting(wantedName),
+          })
         : undefined,
     };
   }
