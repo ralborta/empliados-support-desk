@@ -583,6 +583,79 @@ export async function probeWaraContactSession(contactId: number): Promise<{
   return { ok: created.ok, status: created.status, error: created.error };
 }
 
+const selectableContactsCache = new Map<
+  string,
+  { contacts: WaraEmpresaContact[]; at: number }
+>();
+const SELECTABLE_CACHE_MS = 60_000;
+
+/** Contactos para los que Wara devuelve SessionToken (excluye los no habilitados en staging). */
+export async function filterSelectableContacts(
+  contacts: WaraEmpresaContact[],
+  cacheKey?: string
+): Promise<WaraEmpresaContact[]> {
+  if (contacts.length === 0) return [];
+  if (contacts.length === 1) {
+    const probe = await probeWaraContactSession(contacts[0].id);
+    return probe.ok ? contacts : [];
+  }
+
+  if (cacheKey) {
+    const hit = selectableContactsCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < SELECTABLE_CACHE_MS) return hit.contacts;
+  }
+
+  const probed = await Promise.all(
+    contacts.map(async (contact) => ({
+      contact,
+      ok: (await probeWaraContactSession(contact.id)).ok,
+    }))
+  );
+  const selectable = probed.filter((p) => p.ok).map((p) => p.contact);
+  if (cacheKey) {
+    selectableContactsCache.set(cacheKey, { contacts: selectable, at: Date.now() });
+  }
+  return selectable;
+}
+
+export function formatContactsMenu(contacts: WaraEmpresaContact[]): string {
+  return contacts.map((c, i) => `${i + 1}. ${c.empresa || c.nombre}`).join("\n");
+}
+
+function unavailableContactsNote(
+  all: WaraEmpresaContact[],
+  selectable: WaraEmpresaContact[]
+): string {
+  const blocked = all.filter(
+    (c) => !selectable.some((s) => s.id === c.id)
+  );
+  if (!blocked.length) return "";
+  const names = blocked.map((c) => c.empresa || c.nombre).join(", ");
+  return `\n\n(${names} no está habilitada para el chatbot en este ambiente.)`;
+}
+
+/** Menú numerado solo con empresas que Wara puede abrir en sesión. */
+export async function buildCompanyMenuPayload(
+  contacts: WaraEmpresaContact[],
+  cacheKey?: string
+): Promise<{
+  selectable: WaraEmpresaContact[];
+  menuContacts: WaraEmpresaContact[];
+  waraContactsText: string;
+  requiresSelection: boolean;
+}> {
+  const selectable = await filterSelectableContacts(contacts, cacheKey);
+  const menuContacts = selectable.length > 0 ? selectable : contacts;
+  const waraContactsText =
+    formatContactsMenu(menuContacts) + unavailableContactsNote(contacts, selectable);
+  return {
+    selectable,
+    menuContacts,
+    waraContactsText,
+    requiresSelection: menuContacts.length > 1,
+  };
+}
+
 export async function resolveWaraSessionByPhone(
   prisma: PrismaClient,
   rawPhone: string
@@ -981,22 +1054,24 @@ export async function resolveCustomerByWaraPhone(
     };
   }
 
-  // Si hay UNA sola empresa, la fijamos directo. Si hay varias y el cliente ya eligió
-  // antes (companyName local sigue en la lista de Wara), se respeta esa elección.
-  // Si hay varias y nada elegido aún, dejamos companyName en blanco hasta que confirme.
+  // Si hay UNA sola empresa usable, la fijamos directo. Si hay varias y el cliente ya eligió
+  // antes (companyName local sigue en la lista usable de Wara), se respeta esa elección.
   const previouslySelected = local?.companyName?.trim() || null;
   let chosenCompany: string | null = null;
 
-  if (lookup.contactos.length === 1) {
-    chosenCompany = lookup.contactos[0].empresa || lookup.contactos[0].nombre;
-  } else if (
+  const { menuContacts, requiresSelection: menuRequiresSelection } =
+    await buildCompanyMenuPayload(lookup.contactos, normalized);
+
+  if (
     previouslySelected &&
-    lookup.contactos.some(
+    menuContacts.some(
       (c) =>
         c.empresa.localeCompare(previouslySelected, "es", { sensitivity: "accent" }) === 0
     )
   ) {
     chosenCompany = previouslySelected;
+  } else if (menuContacts.length === 1) {
+    chosenCompany = menuContacts[0].empresa || menuContacts[0].nombre;
   }
 
   // Wara puede devolver el nombre del contacto (persona); lo guardamos como name del Customer
@@ -1019,10 +1094,10 @@ export async function resolveCustomerByWaraPhone(
     ? await prisma.customer.update({ where: { id: local.id }, data })
     : await prisma.customer.create({ data });
 
-  const requiresCompanySelection = lookup.contactos.length > 1 && !chosenCompany;
+  const requiresCompanySelection = menuRequiresSelection && !chosenCompany;
   if (requiresCompanySelection) {
     console.log(
-      `[WaraAPI] ${normalized} tiene ${lookup.contactos.length} contactos en Wara; falta confirmar cuál.`
+      `[WaraAPI] ${normalized} tiene ${menuContacts.length} empresa(s) seleccionable(s) en Wara; falta confirmar cuál.`
     );
   }
 
@@ -1063,10 +1138,9 @@ export async function selectCompanyForCustomer(
   }
 
   const wantedRaw = selection.companyName?.trim() || "";
-  // El cliente puede responder de varias formas: "1", "wara", "1 wara",
-  // "1. WARA", "opcion 2", "el cacique". Extraemos por separado el número
-  // de opción inicial (si lo hay) y la parte de texto del nombre.
-  const leadingNumberMatch = wantedRaw.match(/^\s*(?:opci[oó]n\s*)?(\d{1,3})\b/i);
+  const leadingNumberMatch =
+    wantedRaw.match(/^\s*(?:opci[oó]n\s*)?(\d{1,3})\s*(?:[).:\-]\s*)/i) ||
+    wantedRaw.match(/^\s*(?:opci[oó]n\s*)?(\d{1,3})\s*$/i);
   const wantedIndex = leadingNumberMatch
     ? Number.parseInt(leadingNumberMatch[1], 10) - 1
     : null;
@@ -1115,27 +1189,25 @@ export async function selectCompanyForCustomer(
     };
   }
 
-  // Normaliza para comparar sin acentos, sin mayúsculas y sin espacios extra.
+  const selectable = await filterSelectableContacts(lookup.contactos, normalized);
+  const menuContacts = selectable.length > 0 ? selectable : lookup.contactos;
+
   const wantedNameNorm = normCompanyToken(wantedName);
 
   const matched =
-    // 1) Por id explícito
     (wantedId != null
       ? lookup.contactos.find((c) => c.id === wantedId)
       : undefined) ??
-    // 2) Por número de opción (índice del menú)
-    (wantedIndex != null && wantedIndex >= 0 && wantedIndex < lookup.contactos.length
-      ? lookup.contactos[wantedIndex]
+    (wantedIndex != null && wantedIndex >= 0 && wantedIndex < menuContacts.length
+      ? menuContacts[wantedIndex]
       : undefined) ??
-    // 3) Por nombre: exacto, contiene, alias (guara→wara), primera palabra, etc.
     (wantedNameNorm
       ? lookup.contactos.find((c) => contactMatchesSelection(c, wantedNameNorm))
       : undefined);
 
   if (!matched) {
-    const menu = lookup.contactos
-      .map((c, i) => `${i + 1}. ${c.empresa || c.nombre}`)
-      .join("\n");
+    const menu = formatContactsMenu(menuContacts);
+    const note = unavailableContactsNote(lookup.contactos, selectable);
     return {
       ok: false,
       customer: null,
@@ -1143,24 +1215,29 @@ export async function selectCompanyForCustomer(
       error: "La empresa indicada no figura entre las asociadas a este teléfono",
       contacts: lookup.contactos,
       menuMessage: menu
-        ? `No reconocí esa opción. ¿De cuál empresa escribís?\n\n${menu}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+        ? `No reconocí esa opción. ¿De cuál empresa escribís?\n\n${menu}${note}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
         : undefined,
     };
   }
 
   const matchedCompany = matched.empresa || matched.nombre;
+  const isBlocked =
+    selectable.length > 0 && !selectable.some((c) => c.id === matched.id);
 
-  if (lookup.contactos.length > 1) {
+  if (isBlocked || lookup.contactos.length > 1) {
     const sessionProbe = await probeWaraContactSession(matched.id);
     if (!sessionProbe.ok) {
       const errLower = (sessionProbe.error ?? "").toLowerCase();
-      const menu = lookup.contactos
-        .map((c, i) => `${i + 1}. ${c.empresa || c.nombre}`)
-        .join("\n");
+      const menu = formatContactsMenu(menuContacts);
+      const note = unavailableContactsNote(lookup.contactos, selectable);
       const hint =
         errLower.includes("inexistente") || errLower.includes("no autorizado")
           ? `Wara no habilitó el chatbot para "${matchedCompany}" con este número.`
           : `No pude abrir sesión en Wara para "${matchedCompany}".`;
+      const soloUna =
+        menuContacts.length === 1
+          ? ` Podés responder ${menuContacts[0].empresa || menuContacts[0].nombre} o 1.`
+          : "";
       return {
         ok: false,
         customer: null,
@@ -1170,7 +1247,7 @@ export async function selectCompanyForCustomer(
         matchedContact: matched,
         menuMessage:
           menu &&
-          `${hint} Elegí otra empresa si corresponde:\n\n${menu}\n\nRespondé con el número de la opción o el nombre de la empresa.`,
+          `${hint}${soloUna}\n\n${menu}${note}\n\nRespondé con el número de la opción o con el nombre de la empresa.`,
       };
     }
   }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
+  buildCompanyMenuPayload,
   looksLikeCompanySelection,
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
@@ -351,11 +352,10 @@ export async function customerRegisteredContextResponse(
     : null;
   const contacts = resolution.lookup?.contactos ?? [];
   const requiresCompanySelection = resolution.requiresCompanySelection;
-  // Mostramos al cliente la razón social (empresa). Si por algún motivo no viene, caemos al
-  // nombre del contacto para no quedar con un guión vacío.
-  const waraContactsText = contacts
-    .map((c, idx) => `${idx + 1}. ${c.empresa || c.nombre}`)
-    .join("\n");
+  const menuPayload = contacts.length
+    ? await buildCompanyMenuPayload(contacts, normalized)
+    : null;
+  const waraContactsText = menuPayload?.waraContactsText ?? "";
   const lastTicketSummary = lastTicket?.aiSummary?.trim() || "";
   const lastTicketTitle = lastTicket?.title?.trim() || "";
   const lastTicketContextText = lastTicket
