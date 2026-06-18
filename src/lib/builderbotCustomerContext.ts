@@ -367,6 +367,14 @@ export async function customerRegisteredContextResponse(
       `${lastTicketSummary ? `. Resumen: ${lastTicketSummary}` : ""}`
     : "";
 
+  let responseMessage = selectionMessage;
+  if (!responseMessage && requiresCompanySelection && waraContactsText) {
+    responseMessage =
+      `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
+      `${waraContactsText}\n\n` +
+      `Respondé con el número de la opción o con el nombre de la empresa.`;
+  }
+
   return NextResponse.json({
     registered,
     registered_s: registered ? "true" : "false",
@@ -394,7 +402,7 @@ export async function customerRegisteredContextResponse(
     requiresCompanySelection,
     requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
     selectionFailed_s: selectionMessage ? "true" : "false",
-    message: selectionMessage,
+    message: responseMessage,
     testBlocked: resolution.testBlocked ?? false,
     testBlocked_s: resolution.testBlocked ? "true" : "false",
   });

@@ -35,7 +35,14 @@ const ANSWERS = {
   cambiarSave: "8ffff219-a9ec-491f-bcee-9c6208e45616",
 };
 
-const selectHttpRules = [];
+const selectHttpRules = [
+  {
+    conditionRule: "ok_s",
+    conditionValue: "true",
+    condition: "===",
+    conditionFlowId: FLOWS.router,
+  },
+];
 
 function loadMcp() {
   const cfg = JSON.parse(readFileSync(path.join(homedir(), ".cursor/mcp.json"), "utf8"));
@@ -84,7 +91,7 @@ async function main() {
               conditionRule: "selectionFailed_s",
               conditionValue: "true",
               condition: "===",
-              conditionFlowId: "03d37040-357d-4b17-9c23-2ba8ac706454",
+              conditionFlowId: FLOWS.elegir,
             },
             {
               conditionRule: "requiresCompanySelection_s",
