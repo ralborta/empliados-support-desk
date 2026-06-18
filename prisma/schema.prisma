@@ -161,3 +161,17 @@ model TicketTag {
 
   @@id([ticketId, tagId])
 }
+
+/// Prompts de subflujos Atilio editables desde /configuracion (fuente de verdad en panel; sync BB vía script MCP).
+model BotPromptModule {
+  key                String   @id
+  name               String
+  description        String?
+  flowLabel          String?
+  content            String   @db.Text
+  sortOrder          Int      @default(0)
+  builderbotFlowId   String?
+  builderbotAnswerId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
