@@ -53,7 +53,8 @@ function isResetFlag(value: unknown): boolean {
 function isChangeCompanyPhrase(value: string | undefined | null): boolean {
   const t = (value ?? "").trim().toLowerCase();
   if (!t) return false;
-  return /\b(cambiar|cambio|cambiá|otra|elegir|seleccionar)\b.*\bempresa\b|\bempresa\b.*\b(cambiar|equivocada|otra)\b|^cambiar(\s+de)?\s+empresa$/.test(
+  if (/^reiniciar(\s+de)?\s+empresa$/.test(t)) return true;
+  return /\b(cambiar|cambio|cambiá|otra|elegir|seleccionar|reiniciar)\b.*\bempresa\b|\bempresa\b.*\b(cambiar|equivocada|otra|reiniciar)\b|^cambiar(\s+de)?\s+empresa$/.test(
     t
   );
 }
@@ -130,7 +131,17 @@ export async function POST(req: NextRequest) {
     const message = multi
       ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}`
       : menu?.menuContacts.length === 1
-        ? `Tu número tiene una sola empresa disponible (${menu.menuContacts[0].empresa || menu.menuContacts[0].nombre}), así que sigo con esa. ¿En qué te puedo ayudar?`
+        ? (() => {
+            const only = menu.menuContacts[0].empresa || menu.menuContacts[0].nombre;
+            const blocked = (contacts ?? []).filter(
+              (c) => !menu.selectable.some((s) => s.id === c.id)
+            );
+            const blockedNote =
+              blocked.length > 0
+                ? ` (${blocked.map((c) => c.empresa || c.nombre).join(", ")} figura en Wara pero no está habilitada para el chatbot.)`
+                : "";
+            return `Tu número tiene una sola empresa disponible (${only})${blockedNote} ¿En qué te puedo ayudar?`;
+          })()
         : contacts.length === 1
           ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}), así que sigo con esa. ¿En qué te puedo ayudar?`
           : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;

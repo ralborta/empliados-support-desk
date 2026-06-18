@@ -608,6 +608,11 @@ const selectableContactsCache = new Map<
 >();
 const SELECTABLE_CACHE_MS = 60_000;
 
+export function invalidateSelectableContactsCache(cacheKey?: string) {
+  if (cacheKey) selectableContactsCache.delete(cacheKey);
+  else selectableContactsCache.clear();
+}
+
 /** Contactos para los que Wara devuelve SessionToken (excluye los no habilitados en staging). */
 export async function filterSelectableContacts(
   contacts: WaraEmpresaContact[],
@@ -664,9 +669,16 @@ export async function buildCompanyMenuPayload(
   requiresSelection: boolean;
 }> {
   const selectable = await filterSelectableContacts(contacts, cacheKey);
-  const menuContacts = selectable.length > 0 ? selectable : contacts;
+  const menuContacts = selectable;
+  const blocked = contacts.filter((c) => !selectable.some((s) => s.id === c.id));
   const waraContactsText =
-    formatContactsMenu(menuContacts) + unavailableContactsNote(contacts, selectable);
+    menuContacts.length > 0
+      ? formatContactsMenu(menuContacts) + unavailableContactsNote(contacts, selectable)
+      : blocked.length > 0
+        ? `Por ahora ninguna de tus empresas en Wara (${blocked
+            .map((c) => c.empresa || c.nombre)
+            .join(", ")}) está habilitada para el chatbot en este ambiente. Te derivo con un agente.`
+        : "";
   return {
     selectable,
     menuContacts,
@@ -1209,7 +1221,7 @@ export async function selectCompanyForCustomer(
   }
 
   const selectable = await filterSelectableContacts(lookup.contactos, normalized);
-  const menuContacts = selectable.length > 0 ? selectable : lookup.contactos;
+  const menuContacts = selectable;
 
   const wantedNameNorm = normCompanyToken(wantedName);
 
@@ -1248,16 +1260,18 @@ export async function selectCompanyForCustomer(
   if (isBlocked || lookup.contactos.length > 1) {
     const sessionProbe = await probeWaraContactSession(matched.id);
     if (!sessionProbe.ok) {
+      invalidateSelectableContactsCache(normalized);
       const errLower = (sessionProbe.error ?? "").toLowerCase();
-      const menu = formatContactsMenu(menuContacts);
-      const note = unavailableContactsNote(lookup.contactos, selectable);
+      const refreshed = await buildCompanyMenuPayload(lookup.contactos, normalized);
+      const menu = formatContactsMenu(refreshed.menuContacts);
+      const note = unavailableContactsNote(lookup.contactos, refreshed.selectable);
       const hint =
         errLower.includes("inexistente") || errLower.includes("no autorizado")
           ? `Wara no habilitó el chatbot para "${matchedCompany}" con este número.`
           : `No pude abrir sesión en Wara para "${matchedCompany}".`;
       const soloUna =
-        menuContacts.length === 1
-          ? ` Podés responder ${menuContacts[0].empresa || menuContacts[0].nombre} o 1.`
+        refreshed.menuContacts.length === 1
+          ? ` Podés responder ${refreshed.menuContacts[0].empresa || refreshed.menuContacts[0].nombre} o 1.`
           : "";
       return {
         ok: false,
@@ -1267,8 +1281,9 @@ export async function selectCompanyForCustomer(
         contacts: lookup.contactos,
         matchedContact: matched,
         menuMessage:
-          menu &&
-          `${hint}${soloUna}\n\n${menu}${note}\n\nRespondé con el número de la opción o con el nombre de la empresa.`,
+          refreshed.menuContacts.length > 0
+            ? `${hint}${soloUna}\n\n${menu}${note}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+            : `${hint} Por ahora solo podés operar con las empresas habilitadas para el chatbot.`,
       };
     }
   }
