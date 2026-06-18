@@ -5,7 +5,7 @@ import {
   requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { obtenerEmpresaPorNumero, selectCompanyForCustomer, buildCompanyMenuPayload } from "@/lib/waraApi";
+import { obtenerEmpresaPorNumero, selectCompanyForCustomer, buildCompanyMenuPayload, waraRequiresCompanyConfirmation, waraCanAutoSelectCompany } from "@/lib/waraApi";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 /** BuilderBot solo interpola {message} y reglas HTTP cuando el status es 2xx. */
@@ -127,15 +127,13 @@ export async function POST(req: NextRequest) {
       ? await buildCompanyMenuPayload(contacts, normalizedPhone)
       : null;
     const waraContactsText = menu?.waraContactsText ?? "";
-    const waraCount = contacts.length;
-    const selectableCount = menu?.menuContacts.length ?? 0;
-    // Varias empresas en Wara → siempre menú de confirmación (aunque solo una sea usable).
-    const multi = waraCount > 1 && selectableCount > 0;
+    const selectable = menu?.menuContacts ?? [];
+    const multi = waraRequiresCompanyConfirmation(contacts, selectable);
     const message = multi
       ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
-      : selectableCount === 1 && waraCount === 1
-        ? `Tu número tiene una sola empresa asociada (${menu!.menuContacts[0].empresa || menu!.menuContacts[0].nombre}). ¿En qué te puedo ayudar?`
-        : selectableCount === 0 && waraCount > 0
+      : waraCanAutoSelectCompany(contacts, selectable)
+        ? `Tu número tiene una sola empresa asociada (${selectable[0].empresa || selectable[0].nombre}). ¿En qué te puedo ayudar?`
+        : selectable.length === 0 && contacts.length > 0
           ? waraContactsText ||
             `Ninguna de tus empresas en Wara está habilitada para el chatbot en este ambiente. Te derivo con un agente.`
           : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;

@@ -658,6 +658,26 @@ function unavailableContactsNote(
   return `\n\n(${names} no está habilitada para el chatbot en este ambiente.)`;
 }
 
+/**
+ * Regla global multi-empresa (cualquier número / cualquier cliente):
+ * si Wara devuelve más de un contacto, hay que pedir confirmación aunque solo uno
+ * tenga sesión de chatbot habilitada.
+ */
+export function waraRequiresCompanyConfirmation(
+  allContacts: WaraEmpresaContact[],
+  selectableContacts: WaraEmpresaContact[]
+): boolean {
+  return allContacts.length > 1 && selectableContacts.length > 0;
+}
+
+/** Auto-selección solo cuando Wara tiene un único contacto para ese teléfono. */
+export function waraCanAutoSelectCompany(
+  allContacts: WaraEmpresaContact[],
+  selectableContacts: WaraEmpresaContact[]
+): boolean {
+  return allContacts.length === 1 && selectableContacts.length === 1;
+}
+
 /** Menú numerado solo con empresas que Wara puede abrir en sesión. */
 export async function buildCompanyMenuPayload(
   contacts: WaraEmpresaContact[],
@@ -683,8 +703,7 @@ export async function buildCompanyMenuPayload(
     selectable,
     menuContacts,
     waraContactsText,
-    /** Si Wara tiene más de un contacto, el usuario debe confirmar aunque solo uno sea usable. */
-    requiresSelection: contacts.length > 1 && menuContacts.length > 0,
+    requiresSelection: waraRequiresCompanyConfirmation(contacts, menuContacts),
   };
 }
 
@@ -1086,12 +1105,11 @@ export async function resolveCustomerByWaraPhone(
     };
   }
 
-  // Si hay UNA sola empresa usable, la fijamos directo. Si hay varias y el cliente ya eligió
-  // antes (companyName local sigue en la lista usable de Wara), se respeta esa elección.
+  // Multi-empresa: confirmar siempre que Wara devuelva >1 contacto. Auto-selección solo con 1 contacto en Wara.
   const previouslySelected = local?.companyName?.trim() || null;
   let chosenCompany: string | null = null;
 
-  const { menuContacts, requiresSelection: menuRequiresSelection } =
+  const { menuContacts, selectable, requiresSelection: menuRequiresSelection } =
     await buildCompanyMenuPayload(lookup.contactos, normalized);
 
   if (
@@ -1102,8 +1120,7 @@ export async function resolveCustomerByWaraPhone(
     )
   ) {
     chosenCompany = previouslySelected;
-  } else if (menuContacts.length === 1 && lookup.contactos.length === 1) {
-    // Auto-selección solo si en Wara hay un único contacto real.
+  } else if (waraCanAutoSelectCompany(lookup.contactos, menuContacts)) {
     chosenCompany = menuContacts[0].empresa || menuContacts[0].nombre;
   }
 
