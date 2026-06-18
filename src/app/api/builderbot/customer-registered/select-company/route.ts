@@ -181,9 +181,10 @@ export async function POST(req: NextRequest) {
   // El próximo mensaje del cliente entra de nuevo por Inicio -> Router con la empresa
   // ya fijada, así no encadenamos un clasificador de intención sobre la opción ("1"/"2").
   const message =
-    `Perfecto, sigo con ${selectedCompany || "tu empresa"}. ¿En qué te puedo ayudar?\n\n` +
-    `Puedo: consultar el estado de una unidad, registrar un cambio de odómetro/horómetro, ` +
-    `gestionar mantenimiento o solicitar un certificado.`;
+    result.menuMessage ??
+    (`Perfecto, sigo con ${selectedCompany || "tu empresa"}. ¿En qué te puedo ayudar?\n\n` +
+      `Puedo: consultar el estado de una unidad, registrar un cambio de odómetro/horómetro, ` +
+      `gestionar mantenimiento o solicitar un certificado.`);
   return NextResponse.json({
     ok: true,
     ok_s: "true",

@@ -1244,16 +1244,76 @@ export async function selectCompanyForCustomer(
 
   const wantedNameNorm = normCompanyToken(wantedName);
 
-  const matched =
-    (wantedId != null
-      ? lookup.contactos.find((c) => c.id === wantedId)
-      : undefined) ??
+  const matchInMenu =
+    (wantedId != null ? menuContacts.find((c) => c.id === wantedId) : undefined) ??
     (wantedIndex != null && wantedIndex >= 0 && wantedIndex < menuContacts.length
       ? menuContacts[wantedIndex]
       : undefined) ??
     (wantedNameNorm
-      ? lookup.contactos.find((c) => contactMatchesSelection(c, wantedNameNorm))
+      ? menuContacts.find((c) => contactMatchesSelection(c, wantedNameNorm))
       : undefined);
+
+  const blockedOnlyMatch =
+    !matchInMenu && wantedNameNorm
+      ? lookup.contactos.find(
+          (c) =>
+            contactMatchesSelection(c, wantedNameNorm) &&
+            !selectable.some((s) => s.id === c.id)
+        )
+      : undefined;
+
+  async function persistCompanyChoice(contact: WaraEmpresaContact) {
+    const company = contact.empresa || contact.nombre;
+    const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    const customer = local
+      ? await prisma.customer.update({
+          where: { id: local.id },
+          data: { companyName: company },
+        })
+      : await prisma.customer.create({
+          data: { phone: normalized, companyName: company },
+        });
+    return { customer, company, contact };
+  }
+
+  // Empresa pedida existe en Wara pero no tiene chatbot: si solo hay otra usable, seguimos con esa.
+  if (blockedOnlyMatch && menuContacts.length === 1) {
+    const fallback = menuContacts[0];
+    const blockedName = blockedOnlyMatch.empresa || blockedOnlyMatch.nombre;
+    const { customer, company } = await persistCompanyChoice(fallback);
+    return {
+      ok: true,
+      customer,
+      status: 200,
+      matchedContact: fallback,
+      contacts: lookup.contactos,
+      menuMessage:
+        `${blockedName} no está habilitada para el chatbot con este número. ` +
+        `Sigo con ${company}. ¿En qué te puedo ayudar?`,
+    };
+  }
+
+  if (blockedOnlyMatch) {
+    invalidateSelectableContactsCache(normalized);
+    const refreshed = await buildCompanyMenuPayload(lookup.contactos, normalized);
+    const menu = formatContactsMenu(refreshed.menuContacts);
+    const note = unavailableContactsNote(lookup.contactos, refreshed.selectable);
+    const blockedName = blockedOnlyMatch.empresa || blockedOnlyMatch.nombre;
+    return {
+      ok: false,
+      customer: null,
+      status: 409,
+      error: `${blockedName} no está habilitada para el chatbot`,
+      contacts: lookup.contactos,
+      matchedContact: blockedOnlyMatch,
+      menuMessage:
+        refreshed.menuContacts.length > 0
+          ? `${blockedName} no está habilitada para el chatbot con este número.\n\n${menu}${note}\n\nRespondé con el número de la opción o el nombre de una empresa habilitada.`
+          : `${blockedName} no está habilitada para el chatbot. Por ahora no hay empresas habilitadas para este número.`,
+    };
+  }
+
+  const matched = matchInMenu;
 
   if (!matched) {
     const menu = formatContactsMenu(menuContacts);
@@ -1273,10 +1333,12 @@ export async function selectCompanyForCustomer(
   }
 
   const matchedCompany = matched.empresa || matched.nombre;
-  const isBlocked =
-    selectable.length > 0 && !selectable.some((c) => c.id === matched.id);
 
-  if (isBlocked || lookup.contactos.length > 1) {
+  // Ya verificamos sesión al armar menuContacts; no re-probar salvo contacto fuera del menú.
+  if (
+    lookup.contactos.length > 1 &&
+    !selectable.some((c) => c.id === matched.id)
+  ) {
     const sessionProbe = await probeWaraContactSession(matched.id);
     if (!sessionProbe.ok) {
       invalidateSelectableContactsCache(normalized);
@@ -1288,10 +1350,6 @@ export async function selectCompanyForCustomer(
         errLower.includes("inexistente") || errLower.includes("no autorizado")
           ? `Wara no habilitó el chatbot para "${matchedCompany}" con este número.`
           : `No pude abrir sesión en Wara para "${matchedCompany}".`;
-      const soloUna =
-        refreshed.menuContacts.length === 1
-          ? ` Podés responder ${refreshed.menuContacts[0].empresa || refreshed.menuContacts[0].nombre} o 1.`
-          : "";
       return {
         ok: false,
         customer: null,
@@ -1301,25 +1359,16 @@ export async function selectCompanyForCustomer(
         matchedContact: matched,
         menuMessage:
           refreshed.menuContacts.length > 0
-            ? `${hint}${soloUna}\n\n${menu}${note}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+            ? `${hint}\n\n${menu}${note}\n\nRespondé con el número de la opción o el nombre de una empresa habilitada.`
             : `${hint} Por ahora solo podés operar con las empresas habilitadas para el chatbot.`,
       };
     }
   }
 
-  const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
-  const customer = local
-    ? await prisma.customer.update({
-        where: { id: local.id },
-        data: { companyName: matchedCompany },
-      })
-    : await prisma.customer.create({
-        data: { phone: normalized, companyName: matchedCompany },
-      });
-
+  const saved = await persistCompanyChoice(matched);
   return {
     ok: true,
-    customer,
+    customer: saved.customer,
     status: 200,
     matchedContact: matched,
     contacts: lookup.contactos,
