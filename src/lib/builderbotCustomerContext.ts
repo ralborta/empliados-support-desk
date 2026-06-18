@@ -6,6 +6,7 @@ import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsapp
 import {
   buildCompanyMenuPayload,
   looksLikeCompanySelection,
+  looksLikeGreeting,
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
@@ -285,6 +286,8 @@ export async function customerRegisteredContextResponse(
       registered_s: "false",
       ignore: true,
       ignore_s: "true",
+      nextFlow: "ignore",
+      nextFlow_s: "ignore",
       phone: normalizeWhatsAppPhone(trimmed) || trimmed,
       name: "",
       companyName: "",
@@ -378,11 +381,27 @@ export async function customerRegisteredContextResponse(
       `${waraContactsText}\n\n` +
       `Respondé con el número de la opción o con el nombre de la empresa.`;
   }
-  if (!responseMessage && registered && !requiresCompanySelection) {
-    const firstName = customer?.name?.trim().split(/\s+/)[0];
-    responseMessage = firstName
-      ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-      : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+  // Ruteo explícito para BuilderBot: evita saltar al Router en saludos (ahí se perdía la respuesta).
+  type NextFlow = "ignore" | "elegir" | "derivar" | "reply" | "router";
+  let nextFlow: NextFlow = "derivar";
+  if (resolution.testBlocked) {
+    nextFlow = "derivar";
+  } else if (!registered) {
+    nextFlow = "derivar";
+  } else if (requiresCompanySelection) {
+    nextFlow = "elegir";
+  } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      const firstName = customer?.name?.trim().split(/\s+/)[0];
+      responseMessage = firstName
+        ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
+        : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+    }
+  } else {
+    nextFlow = "router";
+    // Trámites / consultas: el Router clasifica; no duplicar saludo del HTTP.
+    responseMessage = "";
   }
 
   return NextResponse.json({
@@ -411,6 +430,8 @@ export async function customerRegisteredContextResponse(
     lastTicketContextText,
     requiresCompanySelection,
     requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
+    nextFlow,
+    nextFlow_s: nextFlow,
     // No usar selectionFailed_s para rutear a mute/silencio: solo requiresCompanySelection + message.
     selectionFailed_s: "false",
     message: responseMessage,
