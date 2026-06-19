@@ -188,9 +188,7 @@ export async function POST(req: NextRequest) {
   // ya fijada, así no encadenamos un clasificador de intención sobre la opción ("1"/"2").
   const message =
     result.menuMessage ??
-    (`Perfecto, sigo con ${selectedCompany || "tu empresa"}. ¿En qué te puedo ayudar?\n\n` +
-      `Puedo: consultar el estado de una unidad, registrar un cambio de odómetro/horómetro, ` +
-      `gestionar mantenimiento o solicitar un certificado.`);
+    `Perfecto, sigo con ${selectedCompany || "tu empresa"}. ¿En qué te puedo ayudar?`;
   return NextResponse.json({
     ok: true,
     ok_s: "true",

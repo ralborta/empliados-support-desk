@@ -322,11 +322,13 @@ export async function customerRegisteredContextResponse(
   const selectionText = opts?.selectionText?.trim() || "";
   let selectionMessage = "";
   let companyPickedThisTurn = false;
+  const multiCompany = (resolution.lookup?.contactos.length ?? 0) > 1;
   if (
-    resolution.requiresCompanySelection &&
     selectionText &&
-    looksLikeCompanySelection(selectionText)
+    looksLikeCompanySelection(selectionText) &&
+    (resolution.requiresCompanySelection || multiCompany)
   ) {
+    const previousContactId = resolution.customer?.selectedCompanyContactId ?? null;
     const picked = await selectCompanyForCustomer(prisma, trimmed, {
       companyName: selectionText,
     });
@@ -334,11 +336,15 @@ export async function customerRegisteredContextResponse(
       companyPickedThisTurn = true;
       resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
       const pickedCompany = picked.customer?.companyName?.trim() || "";
+      const sameCompany =
+        previousContactId != null && picked.matchedContact?.id === previousContactId;
       selectionMessage =
         picked.menuMessage ??
-        (pickedCompany
-          ? `Perfecto, sigo con ${pickedCompany}. ¿En qué te puedo ayudar?`
-          : "Perfecto. ¿En qué te puedo ayudar?");
+        (sameCompany
+          ? `Estás operando con ${pickedCompany}. ¿En qué te puedo ayudar?`
+          : pickedCompany
+            ? `Perfecto, sigo con ${pickedCompany}. ¿En qué te puedo ayudar?`
+            : "Perfecto. ¿En qué te puedo ayudar?");
     } else {
       selectionMessage = picked.menuMessage ?? picked.error ?? "";
     }
@@ -383,6 +389,8 @@ export async function customerRegisteredContextResponse(
       `${lastTicketSummary ? `. Resumen: ${lastTicketSummary}` : ""}`
     : "";
 
+  const activeCompany =
+    resolution.selectedCompanyName ?? customer?.companyName?.trim() ?? "";
   let responseMessage = selectionMessage;
   if (
     !responseMessage &&
@@ -391,9 +399,10 @@ export async function customerRegisteredContextResponse(
     selectionText &&
     looksLikeCompanyListQuestion(selectionText)
   ) {
-    responseMessage =
-      `Este número está asociado en Wara a:\n\n${waraContactsText}\n\n` +
-      `Para cambiar de empresa, escribí "cambiar empresa" y elegí una opción.`;
+    responseMessage = activeCompany
+      ? `Estás operando con ${activeCompany}.\n\nEste número también está asociado en Wara a:\n\n${waraContactsText}\n\nPara cambiar de empresa, escribí "cambiar empresa" y elegí una opción.`
+      : `Este número está asociado en Wara a:\n\n${waraContactsText}\n\n` +
+        `Elegí con el número de la opción o el nombre de la empresa.`;
   } else if (!responseMessage && requiresCompanySelection && waraContactsText) {
     responseMessage =
       `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
@@ -441,10 +450,26 @@ export async function customerRegisteredContextResponse(
         ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
         : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
     }
+  } else if (
+    selectionText &&
+    looksLikeCompanySelection(selectionText) &&
+    multiCompany
+  ) {
+    // Menú 1/2/WARA con varias empresas: no mandar al Router (evita colgarse o listar flota).
+    nextFlow = "reply";
+    if (!responseMessage) {
+      responseMessage =
+        `No pude registrar esa opción. ¿De cuál empresa escribís?\n\n${waraContactsText}\n\n` +
+        `Respondé con el número de la opción o con el nombre de la empresa.`;
+    }
   } else {
     nextFlow = "router";
     // Trámites / consultas: el Router clasifica; no duplicar saludo del HTTP.
     responseMessage = "";
+  }
+
+  if (nextFlow === "reply" && !responseMessage.trim()) {
+    responseMessage = "¿En qué te puedo ayudar?";
   }
 
   return NextResponse.json({
@@ -473,6 +498,8 @@ export async function customerRegisteredContextResponse(
     lastTicketContextText,
     requiresCompanySelection,
     requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
+    companyPickedThisTurn,
+    companyPickedThisTurn_s: companyPickedThisTurn ? "true" : "false",
     nextFlow,
     nextFlow_s: nextFlow,
     // No usar selectionFailed_s para rutear a mute/silencio: solo requiresCompanySelection + message.

@@ -42,6 +42,13 @@ function buildRules() {
   return [
     {
       conditionRule:
+        "MENÚ DE EMPRESA — RESIDUAL. El mensaje es EXCLUSIVAMENTE 1, 2, WARA, Guara, El Cacique o Cacique, sin patente ni pedido de reporte, listado, certificado u odómetro. NO es consulta de unidades ni flota. NO enrutar a ejecutar consulta ni listado.",
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.elegirEmpresa,
+    },
+    {
+      conditionRule:
         "CONFIRMACIÓN DE ODÓMETRO. Interpretá por CONTEXTO: en el turno anterior el bot resumió un cambio de ODÓMETRO/HORÓMETRO y pidió confirmación, y ahora el cliente acepta/da el visto bueno de cualquier forma natural. Solo aplica si ese último resumen era de odómetro/horómetro; no si era de mantenimiento o certificado.",
       conditionValue: "",
       condition: "",

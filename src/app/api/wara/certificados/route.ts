@@ -8,6 +8,7 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
 import {
+  looksLikeCompanySelection,
   obtenerCertificadoCobertura,
   resolveCustomerByWaraPhone,
   resolveWaraSessionByPhone,
@@ -418,6 +419,19 @@ export async function POST(req: NextRequest) {
     parsed.data.detalle?.trim() ||
     parsed.data.detail?.trim() ||
     "Solicitud de certificado";
+
+  if (looksLikeCompanySelection(text)) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message: "",
+        skipResponse_s: "true",
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   const threadText = await recentThreadText(rawPhone);
   const plate = normalizePlate(
     parsed.data.patente ??

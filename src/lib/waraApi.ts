@@ -79,7 +79,9 @@ export function looksLikeCompanyListQuestion(text: string | undefined | null): b
   const n = normCompanyToken(text ?? "");
   if (!n) return false;
   if (/\b(que|q|cuales|cuantas)\b.*\bempresa/.test(n)) return true;
-  if (/\bempresa/.test(n) && /\b(tengo|asociad|vinculad|lista|figur)/.test(n)) return true;
+  if (/\bempresa/.test(n) && /\b(tengo|asociad|vinculad|lista|figur|estoy|operando|uso|usando)\b/.test(n)) {
+    return true;
+  }
   return false;
 }
 
@@ -580,6 +582,7 @@ async function createChatBotToken(contactId: number): Promise<{
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, contacto_id: contactId }),
         cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
       });
       json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
     } catch (error) {
@@ -1383,6 +1386,18 @@ export async function selectCompanyForCustomer(
   }
 
   const matchedCompany = matched.empresa || matched.nombre;
+  const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (local?.selectedCompanyContactId === matched.id) {
+    return {
+      ok: true,
+      customer: local,
+      status: 200,
+      matchedContact: matched,
+      contacts: lookup.contactos,
+      menuMessage: `Estás operando con ${matchedCompany}. ¿En qué te puedo ayudar?`,
+    };
+  }
+
   const sessionProbe = await probeWaraContactSession(matched.id);
   if (!sessionProbe.ok) {
     if (isPruebasFallbackEnabled()) {

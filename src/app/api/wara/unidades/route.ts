@@ -10,7 +10,12 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
-import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
+import {
+  consultarEstadoUnidades,
+  looksLikeCompanySelection,
+  resolveWaraSessionByPhone,
+  type WaraUnidadEstado,
+} from "@/lib/waraApi";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
 
 const bodySchema = z
@@ -418,6 +423,21 @@ export async function POST(req: NextRequest) {
   const rawText = parsed.data.rawText ?? "";
   const explicitPlate =
     parsed.data.patente ?? parsed.data.plate ?? detectPlate(rawText) ?? "";
+
+  if (looksLikeCompanySelection(rawText.trim()) && !explicitPlate) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText: "",
+        message: "",
+        skipResponse_s: "true",
+        action: "none" as const,
+        unidadesCount: 0,
+      },
+      { status: BB_STATUS }
+    );
+  }
 
   if (
     !explicitPlate &&
