@@ -418,6 +418,18 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
     }
+  } else if (
+    requiresCompanySelection &&
+    selectionText &&
+    looksLikeCompanySelection(selectionText)
+  ) {
+    // Llegó "1"/"WARA" pero no se pudo persistir (p. ej. BB no mandó body) → re-mostrar menú con error.
+    nextFlow = "reply";
+    if (!responseMessage) {
+      responseMessage =
+        `No pude registrar esa opción. ¿De cuál empresa escribís?\n\n${waraContactsText}\n\n` +
+        `Respondé con el número de la opción o con el nombre de la empresa.`;
+    }
   } else if (requiresCompanySelection) {
     // Mostrar menú y quedarse en WELCOME/Inicio; NO entrar al subflujo Elegir (evita quedar en ".").
     nextFlow = "reply";
