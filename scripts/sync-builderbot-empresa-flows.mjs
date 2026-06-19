@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
  * Flujos elegir/cambiar empresa (BuilderBot):
- * - Cada mensaje pasa por WELCOME → no sirve menú+captura en 2 pasos.
- * - Elegir Empresa: un solo HTTP que intenta guardar con {body} y muestra {message}.
- * - Cambiar Empresa: solo reset HTTP; la elección la hace Inicio → Elegir en el próximo turno.
- * - Inicio: messageMapping {message} para errores de auto-selección.
+ * - Inicio muestra menú y rutea a Elegir solo si hay 2+ empresas usables.
+ * - Elegir: captura la respuesta del usuario y DESPUÉS llama select-company (no repostea el saludo).
+ * - Cambiar Empresa: reset HTTP; si solo hay una usable, el backend la reasigna solo.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -31,7 +30,7 @@ const ANSWERS = {
   inicioUnmute: "7bcb3e3a-0498-4c59-a9e9-2ffbdb756033",
   inicioHttp: "f9901e83-6dca-4bbe-897e-721acc5bd871",
   ignorarMute: "87a1c31f-8278-4945-b446-2a3fbacb7e2f",
-  elegirText: "753ea570-b8c5-4546-8bff-116a8f053551",
+  elegirCapture: "753ea570-b8c5-4546-8bff-116a8f053551",
   elegirHttp: "682abeb0-2718-4a42-847f-9e972a8e90ef",
   cambiarReset: "c1891f82-32d9-4056-93d7-03739b45b496",
   cambiarCapture: "0f1c9f03-8ed3-403e-888a-453add4da24f",
@@ -142,7 +141,32 @@ async function main() {
     },
   });
 
-  // Elegir: HTTP único en sort 0 (intenta {body} cada vez que entra el flow).
+  // Elegir: captura primero (el menú ya lo mandó Inicio); HTTP en sort 1 con la respuesta nueva.
+  await client.callTool({
+    name: "builderbot_create_answer",
+    arguments: {
+      projectId: PROJECT_ID,
+      flowId: FLOWS.elegir,
+      message: " ",
+      type: "add_text",
+      sort: 0,
+      options: { capture: true, sensitive: false, delay: 0 },
+    },
+  }).catch(async () => {
+    await client.callTool({
+      name: "builderbot_update_answer",
+      arguments: {
+        projectId: PROJECT_ID,
+        flowId: FLOWS.elegir,
+        answerId: ANSWERS.elegirCapture,
+        message: " ",
+        type: "add_text",
+        sort: 0,
+        options: { capture: true, sensitive: false, delay: 0 },
+      },
+    });
+  });
+
   await client.callTool({
     name: "builderbot_update_answer",
     arguments: {
@@ -150,7 +174,7 @@ async function main() {
       flowId: FLOWS.elegir,
       answerId: ANSWERS.elegirHttp,
       type: "add_http",
-      sort: 0,
+      sort: 1,
       options: { capture: false },
       plugins: {
         http: {
@@ -165,21 +189,6 @@ async function main() {
       },
     },
   });
-
-  // Quitar nodo texto+captura viejo (provocaba loop al reiniciar menú cada turno).
-  try {
-    await client.callTool({
-      name: "builderbot_delete_answer",
-      arguments: {
-        projectId: PROJECT_ID,
-        flowId: FLOWS.elegir,
-        answerId: ANSWERS.elegirText,
-      },
-    });
-    console.log("Elegir: eliminado nodo texto+captura obsoleto");
-  } catch (err) {
-    console.warn("Elegir text node:", err.message ?? err);
-  }
 
   // Cambiar: solo reset; la elección la resuelve Inicio → Elegir HTTP en el siguiente mensaje.
   await client.callTool({

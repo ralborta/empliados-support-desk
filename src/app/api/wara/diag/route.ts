@@ -5,11 +5,13 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import {
   getImpersonatedPhone,
+  isTestContactAliasesEnabled,
   isTestWhitelistEnabled,
   isPhoneAllowedForTesting,
   isWaraEmpresaLookupConfigured,
   obtenerEmpresaPorNumero,
 } from "@/lib/waraApi";
+import { pruebasContactAliasesSummary } from "@/config/pruebasContactAliases";
 
 /**
  * Diagnóstico TEMPORAL para entender por qué un número resuelve o no en Wara.
@@ -73,6 +75,12 @@ export async function GET(req: NextRequest) {
     obtenerEmpresaTokenLength: (process.env.WARA_OBTENER_EMPRESA_TOKEN?.trim() || "").length,
     impersonateMap: envFlag("WARA_TEST_IMPERSONATE_MAP"),
     allowedPhones: envFlag("WARA_TEST_ALLOWED_PHONES"),
+    pruebasFallbackElCacique: envFlag("WARA_PRUEBAS_FALLBACK_EL_CACIQUE"),
+    pruebasContactAliases: {
+      envEnabled: envFlag("WARA_PRUEBAS_CONTACT_ALIASES_ENABLED"),
+      ...pruebasContactAliasesSummary(),
+    },
+    contactAliasesEnabled: isTestContactAliasesEnabled(),
     whitelistEnabled: isTestWhitelistEnabled(),
     apiBaseUrlSet: !!process.env.WARA_API_BASE_URL?.trim(),
     apiBaseUrl:

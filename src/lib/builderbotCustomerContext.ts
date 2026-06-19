@@ -5,6 +5,7 @@ import { ensureBuilderBotContactActive } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
   buildCompanyMenuPayload,
+  looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeGreeting,
   resolveCustomerByWaraPhone,
@@ -375,7 +376,17 @@ export async function customerRegisteredContextResponse(
     : "";
 
   let responseMessage = selectionMessage;
-  if (!responseMessage && requiresCompanySelection && waraContactsText) {
+  if (
+    !responseMessage &&
+    registered &&
+    contacts.length > 1 &&
+    selectionText &&
+    looksLikeCompanyListQuestion(selectionText)
+  ) {
+    responseMessage =
+      `Este número está asociado en Wara a:\n\n${waraContactsText}\n\n` +
+      `Para cambiar de empresa, escribí "cambiar empresa" y elegí una opción.`;
+  } else if (!responseMessage && requiresCompanySelection && waraContactsText) {
     responseMessage =
       `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
       `${waraContactsText}\n\n` +
@@ -388,6 +399,11 @@ export async function customerRegisteredContextResponse(
     nextFlow = "derivar";
   } else if (!registered) {
     nextFlow = "derivar";
+  } else if (
+    selectionText &&
+    looksLikeCompanyListQuestion(selectionText)
+  ) {
+    nextFlow = "reply";
   } else if (requiresCompanySelection) {
     nextFlow = "elegir";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {

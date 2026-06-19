@@ -16,6 +16,7 @@ const F = {
   confirmOdo: "b1062a92-0d72-4f90-bcd9-2fa90d76b95f",
   confirmMaint: "e893d57f-faca-490f-85a1-d833aa926b9a",
   confirmCert: "8f4c81a0-e3ca-4c79-b1c5-d94ce6d661e2",
+  elegirEmpresa: "c4b5127a-76fd-4cb2-8b43-d99685b5c50a",
   cambiarEmpresa: "3693a7a9-b5f2-4a66-97f3-acef85dab201",
   odometer: "ae2a5ae9-c289-448c-a068-3cb8c65a2e7f",
   ejecutarConsulta: "29a8afe6-2414-42bd-8a17-4baaa93d9b44",
@@ -62,7 +63,21 @@ function buildRules() {
     },
     {
       conditionRule:
-        'CAMBIAR DE EMPRESA — SOLO frases explícitas: "cambiar empresa", "cambiarme de empresa", "otra empresa", "me equivoqué de empresa", "elegir empresa". PROHIBIDO si el mensaje es solo un nombre de empresa (WARA, El Cacique, Cacique, Guara), un número de menú (1, 2), un saludo, o parte de otra gestión (certificado, patente, reporte, mantenimiento).',
+        'EMPRESAS EN WARA — El cliente pregunta qué empresas tiene asociadas a su teléfono, cuáles empresas, "qué empresas tengo", lista de empresas. NO es consulta de unidades, flota ni patente.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.cambiarEmpresa,
+    },
+    {
+      conditionRule:
+        'ELEGIR EMPRESA POR NOMBRE — quiere operar con, pasar a, cambiar a o usar una empresa nombrada (WARA, Guara, El Cacique, Cacique) o responde con número de menú tras ver opciones. PROHIBIDO si la frase es solo "cambiar empresa" / "cambiar de empresa" sin nombrar cuál (eso va a reset de menú).',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.elegirEmpresa,
+    },
+    {
+      conditionRule:
+        'CAMBIAR DE EMPRESA — SOLO frases explícitas: "cambiar empresa", "cambiarme de empresa", "otra empresa", "me equivoqué de empresa", "elegir empresa", "quiero cambiar de empresa". PROHIBIDO si el mensaje es solo un nombre de empresa (WARA, El Cacique), un número de menú (1, 2), un saludo, "pasar a WARA", o parte de otra gestión (certificado, patente, reporte, mantenimiento).',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.cambiarEmpresa,

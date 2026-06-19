@@ -53,6 +53,13 @@ function isResetFlag(value: unknown): boolean {
 function isChangeCompanyPhrase(value: string | undefined | null): boolean {
   const t = (value ?? "").trim().toLowerCase();
   if (!t) return false;
+  // "quiero pasar a WARA" / "operar con El Cacique" = elegir empresa, no reset.
+  if (
+    /\b(pasar a|operar con|usar|trabajar con|seguir con)\b/.test(t) &&
+    /\b(wara|guara|cacique)\b/.test(t)
+  ) {
+    return false;
+  }
   if (/^reiniciar(\s+de)?\s+empresa$/.test(t)) return true;
   return /\b(cambiar|cambio|cambiá|otra|elegir|seleccionar|reiniciar)\b.*\bempresa\b|\bempresa\b.*\b(cambiar|equivocada|otra|reiniciar)\b|^cambiar(\s+de)?\s+empresa$/.test(
     t
@@ -117,7 +124,7 @@ export async function POST(req: NextRequest) {
     if (customer) {
       await prisma.customer.update({
         where: { id: customer.id },
-        data: { companyName: "" },
+        data: { companyName: "", selectedCompanyContactId: null },
       });
     }
     const lookup = await obtenerEmpresaPorNumero(rawPhone);
@@ -127,15 +134,14 @@ export async function POST(req: NextRequest) {
       ? await buildCompanyMenuPayload(contacts, normalizedPhone)
       : null;
     const waraContactsText = menu?.waraContactsText ?? "";
-    const selectable = menu?.menuContacts ?? [];
-    const multi = waraRequiresCompanyConfirmation(contacts, selectable);
+    const multi = waraRequiresCompanyConfirmation(contacts);
+
     const message = multi
       ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
-      : waraCanAutoSelectCompany(contacts, selectable)
-        ? `Tu número tiene una sola empresa asociada (${selectable[0].empresa || selectable[0].nombre}). ¿En qué te puedo ayudar?`
-        : selectable.length === 0 && contacts.length > 0
-          ? waraContactsText ||
-            `Ninguna de tus empresas en Wara está habilitada para el chatbot en este ambiente. Te derivo con un agente.`
+      : waraCanAutoSelectCompany(contacts)
+        ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}). ¿En qué te puedo ayudar?`
+        : contacts.length === 0
+          ? `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`
           : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;
     return NextResponse.json(
       {
