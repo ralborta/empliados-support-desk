@@ -33,11 +33,7 @@ const ANSWERS = {
 const inicioRules = [
   { conditionRule: "nextFlow_s", conditionValue: "derivar", condition: "===", conditionFlowId: FLOWS.derivar },
   { conditionRule: "nextFlow_s", conditionValue: "router", condition: "===", conditionFlowId: FLOWS.router },
-];
-
-const pickRules = [
-  { conditionRule: "nextFlow_s", conditionValue: "router", condition: "===", conditionFlowId: FLOWS.router },
-  { conditionRule: "ok_s", conditionValue: "true", condition: "===", conditionFlowId: FLOWS.router },
+  // nextFlow_s reply → solo messageMapping, sin saltar al Router en el mismo turno
 ];
 
 function checkHttpPlugin(rules = inicioRules) {
@@ -95,12 +91,12 @@ async function main() {
       sort: 0,
       message: "Validar empresa elegida",
       options: { capture: false },
-      plugins: checkHttpPlugin(pickRules),
+      plugins: checkHttpPlugin(inicioRules),
     },
   });
   console.log("Elegir → POST /check OK");
 
-  // Cambiar: reset → captura respuesta → POST select-company (no depende de WELCOME).
+  // Cambiar: solo reset + menú; la elección ("1"/"WARA") la procesa Inicio (POST /check) en el próximo mensaje.
   await client.callTool({
     name: "builderbot_update_answer",
     arguments: {
@@ -124,42 +120,18 @@ async function main() {
     },
   });
 
-  await client.callTool({
-    name: "builderbot_update_answer",
-    arguments: {
-      projectId: PROJECT_ID,
-      flowId: FLOWS.cambiar,
-      answerId: ANSWERS.cambiarCapture,
-      type: "add_text",
-      sort: 1,
-      message: "\u200b",
-      options: { capture: true, sensitive: false, delay: 0 },
-    },
-  });
-
-  await client.callTool({
-    name: "builderbot_update_answer",
-    arguments: {
-      projectId: PROJECT_ID,
-      flowId: FLOWS.cambiar,
-      answerId: ANSWERS.cambiarSelect,
-      type: "add_http",
-      sort: 2,
-      options: { capture: false },
-      plugins: {
-        http: {
-          url: SELECT_URL,
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-          body: { from: "{from}", companyName: "{body}" },
-          messageMapping: "{message}",
-          avoidResponse: false,
-          rules: pickRules,
-        },
-      },
-    },
-  });
-  console.log("Cambiar → reset + capture + select OK");
+  for (const id of [ANSWERS.cambiarCapture, ANSWERS.cambiarSelect]) {
+    try {
+      await client.callTool({
+        name: "builderbot_delete_answer",
+        arguments: { projectId: PROJECT_ID, flowId: FLOWS.cambiar, answerId: id },
+      });
+      console.log("Cambiar: eliminado nodo", id);
+    } catch (err) {
+      console.warn("Cambiar delete", id, err.message ?? err);
+    }
+  }
+  console.log("Cambiar → solo reset OK");
 
   await client.close();
 }

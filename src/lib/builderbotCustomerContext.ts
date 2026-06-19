@@ -413,8 +413,8 @@ export async function customerRegisteredContextResponse(
   ) {
     nextFlow = "reply";
   } else if (companyPickedThisTurn) {
-    // Empresa recién elegida en este turno (p. ej. "1" / "WARA" vía Inicio + selection=).
-    nextFlow = "router";
+    // Empresa recién elegida: solo confirmar. El Router en el mismo turno interpretaría "1"/"WARA" como patente.
+    nextFlow = "reply";
     if (!responseMessage) {
       responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
     }
