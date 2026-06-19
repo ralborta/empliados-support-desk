@@ -95,8 +95,24 @@ export function looksLikeChangeCompanyRequest(text: string | undefined | null): 
   ) {
     return false;
   }
+  if (/\b(mantenimiento|patente|certificado|reporte|odometro|horometro|unidad)\b/.test(t)) {
+    return false;
+  }
   if (/^reiniciar(\s+de)?\s+empresa$/.test(t)) return true;
-  return /\b(cambiar|cambio|cambiá|otra|elegir|seleccionar|reiniciar)\b.*\bempresa\b|\bempresa\b.*\b(cambiar|equivocada|otra|reiniciar)\b|^cambiar(\s+de)?\s+empresa$/.test(
+  if (/\b(cambiar|cambio|cambiá|cambiarme|otra|elegir|seleccionar|reiniciar)\b.*\bempresa\b/.test(t)) {
+    return true;
+  }
+  if (/\bempresa\b.*\b(cambiar|equivocada|otra|reiniciar)\b/.test(t)) return true;
+  if (/^cambiar(\s+de)?\s+empresa$/.test(t)) return true;
+  // Typos / variantes: "quiero cambiar debemoresa", "cambiar empresa" sin "de"
+  if (/\b(cambiar|cambiarme)\b/.test(t) && t.split(/\s+/).length <= 5) return true;
+  if (/\bquiero\s+cambiar\b/.test(t) && t.split(/\s+/).length <= 6) return true;
+  return false;
+}
+
+export function looksLikeShortAffirmative(text: string | undefined | null): boolean {
+  const t = (text ?? "").trim().toLowerCase();
+  return /^(si|sí|dale|ok|okey|okay|bueno|perfecto|listo|confirmo|confirma|de acuerdo|avancemos|siguiente|claro|exacto)$/.test(
     t
   );
 }
@@ -755,6 +771,44 @@ export function waraRequiresCompanyConfirmation(allContacts: WaraEmpresaContact[
 
 export function waraCanAutoSelectCompany(allContacts: WaraEmpresaContact[]): boolean {
   return allContacts.length === 1;
+}
+
+/** Limpia la empresa guardada y devuelve el menú Wara (usado por Cambiar empresa). */
+export async function resetCustomerCompanyMenu(
+  prisma: PrismaClient,
+  rawPhone: string
+): Promise<{
+  message: string;
+  waraContactsText: string;
+  requiresCompanySelection: boolean;
+  contacts: WaraEmpresaContact[];
+}> {
+  const normalized = normalizeWhatsAppPhone(rawPhone);
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (customer) {
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: { companyName: "", selectedCompanyContactId: null },
+    });
+  }
+  const lookup = await obtenerEmpresaPorNumero(rawPhone);
+  const contacts = lookup.contactos ?? [];
+  const menu = contacts.length
+    ? await buildCompanyMenuPayload(contacts, normalized)
+    : null;
+  const waraContactsText = menu?.waraContactsText ?? "";
+  const multi = waraRequiresCompanyConfirmation(contacts);
+  const message = multi
+    ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+    : waraCanAutoSelectCompany(contacts)
+      ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}). ¿En qué te puedo ayudar?`
+      : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;
+  return {
+    message,
+    waraContactsText,
+    requiresCompanySelection: multi,
+    contacts,
+  };
 }
 
 export async function resolveWaraSessionByPhone(

@@ -8,7 +8,12 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, normalizePlate } from "@/lib/wara";
-import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
+import {
+  looksLikeChangeCompanyRequest,
+  looksLikeShortAffirmative,
+  resetCustomerCompanyMenu,
+  resolveCustomerByWaraPhone,
+} from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
@@ -387,6 +392,22 @@ export async function POST(req: NextRequest) {
     summary.detalle ||
     summary.servicio ||
     "Solicitud de gestion de mantenimiento";
+
+  if (looksLikeChangeCompanyRequest(text)) {
+    const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        changeCompany_s: "true",
+        message: reset.message,
+        requiresCompanySelection: reset.requiresCompanySelection,
+        requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   const service =
     summary.servicio ||
     inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text}`);
@@ -426,6 +447,26 @@ export async function POST(req: NextRequest) {
       undefined
   );
   if (!plate) {
+    if (looksLikeShortAffirmative(text)) {
+      const message =
+        "Contame qué necesitás del mantenimiento: por ejemplo «correctivo para AB123CD», «preventivo» o «configurar plan». Si querés cambiar de empresa, escribí «cambiar empresa».";
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_mantenimiento_operativo",
+        errorStage: "needs_detail",
+        phone: rawPhone,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          needsDetail_s: "true",
+          message,
+          service,
+          priority,
+        },
+        { status: BB_STATUS }
+      );
+    }
     const message =
       "No pude reconocer una patente completa. Enviamela con formato AA123BB o ABC123 junto con el detalle y la prioridad.";
     await appendOutboundBotMessage(rawPhone, message, {

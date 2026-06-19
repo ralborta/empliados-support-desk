@@ -10,6 +10,7 @@ import {
   looksLikeCompanySelection,
   looksLikeGreeting,
   looksLikeOperationalIntent,
+  resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
@@ -320,8 +321,39 @@ export async function customerRegisteredContextResponse(
     );
   }
 
-  let resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
   const selectionText = opts?.selectionText?.trim() || "";
+  if (selectionText && looksLikeChangeCompanyRequest(selectionText)) {
+    const reset = await resetCustomerCompanyMenu(prisma, trimmed);
+    const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+    const customer = resolution.customer;
+    return NextResponse.json({
+      registered: resolution.registered,
+      registered_s: resolution.registered ? "true" : "false",
+      ignore: false,
+      ignore_s: "false",
+      phone: normalized,
+      name: customer?.name?.trim() || "",
+      companyName: "",
+      validationSource: resolution.source,
+      waraLookupConfigured: resolution.lookup?.configured ?? false,
+      waraContactsCount: reset.contacts.length,
+      waraContactId: reset.contacts[0]?.id ?? null,
+      waraContacts: reset.contacts,
+      waraContactsText: reset.waraContactsText,
+      requiresCompanySelection: reset.requiresCompanySelection,
+      requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
+      companyPickedThisTurn: false,
+      companyPickedThisTurn_s: "false",
+      nextFlow: "reply",
+      nextFlow_s: "reply",
+      selectionFailed_s: "false",
+      message: reset.message,
+      testBlocked: resolution.testBlocked ?? false,
+      testBlocked_s: resolution.testBlocked ? "true" : "false",
+    });
+  }
+
+  let resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
   const activeCompanyEarly =
     resolution.selectedCompanyName ?? resolution.customer?.companyName?.trim() ?? "";
   const needsCompanyPick =
@@ -461,13 +493,6 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
   } else if (activeCompany && requiresCompanySelection) {
     // Empresa ya guardada: no bloquear trámites por flag inconsistente.
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (
-    selectionText &&
-    looksLikeChangeCompanyRequest(selectionText)
-  ) {
-    // "cambiar empresa" → Router / flujo Cambiar (reset + menú), no intentar parsear como opción.
     nextFlow = "router";
     responseMessage = "";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {

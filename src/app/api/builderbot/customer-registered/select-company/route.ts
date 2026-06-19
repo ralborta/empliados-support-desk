@@ -5,8 +5,8 @@ import {
   requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { obtenerEmpresaPorNumero, selectCompanyForCustomer, buildCompanyMenuPayload, waraRequiresCompanyConfirmation, waraCanAutoSelectCompany, looksLikeChangeCompanyRequest } from "@/lib/waraApi";
-import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import { selectCompanyForCustomer, resetCustomerCompanyMenu, looksLikeChangeCompanyRequest } from "@/lib/waraApi";
+import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 /** BuilderBot solo interpola {message} y reglas HTTP cuando el status es 2xx. */
 const BB_STATUS = 200;
@@ -103,42 +103,20 @@ export async function POST(req: NextRequest) {
 
   // Modo "cambiar empresa": limpia la empresa guardada y devuelve el menú de opciones.
   if (isResetFlag(parsed.data.reset) || looksLikeChangeCompanyRequest(companyName)) {
-    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
-    if (customer) {
-      await prisma.customer.update({
-        where: { id: customer.id },
-        data: { companyName: "", selectedCompanyContactId: null },
-      });
-    }
-    const lookup = await obtenerEmpresaPorNumero(rawPhone);
-    const contacts = lookup.contactos ?? [];
-    const normalizedPhone = normalizeWhatsAppPhone(rawPhone);
-    const menu = contacts.length
-      ? await buildCompanyMenuPayload(contacts, normalizedPhone)
-      : null;
-    const waraContactsText = menu?.waraContactsText ?? "";
-    const multi = waraRequiresCompanyConfirmation(contacts);
-
-    const message = multi
-      ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
-      : waraCanAutoSelectCompany(contacts)
-        ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}). ¿En qué te puedo ayudar?`
-        : contacts.length === 0
-          ? `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`
-          : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;
+    const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
     return NextResponse.json(
       {
         ok: true,
         ok_s: "true",
         reset: true,
         reset_s: "true",
-        requiresCompanySelection: multi,
-        requiresCompanySelection_s: multi ? "true" : "false",
+        requiresCompanySelection: reset.requiresCompanySelection,
+        requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
         phone: normalizeWhatsAppPhone(rawPhone),
         companyName: "",
-        waraContactsText,
-        contacts,
-        message,
+        waraContactsText: reset.waraContactsText,
+        contacts: reset.contacts,
+        message: reset.message,
       },
       { status: BB_STATUS }
     );

@@ -42,6 +42,13 @@ function buildRules() {
   return [
     {
       conditionRule:
+        'CAMBIAR DE EMPRESA — PRIORIDAD MÁXIMA. Frases: "cambiar empresa", "cambiarme de empresa", "quiero cambiar de empresa", "otra empresa", typos similares. PROHIBIDO si el mensaje es trámite concreto (mantenimiento con detalle, patente, certificado, reporte). La elección 1/2/WARA la procesa Inicio.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.cambiarEmpresa,
+    },
+    {
+      conditionRule:
         "CONFIRMACIÓN DE ODÓMETRO. Interpretá por CONTEXTO: en el turno anterior el bot resumió un cambio de ODÓMETRO/HORÓMETRO y pidió confirmación, y ahora el cliente acepta/da el visto bueno de cualquier forma natural. Solo aplica si ese último resumen era de odómetro/horómetro; no si era de mantenimiento o certificado.",
       conditionValue: "",
       condition: "",
@@ -64,13 +71,6 @@ function buildRules() {
     {
       conditionRule:
         'EMPRESAS EN WARA — El cliente pregunta qué empresas tiene asociadas a su teléfono, cuáles empresas, "qué empresas tengo", lista de empresas. NO es consulta de unidades, flota ni patente.',
-      conditionValue: "",
-      condition: "",
-      conditionFlowId: F.cambiarEmpresa,
-    },
-    {
-      conditionRule:
-        'CAMBIAR DE EMPRESA — SOLO frases explícitas: "cambiar empresa", "cambiarme de empresa", "otra empresa", "me equivoqué de empresa", "elegir empresa", "quiero cambiar de empresa". PROHIBIDO si el mensaje es solo un nombre de empresa (WARA, El Cacique), un número de menú (1, 2), un saludo, "pasar a WARA", o parte de otra gestión (certificado, patente, reporte, mantenimiento). La elección 1/2/WARA ya la procesa Inicio; NO enrutar a Elegir Empresa.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.cambiarEmpresa,
