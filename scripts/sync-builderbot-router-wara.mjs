@@ -77,6 +77,13 @@ function buildRules() {
     },
     {
       conditionRule:
+        "PATENTE PARA MANTENIMIENTO — Si el bot acaba de pedir la patente para registrar o programar mantenimiento (preventivo, correctivo, tarea o plan) y el cliente responde solo con una patente (AD 427 MC, ABC123, etc.) o patente + detalle corto del trabajo, va a Gestión Mantenimiento. PRIORIDAD sobre consulta de unidad/certificado cuando el contexto reciente es mantenimiento operativo, no consulta de reporte ni certificado.",
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.gestionMaint,
+    },
+    {
+      conditionRule:
         'EMPRESAS EN WARA — El cliente pregunta qué empresas tiene asociadas a su teléfono, cuáles empresas, "qué empresas tengo", lista de empresas. NO es consulta de unidades, flota ni patente.',
       conditionValue: "",
       condition: "",

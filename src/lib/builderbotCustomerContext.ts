@@ -499,9 +499,20 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
-      responseMessage = firstName
-        ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-        : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+      if (multiCompany && waraContactsText) {
+        const hola = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
+        responseMessage =
+          `${hola}\n\n` +
+          `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
+          `${waraContactsText}\n\n` +
+          `Respondé con el número de la opción o con el nombre de la empresa.`;
+      } else {
+        responseMessage = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+      }
     }
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.

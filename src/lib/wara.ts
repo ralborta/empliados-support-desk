@@ -73,6 +73,16 @@ export function detectPlate(text: string): string | null {
   return null;
 }
 
+/** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */
+export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
+  const tail = threadText.slice(-2500).toLowerCase();
+  return (
+    /para programar mantenimiento preventivo necesito la patente/.test(tail) ||
+    /para registrar el mantenimiento necesito la patente/.test(tail) ||
+    (/necesito la patente de la unidad/.test(tail) && /mantenimiento/.test(tail))
+  );
+}
+
 /**
  * Formatea una patente argentina con espacios, como Wara espera recibirla:
  *   - Formato Mercosur: "AD 427 MC" (2 letras + 3 dígitos + 2 letras)

@@ -9,7 +9,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -504,12 +504,18 @@ export async function POST(req: NextRequest) {
   };
   let action: "none" | "observation" | "ticket" = "none";
   let ticketRef = "";
+  const plateDisplay = wantedPlate ? formatPlateWithSpaces(wantedPlate) ?? wantedPlate : "";
+  const maintenanceContext = hasPendingMaintenancePlateRequest(threadText);
   let summaryText = !result.ok
     ? result.error || "No pude consultar las unidades en Wara."
     : filtered.length === 0
-      ? wantedPlate && !explicitPlate
-        ? "No encontré esa patente en tu empresa. ¿Podés confirmarme la patente exacta?"
-        : `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
+      ? maintenanceContext && wantedPlate
+        ? `Busqué ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"} y no la encontré. Si la unidad es de otra empresa, escribí "cambiar empresa". Si venías programando mantenimiento, mandá la patente con el detalle (por ejemplo: "preventivo ${plateDisplay}").`
+        : wantedPlate && !explicitPlate
+          ? `No encontré ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. ¿Podés confirmarme la patente exacta? Si es de otra empresa, escribí "cambiar empresa".`
+          : wantedPlate
+            ? `No encontré la patente ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. Revisá que esté bien escrita o, si corresponde a otra empresa, escribí "cambiar empresa".`
+            : `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
       : filtered.length === 1
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);

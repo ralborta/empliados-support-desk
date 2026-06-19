@@ -7,12 +7,14 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { generateTicketCode } from "@/lib/tickets";
-import { detectPlate, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
 import {
+  consultarEstadoUnidades,
   looksLikeChangeCompanyRequest,
   looksLikeShortAffirmative,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
+  resolveWaraSessionByPhone,
 } from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -284,6 +286,51 @@ function priorityLabel(priority: Priority): string {
   return "normal";
 }
 
+function inferServiceFromThread(threadText: string): string | undefined {
+  const t = threadText.toLowerCase();
+  if (/preventiv|plan de mantenimiento/.test(t)) return "Plan de mantenimiento";
+  if (/correctiv|aver[ií]a|falla/.test(t)) return "Correctivo";
+  if (/rfid|neum[aá]tic|cubierta/.test(t)) return "Neumaticos RFID";
+  if (/tarea|orden de trabajo/.test(t)) return "Tarea de mantenimiento";
+  return undefined;
+}
+
+function isPlateOnlyMessage(text: string, plate: string): boolean {
+  const stripped = text
+    .replace(new RegExp(plate.replace(/(.)/g, "$1\\s?"), "gi"), " ")
+    .replace(/[^a-z0-9áéíóúñ]/gi, " ")
+    .trim();
+  return stripped.length < 24 && !/\b(confir|si|dale|ok|listo)\b/i.test(stripped);
+}
+
+async function validatePlateInFleet(
+  rawPhone: string,
+  plate: string,
+  companyName: string
+): Promise<{ found: boolean; checked: boolean; message?: string }> {
+  const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+  if (!session.ok || !session.sessionToken) {
+    return { found: true, checked: false };
+  }
+  const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
+  const result = await consultarEstadoUnidades(session.sessionToken, [plateDisplay]);
+  if (!result.ok) return { found: true, checked: false };
+
+  const wanted = normalizePlate(plate);
+  if (!wanted) return { found: true, checked: false };
+  const found = result.unidades.some((unit) => {
+    const unitPlate = normalizePlate(unit.patente || unit.unidad);
+    return unitPlate && (unitPlate === wanted || unitPlate.includes(wanted) || wanted.includes(unitPlate));
+  });
+  if (found) return { found: true, checked: true };
+
+  const multi = (session.lookup?.contactos.length ?? 0) > 1;
+  const message = multi
+    ? `No encontré la patente ${plateDisplay} en las unidades de ${companyName}. Puede que esa unidad esté en otra de tus empresas: escribí "cambiar empresa", elegí la correcta y volvé a pasarme la patente. Si igual querés registrar la gestión en ${companyName}, respondé con la patente y un breve detalle del trabajo.`
+    : `No encontré la patente ${plateDisplay} entre las unidades activas de ${companyName}. Revisá que esté bien escrita o contame un poco más del trabajo que querés programar para esa unidad.`;
+  return { found: false, checked: true, message };
+}
+
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
   const message = text?.trim();
   if (!message) return;
@@ -404,9 +451,10 @@ export async function POST(req: NextRequest) {
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
   const threadText = await recentThreadText(rawPhone);
   const pendingMaintConfirm = hasPendingMantenimientoConfirmation(threadText);
+  const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
   const summary = parseMantenimientoSummary(pendingMaintConfirm ? threadText : "");
 
-  const text =
+  let text =
     parsed.data.rawText?.trim() ||
     parsed.data.detalle?.trim() ||
     parsed.data.detail?.trim() ||
@@ -432,9 +480,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const threadService = inferServiceFromThread(threadText);
   const service =
     summary.servicio ||
-    inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text}`);
+    threadService ||
+    inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text} ${threadText}`);
   const priority =
     parsed.data.prioridad ??
     parsed.data.priority ??
@@ -467,9 +517,18 @@ export async function POST(req: NextRequest) {
     parsed.data.patente ??
       parsed.data.plate ??
       detectPlate(text) ??
-      (pendingMaintConfirm ? summary.patente ?? detectPlate(threadText) : undefined) ??
+      (pendingMaintConfirm || pendingPlateRequest
+        ? summary.patente ?? detectPlate(threadText)
+        : undefined) ??
       undefined
   );
+  if (plate && pendingPlateRequest && isPlateOnlyMessage(text, plate)) {
+    const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
+    text =
+      threadService === "Plan de mantenimiento"
+        ? `Mantenimiento preventivo para ${plateDisplay}`
+        : `Mantenimiento para ${plateDisplay}`;
+  }
   if (!plate) {
     if (looksLikeShortAffirmative(text)) {
       const message =
@@ -486,6 +545,33 @@ export async function POST(req: NextRequest) {
           flowComplete_s: "true",
           needsDetail_s: "true",
           message,
+          service,
+          priority,
+        },
+        { status: BB_STATUS }
+      );
+    }
+    if (looksLikeOperationalMaintenanceIntent(text)) {
+      const preventivo = /preventiv/i.test(text);
+      const message = preventivo
+        ? "Para programar mantenimiento preventivo necesito la patente de la unidad (por ejemplo AD427MC o ABC123). Si querés, agregá también la prioridad."
+        : "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_mantenimiento_operativo",
+        stage: "needs_plate",
+        service,
+        priority,
+        phone: rawPhone,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          needsPlate_s: "true",
+          message,
+          missing: ["patente"],
+          missing_s: "patente",
           service,
           priority,
         },
@@ -516,6 +602,34 @@ export async function POST(req: NextRequest) {
     );
   }
   if (!isConfirmed(confirmation)) {
+    const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
+    const fleetCheck = await validatePlateInFleet(rawPhone, plate, company);
+    if (!fleetCheck.found && fleetCheck.message && isPlateOnlyMessage(text, plate)) {
+      await appendOutboundBotMessage(rawPhone, fleetCheck.message, {
+        source: "wara_mantenimiento_operativo",
+        stage: "plate_not_in_fleet",
+        service,
+        priority,
+        plate,
+        companyName: company,
+        phone: rawPhone,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          plateNotInFleet_s: "true",
+          message: fleetCheck.message,
+          plate,
+          companyName: company,
+          service,
+          priority,
+        },
+        { status: BB_STATUS }
+      );
+    }
+
     const message = `Voy a registrar:\nPatente: ${plate}\nTipo: ${service}\nPrioridad: ${priorityLabel(priority)}\nDetalle: ${text}\n\nSi esta correcto, responde CONFIRMO para registrarlo.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
