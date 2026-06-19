@@ -119,14 +119,14 @@ function buildRules() {
     },
     {
       conditionRule:
-        "La intención del cliente es REGISTRAR una gestión operativa real de mantenimiento ahora (tarea, correctivo, preventivo, plan, neumáticos/RFID). No aplica a preguntas de cómo usar el módulo.",
+        "La intención del cliente es REGISTRAR o PROGRAMAR una gestión operativa real de mantenimiento ahora (tarea, correctivo, preventivo, plan, neumáticos/RFID). Incluye frases como «quiero programar mantenimiento», «necesito registrar un correctivo», «abrir tarea de mantenimiento». PROHIBIDO si solo pregunta cómo usar o configurar el módulo.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.gestionMaint,
     },
     {
       conditionRule:
-        "La intención del cliente es ENTENDER cómo funciona el módulo de mantenimiento (guía informativa, sin patente ni ticket).",
+        "La intención del cliente es ENTENDER cómo funciona el módulo de mantenimiento (guía informativa, sin patente ni ticket). PROHIBIDO si dice quiero/necesito/programar/registrar mantenimiento o quiere abrir un caso real.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.infoMaint,

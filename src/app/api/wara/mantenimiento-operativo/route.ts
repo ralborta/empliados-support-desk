@@ -80,13 +80,37 @@ function inferPriority(raw: string): Priority {
 }
 
 function isMaintenanceHowToRequest(raw: string): boolean {
+  if (looksLikeOperationalMaintenanceIntent(raw)) return false;
   const text = raw
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-  return /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|mantenimiento|preventiv|correctiv|combustible|rendimiento teorico|consumo)/.test(
+  return /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|preventiv|correctiv|combustible|rendimiento teorico|consumo)/.test(
     text
   );
+}
+
+/** Trámite operativo real (programar/registrar), no guía informativa. */
+function looksLikeOperationalMaintenanceIntent(raw: string): boolean {
+  const text = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return (
+    /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta)\b/.test(
+      text
+    ) && /\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)
+  );
+}
+
+function hasPendingMantenimientoConfirmation(threadText: string): boolean {
+  const lines = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tail = lines.slice(-6).join("\n").toLowerCase();
+  if (/perfecto|deje registrada|orientacion de uso del modulo/.test(tail)) return false;
+  return /voy a registrar:/.test(tail) && /responde\s+confirmo/.test(tail);
 }
 
 function maintenanceHowToMessage(raw: string): string {
@@ -378,10 +402,9 @@ export async function POST(req: NextRequest) {
   }
 
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
-  // No dependemos de {history} (rompe el JSON del body): reconstruimos el trámite
-  // desde lo persistido en la base, igual que en el flujo de odómetro.
   const threadText = await recentThreadText(rawPhone);
-  const summary = parseMantenimientoSummary(threadText);
+  const pendingMaintConfirm = hasPendingMantenimientoConfirmation(threadText);
+  const summary = parseMantenimientoSummary(pendingMaintConfirm ? threadText : "");
 
   const text =
     parsed.data.rawText?.trim() ||
@@ -389,6 +412,7 @@ export async function POST(req: NextRequest) {
     parsed.data.detail?.trim() ||
     parsed.data.servicio?.trim() ||
     parsed.data.service?.trim() ||
+    confirmation?.trim() ||
     summary.detalle ||
     summary.servicio ||
     "Solicitud de gestion de mantenimiento";
@@ -429,6 +453,7 @@ export async function POST(req: NextRequest) {
       {
         ok: true,
         ok_s: "true",
+        flowComplete_s: "true",
         informational: true,
         informational_s: "true",
         message,
@@ -442,8 +467,7 @@ export async function POST(req: NextRequest) {
     parsed.data.patente ??
       parsed.data.plate ??
       detectPlate(text) ??
-      summary.patente ??
-      detectPlate(threadText) ??
+      (pendingMaintConfirm ? summary.patente ?? detectPlate(threadText) : undefined) ??
       undefined
   );
   if (!plate) {
@@ -459,6 +483,7 @@ export async function POST(req: NextRequest) {
         {
           ok: true,
           ok_s: "true",
+          flowComplete_s: "true",
           needsDetail_s: "true",
           message,
           service,
@@ -478,8 +503,9 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(
       {
-        ok: false,
-        ok_s: "false",
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
         message,
         missing: ["patente"],
         missing_s: "patente",
@@ -501,8 +527,9 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(
       {
-        ok: false,
-        ok_s: "false",
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
         confirmationRequired: true,
         confirmationRequired_s: "true",
         message,
@@ -637,6 +664,7 @@ export async function POST(req: NextRequest) {
     {
       ok: true,
       ok_s: "true",
+      flowComplete_s: "true",
       ticketCode: ticket.code,
       ticketId: ticket.id,
       odooRef,

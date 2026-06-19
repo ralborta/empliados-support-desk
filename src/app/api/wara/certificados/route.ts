@@ -497,6 +497,31 @@ export async function POST(req: NextRequest) {
     (pendingConfirm && (isConfirmed(text) || /\bconf/i.test(text)) ? "confirmo" : undefined);
 
   if ((isConfirmed(text) || isConfirmed(confirmRaw)) && !pendingConfirm) {
+    const plateHint =
+      normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) ??
+      detectPlate(text) ??
+      extractPlateFromCertificateSummary(threadText);
+    if (plateHint) {
+      const generated = await findGeneratedCertificate(rawPhone, plateHint);
+      if (generated) {
+        const plateDisplay = formatPlateWithSpaces(plateHint) ?? plateHint;
+        const company = resolution.selectedCompanyName || resolution.customer?.companyName || "tu empresa";
+        const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+        return NextResponse.json(
+          {
+            ok: true,
+            ok_s: "true",
+            flowComplete_s: "true",
+            alreadyGenerated: true,
+            alreadyGenerated_s: "true",
+            plate: plateHint,
+            companyName: company,
+            message,
+          },
+          { status: BB_STATUS }
+        );
+      }
+    }
     const message =
       "No tengo un certificado pendiente de confirmar. Si querés uno nuevo, decime la patente (por ejemplo AD 427 MC).";
     return NextResponse.json(
