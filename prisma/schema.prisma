@@ -80,13 +80,15 @@ model Customer {
 }
 
 model AgentUser {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  name      String
-  phone     String    // Número de teléfono para notificaciones por WhatsApp
-  role      AgentRole
-  tickets   Ticket[]  @relation("AgentAssignments")
-  createdAt DateTime  @default(now())
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  phone        String    // Número de teléfono para notificaciones por WhatsApp
+  role         AgentRole
+  /// Hash scrypt para login al panel (opcional; si null, no puede iniciar sesión).
+  passwordHash String?
+  tickets      Ticket[]  @relation("AgentAssignments")
+  createdAt    DateTime  @default(now())
 }
 
 model Ticket {

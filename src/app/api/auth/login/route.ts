@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import { panelAuthConfigured, panelAuthMissingDescription, tryPanelLogin } from "@/lib/panelAuth";
+import { panelAuthConfigured, panelAuthMissingDescription, tryAgentUserLogin, tryPanelLogin } from "@/lib/panelAuth";
 
 const bodySchema = z.object({
   email: z.string().email(),
@@ -26,7 +26,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Email y contraseña requeridos" }, { status: 400 });
   }
 
-  const user = tryPanelLogin(parsed.data.email, parsed.data.password);
+  const user =
+    tryPanelLogin(parsed.data.email, parsed.data.password) ??
+    (await tryAgentUserLogin(parsed.data.email, parsed.data.password));
   if (!user) {
     return NextResponse.json({ error: "Credenciales inválidas" }, { status: 401 });
   }
