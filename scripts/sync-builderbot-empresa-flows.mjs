@@ -13,10 +13,10 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 const PROJECT_ID = "7d4339ee-2a9b-424e-92f6-ad7790c1662f";
 const API_KEY = "31abb735b990bcde9f41ff1b3a3076d8269b92a7676ceecc07d3fa52ae577b62";
-const SELECT_URL =
-  "https://empliados-support-desk.vercel.app/api/builderbot/customer-registered/select-company";
+const BASE_URL = "https://wara.nivel41.com";
+const SELECT_URL = `${BASE_URL}/api/builderbot/customer-registered/select-company`;
 const CONTEXT_URL =
-  "https://empliados-support-desk.vercel.app/api/builderbot/customer-registered/{from}/context?from={{from}}&selection={{body}}";
+  `${BASE_URL}/api/builderbot/customer-registered/{from}/context?from={{from}}&selection={{body}}`;
 
 const FLOWS = {
   inicio: "0002c201-c25b-4199-bc03-4567a9e23d49",
@@ -39,10 +39,16 @@ const ANSWERS = {
 
 const selectHttpRules = [
   {
-    conditionRule: "ok_s",
-    conditionValue: "true",
+    conditionRule: "nextFlow_s",
+    conditionValue: "router",
     condition: "===",
     conditionFlowId: FLOWS.router,
+  },
+  {
+    conditionRule: "nextFlow_s",
+    conditionValue: "reply",
+    condition: "===",
+    conditionFlowId: FLOWS.inicio,
   },
 ];
 
@@ -118,20 +124,14 @@ async function main() {
               conditionFlowId: FLOWS.ignorar,
             },
             {
-              conditionRule: "requiresCompanySelection_s",
-              conditionValue: "true",
-              condition: "===",
-              conditionFlowId: FLOWS.elegir,
-            },
-            {
-              conditionRule: "registered_s",
-              conditionValue: "false",
+              conditionRule: "nextFlow_s",
+              conditionValue: "derivar",
               condition: "===",
               conditionFlowId: "4d2df610-426b-4239-b720-7eed5a5f0804",
             },
             {
-              conditionRule: "registered_s",
-              conditionValue: "true",
+              conditionRule: "nextFlow_s",
+              conditionValue: "router",
               condition: "===",
               conditionFlowId: FLOWS.router,
             },
@@ -141,32 +141,7 @@ async function main() {
     },
   });
 
-  // Elegir: captura primero (el menú ya lo mandó Inicio); HTTP en sort 1 con la respuesta nueva.
-  await client.callTool({
-    name: "builderbot_create_answer",
-    arguments: {
-      projectId: PROJECT_ID,
-      flowId: FLOWS.elegir,
-      message: " ",
-      type: "add_text",
-      sort: 0,
-      options: { capture: true, sensitive: false, delay: 0 },
-    },
-  }).catch(async () => {
-    await client.callTool({
-      name: "builderbot_update_answer",
-      arguments: {
-        projectId: PROJECT_ID,
-        flowId: FLOWS.elegir,
-        answerId: ANSWERS.elegirCapture,
-        message: " ",
-        type: "add_text",
-        sort: 0,
-        options: { capture: true, sensitive: false, delay: 0 },
-      },
-    });
-  });
-
+  // Elegir: un solo HTTP (misma lógica que Inicio) — evita captura + POST con {body} vacío.
   await client.callTool({
     name: "builderbot_update_answer",
     arguments: {
@@ -174,14 +149,14 @@ async function main() {
       flowId: FLOWS.elegir,
       answerId: ANSWERS.elegirHttp,
       type: "add_http",
-      sort: 1,
+      sort: 0,
       options: { capture: false },
       plugins: {
         http: {
-          url: SELECT_URL,
-          method: "POST",
+          url: CONTEXT_URL,
+          method: "GET",
           headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-          body: { from: "{from}", companyName: "{body}" },
+          body: {},
           messageMapping: "{message}",
           avoidResponse: false,
           rules: selectHttpRules,
@@ -189,6 +164,20 @@ async function main() {
       },
     },
   });
+
+  try {
+    await client.callTool({
+      name: "builderbot_delete_answer",
+      arguments: {
+        projectId: PROJECT_ID,
+        flowId: FLOWS.elegir,
+        answerId: ANSWERS.elegirCapture,
+      },
+    });
+    console.log("Elegir: eliminado nodo captura obsoleto");
+  } catch (err) {
+    console.warn("Elegir capture delete:", err.message ?? err);
+  }
 
   // Cambiar: solo reset; la elección la resuelve Inicio → Elegir HTTP en el siguiente mensaje.
   await client.callTool({

@@ -14,7 +14,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 const PROJECT_ID = "7d4339ee-2a9b-424e-92f6-ad7790c1662f";
 const API_KEY = "31abb735b990bcde9f41ff1b3a3076d8269b92a7676ceecc07d3fa52ae577b62";
 const CONTEXT_URL =
-  "https://empliados-support-desk.vercel.app/api/builderbot/customer-registered/{from}/context?from={{from}}&selection={{body}}";
+  "https://wara.nivel41.com/api/builderbot/customer-registered/{from}/context?from={{from}}&selection={{body}}";
 
 const FLOWS = {
   inicio: "0002c201-c25b-4199-bc03-4567a9e23d49",
@@ -26,10 +26,9 @@ const FLOWS = {
 const INICIO_HTTP = "f9901e83-6dca-4bbe-897e-721acc5bd871";
 
 const inicioRules = [
-  { conditionRule: "nextFlow_s", conditionValue: "elegir", condition: "===", conditionFlowId: FLOWS.elegir },
   { conditionRule: "nextFlow_s", conditionValue: "derivar", condition: "===", conditionFlowId: FLOWS.derivar },
   { conditionRule: "nextFlow_s", conditionValue: "router", condition: "===", conditionFlowId: FLOWS.router },
-  // nextFlow_s reply/ignore → sin regla: solo messageMapping (o silencio para canales)
+  // nextFlow_s reply/ignore/elegir → sin regla: solo messageMapping y el próximo mensaje vuelve a Inicio
 ];
 
 function loadMcp() {

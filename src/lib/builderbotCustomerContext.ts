@@ -321,6 +321,7 @@ export async function customerRegisteredContextResponse(
   let resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
   const selectionText = opts?.selectionText?.trim() || "";
   let selectionMessage = "";
+  let companyPickedThisTurn = false;
   if (
     resolution.requiresCompanySelection &&
     selectionText &&
@@ -330,7 +331,14 @@ export async function customerRegisteredContextResponse(
       companyName: selectionText,
     });
     if (picked.ok) {
+      companyPickedThisTurn = true;
       resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+      const pickedCompany = picked.customer?.companyName?.trim() || "";
+      selectionMessage =
+        picked.menuMessage ??
+        (pickedCompany
+          ? `Perfecto, sigo con ${pickedCompany}. ¿En qué te puedo ayudar?`
+          : "Perfecto. ¿En qué te puedo ayudar?");
     } else {
       selectionMessage = picked.menuMessage ?? picked.error ?? "";
     }
@@ -404,8 +412,15 @@ export async function customerRegisteredContextResponse(
     looksLikeCompanyListQuestion(selectionText)
   ) {
     nextFlow = "reply";
+  } else if (companyPickedThisTurn) {
+    // Empresa recién elegida en este turno (p. ej. "1" / "WARA" vía Inicio + selection=).
+    nextFlow = "router";
+    if (!responseMessage) {
+      responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
+    }
   } else if (requiresCompanySelection) {
-    nextFlow = "elegir";
+    // Mostrar menú y quedarse en WELCOME/Inicio; NO entrar al subflujo Elegir (evita quedar en ".").
+    nextFlow = "reply";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
