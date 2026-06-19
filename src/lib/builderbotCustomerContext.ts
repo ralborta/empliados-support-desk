@@ -9,6 +9,7 @@ import {
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeGreeting,
+  looksLikeOperationalIntent,
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
@@ -321,6 +322,10 @@ export async function customerRegisteredContextResponse(
 
   let resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
   const selectionText = opts?.selectionText?.trim() || "";
+  const activeCompanyEarly =
+    resolution.selectedCompanyName ?? resolution.customer?.companyName?.trim() ?? "";
+  const needsCompanyPick =
+    resolution.requiresCompanySelection && !activeCompanyEarly;
   let selectionMessage = "";
   let companyPickedThisTurn = false;
   const multiCompany = (resolution.lookup?.contactos.length ?? 0) > 1;
@@ -328,7 +333,7 @@ export async function customerRegisteredContextResponse(
     !!selectionText && looksLikeCompanySelection(selectionText);
   if (
     strictCompanyPick &&
-    (resolution.requiresCompanySelection || multiCompany)
+    (needsCompanyPick || multiCompany)
   ) {
     const previousContactId = resolution.customer?.selectedCompanyContactId ?? null;
     const picked = await selectCompanyForCustomer(prisma, trimmed, {
@@ -379,6 +384,10 @@ export async function customerRegisteredContextResponse(
     : null;
   const contacts = resolution.lookup?.contactos ?? [];
   const requiresCompanySelection = resolution.requiresCompanySelection;
+  const activeCompany =
+    resolution.selectedCompanyName ?? customer?.companyName?.trim() ?? "";
+  /** Solo pedir menú si falta elegir; si ya hay empresa guardada, seguir el trámite. */
+  const needsCompanyMenu = requiresCompanySelection && !activeCompany;
   const menuPayload = contacts.length
     ? await buildCompanyMenuPayload(contacts, normalized)
     : null;
@@ -391,8 +400,6 @@ export async function customerRegisteredContextResponse(
       `${lastTicketSummary ? `. Resumen: ${lastTicketSummary}` : ""}`
     : "";
 
-  const activeCompany =
-    resolution.selectedCompanyName ?? customer?.companyName?.trim() ?? "";
   let responseMessage = selectionMessage;
   if (
     !responseMessage &&
@@ -405,7 +412,7 @@ export async function customerRegisteredContextResponse(
       ? `Estás operando con ${activeCompany}.\n\nEste número también está asociado en Wara a:\n\n${waraContactsText}\n\nPara cambiar de empresa, escribí "cambiar empresa" y elegí una opción.`
       : `Este número está asociado en Wara a:\n\n${waraContactsText}\n\n` +
         `Elegí con el número de la opción o el nombre de la empresa.`;
-  } else if (!responseMessage && requiresCompanySelection && waraContactsText) {
+  } else if (!responseMessage && needsCompanyMenu && waraContactsText) {
     responseMessage =
       `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
       `${waraContactsText}\n\n` +
@@ -430,7 +437,15 @@ export async function customerRegisteredContextResponse(
       responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
     }
   } else if (
-    requiresCompanySelection &&
+    needsCompanyMenu &&
+    selectionText &&
+    looksLikeOperationalIntent(selectionText)
+  ) {
+    // Trámite concreto sin empresa fijada: dejar que el Router/API responda (no repetir menú).
+    nextFlow = "router";
+    responseMessage = "";
+  } else if (
+    needsCompanyMenu &&
     selectionText &&
     looksLikeCompanySelection(selectionText)
   ) {
@@ -441,9 +456,13 @@ export async function customerRegisteredContextResponse(
         `No pude registrar esa opción. ¿De cuál empresa escribís?\n\n${waraContactsText}\n\n` +
         `Respondé con el número de la opción o con el nombre de la empresa.`;
     }
-  } else if (requiresCompanySelection) {
-    // Mostrar menú y quedarse en WELCOME/Inicio; NO entrar al subflujo Elegir (evita quedar en ".").
+  } else if (needsCompanyMenu) {
+    // Falta elegir empresa: mostrar menú solo si no hay trámite operativo.
     nextFlow = "reply";
+  } else if (activeCompany && requiresCompanySelection) {
+    // Empresa ya guardada: no bloquear trámites por flag inconsistente.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (
     selectionText &&
     looksLikeChangeCompanyRequest(selectionText)
@@ -496,8 +515,8 @@ export async function customerRegisteredContextResponse(
     hasLastTicket: !!lastTicket,
     hasLastTicket_s: lastTicket ? "true" : "false",
     lastTicketContextText,
-    requiresCompanySelection,
-    requiresCompanySelection_s: requiresCompanySelection ? "true" : "false",
+    requiresCompanySelection: needsCompanyMenu,
+    requiresCompanySelection_s: needsCompanyMenu ? "true" : "false",
     companyPickedThisTurn,
     companyPickedThisTurn_s: companyPickedThisTurn ? "true" : "false",
     nextFlow,

@@ -101,7 +101,7 @@ export function looksLikeChangeCompanyRequest(text: string | undefined | null): 
   );
 }
 
-function looksLikeOperationalIntent(text: string): boolean {
+export function looksLikeOperationalIntent(text: string): boolean {
   const n = normCompanyToken(text);
   if (!n) return false;
   return /\b(quiero|necesito|programar|consultar|solicitar|pedir|ver|dame|decime|pasame|reporte|mantenimiento|certificado|patente|odometro|horometro|unidad|unidades|flota|ticket|reclamo|asesor|ubicacion|ignicion|voltaje|offline|falla|problema|ayuda|como hago|como puedo|estado de|ultimo reporte|sin reporte)\b/.test(
@@ -1262,7 +1262,11 @@ export async function resolveCustomerByWaraPhone(
     ? await prisma.customer.update({ where: { id: local.id }, data })
     : await prisma.customer.create({ data });
 
-  const requiresCompanySelection = menuRequiresSelection && !chosenCompany;
+  let requiresCompanySelection = menuRequiresSelection && !chosenCompany;
+  if (local?.selectedCompanyContactId != null && chosenContact?.id === local.selectedCompanyContactId) {
+    requiresCompanySelection = false;
+  }
+
   if (requiresCompanySelection) {
     console.log(
       `[WaraAPI] ${normalized} tiene ${menuContacts.length} empresa(s) seleccionable(s) en Wara; falta confirmar cuál.`

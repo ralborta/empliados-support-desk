@@ -42,13 +42,6 @@ function buildRules() {
   return [
     {
       conditionRule:
-        "MENÚ DE EMPRESA — RESIDUAL. El mensaje es EXCLUSIVAMENTE 1, 2, WARA, Guara, El Cacique o Cacique, sin patente ni pedido de reporte, listado, certificado u odómetro. NO es consulta de unidades ni flota. NO enrutar a ejecutar consulta ni listado.",
-      conditionValue: "",
-      condition: "",
-      conditionFlowId: F.elegirEmpresa,
-    },
-    {
-      conditionRule:
         "CONFIRMACIÓN DE ODÓMETRO. Interpretá por CONTEXTO: en el turno anterior el bot resumió un cambio de ODÓMETRO/HORÓMETRO y pidió confirmación, y ahora el cliente acepta/da el visto bueno de cualquier forma natural. Solo aplica si ese último resumen era de odómetro/horómetro; no si era de mantenimiento o certificado.",
       conditionValue: "",
       condition: "",
@@ -77,14 +70,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        'ELEGIR EMPRESA POR NOMBRE — quiere operar con, pasar a, cambiar a o usar una empresa nombrada (WARA, Guara, El Cacique, Cacique) o responde con número de menú tras ver opciones. PROHIBIDO si la frase es solo "cambiar empresa" / "cambiar de empresa" sin nombrar cuál (eso va a reset de menú).',
-      conditionValue: "",
-      condition: "",
-      conditionFlowId: F.elegirEmpresa,
-    },
-    {
-      conditionRule:
-        'CAMBIAR DE EMPRESA — SOLO frases explícitas: "cambiar empresa", "cambiarme de empresa", "otra empresa", "me equivoqué de empresa", "elegir empresa", "quiero cambiar de empresa". PROHIBIDO si el mensaje es solo un nombre de empresa (WARA, El Cacique), un número de menú (1, 2), un saludo, "pasar a WARA", o parte de otra gestión (certificado, patente, reporte, mantenimiento).',
+        'CAMBIAR DE EMPRESA — SOLO frases explícitas: "cambiar empresa", "cambiarme de empresa", "otra empresa", "me equivoqué de empresa", "elegir empresa", "quiero cambiar de empresa". PROHIBIDO si el mensaje es solo un nombre de empresa (WARA, El Cacique), un número de menú (1, 2), un saludo, "pasar a WARA", o parte de otra gestión (certificado, patente, reporte, mantenimiento). La elección 1/2/WARA ya la procesa Inicio; NO enrutar a Elegir Empresa.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.cambiarEmpresa,

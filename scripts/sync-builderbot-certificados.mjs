@@ -41,19 +41,13 @@ async function main() {
       options: { capture: false },
       plugins: {
         http: {
-          url: "https://empliados-support-desk.vercel.app/api/wara/certificados",
+          url: "https://wara.nivel41.com/api/wara/certificados",
           method: "POST",
           headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
           body: { from: "{from}", rawText: "{body}" },
           messageMapping: "{message}",
           avoidResponse: false,
           rules: [
-            {
-              conditionRule: "requiresCompanySelection_s",
-              conditionValue: "true",
-              condition: "===",
-              conditionFlowId: "c4b5127a-76fd-4cb2-8b43-d99685b5c50a",
-            },
             {
               conditionRule: "missing_s",
               conditionValue: "patente",
