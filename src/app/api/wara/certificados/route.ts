@@ -6,7 +6,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
 import {
   looksLikeCompanySelection,
   obtenerCertificadoCobertura,
@@ -127,12 +127,46 @@ async function recentThreadText(rawPhone: string): Promise<string> {
 }
 
 function extractPlateFromCertificateSummary(text: string): string | null {
-  // Tomamos la mención de patente MÁS RECIENTE (la última en el hilo cronológico),
-  // para no agarrar una patente vieja de una solicitud anterior.
-  const labeled = [...text.matchAll(/Patente:\s*([A-Za-z0-9 ]{5,12})/g)];
-  if (labeled.length) return normalizePlate(labeled[labeled.length - 1][1]);
+  const labeled = [...text.matchAll(/Patente:\s*([A-Za-z0-9 ]{5,12})/gi)];
+  if (labeled.length) {
+    const plate = normalizePlate(labeled[labeled.length - 1][1]);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
   const plates = [...text.matchAll(/\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi)];
-  if (plates.length) return normalizePlate(plates[plates.length - 1][1]);
+  for (let i = plates.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(plates[i][1]);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
+  return null;
+}
+
+function isGenericCertificateRequest(text: string): boolean {
+  return /\b(certificado|cobertura|monitoreo|constancia)\b/i.test(text) && !detectPlate(text);
+}
+
+function resolveCertificatePlate(
+  text: string,
+  opts: {
+    explicitPatente?: string;
+    explicitPlate?: string;
+    threadText: string;
+    confirmation?: string;
+  }
+): string | null {
+  const fromMessage =
+    normalizePlate(opts.explicitPatente ?? opts.explicitPlate ?? undefined) ??
+    detectPlate(text) ??
+    null;
+  if (fromMessage && !isExamplePlate(fromMessage)) return fromMessage;
+
+  const confirming =
+    isConfirmed(opts.confirmation) || (/\bconf/i.test(text) && !isGenericCertificateRequest(text));
+
+  if (!isGenericCertificateRequest(text) || confirming) {
+    const fromThread =
+      extractPlateFromCertificateSummary(opts.threadText) ?? detectPlate(opts.threadText);
+    if (fromThread && !isExamplePlate(fromThread)) return fromThread;
+  }
   return null;
 }
 
@@ -433,21 +467,20 @@ export async function POST(req: NextRequest) {
   }
 
   const threadText = await recentThreadText(rawPhone);
-  const plate = normalizePlate(
-    parsed.data.patente ??
-      parsed.data.plate ??
-      detectPlate(text) ??
-      extractPlateFromCertificateSummary(threadText) ??
-      undefined
-  );
   const confirmation =
     parsed.data.confirm ??
     parsed.data.confirmation ??
-    (/\bconf/i.test(text) && plate ? "confirmo" : undefined);
+    (/\bconf/i.test(text) && !isGenericCertificateRequest(text) ? "confirmo" : undefined);
+  const plate = resolveCertificatePlate(text, {
+    explicitPatente: parsed.data.patente,
+    explicitPlate: parsed.data.plate,
+    threadText,
+    confirmation,
+  });
 
   if (!plate) {
     const message =
-      "No pude reconocer una patente completa. Enviamela con formato AA123BB o ABC123 para registrar la solicitud de certificado.";
+      "Para el certificado de cobertura necesito la patente de la unidad (por ejemplo AD 427 MC o ABC123). Enviámela en un mensaje.";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       errorStage: "missing_plate",
