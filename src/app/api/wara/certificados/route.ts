@@ -527,11 +527,13 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(
       {
-        ok: false,
-        ok_s: "false",
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
         message,
         missing: ["patente"],
         missing_s: "patente",
+        needsPlate_s: "true",
       },
       { status: BB_STATUS }
     );
@@ -606,8 +608,9 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(
       {
-        ok: false,
-        ok_s: "false",
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
         confirmationRequired: true,
         confirmationRequired_s: "true",
         message,

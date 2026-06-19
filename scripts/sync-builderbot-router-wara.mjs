@@ -70,6 +70,13 @@ function buildRules() {
     },
     {
       conditionRule:
+        "PATENTE PARA CERTIFICADO — Si el bot acaba de pedir la patente para certificado de cobertura (por ejemplo 'necesito la patente' / 'enviámela en un mensaje') y el cliente responde solo con una patente (AB006EX, AD 427 MC, etc.), va a certificados. PRIORIDAD sobre consulta de unidad o listado cuando el contexto reciente es certificado, no consulta de reporte.",
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.certificados,
+    },
+    {
+      conditionRule:
         'EMPRESAS EN WARA — El cliente pregunta qué empresas tiene asociadas a su teléfono, cuáles empresas, "qué empresas tengo", lista de empresas. NO es consulta de unidades, flota ni patente.',
       conditionValue: "",
       condition: "",
