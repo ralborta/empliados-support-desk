@@ -85,15 +85,38 @@ export function looksLikeCompanyListQuestion(text: string | undefined | null): b
   return false;
 }
 
+/** Frases para cambiar/reiniciar empresa (flujo Cambiar en BuilderBot, no selección del menú). */
+export function looksLikeChangeCompanyRequest(text: string | undefined | null): boolean {
+  const t = (text ?? "").trim().toLowerCase();
+  if (!t) return false;
+  if (
+    /\b(pasar a|operar con|usar|trabajar con|seguir con)\b/.test(t) &&
+    /\b(wara|guara|cacique)\b/.test(t)
+  ) {
+    return false;
+  }
+  if (/^reiniciar(\s+de)?\s+empresa$/.test(t)) return true;
+  return /\b(cambiar|cambio|cambiá|otra|elegir|seleccionar|reiniciar)\b.*\bempresa\b|\bempresa\b.*\b(cambiar|equivocada|otra|reiniciar)\b|^cambiar(\s+de)?\s+empresa$/.test(
+    t
+  );
+}
+
+function looksLikeOperationalIntent(text: string): boolean {
+  const n = normCompanyToken(text);
+  if (!n) return false;
+  return /\b(quiero|necesito|programar|consultar|solicitar|pedir|ver|dame|decime|pasame|reporte|mantenimiento|certificado|patente|odometro|horometro|unidad|unidades|flota|ticket|reclamo|asesor|ubicacion|ignicion|voltaje|offline|falla|problema|ayuda|como hago|como puedo|estado de|ultimo reporte|sin reporte)\b/.test(
+    n
+  );
+}
+
 /** Respuesta corta que parece elegir empresa del menú (1/2, WARA, El Cacique, etc.). */
 export function looksLikeCompanySelection(text: string | undefined | null): boolean {
   if (looksLikeCompanyListQuestion(text)) return false;
+  if (looksLikeChangeCompanyRequest(text)) return false;
   const t = (text ?? "").trim();
-  if (!t || t.length > 60) return false;
-  const norm = t
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+  if (!t || t.length > 50) return false;
+  if (looksLikeOperationalIntent(t)) return false;
+  const norm = normCompanyToken(t);
   if (
     /^(inicio|volver|hola|buenas|menu|ayuda|si|no|confirmo|gracias|buenos dias|buenas tardes|buenas noches)$/.test(
       norm
@@ -102,10 +125,9 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
     return false;
   }
   if (/^\d{1,2}$/.test(norm)) return true;
-  if (/\bwara\b|\bguara\b|\bcacique\b|\bel cacique\b/.test(norm)) return true;
   if (/^opcion\s*\d{1,2}$/i.test(t)) return true;
-  // Nombre de empresa suelto (ej. "WARA", "El Cacique S.A.")
-  if (/^[a-z0-9][a-z0-9 .\-]{1,40}$/i.test(t) && !/\b(certificado|patente|reporte|odometro|horometro)\b/.test(norm)) {
+  if (/^(wara|guara|el cacique|cacique|el cacique sa|el cacique s\.?a\.?)$/i.test(norm)) return true;
+  if (norm.split(/\s+/).length <= 5 && /\b(wara|guara|el cacique|cacique)\b/.test(norm)) {
     return true;
   }
   return false;

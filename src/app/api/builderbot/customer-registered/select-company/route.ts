@@ -5,7 +5,7 @@ import {
   requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { obtenerEmpresaPorNumero, selectCompanyForCustomer, buildCompanyMenuPayload, waraRequiresCompanyConfirmation, waraCanAutoSelectCompany } from "@/lib/waraApi";
+import { obtenerEmpresaPorNumero, selectCompanyForCustomer, buildCompanyMenuPayload, waraRequiresCompanyConfirmation, waraCanAutoSelectCompany, looksLikeChangeCompanyRequest } from "@/lib/waraApi";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 /** BuilderBot solo interpola {message} y reglas HTTP cuando el status es 2xx. */
@@ -32,7 +32,7 @@ const bodySchema = z
   .refine(
     (d) =>
       isResetFlag(d.reset) ||
-      isChangeCompanyPhrase(d.companyName ?? d.company) ||
+      looksLikeChangeCompanyRequest(d.companyName ?? d.company) ||
       Boolean(
         (d.companyName ?? d.company ?? "").trim() ||
           d.waraContactId != null ||
@@ -47,23 +47,6 @@ function isResetFlag(value: unknown): boolean {
     return ["1", "true", "reset", "si", "sí", "yes"].includes(value.trim().toLowerCase());
   }
   return false;
-}
-
-/** Detecta frases del cliente para volver a elegir empresa (ej. "cambiar empresa"). */
-function isChangeCompanyPhrase(value: string | undefined | null): boolean {
-  const t = (value ?? "").trim().toLowerCase();
-  if (!t) return false;
-  // "quiero pasar a WARA" / "operar con El Cacique" = elegir empresa, no reset.
-  if (
-    /\b(pasar a|operar con|usar|trabajar con|seguir con)\b/.test(t) &&
-    /\b(wara|guara|cacique)\b/.test(t)
-  ) {
-    return false;
-  }
-  if (/^reiniciar(\s+de)?\s+empresa$/.test(t)) return true;
-  return /\b(cambiar|cambio|cambiá|otra|elegir|seleccionar|reiniciar)\b.*\bempresa\b|\bempresa\b.*\b(cambiar|equivocada|otra|reiniciar)\b|^cambiar(\s+de)?\s+empresa$/.test(
-    t
-  );
 }
 
 function toContactId(value: unknown): number | undefined {
@@ -119,7 +102,7 @@ export async function POST(req: NextRequest) {
   const waraContactId = toContactId(parsed.data.waraContactId ?? parsed.data.contactId);
 
   // Modo "cambiar empresa": limpia la empresa guardada y devuelve el menú de opciones.
-  if (isResetFlag(parsed.data.reset) || isChangeCompanyPhrase(companyName)) {
+  if (isResetFlag(parsed.data.reset) || looksLikeChangeCompanyRequest(companyName)) {
     const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
     if (customer) {
       await prisma.customer.update({

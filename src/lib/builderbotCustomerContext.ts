@@ -5,6 +5,7 @@ import { ensureBuilderBotContactActive } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
   buildCompanyMenuPayload,
+  looksLikeChangeCompanyRequest,
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeGreeting,
@@ -323,9 +324,10 @@ export async function customerRegisteredContextResponse(
   let selectionMessage = "";
   let companyPickedThisTurn = false;
   const multiCompany = (resolution.lookup?.contactos.length ?? 0) > 1;
+  const strictCompanyPick =
+    !!selectionText && looksLikeCompanySelection(selectionText);
   if (
-    selectionText &&
-    looksLikeCompanySelection(selectionText) &&
+    strictCompanyPick &&
     (resolution.requiresCompanySelection || multiCompany)
   ) {
     const previousContactId = resolution.customer?.selectedCompanyContactId ?? null;
@@ -442,6 +444,13 @@ export async function customerRegisteredContextResponse(
   } else if (requiresCompanySelection) {
     // Mostrar menú y quedarse en WELCOME/Inicio; NO entrar al subflujo Elegir (evita quedar en ".").
     nextFlow = "reply";
+  } else if (
+    selectionText &&
+    looksLikeChangeCompanyRequest(selectionText)
+  ) {
+    // "cambiar empresa" → Router / flujo Cambiar (reset + menú), no intentar parsear como opción.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
@@ -450,18 +459,9 @@ export async function customerRegisteredContextResponse(
         ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
         : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
     }
-  } else if (
-    selectionText &&
-    looksLikeCompanySelection(selectionText) &&
-    multiCompany
-  ) {
-    // Menú 1/2/WARA con varias empresas: no mandar al Router (evita colgarse o listar flota).
+  } else if (strictCompanyPick && multiCompany && selectionMessage) {
+    // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.
     nextFlow = "reply";
-    if (!responseMessage) {
-      responseMessage =
-        `No pude registrar esa opción. ¿De cuál empresa escribís?\n\n${waraContactsText}\n\n` +
-        `Respondé con el número de la opción o con el nombre de la empresa.`;
-    }
   } else {
     nextFlow = "router";
     // Trámites / consultas: el Router clasifica; no duplicar saludo del HTTP.
