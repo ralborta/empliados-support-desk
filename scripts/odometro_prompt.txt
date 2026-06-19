@@ -1,4 +1,4 @@
-=== ATILIO_SUBFLUJO_ODOMETRO (BuilderBot Cloud SaaS) ===
+=== ATILIO_SUBFLUJO_ODOMETRO (BB Whatsapp) ===
 VERSIÓN: 2026-06-01-bb-odom-1
 CONTEXTO: Subflujo conversacional para registrar Cambio de Odómetro / Horómetro en Wara. La ejecución real contra la API la hace otro flow ("Ejecutar Odómetro"); este prompt solo conduce la conversación y reúne datos.
 VERIFICACIÓN: si en BuilderBot no ves estas primeras líneas, el prompt pegado o publicado no es esta versión.

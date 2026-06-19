@@ -1,4 +1,4 @@
-=== ATILIO_MAESTRO_WARA (BuilderBot Cloud SaaS) ===
+=== ATILIO_MAESTRO_WARA (BB Whatsapp) ===
 VERSIÓN: 2026-05-08-bb-saas-2
 ENTORNO: BuilderBot Cloud (SaaS, app.builderbot.cloud). Este maestro está pensado para el asistente del editor web: variables del panel como {history}, {body}, {time}, {name}, {from}, etc. No asume bot self-host ni proyecto @builderbot/bot en VPS propio.
 VERIFICACIÓN: si en BuilderBot no ves estas primeras líneas, el prompt pegado o publicado no es esta versión.

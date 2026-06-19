@@ -1,4 +1,4 @@
-=== ATILIO_SUBFLUJO_CONSULTA_UNIDAD (BuilderBot Cloud SaaS) ===
+=== ATILIO_SUBFLUJO_CONSULTA_UNIDAD (BB Whatsapp) ===
 VERSIÓN: 2026-06-02-bb-consulta-2
 CONTEXTO: Subflujo conversacional para Consulta de Estado de Unidad en Wara (último reporte, posición, ignición, alimentación). La consulta real contra la API la hace otro flow ("Ejecutar Consulta Unidad"); este prompt solo conduce la conversación y reúne datos.
 VERIFICACIÓN: si en BuilderBot no ves estas primeras líneas, el prompt pegado o publicado no es esta versión.

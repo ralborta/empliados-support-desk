@@ -72,7 +72,7 @@ export function getBotPromptModuleDef(key: string): BotPromptModuleDef | undefin
 
 export function buildModulePlaceholder(def: BotPromptModuleDef): string {
   return [
-    `=== ATILIO — ${def.name.toUpperCase()} ===`,
+    `=== ATILIO — ${def.name.toUpperCase()} (BB Whatsapp) ===`,
     "VERSIÓN: borrador",
     `CONTEXTO: ${def.description}`,
     "==================================================",
