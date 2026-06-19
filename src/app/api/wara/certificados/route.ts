@@ -144,13 +144,31 @@ function isGenericCertificateRequest(text: string): boolean {
   return /\b(certificado|cobertura|monitoreo|constancia)\b/i.test(text) && !detectPlate(text);
 }
 
+/** Hay un resumen pendiente de confirmar en el hilo (evita usar patente vieja del ticket). */
+function hasPendingCertificateConfirmation(threadText: string): boolean {
+  const lines = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tail = lines.slice(-6).join("\n").toLowerCase();
+  if (
+    /perfecto,\s*gener[eé] el certificado|ya fue enviado|necesito la patente/.test(tail)
+  ) {
+    return false;
+  }
+  return (
+    /voy a generar el certificado de cobertura/.test(tail) &&
+    /responde\s+confirmo/.test(tail)
+  );
+}
+
 function resolveCertificatePlate(
   text: string,
   opts: {
     explicitPatente?: string;
     explicitPlate?: string;
     threadText: string;
-    confirmation?: string;
+    allowThread?: boolean;
   }
 ): string | null {
   const fromMessage =
@@ -159,14 +177,12 @@ function resolveCertificatePlate(
     null;
   if (fromMessage && !isExamplePlate(fromMessage)) return fromMessage;
 
-  const confirming =
-    isConfirmed(opts.confirmation) || (/\bconf/i.test(text) && !isGenericCertificateRequest(text));
-
-  if (!isGenericCertificateRequest(text) || confirming) {
-    const fromThread =
-      extractPlateFromCertificateSummary(opts.threadText) ?? detectPlate(opts.threadText);
-    if (fromThread && !isExamplePlate(fromThread)) return fromThread;
+  if (!opts.allowThread || !hasPendingCertificateConfirmation(opts.threadText)) {
+    return null;
   }
+  const fromThread =
+    extractPlateFromCertificateSummary(opts.threadText) ?? detectPlate(opts.threadText);
+  if (fromThread && !isExamplePlate(fromThread)) return fromThread;
   return null;
 }
 
@@ -452,6 +468,8 @@ export async function POST(req: NextRequest) {
     parsed.data.rawText?.trim() ||
     parsed.data.detalle?.trim() ||
     parsed.data.detail?.trim() ||
+    parsed.data.confirm?.trim() ||
+    parsed.data.confirmation?.trim() ||
     "Solicitud de certificado";
 
   if (looksLikeCompanySelection(text)) {
@@ -467,15 +485,36 @@ export async function POST(req: NextRequest) {
   }
 
   const threadText = await recentThreadText(rawPhone);
+  const genericNewRequest =
+    isGenericCertificateRequest(text) &&
+    !normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) &&
+    !detectPlate(text);
+  const pendingConfirm =
+    !genericNewRequest && hasPendingCertificateConfirmation(threadText);
+  const confirmRaw = parsed.data.confirm ?? parsed.data.confirmation;
   const confirmation =
-    parsed.data.confirm ??
-    parsed.data.confirmation ??
-    (/\bconf/i.test(text) && !isGenericCertificateRequest(text) ? "confirmo" : undefined);
+    confirmRaw ??
+    (pendingConfirm && (isConfirmed(text) || /\bconf/i.test(text)) ? "confirmo" : undefined);
+
+  if ((isConfirmed(text) || isConfirmed(confirmRaw)) && !pendingConfirm) {
+    const message =
+      "No tengo un certificado pendiente de confirmar. Si querés uno nuevo, decime la patente (por ejemplo AD 427 MC).";
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   const plate = resolveCertificatePlate(text, {
     explicitPatente: parsed.data.patente,
     explicitPlate: parsed.data.plate,
     threadText,
-    confirmation,
+    allowThread: pendingConfirm || isConfirmed(confirmation),
   });
 
   if (!plate) {
@@ -521,6 +560,7 @@ export async function POST(req: NextRequest) {
           ok_s: "true",
           alreadyGenerated: true,
           alreadyGenerated_s: "true",
+          flowComplete_s: "true",
           plate,
           companyName: company,
           message,
@@ -547,6 +587,7 @@ export async function POST(req: NextRequest) {
           ok_s: "true",
           alreadyGenerated: true,
           alreadyGenerated_s: "true",
+          flowComplete_s: "true",
           plate,
           companyName: company,
           message,
@@ -697,6 +738,7 @@ export async function POST(req: NextRequest) {
     {
       ok: true,
       ok_s: "true",
+      flowComplete_s: "true",
       plate,
       companyName: company,
       url: certUrl,

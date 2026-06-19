@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Certificados: un solo HTTP (sin texto+capture duplicado).
- * La patente y confirmación las resuelve el backend.
+ * ConfirmCert: ejecuta la confirmación CONFIRMO contra wara.nivel41.com.
+ * Sin regla missing_s → certificados (causaba loop patente + confirmación).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -10,9 +10,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 const PROJECT_ID = "7d4339ee-2a9b-424e-92f6-ad7790c1662f";
-const FLOW_ID = "fd2e658c-f547-4ec6-b64f-00815620bd6b";
-const TEXT_ID = "0e9329bd-befd-4f5f-a8a8-0ea864df3da5";
-const HTTP_ID = "817f4740-c633-4d3d-b761-95b026f61ed5";
+const FLOW_ID = "8f4c81a0-e3ca-4c79-b1c5-d94ce6d661e2";
+const HTTP_ID = "78dbd6ce-faab-4131-afe4-cfa50236d811";
+const ELEGIR_FLOW = "c4b5127a-76fd-4cb2-8b43-d99685b5c50a";
 const API_KEY = "31abb735b990bcde9f41ff1b3a3076d8269b92a7676ceecc07d3fa52ae577b62";
 const BASE = "https://wara.nivel41.com";
 
@@ -31,18 +31,8 @@ async function main() {
   const transport = new SSEClientTransport(new URL(sseUrl), {
     requestInit: { headers: { "x-builderbot-api-key": key } },
   });
-  const client = new Client({ name: "sync-certificados", version: "1.0.0" });
+  const client = new Client({ name: "sync-confirm-cert", version: "1.0.0" });
   await client.connect(transport);
-
-  try {
-    await client.callTool({
-      name: "builderbot_delete_answer",
-      arguments: { projectId: PROJECT_ID, flowId: FLOW_ID, answerId: TEXT_ID },
-    });
-    console.log("Eliminado nodo texto+capture duplicado");
-  } catch (err) {
-    console.warn("Delete text node:", err.message ?? err);
-  }
 
   await client.callTool({
     name: "builderbot_update_answer",
@@ -51,23 +41,30 @@ async function main() {
       flowId: FLOW_ID,
       answerId: HTTP_ID,
       type: "add_http",
-      sort: 0,
+      sort: 1,
       options: { capture: false },
       plugins: {
         http: {
           url: `${BASE}/api/wara/certificados`,
           method: "POST",
           headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-          body: { from: "{from}", rawText: "{body}" },
+          body: { from: "{from}", confirm: "{body}" },
           messageMapping: "{message}",
           avoidResponse: false,
-          rules: [],
+          rules: [
+            {
+              conditionRule: "requiresCompanySelection_s",
+              conditionValue: "true",
+              condition: "===",
+              conditionFlowId: ELEGIR_FLOW,
+            },
+          ],
         },
       },
     },
   });
 
-  console.log("Certificados → HTTP único OK");
+  console.log("ConfirmCert → wara.nivel41.com OK (sin loop a certificados)");
   await client.close();
 }
 
