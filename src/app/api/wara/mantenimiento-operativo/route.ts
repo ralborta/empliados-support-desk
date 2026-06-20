@@ -9,12 +9,12 @@ import {
 import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
 import {
-  consultarEstadoUnidades,
   looksLikeChangeCompanyRequest,
   looksLikeShortAffirmative,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   resolveWaraSessionByPhone,
+  validatePlateInFleetForPhone,
 } from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -303,34 +303,6 @@ function isPlateOnlyMessage(text: string, plate: string): boolean {
   return stripped.length < 24 && !/\b(confir|si|dale|ok|listo)\b/i.test(stripped);
 }
 
-async function validatePlateInFleet(
-  rawPhone: string,
-  plate: string,
-  companyName: string
-): Promise<{ found: boolean; checked: boolean; message?: string }> {
-  const session = await resolveWaraSessionByPhone(prisma, rawPhone);
-  if (!session.ok || !session.sessionToken) {
-    return { found: true, checked: false };
-  }
-  const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
-  const result = await consultarEstadoUnidades(session.sessionToken, [plateDisplay]);
-  if (!result.ok) return { found: true, checked: false };
-
-  const wanted = normalizePlate(plate);
-  if (!wanted) return { found: true, checked: false };
-  const found = result.unidades.some((unit) => {
-    const unitPlate = normalizePlate(unit.patente || unit.unidad);
-    return unitPlate && (unitPlate === wanted || unitPlate.includes(wanted) || wanted.includes(unitPlate));
-  });
-  if (found) return { found: true, checked: true };
-
-  const multi = (session.lookup?.contactos.length ?? 0) > 1;
-  const message = multi
-    ? `No encontré la patente ${plateDisplay} en las unidades de ${companyName}. Puede que esa unidad esté en otra de tus empresas: escribí "cambiar empresa", elegí la correcta y volvé a pasarme la patente. Si igual querés registrar la gestión en ${companyName}, respondé con la patente y un breve detalle del trabajo.`
-    : `No encontré la patente ${plateDisplay} entre las unidades activas de ${companyName}. Revisá que esté bien escrita o contame un poco más del trabajo que querés programar para esa unidad.`;
-  return { found: false, checked: true, message };
-}
-
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
   const message = text?.trim();
   if (!message) return;
@@ -603,7 +575,7 @@ export async function POST(req: NextRequest) {
   }
   if (!isConfirmed(confirmation)) {
     const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
-    const fleetCheck = await validatePlateInFleet(rawPhone, plate, company);
+    const fleetCheck = await validatePlateInFleetForPhone(prisma, rawPhone, plate, company, "maintenance");
     if (!fleetCheck.found && fleetCheck.message && isPlateOnlyMessage(text, plate)) {
       await appendOutboundBotMessage(rawPhone, fleetCheck.message, {
         source: "wara_mantenimiento_operativo",

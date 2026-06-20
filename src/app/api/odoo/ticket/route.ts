@@ -8,7 +8,7 @@ import {
   getOdooConfigStatus,
   OdooError,
 } from "@/lib/odooApi";
-import { detectPlate, detectIncidentType, formatPlateWithSpaces, normalizePlate, waraIncidentLabels } from "@/lib/wara";
+import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, normalizePlate, waraIncidentLabels } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { consultarEstadoUnidades, resolveWaraSessionByPhone } from "@/lib/waraApi";
@@ -183,14 +183,9 @@ async function findRecentOdooRef(rawPhone: string, plate: string): Promise<strin
   return null;
 }
 
-function extractLastPlateFromThread(text: string): string | null {
-  const labeled = [...text.matchAll(/Patente:\s*([A-Za-z0-9 ]{5,12})/gi)];
-  if (labeled.length) return normalizePlateForTitle(labeled[labeled.length - 1][1]);
-  const unitMention = [...text.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
-  if (unitMention.length) return normalizePlateForTitle(unitMention[unitMention.length - 1][1]);
-  const plates = [...text.matchAll(/\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi)];
-  if (plates.length) return normalizePlateForTitle(plates[plates.length - 1][1]);
-  return null;
+function extractLastPlateFromThreadCompat(text: string): string | null {
+  const plate = extractLastPlateFromThread(text);
+  return plate ? normalizePlateForTitle(plate) : null;
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -285,7 +280,7 @@ export async function POST(req: NextRequest) {
     data.plate ??
       data.patente ??
       detectPlate(data.rawText ?? "") ??
-      extractLastPlateFromThread(threadText) ??
+      extractLastPlateFromThreadCompat(threadText) ??
       detectPlate(threadText) ??
       undefined
   );

@@ -92,8 +92,9 @@ function parseFromText(rawText: string): {
   const horoCandidates: string[] = [];
   const kmRegex = /(?:od[oó]metro|kilometraje|kil[oó]metros?|km)[^\d]{0,20}(\d[\d.\s,]*\d|\d)/gi;
   const kmTrailRegex = /(\d[\d.\s,]*\d|\d)\s*(?:km|kil[oó]metros?)\b/gi;
-  const horoRegex = /(?:hor[oó]metro|horas?)[^\d]{0,20}(\d[\d.\s,]*\d|\d)/gi;
-  const horoTrailRegex = /(\d[\d.\s,]*\d|\d)\s*(?:hs|h|horas?)\b/gi;
+  // "Hora: 09:30" (hora de lectura) NO es horómetro; solo horómetro explícito o "horas" en plural.
+  const horoRegex = /(?:hor[oó]metro|\bhoras\b)[^\d]{0,20}(\d[\d.\s,]*\d|\d)/gi;
+  const horoTrailRegex = /(\d[\d.\s,]*\d|\d)\s*(?:hs|\bhoras\b)\b/gi;
   for (const m of cleaned.matchAll(kmRegex)) if (m[1]) kmCandidates.push(m[1]);
   for (const m of cleaned.matchAll(kmTrailRegex)) if (m[1]) kmCandidates.push(m[1]);
   for (const m of cleaned.matchAll(horoRegex)) if (m[1]) horoCandidates.push(m[1]);
@@ -111,6 +112,37 @@ function parseFromText(rawText: string): {
     odometro: pickLargest(kmCandidates),
     horometro: pickLargest(horoCandidates),
   };
+}
+
+/** True si el hilo pide explícitamente actualizar horómetro (no confundir con "hora de lectura"). */
+function mentionsHorometroIntent(text: string): boolean {
+  const t = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\bhorometro\b/.test(t) ||
+    /\bhoras de motor\b/.test(t) ||
+    /\bcambio de horometro\b/.test(t) ||
+    /\bactualizar horometro\b/.test(t)
+  );
+}
+
+function resolveHorometroForWara(opts: {
+  explicitHorometro?: number;
+  parsedHorometro?: number;
+  combinedText: string;
+}): number | undefined {
+  if (typeof opts.explicitHorometro === "number" && Number.isFinite(opts.explicitHorometro)) {
+    return opts.explicitHorometro;
+  }
+  if (typeof opts.parsedHorometro !== "number" || !Number.isFinite(opts.parsedHorometro)) {
+    return undefined;
+  }
+  if (!mentionsHorometroIntent(opts.combinedText)) {
+    return undefined;
+  }
+  return opts.parsedHorometro;
 }
 
 /**
@@ -338,13 +370,13 @@ export async function POST(req: NextRequest) {
     fromText.odometro,
     threadParsed.odometro
   );
-  const horometro = firstFiniteNumber(
-    parsed.data.horometro,
-    parsed.data.hourmeter,
-    fromText.horometro,
-    threadParsed.horometro
-  );
   const rawText = parsed.data.rawText?.trim() ?? "";
+  const combinedText = [threadText, rawText].filter(Boolean).join("\n");
+  const horometro = resolveHorometroForWara({
+    explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
+    parsedHorometro: firstFiniteNumber(fromText.horometro, threadParsed.horometro),
+    combinedText,
+  });
   const pendingOdoConfirm = hasPendingOdometerConfirmation(threadText);
   const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
   const confirmed =

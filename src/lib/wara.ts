@@ -73,6 +73,34 @@ export function detectPlate(text: string): string | null {
   return null;
 }
 
+/**
+ * Última patente real mencionada en el hilo (resúmenes del bot, "unidad XX", o patente suelta).
+ * Ignora patentes de ejemplo de los prompts.
+ */
+export function extractLastPlateFromThread(text: string): string | null {
+  if (!text?.trim()) return null;
+  const labeled = [
+    ...(text || "").matchAll(
+      /(?:Patente|Matr[ií]cula)[^\n:]*[:\-]\s*([A-Za-z0-9 ]{5,12})/gi
+    ),
+  ];
+  for (let i = labeled.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(labeled[i][1]);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
+  const unitMention = [...text.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
+  for (let i = unitMention.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(unitMention[i][1]);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
+  const plates = [...text.matchAll(PLATE_REGEX_GLOBAL)];
+  for (let i = plates.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(plates[i][1]);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
+  return null;
+}
+
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */
 export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();

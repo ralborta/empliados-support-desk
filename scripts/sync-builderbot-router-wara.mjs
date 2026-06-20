@@ -42,7 +42,14 @@ function buildRules() {
   return [
     {
       conditionRule:
-        'CAMBIAR DE EMPRESA — PRIORIDAD MÁXIMA. Frases: "cambiar empresa", "cambiarme de empresa", "quiero cambiar de empresa", "otra empresa", typos similares. PROHIBIDO si el mensaje es trámite concreto (mantenimiento con detalle, patente, certificado, reporte). La elección 1/2/WARA la procesa Inicio.',
+        'CORRECCIÓN DE PATENTE/MATRÍCULA EN ODÓMETRO (NO ES CAMBIAR EMPRESA) — Por CONTEXTO: el historial reciente es trámite de cambio de odómetro u horómetro (bot pidió patente, odómetro, o hay resumen "Voy a registrar" con odómetro) y el mensaje actual corrige la unidad: "cambiar matrícula", "cambiar patente", "corregir matrícula/patente", "no es la correcta", "me equivoqué de patente/matrícula", u otra patente para reemplazar la anterior. Va a odómetro. PROHIBIDO enrutar a cambiar de empresa.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.odometer,
+    },
+    {
+      conditionRule:
+        'CAMBIAR DE EMPRESA — PRIORIDAD MÁXIMA. Frases: "cambiar empresa", "cambiarme de empresa", "quiero cambiar de empresa", "otra empresa", typos similares. PROHIBIDO si el mensaje es trámite concreto (mantenimiento con detalle, patente, certificado, reporte). PROHIBIDO si dice cambiar/corregir matrícula o patente (corregir la unidad del trámite en curso, NO cambiar de empresa Wara). La elección 1/2/WARA la procesa Inicio.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.cambiarEmpresa,

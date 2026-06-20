@@ -3,6 +3,7 @@ import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
 } from "@/config/pruebasContactAliases";
+import { formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 export type WaraEmpresaContact = {
@@ -86,16 +87,42 @@ export function looksLikeCompanyListQuestion(text: string | undefined | null): b
 }
 
 /** Frases para cambiar/reiniciar empresa (flujo Cambiar en BuilderBot, no selección del menú). */
+/** Corregir la patente/matrícula del trámite en curso — no es cambiar de empresa Wara. */
+export function looksLikePlateCorrectionRequest(text: string | undefined | null): boolean {
+  const t = (text ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (!t) return false;
+  if (
+    /\b(cambiar|corregir|rectificar|modificar|actualizar)\b.*\b(matr[i]?cula|patente)\b/.test(t)
+  ) {
+    return true;
+  }
+  if (/\b(matr[i]?cula|patente)\b.*\b(incorrecta|equivocada|mal|error)\b/.test(t)) {
+    return true;
+  }
+  if (/\bno es la (correcta|patente|matricula)\b/.test(t)) return true;
+  if (/\bme equivoque de (patente|matricula)\b/.test(t)) return true;
+  return false;
+}
+
 export function looksLikeChangeCompanyRequest(text: string | undefined | null): boolean {
   const t = (text ?? "").trim().toLowerCase();
   if (!t) return false;
+  if (looksLikePlateCorrectionRequest(text)) return false;
   if (
     /\b(pasar a|operar con|usar|trabajar con|seguir con)\b/.test(t) &&
     /\b(wara|guara|cacique)\b/.test(t)
   ) {
     return false;
   }
-  if (/\b(mantenimiento|patente|certificado|reporte|odometro|horometro|unidad)\b/.test(t)) {
+  if (
+    /\b(mantenimiento|patente|matricula|matr[ií]cula|certificado|reporte|odometro|horometro|unidad)\b/.test(
+      t.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    )
+  ) {
     return false;
   }
   if (/^reiniciar(\s+de)?\s+empresa$/.test(t)) return true;
@@ -104,9 +131,13 @@ export function looksLikeChangeCompanyRequest(text: string | undefined | null): 
   }
   if (/\bempresa\b.*\b(cambiar|equivocada|otra|reiniciar)\b/.test(t)) return true;
   if (/^cambiar(\s+de)?\s+empresa$/.test(t)) return true;
-  // Typos / variantes: "quiero cambiar debemoresa", "cambiar empresa" sin "de"
-  if (/\b(cambiar|cambiarme)\b/.test(t) && t.split(/\s+/).length <= 5) return true;
-  if (/\bquiero\s+cambiar\b/.test(t) && t.split(/\s+/).length <= 6) return true;
+  // Typos / variantes: "quiero cambiar de empresa", no "cambiar matrícula".
+  if (/\b(cambiar|cambiarme)\b/.test(t) && /\bempresa\b/.test(t) && t.split(/\s+/).length <= 6) {
+    return true;
+  }
+  if (/\bquiero\s+cambiar\b/.test(t) && /\bempresa\b/.test(t) && t.split(/\s+/).length <= 7) {
+    return true;
+  }
   return false;
 }
 
@@ -968,6 +999,92 @@ export async function resolveWaraSessionByPhone(
 
 function errorFromWara(json: Record<string, unknown> | null, fallback: string): string {
   return typeof json?.error === "string" ? json.error : fallback;
+}
+
+function normalizeWaraErrorText(value: string | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Errores de patente/unidad inexistente o sin permiso: no escalan a Odoo ni abren ticket. */
+export function isWaraPlateValidationError(params: {
+  status?: number;
+  error?: string;
+}): boolean {
+  const err = normalizeWaraErrorText(params.error);
+  if (
+    /no se encontr|no encontr|unidad no encontr|vehiculo no encontr|veh[ií]culo no encontr|patente no encontr|no existe la unidad|no existe el vehiculo|patente invalida|matricula invalida|formato de patente|sin permiso|no autoriz|no pertenece|no asignad|no corresponde a/.test(
+      err
+    )
+  ) {
+    return true;
+  }
+  if (params.status === 404) return true;
+  if (params.status === 400 && err.length > 0) {
+    if (/validacion|validation|bad request|http 400/.test(err)) return true;
+    if (
+      /unidad|vehiculo|patente|matricula|movil|flota/.test(err) &&
+      !/servidor|interno|timeout|mantenimiento programado/.test(err)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Etiqueta legible para tickets Odoo cuando sí escala (no validación del cliente). */
+export function waraCertificateFailureCategory(error: string | undefined, status?: number): string {
+  if (isWaraPlateValidationError({ status, error })) {
+    return "Error de validación de matrícula";
+  }
+  const err = normalizeWaraErrorText(error);
+  if (/requisito|habilit|cobertura|monitoreo|vencid|suspendid|bloquead/.test(err)) {
+    return "Rechazo de negocio (certificado no aplicable)";
+  }
+  if (/permiso|autoriz/.test(err)) return "Sin permisos para la operación";
+  return "Certificado no emitido por Wara";
+}
+
+export type PlateFleetValidationPurpose = "certificate" | "maintenance";
+
+/** Consulta flota Wara antes de trámites operativos; evita tickets por typos de patente. */
+export async function validatePlateInFleetForPhone(
+  prisma: PrismaClient,
+  rawPhone: string,
+  plate: string,
+  companyName: string,
+  purpose: PlateFleetValidationPurpose = "maintenance"
+): Promise<{ found: boolean; checked: boolean; message?: string }> {
+  const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+  if (!session.ok || !session.sessionToken) {
+    return { found: true, checked: false };
+  }
+  const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
+  const result = await consultarEstadoUnidades(session.sessionToken, [plateDisplay]);
+  if (!result.ok) return { found: true, checked: false };
+
+  const wanted = normalizePlate(plate);
+  if (!wanted) return { found: true, checked: false };
+  const found = result.unidades.some((unit) => {
+    const unitPlate = normalizePlate(unit.patente || unit.unidad);
+    return unitPlate && (unitPlate === wanted || unitPlate.includes(wanted) || wanted.includes(unitPlate));
+  });
+  if (found) return { found: true, checked: true };
+
+  const multi = (session.lookup?.contactos.length ?? 0) > 1;
+  if (purpose === "certificate") {
+    const message = multi
+      ? `No encontré la patente ${plateDisplay} en las unidades de ${companyName}. Revisá que esté bien escrita. Si la unidad es de otra de tus empresas, escribí "cambiar empresa", elegí la correcta y volvé a pedir el certificado.`
+      : `No encontré la patente ${plateDisplay} entre las unidades activas de ${companyName}. Revisá que esté bien escrita e intentá de nuevo.`;
+    return { found: false, checked: true, message };
+  }
+
+  const message = multi
+    ? `No encontré la patente ${plateDisplay} en las unidades de ${companyName}. Puede que esa unidad esté en otra de tus empresas: escribí "cambiar empresa", elegí la correcta y volvé a pasarme la patente. Si igual querés registrar la gestión en ${companyName}, respondé con la patente y un breve detalle del trabajo.`
+    : `No encontré la patente ${plateDisplay} entre las unidades activas de ${companyName}. Revisá que esté bien escrita o contame un poco más del trabajo que querés programar para esa unidad.`;
+  return { found: false, checked: true, message };
 }
 
 /**

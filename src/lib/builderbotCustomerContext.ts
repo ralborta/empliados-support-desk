@@ -2,6 +2,12 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureBuilderBotContactActive } from "@/lib/builderbot";
+import { recentThreadTextForPhone } from "@/lib/conversationThread";
+import {
+  extractLastPlateFromThread,
+  formatPlateWithSpaces,
+  threadTextSinceCompanySelection,
+} from "@/lib/wara";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
   buildCompanyMenuPayload,
@@ -432,6 +438,17 @@ export async function customerRegisteredContextResponse(
       `${lastTicketSummary ? `. Resumen: ${lastTicketSummary}` : ""}`
     : "";
 
+  const fullThreadText = customer ? await recentThreadTextForPhone(trimmed) : "";
+  const scopedThreadText = threadTextSinceCompanySelection(fullThreadText);
+  const lastKnownPlate = extractLastPlateFromThread(scopedThreadText) ?? "";
+  const lastKnownPlateFormatted = lastKnownPlate
+    ? formatPlateWithSpaces(lastKnownPlate) ?? lastKnownPlate
+    : "";
+  const hasKnownPlate = !!lastKnownPlate;
+  const threadOperationalHint = hasKnownPlate
+    ? `Patente/matrícula ya mencionada en este hilo: ${lastKnownPlateFormatted}. No la vuelvas a pedir salvo corrección explícita del cliente.`
+    : "";
+
   let responseMessage = selectionMessage;
   if (
     !responseMessage &&
@@ -551,6 +568,11 @@ export async function customerRegisteredContextResponse(
     hasLastTicket: !!lastTicket,
     hasLastTicket_s: lastTicket ? "true" : "false",
     lastTicketContextText,
+    lastKnownPlate,
+    lastKnownPlateFormatted,
+    hasKnownPlate,
+    hasKnownPlate_s: hasKnownPlate ? "true" : "false",
+    threadOperationalHint,
     requiresCompanySelection: needsCompanyMenu,
     requiresCompanySelection_s: needsCompanyMenu ? "true" : "false",
     companyPickedThisTurn,

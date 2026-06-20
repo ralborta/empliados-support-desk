@@ -9,7 +9,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -179,14 +179,9 @@ async function recentThreadText(rawPhone: string): Promise<string> {
   }
 }
 
-function extractLastPlateFromThread(text: string): string | null {
-  const labeled = [...text.matchAll(/Patente:\s*([A-Za-z0-9 ]{5,12})/gi)];
-  if (labeled.length) return normalizeLoosePlate(labeled[labeled.length - 1][1]);
-  const unitMention = [...text.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
-  if (unitMention.length) return normalizeLoosePlate(unitMention[unitMention.length - 1][1]);
-  const plates = [...text.matchAll(/\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi)];
-  if (plates.length) return normalizeLoosePlate(plates[plates.length - 1][1]);
-  return null;
+function extractLastPlateFromThreadCompat(text: string): string | null {
+  const plate = extractLastPlateFromThread(text);
+  return plate ? normalizeLoosePlate(plate) : null;
 }
 
 /** Pide listado/flota sin patente puntual (no filtrar por patente vieja del hilo). */
@@ -482,7 +477,7 @@ export async function POST(req: NextRequest) {
   const wantedPlate = normalizeLoosePlate(
     explicitPlate ||
       (useThreadPlate
-        ? extractLastPlateFromThread(scopedThread) ?? detectPlate(scopedThread) ?? ""
+        ? extractLastPlateFromThreadCompat(scopedThread) ?? detectPlate(scopedThread) ?? ""
         : "")
   );
   const filterUnits = (units: WaraUnidadEstado[], plate: string) =>

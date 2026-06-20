@@ -9,9 +9,12 @@ import {
 import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
 import {
   looksLikeCompanySelection,
+  isWaraPlateValidationError,
   obtenerCertificadoCobertura,
   resolveCustomerByWaraPhone,
   resolveWaraSessionByPhone,
+  validatePlateInFleetForPhone,
+  waraCertificateFailureCategory,
 } from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -271,11 +274,12 @@ function sanitizeWaraDetailForUser(detail: string): string {
     .trim();
 }
 
-/** Solo escalamos a Odoo cuando Wara rechaza por negocio, no por fallo técnico temporal. */
+/** Solo escalamos a Odoo cuando Wara rechaza por negocio real, no por typo/validación ni fallo temporal. */
 function shouldEscalateCertificateToOdoo(params: {
   status?: number;
   error?: string;
 }): boolean {
+  if (isWaraPlateValidationError(params)) return false;
   const status = params.status ?? 0;
   if (status >= 500) return false;
   const err = (params.error ?? "").toLowerCase();
@@ -287,6 +291,76 @@ function shouldEscalateCertificateToOdoo(params: {
     return false;
   }
   return true;
+}
+
+async function respondPlateValidationError(params: {
+  rawPhone: string;
+  plate: string;
+  company: string;
+  message: string;
+  stage: string;
+}) {
+  await appendOutboundBotMessage(params.rawPhone, params.message, {
+    source: "wara_certificados",
+    errorStage: params.stage,
+    plate: params.plate,
+    companyName: params.company,
+    validationError: true,
+  });
+  return NextResponse.json(
+    {
+      ok: false,
+      ok_s: "false",
+      flowComplete_s: "true",
+      message: params.message,
+      plate: params.plate,
+      companyName: params.company,
+      validationError: true,
+      validationError_s: "true",
+    },
+    { status: BB_STATUS }
+  );
+}
+
+async function ensurePlateInFleet(params: {
+  rawPhone: string;
+  plate: string;
+  company: string;
+  stage: string;
+}) {
+  const fleetCheck = await validatePlateInFleetForPhone(
+    prisma,
+    params.rawPhone,
+    params.plate,
+    params.company,
+    "certificate"
+  );
+  if (fleetCheck.found || !fleetCheck.checked || !fleetCheck.message) {
+    return null;
+  }
+  return respondPlateValidationError({
+    rawPhone: params.rawPhone,
+    plate: params.plate,
+    company: params.company,
+    message: fleetCheck.message,
+    stage: params.stage,
+  });
+}
+
+function certificateValidationMessageFromWara(params: {
+  plateDisplay: string;
+  company: string;
+  waraDetail: string;
+  status?: number;
+}): string {
+  const detail = sanitizeWaraDetailForUser(params.waraDetail);
+  if (isWaraPlateValidationError({ status: params.status, error: params.waraDetail })) {
+    if (/no se encontr|no encontr|unidad no encontr|veh[ií]culo no encontr/i.test(detail.toLowerCase())) {
+      return `No pude emitir el certificado para ${params.plateDisplay}: no encontré esa unidad en ${params.company}. Revisá que la patente esté bien escrita. Si pertenece a otra empresa, escribí "cambiar empresa" y volvé a pedirlo.`;
+    }
+    return `No pude emitir el certificado para ${params.plateDisplay}: error de validación de matrícula. Revisá que la patente esté bien escrita e intentá de nuevo.`;
+  }
+  return detail;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -346,14 +420,15 @@ async function escalateCertificateFailure(params: {
   const odooCfg = getOdooConfig();
   if (odooCfg) {
     try {
+      const failureCategory = waraCertificateFailureCategory(params.waraDetail, params.status);
       const odoo = await createHelpdeskTicket(odooCfg, {
         subject: title,
         description: [
           `Certificado de cobertura no emitido (gestión vía Atilio / WhatsApp).`,
           `Empresa Wara: ${params.company}`,
           `Patente: ${params.plate}`,
-          `Motivo informado por Wara: ${params.waraDetail}`,
-          params.status ? `Estado Wara: ${params.status}` : "",
+          `Motivo: ${failureCategory}`,
+          `Detalle Wara: ${params.waraDetail}`,
           `WhatsApp: ${params.rawPhone}`,
           `Ticket local: ${localTicket.code}`,
         ]
@@ -570,6 +645,17 @@ export async function POST(req: NextRequest) {
     `${text}\n${confirmation ?? ""}`
   );
 
+  const confirmedNow = isConfirmed(confirmation) || wantsExplicitResend;
+  if (!confirmedNow) {
+    const earlyValidation = await ensurePlateInFleet({
+      rawPhone,
+      plate,
+      company,
+      stage: "plate_not_in_fleet_precheck",
+    });
+    if (earlyValidation) return earlyValidation;
+  }
+
   if (isConfirmed(confirmation) && !wantsExplicitResend) {
     const generated = await findGeneratedCertificate(rawPhone, plate);
     if (generated) {
@@ -677,8 +763,46 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const fleetValidation = await ensurePlateInFleet({
+    rawPhone,
+    plate,
+    company,
+    stage: "plate_not_in_fleet_confirm",
+  });
+  if (fleetValidation) return fleetValidation;
+
   const result = await obtenerCertificadoCobertura(session.sessionToken, plateDisplay);
   if (!result.ok) {
+    if (isWaraPlateValidationError({ status: result.status, error: result.error })) {
+      const message = certificateValidationMessageFromWara({
+        plateDisplay,
+        company,
+        waraDetail: result.error?.trim() || "Unidad no encontrada",
+        status: result.status,
+      });
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_certificados",
+        errorStage: "certificadocobertura_validation",
+        status: result.status,
+        error: result.error ?? "",
+        plate,
+        companyName: company,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          flowComplete_s: "true",
+          message,
+          plate,
+          companyName: company,
+          error: result.error,
+          validationError: true,
+          validationError_s: "true",
+        },
+        { status: BB_STATUS }
+      );
+    }
     if (!shouldEscalateCertificateToOdoo({ status: result.status, error: result.error })) {
       const message = `No pude emitir el certificado de cobertura para ${plateDisplay} en este momento por un problema temporal con Wara. Intentá nuevamente en unos minutos.`;
       await appendOutboundBotMessage(rawPhone, message, {
