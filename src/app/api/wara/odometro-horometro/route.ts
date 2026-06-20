@@ -245,6 +245,16 @@ function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioO
   return parts.join(" ");
 }
 
+function hasPendingOdometerConfirmation(threadText: string): boolean {
+  const tail = threadText.slice(-2500).toLowerCase();
+  if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
+  return (
+    /voy a registrar:/.test(tail) &&
+    /od[oó]metro/.test(tail) &&
+    /respond[eé]\s+confirmo/.test(tail)
+  );
+}
+
 // BuilderBot Cloud solo mapea el body de la respuesta (p.ej. {message_s}) cuando el
 // status HTTP es 2xx. Como estos endpoints los consume exclusivamente BuilderBot,
 // SIEMPRE respondemos 200 y dejamos el estado real en `ok` + el texto en `message`.
@@ -334,7 +344,11 @@ export async function POST(req: NextRequest) {
     fromText.horometro,
     threadParsed.horometro
   );
-  const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
+  const rawText = parsed.data.rawText?.trim() ?? "";
+  const pendingOdoConfirm = hasPendingOdometerConfirmation(threadText);
+  const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
+  const confirmed =
+    isConfirmed(confirmSignal) || (pendingOdoConfirm && isConfirmed(rawText));
 
   if (!patente) {
     return NextResponse.json({ ok: false, error: "Patente inválida", message: "¿Me pasás la patente de la unidad? Por ejemplo AA123BB." }, { status: BB_STATUS });
@@ -342,10 +356,13 @@ export async function POST(req: NextRequest) {
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?" }, { status: BB_STATUS });
   }
-  if (!isConfirmed(confirmation)) {
+  if (!confirmed) {
     return NextResponse.json({
-      ok: false,
+      ok: true,
+      ok_s: "true",
+      flowComplete_s: "true",
       confirmationRequired: true,
+      confirmationRequired_s: "true",
       error: "Falta confirmación",
       message: `Antes de registrar en Wara, confirmá si querés aplicar este cambio: patente ${patente}${typeof odometro === "number" ? `, odómetro ${odometro} km` : ""}${typeof horometro === "number" ? `, horómetro ${horometro} h` : ""}. Respondé CONFIRMO para continuar.`,
       patente,

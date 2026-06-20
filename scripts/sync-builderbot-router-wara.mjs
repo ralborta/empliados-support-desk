@@ -49,7 +49,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        "CONFIRMACIÓN DE ODÓMETRO. Interpretá por CONTEXTO: en el turno anterior el bot resumió un cambio de ODÓMETRO/HORÓMETRO y pidió confirmación, y ahora el cliente acepta/da el visto bueno de cualquier forma natural. Solo aplica si ese último resumen era de odómetro/horómetro; no si era de mantenimiento o certificado.",
+        "CONFIRMACIÓN DE ODÓMETRO. Interpretá por CONTEXTO: en el turno anterior el bot resumió un cambio de ODÓMETRO/HORÓMETRO (Voy a registrar + patente + odómetro) y pidió confirmación, y ahora el cliente acepta de forma natural: CONFIRMO, Confirmo, confirmo, sí, dale, ok, listo o correcto. Solo aplica si ese último resumen era de odómetro/horómetro; no si era de mantenimiento o certificado.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.confirmOdo,

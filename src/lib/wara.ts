@@ -83,6 +83,24 @@ export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
   );
 }
 
+/** Ignora mensajes anteriores al último cambio/selección de empresa en el hilo. */
+export function threadTextSinceCompanySelection(text: string): string {
+  const lines = text.split("\n");
+  let cut = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (
+      /Listo, reinici[eé] la empresa/i.test(line) ||
+      /Perfecto, sigo con/i.test(line) ||
+      /Est[aá]s operando con/i.test(line) ||
+      /asociado a m[aá]s de una empresa/i.test(line)
+    ) {
+      cut = i;
+    }
+  }
+  return lines.slice(cut).join("\n");
+}
+
 /**
  * Formatea una patente argentina con espacios, como Wara espera recibirla:
  *   - Formato Mercosur: "AD 427 MC" (2 letras + 3 dígitos + 2 letras)

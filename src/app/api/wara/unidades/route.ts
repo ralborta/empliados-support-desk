@@ -9,7 +9,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -198,7 +198,7 @@ function looksLikeUnitListRequest(rawText: string | undefined | null): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (detectPlate(t)) return false;
-  return /\b(listado|mis unidades|todas las unidades|flota|cuantas unidades|ver unidades|mis camiones|que unidades)\b/.test(
+  return /\b(listado|lista de unidad|lista de unidades|listame|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades)\b/.test(
     norm
   );
 }
@@ -472,7 +472,8 @@ export async function POST(req: NextRequest) {
   }
 
   const requestedPlates = parseRequestedPlates(parsed.data);
-  const result = await consultarEstadoUnidades(session.sessionToken, requestedPlates);
+  const scopedThread = threadTextSinceCompanySelection(threadText);
+  let result = await consultarEstadoUnidades(session.sessionToken, requestedPlates);
   const useThreadPlate =
     !explicitPlate &&
     !looksLikeUnitListRequest(rawText) &&
@@ -481,16 +482,25 @@ export async function POST(req: NextRequest) {
   const wantedPlate = normalizeLoosePlate(
     explicitPlate ||
       (useThreadPlate
-        ? extractLastPlateFromThread(threadText) ?? detectPlate(threadText) ?? ""
+        ? extractLastPlateFromThread(scopedThread) ?? detectPlate(scopedThread) ?? ""
         : "")
   );
-  const filtered = wantedPlate
-    ? result.unidades.filter((u) => {
-        const plate = normalizeLoosePlate(u.patente);
-        if (!plate) return false;
-        return plate === wantedPlate || plate.includes(wantedPlate);
-      })
-    : result.unidades;
+  const filterUnits = (units: WaraUnidadEstado[], plate: string) =>
+    plate
+      ? units.filter((u) => {
+          const unitPlate = normalizeLoosePlate(u.patente);
+          if (!unitPlate) return false;
+          return unitPlate === plate || unitPlate.includes(plate) || plate.includes(unitPlate);
+        })
+      : units;
+  let filtered = filterUnits(result.unidades, wantedPlate);
+  if (result.ok && wantedPlate && filtered.length === 0 && requestedPlates.length > 0) {
+    const full = await consultarEstadoUnidades(session.sessionToken, []);
+    if (full.ok && full.unidades.length > 0) {
+      result = full;
+      filtered = filterUnits(full.unidades, wantedPlate);
+    }
+  }
   const buildManyUnitsText = (units: WaraUnidadEstado[]): string => {
     const cliente = session.companyName || result.cliente || "este cliente";
     const max = 8;
