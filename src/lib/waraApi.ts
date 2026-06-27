@@ -180,6 +180,110 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
   return false;
 }
 
+/** Guía informativa del módulo Opciones (Agenda, Perfiles, Notificaciones). */
+export function looksLikeOpcionesInfoRequest(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  if (/\b(mantenimiento|preventiv|correctiv|odometro|horometro|certificado)\b/.test(t) && !/\b(agenda|contacto|notific|perfil|opciones)\b/.test(t)) {
+    return false;
+  }
+  return /\b(agenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base|configurar una alarma|configurar alarma)\b/.test(
+    t
+  );
+}
+
+export function looksLikeOpcionesGuideInThread(threadText: string): boolean {
+  const tail = normCompanyToken(threadText.slice(-4000));
+  if (!tail) return false;
+  const opcionesRoute =
+    /(opciones|entra a opciones|entrar a opciones|ingresa a opciones)/.test(tail) &&
+    /(agenda|notific|perfil|contacto|alarma|alerta)/.test(tail);
+  const agendaSteps =
+    /(agregar contacto|anadir contacto|agenda)/.test(tail) &&
+    /(chofer|supervisor|perfil|grupo|contacto)/.test(tail);
+  const numberedGuide =
+    /1\.\s*entra/.test(tail) && /agenda/.test(tail) && /guard/.test(tail);
+  return opcionesRoute || agendaSteps || numberedGuide;
+}
+
+/** Guía informativa del módulo Unidades (panel de flota, MIS ATAJOS). */
+export function looksLikeUnidadesInfoRequest(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  if (
+    /\b(no reporta|no actualiza|offline|sin reporte|ultimo reporte|consultar|reporte en vivo|patente|certificado|odometro|horometro|mantenimiento)\b/.test(
+      t
+    ) &&
+    !/\b(modulo unidades|modulo de unidades|mis atajos|chevron|ficha expandida|grupo de unidades|crear grupo|mover unidades|punto rojo|punto verde|punto azul|barra lateral|icono del auto|seguimiento y control)\b/.test(
+      t
+    )
+  ) {
+    return false;
+  }
+  return (
+    /\b(modulo unidades|modulo de unidades|mis atajos|chevron|ficha expandida|grupo de unidades|crear grupo|mover unidades|punto rojo|punto verde|punto azul|mostrar ocultar|lista o tarjetas|encabezado del modulo|configurar unidad|compartir posicion|orden de trabajo|flujo del operador|barra lateral|icono del auto|seguimiento y control|ataljos|historial en el modulo)\b/.test(
+      t
+    ) ||
+    (/\b(como|donde|que es|que significa|para que sirve)\b/.test(t) &&
+      /\b(unidades|unidad|flota|mapa|grupo|ficha|historial|ataljos|panel)\b/.test(t) &&
+      !/\b(reporta|reporte|consultar|patente|certificado|offline)\b/.test(t))
+  );
+}
+
+export function looksLikeUnidadesGuideInThread(threadText: string): boolean {
+  const tail = normCompanyToken(threadText.slice(-4000));
+  if (!tail) return false;
+  const moduleRoute =
+    /(modulo unidades|modulo de unidades|barra lateral|icono del auto)/.test(tail) &&
+    /(grupo|ficha|mapa|flota|ataljos|chevron)/.test(tail);
+  const atajosGuide =
+    /mis atajos/.test(tail) && /(historial|compartir|configurar unidad|orden de trabajo)/.test(tail);
+  const colorDots =
+    /punto (rojo|verde|azul)/.test(tail) && /(unidad|alarma|activa|detenida)/.test(tail);
+  const numberedGuide =
+    /1\.\s*(entra|ingresa|abri)/.test(tail) && /(unidades|modulo unidades|grupo)/.test(tail);
+  return moduleRoute || atajosGuide || colorDots || numberedGuide;
+}
+
+export function looksLikePlatformInfoGuideInThread(threadText: string): boolean {
+  return looksLikeOpcionesGuideInThread(threadText) || looksLikeUnidadesGuideInThread(threadText);
+}
+
+function isGenericMaintenanceFallbackText(text: string): boolean {
+  return normCompanyToken(text) === "solicitud de gestion de mantenimiento";
+}
+
+/** Trámite operativo real (programar/registrar), no guía informativa. */
+export function looksLikeOperationalMaintenanceIntent(raw: string): boolean {
+  const text = normCompanyToken(raw);
+  return (
+    /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta)\b/.test(
+      text
+    ) && /\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)
+  );
+}
+
+/** Invocación espuria del ejecutor de mantenimiento (p. ej. reproceso tras guía Opciones). */
+export function shouldSkipStrayMaintenanceRequest(
+  text: string,
+  threadText: string,
+  opts: {
+    pendingPlateRequest: boolean;
+    pendingMaintConfirm: boolean;
+    lastInbound?: string;
+  }
+): boolean {
+  if (opts.pendingPlateRequest || opts.pendingMaintConfirm) return false;
+  if (looksLikeOperationalMaintenanceIntent(text)) return false;
+  if (looksLikeOpcionesInfoRequest(text)) return true;
+  if (looksLikeUnidadesInfoRequest(text)) return true;
+  if (opts.lastInbound && looksLikeOpcionesInfoRequest(opts.lastInbound)) return true;
+  if (opts.lastInbound && looksLikeUnidadesInfoRequest(opts.lastInbound)) return true;
+  if (looksLikePlatformInfoGuideInThread(threadText)) return true;
+  if (isGenericMaintenanceFallbackText(text)) return true;
+  return false;
+}
+
 export function looksLikeGreeting(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "");
   if (!norm) return true;
@@ -356,6 +460,56 @@ function waraMaintenanceApiBaseUrl(): string {
     process.env.WARA_API_BASE_URL?.trim() ||
     "https://apps.visionblo.com/rb/app/api_interna";
   return raw.replace(/\/+$/, "");
+}
+
+const WARA_SESSION_TTL_MS = 45 * 60 * 1000;
+
+function isWaraSessionFresh(at: Date | null | undefined): boolean {
+  if (!at) return false;
+  return Date.now() - at.getTime() < WARA_SESSION_TTL_MS;
+}
+
+function waraApiBaseCandidates(): string[] {
+  const primary = waraApiBaseUrl();
+  const maintenance = waraMaintenanceApiBaseUrl();
+  return primary === maintenance ? [primary] : [primary, maintenance];
+}
+
+async function readCachedWaraSession(
+  prisma: PrismaClient,
+  rawPhone: string,
+  contactId: number
+): Promise<string | null> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer?.waraSessionToken?.trim()) return null;
+  if (customer.selectedCompanyContactId !== contactId) return null;
+  if (!isWaraSessionFresh(customer.waraSessionAt)) return null;
+  return customer.waraSessionToken.trim();
+}
+
+async function persistWaraSession(
+  prisma: PrismaClient,
+  rawPhone: string,
+  contactId: number,
+  sessionToken: string
+): Promise<void> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return;
+  await prisma.customer.update({
+    where: { id: customer.id },
+    data: {
+      waraSessionToken: sessionToken,
+      waraSessionAt: new Date(),
+      selectedCompanyContactId: contactId,
+    },
+  });
+}
+
+async function clearWaraSessionCache(prisma: PrismaClient, customerId: string): Promise<void> {
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: { waraSessionToken: null, waraSessionAt: null },
+  });
 }
 
 function obtenerEmpresaToken(): string {
@@ -636,69 +790,104 @@ async function createChatBotToken(contactId: number): Promise<{
     };
   }
 
-  // CreateChatBotToken es intermitente del lado de Wara. Reintentamos una vez
-  // ante fallo transitorio (red, 5xx o token vacío) antes de derivar a un agente.
-  const maxAttempts = 2;
+  // CreateChatBotToken es intermitente del lado de Wara. Reintentamos ante fallo transitorio.
+  const maxAttempts = 3;
+  const backoffMs = [400, 900];
   let lastError = `Wara no devolvió SessionToken (contacto ${contactId})`;
   let lastStatus = 503;
+  const bases = waraApiBaseCandidates();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let res: Response;
-    let json: Record<string, unknown> | null = null;
-    try {
-      res = await fetch(`${waraApiBaseUrl()}/CreateChatBotToken`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, contacto_id: contactId }),
-        cache: "no-store",
-        signal: AbortSignal.timeout(12_000),
-      });
-      json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : "Error de red llamando a CreateChatBotToken";
-      lastStatus = 502;
-      console.error(
-        `[WaraAPI] CreateChatBotToken intento ${attempt}/${maxAttempts} falló (red) contacto=${contactId}: ${lastError}`
-      );
-      continue;
-    }
+    for (const base of bases) {
+      let res: Response;
+      let json: Record<string, unknown> | null = null;
+      try {
+        res = await fetch(`${base}/CreateChatBotToken`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, contacto_id: contactId }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(12_000),
+        });
+        json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      } catch (error) {
+        lastError =
+          error instanceof Error ? error.message : "Error de red llamando a CreateChatBotToken";
+        lastStatus = 502;
+        console.error(
+          `[WaraAPI] CreateChatBotToken intento ${attempt}/${maxAttempts} base=${base} falló (red) contacto=${contactId}: ${lastError}`
+        );
+        continue;
+      }
 
-    const data = waraData(json);
-    const pickString = (key: string): string | undefined => {
-      if (typeof json?.[key] === "string") return json[key] as string;
-      if (typeof data[key] === "string") return data[key] as string;
-      return undefined;
-    };
-    const pickNumber = (key: string): number | undefined => {
-      if (typeof json?.[key] === "number") return json[key] as number;
-      if (typeof data[key] === "number") return data[key] as number;
-      return undefined;
-    };
-    const sessionToken = pickString("SessionToken") ?? pickString("sessionToken");
-
-    if (res.ok && sessionToken) {
-      return {
-        ok: true,
-        status: res.status,
-        sessionToken,
-        customerId: pickNumber("CustomerID"),
-        customerName: pickString("CustomerName"),
-        userTimezone: pickString("UserTimezone"),
-        customerTimezone: pickString("CustomerTimezone"),
+      const data = waraData(json);
+      const pickString = (key: string): string | undefined => {
+        if (typeof json?.[key] === "string") return json[key] as string;
+        if (typeof data[key] === "string") return data[key] as string;
+        return undefined;
       };
-    }
+      const pickNumber = (key: string): number | undefined => {
+        if (typeof json?.[key] === "number") return json[key] as number;
+        if (typeof data[key] === "number") return data[key] as number;
+        return undefined;
+      };
+      const sessionToken = pickString("SessionToken") ?? pickString("sessionToken");
 
-    lastStatus = res.status;
-    lastError =
-      typeof json?.error === "string"
-        ? json.error
-        : `Wara respondió HTTP ${res.status} al crear sesión del chatbot`;
-    console.error(
-      `[WaraAPI] CreateChatBotToken intento ${attempt}/${maxAttempts} sin token contacto=${contactId} status=${res.status}: ${lastError}`
-    );
+      if (res.ok && sessionToken) {
+        return {
+          ok: true,
+          status: res.status,
+          sessionToken,
+          customerId: pickNumber("CustomerID"),
+          customerName: pickString("CustomerName"),
+          userTimezone: pickString("UserTimezone"),
+          customerTimezone: pickString("CustomerTimezone"),
+        };
+      }
+
+      lastStatus = res.status;
+      lastError =
+        typeof json?.error === "string"
+          ? json.error
+          : `Wara respondió HTTP ${res.status} al crear sesión del chatbot`;
+      console.error(
+        `[WaraAPI] CreateChatBotToken intento ${attempt}/${maxAttempts} base=${base} sin token contacto=${contactId} status=${res.status}: ${lastError}`
+      );
+      if (res.status < 500) break;
+    }
+    if (attempt < maxAttempts) {
+      await sleep(backoffMs[attempt - 1] ?? 900);
+    }
   }
 
   return { ok: false, status: lastStatus, error: lastError };
+}
+
+async function ensureWaraSessionForContact(
+  prisma: PrismaClient,
+  rawPhone: string,
+  contact: WaraEmpresaContact
+): Promise<{
+  ok: boolean;
+  status: number;
+  sessionToken?: string;
+  customerId?: number;
+  customerName?: string;
+  userTimezone?: string;
+  customerTimezone?: string;
+  error?: string;
+}> {
+  const cached = await readCachedWaraSession(prisma, rawPhone, contact.id);
+  if (cached) {
+    return { ok: true, status: 200, sessionToken: cached };
+  }
+
+  const created = await createChatBotToken(contact.id);
+  if (created.ok && created.sessionToken) {
+    await persistWaraSession(prisma, rawPhone, contact.id, created.sessionToken);
+    return created;
+  }
+  return created;
 }
 
 function findContactForCompany(
@@ -819,7 +1008,12 @@ export async function resetCustomerCompanyMenu(
   if (customer) {
     await prisma.customer.update({
       where: { id: customer.id },
-      data: { companyName: "", selectedCompanyContactId: null },
+      data: {
+        companyName: "",
+        selectedCompanyContactId: null,
+        waraSessionToken: null,
+        waraSessionAt: null,
+      },
     });
   }
   const lookup = await obtenerEmpresaPorNumero(rawPhone);
@@ -875,6 +1069,14 @@ export async function resolveWaraSessionByPhone(
   }
 
   if (resolution.lookup.sessionToken) {
+    const inlineContact = findContactForCompany(
+      resolution.lookup.contactos,
+      resolution.selectedCompanyName ?? resolution.customer?.companyName,
+      resolution.customer?.selectedCompanyContactId
+    );
+    if (inlineContact) {
+      await persistWaraSession(prisma, rawPhone, inlineContact.id, resolution.lookup.sessionToken);
+    }
     return {
       ok: true,
       status: 200,
@@ -903,7 +1105,7 @@ export async function resolveWaraSessionByPhone(
     };
   }
 
-  const created = await createChatBotToken(selectedContact.id);
+  const created = await ensureWaraSessionForContact(prisma, rawPhone, selectedContact);
   if (!created.ok || !created.sessionToken) {
     const companyLabel =
       resolution.selectedCompanyName ?? selectedContact.empresa ?? "";
@@ -922,6 +1124,8 @@ export async function resolveWaraSessionByPhone(
             data: {
               companyName: fallbackCompany,
               selectedCompanyContactId: fallback.contact.id,
+              waraSessionToken: fallback.sessionToken,
+              waraSessionAt: new Date(),
             },
           });
         } else if (normalized.length >= 8) {
@@ -930,6 +1134,8 @@ export async function resolveWaraSessionByPhone(
               phone: normalized,
               companyName: fallbackCompany,
               selectedCompanyContactId: fallback.contact.id,
+              waraSessionToken: fallback.sessionToken,
+              waraSessionAt: new Date(),
             },
           });
         }
@@ -1585,18 +1791,21 @@ export async function selectCompanyForCustomer(
   const matchedCompany = matched.empresa || matched.nombre;
   const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (local?.selectedCompanyContactId === matched.id) {
-    return {
-      ok: true,
-      customer: local,
-      status: 200,
-      matchedContact: matched,
-      contacts: lookup.contactos,
-      menuMessage: `Estás operando con ${matchedCompany}. ¿En qué te puedo ayudar?`,
-    };
+    const session = await ensureWaraSessionForContact(prisma, rawPhone, matched);
+    if (session.ok && session.sessionToken) {
+      return {
+        ok: true,
+        customer: local,
+        status: 200,
+        matchedContact: matched,
+        contacts: lookup.contactos,
+        menuMessage: `Estás operando con ${matchedCompany}. ¿En qué te puedo ayudar?`,
+      };
+    }
   }
 
-  const sessionProbe = await probeWaraContactSession(matched.id);
-  if (!sessionProbe.ok) {
+  const sessionProbe = await ensureWaraSessionForContact(prisma, rawPhone, matched);
+  if (!sessionProbe.ok || !sessionProbe.sessionToken) {
     if (isPruebasFallbackEnabled()) {
       const fallback = await findPruebasFallbackContact(allContacts, matched.id);
       if (fallback) {

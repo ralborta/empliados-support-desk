@@ -24,8 +24,11 @@ const F = {
   certificados: "fd2e658c-f547-4ec6-b64f-00815620bd6b",
   gestionMaint: "42b29014-7560-4a67-bc09-0201eb1efdd5",
   infoMaint: "069bcb65-7503-433c-a4ae-1dd89cd26471",
+  infoOpciones: "312ea5a6-0493-43e6-b026-05d14bcb6436",
+  infoUnidades: "52f8a36b-819b-4edb-aeb7-677041797a31",
   asesor: "f75f176c-d0b0-4aa4-a579-6af9c53cb4e0",
   atilio: "e3e7ad1c-27a9-40a8-8556-a24b758a29c6",
+  ignorar: "03d37040-357d-4b17-9c23-2ba8ac706454",
 };
 
 function loadMcp() {
@@ -77,6 +80,13 @@ function buildRules() {
     },
     {
       conditionRule:
+        'REPROCESO TRAS GUÍA INFORMATIVA — Por CONTEXTO del historial: el bot ya respondió con pasos de Opciones Wara (Agenda/contactos/Perfiles/Notificaciones) o del módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos de color, Crear grupo) y el cliente NO está iniciando mantenimiento operativo, certificado, consulta de reporte en vivo ni odómetro. PROHIBIDO Gestión Mantenimiento y PROHIBIDO pedir patente. El turno informativo terminó.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.ignorar,
+    },
+    {
+      conditionRule:
         "PATENTE PARA CERTIFICADO — Si el bot acaba de pedir la patente para certificado de cobertura (por ejemplo 'necesito la patente' / 'enviámela en un mensaje') y el cliente responde solo con una patente (AB006EX, AD 427 MC, etc.), va a certificados. PRIORIDAD sobre consulta de unidad o listado cuando el contexto reciente es certificado, no consulta de reporte.",
       conditionValue: "",
       condition: "",
@@ -91,6 +101,13 @@ function buildRules() {
     },
     {
       conditionRule:
+        'GUÍA UNIDADES WARA — PRIORIDAD SOBRE CONSULTA EN VIVO. La intención es ENTENDER o USAR el módulo Unidades de la plataforma (panel de flota, no consulta API): cómo acceder (ícono vehículo), encabezado, grupos, puntos verde/azul/rojo, chevron/ficha expandida, MIS ATAJOS (Historial, Compartir, Configurar unidad, Orden de trabajo), Crear grupo, Mover unidades, flujo del operador. Incluye: "qué significa el punto rojo", "cómo veo el historial", "dónde está MIS ATAJOS", "cómo creo un grupo". PROHIBIDO si pide consultar reporte/estado en vivo, patente que no reporta, último reporte offline, certificado, odómetro o mantenimiento operativo.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.infoUnidades,
+    },
+    {
+      conditionRule:
         'EMPRESAS EN WARA — El cliente pregunta qué empresas tiene asociadas a su teléfono, cuáles empresas, "qué empresas tengo", lista de empresas. NO es consulta de unidades, flota ni patente.',
       conditionValue: "",
       condition: "",
@@ -98,7 +115,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        "LISTADO / MIS UNIDADES / ÚLTIMO REPORTE (PRIORIDAD SOBRE CERTIFICADO). La intención es ver el listado de unidades, todas mis unidades, flota, cuántas unidades tengo, último reporte, estado de reporte, consultar unidad, o dice explícitamente que NO necesita certificado / no quiere certificado. También aplica a 'sin reporte', 'no reporta', ubicación, ignición o voltaje cuando busca información consultable en Wara. PROHIBIDO si solo pide certificado de cobertura.",
+        "LISTADO / MIS UNIDADES / ÚLTIMO REPORTE (PRIORIDAD SOBRE CERTIFICADO). La intención es CONSULTAR EN VIVO en Wara: listado operativo, último reporte, si reporta, sin reporte, offline, ubicación, ignición o voltaje. PROHIBIDO si solo pregunta cómo usar el módulo Unidades de la plataforma (MIS ATAJOS, grupos, ficha, puntos de color). PROHIBIDO si solo pide certificado de cobertura.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.ejecutarConsulta,
@@ -133,14 +150,21 @@ function buildRules() {
     },
     {
       conditionRule:
-        "La intención del cliente es REGISTRAR o PROGRAMAR una gestión operativa real de mantenimiento ahora (tarea, correctivo, preventivo, plan, neumáticos/RFID). Incluye frases como «quiero programar mantenimiento», «necesito registrar un correctivo», «abrir tarea de mantenimiento». PROHIBIDO si solo pregunta cómo usar o configurar el módulo.",
+        'GUÍA OPCIONES WARA — PRIORIDAD SOBRE MANTENIMIENTO Y CONSULTA. La intención es ENTENDER o CONFIGURAR el módulo Opciones (Agenda, contactos, Perfiles, permisos, Notificaciones, alertas, alarmas, destinos, eventos). Incluye: "cómo agrego/añado un contacto", "cómo configuro una notificación/alerta/alarma", "no me llega el mail/la alerta", "qué es un perfil", "dónde está la agenda". PROHIBIDO si pide ejecutar odómetro, certificado, consulta de unidad/reporte en vivo, mantenimiento operativo real o ticket/reclamo. PROHIBIDO si solo pregunta cómo funciona el módulo de mantenimiento.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.infoOpciones,
+    },
+    {
+      conditionRule:
+        "La intención del cliente es REGISTRAR o PROGRAMAR una gestión operativa real de mantenimiento ahora (tarea, correctivo, preventivo, plan, neumáticos/RFID). Incluye frases como «quiero programar mantenimiento», «necesito registrar un correctivo», «abrir tarea de mantenimiento». PROHIBIDO si solo pregunta cómo usar o configurar el módulo. PROHIBIDO si pregunta por Agenda, contactos, Perfiles o Notificaciones de Opciones. PROHIBIDO si el historial reciente ya contiene una guía de Opciones respondida (Agenda/contactos/notificaciones) y no hay pedido operativo nuevo.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.gestionMaint,
     },
     {
       conditionRule:
-        "La intención del cliente es ENTENDER cómo funciona el módulo de mantenimiento (guía informativa, sin patente ni ticket). PROHIBIDO si dice quiero/necesito/programar/registrar mantenimiento o quiere abrir un caso real.",
+        "La intención del cliente es ENTENDER cómo funciona el módulo de mantenimiento (guía informativa, sin patente ni ticket). PROHIBIDO si dice quiero/necesito/programar/registrar mantenimiento o quiere abrir un caso real. PROHIBIDO si es guía de Opciones (Agenda, contactos, notificaciones, perfiles).",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.infoMaint,

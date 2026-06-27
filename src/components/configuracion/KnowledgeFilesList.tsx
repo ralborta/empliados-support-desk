@@ -131,8 +131,9 @@ export default function KnowledgeFilesList() {
         <div>
           <h2 className="text-xl font-bold text-slate-900">Documentos de ayuda</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Subí manuales o documentos para que Atilio los use al responder (por ejemplo, el módulo de
-            Mantenimiento Wara).
+            Subí PDFs de guía para los módulos informativos de Atilio (ChatPDF): Mantenimiento,
+            Opciones, Unidades, etc. Convención:{" "}
+            <span className="font-medium text-slate-600">unidades-modulo-flota.pdf</span>
           </p>
         </div>
       </div>

@@ -71,6 +71,9 @@ model Customer {
   companyName   String?
   /// ID del contacto en el sistema externo para la empresa elegida (uso interno del bot; no mostrar en panel)
   selectedCompanyContactId Int?
+  /// SessionToken Wara cacheado para el contacto elegido (CreateChatBotToken).
+  waraSessionToken String?
+  waraSessionAt    DateTime?
   /// Matrícula o patente asociada al cliente
   licensePlate  String?
   /// Si está seteado, Atilio no envía auto-respuestas; el agente responde manual por el panel/WhatsApp

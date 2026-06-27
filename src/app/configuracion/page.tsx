@@ -28,7 +28,7 @@ export default async function ConfiguracionPage() {
 
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-600">
-              2 · Documentos de ayuda
+              2 · Documentos de ayuda (PDF → ChatPDF)
             </p>
             <KnowledgeFilesList />
           </div>

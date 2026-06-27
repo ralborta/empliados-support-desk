@@ -45,6 +45,31 @@ export const BOT_PROMPT_MODULES: BotPromptModuleDef[] = [
     flowLabel: "Consultas sobre mantenimiento",
     sortOrder: 30,
     builderbotFlowId: "069bcb65-7503-433c-a4ae-1dd89cd26471",
+    builderbotAnswerId: "ca1aff0d-b862-4be8-a4d4-6b160ce1bfba",
+  },
+  {
+    key: "opciones_info",
+    name: "Información Opciones",
+    description:
+      "Guía del módulo Opciones: Agenda, Notificaciones, Perfiles y futuras fichas de plataforma.",
+    flowLabel: "Consultas sobre Opciones (guía)",
+    sortOrder: 35,
+    defaultFile: "opciones_info_prompt.txt",
+    builderbotFlowId: "312ea5a6-0493-43e6-b026-05d14bcb6436",
+    builderbotAnswerId: "51d23e45-2a51-4400-bdf5-8411ee6d66c7",
+    syncScriptKey: "opciones_info",
+  },
+  {
+    key: "unidades_info",
+    name: "Información Unidades",
+    description:
+      "Guía del módulo Unidades: panel de flota, grupos, ficha expandida, MIS ATAJOS y controles del mapa.",
+    flowLabel: "Consultas sobre Unidades (guía)",
+    sortOrder: 36,
+    defaultFile: "unidades_info_prompt.txt",
+    builderbotFlowId: "52f8a36b-819b-4edb-aeb7-677041797a31",
+    builderbotAnswerId: "3aa329af-4b8e-4e55-abe3-ea7a742bd785",
+    syncScriptKey: "unidades_info",
   },
   {
     key: "certificados",

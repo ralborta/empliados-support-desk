@@ -193,7 +193,7 @@ function looksLikeUnitListRequest(rawText: string | undefined | null): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (detectPlate(t)) return false;
-  return /\b(listado|lista de unidad|lista de unidades|listame|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades)\b/.test(
+  return /\b(listado|lista de unidad|lista de unidades|listame|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades)\b/.test(
     norm
   );
 }
@@ -452,13 +452,18 @@ export async function POST(req: NextRequest) {
 
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);
   if (!session.ok || !session.sessionToken) {
+    const waraDetail = session.error?.trim();
+    const fallbackMsg =
+      "No pude consultar las unidades en Wara. Te derivo con un agente para revisarlo.";
     return NextResponse.json(
       {
         ok: false,
         error: session.error,
         summaryText: session.requiresCompanySelection
           ? "Antes de consultar unidades necesito que elijas la empresa asociada a este número."
-          : "No pude consultar las unidades en Wara. Te derivo con un agente para revisarlo.",
+          : waraDetail
+            ? `No pude consultar las unidades en Wara: ${waraDetail}`
+            : fallbackMsg,
         requiresCompanySelection: session.requiresCompanySelection ?? false,
         testBlocked: session.testBlocked ?? false,
       },
@@ -469,6 +474,19 @@ export async function POST(req: NextRequest) {
   const requestedPlates = parseRequestedPlates(parsed.data);
   const scopedThread = threadTextSinceCompanySelection(threadText);
   let result = await consultarEstadoUnidades(session.sessionToken, requestedPlates);
+  if (!result.ok && (result.status === 401 || result.status === 403)) {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (customer) {
+      await prisma.customer.update({
+        where: { id: customer.id },
+        data: { waraSessionToken: null, waraSessionAt: null },
+      });
+    }
+    const refreshed = await resolveWaraSessionByPhone(prisma, rawPhone);
+    if (refreshed.ok && refreshed.sessionToken) {
+      result = await consultarEstadoUnidades(refreshed.sessionToken, requestedPlates);
+    }
+  }
   const useThreadPlate =
     !explicitPlate &&
     !looksLikeUnitListRequest(rawText) &&

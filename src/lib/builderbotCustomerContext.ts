@@ -2,7 +2,10 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureBuilderBotContactActive } from "@/lib/builderbot";
-import { recentThreadTextForPhone } from "@/lib/conversationThread";
+import {
+  recentThreadTextForPhone,
+  shouldIgnoreDuplicateInicioTurn,
+} from "@/lib/conversationThread";
 import {
   extractLastPlateFromThread,
   formatPlateWithSpaces,
@@ -470,6 +473,9 @@ export async function customerRegisteredContextResponse(
   // Ruteo explícito para BuilderBot: evita saltar al Router en saludos (ahí se perdía la respuesta).
   type NextFlow = "ignore" | "elegir" | "derivar" | "reply" | "router";
   let nextFlow: NextFlow = "derivar";
+  const duplicateInicioTurn =
+    !!selectionText &&
+    (await shouldIgnoreDuplicateInicioTurn(trimmed, selectionText));
   if (resolution.testBlocked) {
     nextFlow = "derivar";
   } else if (!registered) {
@@ -485,6 +491,9 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
     }
+  } else if (duplicateInicioTurn) {
+    nextFlow = "ignore";
+    responseMessage = "";
   } else if (
     needsCompanyMenu &&
     selectionText &&
@@ -510,7 +519,7 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
   } else if (activeCompany && requiresCompanySelection) {
     // Empresa ya guardada: no bloquear trámites por flag inconsistente.
-    nextFlow = "router";
+    nextFlow = duplicateInicioTurn ? "ignore" : "router";
     responseMessage = "";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
     nextFlow = "reply";
@@ -535,7 +544,7 @@ export async function customerRegisteredContextResponse(
     // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.
     nextFlow = "reply";
   } else {
-    nextFlow = "router";
+    nextFlow = duplicateInicioTurn ? "ignore" : "router";
     // Trámites / consultas: el Router clasifica; no duplicar saludo del HTTP.
     responseMessage = "";
   }

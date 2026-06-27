@@ -13,6 +13,7 @@ const PROJECT_ID = "7d4339ee-2a9b-424e-92f6-ad7790c1662f";
 const FLOW_ID = "42b29014-7560-4a67-bc09-0201eb1efdd5";
 const HTTP_ID = "2ed738cf-9900-49c0-9655-15907fff3cb9";
 const TEXT_CAPTURE_ID = "8f06535f-d411-4efa-9955-2d2034b534b6";
+const IGNORAR_FLOW = "03d37040-357d-4b17-9c23-2ba8ac706454";
 const API_KEY = "31abb735b990bcde9f41ff1b3a3076d8269b92a7676ceecc07d3fa52ae577b62";
 const BASE = "https://wara.nivel41.com";
 const CAMBIAR_FLOW = "3693a7a9-b5f2-4a66-97f3-acef85dab201";
@@ -60,6 +61,12 @@ async function main() {
           messageMapping: "{message}",
           avoidResponse: false,
           rules: [
+            {
+              conditionRule: "skipResponse_s",
+              conditionValue: "true",
+              condition: "===",
+              conditionFlowId: IGNORAR_FLOW,
+            },
             {
               conditionRule: "changeCompany_s",
               conditionValue: "true",

@@ -10,12 +10,18 @@ import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
 import {
   looksLikeChangeCompanyRequest,
+  looksLikeOpcionesInfoRequest,
+  looksLikeUnidadesInfoRequest,
+  looksLikePlatformInfoGuideInThread,
+  looksLikeOperationalMaintenanceIntent,
   looksLikeShortAffirmative,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   resolveWaraSessionByPhone,
+  shouldSkipStrayMaintenanceRequest,
   validatePlateInFleetForPhone,
 } from "@/lib/waraApi";
+import { recentLastInboundTextForPhone } from "@/lib/conversationThread";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
@@ -83,26 +89,17 @@ function inferPriority(raw: string): Priority {
 
 function isMaintenanceHowToRequest(raw: string): boolean {
   if (looksLikeOperationalMaintenanceIntent(raw)) return false;
+  if (looksLikeOpcionesInfoRequest(raw)) return false;
+  if (looksLikeUnidadesInfoRequest(raw)) return false;
   const text = raw
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-  return /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|preventiv|correctiv|combustible|rendimiento teorico|consumo)/.test(
-    text
-  );
-}
-
-/** Trámite operativo real (programar/registrar), no guía informativa. */
-function looksLikeOperationalMaintenanceIntent(raw: string): boolean {
-  const text = raw
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  return (
-    /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta)\b/.test(
-      text
-    ) && /\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)
-  );
+  const maintenanceDomain =
+    /\b(mantenimiento|preventiv|correctiv|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
+  const howToCue =
+    /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo)/;
+  return maintenanceDomain.test(text) && howToCue.test(text);
 }
 
 function hasPendingMantenimientoConfirmation(threadText: string): boolean {
@@ -422,6 +419,7 @@ export async function POST(req: NextRequest) {
 
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
   const threadText = await recentThreadText(rawPhone);
+  const lastInbound = await recentLastInboundTextForPhone(rawPhone);
   const pendingMaintConfirm = hasPendingMantenimientoConfirmation(threadText);
   const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
   const summary = parseMantenimientoSummary(pendingMaintConfirm ? threadText : "");
@@ -447,6 +445,44 @@ export async function POST(req: NextRequest) {
         message: reset.message,
         requiresCompanySelection: reset.requiresCompanySelection,
         requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  if (
+    looksLikeOpcionesInfoRequest(text) ||
+    looksLikeUnidadesInfoRequest(text) ||
+    looksLikeOpcionesInfoRequest(lastInbound) ||
+    looksLikeUnidadesInfoRequest(lastInbound) ||
+    looksLikePlatformInfoGuideInThread(threadText)
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message: "",
+        skipResponse_s: "true",
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  if (
+    shouldSkipStrayMaintenanceRequest(text, threadText, {
+      pendingPlateRequest,
+      pendingMaintConfirm,
+      lastInbound,
+    })
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message: "",
+        skipResponse_s: "true",
+        flowComplete_s: "true",
       },
       { status: BB_STATUS }
     );
@@ -546,6 +582,24 @@ export async function POST(req: NextRequest) {
           missing_s: "patente",
           service,
           priority,
+        },
+        { status: BB_STATUS }
+      );
+    }
+    if (
+      shouldSkipStrayMaintenanceRequest(text, threadText, {
+        pendingPlateRequest,
+        pendingMaintConfirm,
+        lastInbound,
+      })
+    ) {
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          message: "",
+          skipResponse_s: "true",
+          flowComplete_s: "true",
         },
         { status: BB_STATUS }
       );
