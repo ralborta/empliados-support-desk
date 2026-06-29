@@ -260,17 +260,20 @@ function normalizeUnitToken(value: string): string {
   return value.replace(/\s+/g, "").toLowerCase();
 }
 
-/** Interno del backoffice (ej. 003-111): distinto del nombre M300-111 y no viene en la API. */
+/** Interno del backoffice (ej. 003-111): empieza con 0; distinto del nombre M300-111. */
 function looksLikeBackofficeInternoCode(value: string): boolean {
   const compact = value.replace(/\s+/g, "");
-  return /^\d{3}-\d{3}$/.test(compact);
+  return /^0\d{2}-\d{3}$/.test(compact);
 }
 
 function extractUnitQueryFromText(rawText: string | undefined | null): UnitQueryRef | null {
   const text = (rawText ?? "").trim();
   if (!text || detectPlate(text)) return null;
 
-  const internoLabel = text.match(/\binterno\s*[:\-]?\s*([A-Za-z0-9\-]+)/i);
+  const nombreLabel = text.match(/\bnombre\s*(?:de\s+(?:la\s+)?unidad\s*)?(?:es|:|-)?\s*(M?\d{3}-\d{3})/i);
+  if (nombreLabel?.[1]) return { kind: "nombre", value: nombreLabel[1] };
+
+  const internoLabel = text.match(/\binterno\s*(?:es|:|-)?\s*([A-Za-z0-9\-]+)/i);
   if (internoLabel?.[1]) {
     const value = internoLabel[1].trim();
     if (looksLikeBackofficeInternoCode(value)) {
@@ -789,7 +792,7 @@ export async function POST(req: NextRequest) {
         ? extractLastPlateFromThreadCompat(scopedThread) ?? detectPlate(scopedThread) ?? ""
         : "")
   );
-  const unitQuery = !explicitPlate && !wantedPlate ? unitQueryFromText : null;
+  const unitQuery = unitQueryFromText;
   const filterUnits = (units: WaraUnidadEstado[], plate: string) =>
     plate
       ? units.filter((u) => {
@@ -798,9 +801,16 @@ export async function POST(req: NextRequest) {
           return unitPlate === plate || unitPlate.includes(plate) || plate.includes(unitPlate);
         })
       : units;
-  let filtered = filterUnits(result.unidades, wantedPlate);
-  if (result.ok && unitQuery && filtered.length === 0) {
+  let filtered: WaraUnidadEstado[];
+  if (result.ok && unitQuery?.kind === "interno_backoffice") {
+    filtered = [];
+  } else if (result.ok && unitQuery?.kind === "nombre") {
     filtered = filterUnitsByNombre(result.unidades, unitQuery.value);
+    if (wantedPlate && filtered.length > 1) {
+      filtered = filterUnits(filtered, wantedPlate);
+    }
+  } else {
+    filtered = filterUnits(result.unidades, wantedPlate);
   }
   if (result.ok && wantedPlate && filtered.length === 0 && requestedPlates.length > 0) {
     const full = await consultarEstadoUnidades(session.sessionToken, []);
@@ -813,11 +823,14 @@ export async function POST(req: NextRequest) {
     const cliente = session.companyName || result.cliente || "este cliente";
     const max = 8;
     const labels = units
-      .map((u) => (u.patente || u.unidad || "").trim())
+      .map((u) => formatUnitLabel(u))
       .filter((label) => label.length > 0);
     const head = labels.slice(0, max).join(", ");
     const remainder = labels.length - max;
     const suffix = remainder > 0 ? ` y ${remainder} más` : "";
+    if (unitQuery?.kind === "nombre") {
+      return `Encontré ${units.length} unidades con nombre parecido a ${unitQuery.value} en ${cliente}. ${head}${suffix}. Decime la matrícula exacta si querés ver una sola.`;
+    }
     return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una matrícula (ej. NKL 952) o un nombre de unidad (ej. M300-111) para ver su estado.`;
   };
   let action: "none" | "observation" | "ticket" = "none";
@@ -842,7 +855,9 @@ export async function POST(req: NextRequest) {
               })
       : filtered.length === 1
         ? summarizeUnit(filtered[0])
-        : buildManyUnitsText(filtered);
+        : unitQuery || wantedPlate
+          ? buildManyUnitsText(filtered)
+          : buildManyUnitsText(result.unidades);
 
   const isSingleUnitQuery =
     !!wantedPlate || !!unitQuery || requestedPlates.length > 0 || !!explicitPlate;
