@@ -58,11 +58,42 @@ function minutesAgo(seconds: number | undefined): string {
   return `${Math.round(hours / 24)} días`;
 }
 
+function hasTelemetrySeconds(value: number | undefined | null): boolean {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/** Unidad en flota sin telemetría alguna → en backoffice suele figurar equipo "(no instalado)". */
+function unitHasNoInstalledEquipment(unit: WaraUnidadEstado): boolean {
+  if (hasTelemetrySeconds(unit.ultimo_reporte?.hace_segundos)) return false;
+  if (hasTelemetrySeconds(unit.ultima_posicion?.hace_segundos)) return false;
+  if (hasTelemetrySeconds(unit.ultima_ignicion?.hace_segundos)) return false;
+  if (unit.ultima_ignicion?.estado === true || unit.ultima_ignicion?.estado === false) {
+    return false;
+  }
+  if (
+    typeof unit.alimentacion_externa?.voltaje === "number" &&
+    Number.isFinite(unit.alimentacion_externa.voltaje)
+  ) {
+    return false;
+  }
+  return !!(unit.patente?.trim() || unit.unidad?.trim() || unit.movil_id);
+}
+
+function formatUnitLabel(unit: WaraUnidadEstado): string {
+  const plateRaw = unit.patente?.trim() || "";
+  const plate = plateRaw ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw : "";
+  const interno = unit.unidad?.trim() || "";
+  if (plate && interno && normalizeLoosePlate(plate) !== normalizeLoosePlate(interno)) {
+    return `${plate} (interno ${interno})`;
+  }
+  return plate || interno || "la unidad";
+}
+
 function summarizeUnit(unit: WaraUnidadEstado): string {
   const ign = unit.ultima_ignicion?.estado === true ? "encendida" : unit.ultima_ignicion?.estado === false ? "apagada" : "sin dato";
   const volt = typeof unit.alimentacion_externa?.voltaje === "number" ? `${unit.alimentacion_externa.voltaje}V` : "sin dato";
   const pos = minutesAgo(unit.ultima_posicion?.hace_segundos);
-  return `Unidad ${unit.patente || unit.unidad}: último reporte hace ${minutesAgo(unit.ultimo_reporte?.hace_segundos)}, última posición hace ${pos}, ignición ${ign}, alimentación ${volt}.`;
+  return `Unidad ${formatUnitLabel(unit)}: último reporte hace ${minutesAgo(unit.ultimo_reporte?.hace_segundos)}, última posición hace ${pos}, ignición ${ign}, alimentación ${volt}.`;
 }
 
 /** Margen: si la posición es mucho más vieja que el reporte, el equipo no está reportando bien. */
@@ -291,6 +322,25 @@ function reportElapsedSeconds(unit: WaraUnidadEstado): number | null {
   return typeof seconds === "number" && Number.isFinite(seconds) ? seconds : null;
 }
 
+async function findRecentOpenTicketByPlate(
+  rawPhone: string,
+  plate: string,
+  titleNeedle: string
+) {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return null;
+  const ticket = await prisma.ticket.findFirst({
+    where: {
+      customerId: customer.id,
+      status: { in: OPEN_TICKET_THREAD_STATUSES },
+      title: { contains: plate, mode: "insensitive" },
+      AND: { title: { contains: titleNeedle, mode: "insensitive" } },
+    },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  return { ticket, customer };
+}
+
 async function findRecentMissingReportTicket(rawPhone: string, plate: string) {
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (!customer) return null;
@@ -303,9 +353,13 @@ async function findRecentMissingReportTicket(rawPhone: string, plate: string) {
     },
     orderBy: { lastMessageAt: "desc" },
   });
-  if (ticket) return { ticket, customer };
+  return { ticket, customer };
+}
 
-  return { ticket: null, customer };
+async function findRecentNoEquipmentTicket(rawPhone: string, plate: string) {
+  const found = await findRecentOpenTicketByPlate(rawPhone, plate, "Sin equipo instalado");
+  if (!found) return null;
+  return found;
 }
 
 async function createMissingReportTicket(params: {
@@ -419,6 +473,114 @@ async function createMissingReportTicket(params: {
     ref,
     reused: false,
     message: `La unidad ${params.unit.patente || params.unit.unidad} está ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
+  };
+}
+
+async function createNoEquipmentTicket(params: {
+  rawPhone: string;
+  unit: WaraUnidadEstado;
+  companyName: string;
+  contactName: string;
+}): Promise<{ ref: string; message: string; reused: boolean }> {
+  const plate = normalizeLoosePlate(params.unit.patente || params.unit.unidad || "");
+  const label = formatUnitLabel(params.unit);
+  const existing = await findRecentNoEquipmentTicket(params.rawPhone, plate);
+  if (!existing?.customer) {
+    return {
+      ref: "",
+      reused: false,
+      message: `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. No pude registrar el caso automáticamente; te derivo con un asesor para revisarlo.`,
+    };
+  }
+
+  if (existing.ticket) {
+    return {
+      ref: existing.ticket.code,
+      reused: true,
+      message: `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
+    };
+  }
+
+  const title = `${plate} - Sin equipo instalado`;
+  const localTicket = await prisma.ticket.create({
+    data: {
+      code: generateTicketCode(),
+      customerId: existing.customer.id,
+      contactName:
+        params.contactName ||
+        existing.customer.name?.trim() ||
+        params.companyName ||
+        "Sin nombre",
+      title,
+      status: "IN_PROGRESS",
+      priority: "NORMAL",
+      category: "TECH_SUPPORT",
+      incidentType: "GENERAL_TECH",
+      channel: "WHATSAPP",
+      aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Atilio.`,
+    },
+  });
+
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: localTicket.id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text: `Consulta por unidad sin equipo instalado: ${label}`,
+      rawPayload: {
+        source: "wara_unidades_no_equipment",
+        plate,
+        interno: params.unit.unidad ?? "",
+        movilId: params.unit.movil_id,
+        companyName: params.companyName,
+        phone: params.rawPhone,
+      } as Prisma.InputJsonObject,
+    },
+  });
+
+  let ref = localTicket.code;
+  const odooCfg = getOdooConfig();
+  if (odooCfg) {
+    try {
+      const odoo = await createHelpdeskTicket(odooCfg, {
+        subject: title,
+        description: [
+          `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
+          `Empresa Wara: ${params.companyName}`,
+          `Patente: ${params.unit.patente || plate}`,
+          params.unit.unidad ? `Interno (campo unidad): ${params.unit.unidad}` : "",
+          params.unit.movil_id ? `movil_id: ${params.unit.movil_id}` : "",
+          `Motivo: la API no devuelve reporte, posición, ignición ni voltaje.`,
+          `WhatsApp: ${params.rawPhone}`,
+          `Ticket local: ${localTicket.code}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        customerName: params.contactName || existing.customer.name || params.companyName,
+        customerPhone: params.rawPhone,
+        companyName: params.companyName,
+        priority: "NORMAL",
+      });
+      ref = odoo.ref ?? String(odoo.ticketId);
+      await prisma.ticket.update({
+        where: { id: localTicket.id },
+        data: {
+          aiSummary: `Unidad ${label} sin equipo instalado. Odoo: ${ref}.`,
+        },
+      });
+    } catch (error) {
+      console.error(
+        `[Unidades] No se pudo crear caso Odoo sin equipo para ${plate}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  return {
+    ref,
+    reused: false,
+    message: `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
   };
 }
 
@@ -602,37 +764,52 @@ export async function POST(req: NextRequest) {
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);
 
-  if (result.ok && filtered.length === 1 && wantedPlate) {
+  const isSingleUnitQuery =
+    !!wantedPlate || !!internoRef || requestedPlates.length > 0 || !!explicitPlate;
+
+  if (result.ok && filtered.length === 1 && isSingleUnitQuery) {
     const unit = filtered[0];
-    const assessment = assessUnitReporting(unit);
-    if (assessment) {
-      const elapsedText = minutesAgo(assessment.reportElapsed);
-      if (assessment.status === "ok") {
-        action = "observation";
-        summaryText = `La unidad ${unit.patente || unit.unidad} reportó hace ${elapsedText} y la posición también está al día. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
-      } else if (assessment.status === "stale_position") {
-        action = "ticket";
-        const created = await createMissingReportTicket({
-          rawPhone,
-          unit,
-          companyName: session.companyName ?? result.cliente ?? "",
-          contactName: session.contactName ?? "",
-          elapsedText: minutesAgo(assessment.reportElapsed),
-          issueDetail: assessment.reason,
-        });
-        ticketRef = created.ref;
-        summaryText = created.message;
-      } else {
-        action = "ticket";
-        const created = await createMissingReportTicket({
-          rawPhone,
-          unit,
-          companyName: session.companyName ?? result.cliente ?? "",
-          contactName: session.contactName ?? "",
-          elapsedText,
-        });
-        ticketRef = created.ref;
-        summaryText = created.message;
+    if (unitHasNoInstalledEquipment(unit)) {
+      action = "ticket";
+      const created = await createNoEquipmentTicket({
+        rawPhone,
+        unit,
+        companyName: session.companyName ?? result.cliente ?? "",
+        contactName: session.contactName ?? "",
+      });
+      ticketRef = created.ref;
+      summaryText = created.message;
+    } else if (wantedPlate) {
+      const assessment = assessUnitReporting(unit);
+      if (assessment) {
+        const elapsedText = minutesAgo(assessment.reportElapsed);
+        if (assessment.status === "ok") {
+          action = "observation";
+          summaryText = `La unidad ${formatUnitLabel(unit)} reportó hace ${elapsedText} y la posición también está al día. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
+        } else if (assessment.status === "stale_position") {
+          action = "ticket";
+          const created = await createMissingReportTicket({
+            rawPhone,
+            unit,
+            companyName: session.companyName ?? result.cliente ?? "",
+            contactName: session.contactName ?? "",
+            elapsedText: minutesAgo(assessment.reportElapsed),
+            issueDetail: assessment.reason,
+          });
+          ticketRef = created.ref;
+          summaryText = created.message;
+        } else {
+          action = "ticket";
+          const created = await createMissingReportTicket({
+            rawPhone,
+            unit,
+            companyName: session.companyName ?? result.cliente ?? "",
+            contactName: session.contactName ?? "",
+            elapsedText,
+          });
+          ticketRef = created.ref;
+          summaryText = created.message;
+        }
       }
     }
   }
