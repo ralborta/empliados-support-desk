@@ -11,7 +11,7 @@ import {
 import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, normalizePlate, waraIncidentLabels } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
-import { consultarEstadoUnidades, resolveWaraSessionByPhone } from "@/lib/waraApi";
+import { consultarEstadoUnidades, looksLikeHumanAdvisorRequest, resolveWaraSessionByPhone } from "@/lib/waraApi";
 
 /**
  * Crea un ticket de reclamo/escalamiento en Odoo Helpdesk (equipo "Atención al cliente").
@@ -153,21 +153,21 @@ async function recentThreadText(rawPhone: string): Promise<string> {
   }
 }
 
-async function findRecentOdooRef(rawPhone: string, plate: string): Promise<string | null> {
+async function findRecentOdooRef(rawPhone: string, plate?: string): Promise<string | null> {
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (!customer) return null;
   const msgs = await prisma.ticketMessage.findMany({
     where: {
       direction: "OUTBOUND",
       from: "BOT",
-      createdAt: { gte: new Date(Date.now() - 15 * 60 * 1000) },
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
       ticket: { customerId: customer.id },
     },
     orderBy: { createdAt: "desc" },
-    take: 12,
+    take: 20,
     select: { text: true, rawPayload: true },
   });
-  const want = plate.replace(/\s+/g, "").toUpperCase();
+  const want = (plate ?? "").replace(/\s+/g, "").toUpperCase();
   for (const m of msgs) {
     const payload = m.rawPayload as Record<string, unknown> | null;
     if (payload?.source !== "odoo_ticket" && payload?.source !== "wara_unidades_auto_ticket") continue;
@@ -179,6 +179,24 @@ async function findRecentOdooRef(rawPhone: string, plate: string): Promise<strin
     if (ref && /^\d+$/.test(ref)) return ref;
     const match = m.text?.match(/caso N[°º]\s*(\d+)/i);
     if (match) return match[1];
+  }
+  for (const m of msgs) {
+    const tck = m.text?.match(/TCK-\d{4}-\d{4}-\d+/i);
+    if (tck) {
+      if (!want) return tck[0];
+      const threadPlate = extractLastPlateFromThreadCompat(m.text ?? "");
+      if (!threadPlate || threadPlate === want) return tck[0];
+    }
+  }
+  const openTicket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+    orderBy: { lastMessageAt: "desc" },
+    select: { code: true, title: true },
+  });
+  if (openTicket?.code) {
+    if (!want) return openTicket.code;
+    const titlePlate = normalizePlateForTitle(detectPlate(openTicket.title ?? "") ?? "");
+    if (!titlePlate || titlePlate === want) return openTicket.code;
   }
   return null;
 }
@@ -287,10 +305,33 @@ export async function POST(req: NextRequest) {
 
   const event = buildEvent(data.event ?? data.evento, data.rawText);
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
+  const advisorRequest = looksLikeHumanAdvisorRequest(data.rawText);
+
+  if (advisorRequest) {
+    const existingAdvisorRef = await findRecentOdooRef(rawPhone, plate || undefined);
+    if (existingAdvisorRef) {
+      const message = `Ya tenés el caso ${existingAdvisorRef} en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "odoo_ticket",
+        stage: "advisor_existing_case",
+        ref: existingAdvisorRef,
+        plate: plate || undefined,
+      });
+      return NextResponse.json({
+        ok: true,
+        ok_s: "true",
+        ref: existingAdvisorRef,
+        reused: true,
+        reused_s: "true",
+        message,
+      });
+    }
+  }
 
   if (!plate && !explicitSubject) {
-    const message =
-      "Para registrar el caso necesito la patente de la unidad y qué está pasando (ej: NKL 940 no reporta desde ayer).";
+    const message = advisorRequest
+      ? "Te derivo con un asesor de Atención al cliente. Pasame la patente de la unidad y qué está pasando (ej: NKL 952 no reporta desde ayer)."
+      : "Para registrar el caso necesito la patente de la unidad y qué está pasando (ej: NKL 940 no reporta desde ayer).";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",
       errorStage: "missing_plate",
@@ -307,7 +348,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const existingRef = await findRecentOdooRef(rawPhone, plate);
+  const existingRef = await findRecentOdooRef(rawPhone, plate || undefined);
   if (existingRef) {
     const message = `Ya existe un caso abierto (N° ${existingRef}) para este reclamo. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
     await appendOutboundBotMessage(rawPhone, message, {

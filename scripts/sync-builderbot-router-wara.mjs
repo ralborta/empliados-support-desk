@@ -108,6 +108,20 @@ function buildRules() {
     },
     {
       conditionRule:
+        'SALUDO SOLO — PRIORIDAD SOBRE CONSULTA CON HISTORIAL. El mensaje actual es únicamente o casi únicamente un saludo corto (hola, buenos días, buenas tardes, buenas noches, buenas, qué tal, hey) sin patente nueva ni pedido operativo (reporte, certificado, odómetro, mantenimiento, asesor). Retomar en Atilio; NO consultar Wara ni reusar patente del historial. PROHIBIDO Ejecutar Consulta Unidad y PROHIBIDO listado/mis unidades.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.atilio,
+    },
+    {
+      conditionRule:
+        'ASESOR / PERSONA HUMANA — PRIORIDAD ALTA. Pide hablar con asesor, agente, persona humana, operador, atención humana, comunicarse con alguien o escalar el reclamo. Si en el historial ya hay patente/matrícula, número de caso (TCK-, N°) o ticket recién generado: va DIRECTO al flujo asesor/Odoo sin repreguntar patente. Si no hay patente ni caso en historial: también va a asesor para que el backend pida el dato mínimo.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.asesor,
+    },
+    {
+      conditionRule:
         'GUÍA UNIDADES WARA — PRIORIDAD SOBRE CONSULTA EN VIVO. La intención es ENTENDER o USAR el módulo Unidades de la plataforma (panel de flota, no consulta API): cómo acceder (ícono vehículo), encabezado, grupos, puntos verde/azul/rojo, chevron/ficha expandida, MIS ATAJOS (Historial, Compartir, Configurar unidad, Orden de trabajo), Crear grupo, Mover unidades, flujo del operador. Incluye: "qué significa el punto rojo", "cómo veo el historial", "dónde está MIS ATAJOS", "cómo creo un grupo". PROHIBIDO si pide consultar reporte/estado en vivo, patente que no reporta, último reporte offline, certificado, odómetro o mantenimiento operativo.',
       conditionValue: "",
       condition: "",
@@ -122,7 +136,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        "LISTADO / MIS UNIDADES / ÚLTIMO REPORTE (PRIORIDAD SOBRE CERTIFICADO). La intención es CONSULTAR EN VIVO en Wara: listado operativo, último reporte, si reporta, sin reporte, offline, ubicación, ignición o voltaje. PROHIBIDO si solo pregunta cómo usar el módulo Unidades de la plataforma (MIS ATAJOS, grupos, ficha, puntos de color). PROHIBIDO si solo pide certificado de cobertura.",
+        "LISTADO / MIS UNIDADES / ÚLTIMO REPORTE (PRIORIDAD SOBRE CERTIFICADO). La intención es CONSULTAR EN VIVO en Wara: listado operativo, último reporte, si reporta, sin reporte, offline, ubicación, ignición o voltaje. PROHIBIDO si el mensaje actual es solo un saludo. PROHIBIDO si solo pregunta cómo usar el módulo Unidades de la plataforma (MIS ATAJOS, grupos, ficha, puntos de color). PROHIBIDO si solo pide certificado de cobertura.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.ejecutarConsulta,
@@ -136,7 +150,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        "CONSULTAR ESTADO / REPORTE DE UNIDAD (DIRECTO). La intención es conocer información que se resuelve consultando Wara AHORA: último reporte, si está reportando, sin reporte, unidad offline, ubicación, ignición o voltaje. Si la patente está (mensaje o historial) se consulta esa unidad; si falta, el sistema lista o pide patente. El backend valida el tiempo: menor a 1 hora = observación sin ticket; 1 hora o más = caso automático. PROHIBIDO si el cliente dice que la ubicación es incorrecta o reporta falla física/hardware (va a Atilio).",
+        "CONSULTAR ESTADO / REPORTE DE UNIDAD (DIRECTO). La intención es conocer información que se resuelve consultando Wara AHORA: último reporte, si está reportando, sin reporte, unidad offline, ubicación, ignición o voltaje. Si la patente está en el mensaje actual se consulta esa unidad; si falta en el mensaje, el sistema lista o pide patente. PROHIBIDO si el mensaje actual es solo un saludo (aunque haya patente en historial). PROHIBIDO si el cliente dice que la ubicación es incorrecta o reporta falla física/hardware (va a Atilio).",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.ejecutarConsulta,
@@ -175,13 +189,6 @@ function buildRules() {
       conditionValue: "",
       condition: "",
       conditionFlowId: F.infoMaint,
-    },
-    {
-      conditionRule:
-        "ASESOR / TICKET EN ODOO — ÚLTIMO RECURSO Y SOLO CON PATENTE. Aplica SOLO cuando pide explícitamente hablar con una persona/asesor o abrir reclamo formal Y ya hay patente en el historial; o Atilio ya diagnosticó con patente y no hay solución automática. EXCEPCIÓN: falta de reporte va al flujo de consulta de unidad. PROHIBIDO sin patente identificada.",
-      conditionValue: "",
-      condition: "",
-      conditionFlowId: F.asesor,
     },
     {
       conditionRule:

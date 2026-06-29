@@ -13,6 +13,7 @@ import { detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPend
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
+  looksLikeGreeting,
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
@@ -675,6 +676,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (
+    looksLikeGreeting(rawText.trim()) &&
+    !explicitPlate &&
+    !extractUnitQueryFromText(rawText) &&
+    !parsed.data.patente?.trim() &&
+    !parsed.data.plate?.trim()
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText: "",
+        message: "",
+        skipResponse_s: "true",
+        action: "none" as const,
+        unidadesCount: 0,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   if (looksLikeInternoMetaQuestion(rawText)) {
     const message =
       "Por este chat consulto unidades por matrícula (ej. NKL 952) o por nombre de unidad (ej. M300-111). El código interno del backoffice (ej. 003-111) todavía no viene en la API de Wara; si tenés solo el interno, buscalo en el panel y pasame matrícula o nombre.";
@@ -756,6 +778,7 @@ export async function POST(req: NextRequest) {
   const useThreadPlate =
     !explicitPlate &&
     !unitQueryFromText &&
+    !looksLikeGreeting(rawText.trim()) &&
     !looksLikeInternoMetaQuestion(rawText) &&
     !looksLikeUnitListRequest(rawText) &&
     !looksLikeAnotherUnitRequest(rawText) &&

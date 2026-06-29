@@ -525,7 +525,19 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
-      if (multiCompany && waraContactsText) {
+      const greetingLabel =
+        selectionText.trim() && looksLikeGreeting(selectionText)
+          ? selectionText.trim().charAt(0).toUpperCase() + selectionText.trim().slice(1)
+          : "Hola";
+      if (lastTicket && (lastKnownPlate || lastTicket.code)) {
+        const platePart = lastKnownPlateFormatted
+          ? ` sobre la unidad ${lastKnownPlateFormatted}`
+          : "";
+        const casePart = lastTicket.code ? ` (caso ${lastTicket.code})` : "";
+        responseMessage = firstName
+          ? `${greetingLabel}, ${firstName}. Seguimos${platePart}${casePart}. ¿Querés sumar algo o necesitás hablar con un asesor?`
+          : `${greetingLabel}. Seguimos${platePart}${casePart}. ¿Querés sumar algo o necesitás hablar con un asesor?`;
+      } else if (multiCompany && waraContactsText) {
         const hola = firstName
           ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
           : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
