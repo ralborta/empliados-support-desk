@@ -557,7 +557,9 @@ export type WaraSessionResolution = {
 
 export type WaraUnidadEstado = {
   movil_id: number;
+  /** Nombre de la unidad en Wara (backoffice: columna Nombre, ej. M300-111). No es el Interno (003-111). */
   unidad: string;
+  /** Matrícula / patente (backoffice: Matrícula, ej. NKL 952). */
   patente: string;
   ultimo_reporte?: {
     fecha?: string;

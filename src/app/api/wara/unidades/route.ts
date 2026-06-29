@@ -82,11 +82,11 @@ function unitHasNoInstalledEquipment(unit: WaraUnidadEstado): boolean {
 function formatUnitLabel(unit: WaraUnidadEstado): string {
   const plateRaw = unit.patente?.trim() || "";
   const plate = plateRaw ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw : "";
-  const interno = unit.unidad?.trim() || "";
-  if (plate && interno && normalizeLoosePlate(plate) !== normalizeLoosePlate(interno)) {
-    return `${plate} (interno ${interno})`;
+  const nombre = unit.unidad?.trim() || "";
+  if (plate && nombre && normalizeLoosePlate(plate) !== normalizeLoosePlate(nombre)) {
+    return `${plate} (nombre ${nombre})`;
   }
-  return plate || interno || "la unidad";
+  return plate || nombre || "la unidad";
 }
 
 function summarizeUnit(unit: WaraUnidadEstado): string {
@@ -251,9 +251,37 @@ function mentionsMissingReportWithoutPlate(rawText: string | undefined | null): 
   );
 }
 
-function extractInternoRef(rawText: string | undefined | null): string | null {
-  const m = (rawText ?? "").match(/\binterno\s*[:\-]?\s*([A-Za-z0-9\-]+)/i);
-  return m?.[1]?.trim() ?? null;
+type UnitQueryRef =
+  | { kind: "interno_backoffice"; value: string }
+  | { kind: "nombre"; value: string };
+
+function normalizeUnitToken(value: string): string {
+  return value.replace(/\s+/g, "").toLowerCase();
+}
+
+/** Interno del backoffice (ej. 003-111): distinto del nombre M300-111 y no viene en la API. */
+function looksLikeBackofficeInternoCode(value: string): boolean {
+  const compact = value.replace(/\s+/g, "");
+  return /^\d{3}-\d{3}$/.test(compact);
+}
+
+function extractUnitQueryFromText(rawText: string | undefined | null): UnitQueryRef | null {
+  const text = (rawText ?? "").trim();
+  if (!text || detectPlate(text)) return null;
+
+  const internoLabel = text.match(/\binterno\s*[:\-]?\s*([A-Za-z0-9\-]+)/i);
+  if (internoLabel?.[1]) {
+    const value = internoLabel[1].trim();
+    if (looksLikeBackofficeInternoCode(value)) {
+      return { kind: "interno_backoffice", value };
+    }
+    return { kind: "nombre", value };
+  }
+
+  const nombreMatch = text.match(/\b(M?\d{3}-\d{3})\b/i);
+  if (nombreMatch?.[1]) return { kind: "nombre", value: nombreMatch[1] };
+
+  return null;
 }
 
 function looksLikeInternoMetaQuestion(rawText: string | undefined | null): boolean {
@@ -267,13 +295,37 @@ function looksLikeInternoMetaQuestion(rawText: string | undefined | null): boole
   );
 }
 
-function filterUnitsByInterno(units: WaraUnidadEstado[], interno: string) {
-  const norm = interno.replace(/\s+/g, "").toLowerCase();
+/** Busca por campo API `unidad` (= nombre en backoffice), parcial como el buscador web. */
+function filterUnitsByNombre(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
+  const norm = normalizeUnitToken(query);
+  if (!norm) return [];
   return units.filter((u) => {
-    const label = (u.unidad || u.patente || "").replace(/\s+/g, "").toLowerCase();
-    if (!label) return false;
-    return label.includes(norm) || norm.includes(label);
+    const nombre = normalizeUnitToken(u.unidad || "");
+    if (!nombre) return false;
+    return nombre === norm || nombre.includes(norm) || norm.includes(nombre);
   });
+}
+
+function formatUnitNotFoundMessage(opts: {
+  companyName: string;
+  wantedPlate?: string;
+  unitQuery?: UnitQueryRef | null;
+}): string {
+  const company = opts.companyName;
+  if (opts.wantedPlate) {
+    const plateDisplay = formatPlateWithSpaces(opts.wantedPlate) ?? opts.wantedPlate;
+    return `No encontré la patente ${plateDisplay} en las unidades de ${company}. Revisá que esté bien escrita o, si corresponde a otra empresa, escribí "cambiar empresa".`;
+  }
+  if (opts.unitQuery?.kind === "interno_backoffice") {
+    return (
+      `No encontré el interno ${opts.unitQuery.value} en la API de Wara para ${company}. ` +
+      `El código interno del backoffice (ej. 003-111) todavía no viene en la consulta; probá con la matrícula (NKL 952) o el nombre de unidad (M300-111).`
+    );
+  }
+  if (opts.unitQuery?.kind === "nombre") {
+    return `No encontré una unidad con nombre ${opts.unitQuery.value} en ${company}. Probá con la matrícula o revisá el nombre en Wara.`;
+  }
+  return `No encontré una unidad con ese dato para ${company}. Pasame la matrícula (ej. NKL 952) o el nombre (ej. M300-111).`;
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -530,7 +582,7 @@ async function createNoEquipmentTicket(params: {
       rawPayload: {
         source: "wara_unidades_no_equipment",
         plate,
-        interno: params.unit.unidad ?? "",
+        nombre: params.unit.unidad ?? "",
         movilId: params.unit.movil_id,
         companyName: params.companyName,
         phone: params.rawPhone,
@@ -548,7 +600,7 @@ async function createNoEquipmentTicket(params: {
           `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
           `Empresa Wara: ${params.companyName}`,
           `Patente: ${params.unit.patente || plate}`,
-          params.unit.unidad ? `Interno (campo unidad): ${params.unit.unidad}` : "",
+          params.unit.unidad ? `Nombre (campo unidad en API): ${params.unit.unidad}` : "",
           params.unit.movil_id ? `movil_id: ${params.unit.movil_id}` : "",
           `Motivo: la API no devuelve reporte, posición, ignición ni voltaje.`,
           `WhatsApp: ${params.rawPhone}`,
@@ -625,9 +677,9 @@ export async function POST(req: NextRequest) {
 
   if (looksLikeInternoMetaQuestion(rawText)) {
     const message =
-      "Por este chat consulto unidades por patente. Si tenés el número de interno, buscalo en Wara y pasame la patente que ves (por ejemplo MYQ 693), o decime el interno junto con la patente para ubicarla.";
+      "Por este chat consulto unidades por matrícula (ej. NKL 952) o por nombre de unidad (ej. M300-111). El código interno del backoffice (ej. 003-111) todavía no viene en la API de Wara; si tenés solo el interno, buscalo en el panel y pasame matrícula o nombre.";
     await appendOutboundBotMessage(rawPhone, message, {
-      source: "wara_unidades_interno_meta",
+      source: "wara_unidades_unit_query_help",
       rawText,
     });
     return NextResponse.json(
@@ -636,15 +688,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const internoInMessage = extractInternoRef(rawText);
+  const unitQueryInMessage = extractUnitQueryFromText(rawText);
 
   if (
     !explicitPlate &&
-    !internoInMessage &&
+    !unitQueryInMessage &&
     (looksLikeAnotherUnitRequest(rawText) || mentionsMissingReportWithoutPlate(rawText))
   ) {
     const askPlate =
-      "¿Cuál es la patente de esa unidad? Pasámela (por ejemplo AI 211 XK) y la consulto en Wara.";
+      "¿Cuál es la matrícula o el nombre de la unidad? Pasámela (por ejemplo NKL 952 o M300-111) y la consulto en Wara.";
     await appendOutboundBotMessage(rawPhone, askPlate, {
       source: "wara_unidades_ask_plate",
       rawText,
@@ -700,10 +752,10 @@ export async function POST(req: NextRequest) {
       result = await consultarEstadoUnidades(refreshed.sessionToken, requestedPlates);
     }
   }
-  const internoRef = !explicitPlate ? extractInternoRef(rawText) : null;
+  const unitQueryFromText = extractUnitQueryFromText(rawText);
   const useThreadPlate =
     !explicitPlate &&
-    !internoRef &&
+    !unitQueryFromText &&
     !looksLikeInternoMetaQuestion(rawText) &&
     !looksLikeUnitListRequest(rawText) &&
     !looksLikeAnotherUnitRequest(rawText) &&
@@ -714,6 +766,7 @@ export async function POST(req: NextRequest) {
         ? extractLastPlateFromThreadCompat(scopedThread) ?? detectPlate(scopedThread) ?? ""
         : "")
   );
+  const unitQuery = !explicitPlate && !wantedPlate ? unitQueryFromText : null;
   const filterUnits = (units: WaraUnidadEstado[], plate: string) =>
     plate
       ? units.filter((u) => {
@@ -723,8 +776,8 @@ export async function POST(req: NextRequest) {
         })
       : units;
   let filtered = filterUnits(result.unidades, wantedPlate);
-  if (result.ok && internoRef && filtered.length === 0) {
-    filtered = filterUnitsByInterno(result.unidades, internoRef);
+  if (result.ok && unitQuery && filtered.length === 0) {
+    filtered = filterUnitsByNombre(result.unidades, unitQuery.value);
   }
   if (result.ok && wantedPlate && filtered.length === 0 && requestedPlates.length > 0) {
     const full = await consultarEstadoUnidades(session.sessionToken, []);
@@ -742,7 +795,7 @@ export async function POST(req: NextRequest) {
     const head = labels.slice(0, max).join(", ");
     const remainder = labels.length - max;
     const suffix = remainder > 0 ? ` y ${remainder} más` : "";
-    return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una patente puntual para ver su estado.`;
+    return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una matrícula (ej. NKL 952) o un nombre de unidad (ej. M300-111) para ver su estado.`;
   };
   let action: "none" | "observation" | "ticket" = "none";
   let ticketRef = "";
@@ -756,16 +809,20 @@ export async function POST(req: NextRequest) {
         : wantedPlate && !explicitPlate
           ? `No encontré ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. ¿Podés confirmarme la patente exacta? Si es de otra empresa, escribí "cambiar empresa".`
           : wantedPlate
-            ? `No encontré la patente ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. Revisá que esté bien escrita o, si corresponde a otra empresa, escribí "cambiar empresa".`
-            : internoRef
-              ? `No encontré el interno ${internoRef} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. Pasame la patente asociada o revisá el número de interno en Wara.`
-              : `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
+            ? formatUnitNotFoundMessage({
+                companyName: session.companyName || result.cliente || "tu empresa",
+                wantedPlate,
+              })
+            : formatUnitNotFoundMessage({
+                companyName: session.companyName || result.cliente || "tu empresa",
+                unitQuery,
+              })
       : filtered.length === 1
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);
 
   const isSingleUnitQuery =
-    !!wantedPlate || !!internoRef || requestedPlates.length > 0 || !!explicitPlate;
+    !!wantedPlate || !!unitQuery || requestedPlates.length > 0 || !!explicitPlate;
 
   if (result.ok && filtered.length === 1 && isSingleUnitQuery) {
     const unit = filtered[0];
@@ -779,7 +836,7 @@ export async function POST(req: NextRequest) {
       });
       ticketRef = created.ref;
       summaryText = created.message;
-    } else if (wantedPlate) {
+    } else {
       const assessment = assessUnitReporting(unit);
       if (assessment) {
         const elapsedText = minutesAgo(assessment.reportElapsed);
