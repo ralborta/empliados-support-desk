@@ -215,7 +215,34 @@ function mentionsMissingReportWithoutPlate(rawText: string | undefined | null): 
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (detectPlate(rawText ?? "")) return false;
-  return /\b(sin reporte|no reporta|no actualiza|offline|no reporta bien)\b/.test(norm);
+  return /\b(sin reporte|no reporta|no actualiza|offline|no reporta bien|reportando|reporta bien|esta ok|est[aá] bien)\b/.test(
+    norm
+  );
+}
+
+function extractInternoRef(rawText: string | undefined | null): string | null {
+  const m = (rawText ?? "").match(/\binterno\s*[:\-]?\s*([A-Za-z0-9\-]+)/i);
+  return m?.[1]?.trim() ?? null;
+}
+
+function looksLikeInternoMetaQuestion(rawText: string | undefined | null): boolean {
+  const norm = (rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(interno|numero de interno|n[uú]mero de interno)\b/.test(norm) &&
+    /\b(no puedo|no podes|puedo pasarte|se puede|pod[eé]s|pasarte)\b/.test(norm)
+  );
+}
+
+function filterUnitsByInterno(units: WaraUnidadEstado[], interno: string) {
+  const norm = interno.replace(/\s+/g, "").toLowerCase();
+  return units.filter((u) => {
+    const label = (u.unidad || u.patente || "").replace(/\s+/g, "").toLowerCase();
+    if (!label) return false;
+    return label.includes(norm) || norm.includes(label);
+  });
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -434,8 +461,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (looksLikeInternoMetaQuestion(rawText)) {
+    const message =
+      "Por este chat consulto unidades por patente. Si tenés el número de interno, buscalo en Wara y pasame la patente que ves (por ejemplo MYQ 693), o decime el interno junto con la patente para ubicarla.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_unidades_interno_meta",
+      rawText,
+    });
+    return NextResponse.json(
+      { ok: true, summaryText: message, action: "none" as const, unidadesCount: 0 },
+      { status: BB_STATUS }
+    );
+  }
+
+  const internoInMessage = extractInternoRef(rawText);
+
   if (
     !explicitPlate &&
+    !internoInMessage &&
     (looksLikeAnotherUnitRequest(rawText) || mentionsMissingReportWithoutPlate(rawText))
   ) {
     const askPlate =
@@ -453,17 +496,25 @@ export async function POST(req: NextRequest) {
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);
   if (!session.ok || !session.sessionToken) {
     const waraDetail = session.error?.trim();
+    const isOutage =
+      session.status >= 500 ||
+      (waraDetail && /502|503|504|interrupci|gateway|error de red/i.test(waraDetail));
     const fallbackMsg =
       "No pude consultar las unidades en Wara. Te derivo con un agente para revisarlo.";
+    const outageMsg =
+      "Wara tiene una interrupción temporal y no pude consultar tus unidades en este momento. " +
+      "Las guías de plataforma (Opciones, Unidades) siguen disponibles. Probá de nuevo en unos minutos.";
     return NextResponse.json(
       {
         ok: false,
         error: session.error,
         summaryText: session.requiresCompanySelection
           ? "Antes de consultar unidades necesito que elijas la empresa asociada a este número."
-          : waraDetail
-            ? `No pude consultar las unidades en Wara: ${waraDetail}`
-            : fallbackMsg,
+          : isOutage
+            ? outageMsg
+            : waraDetail
+              ? `No pude consultar las unidades en Wara: ${waraDetail}`
+              : fallbackMsg,
         requiresCompanySelection: session.requiresCompanySelection ?? false,
         testBlocked: session.testBlocked ?? false,
       },
@@ -487,8 +538,11 @@ export async function POST(req: NextRequest) {
       result = await consultarEstadoUnidades(refreshed.sessionToken, requestedPlates);
     }
   }
+  const internoRef = !explicitPlate ? extractInternoRef(rawText) : null;
   const useThreadPlate =
     !explicitPlate &&
+    !internoRef &&
+    !looksLikeInternoMetaQuestion(rawText) &&
     !looksLikeUnitListRequest(rawText) &&
     !looksLikeAnotherUnitRequest(rawText) &&
     requestedPlates.length === 0;
@@ -507,6 +561,9 @@ export async function POST(req: NextRequest) {
         })
       : units;
   let filtered = filterUnits(result.unidades, wantedPlate);
+  if (result.ok && internoRef && filtered.length === 0) {
+    filtered = filterUnitsByInterno(result.unidades, internoRef);
+  }
   if (result.ok && wantedPlate && filtered.length === 0 && requestedPlates.length > 0) {
     const full = await consultarEstadoUnidades(session.sessionToken, []);
     if (full.ok && full.unidades.length > 0) {
@@ -538,7 +595,9 @@ export async function POST(req: NextRequest) {
           ? `No encontré ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. ¿Podés confirmarme la patente exacta? Si es de otra empresa, escribí "cambiar empresa".`
           : wantedPlate
             ? `No encontré la patente ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. Revisá que esté bien escrita o, si corresponde a otra empresa, escribí "cambiar empresa".`
-            : `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
+            : internoRef
+              ? `No encontré el interno ${internoRef} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. Pasame la patente asociada o revisá el número de interno en Wara.`
+              : `No encontré una unidad con esa patente para ${session.companyName || result.cliente || "este cliente"}.`
       : filtered.length === 1
         ? summarizeUnit(filtered[0])
         : buildManyUnitsText(filtered);

@@ -73,30 +73,43 @@ export function detectPlate(text: string): string | null {
   return null;
 }
 
+/** Líneas del bot con ejemplos de flota; no usar sus patentes como intención del cliente. */
+export function lineLooksLikeBotUnitListExample(line: string): boolean {
+  const l = line.trim();
+  if (!l) return false;
+  return (
+    /Ten[eé]s \d+ unidades/i.test(l) ||
+    /Decime una patente puntual/i.test(l) ||
+    /Algunas:/i.test(l) ||
+    / y \d+ m[aá]s\.\s*Decime/i.test(l)
+  );
+}
+
 /**
  * Última patente real mencionada en el hilo (resúmenes del bot, "unidad XX", o patente suelta).
- * Ignora patentes de ejemplo de los prompts.
+ * Ignora patentes de ejemplo de los prompts y patentes solo citadas en listados de ejemplo del bot.
  */
 export function extractLastPlateFromThread(text: string): string | null {
   if (!text?.trim()) return null;
-  const labeled = [
-    ...(text || "").matchAll(
-      /(?:Patente|Matr[ií]cula)[^\n:]*[:\-]\s*([A-Za-z0-9 ]{5,12})/gi
-    ),
-  ];
-  for (let i = labeled.length - 1; i >= 0; i--) {
-    const plate = normalizePlate(labeled[i][1]);
-    if (plate && !isExamplePlate(plate)) return plate;
-  }
-  const unitMention = [...text.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
-  for (let i = unitMention.length - 1; i >= 0; i--) {
-    const plate = normalizePlate(unitMention[i][1]);
-    if (plate && !isExamplePlate(plate)) return plate;
-  }
-  const plates = [...text.matchAll(PLATE_REGEX_GLOBAL)];
-  for (let i = plates.length - 1; i >= 0; i--) {
-    const plate = normalizePlate(plates[i][1]);
-    if (plate && !isExamplePlate(plate)) return plate;
+  const lines = text.split("\n");
+
+  for (let li = lines.length - 1; li >= 0; li--) {
+    const line = lines[li];
+    if (lineLooksLikeBotUnitListExample(line)) continue;
+    const labeled = [
+      ...line.matchAll(/(?:Patente|Matr[ií]cula)[^\n:]*[:\-]\s*([A-Za-z0-9 ]{5,12})/gi),
+    ];
+    for (let i = labeled.length - 1; i >= 0; i--) {
+      const plate = normalizePlate(labeled[i][1]);
+      if (plate && !isExamplePlate(plate)) return plate;
+    }
+    const unitMention = [...line.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
+    for (let i = unitMention.length - 1; i >= 0; i--) {
+      const plate = normalizePlate(unitMention[i][1]);
+      if (plate && !isExamplePlate(plate)) return plate;
+    }
+    const plate = detectPlate(line);
+    if (plate) return plate;
   }
   return null;
 }

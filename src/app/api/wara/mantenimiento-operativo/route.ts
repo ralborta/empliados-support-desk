@@ -10,11 +10,13 @@ import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
 import {
   looksLikeChangeCompanyRequest,
+  looksLikeMaintenanceInfoGuideInThread,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
   looksLikePlatformInfoGuideInThread,
   looksLikeOperationalMaintenanceIntent,
   looksLikeShortAffirmative,
+  looksLikeTurnoOrAgendaQuestion,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   resolveWaraSessionByPhone,
@@ -89,6 +91,7 @@ function inferPriority(raw: string): Priority {
 
 function isMaintenanceHowToRequest(raw: string): boolean {
   if (looksLikeOperationalMaintenanceIntent(raw)) return false;
+  if (looksLikeTurnoOrAgendaQuestion(raw)) return false;
   if (looksLikeOpcionesInfoRequest(raw)) return false;
   if (looksLikeUnidadesInfoRequest(raw)) return false;
   const text = raw
@@ -451,11 +454,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (
+    looksLikeTurnoOrAgendaQuestion(text) ||
     looksLikeOpcionesInfoRequest(text) ||
     looksLikeUnidadesInfoRequest(text) ||
     looksLikeOpcionesInfoRequest(lastInbound) ||
     looksLikeUnidadesInfoRequest(lastInbound) ||
-    looksLikePlatformInfoGuideInThread(threadText)
+    looksLikePlatformInfoGuideInThread(threadText) ||
+    looksLikeMaintenanceInfoGuideInThread(threadText)
   ) {
     return NextResponse.json(
       {

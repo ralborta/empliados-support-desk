@@ -263,6 +263,24 @@ export function looksLikeOperationalMaintenanceIntent(raw: string): boolean {
   );
 }
 
+/** Turno/agenda de Opciones Wara, no mantenimiento operativo de unidades. */
+export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
+  const text = normCompanyToken(raw);
+  if (/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) return false;
+  return /\b(turno|turnos|agenda)\b/.test(text);
+}
+
+/** Guía informativa de mantenimiento ya respondida en el hilo reciente. */
+export function looksLikeMaintenanceInfoGuideInThread(threadText: string): boolean {
+  const tail = threadText.slice(-3500).toLowerCase();
+  return (
+    /modulo de mantenimiento/.test(tail) &&
+    (/orientacion de uso|como guia general|tarea preventiva|tarea correctiva|paso a paso/.test(tail) ||
+      /queres que te explique/.test(tail) ||
+      /no genero un ticket por esta consulta/.test(tail))
+  );
+}
+
 /** Invocación espuria del ejecutor de mantenimiento (p. ej. reproceso tras guía Opciones). */
 export function shouldSkipStrayMaintenanceRequest(
   text: string,
@@ -275,11 +293,13 @@ export function shouldSkipStrayMaintenanceRequest(
 ): boolean {
   if (opts.pendingPlateRequest || opts.pendingMaintConfirm) return false;
   if (looksLikeOperationalMaintenanceIntent(text)) return false;
+  if (looksLikeTurnoOrAgendaQuestion(text)) return true;
   if (looksLikeOpcionesInfoRequest(text)) return true;
   if (looksLikeUnidadesInfoRequest(text)) return true;
   if (opts.lastInbound && looksLikeOpcionesInfoRequest(opts.lastInbound)) return true;
   if (opts.lastInbound && looksLikeUnidadesInfoRequest(opts.lastInbound)) return true;
   if (looksLikePlatformInfoGuideInThread(threadText)) return true;
+  if (looksLikeMaintenanceInfoGuideInThread(threadText)) return true;
   if (isGenericMaintenanceFallbackText(text)) return true;
   return false;
 }
@@ -959,6 +979,41 @@ function pruebasFallbackNoteMessage(blockedCompany: string, fallbackCompany: str
   return (
     `⚠️ Modo prueba: Wara no abrió sesión para ${blockedCompany}. ` +
     `Continuamos con ${fallbackCompany} hasta que Wara habilite ese contacto.`
+  );
+}
+
+function isHardWaraSessionError(status: number, error?: string): boolean {
+  const e = normCompanyToken(error ?? "");
+  if (status === 401 || status === 403) return true;
+  return /inexistente|no autorizado|token invalido|no habilito|contacto invalido/.test(e);
+}
+
+/** Caída/intermitencia de Wara (502/503/red): no bloquear elección de empresa. */
+function isTransientWaraSessionError(status: number, error?: string): boolean {
+  if (isHardWaraSessionError(status, error)) return false;
+  if (status >= 500 || status === 0) return true;
+  const e = normCompanyToken(error ?? "");
+  return /502|503|504|timeout|error de red|gateway|intermitente|http 5/.test(e);
+}
+
+function softCompanySelectDuringWaraOutageMessage(company: string): string {
+  return (
+    `Listo, sigo con ${company}. Wara tiene una interrupción temporal en sus servidores; ` +
+    `las guías de plataforma (Opciones, Unidades, etc.) siguen disponibles por este chat. ` +
+    `Para consultar unidades u otros trámites en vivo, probá de nuevo en unos minutos.\n\n` +
+    `¿En qué te puedo ayudar?`
+  );
+}
+
+function formatWaraSessionFailureMessage(
+  company: string,
+  contactId: number,
+  waraErr: string,
+  menu: string
+): string {
+  return (
+    `No pude abrir sesión en Wara para ${company} (contacto ${contactId}): ${waraErr}\n\n` +
+    `${menu}\n\nProbá con otra opción o contactá soporte si el error persiste.`
   );
 }
 
@@ -1790,17 +1845,30 @@ export async function selectCompanyForCustomer(
 
   const matchedCompany = matched.empresa || matched.nombre;
   const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+
+  async function finishCompanySelect(contact: WaraEmpresaContact, menuMessage?: string) {
+    const saved = await persistCompanyChoice(contact);
+    const label = contact.empresa || contact.nombre;
+    return {
+      ok: true as const,
+      customer: saved.customer,
+      status: 200,
+      matchedContact: contact,
+      contacts: lookup.contactos,
+      menuMessage: menuMessage ?? `Perfecto, sigo con ${label}. ¿En qué te puedo ayudar?`,
+    };
+  }
+
   if (local?.selectedCompanyContactId === matched.id) {
     const session = await ensureWaraSessionForContact(prisma, rawPhone, matched);
     if (session.ok && session.sessionToken) {
-      return {
-        ok: true,
-        customer: local,
-        status: 200,
-        matchedContact: matched,
-        contacts: lookup.contactos,
-        menuMessage: `Estás operando con ${matchedCompany}. ¿En qué te puedo ayudar?`,
-      };
+      return finishCompanySelect(matched, `Estás operando con ${matchedCompany}. ¿En qué te puedo ayudar?`);
+    }
+    if (isTransientWaraSessionError(session.status, session.error)) {
+      console.warn(
+        `[WaraAPI] Wara intermitente al revalidar ${matchedCompany} (contacto ${matched.id}); empresa guardada igual.`
+      );
+      return finishCompanySelect(matched, softCompanySelectDuringWaraOutageMessage(matchedCompany));
     }
   }
 
@@ -1824,6 +1892,12 @@ export async function selectCompanyForCustomer(
         };
       }
     }
+    if (isTransientWaraSessionError(sessionProbe.status, sessionProbe.error)) {
+      console.warn(
+        `[WaraAPI] Wara intermitente al elegir ${matchedCompany} (contacto ${matched.id}); empresa guardada sin SessionToken.`
+      );
+      return finishCompanySelect(matched, softCompanySelectDuringWaraOutageMessage(matchedCompany));
+    }
     const menu = formatContactsMenu(allContacts);
     const waraErr = sessionProbe.error?.trim() || "Wara no devolvió SessionToken";
     return {
@@ -1833,17 +1907,9 @@ export async function selectCompanyForCustomer(
       error: waraErr,
       contacts: lookup.contactos,
       matchedContact: matched,
-      menuMessage:
-        `No pude abrir sesión en Wara para ${matchedCompany} (contacto ${matched.id}): ${waraErr}\n\n${menu}\n\nProbá con otra opción o contactá soporte si el error persiste.`,
+      menuMessage: formatWaraSessionFailureMessage(matchedCompany, matched.id, waraErr, menu),
     };
   }
 
-  const saved = await persistCompanyChoice(matched);
-  return {
-    ok: true,
-    customer: saved.customer,
-    status: 200,
-    matchedContact: matched,
-    contacts: lookup.contactos,
-  };
+  return finishCompanySelect(matched);
 }
