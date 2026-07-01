@@ -97,24 +97,17 @@ function summarizeUnit(unit: WaraUnidadEstado): string {
   return `Unidad ${formatUnitLabel(unit)}: último reporte hace ${minutesAgo(unit.ultimo_reporte?.hace_segundos)}, última posición hace ${pos}, ignición ${ign}, alimentación ${volt}.`;
 }
 
-/** Margen: si la posición es mucho más vieja que el reporte, el equipo no está reportando bien. */
+/** Margen: posición o ignición desalineadas respecto al reporte → no se consideran actualizadas. */
 const POSITION_REPORT_DRIFT_SECONDS = 20 * 60;
-/** Unidad parada: posición e ignición apagada con timestamps similares (Mesa de Ayuda Wara). */
-const PARKED_IGNITION_POSITION_ALIGN_SECONDS = 30 * 60;
+const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 60 * 60;
 
 type ReportingAssessment =
   | { status: "ok"; reportElapsed: number }
   | {
-      status: "parked";
-      reportElapsed: number;
-      positionElapsed: number;
-      ignitionElapsed: number;
-    }
-  | {
       status: "ignition_failure";
       reportElapsed: number;
       positionElapsed: number;
-      ignitionElapsed: number;
+      ignitionElapsed: number | null;
     }
   | { status: "missing_report"; reportElapsed: number }
   | { status: "stale_position"; reportElapsed: number; positionElapsed: number | null; reason: string };
@@ -123,13 +116,27 @@ function telemetryElapsedSeconds(value: number | undefined | null): number | nul
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function positionMatchesIgnitionOff(positionElapsed: number, ignitionElapsed: number): boolean {
-  return Math.abs(positionElapsed - ignitionElapsed) <= PARKED_IGNITION_POSITION_ALIGN_SECONDS;
+/** Paso 1 del flujograma Mesa de Ayuda Wara: ¿envía reporte actualizado? */
+function isReportUpdated(reportElapsed: number): boolean {
+  return reportElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS;
 }
 
-/** Posición se actualizó claramente después de que se apagó la ignición. */
-function positionNewerThanIgnitionOff(positionElapsed: number, ignitionElapsed: number): boolean {
-  return positionElapsed + POSITION_REPORT_DRIFT_SECONDS < ignitionElapsed;
+/** Paso 2: ¿posición se actualiza? (alineada con el reporte reciente). */
+function isPositionUpdating(reportElapsed: number, positionElapsed: number | null): boolean {
+  if (positionElapsed == null) return false;
+  return positionElapsed <= reportElapsed + POSITION_REPORT_DRIFT_SECONDS;
+}
+
+/** Paso 3: ¿ignición cambia de estado? (telemetría de ignición al día vs reporte/posición). */
+function isIgnitionUpdating(
+  reportElapsed: number,
+  positionElapsed: number,
+  ignitionElapsed: number | null
+): boolean {
+  if (ignitionElapsed == null) return false;
+  if (ignitionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
+  if (ignitionElapsed > positionElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
+  return true;
 }
 
 function formatWaraDateLocal(iso: string | undefined | null): string {
@@ -219,94 +226,45 @@ function appendLocationIfRequested(summary: string, unit: WaraUnidadEstado, rawT
   return appendix ? `${summary}${appendix}` : summary;
 }
 
+/**
+ * Flujograma Mesa de Ayuda Wara (secuencial):
+ * 1. ¿Reporte actualizado? → NO: Caso 1 falta de reporte
+ * 2. ¿Posición se actualiza? → NO: Caso 2 pérdida de señal satelital
+ * 3. ¿Ignición cambia de estado? → NO: Caso 3 falla de ignición
+ * 4. Sí a todo → funcionamiento normal
+ */
 function assessUnitReporting(unit: WaraUnidadEstado): ReportingAssessment | null {
   const reportElapsed = reportElapsedSeconds(unit);
   if (reportElapsed == null) return null;
 
   const positionElapsed = telemetryElapsedSeconds(unit.ultima_posicion?.hace_segundos);
   const ignitionElapsed = telemetryElapsedSeconds(unit.ultima_ignicion?.hace_segundos);
-  const ignitionOff = unit.ultima_ignicion?.estado === false;
-  const ignitionOn = unit.ultima_ignicion?.estado === true;
 
-  if (reportElapsed >= MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
+  if (!isReportUpdated(reportElapsed)) {
     return { status: "missing_report", reportElapsed };
   }
 
-  if (
-    ignitionOff &&
-    positionElapsed != null &&
-    ignitionElapsed != null &&
-    positionMatchesIgnitionOff(positionElapsed, ignitionElapsed)
-  ) {
-    return { status: "parked", reportElapsed, positionElapsed, ignitionElapsed };
-  }
-
-  if (
-    ignitionOff &&
-    positionElapsed != null &&
-    ignitionElapsed != null &&
-    positionNewerThanIgnitionOff(positionElapsed, ignitionElapsed)
-  ) {
-    return { status: "ignition_failure", reportElapsed, positionElapsed, ignitionElapsed };
-  }
-
-  if (positionElapsed == null) {
-    if (ignitionOff) {
-      return { status: "ok", reportElapsed };
-    }
-    return {
-      status: "stale_position",
-      reportElapsed,
-      positionElapsed: null,
-      reason: "no figura última posición en Wara",
-    };
-  }
-
-  if (positionElapsed >= MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
-    if (
-      ignitionOff &&
-      ignitionElapsed != null &&
-      positionMatchesIgnitionOff(positionElapsed, ignitionElapsed)
-    ) {
-      return { status: "parked", reportElapsed, positionElapsed, ignitionElapsed };
-    }
-    if (!ignitionOn) {
-      return {
-        status: "stale_position",
-        reportElapsed,
-        positionElapsed,
-        reason: `la última posición es de hace ${minutesAgo(positionElapsed)}`,
-      };
-    }
-  }
-
-  if (positionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) {
-    if (
-      ignitionOff &&
-      ignitionElapsed != null &&
-      positionMatchesIgnitionOff(positionElapsed, ignitionElapsed)
-    ) {
-      return { status: "parked", reportElapsed, positionElapsed, ignitionElapsed };
-    }
+  if (!isPositionUpdating(reportElapsed, positionElapsed)) {
+    const reason =
+      positionElapsed == null
+        ? "pérdida de señal satelital: no figura última posición en Wara"
+        : `pérdida de señal satelital: el reporte es reciente pero la posición no se actualiza (posición hace ${minutesAgo(positionElapsed)}, reporte hace ${minutesAgo(reportElapsed)})`;
     return {
       status: "stale_position",
       reportElapsed,
       positionElapsed,
-      reason: `el reporte es reciente pero la posición quedó desactualizada (posición hace ${minutesAgo(positionElapsed)}, reporte hace ${minutesAgo(reportElapsed)})`,
+      reason,
     };
   }
 
-  if (
-    ignitionOn &&
-    ignitionElapsed != null &&
-    ignitionElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS &&
-    positionElapsed > ignitionElapsed + POSITION_REPORT_DRIFT_SECONDS
-  ) {
+  const posElapsed = positionElapsed as number;
+
+  if (!isIgnitionUpdating(reportElapsed, posElapsed, ignitionElapsed)) {
     return {
-      status: "stale_position",
+      status: "ignition_failure",
       reportElapsed,
-      positionElapsed,
-      reason: `hay ignición encendida pero la posición no se actualiza (ignición hace ${minutesAgo(ignitionElapsed)}, posición hace ${minutesAgo(positionElapsed)})`,
+      positionElapsed: posElapsed,
+      ignitionElapsed,
     };
   }
 
@@ -334,7 +292,6 @@ function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
 // Este endpoint lo consume exclusivamente BuilderBot: SIEMPRE respondemos 200 y dejamos
 // el estado real en `ok` + el texto en `summaryText`.
 const BB_STATUS = 200;
-const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 60 * 60;
 
 async function recentThreadText(rawPhone: string): Promise<string> {
   try {
@@ -1033,23 +990,20 @@ export async function POST(req: NextRequest) {
         const label = formatUnitLabel(unit);
         if (assessment.status === "ok") {
           action = "observation";
-          summaryText = `La unidad ${label} reportó hace ${elapsedText} y la posición también está al día. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
-        } else if (assessment.status === "parked") {
-          action = "observation";
-          summaryText =
-            `La unidad ${label} está detenida: el reporte es reciente (hace ${elapsedText}), ` +
-            `la ignición está apagada hace ${minutesAgo(assessment.ignitionElapsed)} y la última posición coincide (hace ${minutesAgo(assessment.positionElapsed)}). ` +
-            `Es normal que no actualice posición mientras está parada con motor apagado; no genero ticket.`;
+          summaryText = `Funcionamiento normal: la unidad ${label} envía reporte actualizado (hace ${elapsedText}), la posición se actualiza y la ignición cambia de estado correctamente. No genero ticket. El GPS puede reportar cada 10 minutos; si algo cambia, volvé a consultar.`;
         } else if (assessment.status === "ignition_failure") {
           action = "ticket";
+          const ignText =
+            assessment.ignitionElapsed != null
+              ? `hace ${minutesAgo(assessment.ignitionElapsed)}`
+              : "sin dato reciente";
           const created = await createMissingReportTicket({
             rawPhone,
             unit,
             companyName: session.companyName ?? result.cliente ?? "",
             contactName: session.contactName ?? "",
             elapsedText,
-            issueDetail:
-              "falla de ignición: la posición se actualiza pero la ignición figura apagada",
+            issueDetail: `falla de ignición: reporte y posición al día pero la ignición no cambia de estado (última ignición ${ignText})`,
             incidentType: "GENERAL_TECH",
             ticketTitleSuffix: "Falla de ignición",
           });
@@ -1064,7 +1018,8 @@ export async function POST(req: NextRequest) {
             contactName: session.contactName ?? "",
             elapsedText: minutesAgo(assessment.reportElapsed),
             issueDetail: assessment.reason,
-            ticketTitleSuffix: "Posición desactualizada",
+            incidentType: "GENERAL_TECH",
+            ticketTitleSuffix: "Pérdida de señal satelital",
           });
           ticketRef = created.ref;
           summaryText = created.message;
@@ -1076,6 +1031,8 @@ export async function POST(req: NextRequest) {
             companyName: session.companyName ?? result.cliente ?? "",
             contactName: session.contactName ?? "",
             elapsedText,
+            issueDetail: `falta de reporte: el GPS no envía datos hace ${elapsedText}`,
+            ticketTitleSuffix: "Falta de reporte",
           });
           ticketRef = created.ref;
           summaryText = created.message;
