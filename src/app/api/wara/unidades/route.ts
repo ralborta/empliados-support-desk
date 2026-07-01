@@ -99,27 +99,161 @@ function summarizeUnit(unit: WaraUnidadEstado): string {
 
 /** Margen: si la posición es mucho más vieja que el reporte, el equipo no está reportando bien. */
 const POSITION_REPORT_DRIFT_SECONDS = 20 * 60;
+/** Unidad parada: posición e ignición apagada con timestamps similares (Mesa de Ayuda Wara). */
+const PARKED_IGNITION_POSITION_ALIGN_SECONDS = 30 * 60;
 
 type ReportingAssessment =
   | { status: "ok"; reportElapsed: number }
+  | {
+      status: "parked";
+      reportElapsed: number;
+      positionElapsed: number;
+      ignitionElapsed: number;
+    }
+  | {
+      status: "ignition_failure";
+      reportElapsed: number;
+      positionElapsed: number;
+      ignitionElapsed: number;
+    }
   | { status: "missing_report"; reportElapsed: number }
   | { status: "stale_position"; reportElapsed: number; positionElapsed: number | null; reason: string };
+
+function telemetryElapsedSeconds(value: number | undefined | null): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function positionMatchesIgnitionOff(positionElapsed: number, ignitionElapsed: number): boolean {
+  return Math.abs(positionElapsed - ignitionElapsed) <= PARKED_IGNITION_POSITION_ALIGN_SECONDS;
+}
+
+/** Posición se actualizó claramente después de que se apagó la ignición. */
+function positionNewerThanIgnitionOff(positionElapsed: number, ignitionElapsed: number): boolean {
+  return positionElapsed + POSITION_REPORT_DRIFT_SECONDS < ignitionElapsed;
+}
+
+function formatWaraDateLocal(iso: string | undefined | null): string {
+  if (!iso?.trim()) return "";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return new Intl.DateTimeFormat("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(d);
+  } catch {
+    return iso;
+  }
+}
+
+function ignitionLabel(unit: WaraUnidadEstado): string {
+  if (unit.ultima_ignicion?.estado === true) return "encendida";
+  if (unit.ultima_ignicion?.estado === false) return "apagada";
+  return "sin dato";
+}
+
+function buildUnitTelemetryOdooLines(unit: WaraUnidadEstado): string[] {
+  const reportElapsed = telemetryElapsedSeconds(unit.ultimo_reporte?.hace_segundos);
+  const positionElapsed = telemetryElapsedSeconds(unit.ultima_posicion?.hace_segundos);
+  const ignitionElapsed = telemetryElapsedSeconds(unit.ultima_ignicion?.hace_segundos);
+  const lines: string[] = [];
+  if (reportElapsed != null) {
+    lines.push(
+      `Último reporte: hace ${minutesAgo(reportElapsed)}` +
+        (unit.ultimo_reporte?.fecha
+          ? ` (${formatWaraDateLocal(unit.ultimo_reporte.fecha)} ART)`
+          : "")
+    );
+  }
+  if (positionElapsed != null) {
+    lines.push(
+      `Última posición: hace ${minutesAgo(positionElapsed)}` +
+        (unit.ultima_posicion?.fecha
+          ? ` (${formatWaraDateLocal(unit.ultima_posicion.fecha)} ART)`
+          : "")
+    );
+  }
+  const lat = unit.ultima_posicion?.lat;
+  const lon = unit.ultima_posicion?.lon;
+  if (typeof lat === "number" && typeof lon === "number") {
+    lines.push(`Coordenadas: ${lat}, ${lon}`);
+  }
+  lines.push(
+    `Ignición: ${ignitionLabel(unit)}` +
+      (ignitionElapsed != null ? ` — hace ${minutesAgo(ignitionElapsed)}` : "") +
+      (unit.ultima_ignicion?.fecha
+        ? ` (${formatWaraDateLocal(unit.ultima_ignicion.fecha)} ART)`
+        : "")
+  );
+  const volt = unit.alimentacion_externa?.voltaje;
+  if (typeof volt === "number" && Number.isFinite(volt)) {
+    lines.push(`Alimentación: ${volt}V`);
+  }
+  return lines;
+}
+
+function looksLikeLocationRequest(text: string | undefined | null): boolean {
+  const norm = (text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(ubicacion|donde esta|donde quedo|mostrame|mostra|mostrar en el mapa|mapa|coordenadas|localizacion|donde se encuentra|donde anda|en donde|dnde esta)\b/.test(
+    norm
+  );
+}
+
+function formatLocationAppendix(unit: WaraUnidadEstado): string {
+  const lat = unit.ultima_posicion?.lat;
+  const lon = unit.ultima_posicion?.lon;
+  if (typeof lat !== "number" || typeof lon !== "number") return "";
+  const posAgo = minutesAgo(unit.ultima_posicion?.hace_segundos);
+  const fecha = formatWaraDateLocal(unit.ultima_posicion?.fecha);
+  const when = fecha ? ` (${fecha})` : "";
+  return `\n\nÚltima ubicación conocida hace ${posAgo}${when}: https://www.google.com/maps?q=${lat},${lon}`;
+}
+
+function appendLocationIfRequested(summary: string, unit: WaraUnidadEstado, rawText: string): string {
+  if (!looksLikeLocationRequest(rawText)) return summary;
+  const appendix = formatLocationAppendix(unit);
+  return appendix ? `${summary}${appendix}` : summary;
+}
 
 function assessUnitReporting(unit: WaraUnidadEstado): ReportingAssessment | null {
   const reportElapsed = reportElapsedSeconds(unit);
   if (reportElapsed == null) return null;
 
-  const positionElapsed =
-    typeof unit.ultima_posicion?.hace_segundos === "number" &&
-    Number.isFinite(unit.ultima_posicion.hace_segundos)
-      ? unit.ultima_posicion.hace_segundos
-      : null;
+  const positionElapsed = telemetryElapsedSeconds(unit.ultima_posicion?.hace_segundos);
+  const ignitionElapsed = telemetryElapsedSeconds(unit.ultima_ignicion?.hace_segundos);
+  const ignitionOff = unit.ultima_ignicion?.estado === false;
+  const ignitionOn = unit.ultima_ignicion?.estado === true;
 
   if (reportElapsed >= MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
     return { status: "missing_report", reportElapsed };
   }
 
+  if (
+    ignitionOff &&
+    positionElapsed != null &&
+    ignitionElapsed != null &&
+    positionMatchesIgnitionOff(positionElapsed, ignitionElapsed)
+  ) {
+    return { status: "parked", reportElapsed, positionElapsed, ignitionElapsed };
+  }
+
+  if (
+    ignitionOff &&
+    positionElapsed != null &&
+    ignitionElapsed != null &&
+    positionNewerThanIgnitionOff(positionElapsed, ignitionElapsed)
+  ) {
+    return { status: "ignition_failure", reportElapsed, positionElapsed, ignitionElapsed };
+  }
+
   if (positionElapsed == null) {
+    if (ignitionOff) {
+      return { status: "ok", reportElapsed };
+    }
     return {
       status: "stale_position",
       reportElapsed,
@@ -129,15 +263,31 @@ function assessUnitReporting(unit: WaraUnidadEstado): ReportingAssessment | null
   }
 
   if (positionElapsed >= MISSING_REPORT_TICKET_THRESHOLD_SECONDS) {
-    return {
-      status: "stale_position",
-      reportElapsed,
-      positionElapsed,
-      reason: `la última posición es de hace ${minutesAgo(positionElapsed)}`,
-    };
+    if (
+      ignitionOff &&
+      ignitionElapsed != null &&
+      positionMatchesIgnitionOff(positionElapsed, ignitionElapsed)
+    ) {
+      return { status: "parked", reportElapsed, positionElapsed, ignitionElapsed };
+    }
+    if (!ignitionOn) {
+      return {
+        status: "stale_position",
+        reportElapsed,
+        positionElapsed,
+        reason: `la última posición es de hace ${minutesAgo(positionElapsed)}`,
+      };
+    }
   }
 
   if (positionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) {
+    if (
+      ignitionOff &&
+      ignitionElapsed != null &&
+      positionMatchesIgnitionOff(positionElapsed, ignitionElapsed)
+    ) {
+      return { status: "parked", reportElapsed, positionElapsed, ignitionElapsed };
+    }
     return {
       status: "stale_position",
       reportElapsed,
@@ -146,12 +296,8 @@ function assessUnitReporting(unit: WaraUnidadEstado): ReportingAssessment | null
     };
   }
 
-  const ignitionElapsed =
-    typeof unit.ultima_ignicion?.hace_segundos === "number" &&
-    Number.isFinite(unit.ultima_ignicion.hace_segundos)
-      ? unit.ultima_ignicion.hace_segundos
-      : null;
   if (
+    ignitionOn &&
     ignitionElapsed != null &&
     ignitionElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS &&
     positionElapsed > ignitionElapsed + POSITION_REPORT_DRIFT_SECONDS
@@ -160,7 +306,7 @@ function assessUnitReporting(unit: WaraUnidadEstado): ReportingAssessment | null
       status: "stale_position",
       reportElapsed,
       positionElapsed,
-      reason: `hay ignición reciente pero la posición no se actualiza (ignición hace ${minutesAgo(ignitionElapsed)}, posición hace ${minutesAgo(positionElapsed)})`,
+      reason: `hay ignición encendida pero la posición no se actualiza (ignición hace ${minutesAgo(ignitionElapsed)}, posición hace ${minutesAgo(positionElapsed)})`,
     };
   }
 
@@ -425,17 +571,19 @@ async function createMissingReportTicket(params: {
   contactName: string;
   elapsedText: string;
   issueDetail?: string;
+  incidentType?: "MISSING_REPORT" | "GENERAL_TECH";
+  ticketTitleSuffix?: string;
 }): Promise<{ ref: string; message: string; reused: boolean }> {
   const plate = normalizeLoosePlate(params.unit.patente || params.unit.unidad || "");
   const issueLabel = params.issueDetail
-    ? `problema de reporte (${params.issueDetail})`
+    ? params.issueDetail
     : `sin reporte hace ${params.elapsedText}`;
   const existing = await findRecentMissingReportTicket(params.rawPhone, plate);
   if (!existing?.customer) {
     return {
       ref: "",
       reused: false,
-      message: `La unidad ${params.unit.patente || params.unit.unidad} está ${issueLabel}. No pude registrar el caso automáticamente, te derivo con un asesor para revisarlo.`,
+      message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. No pude registrar el caso automáticamente, te derivo con un asesor para revisarlo.`,
     };
   }
 
@@ -443,13 +591,16 @@ async function createMissingReportTicket(params: {
     return {
       ref: existing.ticket.code,
       reused: true,
-      message: `La unidad ${params.unit.patente || params.unit.unidad} está ${issueLabel}. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
+      message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
     };
   }
 
-  const title = params.issueDetail
-    ? `${plate} - ${params.issueDetail}`
-    : `${plate} - Unidad sin reporte hace ${params.elapsedText}`;
+  const title = params.ticketTitleSuffix
+    ? `${plate} - ${params.ticketTitleSuffix}`
+    : params.issueDetail
+      ? `${plate} - ${params.issueDetail}`
+      : `${plate} - Unidad sin reporte hace ${params.elapsedText}`;
+  const incidentType = params.incidentType ?? "MISSING_REPORT";
   const localTicket = await prisma.ticket.create({
     data: {
       code: generateTicketCode(),
@@ -463,9 +614,9 @@ async function createMissingReportTicket(params: {
       status: "IN_PROGRESS",
       priority: "HIGH",
       category: "TECH_SUPPORT",
-      incidentType: "MISSING_REPORT",
+      incidentType,
       channel: "WHATSAPP",
-      aiSummary: `Unidad ${plate} con ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
+      aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
     },
   });
 
@@ -474,12 +625,13 @@ async function createMissingReportTicket(params: {
       ticketId: localTicket.id,
       direction: "INBOUND",
       from: "CUSTOMER",
-      text: `Reclamo/consulta por unidad sin reporte: ${plate}`,
+      text: `Reclamo/consulta por unidad: ${plate} — ${issueLabel}`,
       rawPayload: {
         source: "wara_unidades_auto_ticket",
         plate,
         companyName: params.companyName,
         elapsedText: params.elapsedText,
+        issueDetail: params.issueDetail ?? "",
         lastReportDate: params.unit.ultimo_reporte?.fecha ?? "",
         phone: params.rawPhone,
       } as Prisma.InputJsonObject,
@@ -493,12 +645,12 @@ async function createMissingReportTicket(params: {
       const odoo = await createHelpdeskTicket(odooCfg, {
         subject: title,
         description: [
-          `Unidad sin reporte detectada por Atilio / WhatsApp.`,
+          `Consulta/reclamo detectado por Atilio / WhatsApp.`,
           `Empresa Wara: ${params.companyName}`,
           `Patente: ${plate}`,
-          `Unidad: ${params.unit.unidad || ""}`,
-          `Último reporte: hace ${params.elapsedText}`,
-          params.unit.ultimo_reporte?.fecha ? `Fecha último reporte (Wara): ${params.unit.ultimo_reporte.fecha}` : "",
+          params.unit.unidad ? `Nombre unidad: ${params.unit.unidad}` : "",
+          `Motivo: ${issueLabel}`,
+          ...buildUnitTelemetryOdooLines(params.unit),
           `WhatsApp: ${params.rawPhone}`,
           `Ticket local: ${localTicket.code}`,
         ]
@@ -528,7 +680,7 @@ async function createMissingReportTicket(params: {
   return {
     ref,
     reused: false,
-    message: `La unidad ${params.unit.patente || params.unit.unidad} está ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
+    message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
   };
 }
 
@@ -878,9 +1030,31 @@ export async function POST(req: NextRequest) {
       const assessment = assessUnitReporting(unit);
       if (assessment) {
         const elapsedText = minutesAgo(assessment.reportElapsed);
+        const label = formatUnitLabel(unit);
         if (assessment.status === "ok") {
           action = "observation";
-          summaryText = `La unidad ${formatUnitLabel(unit)} reportó hace ${elapsedText} y la posición también está al día. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
+          summaryText = `La unidad ${label} reportó hace ${elapsedText} y la posición también está al día. Como está dentro del margen de observación, no genero ticket por ahora. El GPS puede reportar cada 10 minutos; te recomiendo volver a verificar en aproximadamente una hora.`;
+        } else if (assessment.status === "parked") {
+          action = "observation";
+          summaryText =
+            `La unidad ${label} está detenida: el reporte es reciente (hace ${elapsedText}), ` +
+            `la ignición está apagada hace ${minutesAgo(assessment.ignitionElapsed)} y la última posición coincide (hace ${minutesAgo(assessment.positionElapsed)}). ` +
+            `Es normal que no actualice posición mientras está parada con motor apagado; no genero ticket.`;
+        } else if (assessment.status === "ignition_failure") {
+          action = "ticket";
+          const created = await createMissingReportTicket({
+            rawPhone,
+            unit,
+            companyName: session.companyName ?? result.cliente ?? "",
+            contactName: session.contactName ?? "",
+            elapsedText,
+            issueDetail:
+              "falla de ignición: la posición se actualiza pero la ignición figura apagada",
+            incidentType: "GENERAL_TECH",
+            ticketTitleSuffix: "Falla de ignición",
+          });
+          ticketRef = created.ref;
+          summaryText = created.message;
         } else if (assessment.status === "stale_position") {
           action = "ticket";
           const created = await createMissingReportTicket({
@@ -890,6 +1064,7 @@ export async function POST(req: NextRequest) {
             contactName: session.contactName ?? "",
             elapsedText: minutesAgo(assessment.reportElapsed),
             issueDetail: assessment.reason,
+            ticketTitleSuffix: "Posición desactualizada",
           });
           ticketRef = created.ref;
           summaryText = created.message;
@@ -907,6 +1082,7 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+    summaryText = appendLocationIfRequested(summaryText, unit, rawText);
   }
 
   await appendOutboundBotMessage(rawPhone, summaryText, {
