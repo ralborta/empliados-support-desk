@@ -23,6 +23,7 @@ import {
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
+import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
 
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
@@ -521,22 +522,18 @@ export async function customerRegisteredContextResponse(
     // Empresa ya guardada: no bloquear trámites por flag inconsistente.
     nextFlow = duplicateInicioTurn ? "ignore" : "router";
     responseMessage = "";
+  } else if (selectionText && looksLikeUnitListRequest(selectionText)) {
+    // Listado de flota: ir al router/API, no menú ni saludo con caso previo.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
-      const greetingLabel =
-        selectionText.trim() && looksLikeGreeting(selectionText)
-          ? selectionText.trim().charAt(0).toUpperCase() + selectionText.trim().slice(1)
-          : "Hola";
       if (lastTicket && (lastKnownPlate || lastTicket.code)) {
-        const platePart = lastKnownPlateFormatted
-          ? ` sobre la unidad ${lastKnownPlateFormatted}`
-          : "";
-        const casePart = lastTicket.code ? ` (caso ${lastTicket.code})` : "";
         responseMessage = firstName
-          ? `${greetingLabel}, ${firstName}. Seguimos${platePart}${casePart}. ¿Querés sumar algo o necesitás hablar con un asesor?`
-          : `${greetingLabel}. Seguimos${platePart}${casePart}. ¿Querés sumar algo o necesitás hablar con un asesor?`;
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;
       } else if (multiCompany && waraContactsText) {
         const hola = firstName
           ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`

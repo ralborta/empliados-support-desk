@@ -18,6 +18,14 @@ import {
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
+import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
+import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
+import {
+  filterUnitsByResolvedPlate,
+  filterUnitsBySearchTerms,
+  looksLikeUnitListRequest,
+  resolveUnitQuery,
+} from "@/lib/waraUnitIntent";
 
 const bodySchema = z
   .object({
@@ -49,14 +57,8 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
   );
 }
 
-function minutesAgo(seconds: number | undefined): string {
-  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "sin dato";
-  if (seconds < 90) return "menos de 2 minutos";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 90) return `${minutes} minutos`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours} horas`;
-  return `${Math.round(hours / 24)} días`;
+function minutesAgo(seconds: number | undefined | null): string {
+  return formatMinutesAgo(seconds);
 }
 
 function hasTelemetrySeconds(value: number | undefined | null): boolean {
@@ -97,48 +99,6 @@ function summarizeUnit(unit: WaraUnidadEstado): string {
   return `Unidad ${formatUnitLabel(unit)}: último reporte hace ${minutesAgo(unit.ultimo_reporte?.hace_segundos)}, última posición hace ${pos}, ignición ${ign}, alimentación ${volt}.`;
 }
 
-/** Margen: posición o ignición desalineadas respecto al reporte → no se consideran actualizadas. */
-const POSITION_REPORT_DRIFT_SECONDS = 20 * 60;
-const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 60 * 60;
-
-type ReportingAssessment =
-  | { status: "ok"; reportElapsed: number }
-  | {
-      status: "ignition_failure";
-      reportElapsed: number;
-      positionElapsed: number;
-      ignitionElapsed: number | null;
-    }
-  | { status: "missing_report"; reportElapsed: number }
-  | { status: "stale_position"; reportElapsed: number; positionElapsed: number | null; reason: string };
-
-function telemetryElapsedSeconds(value: number | undefined | null): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-/** Paso 1 del flujograma Mesa de Ayuda Wara: ¿envía reporte actualizado? */
-function isReportUpdated(reportElapsed: number): boolean {
-  return reportElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS;
-}
-
-/** Paso 2: ¿posición se actualiza? (alineada con el reporte reciente). */
-function isPositionUpdating(reportElapsed: number, positionElapsed: number | null): boolean {
-  if (positionElapsed == null) return false;
-  return positionElapsed <= reportElapsed + POSITION_REPORT_DRIFT_SECONDS;
-}
-
-/** Paso 3: ¿ignición cambia de estado? (telemetría de ignición al día vs reporte/posición). */
-function isIgnitionUpdating(
-  reportElapsed: number,
-  positionElapsed: number,
-  ignitionElapsed: number | null
-): boolean {
-  if (ignitionElapsed == null) return false;
-  if (ignitionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
-  if (ignitionElapsed > positionElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
-  return true;
-}
-
 function formatWaraDateLocal(iso: string | undefined | null): string {
   if (!iso?.trim()) return "";
   try {
@@ -152,12 +112,6 @@ function formatWaraDateLocal(iso: string | undefined | null): string {
   } catch {
     return iso;
   }
-}
-
-function ignitionLabel(unit: WaraUnidadEstado): string {
-  if (unit.ultima_ignicion?.estado === true) return "encendida";
-  if (unit.ultima_ignicion?.estado === false) return "apagada";
-  return "sin dato";
 }
 
 function buildUnitTelemetryOdooLines(unit: WaraUnidadEstado): string[] {
@@ -226,51 +180,6 @@ function appendLocationIfRequested(summary: string, unit: WaraUnidadEstado, rawT
   return appendix ? `${summary}${appendix}` : summary;
 }
 
-/**
- * Flujograma Mesa de Ayuda Wara (secuencial):
- * 1. ¿Reporte actualizado? → NO: Caso 1 falta de reporte
- * 2. ¿Posición se actualiza? → NO: Caso 2 pérdida de señal satelital
- * 3. ¿Ignición cambia de estado? → NO: Caso 3 falla de ignición
- * 4. Sí a todo → funcionamiento normal
- */
-function assessUnitReporting(unit: WaraUnidadEstado): ReportingAssessment | null {
-  const reportElapsed = reportElapsedSeconds(unit);
-  if (reportElapsed == null) return null;
-
-  const positionElapsed = telemetryElapsedSeconds(unit.ultima_posicion?.hace_segundos);
-  const ignitionElapsed = telemetryElapsedSeconds(unit.ultima_ignicion?.hace_segundos);
-
-  if (!isReportUpdated(reportElapsed)) {
-    return { status: "missing_report", reportElapsed };
-  }
-
-  if (!isPositionUpdating(reportElapsed, positionElapsed)) {
-    const reason =
-      positionElapsed == null
-        ? "pérdida de señal satelital: no figura última posición en Wara"
-        : `pérdida de señal satelital: el reporte es reciente pero la posición no se actualiza (posición hace ${minutesAgo(positionElapsed)}, reporte hace ${minutesAgo(reportElapsed)})`;
-    return {
-      status: "stale_position",
-      reportElapsed,
-      positionElapsed,
-      reason,
-    };
-  }
-
-  const posElapsed = positionElapsed as number;
-
-  if (!isIgnitionUpdating(reportElapsed, posElapsed, ignitionElapsed)) {
-    return {
-      status: "ignition_failure",
-      reportElapsed,
-      positionElapsed: posElapsed,
-      ignitionElapsed,
-    };
-  }
-
-  return { status: "ok", reportElapsed };
-}
-
 function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
@@ -317,20 +226,6 @@ async function recentThreadText(rawPhone: string): Promise<string> {
 function extractLastPlateFromThreadCompat(text: string): string | null {
   const plate = extractLastPlateFromThread(text);
   return plate ? normalizeLoosePlate(plate) : null;
-}
-
-/** Pide listado/flota sin patente puntual (no filtrar por patente vieja del hilo). */
-function looksLikeUnitListRequest(rawText: string | undefined | null): boolean {
-  const t = (rawText ?? "").trim();
-  if (!t) return true;
-  const norm = t
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  if (detectPlate(t)) return false;
-  return /\b(listado|lista de unidad|lista de unidades|listame|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades)\b/.test(
-    norm
-  );
 }
 
 /** El cliente habla de otra unidad distinta a la del hilo — no reutilizar patente anterior. */
@@ -474,11 +369,6 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
     where: { id: targetTicket.id },
     data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
   });
-}
-
-function reportElapsedSeconds(unit: WaraUnidadEstado): number | null {
-  const seconds = unit.ultimo_reporte?.hace_segundos;
-  return typeof seconds === "number" && Number.isFinite(seconds) ? seconds : null;
 }
 
 async function findRecentOpenTicketByPlate(
@@ -770,7 +660,7 @@ export async function POST(req: NextRequest) {
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const threadText = await recentThreadText(rawPhone);
   const rawText = parsed.data.rawText ?? "";
-  const explicitPlate =
+  let explicitPlate =
     parsed.data.patente ?? parsed.data.plate ?? detectPlate(rawText) ?? "";
 
   if (looksLikeCompanySelection(rawText.trim()) && !explicitPlate) {
@@ -886,10 +776,55 @@ export async function POST(req: NextRequest) {
       result = await consultarEstadoUnidades(refreshed.sessionToken, requestedPlates);
     }
   }
-  const unitQueryFromText = extractUnitQueryFromText(rawText);
+
+  let forceListFleet = false;
+  let unitQuery = extractUnitQueryFromText(rawText);
+
+  if (
+    result.ok &&
+    result.unidades.length > 0 &&
+    requestedPlates.length === 0 &&
+    !parsed.data.patente?.trim() &&
+    !parsed.data.plate?.trim()
+  ) {
+    const resolved = await resolveUnitQuery({
+      rawText,
+      threadText: scopedThread,
+      units: result.unidades,
+    });
+
+    if (resolved.intent === "list_fleet") {
+      forceListFleet = true;
+    } else if (resolved.intent === "need_clarification") {
+      const clarification =
+        resolved.clarificationQuestion ??
+        "¿Me pasás la matrícula exacta o el nombre de la unidad para consultarla en Wara?";
+      await appendOutboundBotMessage(rawPhone, clarification, {
+        source: "wara_unidades_clarification",
+        rawText,
+        resolutionSource: resolved.source,
+      });
+      return NextResponse.json(
+        { ok: true, summaryText: clarification, action: "none" as const, unidadesCount: 0 },
+        { status: BB_STATUS }
+      );
+    } else if (resolved.plate) {
+      explicitPlate = formatPlateWithSpaces(resolved.plate) ?? resolved.plate;
+    } else if (!unitQuery && resolved.searchTerms.length > 0) {
+      const partialMatches = filterUnitsBySearchTerms(result.unidades, resolved.searchTerms);
+      if (partialMatches.length === 1) {
+        explicitPlate =
+          formatPlateWithSpaces(partialMatches[0].patente || partialMatches[0].unidad || "") ??
+          partialMatches[0].patente ??
+          "";
+      }
+    }
+  }
+
   const useThreadPlate =
+    !forceListFleet &&
     !explicitPlate &&
-    !unitQueryFromText &&
+    !unitQuery &&
     !looksLikeGreeting(rawText.trim()) &&
     !looksLikeInternoMetaQuestion(rawText) &&
     !looksLikeUnitListRequest(rawText) &&
@@ -901,15 +836,8 @@ export async function POST(req: NextRequest) {
         ? extractLastPlateFromThreadCompat(scopedThread) ?? detectPlate(scopedThread) ?? ""
         : "")
   );
-  const unitQuery = unitQueryFromText;
   const filterUnits = (units: WaraUnidadEstado[], plate: string) =>
-    plate
-      ? units.filter((u) => {
-          const unitPlate = normalizeLoosePlate(u.patente);
-          if (!unitPlate) return false;
-          return unitPlate === plate || unitPlate.includes(plate) || plate.includes(unitPlate);
-        })
-      : units;
+    plate ? filterUnitsByResolvedPlate(units, plate) : units;
   let filtered: WaraUnidadEstado[];
   if (result.ok && unitQuery?.kind === "interno_backoffice") {
     filtered = [];
@@ -940,7 +868,7 @@ export async function POST(req: NextRequest) {
     if (unitQuery?.kind === "nombre") {
       return `Encontré ${units.length} unidades con nombre parecido a ${unitQuery.value} en ${cliente}. ${head}${suffix}. Decime la matrícula exacta si querés ver una sola.`;
     }
-    return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una matrícula (ej. NKL 952) o un nombre de unidad (ej. M300-111) para ver su estado.`;
+    return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una matrícula (ej. NKL 952), un nombre (ej. SAVEIRO) o una marca para ver una sola.`;
   };
   let action: "none" | "observation" | "ticket" = "none";
   let ticketRef = "";
@@ -962,14 +890,15 @@ export async function POST(req: NextRequest) {
                 companyName: session.companyName || result.cliente || "tu empresa",
                 unitQuery,
               })
-      : filtered.length === 1
+      : filtered.length === 1 && !forceListFleet
         ? summarizeUnit(filtered[0])
         : unitQuery || wantedPlate
           ? buildManyUnitsText(filtered)
           : buildManyUnitsText(result.unidades);
 
   const isSingleUnitQuery =
-    !!wantedPlate || !!unitQuery || requestedPlates.length > 0 || !!explicitPlate;
+    !forceListFleet &&
+    (!!wantedPlate || !!unitQuery || requestedPlates.length > 0 || !!explicitPlate);
 
   if (result.ok && filtered.length === 1 && isSingleUnitQuery) {
     const unit = filtered[0];
@@ -988,54 +917,84 @@ export async function POST(req: NextRequest) {
       if (assessment) {
         const elapsedText = minutesAgo(assessment.reportElapsed);
         const label = formatUnitLabel(unit);
-        if (assessment.status === "ok") {
+        let ticketIssueDetail: string | undefined;
+        if (assessment.status === "ok" || assessment.status === "coherent_pause") {
           action = "observation";
-          summaryText = `Funcionamiento normal: la unidad ${label} envía reporte actualizado (hace ${elapsedText}), la posición se actualiza y la ignición cambia de estado correctamente. No genero ticket. El GPS puede reportar cada 10 minutos; si algo cambia, volvé a consultar.`;
+          summaryText = await buildGpsClientSummary({
+            unitLabel: label,
+            unit,
+            assessment,
+            action,
+          });
         } else if (assessment.status === "ignition_failure") {
           action = "ticket";
           const ignText =
             assessment.ignitionElapsed != null
               ? `hace ${minutesAgo(assessment.ignitionElapsed)}`
               : "sin dato reciente";
+          ticketIssueDetail = `falla de ignición: reporte y posición al día pero la ignición no cambia de estado (última ignición ${ignText})`;
           const created = await createMissingReportTicket({
             rawPhone,
             unit,
             companyName: session.companyName ?? result.cliente ?? "",
             contactName: session.contactName ?? "",
             elapsedText,
-            issueDetail: `falla de ignición: reporte y posición al día pero la ignición no cambia de estado (última ignición ${ignText})`,
+            issueDetail: ticketIssueDetail,
             incidentType: "GENERAL_TECH",
             ticketTitleSuffix: "Falla de ignición",
           });
           ticketRef = created.ref;
-          summaryText = created.message;
+          summaryText = await buildGpsClientSummary({
+            unitLabel: label,
+            unit,
+            assessment,
+            action,
+            ticketRef: created.ref,
+            ticketIssueDetail,
+          });
         } else if (assessment.status === "stale_position") {
           action = "ticket";
+          ticketIssueDetail = assessment.reason;
           const created = await createMissingReportTicket({
             rawPhone,
             unit,
             companyName: session.companyName ?? result.cliente ?? "",
             contactName: session.contactName ?? "",
             elapsedText: minutesAgo(assessment.reportElapsed),
-            issueDetail: assessment.reason,
+            issueDetail: ticketIssueDetail,
             incidentType: "GENERAL_TECH",
             ticketTitleSuffix: "Pérdida de señal satelital",
           });
           ticketRef = created.ref;
-          summaryText = created.message;
+          summaryText = await buildGpsClientSummary({
+            unitLabel: label,
+            unit,
+            assessment,
+            action,
+            ticketRef: created.ref,
+            ticketIssueDetail,
+          });
         } else {
           action = "ticket";
+          ticketIssueDetail = `falta de reporte: el GPS no envía datos hace ${elapsedText}`;
           const created = await createMissingReportTicket({
             rawPhone,
             unit,
             companyName: session.companyName ?? result.cliente ?? "",
             contactName: session.contactName ?? "",
             elapsedText,
-            issueDetail: `falta de reporte: el GPS no envía datos hace ${elapsedText}`,
+            issueDetail: ticketIssueDetail,
             ticketTitleSuffix: "Falta de reporte",
           });
           ticketRef = created.ref;
-          summaryText = created.message;
+          summaryText = await buildGpsClientSummary({
+            unitLabel: label,
+            unit,
+            assessment,
+            action,
+            ticketRef: created.ref,
+            ticketIssueDetail,
+          });
         }
       }
     }
