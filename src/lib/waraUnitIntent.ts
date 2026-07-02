@@ -19,6 +19,10 @@ const STOPWORDS = new Set([
   "consultar",
   "consulta",
   "reporte",
+  "certificado",
+  "cobertura",
+  "constancia",
+  "monitoreo",
   "estado",
   "unidad",
   "unidades",
@@ -202,7 +206,7 @@ Devolvé SOLO JSON válido (sin markdown) con esta forma:
 {"intent":"list_fleet"|"consult_status"|"need_clarification","candidatePlates":["AE483VE"],"clarificationQuestion":null}
 Reglas:
 - intent=list_fleet si piden listado/flota/cuántas unidades/cuento en wara.
-- intent=consult_status si quieren estado/reporte de una unidad concreta.
+- intent=consult_status si quieren estado/reporte de una unidad concreta o certificado de cobertura de una unidad (marca, nombre o patente).
 - candidatePlates: SOLO patentes que existan en el catálogo (sin espacios, mayúsculas).
 - Si hay varias coincidencias razonables (marca, nombre parcial), intent=need_clarification y pregunta breve en español rioplatense.
 - Nunca inventes patentes fuera del catálogo.

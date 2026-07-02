@@ -6,8 +6,9 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
+  consultarEstadoUnidades,
   looksLikeCompanySelection,
   isWaraPlateValidationError,
   obtenerCertificadoCobertura,
@@ -20,6 +21,7 @@ import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { generateTicketCode } from "@/lib/tickets";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
+import { resolveUnitQuery } from "@/lib/waraUnitIntent";
 
 const bodySchema = z
   .object({
@@ -610,12 +612,54 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const plate = resolveCertificatePlate(text, {
+  const plateFromDirect = resolveCertificatePlate(text, {
     explicitPatente: parsed.data.patente,
     explicitPlate: parsed.data.plate,
     threadText,
     allowThread: pendingConfirm || isConfirmed(confirmation),
   });
+
+  let plate = plateFromDirect;
+
+  if (!plate) {
+    const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+    if (session.ok && session.sessionToken) {
+      const fleet = await consultarEstadoUnidades(session.sessionToken, []);
+      if (fleet.ok && fleet.unidades.length > 0) {
+        const scopedThread = threadTextSinceCompanySelection(threadText);
+        const resolved = await resolveUnitQuery({
+          rawText: text,
+          threadText: scopedThread,
+          units: fleet.unidades,
+        });
+        if (resolved.intent === "need_clarification") {
+          const message =
+            resolved.clarificationQuestion ??
+            "Encontré varias unidades posibles. ¿Me pasás la matrícula exacta para el certificado?";
+          await appendOutboundBotMessage(rawPhone, message, {
+            source: "wara_certificados",
+            errorStage: "unit_clarification",
+            resolutionSource: resolved.source,
+          });
+          return NextResponse.json(
+            {
+              ok: true,
+              ok_s: "true",
+              flowComplete_s: "true",
+              message,
+              missing: ["patente"],
+              missing_s: "patente",
+              needsPlate_s: "true",
+            },
+            { status: BB_STATUS }
+          );
+        }
+        if (resolved.plate) {
+          plate = normalizePlate(resolved.plate);
+        }
+      }
+    }
+  }
 
   if (!plate) {
     const message =
