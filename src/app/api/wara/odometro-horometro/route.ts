@@ -9,6 +9,7 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone } from "@/lib/waraApi";
 import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
+import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
   const n = typeof value === "number" ? value : Number(value.replace(",", ".").trim());
@@ -356,7 +357,7 @@ export async function POST(req: NextRequest) {
   // No dependemos de {history} (rompe el JSON): reconstruimos el trámite desde la base.
   const threadText = await recentThreadText(rawPhone);
   const threadParsed = parseFromText(threadText);
-  const patente = normalizePlate(
+  let patente = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       fromText.patente ??
@@ -364,6 +365,25 @@ export async function POST(req: NextRequest) {
       threadParsed.patente ??
       ""
   );
+
+  if (!patente) {
+    const fleetPlate = await resolvePlateWithWaraFleet(
+      prisma,
+      rawPhone,
+      parsed.data.rawText ?? "",
+      threadText
+    );
+    if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
+      return NextResponse.json(
+        { ok: false, error: "Varias unidades", message: fleetPlate.message },
+        { status: BB_STATUS }
+      );
+    }
+    if (fleetPlate.ok) {
+      patente = fleetPlate.plate;
+    }
+  }
+
   const odometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,

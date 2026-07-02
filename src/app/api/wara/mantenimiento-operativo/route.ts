@@ -8,6 +8,7 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
+import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceInfoGuideInThread,
@@ -526,7 +527,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const plate = normalizePlate(
+  let plate = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       detectPlate(text) ??
@@ -535,6 +536,37 @@ export async function POST(req: NextRequest) {
         : undefined) ??
       undefined
   );
+
+  if (!plate) {
+    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, text, threadText);
+    if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
+      await appendOutboundBotMessage(rawPhone, fleetPlate.message, {
+        source: "wara_mantenimiento_operativo",
+        errorStage: "unit_clarification",
+        service,
+        priority,
+        phone: rawPhone,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          needsPlate_s: "true",
+          message: fleetPlate.message,
+          missing: ["patente"],
+          missing_s: "patente",
+          service,
+          priority,
+        },
+        { status: BB_STATUS }
+      );
+    }
+    if (fleetPlate.ok) {
+      plate = fleetPlate.plate;
+    }
+  }
+
   if (plate && pendingPlateRequest && isPlateOnlyMessage(text, plate)) {
     const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
     text =

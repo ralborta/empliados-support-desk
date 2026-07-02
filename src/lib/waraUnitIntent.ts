@@ -1,6 +1,7 @@
 import OpenAI from "openai";
-import { detectPlate, normalizePlate } from "@/lib/wara";
-import type { WaraUnidadEstado } from "@/lib/waraApi";
+import type { PrismaClient } from "@prisma/client";
+import { detectPlate, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
+import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
 
 export type UnitQueryIntent = "list_fleet" | "consult_status" | "need_clarification";
 
@@ -23,6 +24,16 @@ const STOPWORDS = new Set([
   "cobertura",
   "constancia",
   "monitoreo",
+  "mantenimiento",
+  "preventivo",
+  "correctivo",
+  "odometro",
+  "odómetro",
+  "horometro",
+  "horómetro",
+  "registrar",
+  "actualizar",
+  "cambio",
   "estado",
   "unidad",
   "unidades",
@@ -206,7 +217,7 @@ Devolvé SOLO JSON válido (sin markdown) con esta forma:
 {"intent":"list_fleet"|"consult_status"|"need_clarification","candidatePlates":["AE483VE"],"clarificationQuestion":null}
 Reglas:
 - intent=list_fleet si piden listado/flota/cuántas unidades/cuento en wara.
-- intent=consult_status si quieren estado/reporte de una unidad concreta o certificado de cobertura de una unidad (marca, nombre o patente).
+- intent=consult_status si quieren estado/reporte/certificado/mantenimiento/odómetro/horómetro de una unidad concreta (marca, nombre o patente).
 - candidatePlates: SOLO patentes que existan en el catálogo (sin espacios, mayúsculas).
 - Si hay varias coincidencias razonables (marca, nombre parcial), intent=need_clarification y pregunta breve en español rioplatense.
 - Nunca inventes patentes fuera del catálogo.
@@ -306,6 +317,59 @@ export async function resolveUnitQuery(params: {
 
 export function filterUnitsByResolvedPlate(units: WaraUnidadEstado[], plate: string): WaraUnidadEstado[] {
   return filterUnitsByPlate(units, plate);
+}
+
+export type PlateFromFleetResult =
+  | { ok: true; plate: string; source: "direct" | "ai" | "rules" }
+  | { ok: false; reason: "clarification"; message: string }
+  | { ok: false; reason: "not_found" };
+
+/** Resuelve patente desde texto + flota Wara (IA/reglas). Uso compartido en todos los trámites. */
+export async function resolvePlateWithWaraFleet(
+  prisma: PrismaClient,
+  rawPhone: string,
+  rawText: string,
+  threadText: string,
+  directPlate?: string | null
+): Promise<PlateFromFleetResult> {
+  const normalizedDirect = directPlate ? normalizePlate(directPlate) : null;
+  if (normalizedDirect) {
+    return { ok: true, plate: normalizedDirect, source: "direct" };
+  }
+
+  const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+  if (!session.ok || !session.sessionToken) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  const fleet = await consultarEstadoUnidades(session.sessionToken, []);
+  if (!fleet.ok || fleet.unidades.length === 0) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  const scopedThread = threadTextSinceCompanySelection(threadText);
+  const resolved = await resolveUnitQuery({
+    rawText,
+    threadText: scopedThread,
+    units: fleet.unidades,
+  });
+
+  if (resolved.intent === "need_clarification") {
+    return {
+      ok: false,
+      reason: "clarification",
+      message:
+        resolved.clarificationQuestion ??
+        "Encontré varias unidades posibles. ¿Me pasás la matrícula exacta?",
+    };
+  }
+
+  if (resolved.plate) {
+    const plate = normalizePlate(resolved.plate);
+    if (plate) return { ok: true, plate, source: resolved.source };
+  }
+
+  return { ok: false, reason: "not_found" };
 }
 
 export { looksLikeUnitListRequest, filterUnitsBySearchTerms };
