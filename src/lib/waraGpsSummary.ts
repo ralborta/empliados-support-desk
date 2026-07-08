@@ -4,6 +4,7 @@ import {
   buildGpsFacts,
   formatMinutesAgo,
   ignitionLabel,
+  MISSING_REPORT_TICKET_THRESHOLD_SECONDS,
   type GpsAssessment,
 } from "@/lib/waraGpsAssessment";
 
@@ -29,10 +30,13 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
   }
 
   if (assessment.status === "coherent_pause") {
+    const reportRecent = assessment.reportElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS;
+    const pauseReason = reportRecent
+      ? "La ignición está apagada y la última posición coincide con ese apagado: la unidad está detenida y es normal que no actualice posición aunque el reporte sea reciente."
+      : "El reporte, la posición y la ignición apagada van alineados en el tiempo.";
     return (
       `La unidad ${unitLabel} está detenida: ${telemetryLine} ` +
-      `Como reporte, posición e ignición apagada van juntos, no genero ticket por ahora. ` +
-      `Si sigue igual más tarde, volvé a consultar.`
+      `${pauseReason} No genero ticket por ahora. Si algo cambia, volvé a consultar.`
     );
   }
 

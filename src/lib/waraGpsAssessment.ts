@@ -86,10 +86,14 @@ function allTelemetryAligned(
 }
 
 /**
- * Flujograma Mesa de Ayuda Wara + cruce de timestamps antes de Caso 1.
- * 1. Reporte < 1h → pasos 2 y 3
- * 2. Reporte ≥ 1h + paquete alineado + ignición OFF + < 24h → observación (coherent_pause)
- * 3. Reporte ≥ 1h desalineado o ≥ 24h alineado → Caso 1
+ * Flujograma Mesa de Ayuda Wara + cruces de timestamps:
+ * 1. Reporte ≥ 1h → Caso 1, salvo paquete alineado + ignición OFF (< 24h) → observación
+ * 2. Reporte < 1h y posición vieja vs reporte:
+ *    a) Ignición clavada mucho antes que posición → Caso 3 (prioridad sobre Caso 2)
+ *    b) Ignición OFF y posición alineada con ignición → unidad detenida, sin ticket
+ *    c) Sino → Caso 2 pérdida de señal
+ * 3. Reporte y posición OK, ignición desalineada → Caso 3
+ * 4. Todo OK → normal
  */
 export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | null {
   const reportElapsed = reportElapsedSeconds(unit);
@@ -123,14 +127,43 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
   }
 
   if (!isPositionUpdating(reportElapsed, positionElapsed)) {
+    const posElapsed = positionElapsed;
+
+    if (
+      posElapsed != null &&
+      ignitionElapsed != null &&
+      ignitionElapsed > posElapsed + POSITION_REPORT_DRIFT_SECONDS
+    ) {
+      return {
+        status: "ignition_failure",
+        reportElapsed,
+        positionElapsed: posElapsed,
+        ignitionElapsed,
+      };
+    }
+
+    if (
+      ignitionOff &&
+      posElapsed != null &&
+      ignitionElapsed != null &&
+      telemetryAligned(posElapsed, ignitionElapsed)
+    ) {
+      return {
+        status: "coherent_pause",
+        reportElapsed,
+        positionElapsed: posElapsed,
+        ignitionElapsed,
+      };
+    }
+
     const reason =
-      positionElapsed == null
+      posElapsed == null
         ? "pérdida de señal satelital: no figura última posición en Wara"
-        : `pérdida de señal satelital: el reporte es reciente pero la posición no se actualiza (posición hace ${formatMinutesAgo(positionElapsed)}, reporte hace ${formatMinutesAgo(reportElapsed)})`;
+        : `pérdida de señal satelital: el reporte es reciente pero la posición no se actualiza (posición hace ${formatMinutesAgo(posElapsed)}, reporte hace ${formatMinutesAgo(reportElapsed)})`;
     return {
       status: "stale_position",
       reportElapsed,
-      positionElapsed,
+      positionElapsed: posElapsed,
       reason,
     };
   }
