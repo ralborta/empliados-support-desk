@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { priorityLabels } from "@/lib/tickets";
 import { resolutionModeLabels, type ResolutionMode } from "@/lib/wara";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
@@ -130,7 +131,7 @@ export function QuickActionsPanel({
             <button
               key={p}
               className={
-                "rounded-full border px-3.5 py-1.5 text-[11px] font-semibold tracking-wide uppercase shadow-sm outline-none transition-all duration-200 select-none touch-manipulation " +
+                "rounded-full border px-3.5 py-1.5 text-[11px] font-semibold tracking-wide shadow-sm outline-none transition-all duration-200 select-none touch-manipulation " +
                 "hover:-translate-y-px hover:shadow-md active:scale-95 active:shadow-inner active:duration-100 " +
                 "focus-visible:ring-2 focus-visible:ring-rose-400/80 focus-visible:ring-offset-2 " +
                 "disabled:pointer-events-none disabled:opacity-50 " +
@@ -142,7 +143,7 @@ export function QuickActionsPanel({
               disabled={isPending}
               type="button"
             >
-              {p}
+              {priorityLabels[p]}
             </button>
           ))}
         </div>

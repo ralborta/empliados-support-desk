@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Paperclip, Bold, Italic, List } from "lucide-react";
 import type { MessageDirection } from "@/lib/types";
 import { BotPausedToggle } from "./BotPausedToggle";
 
@@ -18,6 +19,16 @@ export function MessageComposer({
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const wrapSelection = (before: string, after: string) => {
+    const el = document.getElementById("ticket-reply-text") as HTMLTextAreaElement | null;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = text.slice(start, end);
+    const next = text.slice(0, start) + before + selected + after + text.slice(end);
+    setText(next);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +51,6 @@ export function MessageComposer({
       } else {
         setText("");
         setFile(null);
-        // Forzar recarga completa de la página para mostrar el nuevo mensaje
         window.location.reload();
       }
     } catch {
@@ -51,47 +61,83 @@ export function MessageComposer({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-semibold text-slate-700">Escribe una nota o respuesta</label>
+    <form
+      onSubmit={handleSubmit}
+      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+    >
+      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
+        <span className="text-sm font-semibold text-slate-800">Responder</span>
         <select
           value={direction}
           onChange={(e) => setDirection(e.target.value as MessageDirection)}
-          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:border-rose-500 focus:outline-none"
+          className="rounded-md border-0 bg-transparent text-xs text-slate-500 focus:outline-none"
         >
-          <option value="OUTBOUND">Respuesta al cliente</option>
+          <option value="OUTBOUND">Al cliente</option>
           <option value="INTERNAL_NOTE">Nota interna</option>
         </select>
       </div>
+
       <textarea
-        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
-        rows={3}
-        placeholder="Escribe una nota..."
+        id="ticket-reply-text"
+        className="w-full resize-none border-0 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+        rows={4}
+        placeholder="Escribir tu respuesta..."
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      <div className="flex items-center gap-2 text-xs text-slate-600">
-        <input
-          type="file"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-          className="block w-full cursor-pointer rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-rose-50 file:px-2 file:py-1 file:text-rose-700"
-        />
-      </div>
-      {error ? <p className="text-xs text-red-600">{error}</p> : null}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {customerId ? (
-          <BotPausedToggle customerId={customerId} initialPaused={botPaused} />
-        ) : null}
-        <div className="flex justify-end sm:ml-auto">
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
+        <div className="flex items-center gap-1">
+          <label className="cursor-pointer rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <Paperclip className="h-4 w-4" />
+            <input
+              type="file"
+              className="hidden"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </label>
+          <button
+            type="button"
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            onClick={() => wrapSelection("*", "*")}
+            title="Negrita"
+          >
+            <Bold className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            onClick={() => wrapSelection("_", "_")}
+            title="Cursiva"
+          >
+            <Italic className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            onClick={() => setText((t) => (t ? `${t}\n• ` : "• "))}
+            title="Lista"
+          >
+            <List className="h-4 w-4" />
+          </button>
+          {file ? <span className="ml-1 max-w-[120px] truncate text-xs text-violet-600">{file.name}</span> : null}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {customerId && direction === "OUTBOUND" ? (
+            <BotPausedToggle customerId={customerId} initialPaused={botPaused} />
+          ) : null}
           <button
             type="submit"
             disabled={loading}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:opacity-60"
+            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-60"
           >
-            {loading ? "Enviando..." : direction === "OUTBOUND" ? "Enviar respuesta" : "Guardar nota"}
+            {loading ? "Enviando…" : "Enviar respuesta"}
           </button>
         </div>
       </div>
+
+      {error ? <p className="px-4 pb-3 text-xs text-red-600">{error}</p> : null}
     </form>
   );
 }

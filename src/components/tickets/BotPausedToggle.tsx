@@ -36,23 +36,18 @@ export function BotPausedToggle({ customerId, initialPaused }: Props) {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-100 bg-rose-50/50 px-2.5 py-1.5">
-      <span className="text-xs text-slate-600">
-        <span className="font-semibold text-slate-700">Atilio:</span>{" "}
-        {paused ? (
-          <span className="font-medium text-amber-700">⏸️ Pausado (respondés vos)</span>
-        ) : (
-          <span className="text-slate-500">Activo</span>
-        )}
-      </span>
-      <button
-        type="button"
-        onClick={toggle}
-        disabled={loading}
-        className="rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-900 shadow-sm transition hover:bg-rose-50 active:scale-[0.98] disabled:opacity-50"
-      >
-        {loading ? "…" : paused ? "Reactivar Atilio" : "Pausar Atilio"}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={loading}
+      title={paused ? "Atilio pausado — respondés vos" : "Atilio activo en este chat"}
+      className={`rounded-lg border px-3 py-2 text-xs font-semibold shadow-sm transition active:scale-[0.98] disabled:opacity-50 ${
+        paused
+          ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      {loading ? "…" : paused ? "Reactivar Atilio" : "Pausar Atilio"}
+    </button>
   );
 }
