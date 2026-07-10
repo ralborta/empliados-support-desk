@@ -79,7 +79,14 @@ function TicketsSidebar({ user }: { user: SessionUser | null }) {
     <aside className="flex w-64 shrink-0 flex-col bg-[#4a0e1c] text-white lg:w-72">
       <div className="border-b border-white/10 px-5 py-5">
         <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-90">
-          <Image src="/wara-logo.png" alt="Wara" width={100} height={40} priority className="brightness-0 invert" />
+          <Image
+            src="/wara-logo.png"
+            alt="Wara"
+            width={120}
+            height={48}
+            priority
+            className="h-10 w-auto object-contain"
+          />
           <div>
             <span className="block text-sm font-semibold">Soporte</span>
             <span className="text-[11px] text-white/60">Mesa operativa</span>
