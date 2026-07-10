@@ -11,7 +11,7 @@ interface Agent {
   email: string;
   phone: string;
   role: string;
-  createdAt: Date;
+  createdAt: string;
   _count: {
     tickets: number;
   };

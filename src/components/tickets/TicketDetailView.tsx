@@ -14,6 +14,7 @@ import { AssignAgentDropdown } from "@/components/tickets/AssignAgentDropdown";
 import { MessageAttachments } from "@/components/tickets/MessageAttachments";
 import { QuickActionsPanel } from "@/components/tickets/QuickActionsPanel";
 import { resolutionModeLabels, waraIncidentLabels, type WaraIncidentType } from "@/lib/wara";
+import { formatDateTimeAR } from "@/lib/formatDateTimeAR";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 
@@ -33,12 +34,12 @@ interface TicketDetailViewProps {
     aiSummary: string | null;
     assignedToUserId: string | null;
     customerId: string | null;
+    botPaused?: boolean;
     customer: {
       name: string | null;
       companyName: string | null;
       licensePlate: string | null;
       phone: string;
-      botPausedAt: Date | null;
     } | null;
     assignedTo: { name: string } | null;
     messages: Array<{
@@ -53,7 +54,6 @@ interface TicketDetailViewProps {
   agentes: Array<{ id: string; name: string; email: string }>;
   wara: Record<string, unknown> | null;
   incidentTypeLabel: string;
-  formatDateTimeAR: (value: string) => string;
 }
 
 export function TicketDetailView({
@@ -61,7 +61,6 @@ export function TicketDetailView({
   agentes,
   wara,
   incidentTypeLabel,
-  formatDateTimeAR,
 }: TicketDetailViewProps) {
   const [tab, setTab] = useState<"conversacion" | "detalles" | "historial">("conversacion");
   const conversation = ticket.messages || [];
@@ -199,7 +198,7 @@ export function TicketDetailView({
             <MessageComposer
               ticketId={ticket.id}
               customerId={ticket.customerId}
-              botPaused={!!ticket.customer?.botPausedAt}
+              botPaused={!!ticket.botPaused}
             />
           </div>
 

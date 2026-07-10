@@ -6,22 +6,6 @@ import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { TicketDetailView } from "@/components/tickets/TicketDetailView";
 import { waraIncidentLabels, type WaraIncidentType } from "@/lib/wara";
 
-const DISPLAY_TZ = process.env.APP_TIMEZONE?.trim() || "America/Argentina/Buenos_Aires";
-
-function formatDateTimeAR(value: Date | string) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("es-AR", {
-    timeZone: DISPLAY_TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
   const { id } = await params;
@@ -80,13 +64,13 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
           aiSummary: ticket.aiSummary,
           assignedToUserId: ticket.assignedToUserId,
           customerId: ticket.customerId,
+          botPaused: !!ticket.customer?.botPausedAt,
           customer: ticket.customer
             ? {
                 name: ticket.customer.name,
                 companyName: ticket.customer.companyName,
                 licensePlate: ticket.customer.licensePlate,
                 phone: ticket.customer.phone,
-                botPausedAt: ticket.customer.botPausedAt,
               }
             : null,
           assignedTo: ticket.assignedTo,
@@ -95,14 +79,13 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
             from: msg.from,
             text: msg.text,
             createdAt: msg.createdAt.toISOString(),
-            attachments: msg.attachments,
-            rawPayload: msg.rawPayload,
+            attachments: msg.attachments ? JSON.parse(JSON.stringify(msg.attachments)) : null,
+            rawPayload: undefined,
           })),
         }}
         agentes={agentes}
         wara={wara ?? null}
         incidentTypeLabel={incidentTypeLabel}
-        formatDateTimeAR={(v) => formatDateTimeAR(v)}
       />
     </TicketsLayout>
   );

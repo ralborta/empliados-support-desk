@@ -31,8 +31,8 @@ async function getDashboardStats() {
       resolvedTickets,
     ] = await Promise.all([
       prisma.ticket.count(),
-      prisma.ticket.groupBy({ by: ["status"], _count: true }),
-      prisma.ticket.groupBy({ by: ["priority"], _count: true }),
+      prisma.ticket.groupBy({ by: ["status"], _count: { _all: true } }),
+      prisma.ticket.groupBy({ by: ["priority"], _count: { _all: true } }),
       prisma.ticket.count({ where: { createdAt: { gte: today } } }),
       prisma.ticket.count({
         where: { createdAt: { gte: yesterday, lt: today } },
@@ -109,11 +109,11 @@ async function getDashboardStats() {
       urgentUnassigned,
       ticketsByStatus: ticketsByStatus.map((s) => ({
         status: s.status,
-        count: s._count,
+        count: s._count._all,
       })),
       ticketsByPriority: ticketsByPriority.map((p) => ({
         priority: p.priority,
-        count: p._count,
+        count: p._count._all,
       })),
       last7Days,
       recentTickets,

@@ -33,7 +33,12 @@ export default async function AgentesPage() {
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2">
-            <AgentsList agentes={agentes} />
+            <AgentsList
+              agentes={agentes.map((a) => ({
+                ...a,
+                createdAt: a.createdAt.toISOString(),
+              }))}
+            />
           </div>
           <div>
             <CreateAgentForm />
