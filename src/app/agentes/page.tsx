@@ -3,6 +3,7 @@ import { requireAdminSession } from "@/lib/auth";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { CreateAgentForm } from "@/components/agentes/CreateAgentForm";
 import { AgentsList } from "@/components/agentes/AgentsList";
+import { AgentsPageHeader } from "@/components/agentes/AgentsPageHeader";
 
 export default async function AgentesPage() {
   await requireAdminSession();
@@ -20,28 +21,14 @@ export default async function AgentesPage() {
   const agentesActivos = agentes.filter((a) => a._count.tickets > 0).length;
 
   return (
-    <TicketsLayout>
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Agentes de Soporte</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Gestiona el equipo de soporte y asigna tickets
-          </p>
-        </div>
+    <TicketsLayout showHeader={false}>
+      <div className="mx-auto max-w-6xl space-y-5">
+        <AgentsPageHeader />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-blue-50 p-6 ring-1 ring-blue-100">
-            <div className="text-sm font-medium text-blue-600">Total Agentes</div>
-            <div className="mt-2 text-3xl font-bold text-blue-900">{totalAgentes}</div>
-          </div>
-          <div className="rounded-xl bg-emerald-50 p-6 ring-1 ring-emerald-100">
-            <div className="text-sm font-medium text-emerald-600">Con Tickets Asignados</div>
-            <div className="mt-2 text-3xl font-bold text-emerald-900">{agentesActivos}</div>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-6 ring-1 ring-slate-100">
-            <div className="text-sm font-medium text-slate-600">Disponibles</div>
-            <div className="mt-2 text-3xl font-bold text-slate-900">{totalAgentes - agentesActivos}</div>
-          </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <StatCard label="Total Agentes" value={totalAgentes} />
+          <StatCard label="Con Tickets Asignados" value={agentesActivos} accent="text-emerald-600" />
+          <StatCard label="Disponibles" value={totalAgentes - agentesActivos} accent="text-violet-600" />
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -54,5 +41,22 @@ export default async function AgentesPage() {
         </div>
       </div>
     </TicketsLayout>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  accent = "text-slate-900",
+}: {
+  label: string;
+  value: number;
+  accent?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className={`mt-1 text-3xl font-bold ${accent}`}>{value}</p>
+    </div>
   );
 }

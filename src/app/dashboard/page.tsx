@@ -1,132 +1,110 @@
 import { requireSession } from "@/lib/auth";
 import { statusLabels, priorityLabels } from "@/lib/tickets";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
+import { TicketsTable } from "@/components/tickets/TicketsTable";
+import { Sparkline } from "@/components/ui/Sparkline";
+import { DonutChart } from "@/components/ui/DonutChart";
+import { priorityDonutColor, statusBarColor } from "@/lib/ui/badges";
 import { prisma } from "@/lib/db";
+import Link from "next/link";
 
 async function getDashboardStats() {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const totalTickets = await prisma.ticket.count();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
-    const ticketsByStatus = await prisma.ticket.groupBy({
-      by: ["status"],
-      _count: true,
-    });
-
-    const ticketsByPriority = await prisma.ticket.groupBy({
-      by: ["priority"],
-      _count: true,
-    });
-
-    const ticketsToday = await prisma.ticket.count({
-      where: { createdAt: { gte: today } },
-    });
-
-    const resolvedToday = await prisma.ticket.count({
-      where: {
-        status: "RESOLVED",
-        updatedAt: { gte: today },
-      },
-    });
-
-    const resolvedTickets = await prisma.ticket.findMany({
-      where: {
-        status: { in: ["RESOLVED", "CLOSED"] },
-      },
-      select: {
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    const avgResolutionTime = resolvedTickets.length > 0
-      ? resolvedTickets.reduce((acc, t) => {
-          const diff = t.updatedAt.getTime() - t.createdAt.getTime();
-          return acc + diff / (1000 * 60 * 60);
-        }, 0) / resolvedTickets.length
-      : 0;
-
-    const urgentUnassigned = await prisma.ticket.count({
-      where: {
-        priority: "URGENT",
-        assignedToUserId: null,
-        status: { notIn: ["RESOLVED", "CLOSED"] },
-      },
-    });
-
-    const topAgents = await prisma.agentUser.findMany({
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        _count: {
-          select: {
-            tickets: {
-              where: {
-                status: { notIn: ["CLOSED"] },
-              },
-            },
+    const [
+      totalTickets,
+      ticketsByStatus,
+      ticketsByPriority,
+      ticketsToday,
+      ticketsYesterday,
+      resolvedToday,
+      resolvedYesterday,
+      openCount,
+      inProgressCount,
+      urgentUnassigned,
+      recentTickets,
+      resolvedTickets,
+    ] = await Promise.all([
+      prisma.ticket.count(),
+      prisma.ticket.groupBy({ by: ["status"], _count: true }),
+      prisma.ticket.groupBy({ by: ["priority"], _count: true }),
+      prisma.ticket.count({ where: { createdAt: { gte: today } } }),
+      prisma.ticket.count({
+        where: { createdAt: { gte: yesterday, lt: today } },
+      }),
+      prisma.ticket.count({
+        where: { status: "RESOLVED", updatedAt: { gte: today } },
+      }),
+      prisma.ticket.count({
+        where: { status: "RESOLVED", updatedAt: { gte: yesterday, lt: today } },
+      }),
+      prisma.ticket.count({ where: { status: "OPEN" } }),
+      prisma.ticket.count({ where: { status: "IN_PROGRESS" } }),
+      prisma.ticket.count({
+        where: {
+          priority: "URGENT",
+          assignedToUserId: null,
+          status: { notIn: ["RESOLVED", "CLOSED"] },
+        },
+      }),
+      prisma.ticket.findMany({
+        select: {
+          id: true,
+          code: true,
+          title: true,
+          contactName: true,
+          status: true,
+          priority: true,
+          lastMessageAt: true,
+          createdAt: true,
+          customer: {
+            select: { name: true, companyName: true, licensePlate: true, phone: true },
           },
+          assignedTo: { select: { name: true } },
         },
-      },
-      orderBy: {
-        tickets: {
-          _count: "desc",
-        },
-      },
-      take: 5,
-    });
+        orderBy: { lastMessageAt: "desc" },
+        take: 8,
+      }),
+      prisma.ticket.findMany({
+        where: { status: { in: ["RESOLVED", "CLOSED"] } },
+        select: { createdAt: true, updatedAt: true },
+      }),
+    ]);
+
+    const avgResolutionTime =
+      resolvedTickets.length > 0
+        ? resolvedTickets.reduce((acc, t) => {
+            const diff = t.updatedAt.getTime() - t.createdAt.getTime();
+            return acc + diff / (1000 * 60 * 60);
+          }, 0) / resolvedTickets.length
+        : 0;
 
     const last7Days = [];
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       date.setHours(0, 0, 0, 0);
-      
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
-
       const count = await prisma.ticket.count({
-        where: {
-          createdAt: {
-            gte: date,
-            lt: nextDate,
-          },
-        },
+        where: { createdAt: { gte: date, lt: nextDate } },
       });
-
-      last7Days.push({
-        date: date.toISOString().split("T")[0],
-        count,
-      });
+      last7Days.push({ date: date.toISOString().split("T")[0], count });
     }
-
-    const topCompanies = await prisma.customer.findMany({
-      select: {
-        id: true,
-        name: true,
-        companyName: true,
-        phone: true,
-        _count: {
-          select: {
-            tickets: true,
-          },
-        },
-      },
-      orderBy: {
-        tickets: {
-          _count: "desc",
-        },
-      },
-      take: 5,
-    });
 
     return {
       totalTickets,
       ticketsToday,
+      ticketsYesterday,
       resolvedToday,
+      resolvedYesterday,
+      openCount,
+      inProgressCount,
       avgResolutionTime: Math.round(avgResolutionTime * 10) / 10,
       urgentUnassigned,
       ticketsByStatus: ticketsByStatus.map((s) => ({
@@ -137,24 +115,26 @@ async function getDashboardStats() {
         priority: p.priority,
         count: p._count,
       })),
-      topAgents: topAgents.map((a) => ({
-        id: a.id,
-        name: a.name,
-        email: a.email,
-        activeTickets: a._count.tickets,
-      })),
       last7Days,
-      topCompanies: topCompanies.map((c) => ({
-        id: c.id,
-        name: c.companyName?.trim() || c.name?.trim() || c.phone,
-        phone: c.phone,
-        totalTickets: c._count.tickets,
-      })),
+      recentTickets,
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error("[Dashboard] Error al cargar stats:", error);
     return null;
   }
+}
+
+function pctChange(today: number, yesterday: number): string {
+  if (yesterday === 0) return today > 0 ? "+100%" : "0%";
+  const pct = Math.round(((today - yesterday) / yesterday) * 100);
+  return `${pct >= 0 ? "+" : ""}${pct}%`;
+}
+
+function formatAvgHours(h: number): string {
+  const hours = Math.floor(h);
+  const mins = Math.round((h - hours) * 60);
+  if (hours === 0) return `${mins}m`;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
 export default async function DashboardPage() {
@@ -164,226 +144,175 @@ export default async function DashboardPage() {
   if (!stats) {
     return (
       <TicketsLayout>
-        <div className="mx-auto max-w-7xl">
-          <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
-          <p className="mt-4 text-slate-600">Error al cargar estadísticas.</p>
-        </div>
+        <p className="text-slate-600">Error al cargar estadísticas.</p>
       </TicketsLayout>
     );
   }
 
+  const sparkData = stats.last7Days.map((d) => d.count);
+  const prioritySegments = stats.ticketsByPriority.map((p) => ({
+    value: p.count,
+    color: priorityDonutColor(p.priority),
+    label: priorityLabels[p.priority as keyof typeof priorityLabels],
+  }));
+
   return (
-    <TicketsLayout>
-      <div className="mx-auto max-w-7xl">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900">📊 Dashboard</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Vista general del sistema de tickets
+    <TicketsLayout urgentCount={stats.urgentUnassigned}>
+      {stats.urgentUnassigned > 0 ? (
+        <div className="mb-5 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <span className="text-lg" aria-hidden>
+            🚨
+          </span>
+          <p className="text-sm font-medium text-red-800">
+            {stats.urgentUnassigned} ticket(s) urgente(s) sin asignar —{" "}
+            <Link href="/tickets/urgentes" className="underline hover:no-underline">
+              ver urgentes
+            </Link>
           </p>
         </div>
+      ) : null}
 
-        {/* KPIs principales */}
-        <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <KPICard
-            title="Total Tickets"
-            value={stats.totalTickets}
-            icon="🎫"
-            color="bg-stone-100 text-stone-700"
-          />
-          <KPICard
-            title="Creados Hoy"
-            value={stats.ticketsToday}
-            icon="📥"
-            color="bg-sky-100 text-sky-700"
-          />
-          <KPICard
-            title="Resueltos Hoy"
-            value={stats.resolvedToday}
-            icon="✅"
-            color="bg-emerald-100 text-emerald-700"
-          />
-          <KPICard
-            title="Tiempo Promedio"
-            value={`${stats.avgResolutionTime}h`}
-            icon="⏱️"
-            color="bg-amber-100 text-amber-700"
-          />
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <StatCard
+          label="Total Tickets"
+          value={stats.totalTickets}
+          delta={pctChange(stats.ticketsToday, stats.ticketsYesterday)}
+          sparkColor="#6366f1"
+          spark={sparkData}
+        />
+        <StatCard
+          label="Abiertos"
+          value={stats.openCount}
+          delta={`${stats.openCount} activos`}
+          sparkColor="#3b82f6"
+          spark={sparkData}
+        />
+        <StatCard
+          label="En Progreso"
+          value={stats.inProgressCount}
+          delta={`${stats.inProgressCount} en curso`}
+          sparkColor="#f59e0b"
+          spark={sparkData}
+        />
+        <StatCard
+          label="Resueltos Hoy"
+          value={stats.resolvedToday}
+          delta={pctChange(stats.resolvedToday, stats.resolvedYesterday)}
+          sparkColor="#22c55e"
+          spark={sparkData}
+        />
+        <StatCard
+          label="Tiempo Promedio"
+          value={formatAvgHours(stats.avgResolutionTime)}
+          delta="resolución"
+          sparkColor="#8b5cf6"
+          spark={sparkData}
+          isText
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        <div className="xl:col-span-8">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <h2 className="font-semibold text-slate-900">Tickets Recientes</h2>
+              <Link href="/tickets" className="text-sm font-medium text-violet-600 hover:text-violet-800">
+                Ver todos →
+              </Link>
+            </div>
+            <TicketsTable
+              compact
+              tickets={stats.recentTickets.map((t) => ({
+                ...t,
+                lastMessageAt: t.lastMessageAt.toISOString(),
+                createdAt: t.createdAt.toISOString(),
+              }))}
+            />
+          </div>
         </div>
 
-        {/* Alerta de urgentes */}
-        {stats.urgentUnassigned > 0 && (
-          <div className="mb-8 rounded-2xl bg-rose-50 p-6 shadow-sm ring-1 ring-rose-200">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🚨</span>
-              <div>
-                <h3 className="font-semibold text-rose-900">
-                  ¡Atención! {stats.urgentUnassigned} ticket(s) urgente(s) sin asignar
-                </h3>
-                <p className="text-sm text-rose-700">
-                  Requieren atención inmediata
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        <div className="space-y-4 xl:col-span-4">
+          <Widget title="Tickets por Prioridad">
+            <DonutChart segments={prioritySegments} />
+          </Widget>
 
-        {/* Grid principal */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Tickets por Estado */}
-          <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              📋 Tickets por Estado
-            </h2>
+          <Widget title="Tickets por Estado">
             <div className="space-y-3">
-              {stats.ticketsByStatus.map((item: any) => (
-                <ProgressBar
+              {stats.ticketsByStatus.map((item) => (
+                <ProgressRow
                   key={item.status}
                   label={statusLabels[item.status as keyof typeof statusLabels]}
                   value={item.count}
                   total={stats.totalTickets}
-                  color={getStatusColor(item.status)}
+                  color={statusBarColor(item.status)}
                 />
               ))}
             </div>
-          </div>
+          </Widget>
 
-          {/* Tickets por Prioridad */}
-          <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              🔥 Tickets por Prioridad
-            </h2>
-            <div className="space-y-3">
-              {stats.ticketsByPriority.map((item: any) => (
-                <ProgressBar
-                  key={item.priority}
-                  label={priorityLabels[item.priority as keyof typeof priorityLabels]}
-                  value={item.count}
-                  total={stats.totalTickets}
-                  color={getPriorityColor(item.priority)}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Tendencia últimos 7 días */}
-          <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              📈 Últimos 7 días
-            </h2>
-            <div className="flex items-end justify-between gap-2 h-48">
-              {stats.last7Days.map((day: any) => {
-                const maxCount = Math.max(...stats.last7Days.map((d: any) => d.count));
-                const height = maxCount > 0 ? (day.count / maxCount) * 100 : 0;
+          <Widget title="Actividad Últimos 7 Días">
+            <div className="flex h-36 items-end justify-between gap-1.5">
+              {stats.last7Days.map((day) => {
+                const maxCount = Math.max(...stats.last7Days.map((d) => d.count), 1);
+                const height = (day.count / maxCount) * 100;
                 return (
-                  <div key={day.date} className="flex flex-col items-center flex-1">
-                    <div className="text-xs font-semibold text-slate-700 mb-1">
-                      {day.count}
-                    </div>
+                  <div key={day.date} className="flex flex-1 flex-col items-center gap-1">
+                    <span className="text-[10px] font-semibold text-slate-600">{day.count}</span>
                     <div
-                      className="w-full bg-rose-400 rounded-t-lg transition-all"
-                      style={{ height: `${height}%`, minHeight: day.count > 0 ? "8px" : "2px" }}
+                      className="w-full rounded-t-md bg-violet-400 transition-all"
+                      style={{ height: `${Math.max(height, 4)}%`, minHeight: day.count > 0 ? 8 : 4 }}
                     />
-                    <div className="mt-2 text-xs text-slate-500">
+                    <span className="text-[10px] text-slate-400">
                       {new Date(day.date).toLocaleDateString("es", { weekday: "short" })}
-                    </div>
+                    </span>
                   </div>
                 );
               })}
             </div>
-          </div>
-
-          {/* Top Agentes */}
-          <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              👥 Top Agentes
-            </h2>
-            <div className="space-y-3">
-              {stats.topAgents.length === 0 ? (
-                <p className="text-sm text-slate-500">No hay agentes con tickets asignados.</p>
-              ) : (
-                stats.topAgents.map((agent: any, index: number) => (
-                  <div key={agent.id} className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-sm font-semibold text-rose-700">
-                        #{index + 1}
-                      </span>
-                      <div>
-                        <div className="text-sm font-medium text-slate-900">{agent.name}</div>
-                        <div className="text-xs text-slate-500">{agent.email}</div>
-                      </div>
-                    </div>
-                    <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
-                      {agent.activeTickets}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Top Empresas */}
-          <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 lg:col-span-2">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              🏢 Top Empresas con más Tickets
-            </h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              {stats.topCompanies.length === 0 ? (
-                <p className="text-sm text-slate-500">No hay datos disponibles.</p>
-              ) : (
-                stats.topCompanies.map((company: any, index: number) => (
-                  <div
-                    key={company.id}
-                    className="rounded-xl border border-slate-200 p-4 transition-all hover:border-rose-300 hover:shadow-md"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-2xl">#{index + 1}</span>
-                      <span className="text-xl font-bold text-rose-700">
-                        {company.totalTickets}
-                      </span>
-                    </div>
-                    <div className="text-sm font-medium text-slate-900 truncate">
-                      {company.name}
-                    </div>
-                    <div className="text-xs text-slate-500">{company.phone}</div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          </Widget>
         </div>
       </div>
     </TicketsLayout>
   );
 }
 
-function KPICard({
-  title,
+function StatCard({
+  label,
   value,
-  icon,
-  color,
+  delta,
+  sparkColor,
+  spark,
+  isText,
 }: {
-  title: string;
+  label: string;
   value: string | number;
-  icon: string;
-  color: string;
+  delta: string;
+  sparkColor: string;
+  spark: number[];
+  isText?: boolean;
 }) {
   return (
-    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-600">{title}</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{value}</p>
-        </div>
-        <div className={`rounded-2xl p-3 ${color}`}>
-          <span className="text-2xl">{icon}</span>
-        </div>
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <div className="mt-1 flex items-end justify-between gap-2">
+        <p className={`font-bold text-slate-900 ${isText ? "text-xl" : "text-2xl"}`}>{value}</p>
+        <Sparkline data={spark} color={sparkColor} />
       </div>
+      <p className="mt-1 text-[11px] text-slate-400">{delta} vs ayer</p>
     </div>
   );
 }
 
-function ProgressBar({
+function Widget({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h3 className="mb-3 text-sm font-semibold text-slate-900">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function ProgressRow({
   label,
   value,
   total,
@@ -394,52 +323,16 @@ function ProgressBar({
   total: number;
   color: string;
 }) {
-  const percentage = total > 0 ? (value / total) * 100 : 0;
-
+  const pct = total > 0 ? (value / total) * 100 : 0;
   return (
     <div>
-      <div className="flex items-center justify-between text-sm mb-1">
+      <div className="mb-1 flex justify-between text-xs">
         <span className="font-medium text-slate-700">{label}</span>
-        <span className="text-slate-600">{value}</span>
+        <span className="text-slate-500">{value}</span>
       </div>
-      <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-        <div
-          className={`h-full rounded-full ${color} transition-all`}
-          style={{ width: `${percentage}%` }}
-        />
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
-}
-
-function getStatusColor(status: string): string {
-  switch (status) {
-    case "OPEN":
-      return "bg-blue-500";
-    case "IN_PROGRESS":
-      return "bg-amber-500";
-    case "WAITING_CUSTOMER":
-      return "bg-lime-500";
-    case "RESOLVED":
-      return "bg-emerald-500";
-    case "CLOSED":
-      return "bg-slate-400";
-    default:
-      return "bg-slate-300";
-  }
-}
-
-function getPriorityColor(priority: string): string {
-  switch (priority) {
-    case "URGENT":
-      return "bg-rose-500";
-    case "HIGH":
-      return "bg-amber-500";
-    case "NORMAL":
-      return "bg-emerald-500";
-    case "LOW":
-      return "bg-slate-400";
-    default:
-      return "bg-slate-300";
-  }
 }

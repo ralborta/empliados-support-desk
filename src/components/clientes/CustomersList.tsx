@@ -90,11 +90,11 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
   };
 
   return (
-    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       {feedback && (
         <div
           role="alert"
-          className={`mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+          className={`mx-5 mt-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
             feedback.kind === "success"
               ? "border-emerald-200 bg-emerald-50 text-emerald-900"
               : "border-red-200 bg-red-50 text-red-900"
@@ -111,60 +111,60 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
           </button>
         </div>
       )}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Clientes</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {initialTotal} {initialTotal === 1 ? "cliente" : "clientes"} en total
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-          <div className="flex items-center gap-2 flex-1 w-full sm:w-auto">
-            <div className="relative flex-1 sm:flex-initial">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold text-slate-900">Listado</h2>
+            <p className="text-sm text-slate-500">
+              {initialTotal} {initialTotal === 1 ? "cliente" : "clientes"} en total
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Buscar por teléfono, persona, empresa o patente..."
-                className="w-full sm:w-auto pl-10 pr-4 py-2 rounded-lg border border-slate-300 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                placeholder="Buscar..."
+                className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 sm:w-56"
               />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             </div>
             <select
               value={hasTicketsFilter}
               onChange={(e) => handleFilterChange(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white min-w-[160px]"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-violet-400 focus:outline-none"
             >
-              <option value="all">Todos los clientes</option>
+              <option value="all">Todos</option>
               <option value="true">Con tickets</option>
               <option value="false">Sin tickets</option>
             </select>
             <button
               onClick={handleSearch}
               disabled={loading}
-              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 whitespace-nowrap"
+              className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
             >
-              {loading ? "Buscando..." : "Buscar"}
+              {loading ? "..." : "Buscar"}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto p-2">
         <table className="w-full">
-          <thead>
-            <tr className="border-b border-slate-200">
-              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Teléfono</th>
-              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Persona</th>
-              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Empresa</th>
-              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Patente</th>
-              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Tickets</th>
-              <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Fecha</th>
-              <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Acciones</th>
+          <thead className="border-b border-slate-100 bg-slate-50/80">
+            <tr>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Teléfono</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Persona</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Empresa</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Patente</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tickets</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">Fecha</th>
+              <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">Acciones</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-slate-50">
             {customers.length === 0 ? (
               <tr>
                 <td colSpan={7} className="py-8 text-center text-slate-500">
@@ -173,20 +173,20 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
               </tr>
             ) : (
               customers.map((customer) => (
-                <tr key={customer.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="py-3 px-4 text-sm text-slate-900 font-medium">{customer.phone}</td>
-                  <td className="py-3 px-4 text-sm text-slate-700">{customer.name || "—"}</td>
-                  <td className="py-3 px-4 text-sm text-slate-700">{customer.companyName || "—"}</td>
-                  <td className="py-3 px-4 text-sm text-slate-700 font-mono">{customer.licensePlate || "—"}</td>
-                  <td className="py-3 px-4 text-sm text-slate-600">
-                    <span className="inline-flex items-center px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                <tr key={customer.id} className="hover:bg-violet-50/30">
+                  <td className="px-4 py-3 text-sm font-medium text-slate-900">{customer.phone}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{customer.name || "—"}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{customer.companyName || "—"}</td>
+                  <td className="px-4 py-3 font-mono text-sm text-slate-700">{customer.licensePlate || "—"}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 ring-1 ring-violet-100">
                       {customer._count.tickets}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-sm text-slate-500">
+                  <td className="px-4 py-3 text-sm text-slate-500">
                     {new Date(customer.createdAt).toLocaleDateString("es-AR")}
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="px-4 py-3 text-right">
                     <div className="inline-flex flex-wrap items-center justify-end gap-1">
                       <button
                         type="button"

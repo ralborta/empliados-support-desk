@@ -4,7 +4,16 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LogOut } from "lucide-react";
+import {
+  LayoutDashboard,
+  Ticket,
+  Users,
+  Settings,
+  UserCircle,
+  LogOut,
+  Circle,
+} from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
 
 type SessionUser = {
   name: string;
@@ -12,19 +21,18 @@ type SessionUser = {
   role: string;
 };
 
-export function TicketsLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex min-h-screen">
-      <TicketsSidebar />
-      <main className="flex-1 bg-rose-50/60 p-6">{children}</main>
-    </div>
-  );
-}
-
-function TicketsSidebar() {
-  const router = useRouter();
+export function TicketsLayout({
+  children,
+  headerSubtitle,
+  urgentCount,
+  showHeader = true,
+}: {
+  children: React.ReactNode;
+  headerSubtitle?: string;
+  urgentCount?: number;
+  showHeader?: boolean;
+}) {
   const [user, setUser] = useState<SessionUser | null>(null);
-  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/session")
@@ -33,6 +41,28 @@ function TicketsSidebar() {
       .catch(() => setUser(null));
   }, []);
 
+  return (
+    <div className="flex min-h-screen bg-[#f4f5f7]">
+      <TicketsSidebar user={user} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <main className="flex-1 overflow-y-auto p-5 lg:p-6">
+          {showHeader ? (
+            <PageHeader
+              userName={user?.name || user?.email}
+              urgentCount={urgentCount}
+              subtitle={headerSubtitle}
+            />
+          ) : null}
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function TicketsSidebar({ user }: { user: SessionUser | null }) {
+  const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
   const isAdmin = user?.role === "ADMIN";
 
   async function handleLogout() {
@@ -46,43 +76,48 @@ function TicketsSidebar() {
   }
 
   return (
-    <aside className="flex w-72 flex-col bg-gradient-to-b from-rose-950 via-rose-900 to-rose-950 text-white shadow-2xl border-r border-rose-800/50">
-      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-700/50">
-        <Link href="/tickets" className="flex items-center gap-3 hover:opacity-90 transition">
-          <Image src="/wara-logo.png" alt="Soporte" width={120} height={48} priority />
+    <aside className="flex w-64 shrink-0 flex-col bg-[#4a0e1c] text-white lg:w-72">
+      <div className="border-b border-white/10 px-5 py-5">
+        <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-90">
+          <Image src="/wara-logo.png" alt="Wara" width={100} height={40} priority className="brightness-0 invert" />
           <div>
-            <span className="text-lg font-bold block">Soporte</span>
-            <span className="text-xs text-rose-200">Mesa operativa</span>
+            <span className="block text-sm font-semibold">Soporte</span>
+            <span className="text-[11px] text-white/60">Mesa operativa</span>
           </div>
         </Link>
       </div>
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4 text-sm">
+
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4 text-sm">
         <SectionTitle>Inicio</SectionTitle>
-        <NavLink label="📊 Dashboard" href="/dashboard" />
-        <NavLink label="🎫 Todos los Tickets" href="/tickets" />
+        <NavLink href="/dashboard" icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" />
+        <NavLink href="/tickets" icon={<Ticket className="h-4 w-4" />} label="Todos los Tickets" />
+
         <SectionTitle>Por Estado</SectionTitle>
-        <NavLink label="Abiertos" href="/tickets/abiertos" />
-        <NavLink label="En Progreso" href="/tickets/en-progreso" />
-        <NavLink label="Esperando datos del cliente" href="/tickets/esperando-cliente" />
-        <NavLink label="Resueltos" href="/tickets/resueltos" />
-        <NavLink label="Cerrados" href="/tickets/cerrados" />
+        <NavLink href="/tickets/abiertos" label="Abiertos" />
+        <NavLink href="/tickets/en-progreso" label="En Progreso" />
+        <NavLink href="/tickets/esperando-cliente" label="Esperando cliente" />
+        <NavLink href="/tickets/resueltos" label="Resueltos" />
+        <NavLink href="/tickets/cerrados" label="Cerrados" />
+
         <SectionTitle>Por Prioridad</SectionTitle>
-        <NavLink label="Urgente" href="/tickets/urgentes" indicator="bg-rose-500" />
-        <NavLink label="Alta" href="/tickets/alta" indicator="bg-amber-500" />
-        <NavLink label="Normal" href="/tickets/normal" indicator="bg-emerald-500" />
-        <NavLink label="Baja" href="/tickets/baja" indicator="bg-slate-400" />
+        <NavLink href="/tickets/urgentes" label="Urgente" dot="text-red-400" />
+        <NavLink href="/tickets/alta" label="Alta" dot="text-orange-400" />
+        <NavLink href="/tickets/normal" label="Normal" dot="text-emerald-400" />
+        <NavLink href="/tickets/baja" label="Baja" dot="text-slate-400" />
+
         <SectionTitle>Gestión</SectionTitle>
         {isAdmin ? (
           <>
-            <NavLink label="👥 Agentes" href="/agentes" />
-            <NavLink label="⚙️ Configuración" href="/configuracion" />
+            <NavLink href="/agentes" icon={<Users className="h-4 w-4" />} label="Agentes" />
+            <NavLink href="/configuracion" icon={<Settings className="h-4 w-4" />} label="Configuración" />
           </>
         ) : null}
-        <NavLink label="👤 Clientes" href="/clientes" />
+        <NavLink href="/clientes" icon={<UserCircle className="h-4 w-4" />} label="Clientes" />
       </nav>
-      <div className="border-t border-rose-800/50 px-3 py-4">
+
+      <div className="border-t border-white/10 px-3 py-4">
         {user ? (
-          <p className="mb-2 truncate px-4 text-xs text-rose-200" title={user.email}>
+          <p className="mb-2 truncate px-3 text-xs text-white/60" title={user.email}>
             {user.name || user.email}
           </p>
         ) : null}
@@ -90,9 +125,9 @@ function TicketsSidebar() {
           type="button"
           onClick={handleLogout}
           disabled={loggingOut}
-          className="flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium text-rose-100 transition hover:bg-white/10 hover:text-white disabled:opacity-60"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white disabled:opacity-60"
         >
-          <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+          <LogOut className="h-4 w-4 shrink-0" />
           {loggingOut ? "Cerrando sesión..." : "Cerrar sesión"}
         </button>
       </div>
@@ -102,7 +137,7 @@ function TicketsSidebar() {
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-4 pb-2 pt-5 text-xs font-bold uppercase tracking-wider text-slate-400 border-t border-slate-700/50 mt-2">
+    <div className="px-3 pb-1.5 pt-4 text-[10px] font-bold uppercase tracking-widest text-white/40 first:pt-0">
       {children}
     </div>
   );
@@ -111,11 +146,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function NavLink({
   href,
   label,
-  indicator,
+  icon,
+  dot,
 }: {
   href: string;
   label: string;
-  indicator?: string;
+  icon?: React.ReactNode;
+  dot?: string;
 }) {
   const pathname = usePathname();
   const active = pathname === href;
@@ -123,21 +160,20 @@ function NavLink({
   return (
     <Link
       href={href}
-      className={`group flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${
+      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
         active
-          ? "bg-white text-slate-900 shadow-lg"
-          : "text-slate-300 hover:bg-white/5 hover:text-white"
+          ? "bg-white text-[#4a0e1c] shadow-sm"
+          : "text-white/75 hover:bg-white/10 hover:text-white"
       }`}
     >
-      {indicator ? (
-        <span className={`h-2.5 w-2.5 rounded-full ${indicator} shadow-sm`}></span>
+      {dot ? (
+        <Circle className={`h-2 w-2 fill-current ${dot}`} strokeWidth={0} />
+      ) : icon ? (
+        icon
       ) : (
-        <span className="w-2.5"></span>
+        <span className="w-4" />
       )}
-      <span>{label}</span>
-      {active && (
-        <span className="ml-auto h-1.5 w-1.5 animate-pulse rounded-full bg-slate-900"></span>
-      )}
+      {label}
     </Link>
   );
 }

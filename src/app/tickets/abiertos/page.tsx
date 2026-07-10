@@ -1,39 +1,19 @@
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/auth";
-import { TicketsLayout } from "@/components/tickets/TicketsLayout";
-import { TicketsTable } from "@/components/tickets/TicketsTable";
+import { TicketsListPage } from "@/components/tickets/TicketsListPage";
+import type { TicketListSearchParams } from "@/lib/ticketListQuery";
 
-export default async function TicketsAbiertosPage() {
-  await requireSession();
-
-  const tickets = await prisma.ticket.findMany({
-    where: { status: "OPEN" },
-    include: { customer: true, assignedTo: true },
-    orderBy: { lastMessageAt: "desc" },
-    take: 100,
-  });
-
-  const totalCount = await prisma.ticket.count({ where: { status: "OPEN" } });
-
+export default async function TicketsAbiertosPage({
+  searchParams,
+}: {
+  searchParams: Promise<TicketListSearchParams>;
+}) {
   return (
-    <TicketsLayout>
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Tickets Abiertos</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {totalCount} {totalCount === 1 ? "ticket abierto" : "tickets abiertos"} esperando atención
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-blue-50 p-6 ring-1 ring-blue-100">
-            <div className="text-sm font-medium text-blue-600">Total Abiertos</div>
-            <div className="mt-2 text-3xl font-bold text-blue-900">{totalCount}</div>
-          </div>
-        </div>
-
-        <TicketsTable tickets={tickets} />
-      </div>
-    </TicketsLayout>
+    <TicketsListPage
+      basePath="/tickets/abiertos"
+      title="Tickets Abiertos"
+      subtitle="Tickets pendientes de atención"
+      searchParams={await searchParams}
+      fixedFilter={{ status: "OPEN" }}
+      highlightStat={{ label: "Total Abiertos", color: "text-blue-600" }}
+    />
   );
 }

@@ -15,7 +15,7 @@ export function generateTicketCode(date = new Date()) {
 export const statusLabels: Record<TicketStatus, string> = {
   OPEN: "Nuevo",
   IN_PROGRESS: "En análisis",
-  WAITING_CUSTOMER: "Esperando datos del cliente",
+  WAITING_CUSTOMER: "Esperando cliente",
   RESOLVED: "Resuelto",
   CLOSED: "Cerrado",
 };

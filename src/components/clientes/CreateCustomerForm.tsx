@@ -58,8 +58,8 @@ export function CreateCustomerForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-      <h3 className="text-lg font-semibold text-slate-900 mb-4">Agregar Cliente</h3>
+    <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h3 className="mb-4 text-lg font-semibold text-slate-900">Agregar Cliente</h3>
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm border border-red-200">
@@ -83,7 +83,7 @@ export function CreateCustomerForm() {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             placeholder="+54 9 2615 35-9001"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
             required
             disabled={loading}
           />
@@ -96,7 +96,7 @@ export function CreateCustomerForm() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ej. Fernando Cantos"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
             disabled={loading}
           />
         </div>
@@ -108,7 +108,7 @@ export function CreateCustomerForm() {
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
             placeholder="Ej. Bioterra S.R.L."
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
             disabled={loading}
           />
         </div>
@@ -120,7 +120,7 @@ export function CreateCustomerForm() {
             value={licensePlate}
             onChange={(e) => setLicensePlate(e.target.value)}
             placeholder="Ej. KDN278 o AC 190 KT"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
             disabled={loading}
           />
         </div>
@@ -128,7 +128,7 @@ export function CreateCustomerForm() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "Guardando..." : "Agregar Cliente"}
         </button>

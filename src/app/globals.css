@@ -1,13 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eef2f8;
+  --background: #f4f5f7;
   --foreground: #0f172a;
+  --wara: #4a0e1c;
+  --wara-light: #6b1a2d;
+  --wara-accent: #7c3aed;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-wara: var(--wara);
+  --color-wara-light: var(--wara-light);
+  --color-wara-accent: var(--wara-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -19,7 +25,8 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {

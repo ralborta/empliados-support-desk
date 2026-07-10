@@ -26,28 +26,36 @@ export function StatusActions({
   };
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        disabled={isPending || currentStatus === "IN_PROGRESS"}
+        onClick={() => updateStatus("IN_PROGRESS")}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+      >
+        En análisis
+      </button>
       <button
         type="button"
         disabled={isPending || currentStatus === "WAITING_CUSTOMER"}
         onClick={() => updateStatus("WAITING_CUSTOMER")}
-        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
       >
-        Esperando Cliente
+        Esperando cliente
       </button>
       <button
         type="button"
         disabled={isPending || currentStatus === "RESOLVED"}
         onClick={() => updateStatus("RESOLVED")}
-        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+        className="rounded-lg bg-[#4a0e1c] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#6b1a2d] disabled:opacity-60"
       >
-        Marcar como Resuelto
+        Marcar resuelto
       </button>
       <button
         type="button"
         disabled={isPending || currentStatus === "CLOSED"}
         onClick={() => updateStatus("CLOSED")}
-        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 shadow-sm hover:bg-red-100 disabled:opacity-60"
       >
         Cerrar
       </button>

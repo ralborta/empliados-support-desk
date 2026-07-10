@@ -1,41 +1,19 @@
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/auth";
-import { TicketsLayout } from "@/components/tickets/TicketsLayout";
-import { TicketsTable } from "@/components/tickets/TicketsTable";
+import { TicketsListPage } from "@/components/tickets/TicketsListPage";
+import type { TicketListSearchParams } from "@/lib/ticketListQuery";
 
-export default async function TicketsUrgentesPage() {
-  await requireSession();
-
-  const tickets = await prisma.ticket.findMany({
-    where: { priority: "URGENT", status: { not: "CLOSED" } },
-    include: { customer: true, assignedTo: true },
-    orderBy: { lastMessageAt: "desc" },
-    take: 100,
-  });
-
-  const totalCount = await prisma.ticket.count({ 
-    where: { priority: "URGENT", status: { not: "CLOSED" } } 
-  });
-
+export default async function TicketsUrgentesPage({
+  searchParams,
+}: {
+  searchParams: Promise<TicketListSearchParams>;
+}) {
   return (
-    <TicketsLayout>
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">🔴 Tickets Urgentes</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {totalCount} {totalCount === 1 ? "ticket urgente" : "tickets urgentes"} requieren atención inmediata
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-rose-50 p-6 ring-1 ring-rose-100">
-            <div className="text-sm font-medium text-rose-600">Urgentes</div>
-            <div className="mt-2 text-3xl font-bold text-rose-900">{totalCount}</div>
-          </div>
-        </div>
-
-        <TicketsTable tickets={tickets} />
-      </div>
-    </TicketsLayout>
+    <TicketsListPage
+      basePath="/tickets/urgentes"
+      title="Tickets Urgentes"
+      subtitle="Requieren atención inmediata"
+      searchParams={await searchParams}
+      fixedFilter={{ priority: "URGENT" }}
+      highlightStat={{ label: "Urgentes", color: "text-red-600" }}
+    />
   );
 }

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { statusLabels, priorityLabels } from "@/lib/tickets";
+import { statusBadgeClass, priorityBadgeClass } from "@/lib/ui/badges";
+import { AgentAvatar } from "@/components/ui/AgentAvatar";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 type TicketPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -27,76 +29,67 @@ interface Ticket {
   } | null;
 }
 
-function statusBadgeClass(status: TicketStatus) {
-  switch (status) {
-    case "OPEN":
-      return "bg-blue-100 text-blue-800";
-    case "IN_PROGRESS":
-      return "bg-amber-100 text-amber-800";
-    case "WAITING_CUSTOMER":
-      return "bg-lime-100 text-lime-800";
-    case "RESOLVED":
-      return "bg-emerald-100 text-emerald-800";
-    case "CLOSED":
-      return "bg-slate-200 text-slate-700";
-  }
-}
-
-function priorityBadgeClass(priority: TicketPriority) {
-  switch (priority) {
-    case "URGENT":
-      return "bg-rose-100 text-rose-800";
-    case "HIGH":
-      return "bg-amber-100 text-amber-800";
-    case "NORMAL":
-      return "bg-emerald-100 text-emerald-800";
-    case "LOW":
-      return "bg-slate-200 text-slate-700";
-  }
-}
-
-export function TicketsTable({ tickets }: { tickets: Ticket[] }) {
+export function TicketsTable({
+  tickets,
+  compact = false,
+}: {
+  tickets: Ticket[];
+  compact?: boolean;
+}) {
   const router = useRouter();
 
   const formatDateTime = (date: Date | string) => {
     try {
       const d = typeof date === "string" ? new Date(date) : date;
-      if (isNaN(d.getTime())) {
-        return { date: "N/A", time: "N/A" };
-      }
+      if (isNaN(d.getTime())) return { date: "N/A", time: "" };
       return {
         date: d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" }),
         time: d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
       };
     } catch {
-      return { date: "N/A", time: "N/A" };
+      return { date: "N/A", time: "" };
     }
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-white shadow-lg ring-1 ring-slate-200">
+    <div className={compact ? "" : "overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"}>
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-200">
+          <thead className="border-b border-slate-100 bg-slate-50/80">
             <tr>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">ID</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">Asunto</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">Cliente</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">Estado</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">Prioridad</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">Asignado</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">Última Actividad</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-700">Creado</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                ID
+              </th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Asunto
+              </th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Cliente
+              </th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Estado
+              </th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Prioridad
+              </th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Asignado
+              </th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Última Actividad
+              </th>
+              {!compact ? (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Creado
+                </th>
+              ) : null}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-slate-100">
+          <tbody className="divide-y divide-slate-50 bg-white">
             {tickets.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center text-sm text-slate-500">
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-4xl">📭</span>
-                    <span>No hay tickets en esta sección.</span>
-                  </div>
+                <td colSpan={compact ? 7 : 8} className="px-4 py-10 text-center text-sm text-slate-500">
+                  No hay tickets en esta sección.
                 </td>
               </tr>
             ) : (
@@ -106,72 +99,63 @@ export function TicketsTable({ tickets }: { tickets: Ticket[] }) {
                 return (
                   <tr
                     key={ticket.id}
-                    className="cursor-pointer transition-colors hover:bg-rose-50/40"
+                    className="cursor-pointer transition-colors hover:bg-violet-50/30"
                     onClick={() => router.push(`/tickets/${ticket.id}`)}
                   >
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-bold text-slate-900">{ticket.code}</div>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className="text-sm font-semibold text-slate-800">{ticket.code}</span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-3">
                       <Link
                         href={`/tickets/${ticket.id}`}
-                        className="block text-sm font-semibold text-rose-700 hover:text-rose-900 hover:underline"
+                        className="text-sm font-medium text-slate-900 hover:text-violet-700"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {ticket.title.length > 60 ? `${ticket.title.substring(0, 60)}...` : ticket.title}
+                        {ticket.title.length > 50 ? `${ticket.title.substring(0, 50)}…` : ticket.title}
                       </Link>
-                      <div className="text-xs text-slate-500 mt-1">📱 {ticket.customer?.phone}</div>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-slate-900">
+                    <td className="px-4 py-3">
+                      <div className="text-sm text-slate-800">
                         {ticket.customer?.companyName?.trim() ||
                           ticket.customer?.name?.trim() ||
-                          "Sin datos"}
+                          ticket.contactName}
                       </div>
-                      {ticket.customer?.companyName && ticket.customer?.name && (
-                        <div className="text-xs text-slate-500 mt-0.5">{ticket.customer.name}</div>
-                      )}
-                      <div className="text-xs text-slate-500 mt-1">👤 {ticket.contactName}</div>
-                      {ticket.customer?.licensePlate && (
-                        <div className="text-xs text-slate-500">🚗 {ticket.customer.licensePlate}</div>
-                      )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="whitespace-nowrap px-4 py-3">
                       <span
-                        className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${statusBadgeClass(ticket.status as TicketStatus)}`}
+                        className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusBadgeClass(ticket.status as TicketStatus)}`}
                       >
                         {statusLabels[ticket.status as TicketStatus]}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="whitespace-nowrap px-4 py-3">
                       <span
-                        className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${priorityBadgeClass(ticket.priority as TicketPriority)}`}
+                        className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${priorityBadgeClass(ticket.priority as TicketPriority)}`}
                       >
                         {priorityLabels[ticket.priority as TicketPriority]}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="whitespace-nowrap px-4 py-3">
                       {ticket.assignedTo ? (
                         <div className="flex items-center gap-2">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100">
-                            <span className="text-xs font-bold text-rose-700">
-                              {ticket.assignedTo.name.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
-                          <span className="text-sm font-medium text-slate-700">{ticket.assignedTo.name}</span>
+                          <AgentAvatar name={ticket.assignedTo.name} size="sm" />
+                          <span className="text-sm text-slate-700">{ticket.assignedTo.name.split(" ")[0]}</span>
                         </div>
                       ) : (
-                        <span className="text-sm text-slate-400 italic">Sin asignar</span>
+                        <span className="text-sm italic text-slate-400">Sin asignar</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-slate-900">{lastActivity.date}</div>
-                      <div className="text-xs text-slate-500">{lastActivity.time}</div>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <div className="text-sm text-slate-700">{lastActivity.date}</div>
+                      {lastActivity.time ? (
+                        <div className="text-[11px] text-slate-400">{lastActivity.time}</div>
+                      ) : null}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-slate-700">{created.date}</div>
-                      <div className="text-xs text-slate-500">{created.time}</div>
-                    </td>
+                    {!compact ? (
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <div className="text-sm text-slate-600">{created.date}</div>
+                      </td>
+                    ) : null}
                   </tr>
                 );
               })

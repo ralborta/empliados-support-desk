@@ -25,7 +25,7 @@ export default function LoginPage() {
         const data = await res.json().catch(() => ({}));
         setError(data.error || "Credenciales inválidas");
       } else {
-        router.replace("/tickets");
+        router.replace("/dashboard");
       }
     } catch {
       setError("Error al iniciar sesión");
@@ -35,13 +35,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-rose-50 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl">
+    <div className="flex min-h-screen items-center justify-center bg-[#f4f5f7] px-4">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
         <div className="mb-6 text-center">
           <div className="mb-4 flex justify-center">
-            <Image src="/wara-logo.png" alt="Soporte" width={220} height={90} priority />
+            <Image src="/wara-logo.png" alt="Wara Soporte" width={180} height={72} priority />
           </div>
-          <div className="text-lg font-semibold text-slate-700">Soporte</div>
+          <div className="text-lg font-semibold text-slate-800">Mesa de Ayuda Wara</div>
           <div className="text-sm text-slate-500">Acceso interno</div>
         </div>
         <form className="space-y-4" onSubmit={handleSubmit}>
@@ -53,7 +53,7 @@ export default function LoginPage() {
               id="email"
               type="email"
               autoComplete="username"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-rose-500 focus:outline-none"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -67,7 +67,7 @@ export default function LoginPage() {
               id="password"
               type="password"
               autoComplete="current-password"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-rose-500 focus:outline-none"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -77,7 +77,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="flex w-full items-center justify-center rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-800 disabled:opacity-60"
+            className="flex w-full items-center justify-center rounded-lg bg-[#4a0e1c] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#6b1a2d] disabled:opacity-60"
           >
             {loading ? "Ingresando..." : "Ingresar"}
           </button>
