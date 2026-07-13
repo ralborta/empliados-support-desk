@@ -24,7 +24,10 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
 
   if (assessment.status === "ok") {
     return (
-      `Funcionamiento normal: la unidad ${unitLabel} envía reporte actualizado, la posición se actualiza y la ignición acompaña. ` +
+      `Funcionamiento normal: la unidad ${unitLabel} envía reporte y posición actualizados` +
+      (facts.ignicionEstado === "encendida"
+        ? `; la ignición está encendida (puede llevar rato en ON sin cambiar de estado). `
+        : ` y la ignición acompaña. `) +
       `${telemetryLine} No genero ticket. El GPS puede reportar cada 10 minutos; si algo cambia, volvé a consultar.`
     );
   }

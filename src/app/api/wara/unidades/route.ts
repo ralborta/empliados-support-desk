@@ -932,7 +932,7 @@ export async function POST(req: NextRequest) {
             assessment.ignitionElapsed != null
               ? `hace ${minutesAgo(assessment.ignitionElapsed)}`
               : "sin dato reciente";
-          ticketIssueDetail = `falla de ignición: reporte y posición al día pero la ignición no cambia de estado (última ignición ${ignText})`;
+          ticketIssueDetail = `falla de ignición: reporte y posición al día pero la ignición no acompaña (última ignición ${ignText}, ${ignitionLabel(unit)})`;
           const created = await createMissingReportTicket({
             rawPhone,
             unit,

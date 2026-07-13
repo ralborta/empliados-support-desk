@@ -61,8 +61,12 @@ function isPositionUpdating(reportElapsed: number, positionElapsed: number | nul
 function isIgnitionUpdating(
   reportElapsed: number,
   positionElapsed: number,
-  ignitionElapsed: number | null
+  ignitionElapsed: number | null,
+  ignitionOn: boolean
 ): boolean {
+  // Ignición ON: "hace X minutos" es el último cambio a encendida. Puede quedar
+  // quieto mientras el vehículo opera (reporte/posición al día). No es falla.
+  if (ignitionOn) return true;
   if (ignitionElapsed == null) return false;
   if (ignitionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
   if (ignitionElapsed > positionElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
@@ -92,7 +96,9 @@ function allTelemetryAligned(
  *    a) Ignición clavada mucho antes que posición → Caso 3 (prioridad sobre Caso 2)
  *    b) Ignición OFF y posición alineada con ignición → unidad detenida, sin ticket
  *    c) Sino → Caso 2 pérdida de señal
- * 3. Reporte y posición OK, ignición desalineada → Caso 3
+ * 3. Reporte y posición OK:
+ *    - Ignición ON → normal (operando; el timestamp no tiene que “moverse”)
+ *    - Ignición OFF/sin dato desalineada vs reporte/posición → Caso 3
  * 4. Todo OK → normal
  */
 export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | null {
@@ -101,6 +107,7 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
 
   const positionElapsed = telemetryElapsedSeconds(unit.ultima_posicion?.hace_segundos);
   const ignitionElapsed = telemetryElapsedSeconds(unit.ultima_ignicion?.hace_segundos);
+  const ignitionOn = unit.ultima_ignicion?.estado === true;
   const ignitionOff = unit.ultima_ignicion?.estado === false;
 
   if (!isReportUpdated(reportElapsed)) {
@@ -132,6 +139,7 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
     if (
       posElapsed != null &&
       ignitionElapsed != null &&
+      !ignitionOn &&
       ignitionElapsed > posElapsed + POSITION_REPORT_DRIFT_SECONDS
     ) {
       return {
@@ -170,7 +178,7 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
 
   const posElapsed = positionElapsed as number;
 
-  if (!isIgnitionUpdating(reportElapsed, posElapsed, ignitionElapsed)) {
+  if (!isIgnitionUpdating(reportElapsed, posElapsed, ignitionElapsed, ignitionOn)) {
     return {
       status: "ignition_failure",
       reportElapsed,
