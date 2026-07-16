@@ -10,7 +10,15 @@ export default async function AgentesPage() {
 
   const agentes = await prisma.agentUser.findMany({
     orderBy: { createdAt: "desc" },
-    include: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      role: true,
+      createdAt: true,
+      passwordHash: true,
+      sessionActive: true,
       _count: {
         select: { tickets: true },
       },
@@ -35,8 +43,15 @@ export default async function AgentesPage() {
           <div className="lg:col-span-2">
             <AgentsList
               agentes={agentes.map((a) => ({
-                ...a,
+                id: a.id,
+                name: a.name,
+                email: a.email,
+                phone: a.phone,
+                role: a.role,
                 createdAt: a.createdAt.toISOString(),
+                hasPassword: !!a.passwordHash,
+                sessionActive: a.sessionActive,
+                _count: a._count,
               }))}
             />
           </div>

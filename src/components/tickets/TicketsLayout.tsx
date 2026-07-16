@@ -59,7 +59,11 @@ export function TicketsLayout({
               urgentCount={urgentCount}
               subtitle={headerSubtitle}
             />
-          ) : null}
+          ) : (
+            <div className="mb-5 flex justify-end">
+              <NotificationBell />
+            </div>
+          )}
           {children}
         </main>
       </div>
@@ -142,11 +146,6 @@ function TicketsSidebar({ user }: { user: SessionUser | null }) {
       </nav>
 
       <div className="border-t border-white/10 px-3 py-4">
-        <div className="mb-3 flex items-center justify-end px-2">
-          <div className="[&_button]:border-white/20 [&_button]:bg-white/10 [&_button]:text-white [&_button]:hover:bg-white/20">
-            <NotificationBell />
-          </div>
-        </div>
         {user ? (
           <div className="mb-3 flex items-center gap-3 rounded-lg px-2 py-2">
             <AgentAvatar name={user.name || user.email} size="lg" />
