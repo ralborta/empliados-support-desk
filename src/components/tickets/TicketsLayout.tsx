@@ -14,6 +14,7 @@ import {
   Circle,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 import { AgentAvatar } from "@/components/ui/AgentAvatar";
 
 type SessionUser = {
@@ -91,7 +92,7 @@ function TicketsSidebar({ user }: { user: SessionUser | null }) {
 
   const s = counts?.status ?? {};
   const p = counts?.priority ?? {};
-  const roleLabel = user?.role === "ADMIN" ? "Administrador" : "Coordinador";
+  const roleLabel = user?.role === "ADMIN" ? "Administrador" : "Asesor";
 
   return (
     <aside className="flex w-64 shrink-0 flex-col bg-[#4a0e1c] text-white lg:w-72">
@@ -141,6 +142,11 @@ function TicketsSidebar({ user }: { user: SessionUser | null }) {
       </nav>
 
       <div className="border-t border-white/10 px-3 py-4">
+        <div className="mb-3 flex items-center justify-end px-2">
+          <div className="[&_button]:border-white/20 [&_button]:bg-white/10 [&_button]:text-white [&_button]:hover:bg-white/20">
+            <NotificationBell />
+          </div>
+        </div>
         {user ? (
           <div className="mb-3 flex items-center gap-3 rounded-lg px-2 py-2">
             <AgentAvatar name={user.name || user.email} size="lg" />

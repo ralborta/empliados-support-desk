@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { generateTicketCode } from "@/lib/tickets";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { sessionOptions, type SessionData } from "@/lib/auth";
+import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status") as "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED" | null;
@@ -116,6 +117,12 @@ export async function POST(req: Request) {
       channel: "WEB",
     },
   });
+
+  try {
+    await autoAssignNewTicket(ticket.id);
+  } catch (e) {
+    console.error("[tickets POST] autoAssign:", e);
+  }
 
   return NextResponse.json({ ticket });
 }

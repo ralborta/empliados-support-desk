@@ -16,6 +16,11 @@ import {
   type TicketListFixedFilter,
   type TicketListSearchParams,
 } from "@/lib/ticketListQuery";
+import {
+  applyAdvisorTicketScope,
+  isDbAgentUserId,
+  sortTicketsByPriority,
+} from "@/lib/advisorDistribution";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 type TicketPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -48,10 +53,13 @@ export async function TicketsListPage({
   highlightStat,
 }: TicketsListPageProps) {
   const session = await requireSession();
+  const isAdvisorOnly =
+    session.user?.role === "SUPPORT" && isDbAgentUserId(session.user.id);
   const page = parseTicketListPage(searchParams.page);
-  const where = buildTicketWhere(searchParams, fixedFilter);
+  const baseWhere = buildTicketWhere(searchParams, fixedFilter);
+  const where = applyAdvisorTicketScope(baseWhere, session.user!);
 
-  const [tickets, filteredCount, statusCounts, priorityCounts, totalCount, agentes] =
+  const [rawTickets, filteredCount, statusCounts, priorityCounts, totalCount, agentes] =
     await Promise.all([
       prisma.ticket.findMany({
         where,
@@ -61,14 +69,24 @@ export async function TicketsListPage({
         take: TICKETS_PAGE_SIZE,
       }),
       prisma.ticket.count({ where }),
-      prisma.ticket.groupBy({ by: ["status"], _count: { _all: true } }),
-      prisma.ticket.groupBy({ by: ["priority"], _count: { _all: true } }),
-      prisma.ticket.count(),
+      prisma.ticket.groupBy({
+        by: ["status"],
+        where,
+        _count: { _all: true },
+      }),
+      prisma.ticket.groupBy({
+        by: ["priority"],
+        where,
+        _count: { _all: true },
+      }),
+      prisma.ticket.count({ where: isAdvisorOnly ? where : undefined }),
       prisma.agentUser.findMany({
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       }),
     ]);
+
+  const tickets = isAdvisorOnly ? sortTicketsByPriority(rawTickets) : rawTickets;
 
   const totalPages = Math.max(1, Math.ceil(filteredCount / TICKETS_PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -107,6 +125,7 @@ export async function TicketsListPage({
               totalInSystem={totalCount}
               basePath={basePath}
               agentes={agentes}
+              isAdmin={session.user?.role === "ADMIN"}
             />
           </Suspense>
         ) : (

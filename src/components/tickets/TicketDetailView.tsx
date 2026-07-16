@@ -55,6 +55,7 @@ interface TicketDetailViewProps {
   agentes: Array<{ id: string; name: string; email: string }>;
   wara: Record<string, unknown> | null;
   incidentTypeLabel: string;
+  isAdmin?: boolean;
 }
 
 function collectAttachments(
@@ -81,6 +82,7 @@ export function TicketDetailView({
   agentes,
   wara,
   incidentTypeLabel,
+  isAdmin = false,
 }: TicketDetailViewProps) {
   const [tab, setTab] = useState<TabId>("conversacion");
   const conversation = ticket.messages || [];
@@ -226,11 +228,25 @@ export function TicketDetailView({
 
           <div className="space-y-4 xl:col-span-4">
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <AssignAgentDropdown
-                ticketId={ticket.id}
-                currentAgentId={ticket.assignedToUserId}
-                agentes={agentes}
-              />
+              {isAdmin ? (
+                <AssignAgentDropdown
+                  ticketId={ticket.id}
+                  currentAgentId={ticket.assignedToUserId}
+                  agentes={agentes}
+                />
+              ) : (
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-slate-700">Asignado a</p>
+                  {ticket.assignedTo ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-800">
+                      <AgentAvatar name={ticket.assignedTo.name} size="sm" />
+                      {ticket.assignedTo.name}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">Sin asignar (en cola)</p>
+                  )}
+                </div>
+              )}
             </div>
             <ConversationSummary
               ticketId={ticket.id}

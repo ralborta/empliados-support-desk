@@ -13,6 +13,7 @@ import {
   waraIncidentLabels,
 } from "@/lib/wara";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
 // Using string literals instead of Prisma enums for compatibility
@@ -416,6 +417,18 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       peerText: textForFarewell,
       rawExtra: { atClienteDespedida: true },
     });
+  }
+
+  try {
+    const fresh = await prisma.ticket.findUnique({
+      where: { id: ticket.id },
+      select: { assignedToUserId: true },
+    });
+    if (isNewTicket || !fresh?.assignedToUserId) {
+      await autoAssignNewTicket(ticket.id);
+    }
+  } catch (e) {
+    console.error("[whatsapp/inbound] autoAssign:", e);
   }
 
   return NextResponse.json({

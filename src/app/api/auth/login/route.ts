@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { panelAuthConfigured, panelAuthMissingDescription, tryAgentUserLogin, tryPanelLogin } from "@/lib/panelAuth";
+import { onAdvisorLogin } from "@/lib/advisorDistribution";
 
 const bodySchema = z.object({
   email: z.string().email(),
@@ -36,6 +37,12 @@ export async function POST(req: Request) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
   session.user = user;
   await session.save();
+
+  try {
+    await onAdvisorLogin(user.id);
+  } catch (e) {
+    console.error("[auth/login] onAdvisorLogin:", e);
+  }
 
   return NextResponse.json({ ok: true });
 }

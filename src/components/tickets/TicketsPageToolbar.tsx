@@ -28,12 +28,14 @@ export function TicketsPageToolbar({
   basePath,
   agentes,
   hideFixedFilters = false,
+  isAdmin = true,
 }: {
   totalCount: number;
   totalInSystem: number;
   basePath: string;
   agentes: Array<{ id: string; name: string }>;
   hideFixedFilters?: boolean;
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -77,7 +79,9 @@ export function TicketsPageToolbar({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Todos los Tickets</h2>
+          <h2 className="text-xl font-bold text-slate-900">
+            {isAdmin ? "Todos los Tickets" : "Mis casos asignados"}
+          </h2>
           <p className="text-sm text-slate-500">
             {totalCount === totalInSystem
               ? `${totalCount} ${totalCount === 1 ? "ticket" : "tickets"} en el sistema`
@@ -122,19 +126,21 @@ export function TicketsPageToolbar({
             ))}
           </select>
 
-          <select
-            value={currentAssigned}
-            onChange={(e) => pushParams({ assigned: e.target.value })}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
-          >
-            <option value="all">Asignado</option>
-            <option value="none">Sin asignar</option>
-            {agentes.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+          {isAdmin ? (
+            <select
+              value={currentAssigned}
+              onChange={(e) => pushParams({ assigned: e.target.value })}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
+            >
+              <option value="all">Asignado</option>
+              <option value="none">Sin asignar</option>
+              {agentes.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
 
           <form onSubmit={handleSearch} className="relative ml-auto flex-1 sm:max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />

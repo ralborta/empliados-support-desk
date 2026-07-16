@@ -62,6 +62,11 @@ enum TicketEventType {
   ESCALATED
 }
 
+enum AgentNotificationType {
+  ASSIGNED
+  REASSIGNED
+}
+
 model Customer {
   id        String    @id @default(cuid())
   phone     String    @unique
@@ -86,12 +91,35 @@ model AgentUser {
   id           String    @id @default(cuid())
   email        String    @unique
   name         String
-  phone        String    // Número de teléfono para notificaciones por WhatsApp
+  phone        String    // Legacy; avisos al asesor van al panel, no WhatsApp
   role         AgentRole
   /// Hash scrypt para login al panel (opcional; si null, no puede iniciar sesión).
   passwordHash String?
+  /// Asesor conectado al backoffice y disponible para recibir casos (solo rol SUPPORT).
+  sessionActive   Boolean   @default(false)
+  sessionActiveAt DateTime?
+  /// Tras logout: liberar casos a la cola cuando llegue este timestamp (gracia 5 min).
+  casesReleaseAt  DateTime?
   tickets      Ticket[]  @relation("AgentAssignments")
+  notifications AgentNotification[]
   createdAt    DateTime  @default(now())
+
+  @@index([sessionActive])
+  @@index([casesReleaseAt])
+}
+
+model AgentNotification {
+  id          String                @id @default(cuid())
+  agentUserId String
+  agentUser   AgentUser             @relation(fields: [agentUserId], references: [id], onDelete: Cascade)
+  ticketId    String
+  ticket      Ticket                @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  type        AgentNotificationType @default(ASSIGNED)
+  readAt      DateTime?
+  createdAt   DateTime              @default(now())
+
+  @@index([agentUserId, readAt])
+  @@index([ticketId])
 }
 
 model Ticket {
@@ -117,6 +145,7 @@ model Ticket {
   messages          TicketMessage[]
   events            TicketEvent[]
   tags              TicketTag[]
+  agentNotifications AgentNotification[]
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 

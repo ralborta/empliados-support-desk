@@ -1,14 +1,21 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { categoryLabels } from "@/lib/tickets";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { TicketDetailView } from "@/components/tickets/TicketDetailView";
 import { waraIncidentLabels, type WaraIncidentType } from "@/lib/wara";
+import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
 
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
-  await requireSession();
+  const session = await requireSession();
   const { id } = await params;
+
+  const allowed = await assertAdvisorCanAccessTicket(id, session.user!);
+  if (!allowed) {
+    redirect("/tickets");
+  }
+
   const ticket = await prisma.ticket.findUnique({
     where: { id },
     include: {
@@ -26,6 +33,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
   }
 
   const agentes = await prisma.agentUser.findMany({
+    where: { role: "SUPPORT" },
     orderBy: { name: "asc" },
     select: { id: true, name: true, email: true },
   });
@@ -49,6 +57,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
   return (
     <TicketsLayout showHeader={false}>
       <TicketDetailView
+        isAdmin={session.user?.role === "ADMIN"}
         ticket={{
           id: ticket.id,
           code: ticket.code,

@@ -4,9 +4,16 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import { sendWhatsAppMessage } from "@/lib/builderbot";
+import { adminAssignTicket, assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+  if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id } = await params;
+  const allowed = await assertAdvisorCanAccessTicket(id, session.user);
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
   const ticket = await prisma.ticket.findUnique({
     where: { id },
     include: { customer: true, assignedTo: true, messages: true },
@@ -27,65 +34,44 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+  const allowed = await assertAdvisorCanAccessTicket(id, session.user);
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
   const json = await req.json().catch(() => null);
   const parsed = updateSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  // Obtener el ticket actual para comparar cambios
-  const currentTicket = await prisma.ticket.findUnique({
-    where: { id },
-    include: {
-      customer: true,
-      assignedTo: true,
-    },
-  });
+  if (parsed.data.assignedToUserId !== undefined && session.user.role !== "ADMIN") {
+    return NextResponse.json(
+      { error: "Solo un administrador puede reasignar casos manualmente" },
+      { status: 403 },
+    );
+  }
 
+  const currentTicket = await prisma.ticket.findUnique({ where: { id } });
   if (!currentTicket) {
     return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
   }
 
-  // Detectar si se está asignando a un nuevo agente
-  const isNewAssignment = 
-    parsed.data.assignedToUserId !== undefined &&
-    parsed.data.assignedToUserId !== currentTicket.assignedToUserId &&
-    parsed.data.assignedToUserId !== null;
+  const { assignedToUserId, ...rest } = parsed.data;
 
-  const ticket = await prisma.ticket.update({
-    where: { id },
-    data: {
-      ...parsed.data,
-    },
-    include: {
-      customer: true,
-      assignedTo: true,
-    },
-  });
-
-  // Si se asignó a un nuevo agente, enviar notificación por WhatsApp
-  if (isNewAssignment && ticket.assignedTo) {
-    try {
-      const summary = ticket.aiSummary || "No hay resumen disponible aún.";
-      const message = `🎫 *Nuevo ticket asignado*\n\n` +
-        `Ticket: *${ticket.code}*\n` +
-        `Cliente: ${[ticket.customer?.companyName, ticket.customer?.name].filter(Boolean).join(" — ") || ticket.customer?.phone}\n` +
-        `Prioridad: ${ticket.priority}\n` +
-        `Estado: ${ticket.status}\n\n` +
-        `📋 *Resumen:*\n${summary}\n\n` +
-        `👉 Ver en panel: https://empliados-support-desk.vercel.app/tickets/${ticket.id}`;
-
-      await sendWhatsAppMessage({
-        number: ticket.assignedTo.phone,
-        message,
-      });
-
-      console.log(`[Tickets] ✅ Notificación enviada a ${ticket.assignedTo.name} (${ticket.assignedTo.phone})`);
-    } catch (error: any) {
-      console.error(`[Tickets] ⚠️ Error al notificar al agente:`, error.message);
-      // No fallar si la notificación falla
-    }
+  if (assignedToUserId !== undefined && session.user.role === "ADMIN") {
+    await adminAssignTicket(id, assignedToUserId, session.user.id);
   }
+
+  const hasOtherUpdates = Object.values(rest).some((v) => v !== undefined);
+  const ticket = hasOtherUpdates
+    ? await prisma.ticket.update({
+        where: { id },
+        data: rest,
+        include: { customer: true, assignedTo: true },
+      })
+    : await prisma.ticket.findUnique({
+        where: { id },
+        include: { customer: true, assignedTo: true },
+      });
 
   return NextResponse.json({ ticket });
 }

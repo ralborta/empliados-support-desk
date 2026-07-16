@@ -18,6 +18,7 @@ import {
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
+import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
@@ -524,6 +525,12 @@ async function createMissingReportTicket(params: {
     }
   }
 
+  try {
+    await autoAssignNewTicket(localTicket.id);
+  } catch (e) {
+    console.error("[Unidades] autoAssign:", e);
+  }
+
   return {
     ref,
     reused: false,
@@ -630,6 +637,12 @@ async function createNoEquipmentTicket(params: {
         }`
       );
     }
+  }
+
+  try {
+    await autoAssignNewTicket(localTicket.id);
+  } catch (e) {
+    console.error("[Unidades] autoAssign sin equipo:", e);
   }
 
   return {

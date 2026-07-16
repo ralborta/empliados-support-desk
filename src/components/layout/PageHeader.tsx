@@ -1,8 +1,9 @@
 "use client";
 
-import { Bell, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 
 export function PageHeader({
   userName,
@@ -45,19 +46,7 @@ export function PageHeader({
             className="w-72 rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 lg:w-80"
           />
         </form>
-        <button
-          type="button"
-          className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50"
-          title="Notificaciones"
-          onClick={() => router.push("/tickets/urgentes")}
-        >
-          <Bell className="h-5 w-5" />
-          {urgentCount > 0 ? (
-            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-              {urgentCount > 9 ? "9+" : urgentCount}
-            </span>
-          ) : null}
-        </button>
+        <NotificationBell />
       </div>
     </header>
   );
