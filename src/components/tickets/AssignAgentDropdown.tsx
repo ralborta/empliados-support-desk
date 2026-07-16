@@ -19,10 +19,12 @@ export function AssignAgentDropdown({ ticketId, currentAgentId, agentes }: Assig
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState(currentAgentId || "");
+  const [error, setError] = useState<string | null>(null);
 
   const handleChange = async (newAgentId: string) => {
     setSelectedAgentId(newAgentId);
     setLoading(true);
+    setError(null);
 
     try {
       const res = await fetch(`/api/tickets/${ticketId}`, {
@@ -36,11 +38,11 @@ export function AssignAgentDropdown({ ticketId, currentAgentId, agentes }: Assig
       if (res.ok) {
         router.refresh();
       } else {
-        alert("Error al asignar agente");
+        setError("Error al asignar agente");
         setSelectedAgentId(currentAgentId || "");
       }
-    } catch (error) {
-      alert("Error de red");
+    } catch {
+      setError("Error de red");
       setSelectedAgentId(currentAgentId || "");
     } finally {
       setLoading(false);
@@ -70,6 +72,11 @@ export function AssignAgentDropdown({ ticketId, currentAgentId, agentes }: Assig
           Actualizando...
         </div>
       )}
+      {error ? (
+        <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }

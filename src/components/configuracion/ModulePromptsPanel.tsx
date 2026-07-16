@@ -9,6 +9,7 @@ import {
   Loader2,
   Save,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 type ModulePrompt = {
   key: string;
@@ -36,6 +37,7 @@ export default function ModulePromptsPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [pendingModuleKey, setPendingModuleKey] = useState<string | null>(null);
 
   const loadModules = useCallback(async () => {
     setIsLoading(true);
@@ -80,20 +82,24 @@ export default function ModulePromptsPanel() {
     if (nextKey === selectedKey) return;
     const currentDraft = selectedKey ? drafts[selectedKey] : null;
     if (currentDraft?.dirty) {
-      const ok = window.confirm(
-        "Tenés cambios sin guardar. ¿Cambiar de módulo igual? Se pierde lo que editaste."
-      );
-      if (!ok) return;
-      setDrafts((prev) => {
-        const mod = modules.find((m) => m.key === selectedKey);
-        if (!mod || !prev[selectedKey]) return prev;
-        return {
-          ...prev,
-          [selectedKey]: { content: mod.content, dirty: false },
-        };
-      });
+      setPendingModuleKey(nextKey);
+      return;
     }
     setSelectedKey(nextKey);
+  };
+
+  const confirmSwitchModule = () => {
+    if (!pendingModuleKey) return;
+    setDrafts((prev) => {
+      const mod = modules.find((m) => m.key === selectedKey);
+      if (!mod || !prev[selectedKey]) return prev;
+      return {
+        ...prev,
+        [selectedKey]: { content: mod.content, dirty: false },
+      };
+    });
+    setSelectedKey(pendingModuleKey);
+    setPendingModuleKey(null);
   };
 
   const handleSave = async (key: string) => {
@@ -299,6 +305,16 @@ export default function ModulePromptsPanel() {
           </p>
         </div>
       )}
+      <ConfirmDialog
+        open={!!pendingModuleKey}
+        title="Cambios sin guardar"
+        description="Tenés cambios sin guardar. ¿Cambiar de módulo igual? Se pierde lo que editaste."
+        confirmLabel="Cambiar módulo"
+        cancelLabel="Seguir editando"
+        variant="default"
+        onConfirm={confirmSwitchModule}
+        onCancel={() => setPendingModuleKey(null)}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, CheckCircle2, AlertCircle, Brain, Save, Archive, RotateCcw, ClipboardCopy } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const LOCAL_BACKUP_KEY = "empliados-support-desk:agent-prompt-local-backup:v1";
 
@@ -40,6 +41,7 @@ export default function AgentConfig() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false);
 
   const refreshLocalBackupMeta = useCallback(() => {
     const b = readLocalBackup();
@@ -179,16 +181,21 @@ export default function AgentConfig() {
       setTimeout(() => setMessage(null), 4000);
       return;
     }
-    if (
-      !window.confirm(
-        "¿Recuperar el respaldo local? Se reemplaza lo que ves en pantalla hasta que guardes los cambios."
-      )
-    ) {
+    setRestoreConfirmOpen(true);
+  };
+
+  const confirmRestoreLocalBackup = () => {
+    const b = readLocalBackup();
+    if (!b) {
+      setRestoreConfirmOpen(false);
+      setMessage({ type: "error", text: "No hay respaldo local en este navegador." });
+      setTimeout(() => setMessage(null), 4000);
       return;
     }
     setPrompt(b.editable);
     setFullPrompt(b.fullContent);
     setUsesTemplate(b.usesTemplate);
+    setRestoreConfirmOpen(false);
     setMessage({
       type: "success",
       text: "Respaldo recuperado. Revisá el texto y pulsá Guardar cambios cuando esté listo.",
@@ -338,6 +345,17 @@ export default function AgentConfig() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={restoreConfirmOpen}
+        title="Recuperar respaldo local"
+        description="¿Recuperar el respaldo local? Se reemplaza lo que ves en pantalla hasta que guardes los cambios."
+        confirmLabel="Recuperar"
+        cancelLabel="Cancelar"
+        variant="default"
+        onConfirm={confirmRestoreLocalBackup}
+        onCancel={() => setRestoreConfirmOpen(false)}
+      />
     </div>
   );
 }

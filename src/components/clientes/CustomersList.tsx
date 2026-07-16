@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Trash2, Pencil, X } from "lucide-react";
 import { EditCustomerModal, type CustomerRow } from "@/components/clientes/EditCustomerModal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface Customer extends CustomerRow {}
 
@@ -217,25 +218,12 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
 
       <EditCustomerModal customer={editing} onClose={() => setEditing(null)} onSaved={handleSaved} />
 
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[1px]"
-          role="presentation"
-          onClick={() => {
-            if (!deleteLoading) setDeleteTarget(null);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-customer-title"
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-slate-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="delete-customer-title" className="text-lg font-semibold text-slate-900">
-              Eliminar cliente
-            </h2>
-            <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar cliente"
+        description={
+          deleteTarget ? (
+            <>
               ¿Seguro que querés eliminar a{" "}
               <span className="font-semibold text-slate-900">{deleteTarget.phone}</span>
               {deleteTarget.name ? (
@@ -245,36 +233,26 @@ export function CustomersList({ initialCustomers, initialTotal }: CustomersListP
                 </>
               ) : null}
               ?
-            </p>
-            {deleteTarget._count.tickets > 0 ? (
-              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-100">
-                También se borrarán <strong>{deleteTarget._count.tickets}</strong> ticket
-                {deleteTarget._count.tickets === 1 ? "" : "s"} con mensajes, eventos e historial asociados.
-              </p>
-            ) : (
-              <p className="mt-2 text-sm text-slate-500">Este cliente no tiene tickets registrados.</p>
-            )}
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={deleteLoading}
-                onClick={() => setDeleteTarget(null)}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={deleteLoading}
-                onClick={() => void confirmDelete()}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-              >
-                {deleteLoading ? "Eliminando…" : "Eliminar definitivamente"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              {deleteTarget._count.tickets > 0 ? (
+                <span className="mt-2 block rounded-lg bg-amber-50 px-3 py-2 text-amber-900 ring-1 ring-amber-100">
+                  También se borrarán <strong>{deleteTarget._count.tickets}</strong> ticket
+                  {deleteTarget._count.tickets === 1 ? "" : "s"} con mensajes, eventos e historial asociados.
+                </span>
+              ) : (
+                <span className="mt-2 block text-slate-500">Este cliente no tiene tickets registrados.</span>
+              )}
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar definitivamente"
+        cancelLabel="Cancelar"
+        variant="danger"
+        loading={deleteLoading}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (!deleteLoading) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }

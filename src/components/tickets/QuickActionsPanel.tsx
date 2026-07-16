@@ -68,6 +68,7 @@ export function QuickActionsPanel({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [resolution, setResolution] = useState(currentResolution || "");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const patchTicket = (payload: { status?: TicketStatus; priority?: TicketPriority; resolution?: string }) => {
     startTransition(async () => {
@@ -81,6 +82,7 @@ export function QuickActionsPanel({
   };
 
   const runQuickAction = (action: QuickAction) => {
+    setActionError(null);
     startTransition(async () => {
       const res = await fetch(`/api/tickets/${ticketId}/quick-action`, {
         method: "POST",
@@ -90,7 +92,7 @@ export function QuickActionsPanel({
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         console.error("Acción rápida:", err);
-        alert(err?.error || "No se pudo completar la acción");
+        setActionError(err?.error || "No se pudo completar la acción");
         return;
       }
       router.refresh();
@@ -106,6 +108,9 @@ export function QuickActionsPanel({
       <p className="text-[11px] leading-snug text-slate-500">
         Cada acción envía un mensaje por WhatsApp (salvo nota interna) y actualiza el estado del ticket.
       </p>
+      {actionError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{actionError}</div>
+      ) : null}
       <div className="grid grid-cols-2 gap-2.5">
         {quickActionItems.map(({ action, label }) => (
           <button

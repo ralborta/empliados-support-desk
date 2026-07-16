@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Upload, Trash2, Loader2, FileText, AlertCircle, FolderOpen } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface BuilderbotFile {
   id: string;
@@ -15,6 +16,8 @@ export default function KnowledgeFilesList() {
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<BuilderbotFile | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,10 +77,12 @@ export default function KnowledgeFilesList() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("¿Estás seguro de eliminar este archivo?")) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
 
     setDeletingIds((prev) => new Set(prev).add(id));
+    setDeleteError(null);
     setError(null);
 
     try {
@@ -90,9 +95,9 @@ export default function KnowledgeFilesList() {
       }
 
       setFiles((prev) => prev.filter((f) => f.id !== id));
+      setDeleteTarget(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo eliminar el archivo");
-      setTimeout(() => setError(null), 5000);
+      setDeleteError(err instanceof Error ? err.message : "No se pudo eliminar el archivo");
     } finally {
       setDeletingIds((prev) => {
         const next = new Set(prev);
@@ -220,7 +225,10 @@ export default function KnowledgeFilesList() {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleDelete(file.id)}
+                  onClick={() => {
+                    setDeleteError(null);
+                    setDeleteTarget(file);
+                  }}
                   disabled={isDeleting}
                   className="ml-4 p-2.5 text-red-500 hover:bg-red-50 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Eliminar archivo"
@@ -232,6 +240,32 @@ export default function KnowledgeFilesList() {
           })
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar archivo"
+        description={
+          deleteTarget ? (
+            <>
+              ¿Estás seguro de eliminar{" "}
+              <span className="font-semibold text-slate-900">{deleteTarget.name}</span>? Esta acción no se puede
+              deshacer.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        variant="danger"
+        loading={deleteTarget ? deletingIds.has(deleteTarget.id) : false}
+        error={deleteError}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (!deleteTarget || !deletingIds.has(deleteTarget.id)) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+      />
     </div>
   );
 }
