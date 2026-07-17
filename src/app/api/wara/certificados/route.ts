@@ -16,9 +16,9 @@ import {
   validatePlateInFleetForPhone,
   waraCertificateFailureCategory,
 } from "@/lib/waraApi";
-import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
+import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
-import { generateTicketCode } from "@/lib/tickets";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
@@ -384,42 +384,36 @@ async function escalateCertificateFailure(params: {
   if (!customer) return { odooRef: null, localRef: null };
 
   const title = `${params.plate} - Certificado no emitido`;
-  const localTicket = await prisma.ticket.create({
-    data: {
-      code: generateTicketCode(),
-      customerId: customer.id,
-      contactName:
-        params.contactName || customer.name?.trim() || params.company || "Sin nombre",
-      title,
-      status: "IN_PROGRESS",
-      priority: "NORMAL",
-      category: "TECH_SUPPORT",
-      incidentType: "CERTIFICATE",
-      channel: "WHATSAPP",
-      aiSummary: `No se pudo emitir certificado para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}`,
-    },
+
+  const { ticket: localTicket, created } = await attachToOpenConversation(prisma, {
+    customerId: customer.id,
+    contactName:
+      params.contactName || customer.name?.trim() || params.company || "Sin nombre",
+    title,
+    messageText: `Solicitud de certificado no emitida para ${params.plate}. Motivo Wara: ${params.waraDetail}`,
+    messagePayload: {
+      source: "wara_certificados_escalation",
+      plate: params.plate,
+      companyName: params.company,
+      waraDetail: params.waraDetail,
+      status: params.status ?? null,
+      phone: params.rawPhone,
+    } as Prisma.InputJsonObject,
+    incidentType: "CERTIFICATE",
+    priority: "NORMAL",
+    status: "IN_PROGRESS",
+    aiSummary: `No se pudo emitir certificado para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}`,
   });
 
-  await prisma.ticketMessage.create({
-    data: {
-      ticketId: localTicket.id,
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      text: `Solicitud de certificado no emitida para ${params.plate}. Motivo Wara: ${params.waraDetail}`,
-      rawPayload: {
-        source: "wara_certificados_escalation",
-        plate: params.plate,
-        companyName: params.company,
-        waraDetail: params.waraDetail,
-        status: params.status ?? null,
-        phone: params.rawPhone,
-      } as Prisma.InputJsonObject,
-    },
-  });
+  try {
+    await autoAssignNewTicket(localTicket.id);
+  } catch (e) {
+    console.error("[Certificados] autoAssign:", e);
+  }
 
   let odooRef: string | null = null;
   const odooCfg = getOdooConfig();
-  if (odooCfg) {
+  if (created && odooCfg) {
     try {
       const failureCategory = waraCertificateFailureCategory(params.waraDetail, params.status);
       const odoo = await createHelpdeskTicket(odooCfg, {

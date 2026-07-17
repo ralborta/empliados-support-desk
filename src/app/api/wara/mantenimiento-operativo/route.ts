@@ -6,7 +6,6 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { generateTicketCode } from "@/lib/tickets";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 import {
@@ -25,7 +24,8 @@ import {
   validatePlateInFleetForPhone,
 } from "@/lib/waraApi";
 import { recentLastInboundTextForPhone } from "@/lib/conversationThread";
-import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
+import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
 
@@ -56,11 +56,6 @@ const bodySchema = z
 type Priority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 
 const BB_STATUS = 200;
-const OPEN_THREAD_STATUSES: Array<"OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER"> = [
-  "OPEN",
-  "IN_PROGRESS",
-  "WAITING_CUSTOMER",
-];
 
 function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): string | undefined {
   return (
@@ -719,67 +714,39 @@ export async function POST(req: NextRequest) {
   }
   const title = `${service}${plate ? ` · ${plate}` : ""}`;
 
-  const currentTicket = await prisma.ticket.findFirst({
-    where: {
-      customerId: resolution.customer.id,
-      status: { in: OPEN_THREAD_STATUSES },
-      category: "TECH_SUPPORT",
-    },
-    orderBy: { lastMessageAt: "desc" },
+  const { ticket, created } = await attachToOpenConversation(prisma, {
+    customerId: resolution.customer.id,
+    contactName:
+      resolution.customer.name?.trim() ||
+      resolution.selectedCompanyName?.trim() ||
+      "Sin nombre",
+    title,
+    messageText: text,
+    messagePayload: {
+      source: "builderbot_mantenimiento_operativo",
+      service,
+      companyName: resolution.selectedCompanyName ?? "",
+      plate: plate ?? "",
+      phone: rawPhone,
+    } as Prisma.InputJsonObject,
+    incidentType: "GENERAL_TECH",
+    priority,
+    status: "IN_PROGRESS",
+    aiSummary: `${service}${plate ? ` para ${plate}` : ""}. Cliente: ${
+      resolution.selectedCompanyName || resolution.customer.name || "sin nombre"
+    }.`,
   });
 
-  const ticket =
-    currentTicket ??
-    (await prisma.ticket.create({
-      data: {
-        code: generateTicketCode(),
-        customerId: resolution.customer.id,
-        contactName:
-          resolution.customer.name?.trim() ||
-          resolution.selectedCompanyName?.trim() ||
-          "Sin nombre",
-        title,
-        status: "OPEN",
-        priority,
-        category: "TECH_SUPPORT",
-        incidentType: "GENERAL_TECH",
-        channel: "WHATSAPP",
-      },
-    }));
-
-  await prisma.ticketMessage.create({
-    data: {
-      ticketId: ticket.id,
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      text,
-      rawPayload: {
-        source: "builderbot_mantenimiento_operativo",
-        service,
-        companyName: resolution.selectedCompanyName ?? "",
-        plate: plate ?? "",
-        phone: rawPhone,
-      },
-    },
-  });
-
-  await prisma.ticket.update({
-    where: { id: ticket.id },
-    data: {
-      title,
-      priority,
-      status: ticket.status === "OPEN" ? "IN_PROGRESS" : ticket.status,
-      lastMessageAt: new Date(),
-      aiSummary: `${service}${plate ? ` para ${plate}` : ""}. Cliente: ${
-        resolution.selectedCompanyName || resolution.customer.name || "sin nombre"
-      }.`,
-    },
-  });
+  try {
+    await autoAssignNewTicket(ticket.id);
+  } catch (e) {
+    console.error("[Mantenimiento] autoAssign:", e);
+  }
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
   let odooRef: string | null = null;
   const odooCfg = getOdooConfig();
-  if (odooCfg) {
+  if (created && odooCfg) {
     try {
       const odoo = await createHelpdeskTicket(odooCfg, {
         subject: `${plate} - ${service}`,

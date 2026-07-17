@@ -1,6 +1,10 @@
 import type { Prisma, TicketPriority, TicketStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { sendTicketAssignedEmail } from "@/lib/panelEmail";
+import {
+  findConversationAdvisorId,
+  mergeDuplicateOpenTicketsForCustomer,
+} from "@/lib/ticketThreading";
 
 /** Casos que cuentan para carga del asesor y cola operativa. */
 export const ADVISOR_ACTIVE_TICKET_STATUSES: TicketStatus[] = [
@@ -173,6 +177,31 @@ async function assignTicketInternal(
   }
 }
 
+/** Todos los tickets abiertos del cliente → mismo asesor (una conversación). */
+async function assignConversationToAdvisor(
+  customerId: string,
+  agentUserId: string,
+  defaultNotification: "ASSIGNED" | "REASSIGNED" = "ASSIGNED",
+): Promise<number> {
+  const openTickets = await prisma.ticket.findMany({
+    where: {
+      customerId,
+      status: { in: ADVISOR_ACTIVE_TICKET_STATUSES },
+    },
+    select: { id: true, assignedToUserId: true },
+  });
+
+  let changes = 0;
+  for (const t of openTickets) {
+    if (t.assignedToUserId === agentUserId) continue;
+    await assignTicketInternal(t.id, agentUserId, {
+      notificationType: t.assignedToUserId ? "REASSIGNED" : defaultNotification,
+    });
+    changes++;
+  }
+  return changes;
+}
+
 /** Libera casos de asesores desconectados tras la gracia de 5 minutos. */
 export async function processScheduledAdvisorReleases(): Promise<number> {
   const now = new Date();
@@ -237,21 +266,65 @@ export async function rebalanceAmongActiveAdvisors(options?: {
       status: { in: ADVISOR_ACTIVE_TICKET_STATUSES },
       OR: [{ assignedToUserId: null }, { assignedToUserId: { in: activeIds } }],
     },
-    select: { id: true, priority: true, lastMessageAt: true, assignedToUserId: true },
+    select: {
+      id: true,
+      customerId: true,
+      priority: true,
+      lastMessageAt: true,
+      assignedToUserId: true,
+    },
   });
 
-  const sorted = sortTicketsByPriority(poolTickets);
+  const customerIds = [...new Set(poolTickets.map((t) => t.customerId))];
+  for (const customerId of customerIds) {
+    await mergeDuplicateOpenTicketsForCustomer(prisma, customerId);
+  }
+
+  const freshPool = await prisma.ticket.findMany({
+    where: {
+      status: { in: ADVISOR_ACTIVE_TICKET_STATUSES },
+      OR: [{ assignedToUserId: null }, { assignedToUserId: { in: activeIds } }],
+    },
+    select: {
+      id: true,
+      customerId: true,
+      priority: true,
+      lastMessageAt: true,
+      assignedToUserId: true,
+    },
+  });
+
+  const byCustomer = new Map<string, typeof freshPool>();
+  for (const ticket of freshPool) {
+    const list = byCustomer.get(ticket.customerId) ?? [];
+    list.push(ticket);
+    byCustomer.set(ticket.customerId, list);
+  }
+
+  const conversationUnits = [...byCustomer.entries()]
+    .map(([customerId, tickets]) => {
+      const best = sortTicketsByPriority(tickets)[0]!;
+      return { customerId, tickets, best };
+    })
+    .sort((a, b) => {
+      const pd = PRIORITY_RANK[b.best.priority] - PRIORITY_RANK[a.best.priority];
+      if (pd !== 0) return pd;
+      return b.best.lastMessageAt.getTime() - a.best.lastMessageAt.getTime();
+    });
+
   const loads = new Map<string, number>(activeIds.map((id) => [id, 0]));
 
   let changes = 0;
-  for (const ticket of sorted) {
+  for (const unit of conversationUnits) {
     const targetId = [...loads.entries()].sort((a, b) => a[1] - b[1])[0]![0];
 
-    if (ticket.assignedToUserId !== targetId) {
-      await assignTicketInternal(ticket.id, targetId, {
-        notificationType: ticket.assignedToUserId ? "REASSIGNED" : "ASSIGNED",
-      });
-      changes++;
+    for (const ticket of unit.tickets) {
+      if (ticket.assignedToUserId !== targetId) {
+        await assignTicketInternal(ticket.id, targetId, {
+          notificationType: ticket.assignedToUserId ? "REASSIGNED" : "ASSIGNED",
+        });
+        changes++;
+      }
     }
 
     loads.set(targetId, (loads.get(targetId) ?? 0) + 1);
@@ -259,25 +332,50 @@ export async function rebalanceAmongActiveAdvisors(options?: {
 
   if (changes > 0) {
     console.log(
-      `[advisorDistribution] Rebalanceo entre ${activeIds.length} asesor(es): ${changes} movimiento(s)`,
+      `[advisorDistribution] Rebalanceo (${conversationUnits.length} conversación(es), ${activeIds.length} asesor(es)): ${changes} movimiento(s)`,
     );
   }
 
   return { assigned: changes, activeAdvisors: activeIds.length };
 }
 
-/** Nuevo caso: va al asesor activo con menos carga; si no hay nadie, queda en cola. */
+/** Nuevo caso: hereda asesor de la conversación activa o asigna al conectado con menos carga. */
 export async function autoAssignNewTicket(ticketId: string): Promise<boolean> {
   await processScheduledAdvisorReleases();
 
-  const ticket = await prisma.ticket.findUnique({
+  let ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    select: { status: true, assignedToUserId: true },
+    select: { id: true, customerId: true, status: true, assignedToUserId: true },
   });
   if (!ticket || !ADVISOR_ACTIVE_TICKET_STATUSES.includes(ticket.status)) {
     return false;
   }
-  if (ticket.assignedToUserId) return false;
+
+  const merged = await mergeDuplicateOpenTicketsForCustomer(prisma, ticket.customerId);
+  if (merged.keptTicketId) {
+    ticketId = merged.keptTicketId;
+    ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, customerId: true, status: true, assignedToUserId: true },
+    });
+    if (!ticket || !ADVISOR_ACTIVE_TICKET_STATUSES.includes(ticket.status)) {
+      return false;
+    }
+  }
+
+  if (ticket.assignedToUserId) {
+    await assignConversationToAdvisor(ticket.customerId, ticket.assignedToUserId);
+    return true;
+  }
+
+  const conversationAdvisor = await findConversationAdvisorId(prisma, ticket.customerId);
+  if (conversationAdvisor) {
+    await assignConversationToAdvisor(ticket.customerId, conversationAdvisor, "ASSIGNED");
+    console.log(
+      `[advisorDistribution] Ticket ${ticketId} → asesor ${conversationAdvisor} (misma conversación)`,
+    );
+    return true;
+  }
 
   const activeIds = await getActiveSupportAdvisorIds();
   if (activeIds.length === 0) return false;
@@ -292,8 +390,10 @@ export async function autoAssignNewTicket(ticketId: string): Promise<boolean> {
     }
   }
 
-  await assignTicketInternal(ticketId, minId, { notificationType: "ASSIGNED" });
-  console.log(`[advisorDistribution] Ticket ${ticketId} → asesor ${minId} (carga ${minLoad})`);
+  await assignConversationToAdvisor(ticket.customerId, minId, "ASSIGNED");
+  console.log(
+    `[advisorDistribution] Conversación ${ticket.customerId} → asesor ${minId} (carga ${minLoad})`,
+  );
   return true;
 }
 

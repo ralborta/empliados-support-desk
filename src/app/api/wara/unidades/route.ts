@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
-import { generateTicketCode } from "@/lib/tickets";
+import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
@@ -18,7 +18,6 @@ import {
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
-import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
@@ -449,46 +448,34 @@ async function createMissingReportTicket(params: {
       ? `${plate} - ${params.issueDetail}`
       : `${plate} - Unidad sin reporte hace ${params.elapsedText}`;
   const incidentType = params.incidentType ?? "MISSING_REPORT";
-  const localTicket = await prisma.ticket.create({
-    data: {
-      code: generateTicketCode(),
-      customerId: existing.customer.id,
-      contactName:
-        params.contactName ||
-        existing.customer.name?.trim() ||
-        params.companyName ||
-        "Sin nombre",
-      title,
-      status: "IN_PROGRESS",
-      priority: "HIGH",
-      category: "TECH_SUPPORT",
-      incidentType,
-      channel: "WHATSAPP",
-      aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
-    },
-  });
 
-  await prisma.ticketMessage.create({
-    data: {
-      ticketId: localTicket.id,
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      text: `Reclamo/consulta por unidad: ${plate} — ${issueLabel}`,
-      rawPayload: {
-        source: "wara_unidades_auto_ticket",
-        plate,
-        companyName: params.companyName,
-        elapsedText: params.elapsedText,
-        issueDetail: params.issueDetail ?? "",
-        lastReportDate: params.unit.ultimo_reporte?.fecha ?? "",
-        phone: params.rawPhone,
-      } as Prisma.InputJsonObject,
-    },
+  const { ticket: localTicket, created } = await attachToOpenConversation(prisma, {
+    customerId: existing.customer.id,
+    contactName:
+      params.contactName ||
+      existing.customer.name?.trim() ||
+      params.companyName ||
+      "Sin nombre",
+    title,
+    messageText: `Reclamo/consulta por unidad: ${plate} — ${issueLabel}`,
+    messagePayload: {
+      source: "wara_unidades_auto_ticket",
+      plate,
+      companyName: params.companyName,
+      elapsedText: params.elapsedText,
+      issueDetail: params.issueDetail ?? "",
+      lastReportDate: params.unit.ultimo_reporte?.fecha ?? "",
+      phone: params.rawPhone,
+    } as Prisma.InputJsonObject,
+    incidentType,
+    priority: "HIGH",
+    status: "IN_PROGRESS",
+    aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
   });
 
   let ref = localTicket.code;
   const odooCfg = getOdooConfig();
-  if (odooCfg) {
+  if (created && odooCfg) {
     try {
       const odoo = await createHelpdeskTicket(odooCfg, {
         subject: title,
@@ -533,8 +520,10 @@ async function createMissingReportTicket(params: {
 
   return {
     ref,
-    reused: false,
-    message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
+    reused: !created,
+    message: created
+      ? `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`
+      : `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Registré la consulta en el caso abierto (${ref}) con el mismo asesor.`,
   };
 }
 
@@ -564,45 +553,33 @@ async function createNoEquipmentTicket(params: {
   }
 
   const title = `${plate} - Sin equipo instalado`;
-  const localTicket = await prisma.ticket.create({
-    data: {
-      code: generateTicketCode(),
-      customerId: existing.customer.id,
-      contactName:
-        params.contactName ||
-        existing.customer.name?.trim() ||
-        params.companyName ||
-        "Sin nombre",
-      title,
-      status: "IN_PROGRESS",
-      priority: "NORMAL",
-      category: "TECH_SUPPORT",
-      incidentType: "GENERAL_TECH",
-      channel: "WHATSAPP",
-      aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Atilio.`,
-    },
-  });
 
-  await prisma.ticketMessage.create({
-    data: {
-      ticketId: localTicket.id,
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      text: `Consulta por unidad sin equipo instalado: ${label}`,
-      rawPayload: {
-        source: "wara_unidades_no_equipment",
-        plate,
-        nombre: params.unit.unidad ?? "",
-        movilId: params.unit.movil_id,
-        companyName: params.companyName,
-        phone: params.rawPhone,
-      } as Prisma.InputJsonObject,
-    },
+  const { ticket: localTicket, created } = await attachToOpenConversation(prisma, {
+    customerId: existing.customer.id,
+    contactName:
+      params.contactName ||
+      existing.customer.name?.trim() ||
+      params.companyName ||
+      "Sin nombre",
+    title,
+    messageText: `Consulta por unidad sin equipo instalado: ${label}`,
+    messagePayload: {
+      source: "wara_unidades_no_equipment",
+      plate,
+      nombre: params.unit.unidad ?? "",
+      movilId: params.unit.movil_id,
+      companyName: params.companyName,
+      phone: params.rawPhone,
+    } as Prisma.InputJsonObject,
+    incidentType: "GENERAL_TECH",
+    priority: "NORMAL",
+    status: "IN_PROGRESS",
+    aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Atilio.`,
   });
 
   let ref = localTicket.code;
   const odooCfg = getOdooConfig();
-  if (odooCfg) {
+  if (created && odooCfg) {
     try {
       const odoo = await createHelpdeskTicket(odooCfg, {
         subject: title,
@@ -647,8 +624,10 @@ async function createNoEquipmentTicket(params: {
 
   return {
     ref,
-    reused: false,
-    message: `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`,
+    reused: !created,
+    message: created
+      ? `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`
+      : `La unidad ${label} no tiene equipo instalado. Registré la consulta en el caso abierto (${ref}) con el mismo asesor.`,
   };
 }
 
