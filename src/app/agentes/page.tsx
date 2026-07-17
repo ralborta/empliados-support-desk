@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { requireAdminSession } from "@/lib/auth";
+import { isAdvisorPresentlyOnline } from "@/lib/advisorDistribution";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { CreateAgentForm } from "@/components/agentes/CreateAgentForm";
 import { AgentsList } from "@/components/agentes/AgentsList";
@@ -19,6 +20,7 @@ export default async function AgentesPage() {
       createdAt: true,
       passwordHash: true,
       sessionActive: true,
+      lastSeenAt: true,
       _count: {
         select: { tickets: true },
       },
@@ -50,7 +52,10 @@ export default async function AgentesPage() {
                 role: a.role,
                 createdAt: a.createdAt.toISOString(),
                 hasPassword: !!a.passwordHash,
-                sessionActive: a.sessionActive,
+                sessionActive: isAdvisorPresentlyOnline({
+                  sessionActive: a.sessionActive,
+                  lastSeenAt: a.lastSeenAt,
+                }),
                 _count: a._count,
               }))}
             />

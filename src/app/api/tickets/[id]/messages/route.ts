@@ -7,6 +7,35 @@ import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { summarizeConversation } from "@/lib/openai";
 import { uploadFileToBlob } from "@/lib/blob";
+import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+  if (!session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const allowed = await assertAdvisorCanAccessTicket(id, session.user);
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const messages = await prisma.ticketMessage.findMany({
+    where: { ticketId: id },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      from: true,
+      text: true,
+      createdAt: true,
+      attachments: true,
+    },
+  });
+
+  return NextResponse.json({
+    messages: messages.map((m) => ({
+      ...m,
+      createdAt: m.createdAt.toISOString(),
+    })),
+  });
+}
 
 const messageSchema = z.object({
   text: z.string().min(1),

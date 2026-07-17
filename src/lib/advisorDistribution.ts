@@ -1,5 +1,6 @@
 import type { Prisma, TicketPriority, TicketStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { sendTicketAssignedEmail } from "@/lib/panelEmail";
 
 /** Casos que cuentan para carga del asesor y cola operativa. */
 export const ADVISOR_ACTIVE_TICKET_STATUSES: TicketStatus[] = [
@@ -9,6 +10,9 @@ export const ADVISOR_ACTIVE_TICKET_STATUSES: TicketStatus[] = [
 ];
 
 export const DISCONNECT_GRACE_MS = 5 * 60 * 1000;
+
+/** Sin heartbeat en este lapso → el asesor no cuenta como conectado. */
+export const ADVISOR_PRESENCE_TIMEOUT_MS = 2 * 60 * 1000;
 
 const PRIORITY_RANK: Record<TicketPriority, number> = {
   URGENT: 4,
@@ -31,11 +35,43 @@ export function sortTicketsByPriority<T extends { priority: TicketPriority; last
   });
 }
 
+async function expireStaleAdvisorSessions(): Promise<number> {
+  const cutoff = new Date(Date.now() - ADVISOR_PRESENCE_TIMEOUT_MS);
+  const stale = await prisma.agentUser.findMany({
+    where: {
+      role: "SUPPORT",
+      sessionActive: true,
+      OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: cutoff } }],
+    },
+    select: { id: true, name: true },
+  });
+
+  if (stale.length === 0) return 0;
+
+  const releaseAt = new Date(Date.now() + DISCONNECT_GRACE_MS);
+  for (const agent of stale) {
+    await prisma.agentUser.update({
+      where: { id: agent.id },
+      data: {
+        sessionActive: false,
+        casesReleaseAt: releaseAt,
+      },
+    });
+    console.log(`[advisorDistribution] Sesión expirada por inactividad: ${agent.name}`);
+  }
+
+  return stale.length;
+}
+
 async function getActiveSupportAdvisorIds(): Promise<string[]> {
+  await expireStaleAdvisorSessions();
+
+  const cutoff = new Date(Date.now() - ADVISOR_PRESENCE_TIMEOUT_MS);
   const rows = await prisma.agentUser.findMany({
     where: {
       role: "SUPPORT",
       sessionActive: true,
+      lastSeenAt: { gte: cutoff },
     },
     select: { id: true },
     orderBy: { sessionActiveAt: "asc" },
@@ -64,6 +100,39 @@ async function notifyAssignment(
       type,
     },
   });
+
+  void (async () => {
+    try {
+      const [agent, ticket] = await Promise.all([
+        prisma.agentUser.findUnique({
+          where: { id: agentUserId },
+          select: { email: true, name: true },
+        }),
+        prisma.ticket.findUnique({
+          where: { id: ticketId },
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            customer: { select: { companyName: true, name: true } },
+          },
+        }),
+      ]);
+      if (!agent?.email || !ticket) return;
+
+      await sendTicketAssignedEmail({
+        to: agent.email,
+        agentName: agent.name,
+        ticketCode: ticket.code,
+        ticketTitle: ticket.title,
+        companyName: ticket.customer.companyName || ticket.customer.name || "Cliente",
+        ticketId: ticket.id,
+        type,
+      });
+    } catch (err) {
+      console.error("[advisorDistribution] Email asignación:", err);
+    }
+  })();
 }
 
 async function assignTicketInternal(
@@ -242,6 +311,7 @@ export async function onAdvisorLogin(agentUserId: string): Promise<void> {
     data: {
       sessionActive: true,
       sessionActiveAt: new Date(),
+      lastSeenAt: new Date(),
       casesReleaseAt: null,
     },
   });
@@ -265,6 +335,7 @@ export async function onAdvisorLogout(agentUserId: string): Promise<void> {
     where: { id: agentUserId },
     data: {
       sessionActive: false,
+      lastSeenAt: null,
       casesReleaseAt: releaseAt,
     },
   });
@@ -339,9 +410,42 @@ export async function assertAdvisorCanAccessTicket(
   return ticket?.assignedToUserId === user.id;
 }
 
+export function isAdvisorPresentlyOnline(agent: {
+  sessionActive: boolean;
+  lastSeenAt: Date | null;
+}): boolean {
+  if (!agent.sessionActive || !agent.lastSeenAt) return false;
+  return agent.lastSeenAt.getTime() >= Date.now() - ADVISOR_PRESENCE_TIMEOUT_MS;
+}
+
 export async function getUnreadNotificationCount(agentUserId: string): Promise<number> {
   if (!isDbAgentUserId(agentUserId)) return 0;
   return prisma.agentNotification.count({
     where: { agentUserId, readAt: null },
   });
+}
+
+/** Ping desde el panel: mantiene al asesor como conectado mientras la pestaña esté abierta. */
+export async function advisorHeartbeat(agentUserId: string): Promise<{ ok: boolean }> {
+  if (!isDbAgentUserId(agentUserId)) return { ok: false };
+
+  const agent = await prisma.agentUser.findUnique({
+    where: { id: agentUserId },
+    select: { role: true },
+  });
+  if (!agent || agent.role !== "SUPPORT") return { ok: false };
+
+  await expireStaleAdvisorSessions();
+
+  await prisma.agentUser.update({
+    where: { id: agentUserId },
+    data: {
+      sessionActive: true,
+      lastSeenAt: new Date(),
+      sessionActiveAt: new Date(),
+      casesReleaseAt: null,
+    },
+  });
+
+  return { ok: true };
 }

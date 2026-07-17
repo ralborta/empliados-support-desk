@@ -100,12 +100,15 @@ model AgentUser {
   sessionActiveAt DateTime?
   /// Tras logout: liberar casos a la cola cuando llegue este timestamp (gracia 5 min).
   casesReleaseAt  DateTime?
+  /// Último ping del panel; define si el asesor está realmente conectado.
+  lastSeenAt      DateTime?
   tickets      Ticket[]  @relation("AgentAssignments")
   notifications AgentNotification[]
   createdAt    DateTime  @default(now())
 
   @@index([sessionActive])
   @@index([casesReleaseAt])
+  @@index([lastSeenAt])
 }
 
 model AgentNotification {

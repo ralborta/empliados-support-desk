@@ -9,10 +9,12 @@ export function MessageComposer({
   ticketId,
   customerId,
   botPaused = false,
+  onSent,
 }: {
   ticketId: string;
   customerId?: string | null;
   botPaused?: boolean;
+  onSent?: () => void;
 }) {
   const [text, setText] = useState("");
   const [direction, setDirection] = useState<MessageDirection>("OUTBOUND");
@@ -51,7 +53,11 @@ export function MessageComposer({
       } else {
         setText("");
         setFile(null);
-        window.location.reload();
+        if (onSent) {
+          onSent();
+        } else {
+          window.location.reload();
+        }
       }
     } catch {
       setError("Error de red");

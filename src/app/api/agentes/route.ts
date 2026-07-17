@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireAdminApi } from "@/lib/apiAuth";
 import { hashAgentPassword } from "@/lib/agentPassword";
+import { sendAdvisorWelcomeEmail } from "@/lib/panelEmail";
 
 const createAgentSchema = z.object({
   name: z.string().min(1),
@@ -102,6 +103,12 @@ export async function POST(req: Request) {
   });
 
   console.log(`[Agentes] ✅ Agente creado: ${name} (${email})`);
+
+  void sendAdvisorWelcomeEmail({
+    to: agente.email,
+    name: agente.name,
+    role: agente.role,
+  }).catch((err) => console.error("[Agentes] Email bienvenida:", err));
 
   return NextResponse.json({ agente: agentPublicFields(agente) }, { status: 201 });
 }

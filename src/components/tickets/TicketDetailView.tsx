@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft, User, FileText } from "lucide-react";
 import { statusLabels, priorityLabels, fromLabels, categoryLabels } from "@/lib/tickets";
@@ -14,6 +14,7 @@ import { MessageAttachments } from "@/components/tickets/MessageAttachments";
 import { QuickActionsPanel } from "@/components/tickets/QuickActionsPanel";
 import { resolutionModeLabels } from "@/lib/wara";
 import { formatDateTimeAR } from "@/lib/formatDateTimeAR";
+import { usePollWhenVisible } from "@/lib/hooks/usePollWhenVisible";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 type TabId = "conversacion" | "archivos" | "detalles" | "historial";
@@ -85,7 +86,23 @@ export function TicketDetailView({
   isAdmin = false,
 }: TicketDetailViewProps) {
   const [tab, setTab] = useState<TabId>("conversacion");
-  const conversation = ticket.messages || [];
+  const [conversation, setConversation] = useState(ticket.messages || []);
+
+  const refreshMessages = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/messages`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.messages)) {
+        setConversation(data.messages);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [ticket.id]);
+
+  usePollWhenVisible(refreshMessages, 5000, tab === "conversacion");
+
   const attachments = useMemo(() => collectAttachments(conversation), [conversation]);
 
   const companyName =
@@ -223,6 +240,7 @@ export function TicketDetailView({
               ticketId={ticket.id}
               customerId={ticket.customerId}
               botPaused={!!ticket.botPaused}
+              onSent={refreshMessages}
             />
           </div>
 

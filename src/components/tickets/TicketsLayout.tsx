@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { PanelLiveSync } from "@/components/layout/PanelLiveSync";
 import { AgentAvatar } from "@/components/ui/AgentAvatar";
 
 type SessionUser = {
@@ -50,6 +51,7 @@ export function TicketsLayout({
 
   return (
     <div className="flex min-h-screen bg-[#f4f5f7]">
+      <PanelLiveSync userRole={user?.role} />
       <TicketsSidebar user={user} />
       <div className="flex min-w-0 flex-1 flex-col">
         <main className="flex-1 overflow-y-auto p-5 lg:p-6">
