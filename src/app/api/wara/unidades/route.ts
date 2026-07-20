@@ -17,7 +17,7 @@ import {
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
-import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
+import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
@@ -420,7 +420,7 @@ async function createMissingReportTicket(params: {
   issueDetail?: string;
   incidentType?: "MISSING_REPORT" | "GENERAL_TECH";
   ticketTitleSuffix?: string;
-}): Promise<{ ref: string; message: string; reused: boolean }> {
+}): Promise<{ ref: string; message: string; reused: boolean; odooRef: string | null }> {
   const plate = normalizeLoosePlate(params.unit.patente || params.unit.unidad || "");
   const issueLabel = params.issueDetail
     ? params.issueDetail
@@ -430,6 +430,7 @@ async function createMissingReportTicket(params: {
     return {
       ref: "",
       reused: false,
+      odooRef: null,
       message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. No pude registrar el caso automáticamente, te derivo con un asesor para revisarlo.`,
     };
   }
@@ -438,6 +439,7 @@ async function createMissingReportTicket(params: {
     return {
       ref: existing.ticket.code,
       reused: true,
+      odooRef: null,
       message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
     };
   }
@@ -448,6 +450,7 @@ async function createMissingReportTicket(params: {
       ? `${plate} - ${params.issueDetail}`
       : `${plate} - Unidad sin reporte hace ${params.elapsedText}`;
   const incidentType = params.incidentType ?? "MISSING_REPORT";
+  const dedupeKey = `wara_unidades:${plate}:${params.ticketTitleSuffix ?? incidentType}`;
 
   const { ticket: localTicket, created } = await attachToOpenConversation(prisma, {
     customerId: existing.customer.id,
@@ -473,44 +476,44 @@ async function createMissingReportTicket(params: {
     aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
   });
 
-  let ref = localTicket.code;
-  const odooCfg = getOdooConfig();
-  if (created && odooCfg) {
-    try {
-      const odoo = await createHelpdeskTicket(odooCfg, {
-        subject: title,
-        description: [
-          `Consulta/reclamo detectado por Atilio / WhatsApp.`,
-          `Empresa Wara: ${params.companyName}`,
-          `Patente: ${plate}`,
-          params.unit.unidad ? `Nombre unidad: ${params.unit.unidad}` : "",
-          `Motivo: ${issueLabel}`,
-          ...buildUnitTelemetryOdooLines(params.unit),
-          `WhatsApp: ${params.rawPhone}`,
-          `Ticket local: ${localTicket.code}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        customerName: params.contactName || existing.customer.name || params.companyName,
-        customerPhone: params.rawPhone,
-        companyName: params.companyName,
-        priority: "HIGH",
-      });
-      ref = odoo.ref ?? String(odoo.ticketId);
-      await prisma.ticket.update({
-        where: { id: localTicket.id },
-        data: {
-          aiSummary: `Unidad ${plate} sin reporte hace ${params.elapsedText}. Odoo: ${ref}.`,
-        },
-      });
-    } catch (error) {
-      console.error(
-        `[Unidades] No se pudo crear caso Odoo para ${plate}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
+  const odooDescription = [
+    `Consulta/reclamo detectado por Atilio / WhatsApp.`,
+    `Empresa Wara: ${params.companyName}`,
+    `Patente: ${plate}`,
+    params.unit.unidad ? `Nombre unidad: ${params.unit.unidad}` : "",
+    `Motivo: ${issueLabel}`,
+    ...buildUnitTelemetryOdooLines(params.unit),
+    `WhatsApp: ${params.rawPhone}`,
+    `Ticket local: ${localTicket.code}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const { odooRef } = await ensureWaraOdooTicket(prisma, {
+    ticketId: localTicket.id,
+    dedupeKey,
+    subject: title,
+    description: odooDescription,
+    customerName: params.contactName || existing.customer.name || params.companyName,
+    customerPhone: params.rawPhone,
+    companyName: params.companyName,
+    priority: "HIGH",
+    messageSource: "wara_unidades_auto_ticket",
+    messagePlate: plate,
+    logContext: "Unidades",
+  });
+
+  if (odooRef) {
+    await prisma.ticket.update({
+      where: { id: localTicket.id },
+      data: {
+        aiSummary: `Unidad ${plate}: ${issueLabel}. Odoo: ${odooRef}.`,
+      },
+    });
   }
+
+  const ref = odooRef ?? localTicket.code;
+  const localReused = !created;
 
   try {
     await autoAssignNewTicket(localTicket.id);
@@ -518,12 +521,23 @@ async function createMissingReportTicket(params: {
     console.error("[Unidades] autoAssign:", e);
   }
 
+  const unitLabel = params.unit.patente || params.unit.unidad;
+  let message: string;
+  if (odooRef) {
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé el caso Odoo ${odooRef} para Atención al cliente.${
+      localReused ? ` También quedó en la conversación ${localTicket.code}.` : ""
+    } Te avisamos por este medio cualquier novedad.`;
+  } else if (localReused) {
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Registré la consulta en el caso abierto (${localTicket.code}) con el mismo asesor.`;
+  } else {
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
+  }
+
   return {
     ref,
-    reused: !created,
-    message: created
-      ? `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`
-      : `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Registré la consulta en el caso abierto (${ref}) con el mismo asesor.`,
+    reused: localReused,
+    odooRef,
+    message,
   };
 }
 
@@ -532,7 +546,7 @@ async function createNoEquipmentTicket(params: {
   unit: WaraUnidadEstado;
   companyName: string;
   contactName: string;
-}): Promise<{ ref: string; message: string; reused: boolean }> {
+}): Promise<{ ref: string; message: string; reused: boolean; odooRef: string | null }> {
   const plate = normalizeLoosePlate(params.unit.patente || params.unit.unidad || "");
   const label = formatUnitLabel(params.unit);
   const existing = await findRecentNoEquipmentTicket(params.rawPhone, plate);
@@ -540,6 +554,7 @@ async function createNoEquipmentTicket(params: {
     return {
       ref: "",
       reused: false,
+      odooRef: null,
       message: `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. No pude registrar el caso automáticamente; te derivo con un asesor para revisarlo.`,
     };
   }
@@ -548,11 +563,13 @@ async function createNoEquipmentTicket(params: {
     return {
       ref: existing.ticket.code,
       reused: true,
+      odooRef: null,
       message: `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
     };
   }
 
   const title = `${plate} - Sin equipo instalado`;
+  const dedupeKey = `wara_unidades_no_equipment:${plate}`;
 
   const { ticket: localTicket, created } = await attachToOpenConversation(prisma, {
     customerId: existing.customer.id,
@@ -577,44 +594,42 @@ async function createNoEquipmentTicket(params: {
     aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Atilio.`,
   });
 
-  let ref = localTicket.code;
-  const odooCfg = getOdooConfig();
-  if (created && odooCfg) {
-    try {
-      const odoo = await createHelpdeskTicket(odooCfg, {
-        subject: title,
-        description: [
-          `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
-          `Empresa Wara: ${params.companyName}`,
-          `Patente: ${params.unit.patente || plate}`,
-          params.unit.unidad ? `Nombre (campo unidad en API): ${params.unit.unidad}` : "",
-          params.unit.movil_id ? `movil_id: ${params.unit.movil_id}` : "",
-          `Motivo: la API no devuelve reporte, posición, ignición ni voltaje.`,
-          `WhatsApp: ${params.rawPhone}`,
-          `Ticket local: ${localTicket.code}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        customerName: params.contactName || existing.customer.name || params.companyName,
-        customerPhone: params.rawPhone,
-        companyName: params.companyName,
-        priority: "NORMAL",
-      });
-      ref = odoo.ref ?? String(odoo.ticketId);
-      await prisma.ticket.update({
-        where: { id: localTicket.id },
-        data: {
-          aiSummary: `Unidad ${label} sin equipo instalado. Odoo: ${ref}.`,
-        },
-      });
-    } catch (error) {
-      console.error(
-        `[Unidades] No se pudo crear caso Odoo sin equipo para ${plate}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
+  const { odooRef } = await ensureWaraOdooTicket(prisma, {
+    ticketId: localTicket.id,
+    dedupeKey,
+    subject: title,
+    description: [
+      `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
+      `Empresa Wara: ${params.companyName}`,
+      `Patente: ${params.unit.patente || plate}`,
+      params.unit.unidad ? `Nombre (campo unidad en API): ${params.unit.unidad}` : "",
+      params.unit.movil_id ? `movil_id: ${params.unit.movil_id}` : "",
+      `Motivo: la API no devuelve reporte, posición, ignición ni voltaje.`,
+      `WhatsApp: ${params.rawPhone}`,
+      `Ticket local: ${localTicket.code}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    customerName: params.contactName || existing.customer.name || params.companyName,
+    customerPhone: params.rawPhone,
+    companyName: params.companyName,
+    priority: "NORMAL",
+    messageSource: "wara_unidades_no_equipment",
+    messagePlate: plate,
+    logContext: "Unidades",
+  });
+
+  if (odooRef) {
+    await prisma.ticket.update({
+      where: { id: localTicket.id },
+      data: {
+        aiSummary: `Unidad ${label} sin equipo instalado. Odoo: ${odooRef}.`,
+      },
+    });
   }
+
+  const ref = odooRef ?? localTicket.code;
+  const localReused = !created;
 
   try {
     await autoAssignNewTicket(localTicket.id);
@@ -622,12 +637,22 @@ async function createNoEquipmentTicket(params: {
     console.error("[Unidades] autoAssign sin equipo:", e);
   }
 
+  let message: string;
+  if (odooRef) {
+    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso Odoo ${odooRef} para Atención al cliente.${
+      localReused ? ` También quedó en la conversación ${localTicket.code}.` : ""
+    } Te avisamos por este medio cualquier novedad.`;
+  } else if (localReused) {
+    message = `La unidad ${label} no tiene equipo instalado. Registré la consulta en el caso abierto (${localTicket.code}) con el mismo asesor.`;
+  } else {
+    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
+  }
+
   return {
     ref,
-    reused: !created,
-    message: created
-      ? `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`
-      : `La unidad ${label} no tiene equipo instalado. Registré la consulta en el caso abierto (${ref}) con el mismo asesor.`,
+    reused: localReused,
+    odooRef,
+    message,
   };
 }
 
@@ -942,6 +967,8 @@ export async function POST(req: NextRequest) {
             assessment,
             action,
             ticketRef: created.ref,
+            odooRef: created.odooRef ?? undefined,
+            ticketReused: created.reused,
             ticketIssueDetail,
           });
         } else if (assessment.status === "stale_position") {
@@ -964,6 +991,8 @@ export async function POST(req: NextRequest) {
             assessment,
             action,
             ticketRef: created.ref,
+            odooRef: created.odooRef ?? undefined,
+            ticketReused: created.reused,
             ticketIssueDetail,
           });
         } else {
@@ -985,6 +1014,8 @@ export async function POST(req: NextRequest) {
             assessment,
             action,
             ticketRef: created.ref,
+            odooRef: created.odooRef ?? undefined,
+            ticketReused: created.reused,
             ticketIssueDetail,
           });
         }

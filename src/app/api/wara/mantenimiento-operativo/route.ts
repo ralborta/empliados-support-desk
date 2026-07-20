@@ -27,7 +27,7 @@ import { recentLastInboundTextForPhone } from "@/lib/conversationThread";
 import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
-import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
+import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 
 const bodySchema = z
   .object({
@@ -714,7 +714,7 @@ export async function POST(req: NextRequest) {
   }
   const title = `${service}${plate ? ` · ${plate}` : ""}`;
 
-  const { ticket, created } = await attachToOpenConversation(prisma, {
+  const { ticket } = await attachToOpenConversation(prisma, {
     customerId: resolution.customer.id,
     contactName:
       resolution.customer.name?.trim() ||
@@ -744,44 +744,39 @@ export async function POST(req: NextRequest) {
   }
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
-  let odooRef: string | null = null;
-  const odooCfg = getOdooConfig();
-  if (created && odooCfg) {
-    try {
-      const odoo = await createHelpdeskTicket(odooCfg, {
-        subject: `${plate} - ${service}`,
-        description: [
-          `Gestión de mantenimiento solicitada desde Atilio / WhatsApp.`,
-          `Empresa Wara: ${company}`,
-          `Patente: ${plate}`,
-          `Tipo: ${service}`,
-          `Prioridad: ${priorityLabel(priority)}`,
-          `Detalle: ${text}`,
-          `WhatsApp: ${rawPhone}`,
-          `Ticket local: ${ticket.code}`,
-        ].join("\n"),
-        customerName:
-          resolution.customer.name?.trim() ||
-          resolution.customer.companyName?.trim() ||
-          company,
-        customerPhone: rawPhone,
-        companyName: company,
-        priority,
-      });
-      odooRef = odoo.ref ?? String(odoo.ticketId);
-      await prisma.ticket.update({
-        where: { id: ticket.id },
-        data: {
-          aiSummary: `${service}${plate ? ` para ${plate}` : ""}. Cliente: ${company}. Odoo: ${odooRef}.`,
-        },
-      });
-    } catch (error) {
-      console.error(
-        `[Mantenimiento] No se pudo crear ticket Odoo para ${plate}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
+  const { odooRef } = await ensureWaraOdooTicket(prisma, {
+    ticketId: ticket.id,
+    dedupeKey: `wara_mantenimiento:${plate}:${service}:${text.slice(0, 80)}`,
+    subject: `${plate} - ${service}`,
+    description: [
+      `Gestión de mantenimiento solicitada desde Atilio / WhatsApp.`,
+      `Empresa Wara: ${company}`,
+      `Patente: ${plate}`,
+      `Tipo: ${service}`,
+      `Prioridad: ${priorityLabel(priority)}`,
+      `Detalle: ${text}`,
+      `WhatsApp: ${rawPhone}`,
+      `Ticket local: ${ticket.code}`,
+    ].join("\n"),
+    customerName:
+      resolution.customer.name?.trim() ||
+      resolution.customer.companyName?.trim() ||
+      company,
+    customerPhone: rawPhone,
+    companyName: company,
+    priority,
+    messageSource: "builderbot_mantenimiento_operativo",
+    messagePlate: plate,
+    logContext: "Mantenimiento",
+  });
+
+  if (odooRef) {
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        aiSummary: `${service}${plate ? ` para ${plate}` : ""}. Cliente: ${company}. Odoo: ${odooRef}.`,
+      },
+    });
   }
 
   const responseMessage = odooRef

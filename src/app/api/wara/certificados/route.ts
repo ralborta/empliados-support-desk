@@ -19,7 +19,7 @@ import {
 import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
-import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
+import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
 const bodySchema = z
@@ -385,7 +385,7 @@ async function escalateCertificateFailure(params: {
 
   const title = `${params.plate} - Certificado no emitido`;
 
-  const { ticket: localTicket, created } = await attachToOpenConversation(prisma, {
+  const { ticket: localTicket } = await attachToOpenConversation(prisma, {
     customerId: customer.id,
     contactName:
       params.contactName || customer.name?.trim() || params.company || "Sin nombre",
@@ -411,43 +411,38 @@ async function escalateCertificateFailure(params: {
     console.error("[Certificados] autoAssign:", e);
   }
 
-  let odooRef: string | null = null;
-  const odooCfg = getOdooConfig();
-  if (created && odooCfg) {
-    try {
-      const failureCategory = waraCertificateFailureCategory(params.waraDetail, params.status);
-      const odoo = await createHelpdeskTicket(odooCfg, {
-        subject: title,
-        description: [
-          `Certificado de cobertura no emitido (gestión vía Atilio / WhatsApp).`,
-          `Empresa Wara: ${params.company}`,
-          `Patente: ${params.plate}`,
-          `Motivo: ${failureCategory}`,
-          `Detalle Wara: ${params.waraDetail}`,
-          `WhatsApp: ${params.rawPhone}`,
-          `Ticket local: ${localTicket.code}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        customerName: params.contactName || customer.name || params.company,
-        customerPhone: params.rawPhone,
-        companyName: params.company,
-        priority: "NORMAL",
-      });
-      odooRef = odoo.ref ?? String(odoo.ticketId);
-      await prisma.ticket.update({
-        where: { id: localTicket.id },
-        data: {
-          aiSummary: `Certificado no emitido para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}. Odoo: ${odooRef}.`,
-        },
-      });
-    } catch (error) {
-      console.error(
-        `[Certificados] No se pudo crear caso Odoo para ${params.plate}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
+  const failureCategory = waraCertificateFailureCategory(params.waraDetail, params.status);
+  const { odooRef } = await ensureWaraOdooTicket(prisma, {
+    ticketId: localTicket.id,
+    dedupeKey: `wara_certificados:${params.plate}:${failureCategory}`,
+    subject: title,
+    description: [
+      `Certificado de cobertura no emitido (gestión vía Atilio / WhatsApp).`,
+      `Empresa Wara: ${params.company}`,
+      `Patente: ${params.plate}`,
+      `Motivo: ${failureCategory}`,
+      `Detalle Wara: ${params.waraDetail}`,
+      `WhatsApp: ${params.rawPhone}`,
+      `Ticket local: ${localTicket.code}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    customerName: params.contactName || customer.name || params.company,
+    customerPhone: params.rawPhone,
+    companyName: params.company,
+    priority: "NORMAL",
+    messageSource: "wara_certificados_escalation",
+    messagePlate: params.plate,
+    logContext: "Certificados",
+  });
+
+  if (odooRef) {
+    await prisma.ticket.update({
+      where: { id: localTicket.id },
+      data: {
+        aiSummary: `Certificado no emitido para ${params.plate} (${params.company}). Motivo Wara: ${params.waraDetail}. Odoo: ${odooRef}.`,
+      },
+    });
   }
 
   return { odooRef, localRef: localTicket.code };

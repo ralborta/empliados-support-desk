@@ -14,11 +14,14 @@ export type GpsSummaryInput = {
   assessment: GpsAssessment;
   action: "none" | "observation" | "ticket";
   ticketRef?: string;
+  odooRef?: string;
+  ticketReused?: boolean;
   ticketIssueDetail?: string;
 };
 
 function buildTemplateSummary(input: GpsSummaryInput): string {
-  const { unitLabel, unit, assessment, action, ticketRef, ticketIssueDetail } = input;
+  const { unitLabel, unit, assessment, action, ticketRef, odooRef, ticketReused, ticketIssueDetail } =
+    input;
   const facts = buildGpsFacts(unit, assessment);
   const telemetryLine = `Reporte hace ${facts.reporte}, posición hace ${facts.posicion}, ignición ${facts.ignicionEstado} (hace ${facts.ignicion}).`;
 
@@ -44,9 +47,14 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
   }
 
   if (action === "ticket" && ticketIssueDetail) {
-    const ticketPart = ticketRef
-      ? ` Generé el caso ${ticketRef.startsWith("TCK-") ? ticketRef : `N° ${ticketRef}`} para que Atención al cliente lo revise.`
-      : "";
+    let ticketPart = "";
+    if (odooRef) {
+      ticketPart = ` Generé el caso Odoo ${odooRef} para Atención al cliente.`;
+    } else if (ticketRef) {
+      ticketPart = ticketReused
+        ? ` Registré la consulta en el caso abierto (${ticketRef}).`
+        : ` Generé el caso N° ${ticketRef} para que Atención al cliente lo revise.`;
+    }
     return `La unidad ${unitLabel} presenta ${ticketIssueDetail}. ${telemetryLine}${ticketPart}`;
   }
 
@@ -77,7 +85,9 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
             plantilla_base: template,
             hechos_obligatorios: facts,
             accion: input.action,
-            ticket: input.ticketRef ?? null,
+            ticket: input.odooRef ?? input.ticketRef ?? null,
+            ticket_odoo: input.odooRef ?? null,
+            ticket_reutilizado: input.ticketReused ?? false,
             detalle_ticket: input.ticketIssueDetail ?? null,
           }),
         },
