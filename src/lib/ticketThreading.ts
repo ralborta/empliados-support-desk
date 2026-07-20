@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient, Ticket, TicketPriority, TicketStatus } from "@prisma/client";
-import { generateTicketCode } from "@/lib/tickets";
+import { allocateTicketCode } from "@/lib/tickets";
 
 /**
  * ## Regla de conversación (WhatsApp / soporte)
@@ -131,9 +131,11 @@ export async function attachToOpenConversation(
     return { ticket, created: false };
   }
 
+  const code = await allocateTicketCode(prisma);
+
   ticket = await prisma.ticket.create({
     data: {
-      code: generateTicketCode(),
+      code,
       customerId: params.customerId,
       contactName: params.contactName,
       title: params.title,

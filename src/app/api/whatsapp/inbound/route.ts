@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
-import { generateTicketCode } from "@/lib/tickets";
+import { allocateTicketCode } from "@/lib/tickets";
 import { uploadToBlob, getFileExtension } from "@/lib/blob";
 import { transcribeAudio } from "@/lib/openai";
 import {
@@ -251,9 +251,10 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         orderBy: { lastMessageAt: "desc" },
       });
       if (!t) {
+        const code = await allocateTicketCode(tx);
         t = await tx.ticket.create({
           data: {
-            code: generateTicketCode(),
+            code,
             customerId: customer.id,
             contactName: contactName,
             title: `${waraIncidentLabels[incidentType]}${plate ? ` · ${plate}` : ""}`,

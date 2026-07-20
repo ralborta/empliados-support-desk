@@ -159,6 +159,14 @@ model Ticket {
   @@index([lastMessageAt])
 }
 
+/// Contador diario para códigos DDMMYY + secuencia (zona Argentina).
+model TicketDailySequence {
+  dayKey    String   @id
+  lastSeq   Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model TicketMessage {
   id                String           @id @default(cuid())
   ticketId          String

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { generateTicketCode } from "@/lib/tickets";
+import { allocateTicketCode } from "@/lib/tickets";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
@@ -107,7 +107,7 @@ export async function POST(req: Request) {
 
   const ticket = await prisma.ticket.create({
     data: {
-      code: generateTicketCode(),
+      code: await allocateTicketCode(prisma),
       title,
       customerId: customer.id,
       contactName: contactName || customerName || companyName || "Sin nombre",
