@@ -934,6 +934,15 @@ async function sendTicketCodeAtFarewellWara(opts: {
   }
 }
 
+function looksLikeOperationalUnitQuery(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    /\b(nissan|reporte|unidad|patente|matricula|matr[ií]cula|gps|flota|interno|\d{3}-\d{3})\b/.test(
+      lower,
+    ) || /\b(M?\d{3}-\d{3})\b/i.test(text)
+  );
+}
+
 function decideShouldEscalate({
   text,
   priority,
@@ -945,6 +954,10 @@ function decideShouldEscalate({
 }): boolean {
   const lower = text.toLowerCase();
 
+  if (looksLikeOperationalUnitQuery(text)) {
+    return false;
+  }
+
   // Escalate if priority is URGENT
   if (priority === "URGENT") {
     return true;
@@ -955,8 +968,8 @@ function decideShouldEscalate({
     return true;
   }
 
-  // Escalate if there are already 3+ messages in the ticket
-  if (previousMessages >= 3) {
+  // Escalate if there are already many messages and sigue siendo reclamo abierto
+  if (previousMessages >= 8) {
     return true;
   }
 

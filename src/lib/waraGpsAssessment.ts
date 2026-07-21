@@ -153,14 +153,14 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
     if (
       ignitionOff &&
       posElapsed != null &&
-      ignitionElapsed != null &&
-      telemetryAligned(posElapsed, ignitionElapsed)
+      ((ignitionElapsed != null && telemetryAligned(posElapsed, ignitionElapsed)) ||
+        (ignitionElapsed == null && !isPositionUpdating(reportElapsed, posElapsed)))
     ) {
       return {
         status: "coherent_pause",
         reportElapsed,
         positionElapsed: posElapsed,
-        ignitionElapsed,
+        ignitionElapsed: ignitionElapsed ?? posElapsed,
       };
     }
 

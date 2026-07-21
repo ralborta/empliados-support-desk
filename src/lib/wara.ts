@@ -64,11 +64,16 @@ export function isExamplePlate(value: string | null | undefined): boolean {
  * Detecta la primera patente REAL en el texto, ignorando las patentes de ejemplo
  * de los prompts. Si solo hay ejemplos, devuelve null.
  */
+const PLATE_STOPWORDS = new Set(["DEL", "LOS", "LAS", "UNA", "UNO", "CON", "POR", "SUS"]);
+
 export function detectPlate(text: string): string | null {
   if (!text) return null;
   for (const match of text.matchAll(PLATE_REGEX_GLOBAL)) {
     const plate = normalizePlate(match[1]);
-    if (plate && !EXAMPLE_PLATES.has(plate)) return plate;
+    if (!plate || EXAMPLE_PLATES.has(plate)) continue;
+    const letters = plate.match(/^[A-Z]+/)?.[0] ?? "";
+    if (letters.length === 3 && PLATE_STOPWORDS.has(letters)) continue;
+    return plate;
   }
   return null;
 }

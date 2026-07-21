@@ -49,7 +49,7 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
   if (action === "ticket" && ticketIssueDetail) {
     let ticketPart = "";
     if (odooRef) {
-      ticketPart = ` Generé el caso Odoo ${odooRef} para Atención al cliente.`;
+      ticketPart = ` Generé el caso N° ${odooRef} para Atención al cliente.`;
     } else if (ticketRef) {
       ticketPart = ticketReused
         ? ` Registré la consulta en el caso abierto (${ticketRef}).`

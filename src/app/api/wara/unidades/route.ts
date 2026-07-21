@@ -267,7 +267,7 @@ function looksLikeBackofficeInternoCode(value: string): boolean {
 
 function extractUnitQueryFromText(rawText: string | undefined | null): UnitQueryRef | null {
   const text = (rawText ?? "").trim();
-  if (!text || detectPlate(text)) return null;
+  if (!text) return null;
 
   const nombreLabel = text.match(/\bnombre\s*(?:de\s+(?:la\s+)?unidad\s*)?(?:es|:|-)?\s*(M?\d{3}-\d{3})/i);
   if (nombreLabel?.[1]) return { kind: "nombre", value: nombreLabel[1] };
@@ -283,6 +283,8 @@ function extractUnitQueryFromText(rawText: string | undefined | null): UnitQuery
 
   const nombreMatch = text.match(/\b(M?\d{3}-\d{3})\b/i);
   if (nombreMatch?.[1]) return { kind: "nombre", value: nombreMatch[1] };
+
+  if (detectPlate(text)) return null;
 
   return null;
 }
@@ -525,7 +527,7 @@ async function createMissingReportTicket(params: {
   const unitLabel = params.unit.patente || params.unit.unidad;
   let message: string;
   if (odooRef) {
-    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé el caso Odoo ${odooRef} para Atención al cliente.${
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé el caso N° ${odooRef} para Atención al cliente.${
       localReused ? ` También quedó en la conversación ${localTicket.code}.` : ""
     } Te avisamos por este medio cualquier novedad.`;
   } else if (localReused) {
@@ -640,7 +642,7 @@ async function createNoEquipmentTicket(params: {
 
   let message: string;
   if (odooRef) {
-    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso Odoo ${odooRef} para Atención al cliente.${
+    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${odooRef} para Atención al cliente.${
       localReused ? ` También quedó en la conversación ${localTicket.code}.` : ""
     } Te avisamos por este medio cualquier novedad.`;
   } else if (localReused) {
