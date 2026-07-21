@@ -6,6 +6,10 @@
 - ✅ Build local exitoso (Next.js 16 + Prisma 6)
 - ⏳ Esperando deploy en Vercel
 
+## Rollback de emergencia
+
+Si producción falla tras un deploy: **[ROLLBACK.md](./ROLLBACK.md)** (Nivel 1 = variable `WARA_INBOUND_AUDIT_ONLY=false` en Vercel, ~2 min). Estado actual: `./scripts/rollback-status.sh`
+
 ## 📦 Stack Técnico
 - **Frontend/Backend**: Next.js 16.1.1 (App Router, TypeScript, Tailwind)
 - **Base de Datos**: PostgreSQL en Railway
