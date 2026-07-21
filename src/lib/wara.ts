@@ -83,6 +83,7 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
   const compact = (text ?? "").trim().replace(/\s+/g, "");
   if (!compact || compact.length < 5 || compact.length > 12) return false;
   if (!/^[A-Za-z0-9-]+$/.test(compact)) return false;
+  if (!/\d/.test(compact)) return false;
   const norm = normalizePlate(compact);
   return !!(norm && !isExamplePlate(norm));
 }
