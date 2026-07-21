@@ -20,6 +20,8 @@ import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
+import { buildWebhookMessageId } from "@/lib/webhookMessageId";
+import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 // Using string literals instead of Prisma enums for compatibility
 
 /** Campos para variables BuilderBot (reglas HTTP / mapeo de respuesta del webhook). */
@@ -81,6 +83,15 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   }
   const customerPhoneRaw = String(data.from);
   const customerPhone = normalizeWhatsAppPhone(customerPhoneRaw) || customerPhoneRaw;
+  if (!allowPhoneRequest(customerPhone)) {
+    console.warn(`[WhatsApp] Rate limit excedido para ${customerPhone}`);
+    return NextResponse.json({
+      ok: true,
+      rateLimited: true,
+      message: "Demasiados mensajes en poco tiempo; intentá de nuevo en un minuto.",
+      ...builderBotRegistrationFields(false),
+    });
+  }
   const customerName = data.name != null ? String(data.name) : undefined; // Nombre de WhatsApp (la persona que escribe)
   const customerResolution = await resolveCustomerByWaraPhone(prisma, customerPhoneRaw, {
     contactName: customerName,
@@ -193,12 +204,16 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     contactName = customerName || "Sin nombre";
   }
 
-  // Generar un messageId único basado en el contenido y timestamp
-  const messageId = `${customerPhone}-${Date.now()}`;
+  const messageId = buildWebhookMessageId({
+    data: data as Record<string, unknown>,
+    phone: customerPhone,
+    direction: "inbound",
+    body: actualMessage,
+  });
 
-  // Idempotencia por external message id
+  // Idempotencia por external message id (reintentos BuilderBot / stress)
   const existing = await prisma.ticketMessage.findFirst({
-    where: { 
+    where: {
       externalMessageId: messageId,
     },
   });
@@ -314,27 +329,48 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
 
   const rawPayload = { eventName, data };
 
-  await prisma.ticketMessage.create({
-    data: {
-      ticketId: ticket.id,
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      text: actualMessage || "[Archivo adjunto]",
-      attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
-      rawPayload: {
-        ...rawPayload,
-        wara: {
-          incidentType,
-          incidentTypeLabel: waraIncidentLabels[incidentType],
-          suggestedPriority,
-          plate,
-          companyName,
-          missingData: missing,
+  try {
+    await prisma.ticketMessage.create({
+      data: {
+        ticketId: ticket.id,
+        direction: "INBOUND",
+        from: "CUSTOMER",
+        text: actualMessage || "[Archivo adjunto]",
+        attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
+        rawPayload: {
+          ...rawPayload,
+          wara: {
+            incidentType,
+            incidentTypeLabel: waraIncidentLabels[incidentType],
+            suggestedPriority,
+            plate,
+            companyName,
+            missingData: missing,
+          },
         },
+        externalMessageId: messageId,
       },
-      externalMessageId: messageId,
-    },
-  });
+    });
+  } catch (error: unknown) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      const dup = await prisma.ticketMessage.findFirst({
+        where: { externalMessageId: messageId },
+        select: { ticketId: true },
+      });
+      if (dup) {
+        return NextResponse.json({
+          ok: true,
+          ticketId: dup.ticketId,
+          idempotent: true,
+          ...builderBotRegistrationFields(registeredInPanel),
+        });
+      }
+    }
+    throw error;
+  }
 
   if (processedAttachments.length > 0) {
     console.log(`📎 ${processedAttachments.length} archivo(s) adjunto(s) guardado(s):`);
@@ -654,8 +690,13 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  // Generar messageId único
-  const messageId = `outgoing-${customerPhone}-${Date.now()}`;
+  // Generar messageId estable (reintentos / stress)
+  const messageId = buildWebhookMessageId({
+    data: data as Record<string, unknown>,
+    phone: customerPhone,
+    direction: "outbound",
+    body: messageText,
+  });
 
   // Verificar idempotencia por externalMessageId
   const existingById = await prisma.ticketMessage.findFirst({

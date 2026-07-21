@@ -499,6 +499,20 @@ function waraMaintenanceApiBaseUrl(): string {
 
 const WARA_SESSION_TTL_MS = 45 * 60 * 1000;
 
+const waraSessionInflight = new Map<
+  string,
+  Promise<{
+    ok: boolean;
+    status: number;
+    sessionToken?: string;
+    customerId?: number;
+    customerName?: string;
+    userTimezone?: string;
+    customerTimezone?: string;
+    error?: string;
+  }>
+>();
+
 function isWaraSessionFresh(at: Date | null | undefined): boolean {
   if (!at) return false;
   return Date.now() - at.getTime() < WARA_SESSION_TTL_MS;
@@ -919,12 +933,28 @@ async function ensureWaraSessionForContact(
     return { ok: true, status: 200, sessionToken: cached };
   }
 
-  const created = await createChatBotToken(contact.id);
-  if (created.ok && created.sessionToken) {
-    await persistWaraSession(prisma, rawPhone, contact.id, created.sessionToken);
+  const inflightKey = `${rawPhone}:${contact.id}`;
+  const inflight = waraSessionInflight.get(inflightKey);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    const cachedAgain = await readCachedWaraSession(prisma, rawPhone, contact.id);
+    if (cachedAgain) {
+      return { ok: true, status: 200, sessionToken: cachedAgain };
+    }
+
+    const created = await createChatBotToken(contact.id);
+    if (created.ok && created.sessionToken) {
+      await persistWaraSession(prisma, rawPhone, contact.id, created.sessionToken);
+      return created;
+    }
     return created;
-  }
-  return created;
+  })().finally(() => {
+    waraSessionInflight.delete(inflightKey);
+  });
+
+  waraSessionInflight.set(inflightKey, promise);
+  return promise;
 }
 
 function findContactForCompany(

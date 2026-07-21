@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { WaraUnidadEstado } from "@/lib/waraApi";
+import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import {
   buildGpsFacts,
   formatMinutesAgo,
@@ -68,32 +69,38 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
+    const response = await withOpenAiTimeout((signal) =>
+      openai.chat.completions.create(
         {
-          role: "system",
-          content:
-            "Redactás respuestas de WhatsApp para mesa de ayuda Wara GPS. " +
-            "Mantené los hechos (estado general, ignición, ticket, acción) sin tiempos técnicos crudos ni segundos. " +
-            "No menciones intervalos de reporte del GPS. No inventes datos. Español rioplatense, 2-4 oraciones, sin emojis.",
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "Redactás respuestas de WhatsApp para mesa de ayuda Wara GPS. " +
+                "Mantené los hechos (estado general, ignición, ticket, acción) sin tiempos técnicos crudos ni segundos. " +
+                "No menciones intervalos de reporte del GPS. No inventes datos. Español rioplatense, 2-4 oraciones, sin emojis.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                plantilla_base: template,
+                hechos_obligatorios: facts,
+                accion: input.action,
+                ticket: input.odooRef ?? input.ticketRef ?? null,
+                ticket_odoo: input.odooRef ?? null,
+                ticket_reutilizado: input.ticketReused ?? false,
+                detalle_ticket: input.ticketIssueDetail ?? null,
+              }),
+            },
+          ],
+          temperature: 0.2,
+          max_tokens: 280,
         },
-        {
-          role: "user",
-          content: JSON.stringify({
-            plantilla_base: template,
-            hechos_obligatorios: facts,
-            accion: input.action,
-            ticket: input.odooRef ?? input.ticketRef ?? null,
-            ticket_odoo: input.odooRef ?? null,
-            ticket_reutilizado: input.ticketReused ?? false,
-            detalle_ticket: input.ticketIssueDetail ?? null,
-          }),
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 280,
-    });
+        { signal },
+      ),
+    );
+    if (!response) return template;
 
     const text = response.choices[0]?.message?.content?.trim();
     return text && text.length >= 40 ? text : template;

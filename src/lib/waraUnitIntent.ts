@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { PrismaClient } from "@prisma/client";
 import { detectPlate, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
+import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
 
 export type UnitQueryIntent = "list_fleet" | "consult_status" | "need_clarification";
@@ -323,16 +324,22 @@ Reglas:
   });
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0.1,
-      max_tokens: 300,
-      response_format: { type: "json_object" },
-    });
+    const response = await withOpenAiTimeout((signal) =>
+      openai.chat.completions.create(
+        {
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          temperature: 0.1,
+          max_tokens: 300,
+          response_format: { type: "json_object" },
+        },
+        { signal },
+      ),
+    );
+    if (!response) return null;
 
     const raw = response.choices[0]?.message?.content?.trim();
     if (!raw) return null;

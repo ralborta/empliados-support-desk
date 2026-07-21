@@ -18,6 +18,7 @@ import {
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
+import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
@@ -675,6 +676,16 @@ export async function POST(req: NextRequest) {
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
+  if (!allowPhoneRequest(rawPhone, 20)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "rate_limited",
+        summaryText: "Recibí muchas consultas seguidas. Esperá un momento e intentá de nuevo.",
+      },
+      { status: BB_STATUS },
+    );
+  }
   const threadText = await recentThreadText(rawPhone);
   const rawText = parsed.data.rawText ?? "";
   let explicitPlate =

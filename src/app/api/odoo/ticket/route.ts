@@ -17,6 +17,8 @@ import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
+import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
+import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 
 /**
  * Crea un ticket de reclamo/escalamiento en Odoo Helpdesk (equipo "Atención al cliente").
@@ -288,6 +290,18 @@ export async function POST(req: NextRequest) {
   const data = parsed.data;
   const rawPhone = (data.from ?? data.phone ?? data.customerPhone ?? "").trim();
 
+  if (rawPhone && !allowPhoneRequest(rawPhone, 15)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        message: "Recibí muchas solicitudes seguidas. Esperá un momento e intentá de nuevo.",
+        error: "rate_limited",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   if (looksLikeCustomerConversationCloseRequest(data.rawText)) {
     const closeResult = await handleCustomerConversationCloseRequest({
       rawPhone,
@@ -434,7 +448,58 @@ export async function POST(req: NextRequest) {
   ];
   const description = descriptionLines.filter(Boolean).join("\n");
 
+  const dedupeKey = `odoo_ticket:${rawPhone}:${plate || "no-plate"}:${subject.slice(0, 120)}`;
+  const localTicket =
+    localCustomer &&
+    (await prisma.ticket.findFirst({
+      where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+      orderBy: { lastMessageAt: "desc" },
+      select: { id: true },
+    }));
+
   try {
+    if (localTicket) {
+      const ensured = await ensureWaraOdooTicket(prisma, {
+        ticketId: localTicket.id,
+        dedupeKey,
+        subject,
+        description,
+        customerName,
+        customerPhone: rawPhone || data.customerPhone,
+        companyName,
+        priority: data.priority,
+        messageSource: "odoo_ticket",
+        messagePlate: plate || undefined,
+        logContext: "odoo_ticket",
+      });
+
+      if (ensured.odooRef) {
+        const ref = ensured.odooRef;
+        const message = ensured.created
+          ? `Listo, generé el caso N° ${ref} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
+          : `Ya tenés el caso ${ref} en revisión. Un asesor de Atención al cliente te va a contactar por este medio.`;
+
+        if (ensured.created) {
+          await appendOutboundBotMessage(rawPhone, message, {
+            source: "odoo_ticket",
+            ref,
+            plate,
+            companyName,
+            odooDedupeKey: dedupeKey,
+          });
+        }
+
+        return NextResponse.json({
+          ok: true,
+          ok_s: "true",
+          ref,
+          reused: !ensured.created,
+          reused_s: ensured.created ? "false" : "true",
+          message,
+        });
+      }
+    }
+
     const result = await createHelpdeskTicket(cfg, {
       subject,
       description,
