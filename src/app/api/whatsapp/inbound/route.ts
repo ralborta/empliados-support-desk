@@ -394,11 +394,10 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     const pideNumeroTicket = messageAsksForTicketCode(messageLower);
 
     if (shouldEscalate && solicitaAgente) {
+      // La respuesta la envía /api/odoo/ticket para evitar duplicados con BBC.
+    } else if (shouldEscalate) {
       autoReplyMessage = `Hola! Tu consulta ha sido escalada a nuestro equipo. Ticket: *${ticket.code}*. Te responderemos pronto.`;
       autoReplyKind = "escalation";
-    } else if (isNewTicket) {
-      autoReplyMessage = `Hola! Hemos recibido tu mensaje. Ticket: *${ticket.code}*. Un agente lo revisará pronto.`;
-      autoReplyKind = "new_ticket";
     } else if (pideNumeroTicket) {
       autoReplyMessage = `Tu número de caso (ticket) es *${ticket.code}*.`;
       autoReplyKind = "ticket_on_request";

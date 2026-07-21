@@ -8,10 +8,11 @@ import {
   getOdooConfigStatus,
   OdooError,
 } from "@/lib/odooApi";
-import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, normalizePlate, waraIncidentLabels } from "@/lib/wara";
+import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, normalizePlate, threadTextSinceCompanySelection, waraIncidentLabels } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { consultarEstadoUnidades, looksLikeHumanAdvisorRequest, resolveWaraSessionByPhone } from "@/lib/waraApi";
+import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
 import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
@@ -307,6 +308,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (looksLikeUnitListRequest(data.rawText ?? "")) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        skipResponse_s: "true",
+        message: "",
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   // Enriquecemos empresa/contacto desde la base local (se persistió en el alta/selección de empresa).
   const localCustomer = rawPhone ? await findCustomerByWhatsAppNumber(prisma, rawPhone) : null;
   let companyName = data.companyName?.trim() || localCustomer?.companyName?.trim() || "";
@@ -316,14 +330,15 @@ export async function POST(req: NextRequest) {
   }
   const customerName = data.customerName?.trim() || localCustomer?.name?.trim() || "";
 
-  // Patente: explícita -> detectada del mensaje -> historial reciente.
+  // Patente: explícita -> detectada del mensaje -> historial reciente (desde selección de empresa).
   const threadText = await recentThreadText(rawPhone);
+  const scopedThread = threadTextSinceCompanySelection(threadText);
   const plate = normalizePlateForTitle(
     data.plate ??
       data.patente ??
       detectPlate(data.rawText ?? "") ??
-      extractLastPlateFromThreadCompat(threadText) ??
-      detectPlate(threadText) ??
+      extractLastPlateFromThreadCompat(scopedThread) ??
+      detectPlate(scopedThread) ??
       undefined
   );
 
@@ -352,10 +367,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (!plate && !explicitSubject) {
-    const message = advisorRequest
-      ? "Te derivo con un asesor de Atención al cliente. Pasame la patente de la unidad y qué está pasando (ej: NKL 952 no reporta desde ayer)."
-      : "Para registrar el caso necesito la patente de la unidad y qué está pasando (ej: NKL 940 no reporta desde ayer).";
+  if (!plate && !explicitSubject && !advisorRequest) {
+    const message =
+      "Para registrar el caso necesito la patente de la unidad y qué está pasando (ej: NKL 940 no reporta desde ayer).";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",
       errorStage: "missing_plate",
@@ -372,7 +386,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const existingRef = await findRecentOdooRef(rawPhone, plate || undefined);
+  const existingRef = advisorRequest ? null : await findRecentOdooRef(rawPhone, plate || undefined);
   if (existingRef) {
     const message = `Ya existe un caso abierto (N° ${existingRef}) para este reclamo. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
     await appendOutboundBotMessage(rawPhone, message, {
@@ -391,7 +405,13 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const subject = explicitSubject || (plate ? `${plate} - ${event}` : event);
+  const subject =
+    explicitSubject ||
+    (advisorRequest && !plate
+      ? "Cliente solicita asesor humano"
+      : plate
+        ? `${plate} - ${event}`
+        : event);
 
   // Dato real de la API de Wara para enriquecer el evento (ej. "sin reporte hace 18 h").
   const plateWithSpaces = plate ? formatPlateWithSpaces(plate) ?? plate : "";

@@ -730,10 +730,14 @@ export async function POST(req: NextRequest) {
   }
 
   const unitQueryInMessage = extractUnitQueryFromText(rawText);
+  const scopedThreadEarly = threadTextSinceCompanySelection(threadText);
+  const threadPlateEarly =
+    extractLastPlateFromThreadCompat(scopedThreadEarly) ?? detectPlate(scopedThreadEarly);
 
   if (
     !explicitPlate &&
     !unitQueryInMessage &&
+    !threadPlateEarly &&
     (looksLikeAnotherUnitRequest(rawText) || mentionsMissingReportWithoutPlate(rawText))
   ) {
     const askPlate =

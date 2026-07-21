@@ -1345,10 +1345,28 @@ export async function validatePlateInFleetForPhone(
 
   const wanted = normalizePlate(plate);
   if (!wanted) return { found: true, checked: false };
-  const found = result.unidades.some((unit) => {
-    const unitPlate = normalizePlate(unit.patente || unit.unidad);
-    return unitPlate && (unitPlate === wanted || unitPlate.includes(wanted) || wanted.includes(unitPlate));
-  });
+  const plateMatchesUnit = (unitPlate: string | null | undefined) => {
+    if (!unitPlate) return false;
+    const unitNorm = normalizePlate(unitPlate);
+    if (!unitNorm) return false;
+    if (unitNorm === wanted || unitNorm.includes(wanted) || wanted.includes(unitNorm)) return true;
+    if (unitNorm.length === wanted.length) {
+      let diffs = 0;
+      for (let i = 0; i < wanted.length; i++) {
+        if (unitNorm[i] !== wanted[i]) diffs++;
+      }
+      if (diffs === 1) return true;
+    }
+    return false;
+  };
+
+  let found = result.unidades.some((unit) => plateMatchesUnit(unit.patente || unit.unidad));
+  if (!found) {
+    const full = await consultarEstadoUnidades(session.sessionToken, []);
+    if (full.ok && full.unidades.length > 0) {
+      found = full.unidades.some((unit) => plateMatchesUnit(unit.patente || unit.unidad));
+    }
+  }
   if (found) return { found: true, checked: true };
 
   const multi = (session.lookup?.contactos.length ?? 0) > 1;

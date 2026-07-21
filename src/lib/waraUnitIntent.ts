@@ -138,6 +138,62 @@ function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnida
   });
 }
 
+/** Prefijo de patente en frases como "la que empieza con AG". */
+function extractPlatePrefixHint(rawText: string): string | null {
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z]{2}\d{0,3})/i);
+  if (explicit?.[1]) return explicit[1].replace(/\s+/g, "").toUpperCase();
+  const loose = norm.match(/\bcon\s+([a-z]{2})\b/);
+  if (loose?.[1]) return loose[1].toUpperCase();
+  return null;
+}
+
+function filterUnitsByPlatePrefix(units: WaraUnidadEstado[], prefix: string): WaraUnidadEstado[] {
+  const p = prefix.replace(/\s+/g, "").toUpperCase();
+  if (p.length < 2) return [];
+  return units.filter((u) => {
+    const unitPlate = normalizeLoosePlate(u.patente || u.unidad || "");
+    return unitPlate.startsWith(p);
+  });
+}
+
+/** Typo de 1 carácter en patente (ej. AG562ST → AG562SP) cuando hay candidato único. */
+function fuzzyMatchUnitByPlate(
+  units: WaraUnidadEstado[],
+  inputPlate: string,
+): WaraUnidadEstado | null {
+  const wanted = normalizeLoosePlate(inputPlate);
+  if (!wanted || wanted.length < 5) return null;
+
+  const candidates = units
+    .map((unit) => ({
+      unit,
+      plate: normalizeLoosePlate(unit.patente || unit.unidad || ""),
+    }))
+    .filter((c) => c.plate);
+
+  const oneCharOff = candidates.filter((c) => {
+    if (c.plate.length !== wanted.length) return false;
+    let diffs = 0;
+    for (let i = 0; i < wanted.length; i++) {
+      if (c.plate[i] !== wanted[i]) diffs++;
+    }
+    return diffs === 1;
+  });
+  if (oneCharOff.length === 1) return oneCharOff[0].unit;
+
+  if (wanted.length >= 4) {
+    const prefix = wanted.slice(0, 4);
+    const prefixMatches = candidates.filter((c) => c.plate.startsWith(prefix));
+    if (prefixMatches.length === 1) return prefixMatches[0].unit;
+  }
+
+  return null;
+}
+
 function resolveWithRules(
   rawText: string,
   threadText: string,
@@ -150,10 +206,17 @@ function resolveWithRules(
   const plateFromMessage = detectPlate(rawText) ?? detectPlate(threadText) ?? "";
   if (plateFromMessage) {
     const plate = normalizeLoosePlate(plateFromMessage);
-    const matches = filterUnitsByPlate(units, plate);
+    let matches = filterUnitsByPlate(units, plate);
+    if (matches.length === 0) {
+      const fuzzy = fuzzyMatchUnitByPlate(units, plate);
+      if (fuzzy) matches = [fuzzy];
+    }
     return {
       intent: matches.length === 1 ? "consult_status" : matches.length > 1 ? "need_clarification" : "consult_status",
-      plate,
+      plate:
+        matches.length === 1
+          ? normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || plate
+          : plate,
       searchTerms: [],
       candidatePlates: matches.map((u) => normalizeLoosePlate(u.patente || u.unidad || "")).filter(Boolean),
       clarificationQuestion:
@@ -162,6 +225,36 @@ function resolveWithRules(
           : undefined,
       source: "rules",
     };
+  }
+
+  const prefixHint = extractPlatePrefixHint(rawText) ?? extractPlatePrefixHint(threadText);
+  if (prefixHint) {
+    const prefixMatches = filterUnitsByPlatePrefix(units, prefixHint);
+    const candidatePlates = prefixMatches
+      .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+      .filter(Boolean);
+    if (prefixMatches.length === 1) {
+      return {
+        intent: "consult_status",
+        plate: candidatePlates[0],
+        searchTerms: [],
+        candidatePlates,
+        source: "rules",
+      };
+    }
+    if (prefixMatches.length > 1) {
+      const labels = prefixMatches
+        .slice(0, 5)
+        .map((u) => (u.patente || u.unidad || "").trim())
+        .join(", ");
+      return {
+        intent: "need_clarification",
+        searchTerms: [],
+        candidatePlates,
+        clarificationQuestion: `Encontré ${prefixMatches.length} unidades que empiezan con ${prefixHint} (${labels}). Decime la patente exacta.`,
+        source: "rules",
+      };
+    }
   }
 
   const terms = extractSearchTerms(rawText, threadText);
@@ -305,18 +398,45 @@ Reglas:
   }
 }
 
+function isDecisiveRulesResolution(resolution: UnitQueryResolution): boolean {
+  if (resolution.intent === "list_fleet") return true;
+  if (resolution.intent === "consult_status" && resolution.plate) return true;
+  if (resolution.intent === "need_clarification" && resolution.candidatePlates.length > 1) {
+    return true;
+  }
+  return false;
+}
+
 export async function resolveUnitQuery(params: {
   rawText: string;
   threadText: string;
   units: WaraUnidadEstado[];
 }): Promise<UnitQueryResolution> {
+  const rules = resolveWithRules(params.rawText, params.threadText, params.units);
+  if (isDecisiveRulesResolution(rules)) return rules;
+
   const ai = await resolveWithAi(params.rawText, params.threadText, params.units);
-  if (ai) return ai;
-  return resolveWithRules(params.rawText, params.threadText, params.units);
+  if (ai) {
+    if (rules.intent === "consult_status" && rules.plate && rules.candidatePlates.length === 1) {
+      return rules;
+    }
+    if (
+      ai.intent === "need_clarification" &&
+      rules.plate &&
+      rules.candidatePlates.length === 1
+    ) {
+      return rules;
+    }
+    return ai;
+  }
+  return rules;
 }
 
 export function filterUnitsByResolvedPlate(units: WaraUnidadEstado[], plate: string): WaraUnidadEstado[] {
-  return filterUnitsByPlate(units, plate);
+  const exact = filterUnitsByPlate(units, plate);
+  if (exact.length > 0) return exact;
+  const fuzzy = fuzzyMatchUnitByPlate(units, plate);
+  return fuzzy ? [fuzzy] : [];
 }
 
 export type PlateFromFleetResult =
@@ -372,4 +492,4 @@ export async function resolvePlateWithWaraFleet(
   return { ok: false, reason: "not_found" };
 }
 
-export { looksLikeUnitListRequest, filterUnitsBySearchTerms };
+export { looksLikeUnitListRequest, filterUnitsBySearchTerms, fuzzyMatchUnitByPlate };

@@ -23,7 +23,6 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
   const { unitLabel, unit, assessment, action, ticketRef, odooRef, ticketReused, ticketIssueDetail } =
     input;
   const facts = buildGpsFacts(unit, assessment);
-  const telemetryLine = `Reporte hace ${facts.reporte}, posición hace ${facts.posicion}, ignición ${facts.ignicionEstado} (hace ${facts.ignicion}).`;
 
   if (assessment.status === "ok") {
     return (
@@ -31,7 +30,7 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
       (facts.ignicionEstado === "encendida"
         ? `; la ignición está encendida (puede llevar rato en ON sin cambiar de estado). `
         : ` y la ignición acompaña. `) +
-      `${telemetryLine} No genero ticket. El GPS puede reportar cada 10 minutos; si algo cambia, volvé a consultar.`
+      `No genero ticket. Si algo cambia, volvé a consultar.`
     );
   }
 
@@ -41,7 +40,7 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
       ? "La ignición está apagada y la última posición coincide con ese apagado: la unidad está detenida y es normal que no actualice posición aunque el reporte sea reciente."
       : "El reporte, la posición y la ignición apagada van alineados en el tiempo.";
     return (
-      `La unidad ${unitLabel} está detenida: ${telemetryLine} ` +
+      `La unidad ${unitLabel} está detenida. ` +
       `${pauseReason} No genero ticket por ahora. Si algo cambia, volvé a consultar.`
     );
   }
@@ -55,10 +54,10 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
         ? ` Registré la consulta en el caso abierto (${ticketRef}).`
         : ` Generé el caso N° ${ticketRef} para que Atención al cliente lo revise.`;
     }
-    return `La unidad ${unitLabel} presenta ${ticketIssueDetail}. ${telemetryLine}${ticketPart}`;
+    return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${ticketPart}`;
   }
 
-  return `Consulta de ${unitLabel}. ${telemetryLine}`;
+  return `Consulta de ${unitLabel}.`;
 }
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {
@@ -76,8 +75,8 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
           role: "system",
           content:
             "Redactás respuestas de WhatsApp para mesa de ayuda Wara GPS. " +
-            "Mantené EXACTOS los hechos (tiempos, ignición, ticket, acción). " +
-            "No inventes datos. No cambies si hay ticket o no. Español rioplatense, 2-4 oraciones, sin emojis.",
+            "Mantené los hechos (estado general, ignición, ticket, acción) sin tiempos técnicos crudos ni segundos. " +
+            "No menciones intervalos de reporte del GPS. No inventes datos. Español rioplatense, 2-4 oraciones, sin emojis.",
         },
         {
           role: "user",
