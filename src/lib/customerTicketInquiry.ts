@@ -4,6 +4,48 @@ import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConvers
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 
+/** Persiste respuesta del bot en el ticket del cliente (panel / historial). */
+export async function persistCustomerBotReply(
+  rawPhone: string,
+  text: string,
+  payload: Record<string, unknown>,
+  client: PrismaClient = prisma,
+): Promise<void> {
+  const message = text?.trim();
+  if (!message) return;
+  const customer = await findCustomerByWhatsAppNumber(client, rawPhone);
+  if (!customer) return;
+  const targetTicket =
+    (await client.ticket.findFirst({
+      where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+      orderBy: { lastMessageAt: "desc" },
+    })) ??
+    (await client.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    }));
+  if (!targetTicket) return;
+  const recent = await client.ticketMessage.findFirst({
+    where: {
+      ticketId: targetTicket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+  });
+  if (recent) return;
+  await client.ticketMessage.create({
+    data: {
+      ticketId: targetTicket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      text: message,
+      rawPayload: payload as never,
+    },
+  });
+}
+
 function normInquiryText(text: string): string {
   return text
     .normalize("NFD")

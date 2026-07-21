@@ -115,7 +115,21 @@ function buildRules() {
     },
     {
       conditionRule:
-        'ASESOR / PERSONA HUMANA — PRIORIDAD ALTA. Pide hablar con asesor, agente, persona humana, operador, atención humana, comunicarse con alguien o escalar el reclamo. Si en el historial ya hay patente/matrícula, número de caso (TCK-, N°) o ticket recién generado: va DIRECTO al flujo asesor/Odoo sin repreguntar patente. Si no hay patente ni caso en historial: también va a asesor para que el backend pida el dato mínimo.',
+        'CERRAR CASO / CONVERSACIÓN — PRIORIDAD SOBRE ASESOR. El cliente pide cerrar, resolver o finalizar el caso, ticket, consulta, reclamo o conversación: "cerrar caso", "quiero cerrar mi caso", "resolver conversación", "dar por cerrado", "cerrame el ticket". NO es reclamo nuevo ni pedido de patente para registrar. Va al ejecutor Odoo (backend cierra y responde). PROHIBIDO flujo asesor conversacional que pida patente.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.asesor,
+    },
+    {
+      conditionRule:
+        'CONSULTA CASO ABIERTO — PRIORIDAD SOBRE ASESOR. Pregunta si tiene un caso/ticket/reclamo abierto, activo o pendiente: "tengo un caso abierto", "hay algún ticket abierto", "caso abierto?". NO pide hablar con asesor ni registrar patente nueva. Va al ejecutor Odoo (backend responde con el estado). PROHIBIDO flujo asesor conversacional.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.asesor,
+    },
+    {
+      conditionRule:
+        'ASESOR / PERSONA HUMANA — PRIORIDAD ALTA. Pide hablar con asesor, agente, persona humana, operador, atención humana, comunicarse con alguien o escalar el reclamo. NO aplica si solo pregunta si tiene caso abierto ni si pide cerrar/cerrar caso/resolver conversación. Si en el historial ya hay patente/matrícula, número de caso (TCK-, N°) o ticket recién generado: va DIRECTO al flujo asesor/Odoo sin repreguntar patente. Si no hay patente ni caso en historial: también va a asesor para que el backend pida el dato mínimo.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.asesor,

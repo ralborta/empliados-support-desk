@@ -23,6 +23,15 @@ import {
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
+import {
+  handleCustomerConversationCloseRequest,
+  looksLikeCustomerConversationCloseRequest,
+} from "@/lib/customerConversationClose";
+import {
+  buildOpenCaseStatusReply,
+  looksLikeOpenCaseStatusInquiry,
+  persistCustomerBotReply,
+} from "@/lib/customerTicketInquiry";
 import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
 
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
@@ -483,6 +492,47 @@ export async function customerRegisteredContextResponse(
     nextFlow = "derivar";
   } else if (
     selectionText &&
+    looksLikeCustomerConversationCloseRequest(selectionText)
+  ) {
+    const closeResult = await handleCustomerConversationCloseRequest({
+      rawPhone: trimmed,
+      messageText: selectionText,
+      source: "builderbot_context",
+    });
+    nextFlow = "reply";
+    responseMessage = closeResult.replyMessage;
+  } else if (selectionText && looksLikeOpenCaseStatusInquiry(selectionText)) {
+    responseMessage = await buildOpenCaseStatusReply(trimmed);
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "open_case_status_inquiry",
+    });
+    nextFlow = "reply";
+  } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      const firstName = customer?.name?.trim().split(/\s+/)[0];
+      if (lastTicket && (lastKnownPlate || lastTicket.code)) {
+        responseMessage = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;
+      } else if (multiCompany && waraContactsText) {
+        const hola = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
+        responseMessage =
+          `${hola}\n\n` +
+          `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
+          `${waraContactsText}\n\n` +
+          `Respondé con el número de la opción o con el nombre de la empresa.`;
+      } else {
+        responseMessage = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+      }
+    }
+  } else if (
+    selectionText &&
     looksLikeCompanyListQuestion(selectionText)
   ) {
     nextFlow = "reply";
@@ -526,29 +576,6 @@ export async function customerRegisteredContextResponse(
     // Listado de flota: ir al router/API, no menú ni saludo con caso previo.
     nextFlow = "router";
     responseMessage = "";
-  } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
-    nextFlow = "reply";
-    if (!responseMessage) {
-      const firstName = customer?.name?.trim().split(/\s+/)[0];
-      if (lastTicket && (lastKnownPlate || lastTicket.code)) {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;
-      } else if (multiCompany && waraContactsText) {
-        const hola = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
-        responseMessage =
-          `${hola}\n\n` +
-          `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
-          `${waraContactsText}\n\n` +
-          `Respondé con el número de la opción o con el nombre de la empresa.`;
-      } else {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
-      }
-    }
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.
     nextFlow = "reply";
