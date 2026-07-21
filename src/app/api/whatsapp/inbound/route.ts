@@ -16,6 +16,10 @@ import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
+import {
+  handleCustomerConversationCloseRequest,
+  looksLikeCustomerConversationCloseRequest,
+} from "@/lib/customerConversationClose";
 // Using string literals instead of Prisma enums for compatibility
 
 /** Campos para variables BuilderBot (reglas HTTP / mapeo de respuesta del webhook). */
@@ -233,6 +237,28 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       waraLookupConfigured: customerResolution.lookup?.configured ?? false,
       waraLookupError: customerResolution.lookup?.error ?? null,
       ...builderBotRegistrationFields(false),
+    });
+  }
+
+  if (looksLikeCustomerConversationCloseRequest(actualMessage)) {
+    const closeResult = await handleCustomerConversationCloseRequest({
+      rawPhone: customerPhoneRaw,
+      messageText: actualMessage,
+      contactName,
+      externalMessageId: messageId,
+      source: "whatsapp_inbound",
+    });
+
+    return NextResponse.json({
+      ok: true,
+      conversationClosed: closeResult.closed,
+      conversationClosed_s: closeResult.closed ? "true" : "false",
+      skipResponse_s: "true",
+      flowComplete_s: "true",
+      ticketCode: closeResult.ticketCode,
+      ticketId: closeResult.ticketId,
+      message: closeResult.replyMessage,
+      ...builderBotRegistrationFields(registeredInPanel),
     });
   }
 

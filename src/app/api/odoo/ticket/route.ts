@@ -12,6 +12,10 @@ import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlat
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { consultarEstadoUnidades, looksLikeHumanAdvisorRequest, resolveWaraSessionByPhone } from "@/lib/waraApi";
+import {
+  handleCustomerConversationCloseRequest,
+  looksLikeCustomerConversationCloseRequest,
+} from "@/lib/customerConversationClose";
 
 /**
  * Crea un ticket de reclamo/escalamiento en Odoo Helpdesk (equipo "Atención al cliente").
@@ -282,6 +286,26 @@ export async function POST(req: NextRequest) {
 
   const data = parsed.data;
   const rawPhone = (data.from ?? data.phone ?? data.customerPhone ?? "").trim();
+
+  if (looksLikeCustomerConversationCloseRequest(data.rawText)) {
+    const closeResult = await handleCustomerConversationCloseRequest({
+      rawPhone,
+      messageText: data.rawText ?? "",
+      source: "odoo_ticket",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        skipResponse_s: "true",
+        flowComplete_s: "true",
+        conversationClosed_s: closeResult.closed ? "true" : "false",
+        ticketCode: closeResult.ticketCode ?? "",
+        message: closeResult.replyMessage,
+      },
+      { status: BB_STATUS },
+    );
+  }
 
   // Enriquecemos empresa/contacto desde la base local (se persistió en el alta/selección de empresa).
   const localCustomer = rawPhone ? await findCustomerByWhatsAppNumber(prisma, rawPhone) : null;
