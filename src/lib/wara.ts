@@ -181,7 +181,32 @@ export function formatPlateWithSpaces(value: string | null | undefined): string 
   if (mercosur) return `${mercosur[1]} ${mercosur[2]} ${mercosur[3]}`;
   const legacy = compact.match(/^([A-Z]{3})(\d{3})$/);
   if (legacy) return `${legacy[1]} ${legacy[2]}`;
+  const legacy4 = compact.match(/^([A-Z]{3})(\d{4})$/);
+  if (legacy4) return `${legacy4[1]} ${legacy4[2]}`;
   return compact;
+}
+
+/** Variantes de matrícula para APIs Wara de mantenimiento (odómetro, certificado). */
+export function waraPatenteCandidatesForApi(
+  inputPlate: string,
+  storedPatente?: string | null,
+): string[] {
+  const out: string[] = [];
+  const push = (value: string | null | undefined) => {
+    const v = value?.trim();
+    if (!v) return;
+    if (!out.includes(v)) out.push(v);
+  };
+
+  push(storedPatente?.trim());
+  const compact = normalizePlate(inputPlate) ?? normalizePlate(storedPatente ?? "");
+  if (compact) {
+    push(compact);
+    push(formatPlateWithSpaces(compact));
+    const legacy4 = compact.match(/^([A-Z]{3})(\d{4})$/);
+    if (legacy4) push(`${legacy4[1]} ${legacy4[2]}`);
+  }
+  return out;
 }
 
 export function detectIncidentType(text: string): WaraIncidentType {

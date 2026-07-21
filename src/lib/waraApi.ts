@@ -1392,6 +1392,42 @@ export function waraCertificateFailureCategory(error: string | undefined, status
 
 export type PlateFleetValidationPurpose = "certificate" | "maintenance" | "odometer";
 
+function plateMatchesFleetUnit(wanted: string, unit: WaraUnidadEstado): boolean {
+  const matchField = (unitPlate: string | null | undefined) => {
+    if (!unitPlate) return false;
+    const unitNorm = normalizePlate(unitPlate);
+    if (!unitNorm) return false;
+    if (unitNorm === wanted || unitNorm.includes(wanted) || wanted.includes(unitNorm)) return true;
+    if (unitNorm.length === wanted.length) {
+      let diffs = 0;
+      for (let i = 0; i < wanted.length; i++) {
+        if (unitNorm[i] !== wanted[i]) diffs++;
+      }
+      if (diffs === 1) return true;
+    }
+    return false;
+  };
+  return matchField(unit.patente) || matchField(unit.unidad);
+}
+
+/** Busca una unidad en flota Wara por matrícula o nombre (ej. LWK7902 / BRtestes). */
+export async function findFleetUnitByPlate(
+  sessionToken: string,
+  plate: string,
+): Promise<WaraUnidadEstado | null> {
+  const wanted = normalizePlate(plate);
+  if (!wanted) return null;
+  const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
+  const scoped = await consultarEstadoUnidades(sessionToken, [plateDisplay]);
+  if (scoped.ok) {
+    const hit = scoped.unidades.find((unit) => plateMatchesFleetUnit(wanted, unit));
+    if (hit) return hit;
+  }
+  const full = await consultarEstadoUnidades(sessionToken, []);
+  if (!full.ok) return null;
+  return full.unidades.find((unit) => plateMatchesFleetUnit(wanted, unit)) ?? null;
+}
+
 /** Consulta flota Wara antes de trámites operativos; evita tickets por typos de patente. */
 export async function validatePlateInFleetForPhone(
   prisma: PrismaClient,
@@ -1410,29 +1446,18 @@ export async function validatePlateInFleetForPhone(
 
   const wanted = normalizePlate(plate);
   if (!wanted) return { found: true, checked: false };
-  const plateMatchesUnit = (unitPlate: string | null | undefined) => {
-    if (!unitPlate) return false;
-    const unitNorm = normalizePlate(unitPlate);
-    if (!unitNorm) return false;
-    if (unitNorm === wanted || unitNorm.includes(wanted) || wanted.includes(unitNorm)) return true;
-    if (unitNorm.length === wanted.length) {
-      let diffs = 0;
-      for (let i = 0; i < wanted.length; i++) {
-        if (unitNorm[i] !== wanted[i]) diffs++;
-      }
-      if (diffs === 1) return true;
-    }
-    return false;
-  };
 
-  let found = result.unidades.some((unit) => plateMatchesUnit(unit.patente || unit.unidad));
-  if (!found) {
+  let foundUnit: WaraUnidadEstado | null = null;
+  if (result.unidades.length > 0) {
+    foundUnit = result.unidades.find((unit) => plateMatchesFleetUnit(wanted, unit)) ?? null;
+  }
+  if (!foundUnit) {
     const full = await consultarEstadoUnidades(session.sessionToken, []);
     if (full.ok && full.unidades.length > 0) {
-      found = full.unidades.some((unit) => plateMatchesUnit(unit.patente || unit.unidad));
+      foundUnit = full.unidades.find((unit) => plateMatchesFleetUnit(wanted, unit)) ?? null;
     }
   }
-  if (found) return { found: true, checked: true };
+  if (foundUnit) return { found: true, checked: true };
 
   const multi = (session.lookup?.contactos.length ?? 0) > 1;
   if (purpose === "certificate" || purpose === "odometer") {

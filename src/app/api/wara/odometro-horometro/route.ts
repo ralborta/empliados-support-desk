@@ -7,8 +7,8 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone } from "@/lib/waraApi";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
+import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, waraPatenteCandidatesForApi } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
@@ -483,12 +483,35 @@ export async function POST(req: NextRequest) {
   }
 
   const patenteParaWara = formatPlateWithSpaces(patente) ?? patente;
-  const result = await registrarCambioOdometroHorometro(session.sessionToken, {
-    patente: patenteParaWara,
-    fecha,
-    ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
-    ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
-  });
+  const fleetUnit = await findFleetUnitByPlate(session.sessionToken, patente);
+  const patenteCandidates = waraPatenteCandidatesForApi(
+    patente,
+    fleetUnit?.patente || fleetUnit?.unidad,
+  );
+  if (!patenteCandidates.includes(patenteParaWara)) {
+    patenteCandidates.unshift(patenteParaWara);
+  }
+
+  let result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>> | null = null;
+  let patenteRegistrada = patenteCandidates[0] ?? patenteParaWara;
+  for (const candidate of patenteCandidates) {
+    patenteRegistrada = candidate;
+    result = await registrarCambioOdometroHorometro(session.sessionToken, {
+      patente: candidate,
+      fecha,
+      ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
+      ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
+    });
+    if (result.ok) break;
+    const notFound = /no se encontr|no encontr|veh[ií]culo/i.test(result.error ?? "");
+    if (!notFound) break;
+  }
+  if (!result) {
+    return NextResponse.json(
+      { ok: false, error: "Sin respuesta de Wara", message: "No pude registrar el cambio en Wara." },
+      { status: BB_STATUS },
+    );
+  }
 
   let responseMessage = formatSuccessMessage(result, patente);
   // Si Wara no encontró la unidad y el cliente tiene más de una empresa, avisamos
@@ -497,7 +520,16 @@ export async function POST(req: NextRequest) {
     const companies = session.lookup?.contactos ?? [];
     const activeCompany = session.companyName?.trim();
     const notFound = /no se encontr|no encontr|veh[ií]culo|patente|unidad/i.test(result.error ?? "");
-    if (companies.length > 1 && notFound) {
+    if (fleetUnit && notFound) {
+      const label =
+        formatPlateWithSpaces(fleetUnit.patente || patente) ??
+        fleetUnit.patente?.trim() ??
+        fleetUnit.unidad?.trim() ??
+        patente;
+      responseMessage =
+        `Encontré ${label} en tu flota de ${activeCompany || "Wara"}, pero Wara no aceptó registrar el odómetro. ` +
+        `Puede ser una unidad de prueba o sin odómetro habilitado. Probá con otra patente del listado (ej. AB006EX) o escribí "hablar con un asesor".`;
+    } else if (companies.length > 1 && notFound) {
       responseMessage =
         `${responseMessage}${activeCompany ? ` (busqué en ${activeCompany})` : ""}. ` +
         `Si la unidad es de otra de tus empresas, escribí "cambiar empresa" y la registro ahí.`;
@@ -507,6 +539,7 @@ export async function POST(req: NextRequest) {
     source: "wara_odometro_response",
     ok: result.ok,
     patente,
+    patenteRegistrada,
     companyName: session.companyName ?? "",
   });
 
@@ -514,6 +547,7 @@ export async function POST(req: NextRequest) {
     {
       ...result,
       patente,
+      patenteRegistrada,
       fecha,
       companyName: session.companyName ?? "",
       contactName: session.contactName ?? "",
