@@ -1,3 +1,5 @@
+import { resolveOdooPartnerCompanyName, resolveOdooPartnerLookup } from "@/config/odooPartnerAliases";
+
 /**
  * Cliente Odoo (JSON-RPC) para registrar tickets de reclamo en Helpdesk.
  *
@@ -249,6 +251,19 @@ function phoneSearchTerms(phone?: string): string[] {
   );
 }
 
+async function findPartnerById(
+  cfg: OdooConfig,
+  partnerId: number
+): Promise<{ id: number; name?: string } | null> {
+  const rows = await odooExecuteKw<Array<{ id: number; name?: string }>>(
+    cfg,
+    "res.partner",
+    "read",
+    [[partnerId], ["id", "name"]]
+  );
+  return rows?.[0]?.id ? rows[0] : null;
+}
+
 async function findPartnerByPhone(
   cfg: OdooConfig,
   phone?: string
@@ -352,14 +367,21 @@ async function findOrCreatePartner(
   const companyName = opts.companyName?.trim();
   // Prioridad: razón social Wara (empresa del contacto), no un partner viejo por teléfono.
   if (companyName) {
-    const byName = await findPartnerByName(cfg, companyName);
+    const mapped = resolveOdooPartnerLookup(companyName);
+    if (mapped?.partnerId) {
+      const byId = await findPartnerById(cfg, mapped.partnerId);
+      if (byId?.id) return byId;
+    }
+
+    const searchName = mapped?.odooName ?? companyName;
+    const byName = await findPartnerByName(cfg, searchName);
     if (byName?.id) return byName;
     try {
-      const values: Record<string, unknown> = { name: companyName, is_company: true };
+      const values: Record<string, unknown> = { name: searchName, is_company: true };
       if (opts.phone?.trim()) values.phone = opts.phone.trim();
       if (opts.email?.trim()) values.email = opts.email.trim();
       const id = await odooExecuteKw<number>(cfg, "res.partner", "create", [values]);
-      if (id) return { id, name: companyName };
+      if (id) return { id, name: searchName };
     } catch {
       // Si no se puede crear el partner, seguimos sin partner_id (se usa partner_name).
     }
@@ -381,8 +403,9 @@ export async function createHelpdeskTicket(
 
   const teamId = input.teamId ?? cfg.helpdeskTeamId ?? undefined;
   const stageId = input.stageId ?? cfg.helpdeskStageId ?? undefined;
+  const odooCompanyName = resolveOdooPartnerCompanyName(input.companyName) || input.companyName?.trim() || "";
   const partner = await findOrCreatePartner(cfg, {
-    companyName: input.companyName,
+    companyName: odooCompanyName || input.companyName,
     customerName: input.customerName,
     phone: input.customerPhone,
     email: input.customerEmail,
@@ -399,8 +422,8 @@ export async function createHelpdeskTicket(
   }
   if (partner?.id) {
     values.partner_id = partner.id;
-  } else if (input.companyName?.trim() || input.customerName?.trim()) {
-    values.partner_name = (input.companyName ?? input.customerName ?? "").trim();
+  } else if (odooCompanyName || input.customerName?.trim()) {
+    values.partner_name = (odooCompanyName || input.customerName ?? "").trim();
   }
   if (input.customerEmail?.trim()) values.partner_email = input.customerEmail.trim();
   if (input.customerPhone?.trim()) values.partner_phone = input.customerPhone.trim();

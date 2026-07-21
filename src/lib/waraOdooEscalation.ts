@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { resolveOdooPartnerCompanyName } from "@/config/odooPartnerAliases";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
 
 type JsonPayload = Record<string, unknown>;
@@ -37,7 +38,8 @@ export function pickOdooCompanyName(
   sessionCompanyName?: string | null,
   waraCliente?: string | null
 ): string {
-  return waraCliente?.trim() || sessionCompanyName?.trim() || "";
+  const raw = waraCliente?.trim() || sessionCompanyName?.trim() || "";
+  return resolveOdooPartnerCompanyName(raw);
 }
 
 export type EnsureWaraOdooParams = {
