@@ -1288,10 +1288,10 @@ export async function resolveWaraSessionByPhone(
     sessionToken: created.sessionToken,
     customerName: created.customerName ?? resolution.lookup.customerName,
     companyName:
-      created.customerName ??
       resolution.selectedCompanyName ??
-      resolution.customer?.companyName?.trim() ??
       selectedContact.empresa ??
+      resolution.customer?.companyName?.trim() ??
+      created.customerName ??
       "",
     contactName: resolution.customer?.name?.trim() || selectedContact.nombre || "",
     lookup: {

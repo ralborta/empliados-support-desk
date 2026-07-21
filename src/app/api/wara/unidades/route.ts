@@ -17,7 +17,7 @@ import {
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
-import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
+import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalation";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
@@ -941,7 +941,7 @@ export async function POST(req: NextRequest) {
       const created = await createNoEquipmentTicket({
         rawPhone,
         unit,
-        companyName: session.companyName ?? result.cliente ?? "",
+        companyName: pickOdooCompanyName(session.companyName, result.cliente),
         contactName: session.contactName ?? "",
       });
       ticketRef = created.ref;
@@ -970,7 +970,7 @@ export async function POST(req: NextRequest) {
           const created = await createMissingReportTicket({
             rawPhone,
             unit,
-            companyName: session.companyName ?? result.cliente ?? "",
+            companyName: pickOdooCompanyName(session.companyName, result.cliente),
             contactName: session.contactName ?? "",
             elapsedText,
             issueDetail: ticketIssueDetail,
@@ -994,7 +994,7 @@ export async function POST(req: NextRequest) {
           const created = await createMissingReportTicket({
             rawPhone,
             unit,
-            companyName: session.companyName ?? result.cliente ?? "",
+            companyName: pickOdooCompanyName(session.companyName, result.cliente),
             contactName: session.contactName ?? "",
             elapsedText: minutesAgo(assessment.reportElapsed),
             issueDetail: ticketIssueDetail,
@@ -1018,7 +1018,7 @@ export async function POST(req: NextRequest) {
           const created = await createMissingReportTicket({
             rawPhone,
             unit,
-            companyName: session.companyName ?? result.cliente ?? "",
+            companyName: pickOdooCompanyName(session.companyName, result.cliente),
             contactName: session.contactName ?? "",
             elapsedText,
             issueDetail: ticketIssueDetail,
@@ -1045,7 +1045,7 @@ export async function POST(req: NextRequest) {
     source: "wara_unidades_response",
     ok: result.ok,
     unidadesCount: filtered.length,
-    companyName: session.companyName ?? result.cliente ?? "",
+    companyName: pickOdooCompanyName(session.companyName, result.cliente),
     action,
     ticketRef,
   });
@@ -1054,7 +1054,7 @@ export async function POST(req: NextRequest) {
     {
       ...result,
       unidades: filtered,
-      companyName: session.companyName ?? result.cliente ?? "",
+      companyName: pickOdooCompanyName(session.companyName, result.cliente),
       contactName: session.contactName ?? "",
       unidadesCount: filtered.length,
       summaryText,

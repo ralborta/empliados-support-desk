@@ -32,6 +32,14 @@ export async function findExistingOdooRefForDedupe(
   return null;
 }
 
+/** Razón social para Odoo: prioriza el cliente devuelto por la API Wara sobre alias cortos de sesión. */
+export function pickOdooCompanyName(
+  sessionCompanyName?: string | null,
+  waraCliente?: string | null
+): string {
+  return waraCliente?.trim() || sessionCompanyName?.trim() || "";
+}
+
 export type EnsureWaraOdooParams = {
   ticketId: string;
   dedupeKey: string;

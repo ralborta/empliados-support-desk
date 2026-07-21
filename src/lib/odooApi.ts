@@ -266,20 +266,78 @@ async function findPartnerByPhone(
   return null;
 }
 
+function pickBestPartnerByName(
+  rows: Array<{ id: number; name?: string }>,
+  term: string
+): { id: number; name?: string } | null {
+  if (!rows.length) return null;
+  const normalized = term.toLowerCase();
+
+  const exact = rows.find((row) => row.name?.trim().toLowerCase() === normalized);
+  if (exact?.id) return exact;
+
+  const startsWith = rows.filter((row) =>
+    row.name?.trim().toLowerCase().startsWith(normalized)
+  );
+  if (startsWith.length === 1) return startsWith[0];
+  if (startsWith.length > 1) {
+    return [...startsWith].sort(
+      (a, b) => (a.name?.trim().length ?? 0) - (b.name?.trim().length ?? 0)
+    )[0];
+  }
+
+  if (normalized.length <= 4) return null;
+
+  const contains = rows.filter((row) =>
+    row.name?.trim().toLowerCase().includes(normalized)
+  );
+  if (contains.length === 1) return contains[0];
+  if (contains.length > 1) {
+    return [...contains].sort(
+      (a, b) => (a.name?.trim().length ?? 0) - (b.name?.trim().length ?? 0)
+    )[0];
+  }
+
+  return rows[0]?.id ? rows[0] : null;
+}
+
 async function findPartnerByName(
   cfg: OdooConfig,
   name?: string
 ): Promise<{ id: number; name?: string } | null> {
   const term = name?.trim();
   if (!term) return null;
-  const rows = await odooExecuteKw<Array<{ id: number; name?: string }>>(
+
+  const exactRows = await odooExecuteKw<Array<{ id: number; name?: string }>>(
+    cfg,
+    "res.partner",
+    "search_read",
+    [[["name", "=ilike", term]]],
+    { fields: ["id", "name"], limit: 1 }
+  );
+  if (exactRows?.[0]?.id) return exactRows[0];
+
+  // Nombres cortos ("WARA") no deben hacer match parcial: el primer ilike puede ser otra empresa.
+  if (term.length <= 4) return null;
+
+  const prefixRows = await odooExecuteKw<Array<{ id: number; name?: string }>>(
+    cfg,
+    "res.partner",
+    "search_read",
+    [[["name", "=ilike", `${term}%`]]],
+    { fields: ["id", "name"], limit: 8 }
+  );
+  const prefixMatch = pickBestPartnerByName(prefixRows ?? [], term);
+  if (prefixMatch?.id) return prefixMatch;
+
+  const containsRows = await odooExecuteKw<Array<{ id: number; name?: string }>>(
     cfg,
     "res.partner",
     "search_read",
     [[["name", "ilike", term]]],
-    { fields: ["id", "name"], limit: 1 }
+    { fields: ["id", "name"], limit: 8 }
   );
-  return rows?.[0]?.id ? rows[0] : null;
+  return pickBestPartnerByName(containsRows ?? [], term);
 }
 
 /**
