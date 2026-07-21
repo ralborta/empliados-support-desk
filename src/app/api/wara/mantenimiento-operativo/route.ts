@@ -258,21 +258,44 @@ function parseMantenimientoSummary(text: string): {
   detalle?: string;
 } {
   const out: { patente?: string; servicio?: string; prioridad?: Priority; detalle?: string } = {};
-  const patenteM = text.match(/Patente:\s*([A-Za-z0-9 ]{5,12})/);
-  if (patenteM) out.patente = patenteM[1].trim();
-  const tipoM = text.match(/Tipo:\s*(.+)/);
-  if (tipoM) out.servicio = tipoM[1].trim();
-  const detalleM = text.match(/Detalle:\s*(.+)/);
-  if (detalleM) out.detalle = detalleM[1].trim();
-  const prioM = text.match(/Prioridad:\s*(\w+)/i);
-  if (prioM) {
-    const p = prioM[1].toLowerCase();
+
+  const lastCapture = (pattern: RegExp): string | undefined => {
+    const matches = [...text.matchAll(pattern)];
+    const m = matches.at(-1);
+    return m?.[1]?.trim();
+  };
+
+  const patente = lastCapture(/Patente:\s*([A-Za-z0-9 ]{5,12})/g);
+  if (patente) out.patente = patente;
+
+  const servicio = lastCapture(/Tipo:\s*(.+)/g);
+  if (servicio) out.servicio = servicio.split("\n")[0]?.trim();
+
+  const detalle = lastCapture(/Detalle:\s*(.+)/g);
+  if (detalle) out.detalle = detalle.split("\n")[0]?.trim();
+
+  const prioRaw = lastCapture(/Prioridad:\s*(\w+)/gi);
+  if (prioRaw) {
+    const p = prioRaw.toLowerCase();
     if (/urg/.test(p)) out.prioridad = "URGENT";
     else if (/alt/.test(p)) out.prioridad = "HIGH";
     else if (/baj/.test(p)) out.prioridad = "LOW";
     else out.prioridad = "NORMAL";
   }
+
   return out;
+}
+
+/** Confirmación explícita del resumen pendiente (CONFIRMO, sí, dale, etc.). */
+function isMaintenanceConfirmationAccepted(params: {
+  confirmField?: string;
+  rawText?: string;
+  lastInbound?: string;
+  pendingConfirm: boolean;
+}): boolean {
+  if (isConfirmed(params.confirmField)) return true;
+  if (!params.pendingConfirm) return false;
+  return isConfirmed(params.rawText) || isConfirmed(params.lastInbound);
 }
 
 function priorityLabel(priority: Priority): string {
@@ -417,22 +440,38 @@ export async function POST(req: NextRequest) {
   }
 
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
+  const rawInbound = parsed.data.rawText?.trim() ?? "";
   const threadText = await recentThreadText(rawPhone);
   const lastInbound = await recentLastInboundTextForPhone(rawPhone);
   const pendingMaintConfirm = hasPendingMantenimientoConfirmation(threadText);
   const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
   const summary = parseMantenimientoSummary(pendingMaintConfirm ? threadText : "");
 
-  let text =
-    parsed.data.rawText?.trim() ||
-    parsed.data.detalle?.trim() ||
-    parsed.data.detail?.trim() ||
-    parsed.data.servicio?.trim() ||
-    parsed.data.service?.trim() ||
-    confirmation?.trim() ||
-    summary.detalle ||
-    summary.servicio ||
-    "Solicitud de gestion de mantenimiento";
+  const confirmed = isMaintenanceConfirmationAccepted({
+    confirmField: confirmation,
+    rawText: rawInbound,
+    lastInbound,
+    pendingConfirm: pendingMaintConfirm,
+  });
+
+  let text: string;
+  if (pendingMaintConfirm && confirmed) {
+    text =
+      summary.detalle ||
+      summary.servicio ||
+      "Solicitud de gestion de mantenimiento";
+  } else {
+    text =
+      rawInbound ||
+      parsed.data.detalle?.trim() ||
+      parsed.data.detail?.trim() ||
+      parsed.data.servicio?.trim() ||
+      parsed.data.service?.trim() ||
+      confirmation?.trim() ||
+      summary.detalle ||
+      summary.servicio ||
+      "Solicitud de gestion de mantenimiento";
+  }
 
   if (looksLikeChangeCompanyRequest(text)) {
     const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
@@ -491,14 +530,18 @@ export async function POST(req: NextRequest) {
 
   const threadService = inferServiceFromThread(threadText);
   const service =
-    summary.servicio ||
-    threadService ||
-    inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text} ${threadText}`);
+    pendingMaintConfirm && confirmed && summary.servicio
+      ? summary.servicio
+      : summary.servicio ||
+        threadService ||
+        inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text} ${threadText}`);
   const priority =
-    parsed.data.prioridad ??
-    parsed.data.priority ??
-    summary.prioridad ??
-    inferPriority(text);
+    pendingMaintConfirm && confirmed && summary.prioridad
+      ? summary.prioridad
+      : parsed.data.prioridad ??
+        parsed.data.priority ??
+        summary.prioridad ??
+        inferPriority(pendingMaintConfirm && confirmed ? (summary.detalle ?? text) : text);
 
   if (isMaintenanceHowToRequest(text)) {
     const message = maintenanceHowToMessage(text);
@@ -525,6 +568,9 @@ export async function POST(req: NextRequest) {
   let plate = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
+      (pendingMaintConfirm && confirmed && summary.patente
+        ? summary.patente
+        : undefined) ??
       detectPlate(text) ??
       (pendingMaintConfirm || pendingPlateRequest
         ? summary.patente ?? detectPlate(threadText)
@@ -659,7 +705,7 @@ export async function POST(req: NextRequest) {
       { status: BB_STATUS }
     );
   }
-  if (!isConfirmed(confirmation)) {
+  if (!confirmed) {
     const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
     const fleetCheck = await validatePlateInFleetForPhone(prisma, rawPhone, plate, company, "maintenance");
     if (!fleetCheck.found && fleetCheck.message && isPlateOnlyMessage(text, plate)) {
