@@ -33,7 +33,7 @@ export const resolutionModeLabels: Record<ResolutionMode, string> = {
 };
 
 const PLATE_REGEX_GLOBAL =
-  /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/gi;
+  /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3}|[A-Z]{3}\s?\d{4})\b/gi;
 
 /**
  * Patentes de EJEMPLO que aparecen en los textos del bot ("ej: AB123CD", "por
@@ -74,6 +74,25 @@ export function detectPlate(text: string): string | null {
     const letters = plate.match(/^[A-Z]+/)?.[0] ?? "";
     if (letters.length === 3 && PLATE_STOPWORDS.has(letters)) continue;
     return plate;
+  }
+  return null;
+}
+
+/** Mensaje corto que parece ser solo una patente (ej. "Lwk7902"). */
+export function looksLikePlateOnlyMessage(text: string): boolean {
+  const compact = (text ?? "").trim().replace(/\s+/g, "");
+  if (!compact || compact.length < 5 || compact.length > 12) return false;
+  if (!/^[A-Za-z0-9-]+$/.test(compact)) return false;
+  const norm = normalizePlate(compact);
+  return !!(norm && !isExamplePlate(norm));
+}
+
+/** Patente en el mensaje actual, incluyendo formatos viejos (LWK7902) y respuestas sueltas. */
+export function detectLoosePlate(text: string): string | null {
+  const fromRegex = detectPlate(text);
+  if (fromRegex) return fromRegex;
+  if (looksLikePlateOnlyMessage(text)) {
+    return normalizePlate(text);
   }
   return null;
 }

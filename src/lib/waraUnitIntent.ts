@@ -1,6 +1,12 @@
 import OpenAI from "openai";
 import type { PrismaClient } from "@prisma/client";
-import { detectPlate, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
+import {
+  detectLoosePlate,
+  detectPlate,
+  extractLastPlateFromThread,
+  normalizePlate,
+  threadTextSinceCompanySelection,
+} from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
 
@@ -204,7 +210,9 @@ function resolveWithRules(
     return { intent: "list_fleet", searchTerms: [], candidatePlates: [], source: "rules" };
   }
 
-  const plateFromMessage = detectPlate(rawText) ?? detectPlate(threadText) ?? "";
+  // Priorizar lo que escribió ahora; no usar detectPlate(thread) (toma la 1.ª del listado de flota).
+  const plateFromMessage =
+    detectLoosePlate(rawText) ?? extractLastPlateFromThread(threadText) ?? "";
   if (plateFromMessage) {
     const plate = normalizeLoosePlate(plateFromMessage);
     let matches = filterUnitsByPlate(units, plate);

@@ -7,7 +7,9 @@ import { uploadToBlob, getFileExtension } from "@/lib/blob";
 import { transcribeAudio } from "@/lib/openai";
 import {
   detectIncidentType,
+  detectLoosePlate,
   detectMissingData,
+  looksLikePlateOnlyMessage,
   suggestPriority,
   toLegacyCategory,
   waraIncidentLabels,
@@ -15,7 +17,7 @@ import {
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
-import { resolveCustomerByWaraPhone } from "@/lib/waraApi";
+import { looksLikeGreeting, resolveCustomerByWaraPhone } from "@/lib/waraApi";
 import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
@@ -939,14 +941,26 @@ function looksLikeOperationalUnitQuery(text: string): boolean {
   return (
     /\b(nissan|reporte|unidad|patente|matricula|matr[ií]cula|gps|flota|interno|\d{3}-\d{3})\b/.test(
       lower,
-    ) || /\b(M?\d{3}-\d{3})\b/i.test(text)
+    ) ||
+    /\b(M?\d{3}-\d{3})\b/i.test(text) ||
+    /\b(listado|lista de unidades|mis unidades|todas las unidades)\b/.test(lower)
   );
+}
+
+/** Tráfico normal del bot Wara/BBC: no auto-escalar por webhook paralelo. */
+function looksLikeWaraBotTraffic(text: string): boolean {
+  if (looksLikeOperationalUnitQuery(text)) return true;
+  if (looksLikeGreeting(text)) return true;
+  if (looksLikePlateOnlyMessage(text)) return true;
+  if (detectLoosePlate(text)) return true;
+  if (/\batilio\b/i.test(text)) return true;
+  if (looksLikeCustomerConversationCloseRequest(text)) return true;
+  return false;
 }
 
 function decideShouldEscalate({
   text,
   priority,
-  previousMessages,
 }: {
   text: string;
   priority: string;
@@ -954,7 +968,7 @@ function decideShouldEscalate({
 }): boolean {
   const lower = text.toLowerCase();
 
-  if (looksLikeOperationalUnitQuery(text)) {
+  if (looksLikeWaraBotTraffic(text)) {
     return false;
   }
 
@@ -965,11 +979,6 @@ function decideShouldEscalate({
 
   // Escalate if contains critical keywords
   if (/(amenaza|legal|fraude|cliente enojado|escala|denuncia)/.test(lower)) {
-    return true;
-  }
-
-  // Escalate if there are already many messages and sigue siendo reclamo abierto
-  if (previousMessages >= 8) {
     return true;
   }
 

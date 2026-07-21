@@ -9,7 +9,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -187,7 +187,7 @@ function normalizeLoosePlate(value: string): string {
 
 function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
   const explicit = body.patentes ?? [];
-  const single = body.patente ?? body.plate ?? detectPlate(body.rawText ?? "") ?? "";
+  const single = body.patente ?? body.plate ?? detectLoosePlate(body.rawText ?? "") ?? "";
   const raw = [...explicit, single].filter((value) => value.trim().length > 0);
   return Array.from(
     new Set(
@@ -691,7 +691,7 @@ export async function POST(req: NextRequest) {
   const threadText = await recentThreadText(rawPhone);
   const rawText = parsed.data.rawText ?? "";
   let explicitPlate =
-    parsed.data.patente ?? parsed.data.plate ?? detectPlate(rawText) ?? "";
+    parsed.data.patente ?? parsed.data.plate ?? detectLoosePlate(rawText) ?? "";
 
   if (looksLikeCompanySelection(rawText.trim()) && !explicitPlate) {
     return NextResponse.json(

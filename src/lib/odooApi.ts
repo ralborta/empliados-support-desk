@@ -423,7 +423,7 @@ export async function createHelpdeskTicket(
   if (partner?.id) {
     values.partner_id = partner.id;
   } else if (odooCompanyName || input.customerName?.trim()) {
-    values.partner_name = (odooCompanyName || input.customerName ?? "").trim();
+    values.partner_name = (odooCompanyName || (input.customerName ?? "")).trim();
   }
   if (input.customerEmail?.trim()) values.partner_email = input.customerEmail.trim();
   if (input.customerPhone?.trim()) values.partner_phone = input.customerPhone.trim();
