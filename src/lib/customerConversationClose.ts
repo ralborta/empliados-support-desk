@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { shouldInboundSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 
 function normCloseText(text: string): string {
@@ -192,15 +193,21 @@ async function sendCloseReply(params: {
   replyMessage: string;
   source: string;
 }): Promise<void> {
-  try {
-    await sendWhatsAppMessage({
-      number: params.customerPhone,
-      message: params.replyMessage,
-    });
-  } catch (err) {
-    console.error(
-      "[customerClose] Error enviando WhatsApp:",
-      err instanceof Error ? err.message : err,
+  if (shouldInboundSendWhatsAppToCustomer()) {
+    try {
+      await sendWhatsAppMessage({
+        number: params.customerPhone,
+        message: params.replyMessage,
+      });
+    } catch (err) {
+      console.error(
+        "[customerClose] Error enviando WhatsApp:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  } else {
+    console.log(
+      `[customerClose] Audit-only: confirmación de cierre no enviada por WA (BBC/odoo debe responder): ${params.replyMessage.slice(0, 80)}…`,
     );
   }
 
@@ -215,6 +222,7 @@ async function sendCloseReply(params: {
           autoReply: true,
           autoReplyKind: "customer_requested_close",
           source: params.source,
+          waSuppressed: !shouldInboundSendWhatsAppToCustomer(),
         },
       },
     });

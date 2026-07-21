@@ -24,6 +24,10 @@ import {
 } from "@/lib/customerConversationClose";
 import { buildWebhookMessageId } from "@/lib/webhookMessageId";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
+import {
+  isWaraInboundAuditOnly,
+  shouldInboundSendWhatsAppToCustomer,
+} from "@/lib/waraInboundAudit";
 // Using string literals instead of Prisma enums for compatibility
 
 /** Campos para variables BuilderBot (reglas HTTP / mapeo de respuesta del webhook). */
@@ -442,38 +446,47 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     }
   }
 
-  // Enviar respuesta automática si corresponde
+  // Enviar respuesta automática si corresponde (Fase 0: BBC es la única voz al cliente)
   if (autoReplyMessage) {
-    try {
-      await sendWhatsAppMessage({
-        number: customerPhone,
-        message: autoReplyMessage,
-      });
-      console.log(`✅ Respuesta automática enviada a ${customerPhone}`);
+    if (shouldInboundSendWhatsAppToCustomer()) {
+      try {
+        await sendWhatsAppMessage({
+          number: customerPhone,
+          message: autoReplyMessage,
+        });
+        console.log(`✅ Respuesta automática enviada a ${customerPhone}`);
 
-      // Registrar la respuesta automática en el ticket
-      await prisma.ticketMessage.create({
-        data: {
-          ticketId: ticket.id,
-          direction: "OUTBOUND",
-          from: "BOT",
-          text: autoReplyMessage,
-          rawPayload: {
-            autoReply: true,
-            ...(autoReplyKind ? { autoReplyKind } : {}),
-            timestamp: new Date().toISOString(),
+        await prisma.ticketMessage.create({
+          data: {
+            ticketId: ticket.id,
+            direction: "OUTBOUND",
+            from: "BOT",
+            text: autoReplyMessage,
+            rawPayload: {
+              autoReply: true,
+              ...(autoReplyKind ? { autoReplyKind } : {}),
+              timestamp: new Date().toISOString(),
+            },
           },
-        },
-      });
-    } catch (error) {
-      console.error("❌ Error al enviar respuesta automática:", error);
-      // No fallar el webhook si falla el envío
+        });
+      } catch (error) {
+        console.error("❌ Error al enviar respuesta automática:", error);
+      }
+    } else {
+      console.log(
+        `[WhatsApp inbound audit] Auto-respuesta suprimida (${autoReplyKind ?? "unknown"}): ${autoReplyMessage.slice(0, 72)}…`,
+      );
     }
   }
 
-  // Código de caso al despedirse (solo si el texto parece cierre; igual que Mis Reclamos)
+  // Código de caso al despedirse (solo modo legacy; en audit-only responde BBC)
   const textForFarewell = (actualMessage || "").trim();
-  if (!customer.botPausedAt && textForFarewell && isDespedidaWara(textForFarewell)) {
+  if (
+    shouldInboundSendWhatsAppToCustomer() &&
+    !customer.botPausedAt &&
+    textForFarewell &&
+    isDespedidaWara(textForFarewell)
+  ) {
     await sendTicketCodeAtFarewellWara({
       ticketId: ticket.id,
       ticketCode: ticket.code,
@@ -500,8 +513,11 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     ticketId: ticket.id,
     ticketCode: ticket.code,
     escalated: shouldEscalate,
-    autoReplySent: !!autoReplyMessage,
+    autoReplySent: !!autoReplyMessage && shouldInboundSendWhatsAppToCustomer(),
+    autoReplySuppressed: !!autoReplyMessage && !shouldInboundSendWhatsAppToCustomer(),
     autoReplyKind: autoReplyKind ?? null,
+    inboundAuditOnly: isWaraInboundAuditOnly(),
+    inboundAuditOnly_s: isWaraInboundAuditOnly() ? "true" : "false",
     ...builderBotRegistrationFields(true),
   });
 }
@@ -743,7 +759,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
   const phoneOut =
     normalizeWhatsAppPhone(String(customer.phone || customerPhone)) ||
     String(customerPhone);
-  if (messageText && isDespedidaWara(messageText)) {
+  if (messageText && isDespedidaWara(messageText) && shouldInboundSendWhatsAppToCustomer()) {
     await sendTicketCodeAtFarewellWara({
       ticketId: targetTicket.id,
       ticketCode: targetTicket.code,
@@ -877,7 +893,7 @@ async function sendTicketCodeAtFarewellWara(opts: {
   botPaused?: boolean;
 }): Promise<void> {
   const { ticketId, ticketCode, customerPhone, peerText, rawExtra, botPaused } = opts;
-  if (botPaused) return;
+  if (botPaused || !shouldInboundSendWhatsAppToCustomer()) return;
 
   const yaHayMensajeCierre = await outboundAlreadySentDedicatedFarewellCaseCode(ticketId);
   if (!yaHayMensajeCierre) {
