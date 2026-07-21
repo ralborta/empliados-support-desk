@@ -1390,7 +1390,7 @@ export function waraCertificateFailureCategory(error: string | undefined, status
   return "Certificado no emitido por Wara";
 }
 
-export type PlateFleetValidationPurpose = "certificate" | "maintenance";
+export type PlateFleetValidationPurpose = "certificate" | "maintenance" | "odometer";
 
 /** Consulta flota Wara antes de trámites operativos; evita tickets por typos de patente. */
 export async function validatePlateInFleetForPhone(
@@ -1435,9 +1435,10 @@ export async function validatePlateInFleetForPhone(
   if (found) return { found: true, checked: true };
 
   const multi = (session.lookup?.contactos.length ?? 0) > 1;
-  if (purpose === "certificate") {
+  if (purpose === "certificate" || purpose === "odometer") {
+    const tramite = purpose === "odometer" ? "registrar el odómetro" : "pedir el certificado";
     const message = multi
-      ? `No encontré la patente ${plateDisplay} en las unidades de ${companyName}. Revisá que esté bien escrita. Si la unidad es de otra de tus empresas, escribí "cambiar empresa", elegí la correcta y volvé a pedir el certificado.`
+      ? `No encontré la patente ${plateDisplay} en las unidades de ${companyName}. Revisá que esté bien escrita. Si la unidad es de otra de tus empresas, escribí "cambiar empresa", elegí la correcta y volvé a ${tramite}.`
       : `No encontré la patente ${plateDisplay} entre las unidades activas de ${companyName}. Revisá que esté bien escrita e intentá de nuevo.`;
     return { found: false, checked: true, message };
   }

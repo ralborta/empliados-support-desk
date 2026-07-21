@@ -7,7 +7,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone } from "@/lib/waraApi";
+import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone } from "@/lib/waraApi";
 import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
@@ -408,20 +408,6 @@ export async function POST(req: NextRequest) {
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?" }, { status: BB_STATUS });
   }
-  if (!confirmed) {
-    return NextResponse.json({
-      ok: true,
-      ok_s: "true",
-      flowComplete_s: "true",
-      confirmationRequired: true,
-      confirmationRequired_s: "true",
-      error: "Falta confirmación",
-      message: `Antes de registrar en Wara, confirmá si querés aplicar este cambio: patente ${patente}${typeof odometro === "number" ? `, odómetro ${odometro} km` : ""}${typeof horometro === "number" ? `, horómetro ${horometro} h` : ""}. Respondé CONFIRMO para continuar.`,
-      patente,
-      odometro,
-      horometro,
-    }, { status: BB_STATUS });
-  }
 
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);
   if (!session.ok || !session.sessionToken) {
@@ -437,6 +423,50 @@ export async function POST(req: NextRequest) {
       },
       { status: BB_STATUS }
     );
+  }
+
+  const activeCompany = session.companyName?.trim() || "tu empresa";
+  const fleetCheck = await validatePlateInFleetForPhone(
+    prisma,
+    rawPhone,
+    patente,
+    activeCompany,
+    "odometer",
+  );
+  if (!fleetCheck.found && fleetCheck.checked && fleetCheck.message) {
+    await appendOutboundBotMessage(rawPhone, fleetCheck.message, {
+      source: "wara_odometro_response",
+      ok: false,
+      patente,
+      companyName: activeCompany,
+      stage: "plate_not_in_fleet",
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        error: "Patente no encontrada en flota",
+        message: fleetCheck.message,
+        patente,
+        companyName: activeCompany,
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  if (!confirmed) {
+    return NextResponse.json({
+      ok: true,
+      ok_s: "true",
+      flowComplete_s: "true",
+      confirmationRequired: true,
+      confirmationRequired_s: "true",
+      error: "Falta confirmación",
+      message: `Antes de registrar en Wara, confirmá si querés aplicar este cambio: patente ${patente}${typeof odometro === "number" ? `, odómetro ${odometro} km` : ""}${typeof horometro === "number" ? `, horómetro ${horometro} h` : ""}. Respondé CONFIRMO para continuar.`,
+      patente,
+      odometro,
+      horometro,
+    }, { status: BB_STATUS });
   }
 
   const customerTz =
