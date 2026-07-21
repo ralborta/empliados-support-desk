@@ -45,6 +45,22 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
     return true;
   }
 
+  if (/\b(quiero|necesito|me gustar[ií]a|pod[eé]s|podes)\s+(cerrar|dar por cerrad)/.test(t)) {
+    return true;
+  }
+
+  if (/\bcerrar\s+(mi|el|un)\s+(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(t)) {
+    return true;
+  }
+
+  if (
+    /\b(quiero|necesito)\s+.*\b(cerrar|finalizar|terminar)\b.*\b(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
   return false;
 }
 

@@ -18,6 +18,10 @@ import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
+import {
+  buildOpenCaseStatusReply,
+  looksLikeOpenCaseStatusInquiry,
+} from "@/lib/customerTicketInquiry";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 
@@ -318,6 +322,24 @@ export async function POST(req: NextRequest) {
         conversationClosed_s: closeResult.closed ? "true" : "false",
         ticketCode: closeResult.ticketCode ?? "",
         message: closeResult.replyMessage,
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  if (looksLikeOpenCaseStatusInquiry(data.rawText)) {
+    const message = await buildOpenCaseStatusReply(rawPhone);
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "odoo_ticket",
+      stage: "open_case_status_inquiry",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message,
+        skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
+        flowComplete_s: "true",
       },
       { status: BB_STATUS },
     );

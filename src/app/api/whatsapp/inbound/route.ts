@@ -22,6 +22,7 @@ import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
+import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
 import { buildWebhookMessageId } from "@/lib/webhookMessageId";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import {
@@ -971,6 +972,7 @@ function looksLikeWaraBotTraffic(text: string): boolean {
   if (detectLoosePlate(text)) return true;
   if (/\batilio\b/i.test(text)) return true;
   if (looksLikeCustomerConversationCloseRequest(text)) return true;
+  if (looksLikeOpenCaseStatusInquiry(text)) return true;
   return false;
 }
 
