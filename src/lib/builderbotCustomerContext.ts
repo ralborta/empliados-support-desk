@@ -19,6 +19,8 @@ import {
   looksLikeCompanySelection,
   looksLikeGreeting,
   looksLikeOperationalIntent,
+  buildAtilioHelpCapabilitiesReply,
+  looksLikeAtilioHelpRequest,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
@@ -506,6 +508,14 @@ export async function customerRegisteredContextResponse(
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "open_case_status_inquiry",
+    });
+    nextFlow = "reply";
+  } else if (selectionText && looksLikeAtilioHelpRequest(selectionText)) {
+    const firstName = customer?.name?.trim().split(/\s+/)[0];
+    responseMessage = buildAtilioHelpCapabilitiesReply(firstName);
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "atilio_help_capabilities",
     });
     nextFlow = "reply";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {

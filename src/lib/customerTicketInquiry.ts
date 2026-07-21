@@ -91,7 +91,7 @@ export async function buildOpenCaseStatusReply(
   });
 
   if (openTicket) {
-    return `Sí, tenés el caso *${openTicket.code}* abierto. Un asesor de Atención al cliente lo puede revisar por este medio. Si querés cerrarlo, escribí "cerrar caso" o "resolver conversación".`;
+    return `Sí, tenés el caso *${openTicket.code}* abierto. Puedo seguir ayudándote por este chat con consultas sobre ese tema o cosas nuevas. Si querés cerrarlo, escribí "cerrar caso" o "resolver conversación".`;
   }
 
   const lastClosed = await client.ticket.findFirst({

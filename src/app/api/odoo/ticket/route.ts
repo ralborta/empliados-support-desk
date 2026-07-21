@@ -13,6 +13,7 @@ import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import {
   consultarEstadoUnidades,
+  looksLikeAtilioHelpRequest,
   looksLikeGreeting,
   looksLikeHumanAdvisorRequest,
   resolveWaraSessionByPhone,
@@ -364,7 +365,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rawText = (data.rawText ?? "").trim();
-  if (looksLikeGreeting(rawText)) {
+  if (looksLikeGreeting(rawText) || looksLikeAtilioHelpRequest(rawText)) {
     return NextResponse.json(
       {
         ok: true,

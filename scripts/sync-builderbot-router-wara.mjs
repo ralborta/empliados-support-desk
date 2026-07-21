@@ -129,7 +129,14 @@ function buildRules() {
     },
     {
       conditionRule:
-        'ASESOR / PERSONA HUMANA — PRIORIDAD ALTA. Pide hablar con asesor, agente, persona humana, operador, atención humana, comunicarse con alguien o escalar el reclamo. NO aplica si solo pregunta si tiene caso abierto ni si pide cerrar/cerrar caso/resolver conversación. Si en el historial ya hay patente/matrícula, número de caso (TCK-, N°) o ticket recién generado: va DIRECTO al flujo asesor/Odoo sin repreguntar patente. Si no hay patente ni caso en historial: también va a asesor para que el backend pida el dato mínimo.',
+        'ATILIO PUEDE AYUDAR — PRIORIDAD SOBRE ASESOR. Pregunta si Atilio/bot puede ayudarlo o por qué lo derivan: "¿me podés ayudar?", "¿vos no me podés ayudar?", "¿por qué me derivás?". NO pide hablar con asesor humano ni registrar patente. Responde Inicio (capacidades del bot). PROHIBIDO flujo asesor conversacional.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.atilio,
+    },
+    {
+      conditionRule:
+        'ASESOR / PERSONA HUMANA — PRIORIDAD ALTA. Pide hablar con asesor, agente, persona humana, operador, atención humana, comunicarse con alguien o escalar el reclamo. NO aplica si solo pregunta si tiene caso abierto, si pide cerrar/cerrar caso/resolver conversación, ni si pregunta si Atilio le puede ayudar. Si en el historial ya hay patente/matrícula, número de caso (TCK-, N°) o ticket recién generado: va DIRECTO al flujo asesor/Odoo sin repreguntar patente. Si no hay patente ni caso en historial: también va a asesor para que el backend pida el dato mínimo.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.asesor,

@@ -327,6 +327,41 @@ export function looksLikeHumanAdvisorRequest(text: string | undefined | null): b
   return wantsHuman && (intent || /\b(asesor humano|atenci[oó]n humana|agente humano)\b/.test(norm));
 }
 
+/**
+ * Pregunta si Atilio/el bot puede ayudar (no pide explícitamente un humano).
+ * Ej.: "¿vos no me podés ayudar?", "¿me podés ayudar con esto?"
+ */
+export function looksLikeAtilioHelpRequest(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm || norm.length > 160) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+
+  if (/\b(por que|porque|por qué)\s+me\s+deriv/.test(norm)) return true;
+  if (/\bno\s+me\s+(deriv|pases|pase)\b/.test(norm)) return true;
+
+  const asksForHelp =
+    /\b(me\s+)?(podes|pod[eé]s|puede)\s+(ayudar|ayudarme)\b/.test(norm) ||
+    /\b(ayudarme|ayudame|ayudáme|ayudame)\b/.test(norm);
+  if (!asksForHelp) return false;
+
+  if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
+
+  return (
+    /\b(vos|tu|atilio|bot|chatbot)\b/.test(norm) ||
+    /\bno\s+me\s+(podes|pod[eé]s)\s+ayudar\b/.test(norm) ||
+    /\bme\s+(podes|pod[eé]s)\s+ayudar\b/.test(norm)
+  );
+}
+
+export function buildAtilioHelpCapabilitiesReply(firstName?: string): string {
+  const prefix = firstName?.trim() ? `${firstName.trim()}, ` : "";
+  return (
+    `${prefix}sí, puedo ayudarte por este chat con consultas de unidades (reporte, ubicación, flota), certificados de cobertura, odómetro/horómetro y mantenimiento. ` +
+    `Contame qué necesitás — por ejemplo "reporte de LWK7902" o "listado de mis unidades". ` +
+    `Si preferís hablar con una persona, escribí "hablar con un asesor".`
+  );
+}
+
 function companySelectionMenuMessage(
   menu: string,
   opts?: { unrecognized?: boolean }
