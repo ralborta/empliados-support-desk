@@ -33,7 +33,7 @@ export const resolutionModeLabels: Record<ResolutionMode, string> = {
 };
 
 const PLATE_REGEX_GLOBAL =
-  /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3}|[A-Z]{3}\s?\d{4})\b/gi;
+  /\b([A-Z]{2}[\s-]?\d{3}[\s-]?[A-Z]{2}|[A-Z]{3}[\s-]?\d{3}|[A-Z]{3}[\s-]?\d{4})\b/gi;
 
 /**
  * Patentes de EJEMPLO que aparecen en los textos del bot ("ej: AB123CD", "por
@@ -51,7 +51,9 @@ export const EXAMPLE_PLATES = new Set([
 
 export function normalizePlate(value: string | null | undefined): string | null {
   if (!value) return null;
-  return value.toUpperCase().replace(/\s+/g, "");
+  return value
+    .toUpperCase()
+    .replace(/[\s\-_.]+/g, "");
 }
 
 /** True si la patente normalizada es una de las usadas como ejemplo en los prompts. */
@@ -80,7 +82,7 @@ export function detectPlate(text: string): string | null {
 
 /** Mensaje corto que parece ser solo una patente (ej. "Lwk7902"). */
 export function looksLikePlateOnlyMessage(text: string): boolean {
-  const compact = (text ?? "").trim().replace(/\s+/g, "");
+  const compact = (text ?? "").trim().replace(/[\s\-_.]+/g, "");
   if (!compact || compact.length < 5 || compact.length > 12) return false;
   if (!/^[A-Za-z0-9-]+$/.test(compact)) return false;
   if (!/\d/.test(compact)) return false;
@@ -186,27 +188,33 @@ export function formatPlateWithSpaces(value: string | null | undefined): string 
   return compact;
 }
 
-/** Variantes de matrícula para APIs Wara de mantenimiento (odómetro, certificado). */
-export function waraPatenteCandidatesForApi(
-  inputPlate: string,
-  storedPatente?: string | null,
-): string[] {
-  const out: string[] = [];
-  const push = (value: string | null | undefined) => {
-    const v = value?.trim();
-    if (!v) return;
-    if (!out.includes(v)) out.push(v);
-  };
+/**
+ * Patente para APIs Wara: usa la matrícula tal como está en flota.
+ * El cliente puede escribir con espacios o guiones (LWK-7902); el match es flexible,
+ * pero el valor enviado a Wara es el registrado en la unidad.
+ */
+export function resolveWaraPatenteForApi(
+  clientInput: string,
+  fleetUnit?: { patente?: string | null; unidad?: string | null } | null,
+): string {
+  const fromFleet = fleetUnit?.patente?.trim();
+  if (fromFleet) return fromFleet;
 
-  push(storedPatente?.trim());
-  const compact = normalizePlate(inputPlate) ?? normalizePlate(storedPatente ?? "");
-  if (compact) {
-    push(compact);
-    push(formatPlateWithSpaces(compact));
-    const legacy4 = compact.match(/^([A-Z]{3})(\d{4})$/);
-    if (legacy4) push(`${legacy4[1]} ${legacy4[2]}`);
+  const wanted = normalizePlate(clientInput);
+  const unitName = fleetUnit?.unidad?.trim();
+  if (unitName && wanted) {
+    const unitNorm = normalizePlate(unitName);
+    if (
+      unitNorm &&
+      (unitNorm === wanted || unitNorm.includes(wanted) || wanted.includes(unitNorm))
+    ) {
+      return unitName;
+    }
   }
-  return out;
+
+  const client = clientInput.trim();
+  if (client) return client;
+  return normalizePlate(clientInput) ?? clientInput;
 }
 
 export function detectIncidentType(text: string): WaraIncidentType {

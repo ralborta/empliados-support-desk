@@ -6,8 +6,9 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
 import {
+  findFleetUnitByPlate,
   looksLikeCompanySelection,
   isWaraPlateValidationError,
   obtenerCertificadoCobertura,
@@ -789,7 +790,9 @@ export async function POST(req: NextRequest) {
   });
   if (fleetValidation) return fleetValidation;
 
-  const result = await obtenerCertificadoCobertura(session.sessionToken, plateDisplay);
+  const fleetUnit = await findFleetUnitByPlate(session.sessionToken, plate);
+  const patenteParaWara = resolveWaraPatenteForApi(plate, fleetUnit);
+  const result = await obtenerCertificadoCobertura(session.sessionToken, patenteParaWara);
   if (!result.ok) {
     if (isWaraPlateValidationError({ status: result.status, error: result.error })) {
       const message = certificateValidationMessageFromWara({

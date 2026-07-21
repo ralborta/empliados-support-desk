@@ -8,7 +8,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, waraPatenteCandidatesForApi } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
@@ -482,36 +482,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const patenteParaWara = formatPlateWithSpaces(patente) ?? patente;
   const fleetUnit = await findFleetUnitByPlate(session.sessionToken, patente);
-  const patenteCandidates = waraPatenteCandidatesForApi(
-    patente,
-    fleetUnit?.patente || fleetUnit?.unidad,
-  );
-  if (!patenteCandidates.includes(patenteParaWara)) {
-    patenteCandidates.unshift(patenteParaWara);
-  }
+  const patenteParaWara = resolveWaraPatenteForApi(patente, fleetUnit);
 
-  let result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>> | null = null;
-  let patenteRegistrada = patenteCandidates[0] ?? patenteParaWara;
-  for (const candidate of patenteCandidates) {
-    patenteRegistrada = candidate;
-    result = await registrarCambioOdometroHorometro(session.sessionToken, {
-      patente: candidate,
-      fecha,
-      ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
-      ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
-    });
-    if (result.ok) break;
-    const notFound = /no se encontr|no encontr|veh[ií]culo/i.test(result.error ?? "");
-    if (!notFound) break;
-  }
-  if (!result) {
-    return NextResponse.json(
-      { ok: false, error: "Sin respuesta de Wara", message: "No pude registrar el cambio en Wara." },
-      { status: BB_STATUS },
-    );
-  }
+  const result = await registrarCambioOdometroHorometro(session.sessionToken, {
+    patente: patenteParaWara,
+    fecha,
+    ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
+    ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
+  });
 
   let responseMessage = formatSuccessMessage(result, patente);
   // Si Wara no encontró la unidad y el cliente tiene más de una empresa, avisamos
@@ -539,7 +518,7 @@ export async function POST(req: NextRequest) {
     source: "wara_odometro_response",
     ok: result.ok,
     patente,
-    patenteRegistrada,
+    patenteRegistrada: patenteParaWara,
     companyName: session.companyName ?? "",
   });
 
@@ -547,7 +526,7 @@ export async function POST(req: NextRequest) {
     {
       ...result,
       patente,
-      patenteRegistrada,
+      patenteRegistrada: patenteParaWara,
       fecha,
       companyName: session.companyName ?? "",
       contactName: session.contactName ?? "",

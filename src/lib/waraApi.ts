@@ -1410,19 +1410,28 @@ function plateMatchesFleetUnit(wanted: string, unit: WaraUnidadEstado): boolean 
   return matchField(unit.patente) || matchField(unit.unidad);
 }
 
-/** Busca una unidad en flota Wara por matrícula o nombre (ej. LWK7902 / BRtestes). */
+/** Busca una unidad en flota Wara por matrícula o nombre (tolera espacios y guiones). */
 export async function findFleetUnitByPlate(
   sessionToken: string,
   plate: string,
 ): Promise<WaraUnidadEstado | null> {
   const wanted = normalizePlate(plate);
   if (!wanted) return null;
-  const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
-  const scoped = await consultarEstadoUnidades(sessionToken, [plateDisplay]);
-  if (scoped.ok) {
+
+  const lookupKeys = Array.from(
+    new Set(
+      [plate.trim(), formatPlateWithSpaces(plate), wanted].filter(
+        (value): value is string => !!value?.trim(),
+      ),
+    ),
+  );
+  for (const key of lookupKeys) {
+    const scoped = await consultarEstadoUnidades(sessionToken, [key]);
+    if (!scoped.ok) continue;
     const hit = scoped.unidades.find((unit) => plateMatchesFleetUnit(wanted, unit));
     if (hit) return hit;
   }
+
   const full = await consultarEstadoUnidades(sessionToken, []);
   if (!full.ok) return null;
   return full.unidades.find((unit) => plateMatchesFleetUnit(wanted, unit)) ?? null;
