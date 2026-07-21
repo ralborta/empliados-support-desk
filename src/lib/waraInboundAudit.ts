@@ -15,3 +15,11 @@ export function isWaraInboundAuditOnly(): boolean {
 export function shouldInboundSendWhatsAppToCustomer(): boolean {
   return !isWaraInboundAuditOnly();
 }
+
+/**
+ * En audit-only el ejecutor HTTP debe devolver skipResponse_s=false para que BBC envíe
+ * el message al cliente (el inbound ya no manda WA directo).
+ */
+export function bbcShouldSendExecutorMessage(): boolean {
+  return isWaraInboundAuditOnly();
+}

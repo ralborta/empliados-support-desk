@@ -13,6 +13,7 @@ import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { consultarEstadoUnidades, looksLikeHumanAdvisorRequest, resolveWaraSessionByPhone } from "@/lib/waraApi";
 import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
+import { bbcShouldSendExecutorMessage } from "@/lib/waraInboundAudit";
 import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
@@ -312,7 +313,7 @@ export async function POST(req: NextRequest) {
       {
         ok: true,
         ok_s: "true",
-        skipResponse_s: "true",
+        skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
         flowComplete_s: "true",
         conversationClosed_s: closeResult.closed ? "true" : "false",
         ticketCode: closeResult.ticketCode ?? "",
