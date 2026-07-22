@@ -79,6 +79,18 @@ const STOPWORDS = new Set([
   "qué",
   "hola",
   "buenas",
+  "porfa",
+  "porfavor",
+  "algunas",
+  "nombre",
+  "marca",
+  "continuar",
+  "servicio",
+  "perfecto",
+  "atilio",
+  "mesa",
+  "ayuda",
+  "guara",
 ]);
 
 function normalizeToken(value: string): string {
@@ -112,9 +124,8 @@ function looksLikeUnitListRequest(rawText: string): boolean {
   );
 }
 
-function extractSearchTerms(rawText: string, threadText: string): string[] {
-  const blob = `${rawText} ${threadText}`.trim();
-  const tokens = blob
+function tokenizeSearchTerms(text: string): string[] {
+  const tokens = text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -124,11 +135,34 @@ function extractSearchTerms(rawText: string, threadText: string): string[] {
   return Array.from(new Set(tokens));
 }
 
+/** Referencia vaga al hilo — ahí sí conviene mezclar historial. */
+function looksLikeVagueUnitReference(rawText: string): boolean {
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(esa|ese|esa unidad|ese vehiculo|ese veh[ií]culo|la misma|el mismo|la anterior|la del hilo|la que dije|la que mencione|la que mencion[eé])\b/.test(
+    norm
+  );
+}
+
+/**
+ * Términos de búsqueda: priorizar lo que escribió ahora.
+ * Mezclar el hilo (p. ej. listado de flota) contamina marcas como "Nissan" con "alarma", "alex", etc.
+ */
+function extractSearchTerms(rawText: string, threadText: string): string[] {
+  const fromMessage = tokenizeSearchTerms(rawText);
+  if (fromMessage.length > 0 && !looksLikeVagueUnitReference(rawText)) {
+    return fromMessage;
+  }
+  return tokenizeSearchTerms(`${rawText} ${threadText}`.trim());
+}
+
 function filterUnitsBySearchTerms(units: WaraUnidadEstado[], terms: string[]): WaraUnidadEstado[] {
   if (!terms.length) return [];
   return units.filter((unit) => {
     const haystack = normalizeToken(`${unit.patente ?? ""} ${unit.unidad ?? ""}`);
-    return terms.some((term) => {
+    return terms.every((term) => {
       const norm = normalizeToken(term);
       if (!norm || norm.length < 3) return false;
       return haystack.includes(norm);
@@ -417,11 +451,19 @@ Reglas:
   }
 }
 
-function isDecisiveRulesResolution(resolution: UnitQueryResolution): boolean {
+function isDecisiveRulesResolution(
+  resolution: UnitQueryResolution,
+  rawText: string
+): boolean {
   if (resolution.intent === "list_fleet") return true;
   if (resolution.intent === "consult_status" && resolution.plate) return true;
   if (resolution.intent === "need_clarification" && resolution.candidatePlates.length > 1) {
-    return true;
+    // Solo acortar con reglas si la ambigüedad viene del mensaje actual, no del hilo.
+    const messageTerms = tokenizeSearchTerms(rawText);
+    if (messageTerms.length > 0 && !looksLikeVagueUnitReference(rawText)) {
+      return true;
+    }
+    return false;
   }
   return false;
 }
@@ -432,7 +474,7 @@ export async function resolveUnitQuery(params: {
   units: WaraUnidadEstado[];
 }): Promise<UnitQueryResolution> {
   const rules = resolveWithRules(params.rawText, params.threadText, params.units);
-  if (isDecisiveRulesResolution(rules)) return rules;
+  if (isDecisiveRulesResolution(rules, params.rawText)) return rules;
 
   const ai = await resolveWithAi(params.rawText, params.threadText, params.units);
   if (ai) {
