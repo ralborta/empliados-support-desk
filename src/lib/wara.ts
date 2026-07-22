@@ -115,6 +115,34 @@ export function detectLoosePlate(text: string): string | null {
   return null;
 }
 
+/** Extrae patente o prefijo indicado en una corrección ("no la LWK", "no para la patente LW"). */
+export function extractPlateCorrectionHint(text: string | undefined | null): string | null {
+  const raw = String(text ?? "").trim();
+  if (!raw) return null;
+  const norm = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const patterns = [
+    /\bno\b.{0,16}\bla\b\s+([a-z0-9]{2,9})\b/i,
+    /\bno\b.{0,12}\bpara\b.{0,20}\bpatente\b\s+([a-z0-9]{2,9})\b/i,
+    /\b(?:patente|matricula)\b\s+([a-z0-9]{2,9})\b/i,
+    /\bla\b\s+([a-z]{2,3}\d{3,4}[a-z]{0,2})\b/i,
+  ];
+  for (const re of patterns) {
+    const m = norm.match(re);
+    if (m?.[1]) {
+      const hint = m[1].replace(/\s+/g, "").toUpperCase();
+      if (hint.length >= 2) return hint;
+    }
+  }
+
+  const loose = detectLoosePlate(raw);
+  if (loose) return loose;
+  return null;
+}
+
 /** Resumen de odómetro pendiente de confirmación (ChatPDF o backend). */
 export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();

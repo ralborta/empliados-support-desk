@@ -4,13 +4,19 @@ import {
   detectLoosePlate,
   detectPlate,
   extractLastPlateFromThread,
+  extractPlateCorrectionHint,
   isPlausibleVehiclePlate,
   looksLikeOdometerIntentStart,
   normalizePlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
-import { consultarEstadoUnidades, resolveWaraSessionByPhone, type WaraUnidadEstado } from "@/lib/waraApi";
+import {
+  consultarEstadoUnidades,
+  looksLikePlateCorrectionRequest,
+  resolveWaraSessionByPhone,
+  type WaraUnidadEstado,
+} from "@/lib/waraApi";
 
 export type UnitQueryIntent = "list_fleet" | "consult_status" | "need_clarification";
 
@@ -187,10 +193,96 @@ function extractPlatePrefixHint(rawText: string): string | null {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+  const correctionHint = extractPlateCorrectionHint(rawText);
+  if (correctionHint && correctionHint.length <= 5) return correctionHint.toUpperCase();
   const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z]{2}\d{0,3})/i);
   if (explicit?.[1]) return explicit[1].replace(/\s+/g, "").toUpperCase();
+  const paraPatente = norm.match(/\bpatente\b\s+([a-z0-9]{2,6})\b/i);
+  if (paraPatente?.[1]) return paraPatente[1].replace(/\s+/g, "").toUpperCase();
   const loose = norm.match(/\bcon\s+([a-z]{2})\b/);
   if (loose?.[1]) return loose[1].toUpperCase();
+  return null;
+}
+
+function shouldReuseThreadPlateForResolution(rawText: string): boolean {
+  if (looksLikePlateCorrectionRequest(rawText)) return false;
+  if (detectLoosePlate(rawText)) return false;
+  if (extractPlateCorrectionHint(rawText)) return false;
+  if (looksLikeOdometerIntentStart(rawText)) return false;
+  if (looksLikeVagueUnitReference(rawText)) return true;
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm) && !detectPlate(rawText)) return false;
+  return looksLikeOdometerContinuation(rawText);
+}
+
+function shouldSkipAiPlateInference(rawText: string): boolean {
+  if (looksLikePlateCorrectionRequest(rawText)) return true;
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm) &&
+    !detectLoosePlate(rawText) &&
+    !extractPlateCorrectionHint(rawText)
+  );
+}
+
+function looksLikeOdometerContinuation(rawText: string): boolean {
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(od[oó]metro|hor[oó]metro|kilometraje|fecha|ayer|hoy)\b/.test(norm) ||
+    /^\d{4,7}$/.test(rawText.replace(/\s+/g, ""))
+  );
+}
+
+function resolvePlateCorrection(
+  rawText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  if (!looksLikePlateCorrectionRequest(rawText)) return null;
+  const hint = extractPlateCorrectionHint(rawText);
+  if (!hint) return null;
+
+  let matches = filterUnitsByPlate(units, hint);
+  if (matches.length === 0 && hint.length >= 2) {
+    matches = filterUnitsByPlatePrefix(units, hint);
+  }
+  if (matches.length === 0 && hint.length >= 3) {
+    matches = filterUnitsBySearchTerms(units, [hint.toLowerCase()]);
+  }
+
+  if (matches.length === 1) {
+    const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || hint;
+    return {
+      intent: "consult_status",
+      plate,
+      searchTerms: [hint.toLowerCase()],
+      candidatePlates: [plate],
+      source: "rules",
+    };
+  }
+  if (matches.length > 1) {
+    const labels = matches
+      .slice(0, 5)
+      .map((u) => (u.patente || u.unidad || "").trim())
+      .join(", ");
+    return {
+      intent: "need_clarification",
+      searchTerms: [hint.toLowerCase()],
+      candidatePlates: matches
+        .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+        .filter(Boolean),
+      clarificationQuestion: `Encontré varias unidades para "${hint}" (${labels}). Decime la patente exacta.`,
+      source: "rules",
+    };
+  }
   return null;
 }
 
@@ -246,11 +338,19 @@ function resolveWithRules(
     return { intent: "list_fleet", searchTerms: [], candidatePlates: [], source: "rules" };
   }
 
-  // Priorizar lo que escribió ahora; no usar detectPlate(thread) (toma la 1.ª del listado de flota).
+  const correction = resolvePlateCorrection(rawText, units);
+  if (correction) return correction;
+
+  // Priorizar lo que escribió ahora; no arrastrar patente del odómetro u otro trámite previo.
   const threadPlate = extractLastPlateFromThread(threadText);
   const plateFromMessage =
     detectLoosePlate(rawText) ??
-    (threadPlate && isPlausibleVehiclePlate(threadPlate) ? threadPlate : "") ??
+    extractPlateCorrectionHint(rawText) ??
+    (shouldReuseThreadPlateForResolution(rawText) &&
+    threadPlate &&
+    isPlausibleVehiclePlate(threadPlate)
+      ? threadPlate
+      : "") ??
     "";
   if (plateFromMessage) {
     const plate = normalizeLoosePlate(plateFromMessage);
@@ -476,6 +576,7 @@ export async function resolveUnitQuery(params: {
 }): Promise<UnitQueryResolution> {
   const rules = resolveWithRules(params.rawText, params.threadText, params.units);
   if (isDecisiveRulesResolution(rules, params.rawText)) return rules;
+  if (shouldSkipAiPlateInference(params.rawText)) return rules;
 
   const ai = await resolveWithAi(params.rawText, params.threadText, params.units);
   if (ai) {

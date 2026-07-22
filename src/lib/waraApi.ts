@@ -113,6 +113,8 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
   if (/\bno es la (correcta|patente|matricula)\b/.test(t)) return true;
   if (/\bme equivoque de (patente|matricula)\b/.test(t)) return true;
   if (/\bno\b.{0,16}\bla\b/.test(t) && /[a-z0-9]{3,}/.test(t.replace(/\s+/g, ""))) return true;
+  if (/\bno\b.{0,12}\bpara\b.{0,16}\bpatente\b/.test(t)) return true;
+  if (/\b(otra|otro)\b.{0,16}\bpatente\b/.test(t)) return true;
   return false;
 }
 

@@ -6,10 +6,11 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint } from "@/lib/wara";
 import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
+  looksLikePlateCorrectionRequest,
   isWaraPlateValidationError,
   obtenerCertificadoCobertura,
   resolveCustomerByWaraPhone,
@@ -176,9 +177,19 @@ function resolveCertificatePlate(
     allowThread?: boolean;
   }
 ): string | null {
+  if (looksLikePlateCorrectionRequest(text)) {
+    const hint = extractPlateCorrectionHint(text);
+    if (hint) {
+      const plate = normalizePlate(hint);
+      if (plate && !isExamplePlate(plate)) return plate;
+    }
+    return null;
+  }
+
   const fromMessage =
     normalizePlate(opts.explicitPatente ?? opts.explicitPlate ?? undefined) ??
     detectPlate(text) ??
+    extractPlateCorrectionHint(text) ??
     null;
   if (fromMessage && !isExamplePlate(fromMessage)) return fromMessage;
 
@@ -605,7 +616,9 @@ export async function POST(req: NextRequest) {
     explicitPatente: parsed.data.patente,
     explicitPlate: parsed.data.plate,
     threadText,
-    allowThread: pendingConfirm || isConfirmed(confirmation),
+    allowThread:
+      !looksLikePlateCorrectionRequest(text) &&
+      (pendingConfirm || isConfirmed(confirmation)),
   });
 
   let plate = plateFromDirect;
