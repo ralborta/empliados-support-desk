@@ -582,13 +582,25 @@ export async function POST(req: NextRequest) {
     !normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) &&
     !detectPlate(text) &&
     !looksLikeCertificateUnitSelection(text);
-  const pendingConfirm =
+  let pendingConfirm =
     !genericNewRequest && certState === "awaiting_confirm";
   const awaitingUnit = certState === "awaiting_unit";
   const confirmRaw = parsed.data.confirm ?? parsed.data.confirmation;
-  const confirmation =
+  let confirmation =
     confirmRaw ??
     (pendingConfirm && (isConfirmed(text) || /\bconf/i.test(text)) ? "confirmo" : undefined);
+
+  // Red de seguridad: resumen multilínea en hilo + CONFIRMO/Sí.
+  if ((isConfirmed(text) || isConfirmed(confirmRaw)) && !pendingConfirm) {
+    const tail = threadText.slice(-4000).toLowerCase();
+    const summaryPending =
+      /voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail);
+    const summaryPlate = extractPlateFromCertificateSummary(threadText);
+    if (summaryPending && summaryPlate) {
+      pendingConfirm = true;
+      confirmation = confirmation ?? "confirmo";
+    }
+  }
 
   if (pendingConfirm && isCertificateRejection(text)) {
     const message = askCertificateUnitMessage();

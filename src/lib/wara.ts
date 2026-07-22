@@ -290,23 +290,28 @@ export function certificateFlowState(threadText: string): CertificateFlowState {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 12; i--) {
-    const lower = lines[i].toLowerCase();
-    if (/para el certificado de cobertura necesito la unidad/.test(lower)) {
-      return "awaiting_unit";
-    }
+  if (!lines.length) return "none";
+
+  const tail = lines.slice(-12).join("\n").toLowerCase();
+
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) {
     if (/^(no|nop|nope|incorrecto|mal|otra|otro)[\s!.?]*$/i.test(lines[i])) {
-      const prev = lines.slice(Math.max(0, i - 4), i).join("\n").toLowerCase();
+      const prev = lines.slice(Math.max(0, i - 8), i).join("\n").toLowerCase();
       if (/voy a generar el certificado de cobertura/.test(prev)) {
         return "awaiting_unit";
       }
     }
-    if (
-      /voy a generar el certificado de cobertura/.test(lower) &&
-      /responde\s+confirmo/.test(lower)
-    ) {
-      return "awaiting_confirm";
-    }
+  }
+
+  // El resumen del bot es multilínea (Patente / Empresa / CONFIRMO en líneas distintas).
+  if (
+    /voy a generar el certificado de cobertura/.test(tail) &&
+    /responde\s+confirmo/.test(tail)
+  ) {
+    return "awaiting_confirm";
+  }
+  if (/para el certificado de cobertura necesito la unidad/.test(tail)) {
+    return "awaiting_unit";
   }
   return "none";
 }
