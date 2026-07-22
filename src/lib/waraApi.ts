@@ -3,7 +3,12 @@ import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
 } from "@/config/pruebasContactAliases";
-import { formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
+import {
+  formatPlateWithSpaces,
+  hasPendingOdometerConfirmation,
+  normalizePlate,
+  threadAwaitingOdometerPlate,
+} from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 export type WaraEmpresaContact = {
@@ -237,6 +242,39 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
   return false;
 }
 
+function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "").replace(/[^a-z]/g, "");
+  if (!t) return false;
+  if (t.startsWith("conf")) return true;
+  return new Set(["si", "dale", "ok", "listo", "correcto", "perfecto"]).has(t);
+}
+
+/** Mensaje que sigue un trámite de odómetro (confirmación, patente, km, fecha). */
+export function looksLikeOdometerContinuationMessage(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  if (looksLikeOdometerConfirmReply(raw)) return true;
+  const t = normCompanyToken(raw);
+  if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) return true;
+  if (/\b(fecha|ayer|hoy)\b/.test(t)) return true;
+  if (/\b(cambiar|corregir|modificar).{0,24}(patente|matricula)\b/.test(t)) return true;
+  if (/^\d{4,7}$/.test(raw.replace(/\./g, "").replace(/\s+/g, ""))) return true;
+  const plate = normalizePlate(raw.replace(/[\s\-_.]+/g, ""));
+  return !!(plate && /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(plate));
+}
+
+/** ¿Seguir en flujo de odómetro o el cliente cambió de tema? */
+export function shouldContinueOdometerFlow(text: string, threadText: string): boolean {
+  if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
+  if (looksLikeAtilioHelpRequest(text)) return false;
+  if (threadAwaitingOdometerPlate(threadText)) return true;
+  if (hasPendingOdometerConfirmation(threadText)) {
+    return looksLikeOdometerContinuationMessage(text);
+  }
+  const t = normCompanyToken(text);
+  return /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t);
+}
+
 /** Guía informativa del módulo Opciones (Agenda, Perfiles, Notificaciones). */
 export function looksLikeOpcionesInfoRequest(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
@@ -246,7 +284,10 @@ export function looksLikeOpcionesInfoRequest(text: string | undefined | null): b
   }
   return /\b(agenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base|configurar una alarma|configurar alarma)\b/.test(
     t
-  );
+  ) ||
+    (/\b(me ayudas|ayudame|ayudarme|podes ayudar|pod[eé]s ayudar)\b/.test(t) &&
+      /\b(agenda|opciones|contacto|notific|perfil|alarma)\b/.test(t)) ||
+    (/\bcomo funciona\b/.test(t) && /\b(agenda|opciones|contacto|notific|perfil)\b/.test(t));
 }
 
 export function looksLikeOpcionesGuideInThread(threadText: string): boolean {

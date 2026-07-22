@@ -115,10 +115,21 @@ export function detectLoosePlate(text: string): string | null {
   return null;
 }
 
+/** Resumen de odómetro pendiente de confirmación (ChatPDF o backend). */
+export function hasPendingOdometerConfirmation(threadText: string): boolean {
+  const tail = threadText.slice(-2500).toLowerCase();
+  if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
+  return (
+    /voy a registrar:/.test(tail) &&
+    /od[oó]metro/.test(tail) &&
+    /respond[eé]\s+confirmo/.test(tail)
+  );
+}
+
 /** El hilo reciente está pidiendo patente para un trámite de odómetro. */
 export function threadAwaitingOdometerPlate(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
-  if (/voy a registrar:/.test(tail) && /od[oó]metro/.test(tail)) return false;
+  if (hasPendingOdometerConfirmation(threadText)) return false;
   // Solo cuando el BOT pidió patente/odómetro en el turno anterior — no el intent del cliente.
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||

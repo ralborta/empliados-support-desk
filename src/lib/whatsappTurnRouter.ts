@@ -1,12 +1,14 @@
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
-import { detectIncidentType, detectLoosePlate, threadAwaitingOdometerPlate } from "@/lib/wara";
+import { detectIncidentType, detectLoosePlate } from "@/lib/wara";
 import {
   looksLikeHumanAdvisorRequest,
   looksLikeMaintenanceInfoGuideInThread,
+  looksLikeOpcionesInfoRequest,
   looksLikeOperationalIntent,
   looksLikePlatformInfoGuideInThread,
   looksLikeUnidadesInfoRequest,
+  shouldContinueOdometerFlow,
 } from "@/lib/waraApi";
 import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
 
@@ -32,9 +34,7 @@ function looksLikeCertificateIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeOdometerIntent(text: string, threadText: string): boolean {
-  const blob = norm(`${threadText}\n${text}`);
-  if (threadAwaitingOdometerPlate(threadText)) return true;
-  return /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(blob);
+  return shouldContinueOdometerFlow(text, threadText);
 }
 
 function looksLikeMaintenanceOperational(text: string, threadText: string): boolean {
@@ -47,6 +47,7 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeUnitListRequest(text)) return false;
+  if (looksLikeOpcionesInfoRequest(text)) return true;
   if (looksLikeUnidadesInfoRequest(text) || looksLikeUnidadesInfoRequest(threadText)) return true;
   if (looksLikePlatformInfoGuideInThread(threadText)) return true;
   if (looksLikeMaintenanceInfoGuideInThread(threadText) && !looksLikeMaintenanceOperational(text, threadText)) {

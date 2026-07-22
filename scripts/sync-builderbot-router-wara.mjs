@@ -80,6 +80,13 @@ function buildRules() {
     },
     {
       conditionRule:
+        'CAMBIO DE TEMA — GUÍA OPCIONES/AGENDA (PRIORIDAD SOBRE ODÓMETRO PENDIENTE). El mensaje actual pide ayuda o explicación sobre Agenda, contactos, Perfiles, Notificaciones u Opciones de Wara ("me ayudas con la agenda", "cómo funciona la agenda", "cómo agrego un contacto", etc.), aunque en el historial haya un trámite de odómetro sin confirmar o un resumen "Voy a registrar" pendiente. NO es confirmación de odómetro ni aporte de patente/km/fecha. Va a Info Opciones. PROHIBIDO flujo Cambio Odómetro y PROHIBIDO Ejecutar Odómetro.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.infoOpciones,
+    },
+    {
+      conditionRule:
         'REPROCESO TRAS GUÍA INFORMATIVA — Por CONTEXTO del historial: el bot ya respondió con pasos de Opciones Wara (Agenda/contactos/Perfiles/Notificaciones), del módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos de color, Crear grupo) o del módulo de Mantenimiento (guía preventiva/correctiva/planes, sin pedir patente) y el cliente NO está iniciando mantenimiento operativo, certificado, consulta de reporte en vivo ni odómetro. PROHIBIDO Gestión Mantenimiento y PROHIBIDO pedir patente. El turno informativo terminó.',
       conditionValue: "",
       condition: "",
@@ -164,7 +171,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        "La intención del cliente es AJUSTAR / CORREGIR / ACTUALIZAR el odómetro, horómetro o kilometraje de una unidad; o está aportando o corrigiendo datos de ese trámite que ya viene en curso según el contexto reciente. Cuando el tema es odómetro/kilometraje, esta intención SIEMPRE gana por sobre 'reclamo/asesor'. No aplica cuando es solo una confirmación breve a un resumen ya propuesto.",
+        "La intención del cliente es AJUSTAR / CORREGIR / ACTUALIZAR el odómetro, horómetro o kilometraje de una unidad; o está aportando o corrigiendo datos de ese trámite que ya viene en curso según el contexto reciente. Cuando el tema es odómetro/kilometraje, esta intención SIEMPRE gana por sobre 'reclamo/asesor'. No aplica cuando es solo una confirmación breve a un resumen ya propuesto. PROHIBIDO si el mensaje actual es guía informativa de Opciones/Agenda/Unidades o pregunta cómo funciona la agenda.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.odometer,

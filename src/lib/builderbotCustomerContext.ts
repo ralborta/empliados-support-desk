@@ -22,7 +22,9 @@ import {
   looksLikeCompanySelection,
   looksLikeGreeting,
   looksLikeOperationalIntent,
+  looksLikeOpcionesInfoRequest,
   looksLikeRepeatGreetingInSession,
+  looksLikeUnidadesInfoRequest,
   buildAtilioHelpCapabilitiesReply,
   looksLikeAtilioHelpRequest,
   resetCustomerCompanyMenu,
@@ -561,10 +563,18 @@ export async function customerRegisteredContextResponse(
     responseMessage = "";
   } else if (
     selectionText &&
+    (looksLikeOpcionesInfoRequest(selectionText) || looksLikeUnidadesInfoRequest(selectionText))
+  ) {
+    nextFlow = "router";
+    responseMessage = "";
+  } else if (
+    selectionText &&
     !detectLoosePlate(selectionText) &&
     !looksLikeGreeting(selectionText) &&
     !looksLikeUnitListRequest(selectionText) &&
     !looksLikeOdometerIntentStart(selectionText) &&
+    !looksLikeOpcionesInfoRequest(selectionText) &&
+    !looksLikeUnidadesInfoRequest(selectionText) &&
     threadAwaitingOdometerPlate(scopedThreadText || fullThreadText)
   ) {
     const fleetPlate = await resolvePlateWithWaraFleet(

@@ -8,8 +8,9 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, looksLikeOdometerIntentStart, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, hasPendingOdometerConfirmation, isExamplePlate, looksLikeOdometerIntentStart, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import { looksLikeOpcionesInfoRequest, looksLikeUnidadesInfoRequest, shouldContinueOdometerFlow } from "@/lib/waraApi";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
   const n = typeof value === "number" ? value : Number(value.replace(",", ".").trim());
@@ -280,16 +281,6 @@ function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioO
   return parts.join(" ");
 }
 
-function hasPendingOdometerConfirmation(threadText: string): boolean {
-  const tail = threadText.slice(-2500).toLowerCase();
-  if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
-  return (
-    /voy a registrar:/.test(tail) &&
-    /od[oó]metro/.test(tail) &&
-    /respond[eé]\s+confirmo/.test(tail)
-  );
-}
-
 // BuilderBot Cloud solo mapea el body de la respuesta (p.ej. {message_s}) cuando el
 // status HTTP es 2xx. Como estos endpoints los consume exclusivamente BuilderBot,
 // SIEMPRE respondemos 200 y dejamos el estado real en `ok` + el texto en `message`.
@@ -364,6 +355,25 @@ export async function POST(req: NextRequest) {
   const odometerIntentStart = looksLikeOdometerIntentStart(rawText);
   const fromText = parseFromText(rawText);
   const threadText = odometerIntentStart ? "" : await recentThreadText(rawPhone);
+
+  if (
+    !odometerIntentStart &&
+    (looksLikeOpcionesInfoRequest(rawText) || looksLikeUnidadesInfoRequest(rawText)) &&
+    !shouldContinueOdometerFlow(rawText, threadText)
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message: "",
+        skipResponse_s: "true",
+        topicChange_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   const threadParsed = parseFromText(threadText);
   let patente = normalizePlate(
     parsed.data.patente ??
