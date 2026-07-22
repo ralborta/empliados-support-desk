@@ -91,6 +91,7 @@ async function main() {
         projectId: PROJECT_ID,
         flowId,
         answerId,
+        message: label === "Elegir" ? "Validar empresa elegida" : "Hacer peticion http",
         type: "add_http",
         sort: 0,
         options: { capture: false },

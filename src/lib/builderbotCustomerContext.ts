@@ -587,7 +587,7 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
     }
-  } else if (duplicateInicioTurn) {
+  } else if (duplicateInicioTurn && !looksLikeGreeting(selectionText)) {
     nextFlow = "ignore";
     responseMessage = "";
   } else if (
@@ -615,14 +615,13 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
   } else if (activeCompany && requiresCompanySelection) {
     // Empresa ya guardada: no bloquear trámites por flag inconsistente.
-    nextFlow = duplicateInicioTurn ? "ignore" : "router";
+    nextFlow = duplicateInicioTurn && !looksLikeGreeting(selectionText) ? "ignore" : "router";
     responseMessage = "";
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.
     nextFlow = "reply";
   } else {
-    nextFlow = duplicateInicioTurn ? "ignore" : "router";
-    // Trámites / consultas: el Router clasifica; no duplicar saludo del HTTP.
+    nextFlow = duplicateInicioTurn && !looksLikeGreeting(selectionText) ? "ignore" : "router";
     responseMessage = "";
   }
 
