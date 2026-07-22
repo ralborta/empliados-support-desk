@@ -1059,6 +1059,7 @@ export async function POST(req: NextRequest) {
       contactName: session.contactName ?? "",
       unidadesCount: filtered.length,
       summaryText,
+      message: summaryText,
       action,
       ticketRef,
     },

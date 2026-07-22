@@ -10,6 +10,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 const PROJECT_ID = "7d4339ee-2a9b-424e-92f6-ad7790c1662f";
+/** Misma clave que el resto de sync scripts (BUILDERBOT_CONTEXT / Pulze). NO usar bbc-… del MCP. */
+const CONTEXT_API_KEY =
+  process.env.PULZE_API_KEY?.trim() ||
+  process.env.BUILDERBOT_CONTEXT_API_KEY?.trim() ||
+  "31abb735b990bcde9f41ff1b3a3076d8269b92a7676ceecc07d3fa52ae577b62";
 const BASE = process.env.WARA_TURN_BASE_URL?.trim() || "https://wara.nivel41.com";
 const TURN_URL = `${BASE}/api/whatsapp/turn`;
 const SELECT_URL = `${BASE}/api/builderbot/customer-registered/select-company`;
@@ -53,13 +58,12 @@ function loadMcp() {
   const header = args.find((a) => String(a).startsWith("x-builderbot-api-key:"));
   const key = header.split(":", 2)[1].trim();
   const sseUrl = args[args.indexOf("--sse") + 1];
-  const ctxHeader = args.find((a) => String(a).includes("PULZE") || String(a).startsWith("x-api-key:"));
-  const contextKey =
-    process.env.PULZE_API_KEY?.trim() ||
-    process.env.BUILDERBOT_CONTEXT_API_KEY?.trim() ||
-    (ctxHeader ? String(ctxHeader).split(":", 2)[1]?.trim() : "") ||
-    key;
-  return { key, sseUrl, contextKey };
+  if (!CONTEXT_API_KEY || CONTEXT_API_KEY.startsWith("bbc-")) {
+    throw new Error(
+      "CONTEXT_API_KEY inválida: definí PULZE_API_KEY o BUILDERBOT_CONTEXT_API_KEY (64 chars). No uses la clave bbc- del MCP.",
+    );
+  }
+  return { key, sseUrl, contextKey: CONTEXT_API_KEY };
 }
 
 async function main() {
@@ -68,6 +72,12 @@ async function main() {
     { conditionRule: "nextFlow_s", conditionValue: "derivar", condition: "===", conditionFlowId: FLOWS.derivar },
     { conditionRule: "nextFlow_s", conditionValue: "ignore", condition: "===", conditionFlowId: FLOWS.ignorar },
     { conditionRule: "nextFlow_s", conditionValue: "router", condition: "===", conditionFlowId: FLOWS.router },
+    {
+      conditionRule: "skipResponse_s",
+      conditionValue: "true",
+      condition: "===",
+      conditionFlowId: FLOWS.ignorar,
+    },
     // reply → solo messageMapping
   ];
 

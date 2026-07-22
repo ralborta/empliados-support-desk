@@ -64,21 +64,24 @@ function buildTurnPayload(
   overrides: Partial<JsonRecord> = {},
 ): JsonRecord {
   const nextFlow = String(overrides.nextFlow ?? context.nextFlow ?? "reply");
-  const message = String(overrides.message ?? context.message ?? "").trim();
+  const message = String(
+    overrides.message ?? overrides.summaryText ?? context.message ?? context.summaryText ?? "",
+  ).trim();
   const skipResponse =
     overrides.skipResponse_s ??
     (message ? (bbcShouldSendExecutorMessage() ? "false" : "true") : "true");
 
   return {
     ...context,
+    ...overrides,
     ok: overrides.ok ?? true,
     ok_s: String(overrides.ok_s ?? (overrides.ok === false ? "false" : "true")),
     message,
+    summaryText: String(overrides.summaryText ?? message),
     skipResponse_s: skipResponse,
     flowComplete_s: overrides.flowComplete_s ?? "true",
     nextFlow,
     nextFlow_s: String(overrides.nextFlow_s ?? nextFlow),
-    ...overrides,
   };
 }
 
@@ -151,6 +154,8 @@ export async function handleWhatsAppTurn(params: {
     return buildTurnPayload(context, {
       nextFlow: "router",
       nextFlow_s: "router",
+      message: "",
+      skipResponse_s: "true",
       executor: "bbc_router",
       executor_s: "bbc_router",
     });
