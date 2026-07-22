@@ -36,7 +36,7 @@ const ANSWERS = {
   cambiarSelect: "a81b5c62-f672-4030-9648-63f20ce8dbd0",
 };
 
-/** Fase 1: derivar / ignore / router (solo guías informativas aún en BBC). */
+/** Fase 2: backend envía WA; BBC solo rutea (nunca messageMapping). */
 function turnHttpPlugin(apiKey, rules) {
   return {
     http: {
@@ -44,8 +44,8 @@ function turnHttpPlugin(apiKey, rules) {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey },
       body: { from: "{from}", body: "{body}", api_key: apiKey },
-      messageMapping: "{message}",
-      avoidResponse: false,
+      messageMapping: "",
+      avoidResponse: true,
       rules,
     },
   };
