@@ -417,6 +417,21 @@ export function looksLikeOperationalMaintenanceIntent(raw: string): boolean {
   );
 }
 
+/** Guía informativa del módulo Mantenimiento (cómo usar/configurar), no trámite operativo. */
+export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text) return false;
+  if (looksLikeOperationalMaintenanceIntent(String(raw ?? ""))) return false;
+  if (looksLikeTurnoOrAgendaQuestion(String(raw ?? ""))) return false;
+  if (looksLikeOpcionesInfoRequest(raw)) return false;
+  if (looksLikeUnidadesInfoRequest(raw)) return false;
+  const maintenanceDomain =
+    /\b(mantenimiento|preventiv|correctiv|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
+  const howToCue =
+    /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona)\b/;
+  return maintenanceDomain.test(text) && howToCue.test(text);
+}
+
 /** Turno/agenda de Opciones Wara, no mantenimiento operativo de unidades. */
 export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
   const text = normCompanyToken(raw);
