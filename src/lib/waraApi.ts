@@ -499,13 +499,19 @@ export function looksLikeRepeatGreetingInSession(
 export function looksLikeHumanAdvisorRequest(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "");
   if (!norm) return false;
+  if (
+    /\b(escalar|derivar)\b/.test(norm) &&
+    /\b(asesor|agente|persona|humano|humana|operador|representante|supervisor|atencion)\b/.test(norm)
+  ) {
+    return true;
+  }
   const wantsHuman =
     /\b(asesor|agente|persona|humano|humana|operador|representante|supervisor)\b/.test(norm) ||
     /\b(hablar con|comunicarme|comunicar con|contactar con|pasar con|pasame con|derivar|escalar)\b/.test(
       norm
     );
   const intent =
-    /\b(quiero|necesito|pod[eé]s|podes|me gustar[ií]a|dame|pasame|pas[aá]me|solicito)\b/.test(norm) ||
+    /\b(quiero|necesito|pod[eé]s|podes|me gustar[ií]a|dame|pasame|pas[aá]me|solicito|por favor)\b/.test(norm) ||
     /\b(comunicarme|contactar|hablar)\b/.test(norm);
   return wantsHuman && (intent || /\b(asesor humano|atenci[oó]n humana|agente humano)\b/.test(norm));
 }
