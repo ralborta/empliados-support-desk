@@ -7,7 +7,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, normalizePlate } from "@/lib/wara";
-import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceCapabilityQuestion,
@@ -630,11 +630,18 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS }
       );
     }
-    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, text, threadText);
-    if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
-      await appendOutboundBotMessage(rawPhone, fleetPlate.message, {
+
+    const plateSelection =
+      pendingPlateRequest || isMaintenancePlateSelectionMessage(text);
+
+    if (looksLikeOperationalMaintenanceIntent(text, threadText) && !plateSelection) {
+      const preventivo = /preventiv/i.test(text);
+      const message = preventivo
+        ? "Para programar mantenimiento preventivo necesito la patente de la unidad (por ejemplo AD427MC o ABC123). Si querés, agregá también la prioridad."
+        : "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
+      await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_mantenimiento_operativo",
-        errorStage: "unit_clarification",
+        stage: "needs_plate",
         service,
         priority,
         phone: rawPhone,
@@ -645,7 +652,7 @@ export async function POST(req: NextRequest) {
           ok_s: "true",
           flowComplete_s: "true",
           needsPlate_s: "true",
-          message: fleetPlate.message,
+          message,
           missing: ["patente"],
           missing_s: "patente",
           service,
@@ -654,8 +661,42 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS }
       );
     }
-    if (fleetPlate.ok) {
-      plate = fleetPlate.plate;
+
+    if (plateSelection) {
+      const fleetPlate = await resolvePlateWithWaraFleet(
+        prisma,
+        rawPhone,
+        text,
+        threadText,
+        null,
+        { preferAi: true, maintenanceContext: true },
+      );
+      if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
+        await appendOutboundBotMessage(rawPhone, fleetPlate.message, {
+          source: "wara_mantenimiento_operativo",
+          errorStage: "unit_clarification",
+          service,
+          priority,
+          phone: rawPhone,
+        });
+        return NextResponse.json(
+          {
+            ok: true,
+            ok_s: "true",
+            flowComplete_s: "true",
+            needsPlate_s: "true",
+            message: fleetPlate.message,
+            missing: ["patente"],
+            missing_s: "patente",
+            service,
+            priority,
+          },
+          { status: BB_STATUS }
+        );
+      }
+      if (fleetPlate.ok) {
+        plate = fleetPlate.plate;
+      }
     }
   }
 

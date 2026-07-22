@@ -75,6 +75,14 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   );
 }
 
+/** Respuesta de patente/prefijo tras pedido de mantenimiento (no un trámite nuevo). */
+export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
+  const text = rawText.trim();
+  if (!text) return false;
+  if (looksLikeFleetUnitSearchInput(text)) return true;
+  return text.length <= 16 && !/\b(mantenimiento|preventiv|correctiv|quiero|necesito|programar|registrar)\b/i.test(text);
+}
+
 export type UnitQueryIntent = "list_fleet" | "consult_status" | "need_clarification";
 
 export type UnitQueryResolution = {
@@ -175,12 +183,35 @@ function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
 
-function compactUnitsForAi(units: WaraUnidadEstado[], limit = 120): Array<{ movil_id: number; patente: string; unidad: string }> {
-  return units.slice(0, limit).map((u) => ({
+function compactUnitsForAi(
+  units: WaraUnidadEstado[],
+  opts?: { prefixHint?: string | null; limit?: number },
+): Array<{ movil_id: number; patente: string; unidad: string }> {
+  const limit = opts?.limit ?? 120;
+  let pool = units;
+  const prefix = opts?.prefixHint?.trim().toUpperCase();
+  if (prefix) {
+    const filtered = filterUnitsByPlatePrefix(units, prefix);
+    if (filtered.length > 0) pool = filtered;
+  }
+  return pool.slice(0, limit).map((u) => ({
     movil_id: u.movil_id,
     patente: (u.patente ?? "").trim(),
     unidad: (u.unidad ?? "").trim(),
   }));
+}
+
+function prefixHintFromMessage(rawText: string): string | null {
+  return (
+    extractPlatePrefixFromMessage(rawText) ??
+    (isBarePlatePrefixHint(rawText)
+      ? rawText
+          .trim()
+          .replace(/^(la|el|esa|ese)\s+/i, "")
+          .replace(/[\s\-_.]+/g, "")
+          .toUpperCase()
+      : null)
+  );
 }
 
 function looksLikeUnitListRequest(rawText: string): boolean {
@@ -290,7 +321,6 @@ function hasCertificateFlowAwaitingUnit(threadText: string): boolean {
 
 function shouldSkipAiForUnitResolution(rawText: string, threadText: string): boolean {
   if (shouldSkipAiPlateInference(rawText)) return true;
-  if (isBarePlatePrefixHint(rawText)) return true;
   if (hasCertificateFlowAwaitingUnit(threadText)) return true;
   return false;
 }
@@ -661,12 +691,24 @@ function resolveWithRules(
 async function resolveWithAi(
   rawText: string,
   threadText: string,
-  units: WaraUnidadEstado[]
+  units: WaraUnidadEstado[],
+  opts?: { prefixHint?: string | null; maintenanceContext?: boolean },
 ): Promise<UnitQueryResolution | null> {
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const catalog = compactUnitsForAi(units);
+  const prefixHint = opts?.prefixHint ?? prefixHintFromMessage(rawText);
+  const catalog = compactUnitsForAi(units, { prefixHint, limit: prefixHint ? 80 : 120 });
+
+  const maintenanceCue = opts?.maintenanceContext
+    ? `
+- CONTEXTO: el bot pidió patente para registrar/programar mantenimiento. El mensaje es selección de unidad.
+- Resolvé prefijos ("AD", "la que comienza con NKL") contra el catálogo.
+- Una sola coincidencia clara → intent=consult_status con esa patente en candidatePlates.
+- Varias coincidencias → intent=need_clarification listando patentes exactas del catálogo (hasta 8).`
+    : `
+- Si el mensaje es prefijo o frase parcial de patente ("AD", "la q comienza con AD"), buscá en el catálogo.
+- Una coincidencia → consult_status; varias → need_clarification con opciones reales del catálogo.`;
 
   const system = `Sos el resolvedor de consultas de unidades Wara para WhatsApp.
 Devolvé SOLO JSON válido (sin markdown) con esta forma:
@@ -675,9 +717,9 @@ Reglas:
 - intent=list_fleet si piden listado/flota/cuántas unidades/cuento en wara.
 - intent=consult_status si quieren estado/reporte/certificado/mantenimiento/odómetro/horómetro de una unidad concreta (marca, nombre o patente).
 - candidatePlates: SOLO patentes que existan en el catálogo (sin espacios, mayúsculas).
-- Si hay varias coincidencias razonables (marca, nombre parcial), intent=need_clarification y pregunta breve en español rioplatense.
+- Si hay varias coincidencias razonables (marca, nombre parcial, prefijo), intent=need_clarification y pregunta breve en español rioplatense listando patentes.
 - Nunca inventes patentes fuera del catálogo.
-- Si no hay match claro y no es listado, intent=need_clarification pidiendo matrícula o nombre exacto.`;
+- Si no hay match claro y no es listado, intent=need_clarification pidiendo matrícula o nombre exacto.${maintenanceCue}`;
 
   const user = JSON.stringify({
     mensaje: rawText,
@@ -727,13 +769,22 @@ Reglas:
     }
 
     if (intent === "need_clarification") {
+      const labels =
+        candidatePlates.length > 0
+          ? candidatePlates
+              .slice(0, 8)
+              .map((p) => formatPlateWithSpaces(p) ?? p)
+              .join(", ")
+          : "";
       return {
         intent,
         searchTerms: [],
         candidatePlates,
         clarificationQuestion:
           parsed.clarificationQuestion?.trim() ||
-          "¿Me pasás la matrícula exacta o el nombre de la unidad para consultarla en Wara?",
+          (labels
+            ? `Encontré ${candidatePlates.length} unidades (${labels}). Decime la patente exacta.`
+            : "¿Me pasás la matrícula exacta o el nombre de la unidad para consultarla en Wara?"),
         source: "ai",
       };
     }
@@ -774,8 +825,9 @@ function isDecisiveRulesResolution(
   if (resolution.intent === "list_fleet") return true;
   if (resolution.intent === "consult_status" && resolution.plate) return true;
   if (resolution.intent === "need_clarification") {
-    if (extractPlatePrefixFromMessage(rawText)) return true;
-    if (isBarePlatePrefixHint(rawText)) return true;
+    if (extractPlatePrefixFromMessage(rawText) || isBarePlatePrefixHint(rawText)) {
+      return resolution.candidatePlates.length > 0;
+    }
     if (resolution.clarificationQuestion && !resolution.candidatePlates.length) return true;
     if (resolution.candidatePlates.length > 1) {
       // Solo acortar con reglas si la ambigüedad viene del mensaje actual, no del hilo.
@@ -793,7 +845,26 @@ export async function resolveUnitQuery(params: {
   rawText: string;
   threadText: string;
   units: WaraUnidadEstado[];
+  preferAi?: boolean;
 }): Promise<UnitQueryResolution> {
+  const prefixHint = prefixHintFromMessage(params.rawText);
+  const shouldPreferAi =
+    params.preferAi || !!prefixHint || isBarePlatePrefixHint(params.rawText);
+
+  if (shouldPreferAi && process.env.OPENAI_API_KEY?.trim()) {
+    const aiFirst = await resolveWithAi(params.rawText, params.threadText, params.units, {
+      prefixHint,
+      maintenanceContext: !!params.preferAi,
+    });
+    if (aiFirst?.intent === "consult_status" && aiFirst.plate) return aiFirst;
+    if (
+      aiFirst?.intent === "need_clarification" &&
+      (aiFirst.candidatePlates.length > 0 || aiFirst.clarificationQuestion)
+    ) {
+      return aiFirst;
+    }
+  }
+
   const rules = resolveWithRules(params.rawText, params.threadText, params.units);
   if (isDecisiveRulesResolution(rules, params.rawText)) return rules;
 
@@ -813,7 +884,10 @@ export async function resolveUnitQuery(params: {
     return rules;
   }
 
-  const ai = await resolveWithAi(params.rawText, params.threadText, params.units);
+  const ai = await resolveWithAi(params.rawText, params.threadText, params.units, {
+    prefixHint,
+    maintenanceContext: !!params.preferAi,
+  });
   if (ai) {
     if (rules.intent === "consult_status" && rules.plate && rules.candidatePlates.length === 1) {
       return rules;
@@ -842,13 +916,19 @@ export type PlateFromFleetResult =
   | { ok: false; reason: "clarification"; message: string }
   | { ok: false; reason: "not_found" };
 
+export type ResolvePlateWithWaraFleetOptions = {
+  preferAi?: boolean;
+  maintenanceContext?: boolean;
+};
+
 /** Resuelve patente desde texto + flota Wara (IA/reglas). Uso compartido en todos los trámites. */
 export async function resolvePlateWithWaraFleet(
   prisma: PrismaClient,
   rawPhone: string,
   rawText: string,
   threadText: string,
-  directPlate?: string | null
+  directPlate?: string | null,
+  opts?: ResolvePlateWithWaraFleetOptions,
 ): Promise<PlateFromFleetResult> {
   const normalizedDirect = directPlate ? normalizePlate(directPlate) : null;
   if (normalizedDirect) {
@@ -878,6 +958,7 @@ export async function resolvePlateWithWaraFleet(
     rawText,
     threadText: scopedThread,
     units: fleet.unidades,
+    preferAi: opts?.preferAi || opts?.maintenanceContext,
   });
 
   if (resolved.intent === "need_clarification") {

@@ -27,7 +27,7 @@ import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationClose.ts";
 import { assessUnitReporting } from "../src/lib/waraGpsAssessment.ts";
 import { extractPlatePrefixFromMessage, isBarePlatePrefixHint } from "../src/lib/wara.ts";
-import { resolveUnitQuery } from "../src/lib/waraUnitIntent.ts";
+import { resolveUnitQuery, isMaintenancePlateSelectionMessage } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 
@@ -135,6 +135,15 @@ assert(route("AD", maintPlateThread) === "mantenimiento", "AD tras pedido patent
 assert(
   route("La q comienza con AD", maintPlateThread) === "mantenimiento",
   "prefijo AD tras pedido patente → mantenimiento",
+);
+assert(isMaintenancePlateSelectionMessage("AD"), "AD es selección de patente");
+assert(
+  !isMaintenancePlateSelectionMessage("Quiero hacer un mantenimiento"),
+  "inicio trámite NO es selección de patente",
+);
+assert(
+  route("Quiero hacer un mantenimiento", maintPlateThread) === "mantenimiento",
+  "quiero hacer mantenimiento → mantenimiento",
 );
 
 console.log("— Derivación (asesor / casos / NO derivar de más) —");
