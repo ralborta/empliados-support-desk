@@ -520,9 +520,37 @@ export async function customerRegisteredContextResponse(
       stage: "atilio_help_capabilities",
     });
     nextFlow = "reply";
+  } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      const firstName = customer?.name?.trim().split(/\s+/)[0];
+      if (lastTicket && (lastKnownPlate || lastTicket.code)) {
+        responseMessage = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;
+      } else if (multiCompany && waraContactsText) {
+        const hola = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
+        responseMessage =
+          `${hola}\n\n` +
+          `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
+          `${waraContactsText}\n\n` +
+          `Respondé con el número de la opción o con el nombre de la empresa.`;
+      } else {
+        responseMessage = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
+          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+      }
+    }
+  } else if (selectionText && looksLikeUnitListRequest(selectionText)) {
+    nextFlow = "router";
+    responseMessage = "";
   } else if (
     selectionText &&
     !detectLoosePlate(selectionText) &&
+    !looksLikeGreeting(selectionText) &&
+    !looksLikeUnitListRequest(selectionText) &&
     threadAwaitingOdometerPlate(scopedThreadText || fullThreadText)
   ) {
     const fleetPlate = await resolvePlateWithWaraFleet(
@@ -548,29 +576,6 @@ export async function customerRegisteredContextResponse(
       resolved: fleetPlate.ok ? fleetPlate.plate : null,
     });
     nextFlow = "reply";
-  } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
-    nextFlow = "reply";
-    if (!responseMessage) {
-      const firstName = customer?.name?.trim().split(/\s+/)[0];
-      if (lastTicket && (lastKnownPlate || lastTicket.code)) {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;
-      } else if (multiCompany && waraContactsText) {
-        const hola = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
-        responseMessage =
-          `${hola}\n\n` +
-          `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
-          `${waraContactsText}\n\n` +
-          `Respondé con el número de la opción o con el nombre de la empresa.`;
-      } else {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
-      }
-    }
   } else if (
     selectionText &&
     looksLikeCompanyListQuestion(selectionText)
@@ -611,10 +616,6 @@ export async function customerRegisteredContextResponse(
   } else if (activeCompany && requiresCompanySelection) {
     // Empresa ya guardada: no bloquear trámites por flag inconsistente.
     nextFlow = duplicateInicioTurn ? "ignore" : "router";
-    responseMessage = "";
-  } else if (selectionText && looksLikeUnitListRequest(selectionText)) {
-    // Listado de flota: ir al router/API, no menú ni saludo con caso previo.
-    nextFlow = "router";
     responseMessage = "";
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.
