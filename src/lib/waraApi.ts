@@ -416,30 +416,81 @@ export function formatCompanyConfirmMessage(companyName: string): string {
 }
 
 /** Trámite operativo real (programar/registrar), no guía informativa. */
-export function looksLikeOperationalMaintenanceIntent(raw: string): boolean {
+export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = ""): boolean {
   const text = normCompanyToken(raw);
+  if (
+    /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta|puedo)\b/.test(
+      text,
+    ) &&
+    /\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (!looksLikeMaintenanceGuideContextInThread(threadText)) return false;
   return (
-    /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta)\b/.test(
-      text
-    ) && /\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)
+    /\b(puedo|programar|registrar|agendar|generar|hacer|crear|abrir)\b/.test(text) &&
+    /\b(vos|con vos|contigo|atilio|uno|una|lo|preventivo|correctivo|con tu ayuda)\b/.test(text)
   );
 }
 
 /**
  * Tras una guía informativa: pregunta si Atilio puede registrar el mantenimiento o lo hace el cliente en Wara.
- * Ej.: «¿Vos podés generar un mantenimiento o lo hago yo?»
+ * Ej.: «¿Vos podés generar un mantenimiento o lo hago yo?», «¿Puedo programar uno con vos?»
  */
-export function looksLikeMaintenanceCapabilityQuestion(raw: string | undefined | null): boolean {
+export function looksLikeMaintenanceCapabilityQuestion(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
   const text = normCompanyToken(raw ?? "");
-  if (!text || !/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) return false;
+  if (!text) return false;
   if (looksLikeMaintenanceInfoRequest(raw)) return false;
+
+  const threadHasMaintGuide = looksLikeMaintenanceGuideContextInThread(threadText);
+  const maintInText = /\b(mantenimiento|preventiv|correctiv|tarea|plan|uno|una)\b/.test(text);
   const asksBotVsSelf =
-    (/\b(vos|tu|atilio|bot|aca|whatsapp|por aca)\b/.test(text) &&
-      /\b(podes|generar|registrar|programar|abrir|crear|hacer)\b/.test(text)) ||
+    (/\b(vos|tu|atilio|bot|aca|whatsapp|por aca|con vos|contigo)\b/.test(text) &&
+      /\b(podes|pod[eé]s|generar|registrar|programar|abrir|crear|hacer|agendar|haces|hac[eé]s)\b/.test(
+        text,
+      )) ||
     /\b(lo hago yo|hago yo|yo mismo|vos o yo|lo hago yo o vos|generar un mantenimiento o)\b/.test(
       text,
+    ) ||
+    (/\bpuedo\b/.test(text) &&
+      /\b(programar|registrar|agendar|hacer|crear|generar)\b/.test(text) &&
+      (/\b(vos|con vos|contigo|atilio)\b/.test(text) || threadHasMaintGuide));
+
+  if (!asksBotVsSelf) return false;
+  return maintInText || threadHasMaintGuide;
+}
+
+/** Mensaje del cliente con contenido (no ack vacío) — evitar ignorar turnos útiles. */
+export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {
+  const text = (raw ?? "").trim();
+  if (text.length < 4) return false;
+  const norm = normCompanyToken(text);
+  if (
+    /^(ok|si|no|gracias|muchas gracias|listo|dale|bueno|perfecto|genial|entendido|de acuerdo|confirmo)$/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Fallback cuando el turno no produjo respuesta pero el cliente escribió algo con sentido. */
+export function buildUnexpectedTurnFallbackMessage(raw: string | undefined | null): string {
+  const text = normCompanyToken(raw ?? "");
+  if (/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) {
+    return (
+      "Puedo ayudarte con mantenimiento por acá: decime la patente de la unidad y si es preventivo o correctivo. " +
+      "Si preferís hacerlo vos en Wara, entrá a Utilidades → Mantenimiento."
     );
-  return asksBotVsSelf;
+  }
+  return (
+    "Recibí tu consulta. Contame un poco más en concreto qué necesitás " +
+    "(por ejemplo patente, trámite o módulo de Wara) y te guío."
+  );
 }
 
 /** Guía informativa del módulo Mantenimiento (cómo usar/configurar), no trámite operativo. */
@@ -475,6 +526,21 @@ export function looksLikeMaintenanceInfoGuideInThread(threadText: string): boole
   );
 }
 
+/** Contexto de guía de mantenimiento (backend o BBC/ChatPDF). */
+export function looksLikeMaintenanceGuideContextInThread(threadText: string): boolean {
+  if (!threadText.trim()) return false;
+  if (looksLikeMaintenanceInfoGuideInThread(threadText)) return true;
+  const tail = threadText.slice(-4000).toLowerCase();
+  return (
+    /mantenimiento preventivo/.test(tail) ||
+    (/mantenimiento/.test(tail) &&
+      /utilidades|plan de mantenimiento|tarea correctiva|tarea preventiva|ingresa al sistema wara|ingresar al sistema/.test(
+        tail,
+      )) ||
+    (/queres que te explique/.test(tail) && /mantenimiento|preventiv|correctiv|tarea/.test(tail))
+  );
+}
+
 /** Invocación espuria del ejecutor de mantenimiento (p. ej. reproceso tras guía Opciones). */
 export function shouldSkipStrayMaintenanceRequest(
   text: string,
@@ -486,15 +552,21 @@ export function shouldSkipStrayMaintenanceRequest(
   }
 ): boolean {
   if (opts.pendingPlateRequest || opts.pendingMaintConfirm) return false;
-  if (looksLikeOperationalMaintenanceIntent(text)) return false;
-  if (looksLikeMaintenanceCapabilityQuestion(text)) return false;
+  if (looksLikeOperationalMaintenanceIntent(text, threadText)) return false;
+  if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return false;
   if (looksLikeTurnoOrAgendaQuestion(text)) return true;
   if (looksLikeOpcionesInfoRequest(text)) return true;
   if (looksLikeUnidadesInfoRequest(text)) return true;
   if (opts.lastInbound && looksLikeOpcionesInfoRequest(opts.lastInbound)) return true;
   if (opts.lastInbound && looksLikeUnidadesInfoRequest(opts.lastInbound)) return true;
   if (looksLikePlatformInfoGuideInThread(threadText)) return true;
-  if (looksLikeMaintenanceInfoGuideInThread(threadText)) return true;
+  if (
+    looksLikeMaintenanceGuideContextInThread(threadText) &&
+    !looksLikeMaintenanceCapabilityQuestion(text, threadText) &&
+    !looksLikeOperationalMaintenanceIntent(text, threadText)
+  ) {
+    return true;
+  }
   if (isGenericMaintenanceFallbackText(text)) return true;
   return false;
 }

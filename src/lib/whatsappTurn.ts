@@ -13,6 +13,10 @@ import {
   TURN_EXECUTOR_PATH,
   type TurnExecutorId,
 } from "@/lib/whatsappTurnRouter";
+import {
+  buildUnexpectedTurnFallbackMessage,
+  looksLikeSubstantiveCustomerMessage,
+} from "@/lib/waraApi";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
 
 type JsonRecord = Record<string, unknown>;
@@ -128,17 +132,21 @@ export async function handleWhatsAppTurn(params: {
   const contextNextFlow = String(context.nextFlow ?? "derivar");
 
   if (contextNextFlow === "ignore") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
-      buildTurnPayload(context, {
-        message: "",
-        skipResponse_s: "true",
-        nextFlow: "ignore",
-        nextFlow_s: "ignore",
-        executor: "context",
-        executor_s: "context",
-      }),
-    );
+    if (looksLikeSubstantiveCustomerMessage(selectionText)) {
+      // No silenciar preguntas reales por reproceso duplicado de Inicio.
+    } else {
+      return deliverTurnToWhatsApp(
+        rawPhone,
+        buildTurnPayload(context, {
+          message: "",
+          skipResponse_s: "true",
+          nextFlow: "ignore",
+          nextFlow_s: "ignore",
+          executor: "context",
+          executor_s: "context",
+        }),
+      );
+    }
   }
 
   if (contextNextFlow === "derivar") {
@@ -206,7 +214,7 @@ export async function handleWhatsAppTurn(params: {
       finalMessage =
         "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
     } else {
-      finalMessage = "Recibí tu consulta. ¿Podés repetirla con un poco más de detalle?";
+      finalMessage = buildUnexpectedTurnFallbackMessage(selectionText);
     }
   }
 

@@ -24,6 +24,7 @@ import {
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
   looksLikeGreeting,
+  looksLikeMaintenanceCapabilityQuestion,
   looksLikeNonOdometerOperationalIntent,
   looksLikeOperationalMaintenanceIntent,
   looksLikeOdometerContinuationMessage,
@@ -479,6 +480,7 @@ export async function customerRegisteredContextResponse(
     : "";
 
   let responseMessage = selectionMessage;
+  const threadForMaintIntent = scopedThreadText || fullThreadText;
   if (
     !responseMessage &&
     registered &&
@@ -583,14 +585,15 @@ export async function customerRegisteredContextResponse(
         ? `De nada, ${firstName}. ¿Necesitás algo más?`
         : "De nada. ¿En qué más te ayudo?";
     }
-  } else if (selectionText && looksLikeNonOdometerOperationalIntent(selectionText)) {
-    nextFlow = "router";
-    responseMessage = "";
   } else if (
     selectionText &&
-    looksLikeOperationalMaintenanceIntent(selectionText)
+    (looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) ||
+      looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent))
   ) {
-    // Trámite de mantenimiento: siempre al ejecutor (nunca ignorar ni quedar mudo).
+    // Trámite o pregunta operativa de mantenimiento (incluso tras guía informativa).
+    nextFlow = "router";
+    responseMessage = "";
+  } else if (selectionText && looksLikeNonOdometerOperationalIntent(selectionText)) {
     nextFlow = "router";
     responseMessage = "";
   } else if (
@@ -620,7 +623,8 @@ export async function customerRegisteredContextResponse(
     duplicateInicioTurn &&
     !looksLikeGreeting(selectionText) &&
     !looksLikeNonOdometerOperationalIntent(selectionText) &&
-    !looksLikeOperationalMaintenanceIntent(selectionText) &&
+    !looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) &&
+    !looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent) &&
     !looksLikeOdometerIntentStart(selectionText)
   ) {
     nextFlow = "ignore";
@@ -654,7 +658,8 @@ export async function customerRegisteredContextResponse(
       duplicateInicioTurn &&
       !looksLikeGreeting(selectionText) &&
       !looksLikeNonOdometerOperationalIntent(selectionText) &&
-      !looksLikeOperationalMaintenanceIntent(selectionText)
+      !looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) &&
+      !looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent)
         ? "ignore"
         : "router";
     responseMessage = "";
@@ -666,7 +671,8 @@ export async function customerRegisteredContextResponse(
       duplicateInicioTurn &&
       !looksLikeGreeting(selectionText) &&
       !looksLikeNonOdometerOperationalIntent(selectionText) &&
-      !looksLikeOperationalMaintenanceIntent(selectionText)
+      !looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) &&
+      !looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent)
         ? "ignore"
         : "router";
     responseMessage = "";

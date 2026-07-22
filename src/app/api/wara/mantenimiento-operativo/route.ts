@@ -498,7 +498,7 @@ export async function POST(req: NextRequest) {
     looksLikePlatformInfoGuideInThread(threadText) ||
     looksLikeMaintenanceInfoGuideInThread(threadText)
   ) {
-    if (!looksLikeOperationalMaintenanceIntent(text)) {
+    if (!looksLikeOperationalMaintenanceIntent(text, threadText)) {
       return NextResponse.json(
         {
           ok: true,
@@ -519,7 +519,7 @@ export async function POST(req: NextRequest) {
       lastInbound,
     })
   ) {
-    if (!looksLikeOperationalMaintenanceIntent(text)) {
+    if (!looksLikeOperationalMaintenanceIntent(text, threadText)) {
       return NextResponse.json(
         {
           ok: true,
@@ -570,7 +570,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (looksLikeMaintenanceCapabilityQuestion(text)) {
+  if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) {
     const message = maintenanceCapabilityReply();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
@@ -663,7 +663,7 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS }
       );
     }
-    if (looksLikeOperationalMaintenanceIntent(text)) {
+    if (looksLikeOperationalMaintenanceIntent(text, threadText)) {
       const preventivo = /preventiv/i.test(text);
       const message = preventivo
         ? "Para programar mantenimiento preventivo necesito la patente de la unidad (por ejemplo AD427MC o ABC123). Si querés, agregá también la prioridad."

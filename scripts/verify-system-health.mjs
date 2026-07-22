@@ -94,13 +94,18 @@ const maintGuideThread = [
   "Queres que te explique como crear un plan o una tarea?",
 ].join("\n");
 const capabilityQ = "Vos podes generar un mantenimiento o lo hago yo?";
+const scheduleWithBotQ = "Puedo programar uno con vos?";
+assert(
+  looksLikeMaintenanceCapabilityQuestion(scheduleWithBotQ, maintGuideThread),
+  "programar uno con vos tras guía",
+);
+assert(
+  route(scheduleWithBotQ, maintGuideThread) === "mantenimiento",
+  "programar con vos → mantenimiento (no mute)",
+);
 assert(
   looksLikeMaintenanceCapabilityQuestion(capabilityQ),
   "capability question after maint guide",
-);
-assert(
-  route(capabilityQ, maintGuideThread) === "mantenimiento",
-  "capability question routes to mantenimiento (not bbc_router mute)",
 );
 
 console.log("— Derivación (asesor / casos / NO derivar de más) —");

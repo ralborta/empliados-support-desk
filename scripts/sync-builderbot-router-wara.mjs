@@ -94,7 +94,14 @@ function buildRules() {
     },
     {
       conditionRule:
-        'REPROCESO TRAS GUÍA INFORMATIVA — Por CONTEXTO del historial: el bot ya respondió con pasos de Opciones Wara (Agenda/contactos/Perfiles/Notificaciones), del módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos de color, Crear grupo) o del módulo de Mantenimiento (guía preventiva/correctiva/planes, sin pedir patente) y el cliente NO está iniciando mantenimiento operativo, certificado, consulta de reporte en vivo ni odómetro. Incluye agradecimientos breves tras la guía ("ok gracias", "muchas gracias", "listo"). PROHIBIDO Gestión Mantenimiento, PROHIBIDO pedir patente/km y PROHIBIDO reanudar odómetro pendiente. El turno informativo terminó.',
+        'MANTENIMIENTO CON ATILIO TRAS GUÍA — PRIORIDAD SOBRE REPROCESO/IGNORAR. Tras una guía de mantenimiento (preventivo/correctivo/planes), el cliente pregunta si puede programar/registrar/agendar con Atilio/bot/vos por WhatsApp, o si lo hace él en Wara: "puedo programar uno con vos", "vos me lo registrás", "lo hago yo o vos", "me lo hacés vos", "puedo hacerlo contigo". Va a Gestión Mantenimiento (backend responde y pide patente). PROHIBIDO Ignorar/Reproceso informativo.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.gestionMaint,
+    },
+    {
+      conditionRule:
+        'REPROCESO TRAS GUÍA INFORMATIVA — Por CONTEXTO del historial: el bot ya respondió con pasos de Opciones Wara (Agenda/contactos/Perfiles/Notificaciones), del módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos de color, Crear grupo) o del módulo de Mantenimiento (guía preventiva/correctiva/planes, sin pedir patente) y el cliente NO está iniciando mantenimiento operativo ni preguntando si Atilio puede registrar/programar el mantenimiento por WhatsApp, certificado, consulta de reporte en vivo ni odómetro. Incluye agradecimientos breves tras la guía ("ok gracias", "muchas gracias", "listo"). PROHIBIDO Gestión Mantenimiento, PROHIBIDO pedir patente/km y PROHIBIDO reanudar odómetro pendiente. El turno informativo terminó.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.ignorar,

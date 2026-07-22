@@ -17,6 +17,7 @@ import {
 import {
   looksLikeHumanAdvisorRequest,
   looksLikeMaintenanceCapabilityQuestion,
+  looksLikeMaintenanceGuideContextInThread,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeMaintenanceInfoRequest,
   looksLikeNonOdometerOperationalIntent,
@@ -72,11 +73,15 @@ function looksLikeOdometerIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeMaintenanceOperational(text: string, threadText: string): boolean {
-  if (looksLikeOperationalMaintenanceIntent(text)) return true;
-  if (looksLikeMaintenanceCapabilityQuestion(text)) return true;
+  if (looksLikeOperationalMaintenanceIntent(text, threadText)) return true;
+  if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return false;
   const blob = norm(`${threadText}\n${text}`);
-  if (looksLikeMaintenanceInfoGuideInThread(threadText) && !/\b(patente|matricula)\b/.test(blob)) {
+  if (
+    looksLikeMaintenanceGuideContextInThread(threadText) &&
+    !/\b(patente|matricula)\b/.test(blob) &&
+    !looksLikeMaintenanceCapabilityQuestion(text, threadText)
+  ) {
     return false;
   }
   return /\b(mantenimiento|preventiv|correctiv|service|taller|reparaci[oó]n)\b/.test(blob);
@@ -84,13 +89,16 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeUnitListRequest(text)) return false;
-  if (looksLikeOperationalMaintenanceIntent(text)) return false;
-  if (looksLikeMaintenanceCapabilityQuestion(text)) return false;
+  if (looksLikeOperationalMaintenanceIntent(text, threadText)) return false;
+  if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return false;
   if (looksLikeOpcionesInfoRequest(text)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return true;
   if (looksLikeUnidadesInfoRequest(text) || looksLikeUnidadesInfoRequest(threadText)) return true;
   if (looksLikePlatformInfoGuideInThread(threadText)) return true;
   if (looksLikeMaintenanceInfoGuideInThread(threadText) && !looksLikeMaintenanceOperational(text, threadText)) {
+    return true;
+  }
+  if (looksLikeMaintenanceGuideContextInThread(threadText) && !looksLikeMaintenanceOperational(text, threadText)) {
     return true;
   }
   return false;

@@ -16,6 +16,7 @@
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import {
   formatCompanyConfirmMessage,
+  looksLikeMaintenanceCapabilityQuestion,
   looksLikeNonOdometerOperationalIntent,
   looksLikeOperationalMaintenanceIntent,
   shouldSkipStrayMaintenanceRequest,
@@ -69,10 +70,20 @@ assert(
 );
 
 const CAPABILITY_Q = "Vos podes generar un mantenimiento o lo hago yo?";
+const SCHEDULE_WITH_BOT_Q = "Puedo programar uno con vos?";
 const THREAD_AFTER_GUIDE = [
-  "El modulo de mantenimiento sirve para gestionar tareas preventivas y correctivas.",
-  "Queres que te explique como crear un plan o una tarea?",
+  "Para realizar un mantenimiento preventivo en Wara:",
+  "1. Ingresa al sistema Wara",
+  "Queres que te explique como crear una tarea correctiva tambien?",
 ].join("\n");
+assert(
+  looksLikeMaintenanceCapabilityQuestion(SCHEDULE_WITH_BOT_Q, THREAD_AFTER_GUIDE),
+  `post-guía "${SCHEDULE_WITH_BOT_Q}" detectada`,
+);
+assert(
+  classifyTurnExecutor(SCHEDULE_WITH_BOT_Q, THREAD_AFTER_GUIDE) === "mantenimiento",
+  `post-guía "${SCHEDULE_WITH_BOT_Q}" → mantenimiento (no mudo)`,
+);
 assert(
   classifyTurnExecutor(CAPABILITY_Q, THREAD_AFTER_GUIDE) === "mantenimiento",
   `post-guía "${CAPABILITY_Q}" → mantenimiento (no mudo)`,
