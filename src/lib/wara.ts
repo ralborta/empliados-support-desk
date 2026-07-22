@@ -595,7 +595,7 @@ export function looksLikeCertificateUnitReply(text: string, threadText = ""): bo
   return false;
 }
 
-/** Ignora mensajes anteriores al último cambio/selección de empresa en el hilo. */
+/** Ignora mensajes anteriores al último cambio de empresa o reinicio de conversación. */
 export function threadTextSinceCompanySelection(text: string): string {
   const lines = text.split("\n");
   let cut = 0;
@@ -605,7 +605,10 @@ export function threadTextSinceCompanySelection(text: string): string {
       /Listo, reinici[eé] la empresa/i.test(line) ||
       /Perfecto, sigo con/i.test(line) ||
       /Est[aá]s operando con/i.test(line) ||
-      /asociado a m[aá]s de una empresa/i.test(line)
+      /asociado a m[aá]s de una empresa/i.test(line) ||
+      /arrancamos de nuevo/i.test(line) ||
+      /empezamos de nuevo/i.test(line) ||
+      /comenzamos de nuevo/i.test(line)
     ) {
       cut = i;
     }

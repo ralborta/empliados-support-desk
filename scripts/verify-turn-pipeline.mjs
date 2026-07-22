@@ -16,6 +16,7 @@ import {
 import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
+  looksLikeFlowControlCommand,
   shouldContinueOdometerFlow,
 } from "../src/lib/waraApi.ts";
 
@@ -142,6 +143,24 @@ assert(
   ].join("\n")),
   "odómetro registrado no supersede futuras consultas",
 );
+
+console.log("— Reinicio de conversación —");
+assert(looksLikeFlowControlCommand("reinicio"), "reinicio es comando de flujo");
+assert(looksLikeFlowControlCommand("Reiniciar"), "Reiniciar es comando de flujo");
+const resetScoped = threadTextSinceCompanySelection(
+  [
+    "Voy a registrar:",
+    "Listo, registré el cambio para la unidad AD427MC.",
+    "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
+    "Hola Raúl, arrancamos de nuevo. ¿En qué te puedo ayudar?",
+    "Tengo problemas con el odometro",
+  ].join("\n"),
+);
+assert(
+  turnRoute("Tengo problemas con el odometro", resetScoped) === "odoo_ticket",
+  "post-reinicio enruta sin hilo viejo",
+);
+assert(!resetScoped.includes("Voy a registrar"), "reinicio corta hilo anterior");
 
 console.log("— Flujo odómetro (patente, corrección, unidad) —");
 const odoThread = [

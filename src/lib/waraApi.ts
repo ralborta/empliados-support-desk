@@ -658,10 +658,10 @@ export function looksLikeGreeting(text: string | undefined | null): boolean {
 
 /** Comando para reiniciar la conversación (no es patente, marca ni trámite). */
 export function looksLikeFlowControlCommand(text: string | undefined | null): boolean {
-  const norm = normCompanyToken(text ?? "");
+  const norm = normCompanyToken(text ?? "").replace(/[!?.¡¿]+$/g, "").trim();
   if (!norm) return false;
   if (looksLikeChangeCompanyRequest(text)) return false;
-  return /^(reiniciar|inicio|menu|volver|cancelar|reset|empezar de nuevo|comenzar de nuevo|arrancar de nuevo)$/.test(
+  return /^(reiniciar|reinicio|inicio|menu|volver|cancelar|reset|empezar de nuevo|comenzar de nuevo|arrancar de nuevo)$/.test(
     norm,
   );
 }

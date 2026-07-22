@@ -531,6 +531,10 @@ export async function customerRegisteredContextResponse(
     responseMessage = firstName
       ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
       : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "flow_reset",
+    });
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
