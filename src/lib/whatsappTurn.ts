@@ -18,6 +18,7 @@ import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeGpsOrUnitStatusQuestion,
+  looksLikeLiveUnitConsultIntent,
   looksLikeSubstantiveCustomerMessage,
 } from "@/lib/waraApi";
 import {
@@ -84,6 +85,7 @@ function inferRecoveryExecutor(
   failedExecutor: TurnExecutorId,
 ): TurnExecutorId | null {
   if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return "unidades";
+  if (looksLikeLiveUnitConsultIntent(selectionText)) return "unidades";
   if (looksLikeExplicitReclamoOrTicketRequest(selectionText)) return "odoo_ticket";
   if (failedExecutor === "info_guides") return null;
   return null;
@@ -229,6 +231,12 @@ export async function handleWhatsAppTurn(params: {
         "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
     } else if (executor === "unidades" && looksLikeFleetUnitSearchInput(selectionText)) {
       finalMessage = buildFleetUnitNotFoundMessage({ rawText: selectionText });
+    } else if (
+      executor === "unidades" &&
+      (looksLikeLiveUnitConsultIntent(selectionText) || looksLikeGpsOrUnitStatusQuestion(selectionText))
+    ) {
+      finalMessage =
+        "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan).";
     } else {
       finalMessage = buildUnexpectedTurnFallbackMessage(selectionText);
     }

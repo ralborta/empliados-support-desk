@@ -99,6 +99,27 @@ const crossTenant = [
 assert(hasPendingMantenimientoConfirmation(threadTextSinceCompanySelection(crossTenant)), "maint post-empresa");
 assert(turnRoute("Confirmo", crossTenant) === "mantenimiento", "Confirmo post cambio empresa");
 
+console.log("— Hilo contaminado (mantenimiento viejo + GPS/ignición) —");
+const pollutedMaintThread = [
+  "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.",
+  "modulo de mantenimiento",
+  "orientacion de uso",
+  "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
+  "No pude reconocer una patente completa. Enviamela con formato AA123BB or ABC123 junto con el detalle y la prioridad.",
+].join("\n");
+assert(
+  turnRoute("No sé si mi GPS está marcando bien", pollutedMaintThread) === "unidades",
+  "GPS no va a info_guides con hilo maint",
+);
+assert(
+  turnRoute("quiero ver la ignicio de mi unidad", pollutedMaintThread) === "unidades",
+  "ignición no va a mantenimiento con hilo maint",
+);
+assert(
+  turnRoute("Nissan", `${pollutedMaintThread}\nquiero ver la ignicio de mi unidad`) === "unidades",
+  "marca tras consulta ignición va a unidades",
+);
+
 console.log("— Operativo base —");
 assert(turnRoute("listame mis unidades") === "unidades", "flota");
 assert(turnRoute("como funciona el modulo de mantenimiento") === "info_guides", "guía maint");

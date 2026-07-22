@@ -23,6 +23,7 @@ import {
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
+  looksLikeLiveUnitConsultIntent,
   looksLikeMaintenanceCapabilityQuestion,
   looksLikeSubstantiveCustomerMessage,
   looksLikeMaintenanceGuideContextInThread,
@@ -37,6 +38,7 @@ import {
   looksLikeUnidadesInfoRequest,
   looksLikeVehicleBrandOrUnitSearch,
   shouldContinueOdometerFlow,
+  threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
 import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 
@@ -94,7 +96,7 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
   if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return false;
   // Prefijo o patente suelta: no arrastrar "mantenimiento" del hilo (evita skip silencioso).
-  if (isUnitSelectionMessage(text) && !/\b(mantenimiento|preventiv|correctiv)\b/.test(norm(text))) {
+  if (isUnitSelectionMessage(text, threadText) && !/\b(mantenimiento|preventiv|correctiv)\b/.test(norm(text))) {
     return false;
   }
   const blob = norm(`${threadText}\n${text}`);
@@ -113,8 +115,11 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeUnitListRequest(text)) return false;
-  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) return false;
-  if (isUnitSelectionMessage(text) && looksLikeMaintenanceGuideContextInThread(threadText)) {
+  if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) return false;
+  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
+    return false;
+  }
+  if (isUnitSelectionMessage(text, threadText) && looksLikeMaintenanceGuideContextInThread(threadText)) {
     return false;
   }
   if (looksLikeOperationalMaintenanceIntent(text, threadText)) return false;
@@ -136,13 +141,13 @@ function isCertificateUnitContext(threadText: string): boolean {
   return certificateFlowState(threadText) === "awaiting_unit";
 }
 
-function isUnitSelectionMessage(text: string): boolean {
+function isUnitSelectionMessage(text: string, threadText = ""): boolean {
   return (
     !!detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
     !!extractPlatePrefixFromMessage(text) ||
     isMaintenancePlateSelectionMessage(text) ||
-    looksLikeCertificateUnitReply(text) ||
+    looksLikeCertificateUnitReply(text, threadText) ||
     looksLikeVehicleBrandOrUnitSearch(text) ||
     looksLikePlateCorrectionRequest(text)
   );
@@ -161,8 +166,16 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
   if (looksLikeExplicitReclamoOrTicketRequest(text)) return "odoo_ticket";
 
-  // Patente/prefijo tras pedido de mantenimiento — ANTES que guías informativas.
-  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) {
+  // GPS / ignición / reporte en vivo — prioridad sobre guías y mantenimiento arrastrado del hilo.
+  if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+    return "unidades";
+  }
+
+  // Patente/prefijo/marca tras pedido de mantenimiento — salvo que el hilo sea consulta de unidad.
+  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
+    if (threadHasRecentLiveUnitConsultIntent(threadText) && looksLikeVehicleBrandOrUnitSearch(text)) {
+      return "unidades";
+    }
     return "mantenimiento";
   }
 
@@ -196,12 +209,12 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
 
   // Certificado: pedido explícito o respuesta de unidad tras "necesito la unidad"
   if (looksLikeCertificateIntent(text, threadText)) return "certificados";
-  if (isCertificateUnitContext(threadText) && isUnitSelectionMessage(text)) {
+  if (isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText)) {
     return "certificados";
   }
 
   // Mantenimiento: patente pedida en contexto de mantenimiento (también cubierto arriba; redundante por claridad)
-  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) {
+  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
     return "mantenimiento";
   }
 
@@ -209,7 +222,7 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (
     !isOdometerFlowSuperseded(threadText) &&
     (looksLikeOdometerIntent(text, threadText) ||
-      (threadAwaitingOdometerPlate(threadText) && isUnitSelectionMessage(text)) ||
+      (threadAwaitingOdometerPlate(threadText) && isUnitSelectionMessage(text, threadText)) ||
       (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText))))
   ) {
     return "odometro";

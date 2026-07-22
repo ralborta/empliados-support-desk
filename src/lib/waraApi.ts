@@ -494,13 +494,41 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv|correctiv|tarea|plan de mantenimiento)\b/.test(t)) return false;
   const gpsUnitCue =
-    /\b(gps|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
+    /\b(gps|ignicio|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
       t,
     );
   const questionCue =
-    /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta|funciona|bien|mal)\b/.test(t) ||
-    String(text ?? "").includes("?");
+    /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta|funciona|bien|mal|ver|consultar|mostrar)\b/.test(
+      t,
+    ) || String(text ?? "").includes("?");
   return gpsUnitCue && questionCue;
+}
+
+/** Consulta en vivo de unidad (ignición, reporte, GPS) — prioridad sobre mantenimiento/certificado. */
+export function looksLikeLiveUnitConsultIntent(text: string | undefined | null): boolean {
+  if (looksLikeGpsOrUnitStatusQuestion(text)) return true;
+  const t = normCompanyToken(text ?? "");
+  if (!t || t.length > 220) return false;
+  if (/\b(mantenimiento|preventiv|correctiv|certificado|cobertura)\b/.test(t)) return false;
+  if (
+    /\b(quiero|necesito|dame|decime|pasame|ver|consultar|mostrar|estado)\b/.test(t) &&
+    /\b(ignicio|ignicion|reporte|gps|ubicacion|posicion|unidad|flota)\b/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Cliente preguntó por GPS/ignición/reporte en las últimas líneas del hilo. */
+export function threadHasRecentLiveUnitConsultIntent(threadText: string): boolean {
+  const tail = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-10);
+  return tail.some(
+    (line) => looksLikeLiveUnitConsultIntent(line) || looksLikeGpsOrUnitStatusQuestion(line),
+  );
 }
 
 export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {

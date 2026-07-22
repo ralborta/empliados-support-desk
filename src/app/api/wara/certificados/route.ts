@@ -153,9 +153,9 @@ function isGenericCertificateRequest(text: string): boolean {
   return /\b(certificado|cobertura|monitoreo|constancia)\b/i.test(text) && !detectPlate(text);
 }
 
-function looksLikeCertificateUnitSelection(text: string): boolean {
+function looksLikeCertificateUnitSelection(text: string, threadText = ""): boolean {
   return (
-    looksLikeCertificateUnitReply(text) ||
+    looksLikeCertificateUnitReply(text, threadText) ||
     looksLikePlateCorrectionRequest(text) ||
     looksLikeVehicleBrandOrUnitSearch(text)
   );

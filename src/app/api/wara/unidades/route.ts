@@ -14,7 +14,9 @@ import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
   looksLikeGreeting,
+  looksLikeLiveUnitConsultIntent,
   resolveWaraSessionByPhone,
+  threadHasRecentLiveUnitConsultIntent,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
 import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalation";
@@ -248,8 +250,9 @@ function mentionsMissingReportWithoutPlate(rawText: string | undefined | null): 
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (detectPlate(rawText ?? "")) return false;
-  return /\b(sin reporte|no reporta|no actualiza|offline|no reporta bien|reportando|reporta bien|esta ok|est[aá] bien)\b/.test(
-    norm
+  if (looksLikeLiveUnitConsultIntent(rawText)) return true;
+  return /\b(sin reporte|no reporta|no actualiza|offline|no reporta bien|reportando|reporta bien|esta ok|est[aá] bien|gps|marcando|ignicio|ignicion|senal|señal)\b/.test(
+    norm,
   );
 }
 
@@ -760,10 +763,13 @@ export async function POST(req: NextRequest) {
     !explicitPlate &&
     !unitQueryInMessage &&
     !threadPlateEarly &&
-    (looksLikeAnotherUnitRequest(rawText) || mentionsMissingReportWithoutPlate(rawText))
+    (looksLikeAnotherUnitRequest(rawText) ||
+      mentionsMissingReportWithoutPlate(rawText) ||
+      (looksLikeLiveUnitConsultIntent(rawText) && !looksLikeFleetUnitSearchInput(rawText)))
   ) {
-    const askPlate =
-      "¿Cuál es la matrícula o el nombre de la unidad? Pasámela (por ejemplo NKL 952 o M300-111) y la consulto en Wara.";
+    const askPlate = looksLikeLiveUnitConsultIntent(rawText)
+      ? "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan)."
+      : "¿Cuál es la matrícula o el nombre de la unidad? Pasámela (por ejemplo NKL 952 o M300-111) y la consulto en Wara.";
     await appendOutboundBotMessage(rawPhone, askPlate, {
       source: "wara_unidades_ask_plate",
       rawText,
@@ -831,10 +837,17 @@ export async function POST(req: NextRequest) {
     !parsed.data.patente?.trim() &&
     !parsed.data.plate?.trim()
   ) {
+    const liveUnitConsult = looksLikeLiveUnitConsultIntent(rawText);
+    const resolutionThread = `${scopedThread}\n${rawText}`.trim();
+    const recentLiveConsult = threadHasRecentLiveUnitConsultIntent(resolutionThread);
+    const preferAiResolution =
+      looksLikeFleetUnitSearchInput(rawText) || liveUnitConsult || recentLiveConsult;
+
     const resolved = await resolveUnitQuery({
       rawText,
-      threadText: scopedThread,
+      threadText: preferAiResolution ? resolutionThread : scopedThread,
       units: result.unidades,
+      preferAi: preferAiResolution,
     });
 
     if (resolved.intent === "list_fleet") {

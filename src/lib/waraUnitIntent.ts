@@ -17,6 +17,7 @@ import {
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import {
   consultarEstadoUnidades,
+  looksLikeLiveUnitConsultIntent,
   looksLikePlateCorrectionRequest,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
@@ -706,8 +707,14 @@ async function resolveWithAi(
 - Resolvé prefijos ("AD", "la que comienza con NKL") contra el catálogo.
 - Una sola coincidencia clara → intent=consult_status con esa patente en candidatePlates.
 - Varias coincidencias → intent=need_clarification listando patentes exactas del catálogo (hasta 8).`
-    : `
+    : looksLikeLiveUnitConsultIntent(rawText)
+      ? `
+- CONTEXTO: consulta operativa de GPS, ignición o reporte en vivo (no mantenimiento ni certificado).
+- Si el mensaje o el historial mencionan marca/nombre/patente, resolvé contra el catálogo.
+- Si falta la unidad, intent=need_clarification pidiendo patente o marca con ejemplos.`
+      : `
 - Si el mensaje es prefijo o frase parcial de patente ("AD", "la q comienza con AD"), buscá en el catálogo.
+- Si es marca o nombre (Nissan, Saveiro), buscá en el catálogo por nombre de unidad o coincidencias razonables.
 - Una coincidencia → consult_status; varias → need_clarification con opciones reales del catálogo.`;
 
   const system = `Sos el resolvedor de consultas de unidades Wara para WhatsApp.
@@ -828,7 +835,15 @@ function isDecisiveRulesResolution(
     if (extractPlatePrefixFromMessage(rawText) || isBarePlatePrefixHint(rawText)) {
       return resolution.candidatePlates.length > 0;
     }
-    if (resolution.clarificationQuestion && !resolution.candidatePlates.length) return true;
+    if (resolution.clarificationQuestion && !resolution.candidatePlates.length) {
+      if (
+        looksLikeVehicleBrandOrUnitSearch(rawText) ||
+        looksLikeLiveUnitConsultIntent(rawText)
+      ) {
+        return false;
+      }
+      return true;
+    }
     if (resolution.candidatePlates.length > 1) {
       // Solo acortar con reglas si la ambigüedad viene del mensaje actual, no del hilo.
       const messageTerms = tokenizeSearchTerms(rawText);
@@ -848,8 +863,14 @@ export async function resolveUnitQuery(params: {
   preferAi?: boolean;
 }): Promise<UnitQueryResolution> {
   const prefixHint = prefixHintFromMessage(params.rawText);
+  const brandOrLiveConsult =
+    looksLikeVehicleBrandOrUnitSearch(params.rawText) ||
+    looksLikeLiveUnitConsultIntent(params.rawText);
   const shouldPreferAi =
-    params.preferAi || !!prefixHint || isBarePlatePrefixHint(params.rawText);
+    params.preferAi ||
+    !!prefixHint ||
+    isBarePlatePrefixHint(params.rawText) ||
+    brandOrLiveConsult;
 
   // Mantenimiento / prefijo: reglas con catálogo completo primero (414 unidades); IA si no alcanza.
   if (shouldPreferAi && prefixHint) {

@@ -425,15 +425,18 @@ export function isMaintenanceFlowSuperseded(
       return hasPendingMantenimientoConfirmation(threadText);
     }
     const gpsUnitCue =
-      /\b(gps|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo)\b/.test(
+      /\b(gps|ignicio|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo)\b/.test(
         current,
       );
     const questionCue =
-      /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta bien|funciona)\b/.test(
+      /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta bien|funciona|ver|consultar|mostrar)\b/.test(
         current,
       ) || current.includes("?");
+    const liveUnitAsk =
+      /\b(quiero|necesito|dame|decime|pasame)\b/.test(current) &&
+      /\b(ignicio|ignicion|reporte|gps|unidad)\b/.test(current);
     const notMaint = !/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(current);
-    if (gpsUnitCue && questionCue && notMaint) return true;
+    if ((gpsUnitCue && questionCue && notMaint) || (liveUnitAsk && notMaint)) return true;
     if (
       notMaint &&
       /\b(certificado|cobertura|odometro|horometro|agenda|opciones|usuarios|listado|mis unidades)\b/.test(
@@ -506,13 +509,17 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
   ]).has(t);
 }
 
-export function looksLikeCertificateUnitReply(text: string): boolean {
+export function looksLikeCertificateUnitReply(text: string, threadText = ""): boolean {
   if (detectLoosePlate(text) || isBarePlatePrefixHint(text)) return true;
   if (extractPlateCorrectionHint(text)) return true;
   const norm = text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+  if (/\b(quiero|necesito|ver|consultar|saber|gps|ignicio|ignicion|reporte|offline|ubicacion)\b/.test(norm)) {
+    return false;
+  }
+  if (certificateFlowState(threadText) !== "awaiting_unit") return false;
   if (/\b(de la|para la|la unidad|unidad)\b/.test(norm) && /[a-z0-9]{2,}/.test(norm)) return true;
   return false;
 }
