@@ -107,12 +107,55 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
 
 /** Prefijo suelto de patente (NKL, HEJ, AG) sin ser patente completa. */
 export function isBarePlatePrefixHint(text: string | undefined | null): boolean {
-  const compact = String(text ?? "")
+  const stripped = String(text ?? "")
     .trim()
-    .replace(/[\s\-_.]+/g, "")
-    .toUpperCase();
+    .replace(/^(la|el|esa|ese)\s+/i, "");
+  const compact = stripped.replace(/[\s\-_.]+/g, "").toUpperCase();
   if (!/^[A-Z]{2,3}\d{0,4}$/.test(compact)) return false;
   return !isPlausibleVehiclePlate(compact);
+}
+
+/** Prefijo de patente en frases como "la AD", "la que comienza con AG", "empieza con NKL". */
+export function extractPlatePrefixFromMessage(rawText: string | undefined | null): string | null {
+  const norm = String(rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return null;
+
+  const correctionHint = extractPlateCorrectionHint(rawText);
+  if (correctionHint) {
+    const compact = correctionHint.replace(/\s+/g, "").toUpperCase();
+    if (compact.length <= 6 && !isPlausibleVehiclePlate(compact)) return compact;
+  }
+
+  if (isBarePlatePrefixHint(rawText)) {
+    return String(rawText ?? "")
+      .trim()
+      .replace(/^(la|el|esa|ese)\s+/i, "")
+      .replace(/[\s\-_.]+/g, "")
+      .toUpperCase();
+  }
+
+  const laQue = norm.match(
+    /\b(?:la|el|esa|ese)\s+(?:q|que)\s+(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z0-9]{2,6})\b/,
+  );
+  if (laQue?.[1]) return laQue[1].replace(/\s+/g, "").toUpperCase();
+
+  const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z0-9]{2,6})/i);
+  if (explicit?.[1]) return explicit[1].replace(/\s+/g, "").toUpperCase();
+
+  const laPrefix = norm.match(/\b(?:la|el|esa|ese)\s+([a-z]{2,3}\d{0,3})\b/);
+  if (laPrefix?.[1]) {
+    const hint = laPrefix[1].replace(/\s+/g, "").toUpperCase();
+    if (!isPlausibleVehiclePlate(hint)) return hint;
+  }
+
+  const paraPatente = norm.match(/\bpatente\b\s+([a-z0-9]{2,6})\b/i);
+  if (paraPatente?.[1]) return paraPatente[1].replace(/\s+/g, "").toUpperCase();
+
+  return null;
 }
 
 /** Patente en el mensaje actual, incluyendo formatos viejos (LWK7902) y respuestas sueltas. */
@@ -170,7 +213,11 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
   if (loose) return loose;
 
   if (isBarePlatePrefixHint(raw)) {
-    return raw.trim().replace(/[\s\-_.]+/g, "").toUpperCase();
+    return String(raw ?? "")
+      .trim()
+      .replace(/^(la|el|esa|ese)\s+/i, "")
+      .replace(/[\s\-_.]+/g, "")
+      .toUpperCase();
   }
   return null;
 }

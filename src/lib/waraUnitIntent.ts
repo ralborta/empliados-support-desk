@@ -6,6 +6,7 @@ import {
   detectPlate,
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
+  extractPlatePrefixFromMessage,
   isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
   looksLikeOdometerIntentStart,
@@ -26,6 +27,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   return (
     !!detectLoosePlate(rawText) ||
     isBarePlatePrefixHint(rawText) ||
+    !!extractPlatePrefixFromMessage(rawText) ||
     !!extractPlateCorrectionHint(rawText) ||
     looksLikeVehicleBrandOrUnitSearch(rawText) ||
     looksLikePlateCorrectionRequest(rawText)
@@ -223,22 +225,7 @@ function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnida
 
 /** Prefijo de patente en frases como "la que empieza con AG". */
 function extractPlatePrefixHint(rawText: string): string | null {
-  const norm = rawText
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const correctionHint = extractPlateCorrectionHint(rawText);
-  if (correctionHint && correctionHint.length <= 5) return correctionHint.toUpperCase();
-  if (isBarePlatePrefixHint(rawText)) {
-    return rawText.trim().replace(/[\s\-_.]+/g, "").toUpperCase();
-  }
-  const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z]{2}\d{0,3})/i);
-  if (explicit?.[1]) return explicit[1].replace(/\s+/g, "").toUpperCase();
-  const paraPatente = norm.match(/\bpatente\b\s+([a-z0-9]{2,6})\b/i);
-  if (paraPatente?.[1]) return paraPatente[1].replace(/\s+/g, "").toUpperCase();
-  const loose = norm.match(/\bcon\s+([a-z]{2})\b/);
-  if (loose?.[1]) return loose[1].toUpperCase();
-  return null;
+  return extractPlatePrefixFromMessage(rawText);
 }
 
 function shouldReuseThreadPlateForResolution(rawText: string): boolean {
@@ -500,7 +487,12 @@ function resolveWithRules(
   const threadPlate = extractLastPlateFromThread(threadText);
   const plateFromMessage =
     detectLoosePlate(rawText) ??
-    extractPlateCorrectionHint(rawText) ??
+    (() => {
+      const hint = extractPlateCorrectionHint(rawText);
+      if (!hint) return "";
+      if (isBarePlatePrefixHint(rawText) || extractPlatePrefixFromMessage(rawText)) return "";
+      return hint;
+    })() ??
     (shouldReuseThreadPlateForResolution(rawText) &&
     threadPlate &&
     isPlausibleVehiclePlate(threadPlate)
@@ -549,14 +541,14 @@ function resolveWithRules(
     }
     if (prefixMatches.length > 1) {
       const labels = prefixMatches
-        .slice(0, 5)
+        .slice(0, 8)
         .map((u) => (u.patente || u.unidad || "").trim())
         .join(", ");
       return {
         intent: "need_clarification",
         searchTerms: [],
         candidatePlates,
-        clarificationQuestion: `Encontré ${prefixMatches.length} unidades que empiezan con ${prefixHint} (${labels}). Decime la patente exacta.`,
+        clarificationQuestion: `Encontré ${prefixMatches.length} unidades que empiezan con ${prefixHint} (${labels}). Decime cuál querés consultar (patente exacta).`,
         source: "rules",
       };
     }
@@ -600,9 +592,12 @@ function resolveWithRules(
   }
 
   return {
-    intent: "consult_status",
+    intent: "need_clarification",
     searchTerms: terms,
     candidatePlates: [],
+    clarificationQuestion: extractPlatePrefixFromMessage(rawText)
+      ? `No encontré unidades con ese prefijo en tu flota. Decime la patente completa (ej. AD 427 MC) o el nombre de la unidad.`
+      : undefined,
     source: "rules",
   };
 }
@@ -723,6 +718,7 @@ function isDecisiveRulesResolution(
   if (resolution.intent === "list_fleet") return true;
   if (resolution.intent === "consult_status" && resolution.plate) return true;
   if (resolution.intent === "need_clarification") {
+    if (extractPlatePrefixFromMessage(rawText)) return true;
     if (isBarePlatePrefixHint(rawText)) return true;
     if (resolution.clarificationQuestion && !resolution.candidatePlates.length) return true;
     if (resolution.candidatePlates.length > 1) {

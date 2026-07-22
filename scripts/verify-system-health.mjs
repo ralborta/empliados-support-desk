@@ -23,6 +23,8 @@ import {
 import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry.ts";
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationClose.ts";
 import { assessUnitReporting } from "../src/lib/waraGpsAssessment.ts";
+import { extractPlatePrefixFromMessage, isBarePlatePrefixHint } from "../src/lib/wara.ts";
+import { resolveUnitQuery } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 
@@ -148,6 +150,22 @@ assert(certificateFlowState(certAwaitUnit) === "awaiting_unit", "estado cert uni
 assert(hasPendingCertificateConfirmation(certAwaitConfirm), "cert pendiente confirm");
 assert(certificateFlowState(certDone) === "none", "cert cerrado");
 assert(!extractPlateCorrectionHint("configuracion de la aenda"), "aenda no es patente");
+
+console.log("— Prefijo de patente post-listado —");
+assert(isBarePlatePrefixHint("La AD"), "La AD es prefijo");
+assert(extractPlatePrefixFromMessage("La q comienza con AD") === "AD", "comienza con AD");
+const fleetUnits = [
+  { movil_id: 1, patente: "AD 427 MC", unidad: "CAMION 1" },
+  { movil_id: 2, patente: "AD 999 XX", unidad: "CAMION 2" },
+];
+const listThread = "Tenés 414 unidades. Algunas: OST 223, AD 427 MC.";
+const laAd = await resolveUnitQuery({
+  rawText: "La AD",
+  threadText: listThread,
+  units: fleetUnits,
+});
+assert(laAd.intent === "need_clarification", "La AD → aclaración con opciones AD");
+assert((laAd.clarificationQuestion ?? "").includes("AD 427 MC"), "La AD lista candidatos");
 
 console.log("— GPS / ignición (lógica de ticket automático) —");
 const unit = (reportSec, posSec, ignSec, ignOn) => ({
