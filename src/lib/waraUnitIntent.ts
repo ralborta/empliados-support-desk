@@ -857,12 +857,10 @@ export async function resolveUnitQuery(params: {
       maintenanceContext: !!params.preferAi,
     });
     if (aiFirst?.intent === "consult_status" && aiFirst.plate) return aiFirst;
-    if (
-      aiFirst?.intent === "need_clarification" &&
-      (aiFirst.candidatePlates.length > 0 || aiFirst.clarificationQuestion)
-    ) {
+    if (aiFirst?.intent === "need_clarification" && aiFirst.candidatePlates.length > 0) {
       return aiFirst;
     }
+    // IA vaga (sin patentes del catálogo) → reglas con prefijo/filtro determinístico.
   }
 
   const rules = resolveWithRules(params.rawText, params.threadText, params.units);
