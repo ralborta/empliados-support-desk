@@ -45,14 +45,22 @@ function norm(text: string): string {
 }
 
 function looksLikeCertificateIntent(text: string, threadText: string): boolean {
+  const nText = norm(text);
   if (
     looksLikeNonOdometerOperationalIntent(text) &&
-    /\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm(text))
+    /\b(certificado|cobertura|monitoreo|constancia)\b/.test(nText)
   ) {
     return true;
   }
-  const blob = norm(`${threadText}\n${text}`);
-  return /\b(certificado|cobertura|constancia|monitoreo)\b/.test(blob);
+  if (
+    /\b(certificado|cobertura|constancia|monitoreo|reenvi\w*\s+certificado|certificado\s+nuevo)\b/.test(
+      nText,
+    )
+  ) {
+    return true;
+  }
+  // El hilo solo cuenta mientras el trámite de certificado sigue activo (unidad o confirmación).
+  return certificateFlowState(threadText) !== "none";
 }
 
 function looksLikeOdometerIntent(text: string, threadText: string): boolean {

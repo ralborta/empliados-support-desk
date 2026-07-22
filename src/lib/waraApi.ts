@@ -326,12 +326,24 @@ export function looksLikeOpcionesInfoRequest(text: string | undefined | null): b
   if (/\b(mantenimiento|preventiv|correctiv|odometro|horometro|certificado)\b/.test(t) && !/\b(agenda|contacto|notific|perfil|opciones)\b/.test(t)) {
     return false;
   }
-  return /\b(agenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base|configurar una alarma|configurar alarma)\b/.test(
+  if (
+    /\b(usuarios?|usuario)\b/.test(t) &&
+    /\b(empresa|perfil|perfiles|opciones|ver|listar|mostrar|mi empresa)\b/.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /\b(configuracion|configurar)\b/.test(t) &&
+    /\b(aenda|agenda|contacto|contactos|opciones|perfil|perfiles|usuario|usuarios|notific)\b/.test(t)
+  ) {
+    return true;
+  }
+  return /\b(agenda|aenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base|configurar una alarma|configurar alarma)\b/.test(
     t
   ) ||
     (/\b(me ayudas|ayudame|ayudarme|podes ayudar|pod[eé]s ayudar)\b/.test(t) &&
-      /\b(agenda|opciones|contacto|notific|perfil|alarma)\b/.test(t)) ||
-    (/\bcomo funciona\b/.test(t) && /\b(agenda|opciones|contacto|notific|perfil)\b/.test(t));
+      /\b(agenda|aenda|opciones|contacto|notific|perfil|alarma|configuracion|configurar)\b/.test(t)) ||
+    (/\bcomo funciona\b/.test(t) && /\b(agenda|aenda|opciones|contacto|notific|perfil)\b/.test(t));
 }
 
 export function looksLikeOpcionesGuideInThread(threadText: string): boolean {

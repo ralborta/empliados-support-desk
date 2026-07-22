@@ -125,6 +125,15 @@ export function detectLoosePlate(text: string): string | null {
   return null;
 }
 
+function isLikelyPlateOrPrefixToken(hint: string): boolean {
+  const token = hint.replace(/\s+/g, "").toUpperCase();
+  if (!token || token.length < 2) return false;
+  if (isPlausibleVehiclePlate(token)) return true;
+  if (isBarePlatePrefixHint(token)) return true;
+  if (/^[A-Z]{2,3}\d{0,4}$/.test(token)) return true;
+  return false;
+}
+
 /** Extrae patente o prefijo indicado en una corrección ("no la LWK", "no para la patente LW"). */
 export function extractPlateCorrectionHint(text: string | undefined | null): string | null {
   const raw = String(text ?? "").trim();
@@ -133,6 +142,13 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+
+  if (
+    /\b(configuracion|configurar)\b/.test(norm) &&
+    /\b(aenda|agenda|contacto|contactos|opciones|perfil|perfiles|usuario|usuarios)\b/.test(norm)
+  ) {
+    return null;
+  }
 
   const patterns = [
     /\b(?:de la|para la)\b\s+([a-z0-9]{2,12})\b/i,
@@ -146,7 +162,7 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
     const m = norm.match(re);
     if (m?.[1]) {
       const hint = m[1].replace(/\s+/g, "").toUpperCase();
-      if (hint.length >= 2) return hint;
+      if (hint.length >= 2 && isLikelyPlateOrPrefixToken(hint)) return hint;
     }
   }
 

@@ -184,6 +184,19 @@ export async function handleWhatsAppTurn(params: {
   }
 
   const execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
+  if (String(execResult.delegatedTo_s ?? execResult.delegatedTo ?? "") === "bbc_router") {
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(context, {
+        nextFlow: "router",
+        nextFlow_s: "router",
+        message: "",
+        skipResponse_s: "true",
+        executor: "bbc_router",
+        executor_s: "bbc_router",
+      }),
+    );
+  }
   const execMessage = messageFromPayload(execResult);
   const execOk = execResult.ok !== false && execResult.ok_s !== "false";
   const execSkip = String(execResult.skipResponse_s ?? "") === "true";

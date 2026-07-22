@@ -80,7 +80,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        'CAMBIO DE TEMA — GUÍA OPCIONES/AGENDA (PRIORIDAD SOBRE ODÓMETRO PENDIENTE). El mensaje actual pide ayuda o explicación sobre Agenda, contactos, Perfiles, Notificaciones u Opciones de Wara ("me ayudas con la agenda", "cómo funciona la agenda", "cómo agrego un contacto", etc.), aunque en el historial haya un trámite de odómetro sin confirmar o un resumen "Voy a registrar" pendiente. NO es confirmación de odómetro ni aporte de patente/km/fecha. Va a Info Opciones. PROHIBIDO flujo Cambio Odómetro y PROHIBIDO Ejecutar Odómetro.',
+        'CAMBIO DE TEMA — GUÍA OPCIONES/AGENDA (PRIORIDAD SOBRE ODÓMETRO, CERTIFICADO Y CAMBIAR EMPRESA). El mensaje actual pide ayuda o explicación sobre Agenda, contactos, Perfiles, usuarios de la empresa, permisos, Notificaciones u Opciones de Wara ("me ayudas con la agenda", "configuración de la agenda", typo "aenda", "cómo funciona la agenda", "cómo agrego un contacto", "puedo ver los usuarios de mi empresa", "ver usuarios/perfiles de la empresa"), aunque en el historial haya certificado reciente, odómetro sin confirmar o resumen "Voy a registrar" pendiente. NO es confirmación operativa ni patente/prefijo. Va a Info Opciones. PROHIBIDO certificados, consulta unidad, cambiar empresa y odómetro.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.infoOpciones,
@@ -164,7 +164,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        'EMPRESAS EN WARA — El cliente pregunta qué empresas tiene asociadas a su teléfono, cuáles empresas, "qué empresas tengo", lista de empresas. NO es consulta de unidades, flota ni patente.',
+        'EMPRESAS EN WARA — Solo cuando pregunta explícitamente qué/cuáles/cuántas empresas tiene asociadas al teléfono o pide listar empresas vinculadas ("qué empresas tengo", "cuáles empresas tengo"). PROHIBIDO si pregunta por usuarios, contactos, perfiles, agenda u opciones dentro de SU empresa (va a guía Opciones). PROHIBIDO si menciona "mi empresa" para ver usuarios o configurar agenda. NO es consulta de unidades, flota ni patente.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.cambiarEmpresa,
@@ -206,7 +206,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        'GUÍA OPCIONES WARA — PRIORIDAD SOBRE MANTENIMIENTO Y CONSULTA. La intención es ENTENDER o CONFIGURAR el módulo Opciones (Agenda, contactos, Perfiles, permisos, Notificaciones, alertas, alarmas, destinos, eventos). Incluye: "cómo agrego/añado un contacto", "cómo configuro una notificación/alerta/alarma", "no me llega el mail/la alerta", "qué es un perfil", "dónde está la agenda". PROHIBIDO si pide ejecutar odómetro, certificado, consulta de unidad/reporte en vivo, mantenimiento operativo real o ticket/reclamo. PROHIBIDO si solo pregunta cómo funciona el módulo de mantenimiento.',
+        'GUÍA OPCIONES WARA — PRIORIDAD SOBRE MANTENIMIENTO Y CONSULTA. La intención es ENTENDER o CONFIGURAR el módulo Opciones (Agenda, contactos, Perfiles, usuarios de la empresa, permisos, Notificaciones, alertas, alarmas, destinos, eventos). Incluye: "cómo agrego/añado un contacto", "cómo configuro una notificación/alerta/alarma", "no me llega el mail/la alerta", "qué es un perfil", "dónde está la agenda", "configuración de la agenda" (incluso typo "aenda"), "puedo ver los usuarios de mi empresa". PROHIBIDO si pide ejecutar odómetro, certificado, consulta de unidad/reporte en vivo, mantenimiento operativo real o ticket/reclamo. PROHIBIDO si solo pregunta cómo funciona el módulo de mantenimiento.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.infoOpciones,

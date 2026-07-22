@@ -10,7 +10,9 @@ import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, i
 import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
+  looksLikeOpcionesInfoRequest,
   looksLikePlateCorrectionRequest,
+  looksLikeUnidadesInfoRequest,
   looksLikeVehicleBrandOrUnitSearch,
   isWaraPlateValidationError,
   obtenerCertificadoCobertura,
@@ -577,6 +579,24 @@ export async function POST(req: NextRequest) {
 
   const threadText = await recentThreadText(rawPhone);
   const certState = certificateFlowState(threadText);
+
+  if (
+    certState === "none" &&
+    !isGenericCertificateRequest(text) &&
+    (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text))
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message: "",
+        skipResponse_s: "true",
+        delegatedTo: "bbc_router",
+        delegatedTo_s: "bbc_router",
+      },
+      { status: BB_STATUS },
+    );
+  }
   const genericNewRequest =
     isGenericCertificateRequest(text) &&
     !normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) &&
