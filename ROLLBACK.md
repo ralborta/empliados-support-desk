@@ -142,3 +142,5 @@ Consultá con el equipo antes de revertir más de un día de trabajo.
 - [ ] Variable `WARA_INBOUND_AUDIT_ONLY` documentada en Vercel
 - [ ] Este archivo leído por quien opera la demo
 - [ ] Snapshot de flows BBC exportado (cuando empiece Fase 1)
+- [ ] Deploy backend con `/api/whatsapp/turn` (`docs/FASE-1.md`)
+- [ ] `npm run sync-builderbot-inicio-turn` (rollback: `sync-builderbot-inicio-post.mjs`)

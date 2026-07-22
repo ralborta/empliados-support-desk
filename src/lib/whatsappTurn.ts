@@ -1,0 +1,177 @@
+import { NextRequest, NextResponse } from "next/server";
+import { POST as odooTicketPost } from "@/app/api/odoo/ticket/route";
+import { POST as certificadosPost } from "@/app/api/wara/certificados/route";
+import { POST as mantenimientoPost } from "@/app/api/wara/mantenimiento-operativo/route";
+import { POST as odometroPost } from "@/app/api/wara/odometro-horometro/route";
+import { POST as unidadesPost } from "@/app/api/wara/unidades/route";
+import { customerRegisteredContextResponse } from "@/lib/builderbotCustomerContext";
+import { recentThreadTextForPhone } from "@/lib/conversationThread";
+import { allowPhoneRequest } from "@/lib/phoneRateLimit";
+import { bbcShouldSendExecutorMessage } from "@/lib/waraInboundAudit";
+import {
+  classifyTurnExecutor,
+  TURN_EXECUTOR_PATH,
+  type TurnExecutorId,
+} from "@/lib/whatsappTurnRouter";
+
+type JsonRecord = Record<string, unknown>;
+
+type ExecutorHandler = (req: NextRequest) => Promise<NextResponse>;
+
+const EXECUTOR_HANDLERS: Record<Exclude<TurnExecutorId, "bbc_router">, ExecutorHandler> = {
+  unidades: unidadesPost,
+  odometro: odometroPost,
+  certificados: certificadosPost,
+  mantenimiento: mantenimientoPost,
+  odoo_ticket: odooTicketPost,
+};
+
+function executorBody(rawPhone: string, body: string): JsonRecord {
+  return {
+    from: rawPhone,
+    phone: rawPhone,
+    body,
+    rawText: body,
+  };
+}
+
+async function invokeExecutor(
+  executor: Exclude<TurnExecutorId, "bbc_router">,
+  rawPhone: string,
+  body: string,
+  apiKey: string,
+): Promise<JsonRecord> {
+  const handler = EXECUTOR_HANDLERS[executor];
+  const req = new NextRequest(`http://internal${TURN_EXECUTOR_PATH[executor]}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify(executorBody(rawPhone, body)),
+  });
+  const res = await handler(req);
+  return (await res.json().catch(() => ({}))) as JsonRecord;
+}
+
+function messageFromPayload(data: JsonRecord): string {
+  const message = String(data.message ?? data.summaryText ?? "").trim();
+  return message;
+}
+
+function buildTurnPayload(
+  context: JsonRecord,
+  overrides: Partial<JsonRecord> = {},
+): JsonRecord {
+  const nextFlow = String(overrides.nextFlow ?? context.nextFlow ?? "reply");
+  const message = String(overrides.message ?? context.message ?? "").trim();
+  const skipResponse =
+    overrides.skipResponse_s ??
+    (message ? (bbcShouldSendExecutorMessage() ? "false" : "true") : "true");
+
+  return {
+    ...context,
+    ok: overrides.ok ?? true,
+    ok_s: String(overrides.ok_s ?? (overrides.ok === false ? "false" : "true")),
+    message,
+    skipResponse_s: skipResponse,
+    flowComplete_s: overrides.flowComplete_s ?? "true",
+    nextFlow,
+    nextFlow_s: String(overrides.nextFlow_s ?? nextFlow),
+    ...overrides,
+  };
+}
+
+/**
+ * Fase 1 — un turno WhatsApp: contexto + ejecutor backend (sin Router BBC).
+ */
+export async function handleWhatsAppTurn(params: {
+  rawPhone: string;
+  body: string;
+  apiKey: string;
+}): Promise<JsonRecord> {
+  const { rawPhone, body, apiKey } = params;
+  const selectionText = body.trim();
+
+  if (!allowPhoneRequest(rawPhone, 20)) {
+    return buildTurnPayload(
+      { registered: true, registered_s: "true" },
+      {
+        ok: false,
+        ok_s: "false",
+        nextFlow: "reply",
+        nextFlow_s: "reply",
+        message: "Recibí muchas solicitudes seguidas. Esperá un momento e intentá de nuevo.",
+        executor: "rate_limit",
+        executor_s: "rate_limit",
+      },
+    );
+  }
+
+  const contextRes = await customerRegisteredContextResponse(rawPhone, {
+    selectionText: selectionText || undefined,
+  });
+  const context = (await contextRes.json().catch(() => ({}))) as JsonRecord;
+  const contextNextFlow = String(context.nextFlow ?? "derivar");
+
+  if (contextNextFlow === "ignore") {
+    return buildTurnPayload(context, {
+      message: "",
+      skipResponse_s: "true",
+      nextFlow: "ignore",
+      nextFlow_s: "ignore",
+      executor: "context",
+      executor_s: "context",
+    });
+  }
+
+  if (contextNextFlow === "derivar") {
+    return buildTurnPayload(context, {
+      nextFlow: "derivar",
+      nextFlow_s: "derivar",
+      executor: "context",
+      executor_s: "context",
+    });
+  }
+
+  if (contextNextFlow === "reply") {
+    return buildTurnPayload(context, {
+      nextFlow: "reply",
+      nextFlow_s: "reply",
+      executor: "context",
+      executor_s: "context",
+    });
+  }
+
+  // router → backend clasifica y ejecuta
+  const threadHint = await recentThreadTextForPhone(rawPhone);
+  const executor = classifyTurnExecutor(selectionText, threadHint);
+
+  if (executor === "bbc_router") {
+    return buildTurnPayload(context, {
+      nextFlow: "router",
+      nextFlow_s: "router",
+      executor: "bbc_router",
+      executor_s: "bbc_router",
+    });
+  }
+
+  const execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
+  const execMessage = messageFromPayload(execResult);
+  const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+
+  return buildTurnPayload(context, {
+    ok: execOk,
+    ok_s: execOk ? "true" : "false",
+    message: execMessage || String(context.message ?? ""),
+    skipResponse_s:
+      execResult.skipResponse_s ??
+      (execMessage ? (bbcShouldSendExecutorMessage() ? "false" : "true") : "true"),
+    flowComplete_s: execResult.flowComplete_s ?? "true",
+    nextFlow: "reply",
+    nextFlow_s: "reply",
+    executor,
+    executor_s: executor,
+    executorResult: execResult,
+  });
+}

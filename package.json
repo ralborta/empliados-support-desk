@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
-    "sync-builderbot-maestro": "node scripts/sync-builderbot-maestro.mjs"
+    "sync-builderbot-maestro": "node scripts/sync-builderbot-maestro.mjs",
+    "sync-builderbot-inicio-turn": "node scripts/sync-builderbot-inicio-turn.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.1",
