@@ -11,6 +11,7 @@ import {
   hasPendingMaintenancePlateRequest,
   hasPendingMantenimientoConfirmation,
   looksLikeBriefConfirmation,
+  threadTextSinceCompanySelection,
 } from "../src/lib/wara.ts";
 import {
   looksLikeChangeCompanyRequest,
@@ -41,7 +42,9 @@ function assert(cond, label) {
 }
 
 function route(text, thread = "") {
-  return classifyTurnExecutor(text, thread);
+  const scoped = thread ? threadTextSinceCompanySelection(thread) : "";
+  const classificationThread = scoped.trim() ? `${scoped}\n${text}`.trim() : text;
+  return classifyTurnExecutor(text, classificationThread);
 }
 
 const certAwaitUnit = "Para el certificado de cobertura necesito la unidad: decime la patente";
@@ -67,16 +70,16 @@ const routing = [
   ["NKL", certAwaitUnit, "certificados"],
   ["CONFIRMO", certAwaitConfirm, "certificados"],
   ["como esta la ignicion de AE 483 VE", certDone, "unidades"],
-  ["configuracion de la aenda", certDone, "bbc_router"],
-  ["puedo ver los usuarios de mi empresa", certDone, "bbc_router"],
+  ["configuracion de la aenda", certDone, "info_guides"],
+  ["puedo ver los usuarios de mi empresa", certDone, "info_guides"],
   ["como esta la ignicion de AE 483 VE", "", "unidades"],
   ["listame mis unidades", "", "unidades"],
   ["quiero cambiar el odometro de LWK 7902", "", "odometro"],
-  ["me ayudas con la agenda", odoPending, "bbc_router"],
+  ["me ayudas con la agenda", odoPending, "info_guides"],
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
   ["Quiero programar un mantenimiento", "", "mantenimiento"],
-  ["como funciona el modulo de mantenimiento", "", "bbc_router"],
-  ["Quiero saber sobre mantenimiento", "", "bbc_router"],
+  ["como funciona el modulo de mantenimiento", "", "info_guides"],
+  ["Quiero saber sobre mantenimiento", "", "info_guides"],
 ];
 for (const [text, thread, expect] of routing) {
   assert(route(text, thread) === expect, `routing "${text}" → ${expect}`);
@@ -160,6 +163,26 @@ const longMaintThread = [
 assert(hasPendingMantenimientoConfirmation(longMaintThread), "confirm pendiente hilo largo");
 assert(route("Confirmo", longMaintThread) === "mantenimiento", "Confirmo → mantenimiento");
 
+const maintConfirmThread = [
+  "Voy a registrar:",
+  "Patente: AD427MC",
+  "Tipo: Plan de mantenimiento",
+  "Prioridad: normal",
+  "Detalle: Mantenimiento preventivo para AD 427 MC",
+  "Si esta correcto, responde CONFIRMO para registrarlo.",
+].join("\n");
+assert(hasPendingMantenimientoConfirmation(maintConfirmThread), "resumen mantenimiento pendiente");
+assert(route("Confirmo", maintConfirmThread) === "mantenimiento", "Confirmo resumen mantenimiento");
+assert(
+  route("Como puedo saber si esta marcado bien el GPS?", maintConfirmThread) === "unidades",
+  "GPS tras mantenimiento NO reusa trámite",
+);
+assert(
+  route("Como puedo saber si esta marcado bien el GPS?", maintConfirmThread + "\nHola Raúl, seguimos por acá.") ===
+    "unidades",
+  "GPS tras hola + mantenimiento pendiente → unidades",
+);
+
 console.log("— Derivación (asesor / casos / NO derivar de más) —");
 const derivation = [
   ["hablar con un asesor", "odoo_ticket"],
@@ -172,11 +195,24 @@ const derivation = [
   ["la unidad no reporta AE 483 VE", "unidades"],
   ["tengo un problema con el gps", "unidades"],
   ["ultimo reporte NKL 961", "unidades"],
-  ["configuracion de la aenda", "bbc_router"],
+  ["quiero hacer un reclamo", "odoo_ticket"],
+  ["necesito abrir un ticket", "odoo_ticket"],
+  ["problema con la factura", "odoo_ticket"],
+  ["no puedo entrar a la plataforma", "odoo_ticket"],
+  ["asesor", "odoo_ticket"],
+  ["configuracion de la aenda", "info_guides"],
 ];
 for (const [text, expect] of derivation) {
   assert(route(text) === expect, `derivación "${text}" → ${expect}`);
 }
+
+const advisorThread = [
+  "Listo, generé el caso N° 12345 y un asesor de Atención al cliente lo va a revisar.",
+  "¿Querés sumar algo más al reclamo?",
+].join("\n");
+assert(route("confirmo", advisorThread) === "unidades", "confirmo post-asesor NO re-deriva");
+assert(route("dale", advisorThread) === "unidades", "dale post-asesor NO re-deriva");
+assert(route("gracias", advisorThread) === "unidades", "gracias post-asesor NO re-deriva");
 
 assert(looksLikeHumanAdvisorRequest("escalar a un operador por favor"), "detecta escalar+operador");
 assert(looksLikeHumanAdvisorRequest("hablar con un asesor"), "detecta hablar con asesor");

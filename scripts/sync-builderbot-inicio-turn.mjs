@@ -71,8 +71,7 @@ async function main() {
   const inicioRules = [
     { conditionRule: "nextFlow_s", conditionValue: "derivar", condition: "===", conditionFlowId: FLOWS.derivar },
     { conditionRule: "nextFlow_s", conditionValue: "ignore", condition: "===", conditionFlowId: FLOWS.ignorar },
-    { conditionRule: "nextFlow_s", conditionValue: "router", condition: "===", conditionFlowId: FLOWS.router },
-    // reply → BBC envía messageMapping; NO usar skipResponse_s→Ignorar (bloqueaba Router)
+    // router → /turn ya ejecutó el trámite; BBC solo envía message (Fase 1 completa, sin Router GPT).
   ];
 
   const transport = new SSEClientTransport(new URL(sseUrl), {

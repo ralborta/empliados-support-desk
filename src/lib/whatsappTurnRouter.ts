@@ -1,5 +1,6 @@
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
+import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import {
   certificateFlowState,
   detectIncidentType,
@@ -10,14 +11,20 @@ import {
   hasPendingMantenimientoConfirmation,
   hasPendingOdometerConfirmation,
   isBarePlatePrefixHint,
+  isMaintenanceFlowSuperseded,
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
+  looksLikePostAdvisorCaseThread,
   looksLikeCertificateUnitReply,
   threadAwaitingOdometerPlate,
 } from "@/lib/wara";
 import {
+  looksLikeConversationAcknowledgement,
+  looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
   looksLikeMaintenanceCapabilityQuestion,
+  looksLikeSubstantiveCustomerMessage,
   looksLikeMaintenanceGuideContextInThread,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeMaintenanceInfoRequest,
@@ -33,14 +40,14 @@ import {
 } from "@/lib/waraApi";
 import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 
-/** Ejecutores HTTP del backend (Fase 1). `bbc_router` = flujos informativos aún en BBC. */
+/** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
 export type TurnExecutorId =
   | "unidades"
   | "odometro"
   | "certificados"
   | "mantenimiento"
   | "odoo_ticket"
-  | "bbc_router";
+  | "info_guides";
 
 function norm(text: string): string {
   return text
@@ -74,6 +81,15 @@ function looksLikeOdometerIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeMaintenanceOperational(text: string, threadText: string): boolean {
+  if (isMaintenanceFlowSuperseded(threadText, text)) return false;
+  if (looksLikeGpsOrUnitStatusQuestion(text)) return false;
+  const incident = detectIncidentType(text);
+  if (
+    incident !== "OTHER" &&
+    !/\b(mantenimiento|preventiv|correctiv|tarea|plan|service|taller|reparacion)\b/.test(norm(text))
+  ) {
+    return false;
+  }
   if (looksLikeOperationalMaintenanceIntent(text, threadText)) return true;
   if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return false;
@@ -87,6 +103,9 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
     !/\b(patente|matricula)\b/.test(blob) &&
     !looksLikeMaintenanceCapabilityQuestion(text, threadText)
   ) {
+    return false;
+  }
+  if (!/\b(mantenimiento|preventiv|correctiv|service|taller|reparacion)\b/.test(norm(text))) {
     return false;
   }
   return /\b(mantenimiento|preventiv|correctiv|service|taller|reparaci[oó]n)\b/.test(blob);
@@ -135,30 +154,44 @@ function isUnitSelectionMessage(text: string): boolean {
  */
 export function classifyTurnExecutor(selectionText: string, threadText: string): TurnExecutorId {
   const text = selectionText.trim();
-  const blob = `${threadText}\n${text}`;
 
   if (looksLikeUnitListRequest(text)) return "unidades";
   if (looksLikeCustomerConversationCloseRequest(text)) return "odoo_ticket";
   if (looksLikeOpenCaseStatusInquiry(text)) return "odoo_ticket";
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
+  if (looksLikeExplicitReclamoOrTicketRequest(text)) return "odoo_ticket";
 
-  // Patente/prefijo tras pedido de mantenimiento — ANTES que BBC (si no, AD queda mudo en bbc_router).
+  // Patente/prefijo tras pedido de mantenimiento — ANTES que guías informativas.
   if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) {
     return "mantenimiento";
   }
 
-  // Guías informativas → BBC (Opciones, Unidades, Mantenimiento informativo)
-  if (looksLikeBbcInfoGuide(text, threadText)) return "bbc_router";
+  // Guías informativas → backend (Opciones, Unidades, Mantenimiento informativo)
+  if (looksLikeBbcInfoGuide(text, threadText)) return "info_guides";
 
-  // Confirmaciones pendientes (prioridad sobre nueva intención)
-  if (hasPendingCertificateConfirmation(threadText) && looksLikeBriefConfirmation(text)) {
-    return "certificados";
+  // Confirmaciones pendientes — resolver único (cert → odo → maint)
+  const pendingConfirmExecutor = resolvePendingConfirmationExecutor(threadText, text);
+  if (pendingConfirmExecutor) return pendingConfirmExecutor;
+  if (
+    hasPendingMantenimientoConfirmation(threadText) &&
+    looksLikeSubstantiveCustomerMessage(text) &&
+    !looksLikeBriefConfirmation(text)
+  ) {
+    if (looksLikeGpsOrUnitStatusQuestion(text) || detectIncidentType(text) !== "OTHER") {
+      return "unidades";
+    }
   }
-  if (hasPendingOdometerConfirmation(threadText) && looksLikeBriefConfirmation(text)) {
-    return "odometro";
-  }
-  if (hasPendingMantenimientoConfirmation(threadText) && looksLikeBriefConfirmation(text)) {
-    return "mantenimiento";
+
+  // Tras caso/asesor informado: no re-abrir Odoo por "confirmo"/"dale"/"gracias" ni por palabras del hilo.
+  if (
+    looksLikePostAdvisorCaseThread(threadText) &&
+    (looksLikeConversationAcknowledgement(text) ||
+      (looksLikeBriefConfirmation(text) &&
+        !hasPendingCertificateConfirmation(threadText) &&
+        !hasPendingOdometerConfirmation(threadText) &&
+        !hasPendingMantenimientoConfirmation(threadText)))
+  ) {
+    return "unidades";
   }
 
   // Certificado: pedido explícito o respuesta de unidad tras "necesito la unidad"
@@ -184,24 +217,30 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
 
   if (looksLikeMaintenanceOperational(text, threadText)) return "mantenimiento";
 
+  const incident = detectIncidentType(text);
+  if (incident === "ADMIN_DERIVATION" || incident === "ACCESS_PLATFORM") {
+    return "odoo_ticket";
+  }
+
   if (
     detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
-    detectIncidentType(text) !== "OTHER" ||
+    incident !== "OTHER" ||
     looksLikeOperationalIntent(text)
   ) {
     return "unidades";
   }
 
-  if (/\b(reclamo|ticket|caso|problema|falla|aver[ií]a)\b/i.test(blob)) return "odoo_ticket";
+  if (/\b(reclamo|ticket|caso|problema|falla|aver[ií]a)\b/i.test(text)) return "odoo_ticket";
 
   return "unidades";
 }
 
-export const TURN_EXECUTOR_PATH: Record<Exclude<TurnExecutorId, "bbc_router">, string> = {
+export const TURN_EXECUTOR_PATH: Record<TurnExecutorId, string> = {
   unidades: "/api/wara/unidades",
   odometro: "/api/wara/odometro-horometro",
   certificados: "/api/wara/certificados",
   mantenimiento: "/api/wara/mantenimiento-operativo",
   odoo_ticket: "/api/odoo/ticket",
+  info_guides: "/api/wara/info-guides",
 };

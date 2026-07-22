@@ -387,15 +387,95 @@ export function hasPendingCertificateConfirmation(threadText: string): boolean {
   return certificateFlowState(threadText) === "awaiting_confirm";
 }
 
+function normThreadText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
-  const tail = threadText.slice(-4000).toLowerCase();
-  if (/deje registrada|registro registrado|mantenimiento registrado/.test(tail.slice(-600))) {
+  const tail = normThreadText(threadText.slice(-4000));
+  if (/deje registrada|registro registrado|mantenimiento registrado|listo,\s*registr/.test(tail.slice(-800))) {
     return false;
   }
   const summaryStart = tail.lastIndexOf("voy a registrar:");
   if (summaryStart === -1) return false;
   const block = tail.slice(summaryStart, summaryStart + 1200);
-  return /responde\s+confirmo/.test(block);
+  if (/odometro|horometro|kilometraje/.test(block)) return false;
+  return /tipo:/.test(block) && /responde\s+confirmo/.test(block);
+}
+
+/**
+ * El cliente cambió de tema (GPS, certificado, saludo, etc.) tras un trámite de mantenimiento.
+ * Similar a isOdometerFlowSuperseded: el hilo conserva contexto pero el trámite queda abandonado.
+ */
+export function isMaintenanceFlowSuperseded(
+  threadText: string,
+  currentText?: string | null,
+): boolean {
+  if (!threadText.trim()) return false;
+  const current = normThreadText(String(currentText ?? "").trim());
+  if (current) {
+    if (
+      /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|que tal)$/.test(
+        current.replace(/\s+/g, " "),
+      )
+    ) {
+      return hasPendingMantenimientoConfirmation(threadText);
+    }
+    const gpsUnitCue =
+      /\b(gps|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo)\b/.test(
+        current,
+      );
+    const questionCue =
+      /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta bien|funciona)\b/.test(
+        current,
+      ) || current.includes("?");
+    const notMaint = !/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(current);
+    if (gpsUnitCue && questionCue && notMaint) return true;
+    if (
+      notMaint &&
+      /\b(certificado|cobertura|odometro|horometro|agenda|opciones|usuarios|listado|mis unidades)\b/.test(
+        current,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  const lower = normThreadText(threadText);
+  const markers = [
+    lower.lastIndexOf("voy a registrar:"),
+    lower.lastIndexOf("decime la patente de la unidad"),
+    lower.lastIndexOf("para registrar el mantenimiento necesito la patente"),
+    lower.lastIndexOf("para programar mantenimiento preventivo necesito la patente"),
+  ].filter((i) => i >= 0);
+  if (markers.length === 0) return false;
+  const after = normThreadText(threadText.slice(Math.max(...markers) + 60));
+  if (!after.trim()) return false;
+  return (
+    /\b(certificado|cobertura|odometro|horometro)\b/.test(after) ||
+    (/\b(gps|ignicion|como puedo saber|marcado bien)\b/.test(after) &&
+      !/\bconfirmo\b/.test(after.slice(-80)))
+  );
+}
+
+/** Hilo reciente donde ya se informó caso/asesor — evita re-derivar por palabras del historial. */
+export function looksLikePostAdvisorCaseThread(threadText: string | undefined | null): boolean {
+  const tail = String(threadText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .slice(-2800);
+  if (!tail.trim()) return false;
+  return (
+    /ya ten[eé]s el caso/.test(tail) ||
+    /gener[eé] el caso n[°º]?\s*\d+/.test(tail) ||
+    /caso n[°º]?\s*\d+.{0,120}(revisi[oó]n|asesor)/.test(tail) ||
+    /asesor.{0,100}(contact|revis|va a)/.test(tail) ||
+    /un asesor de atenci[oó]n al cliente/.test(tail)
+  );
 }
 
 /** Aceptación breve tipo CONFIRMO / sí / dale / ok. */

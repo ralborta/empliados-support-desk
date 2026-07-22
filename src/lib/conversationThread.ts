@@ -1,5 +1,21 @@
 import { prisma } from "@/lib/db";
+import { threadTextSinceCompanySelection } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+
+/** Contexto de hilo único para context + classify + ejecutores. */
+export type TurnThreadContext = {
+  /** Mensajes persistidos (panel), hasta `take` entradas. */
+  fullThread: string;
+  /** Solo desde la última selección / cambio de empresa. */
+  scopedThread: string;
+  /**
+   * Hilo para clasificar intención: scoped + turno actual.
+   * Evita perder confirmaciones cuando el inbound aún no se persistió.
+   */
+  classificationThread: string;
+};
+
+const DEFAULT_THREAD_TAKE = 48;
 
 function normTurnText(value: string): string {
   return value
@@ -71,8 +87,39 @@ export async function recentLastInboundTextForPhone(
   }
 }
 
+function buildClassificationThread(scopedThread: string, selectionText: string): string {
+  const trimmed = selectionText.trim();
+  if (!trimmed) return scopedThread;
+  const normTail = scopedThread
+    .slice(-Math.max(trimmed.length * 2, 120))
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const normMsg = trimmed
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (normTail.endsWith(normMsg)) return scopedThread;
+  return `${scopedThread}\n${trimmed}`.trim();
+}
+
+/**
+ * Carga hilo unificado para un turno WhatsApp.
+ * Usar SIEMPRE este helper en /turn (no mezclar full vs scoped ad hoc).
+ */
+export async function loadTurnThreadContext(
+  rawPhone: string,
+  selectionText = "",
+  take = DEFAULT_THREAD_TAKE,
+): Promise<TurnThreadContext> {
+  const fullThread = await recentThreadTextForPhone(rawPhone, take);
+  const scopedThread = threadTextSinceCompanySelection(fullThread);
+  const classificationThread = buildClassificationThread(scopedThread, selectionText);
+  return { fullThread, scopedThread, classificationThread };
+}
+
 /** Texto reciente del ticket del cliente (mensajes persistidos en el panel). */
-export async function recentThreadTextForPhone(rawPhone: string, take = 24): Promise<string> {
+export async function recentThreadTextForPhone(rawPhone: string, take = DEFAULT_THREAD_TAKE): Promise<string> {
   try {
     const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
     if (!customer) return "";

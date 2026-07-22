@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { POST as odooTicketPost } from "@/app/api/odoo/ticket/route";
 import { POST as certificadosPost } from "@/app/api/wara/certificados/route";
+import { POST as infoGuidesPost } from "@/app/api/wara/info-guides/route";
 import { POST as mantenimientoPost } from "@/app/api/wara/mantenimiento-operativo/route";
 import { POST as odometroPost } from "@/app/api/wara/odometro-horometro/route";
 import { POST as unidadesPost } from "@/app/api/wara/unidades/route";
 import { customerRegisteredContextResponse } from "@/lib/builderbotCustomerContext";
-import { recentThreadTextForPhone } from "@/lib/conversationThread";
+import { loadTurnThreadContext } from "@/lib/conversationThread";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import {
@@ -15,6 +16,8 @@ import {
 } from "@/lib/whatsappTurnRouter";
 import {
   buildUnexpectedTurnFallbackMessage,
+  looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeGpsOrUnitStatusQuestion,
   looksLikeSubstantiveCustomerMessage,
 } from "@/lib/waraApi";
 import {
@@ -31,12 +34,13 @@ type JsonRecord = Record<string, unknown>;
 
 type ExecutorHandler = (req: NextRequest) => Promise<NextResponse>;
 
-const EXECUTOR_HANDLERS: Record<Exclude<TurnExecutorId, "bbc_router">, ExecutorHandler> = {
+const EXECUTOR_HANDLERS: Record<TurnExecutorId, ExecutorHandler> = {
   unidades: unidadesPost,
   odometro: odometroPost,
   certificados: certificadosPost,
   mantenimiento: mantenimientoPost,
   odoo_ticket: odooTicketPost,
+  info_guides: infoGuidesPost,
 };
 
 function executorBody(rawPhone: string, body: string): JsonRecord {
@@ -49,7 +53,7 @@ function executorBody(rawPhone: string, body: string): JsonRecord {
 }
 
 async function invokeExecutor(
-  executor: Exclude<TurnExecutorId, "bbc_router">,
+  executor: TurnExecutorId,
   rawPhone: string,
   body: string,
   apiKey: string,
@@ -68,8 +72,21 @@ async function invokeExecutor(
 }
 
 function messageFromPayload(data: JsonRecord): string {
-  const message = String(data.message ?? data.summaryText ?? "").trim();
-  return message;
+  return String(data.message ?? data.summaryText ?? "").trim();
+}
+
+function executorSkippedSilently(data: JsonRecord): boolean {
+  return String(data.skipResponse_s ?? "") === "true" && !messageFromPayload(data);
+}
+
+function inferRecoveryExecutor(
+  selectionText: string,
+  failedExecutor: TurnExecutorId,
+): TurnExecutorId | null {
+  if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return "unidades";
+  if (looksLikeExplicitReclamoOrTicketRequest(selectionText)) return "odoo_ticket";
+  if (failedExecutor === "info_guides") return null;
+  return null;
 }
 
 function buildTurnPayload(
@@ -105,7 +122,8 @@ function buildTurnPayload(
 }
 
 /**
- * Fase 1 — un turno WhatsApp: contexto + ejecutor backend (sin Router BBC).
+ * Fase 1 completa — un turno WhatsApp: contexto mínimo + cerebro único en backend.
+ * BBC ya no re-clasifica (sin bbc_router / Router GPT).
  */
 export async function handleWhatsAppTurn(params: {
   rawPhone: string;
@@ -114,6 +132,7 @@ export async function handleWhatsAppTurn(params: {
 }): Promise<JsonRecord> {
   const { rawPhone, body, apiKey } = params;
   const selectionText = body.trim();
+  const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
 
   if (!allowPhoneRequest(rawPhone, 20)) {
     return deliverTurnToWhatsApp(
@@ -140,13 +159,12 @@ export async function handleWhatsAppTurn(params: {
   const contextNextFlow = String(context.nextFlow ?? "derivar");
 
   if (contextNextFlow === "ignore") {
-    const threadHint = await recentThreadTextForPhone(rawPhone);
     if (
       looksLikeSubstantiveCustomerMessage(selectionText) ||
       isBarePlatePrefixHint(selectionText) ||
-      hasPendingMaintenancePlateRequest(threadHint)
+      hasPendingMaintenancePlateRequest(threadCtx.classificationThread)
     ) {
-      // No silenciar preguntas reales ni respuestas de patente/prefijo tras mantenimiento.
+      // Bypass: /turn sigue procesando.
     } else {
       return deliverTurnToWhatsApp(
         rawPhone,
@@ -186,43 +204,26 @@ export async function handleWhatsAppTurn(params: {
     );
   }
 
-  // router → backend clasifica y ejecuta
-  const threadHint = await recentThreadTextForPhone(rawPhone);
-  const executor = classifyTurnExecutor(selectionText, threadHint);
+  let executor = classifyTurnExecutor(selectionText, threadCtx.classificationThread);
+  let execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
 
-  if (executor === "bbc_router") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
-      buildTurnPayload(context, {
-        nextFlow: "router",
-        nextFlow_s: "router",
-        message: "",
-        skipResponse_s: "true",
-        executor: "bbc_router",
-        executor_s: "bbc_router",
-      }),
-    );
+  if (executorSkippedSilently(execResult)) {
+    const recovery = inferRecoveryExecutor(selectionText, executor);
+    if (recovery && recovery !== executor) {
+      const retryResult = await invokeExecutor(recovery, rawPhone, body, apiKey);
+      if (!executorSkippedSilently(retryResult) || messageFromPayload(retryResult)) {
+        execResult = retryResult;
+        executor = recovery;
+      }
+    }
   }
 
-  const execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
-  if (String(execResult.delegatedTo_s ?? execResult.delegatedTo ?? "") === "bbc_router") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
-      buildTurnPayload(context, {
-        nextFlow: "router",
-        nextFlow_s: "router",
-        message: "",
-        skipResponse_s: "true",
-        executor: "bbc_router",
-        executor_s: "bbc_router",
-      }),
-    );
-  }
   const execMessage = messageFromPayload(execResult);
   const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-  const execSkip = String(execResult.skipResponse_s ?? "") === "true";
+  let execSkip = executorSkippedSilently(execResult);
   let finalMessage = execSkip ? "" : execMessage || String(context.message ?? "");
-  if (!finalMessage && !execSkip) {
+
+  if (!finalMessage) {
     if (executor === "mantenimiento") {
       finalMessage =
         "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
@@ -231,6 +232,7 @@ export async function handleWhatsAppTurn(params: {
     } else {
       finalMessage = buildUnexpectedTurnFallbackMessage(selectionText);
     }
+    execSkip = false;
   }
 
   return deliverTurnToWhatsApp(

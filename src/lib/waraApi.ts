@@ -488,6 +488,21 @@ export function looksLikeMaintenanceCapabilityQuestion(
 }
 
 /** Mensaje del cliente con contenido (no ack vacío) — evitar ignorar turnos útiles. */
+/** Consulta operativa sobre GPS, ignición, reporte o estado de unidad (no mantenimiento). */
+export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t || t.length > 220) return false;
+  if (/\b(mantenimiento|preventiv|correctiv|tarea|plan de mantenimiento)\b/.test(t)) return false;
+  const gpsUnitCue =
+    /\b(gps|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
+      t,
+    );
+  const questionCue =
+    /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta|funciona|bien|mal)\b/.test(t) ||
+    String(text ?? "").includes("?");
+  return gpsUnitCue && questionCue;
+}
+
 export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {
   const text = (raw ?? "").trim();
   if (text.length < 4) return false;
@@ -626,10 +641,42 @@ export function looksLikeRepeatGreetingInSession(
   );
 }
 
+/** Cliente pide abrir reclamo/ticket/caso (no consulta GPS ni unidad). */
+export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "");
+  if (!n || n.length > 200) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+  if (/\b(caso|ticket|reclamo)\s+(abierto|activo|pendiente)\b/.test(n)) return false;
+  if (/\b(cerrar|cerrame|resolver)\s+(caso|ticket|reclamo)\b/.test(n)) return false;
+
+  if (
+    /\b(gps|reporte|ignicion|offline|ubicacion|ultimo reporte|no reporta|sin reporte|patente|matricula)\b/.test(
+      n,
+    ) &&
+    /\b(falla|problema|averia|no reporta|offline|sin señal)\b/.test(n)
+  ) {
+    return false;
+  }
+  if (detectLoosePlate(text ?? "") && /\b(falla|problema|averia|no reporta|offline)\b/.test(n)) {
+    return false;
+  }
+
+  if (
+    /\b(reclamo|ticket)\b/.test(n) &&
+    /\b(hacer|abrir|generar|crear|levantar|presentar|tengo un|tengo una|por|nuevo)\b/.test(n)
+  ) {
+    return true;
+  }
+  if (/\b(abrir|crear|generar|levantar)\s+(un\s+)?(ticket|caso|reclamo)\b/.test(n)) return true;
+  if (/\b(necesito|quiero)\s+(un\s+)?(ticket|reclamo|caso)\b/.test(n)) return true;
+  return false;
+}
+
 /** Pide explícitamente hablar con una persona / escalar a humano. */
 export function looksLikeHumanAdvisorRequest(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "");
   if (!norm) return false;
+  if (/^(asesor|agente|operador|humano|humana|persona)[\s!.,]*$/.test(norm)) return true;
   if (
     /\b(escalar|derivar)\b/.test(norm) &&
     /\b(asesor|agente|persona|humano|humana|operador|representante|supervisor|atencion)\b/.test(norm)

@@ -64,7 +64,7 @@ assert(
   !looksLikeOperationalMaintenanceIntent("Quiero saber sobre mantenimiento"),
   "saber sobre NO es operativo",
 );
-assert(route("Quiero saber sobre mantenimiento", GUIDE_THREAD) === "bbc_router", "saber sobre → guía BBC");
+assert(route("Quiero saber sobre mantenimiento", GUIDE_THREAD) === "info_guides", "saber sobre → guía backend");
 
 assert(
   looksLikeMaintenanceCapabilityQuestion("Puedo programar un mantenimiento con vos?", GUIDE_THREAD),
@@ -75,8 +75,8 @@ assert(route("Puedo programar un mantenimiento con vos?", GUIDE_THREAD) === "man
 assert(hasPendingMaintenancePlateRequest(THREAD_AFTER_CAPABILITY), "pedido de patente tras capability");
 assert(route("AD", THREAD_AFTER_CAPABILITY) === "mantenimiento", "AD tras pedido patente → mantenimiento");
 assert(
-  route("AD", THREAD_AFTER_CAPABILITY) !== "bbc_router",
-  "AD NO va a bbc_router tras guía + pedido patente",
+  route("AD", THREAD_AFTER_CAPABILITY) !== "info_guides",
+  "AD NO va a info_guides tras guía + pedido patente",
 );
 assert(route("La q comienza con AD", THREAD_AFTER_CAPABILITY) === "mantenimiento", "prefijo AD → mantenimiento");
 

@@ -6,7 +6,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, looksLikeBriefConfirmation, normalizePlate } from "@/lib/wara";
 import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 import {
   looksLikeChangeCompanyRequest,
@@ -300,7 +300,8 @@ function isMaintenanceConfirmationAccepted(params: {
 }): boolean {
   if (isConfirmed(params.confirmField)) return true;
   if (!params.pendingConfirm) return false;
-  return isConfirmed(params.rawText) || isConfirmed(params.lastInbound);
+  const inbound = (params.rawText ?? params.lastInbound ?? "").trim();
+  return isConfirmed(inbound) || looksLikeBriefConfirmation(inbound);
 }
 
 function priorityLabel(priority: Priority): string {
@@ -448,19 +449,27 @@ export async function POST(req: NextRequest) {
   const rawInbound = parsed.data.rawText?.trim() ?? "";
   const threadText = await recentThreadText(rawPhone);
   const lastInbound = await recentLastInboundTextForPhone(rawPhone);
-  const pendingMaintConfirm = hasPendingMantenimientoConfirmation(threadText);
+  const pendingMaintConfirm =
+    hasPendingMantenimientoConfirmation(threadText) ||
+    (/voy a registrar:/i.test(threadText) &&
+      /tipo:/i.test(threadText) &&
+      /responde\s+confirmo/i.test(threadText) &&
+      !/mantenimiento registrado|listo,\s*registr/i.test(threadText.slice(-800)));
   const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
   const summary = parseMantenimientoSummary(
     /voy a registrar:/i.test(threadText) ? threadText : "",
   );
 
   const inboundForConfirm = rawInbound || lastInbound;
-  const confirmed = isMaintenanceConfirmationAccepted({
+  let confirmed = isMaintenanceConfirmationAccepted({
     confirmField: confirmation,
     rawText: inboundForConfirm,
     lastInbound,
     pendingConfirm: pendingMaintConfirm,
   });
+  if (!confirmed && pendingMaintConfirm && looksLikeBriefConfirmation(inboundForConfirm)) {
+    confirmed = true;
+  }
 
   let text: string;
   if (pendingMaintConfirm && confirmed) {

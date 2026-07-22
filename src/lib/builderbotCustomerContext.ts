@@ -12,10 +12,7 @@ import {
   formatPlateWithSpaces,
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
-  looksLikeOdometerIntentStart,
-  threadAwaitingOdometerPlate,
   threadTextSinceCompanySelection,
-  isOdometerFlowSuperseded,
 } from "@/lib/wara";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
@@ -26,21 +23,14 @@ import {
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
   looksLikeGreeting,
-  looksLikeMaintenanceCapabilityQuestion,
-  looksLikeNonOdometerOperationalIntent,
-  looksLikeOperationalMaintenanceIntent,
-  looksLikeOdometerContinuationMessage,
   looksLikeOperationalIntent,
-  looksLikeOpcionesInfoRequest,
   looksLikeRepeatGreetingInSession,
-  looksLikeUnidadesInfoRequest,
-  looksLikeVehicleBrandOrUnitSearch,
   buildAtilioHelpCapabilitiesReply,
   looksLikeAtilioHelpRequest,
+  looksLikeSubstantiveCustomerMessage,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
-  looksLikePlateCorrectionRequest,
 } from "@/lib/waraApi";
 import {
   handleCustomerConversationCloseRequest,
@@ -51,8 +41,6 @@ import {
   looksLikeOpenCaseStatusInquiry,
   persistCustomerBotReply,
 } from "@/lib/customerTicketInquiry";
-import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
-
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
   let t = String(s ?? "");
@@ -567,18 +555,6 @@ export async function customerRegisteredContextResponse(
           : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
       }
     }
-  } else if (selectionText && looksLikeUnitListRequest(selectionText)) {
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (selectionText && looksLikeOdometerIntentStart(selectionText)) {
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (
-    selectionText &&
-    (looksLikeOpcionesInfoRequest(selectionText) || looksLikeUnidadesInfoRequest(selectionText))
-  ) {
-    nextFlow = "router";
-    responseMessage = "";
   } else if (selectionText && looksLikeConversationAcknowledgement(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
@@ -587,100 +563,46 @@ export async function customerRegisteredContextResponse(
         ? `De nada, ${firstName}. ¿Necesitás algo más?`
         : "De nada. ¿En qué más te ayudo?";
     }
-  } else if (
-    selectionText &&
-    (looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) ||
-      looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent))
-  ) {
-    // Trámite o pregunta operativa de mantenimiento (incluso tras guía informativa).
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (selectionText && looksLikeNonOdometerOperationalIntent(selectionText)) {
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (
-    selectionText &&
-    !isOdometerFlowSuperseded(scopedThreadText || fullThreadText) &&
-    threadAwaitingOdometerPlate(scopedThreadText || fullThreadText) &&
-    (looksLikeOdometerContinuationMessage(selectionText) ||
-      looksLikeVehicleBrandOrUnitSearch(selectionText) ||
-      !!detectLoosePlate(selectionText) ||
-      looksLikePlateCorrectionRequest(selectionText))
-  ) {
-    // Fase 1: el ejecutor odómetro resuelve patente/km (no duplicar lógica acá).
-    nextFlow = "router";
-    responseMessage = "";
+  } else if (companyPickedThisTurn) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      responseMessage = formatCompanyConfirmMessage(activeCompany || "tu empresa");
+    }
   } else if (
     selectionText &&
     looksLikeCompanyListQuestion(selectionText)
   ) {
     nextFlow = "reply";
-  } else if (companyPickedThisTurn) {
-    // Empresa recién elegida: solo confirmar. El Router en el mismo turno interpretaría "1"/"WARA" como patente.
-    nextFlow = "reply";
-    if (!responseMessage) {
-      responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
-    }
-  } else if (
-    duplicateInicioTurn &&
-    !looksLikeGreeting(selectionText) &&
-    !looksLikeNonOdometerOperationalIntent(selectionText) &&
-    !looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) &&
-    !looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent) &&
-    !looksLikeOdometerIntentStart(selectionText) &&
-    !isBarePlatePrefixHint(selectionText) &&
-    !detectLoosePlate(selectionText) &&
-    !hasPendingMaintenancePlateRequest(threadForMaintIntent)
-  ) {
-    nextFlow = "ignore";
-    responseMessage = "";
-  } else if (
-    needsCompanyMenu &&
-    selectionText &&
-    looksLikeOperationalIntent(selectionText)
-  ) {
-    // Trámite concreto sin empresa fijada: dejar que el Router/API responda (no repetir menú).
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (
-    needsCompanyMenu &&
-    selectionText &&
-    looksLikeCompanySelection(selectionText)
-  ) {
-    // Llegó "1"/"WARA" pero no se pudo persistir (p. ej. BB no mandó body) → re-mostrar menú con error.
+  } else if (needsCompanyMenu && selectionText && looksLikeCompanySelection(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
       responseMessage =
         `No pude registrar esa opción. ¿De cuál empresa escribís?\n\n${waraContactsText}\n\n` +
         `Respondé con el número de la opción o con el nombre de la empresa.`;
     }
+  } else if (needsCompanyMenu && selectionText && !looksLikeOperationalIntent(selectionText)) {
+    nextFlow = "reply";
   } else if (needsCompanyMenu) {
-    // Falta elegir empresa: mostrar menú solo si no hay trámite operativo.
     nextFlow = "reply";
-  } else if (activeCompany && requiresCompanySelection) {
-    // Empresa ya guardada: no bloquear trámites por flag inconsistente.
-    nextFlow =
-      duplicateInicioTurn &&
-      !looksLikeGreeting(selectionText) &&
-      !looksLikeNonOdometerOperationalIntent(selectionText) &&
-      !looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) &&
-      !looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent)
-        ? "ignore"
-        : "router";
-    responseMessage = "";
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
-    // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.
     nextFlow = "reply";
-  } else {
-    nextFlow =
-      duplicateInicioTurn &&
-      !looksLikeGreeting(selectionText) &&
-      !looksLikeNonOdometerOperationalIntent(selectionText) &&
-      !looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) &&
-      !looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent)
-        ? "ignore"
-        : "router";
+  } else if (
+    duplicateInicioTurn &&
+    selectionText &&
+    !looksLikeGreeting(selectionText) &&
+    !looksLikeSubstantiveCustomerMessage(selectionText) &&
+    !isBarePlatePrefixHint(selectionText) &&
+    !detectLoosePlate(selectionText) &&
+    !hasPendingMaintenancePlateRequest(threadForMaintIntent)
+  ) {
+    nextFlow = "ignore";
     responseMessage = "";
+  } else if (registered && selectionText.trim()) {
+    // Fase 1 completa: /turn clasifica y ejecuta (operativo + guías + derivación).
+    nextFlow = "router";
+    responseMessage = "";
+  } else {
+    nextFlow = "reply";
   }
 
   if (nextFlow === "reply" && !responseMessage.trim()) {

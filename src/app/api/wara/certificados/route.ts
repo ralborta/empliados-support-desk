@@ -591,8 +591,8 @@ export async function POST(req: NextRequest) {
         ok_s: "true",
         message: "",
         skipResponse_s: "true",
-        delegatedTo: "bbc_router",
-        delegatedTo_s: "bbc_router",
+        delegatedTo: "info_guides",
+        delegatedTo_s: "info_guides",
       },
       { status: BB_STATUS },
     );

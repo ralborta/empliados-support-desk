@@ -1,0 +1,117 @@
+#!/usr/bin/env node
+/**
+ * Regresión integral del cerebro de routing (no solo classifyTurnExecutor aislado).
+ * Simula el hilo que ve /api/whatsapp/turn: scoped + mensaje actual.
+ *
+ * Uso: npx tsx scripts/verify-turn-pipeline.mjs
+ */
+import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
+import { resolvePendingConfirmationExecutor } from "../src/lib/pendingConfirmation.ts";
+import { loadTurnThreadContext } from "../src/lib/conversationThread.ts";
+import {
+  hasPendingMantenimientoConfirmation,
+  threadTextSinceCompanySelection,
+} from "../src/lib/wara.ts";
+import {
+  looksLikeGpsOrUnitStatusQuestion,
+  looksLikeHumanAdvisorRequest,
+} from "../src/lib/waraApi.ts";
+
+let failed = 0;
+
+function assert(cond, label) {
+  if (!cond) {
+    failed++;
+    console.error(`FAIL: ${label}`);
+  }
+}
+
+/** Como /turn: hilo scoped + mensaje actual para clasificar. */
+function turnRoute(text, fullThread = "") {
+  const scoped = threadTextSinceCompanySelection(fullThread);
+  const classificationThread = scoped.trim()
+    ? `${scoped}\n${text}`.trim()
+    : text;
+  return classifyTurnExecutor(text, classificationThread);
+}
+
+const maintSummary = [
+  "Voy a registrar:",
+  "Patente: AD427MC",
+  "Tipo: Plan de mantenimiento",
+  "Prioridad: normal",
+  "Detalle: Mantenimiento preventivo para AD 427 MC",
+  "Si esta correcto, responde CONFIRMO para registrarlo.",
+].join("\n");
+
+const odoSummary = [
+  "Voy a registrar:",
+  "Patente: LWK 7902",
+  "Odómetro: 125000 km",
+  "Si está correcto, respondé CONFIRMO para registrarlo.",
+].join("\n");
+
+const certSummary = [
+  "Voy a generar el certificado de cobertura:",
+  "Patente: AE 483 VE",
+  "Empresa: WARA",
+  "Si esta correcto, responde CONFIRMO para solicitarlo a Wara.",
+].join("\n");
+
+console.log("— Confirmaciones (prioridad cert > odo > maint) —");
+assert(
+  resolvePendingConfirmationExecutor(certSummary, "Confirmo") === "certificados",
+  "confirm cert",
+);
+assert(
+  resolvePendingConfirmationExecutor(odoSummary, "confirmo") === "odometro",
+  "confirm odo",
+);
+assert(
+  resolvePendingConfirmationExecutor(maintSummary, "Confirmo") === "mantenimiento",
+  "confirm maint",
+);
+assert(turnRoute("Confirmo", maintSummary) === "mantenimiento", "turn Confirmo maint");
+
+console.log("— Cambio de tema tras mantenimiento pendiente —");
+assert(
+  turnRoute("Como puedo saber si esta marcado bien el GPS?", maintSummary) === "unidades",
+  "GPS no secuestra maint",
+);
+assert(
+  looksLikeGpsOrUnitStatusQuestion("Como puedo saber si esta marcado bien el GPS?"),
+  "detecta pregunta GPS",
+);
+
+console.log("— Derivación —");
+assert(turnRoute("hablar con un asesor") === "odoo_ticket", "asesor");
+assert(turnRoute("quiero hacer un reclamo") === "odoo_ticket", "reclamo");
+assert(turnRoute("tengo un problema con el gps") === "unidades", "gps operativo");
+assert(!looksLikeHumanAdvisorRequest("tengo un caso abierto?"), "caso abierto ≠ asesor");
+assert(turnRoute("tengo un caso abierto?") === "odoo_ticket", "caso abierto");
+
+console.log("— Cross-tenant (scoped thread) —");
+const crossTenant = [
+  "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
+  "Quiero programar mantenimiento preventivo",
+  maintSummary,
+].join("\n");
+assert(hasPendingMantenimientoConfirmation(threadTextSinceCompanySelection(crossTenant)), "maint post-empresa");
+assert(turnRoute("Confirmo", crossTenant) === "mantenimiento", "Confirmo post cambio empresa");
+
+console.log("— Operativo base —");
+assert(turnRoute("listame mis unidades") === "unidades", "flota");
+assert(turnRoute("como funciona el modulo de mantenimiento") === "info_guides", "guía maint");
+assert(turnRoute("ultimo reporte NKL 961") === "unidades", "reporte");
+
+console.log("— TurnThreadContext (API) —");
+const ctx = await loadTurnThreadContext("+5490000000000", "hola");
+assert(typeof ctx.fullThread === "string", "loadTurnThreadContext full");
+assert(typeof ctx.scopedThread === "string", "loadTurnThreadContext scoped");
+assert(typeof ctx.classificationThread === "string", "loadTurnThreadContext classification");
+
+if (failed > 0) {
+  console.error(`\n✗ ${failed} fallo(s) en pipeline`);
+  process.exit(1);
+}
+console.log(`\n✓ Pipeline routing OK (${failed === 0 ? "todas las categorías" : ""})`);

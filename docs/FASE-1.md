@@ -4,20 +4,22 @@
 
 Un mensaje del cliente → **una respuesta** coherente, sin competencia entre Router/GPT de BBC y el backend.
 
-## Arquitectura
+## Arquitectura (Fase 1 completa)
 
 ```
 WhatsApp → BBC Inicio → POST /api/whatsapp/turn
                               ↓
-                    customerRegisteredContextResponse
+                    customerRegisteredContextResponse (solo auth/empresa/saludo)
                               ↓
               reply | derivar | ignore  →  respuesta directa
               router  →  classifyTurnExecutor → /api/wara/* | /api/odoo/ticket
                               ↓
-                    { message, nextFlow_s: "reply" }
+                    { message, nextFlow_s: "reply" }   ← siempre reply, sin Router GPT
                               ↓
                     BBC messageMapping → WhatsApp
 ```
+
+**Ya no se usa BBC Router GPT** para clasificar. Las guías informativas (Opciones, Unidades, Mantenimiento info) van a `/api/wara/info-guides`.
 
 ## Endpoint
 
@@ -72,7 +74,7 @@ Cuando `WARA_INBOUND_AUDIT_ONLY=true` (default), `/api/whatsapp/turn` envía la 
 | Certificados | `/api/wara/certificados` |
 | Mantenimiento operativo | `/api/wara/mantenimiento-operativo` |
 | Asesor / reclamo / caso | `/api/odoo/ticket` |
-| Guías informativas (módulos) | Aún `nextFlow_s: router` → BBC |
+| Guías informativas (Opciones, Unidades, Mant. info) | `/api/wara/info-guides` |
 
 ## Pruebas definitivas (post-sync)
 
