@@ -22,6 +22,7 @@ import {
   looksLikeCompanySelection,
   looksLikeGreeting,
   looksLikeOperationalIntent,
+  looksLikeRepeatGreetingInSession,
   buildAtilioHelpCapabilitiesReply,
   looksLikeAtilioHelpRequest,
   resetCustomerCompanyMenu,
@@ -525,7 +526,15 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
-      if (lastTicket && (lastKnownPlate || lastTicket.code)) {
+      const repeatGreeting = looksLikeRepeatGreetingInSession(
+        scopedThreadText || fullThreadText,
+        selectionText,
+      );
+      if (repeatGreeting) {
+        responseMessage = firstName
+          ? `Hola ${firstName}, seguimos por acá. ¿Qué necesitás?`
+          : `Hola, seguimos. ¿En qué te ayudo?`;
+      } else if (lastTicket && (lastKnownPlate || lastTicket.code)) {
         responseMessage = firstName
           ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
           : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;

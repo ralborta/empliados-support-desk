@@ -369,6 +369,20 @@ export function looksLikeGreeting(text: string | undefined | null): boolean {
   );
 }
 
+/** Saludo repetido en una conversación que ya venía en curso (no primer contacto). */
+export function looksLikeRepeatGreetingInSession(
+  threadText: string,
+  selectionText: string | undefined | null,
+): boolean {
+  if (!looksLikeGreeting(selectionText) || !threadText.trim()) return false;
+  const tail = threadText.slice(-3500).toLowerCase();
+  return (
+    /atilio|mesa de ayuda wara|seguimos|en qu[eé] te puedo|consulta o servicio|voy a registrar|ten[eé]s \d+ unidades|listo,\s*registr|patente:/.test(
+      tail,
+    )
+  );
+}
+
 /** Pide explícitamente hablar con una persona / escalar a humano. */
 export function looksLikeHumanAdvisorRequest(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "");

@@ -29,6 +29,8 @@ const bodySchema = z
     horometro: numericValue.optional(),
     hourmeter: numericValue.optional(),
     rawText: z.string().optional(),
+    body: z.string().optional(),
+    message: z.string().optional(),
     confirm: z.string().optional(),
     confirmation: z.string().optional(),
     api_key: z.string().min(1).optional(),
@@ -353,7 +355,12 @@ export async function POST(req: NextRequest) {
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
-  const rawText = parsed.data.rawText?.trim() ?? "";
+  const rawText = (
+    parsed.data.rawText ??
+    parsed.data.body ??
+    parsed.data.message ??
+    ""
+  ).trim();
   const odometerIntentStart = looksLikeOdometerIntentStart(rawText);
   const fromText = parseFromText(rawText);
   const threadText = odometerIntentStart ? "" : await recentThreadText(rawPhone);
@@ -401,9 +408,6 @@ export async function POST(req: NextRequest) {
     combinedText: odometerIntentStart ? rawText : combinedText,
   });
   const pendingOdoConfirm = !odometerIntentStart && hasPendingOdometerConfirmation(threadText);
-  const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
-  const confirmed =
-    isConfirmed(confirmSignal) || (pendingOdoConfirm && isConfirmed(rawText));
 
   if (!patente) {
     if (odometerIntentStart) {
@@ -501,19 +505,52 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
+  const hasCompleteOdoPayload =
+    !!patente &&
+    ((typeof odometro === "number" && Number.isFinite(odometro)) ||
+      (typeof horometro === "number" && Number.isFinite(horometro)));
+  const confirmed =
+    isConfirmed(confirmSignal) ||
+    (pendingOdoConfirm && isConfirmed(rawText)) ||
+    (isConfirmed(rawText) && hasCompleteOdoPayload);
+
   if (!confirmed) {
-    return NextResponse.json({
-      ok: true,
-      ok_s: "true",
-      flowComplete_s: "true",
-      confirmationRequired: true,
-      confirmationRequired_s: "true",
-      error: "Falta confirmación",
-      message: `Antes de registrar en Wara, confirmá si querés aplicar este cambio: patente ${patente}${typeof odometro === "number" ? `, odómetro ${odometro} km` : ""}${typeof horometro === "number" ? `, horómetro ${horometro} h` : ""}. Respondé CONFIRMO para continuar.`,
-      patente,
-      odometro,
-      horometro,
-    }, { status: BB_STATUS });
+    if (pendingOdoConfirm) {
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          message: "",
+          skipResponse_s: "true",
+        },
+        { status: BB_STATUS },
+      );
+    }
+    const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
+    const odoLine =
+      typeof odometro === "number"
+        ? `• Odómetro: ${odometro} km`
+        : typeof horometro === "number"
+          ? `• Horómetro: ${horometro} h`
+          : "";
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        confirmationRequired: true,
+        confirmationRequired_s: "true",
+        message:
+          `Voy a registrar:\n• Patente: ${plateDisplay}\n${odoLine}\n\n` +
+          `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`,
+        patente,
+        odometro,
+        horometro,
+      },
+      { status: BB_STATUS },
+    );
   }
 
   const customerTz =
