@@ -851,6 +851,15 @@ export async function resolveUnitQuery(params: {
   const shouldPreferAi =
     params.preferAi || !!prefixHint || isBarePlatePrefixHint(params.rawText);
 
+  // Mantenimiento / prefijo: reglas con catálogo completo primero (414 unidades); IA si no alcanza.
+  if (shouldPreferAi && prefixHint) {
+    const rulesPrefix = resolveWithRules(params.rawText, params.threadText, params.units);
+    if (rulesPrefix.intent === "consult_status" && rulesPrefix.plate) return rulesPrefix;
+    if (rulesPrefix.intent === "need_clarification" && rulesPrefix.candidatePlates.length > 0) {
+      return rulesPrefix;
+    }
+  }
+
   if (shouldPreferAi && process.env.OPENAI_API_KEY?.trim()) {
     const aiFirst = await resolveWithAi(params.rawText, params.threadText, params.units, {
       prefixHint,
