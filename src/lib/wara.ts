@@ -388,13 +388,14 @@ export function hasPendingCertificateConfirmation(threadText: string): boolean {
 }
 
 export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
-  const lines = threadText
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const tail = lines.slice(-6).join("\n").toLowerCase();
-  if (/perfecto|deje registrada|orientacion de uso del modulo/.test(tail)) return false;
-  return /voy a registrar:/.test(tail) && /responde\s+confirmo/.test(tail);
+  const tail = threadText.slice(-4000).toLowerCase();
+  if (/deje registrada|registro registrado|mantenimiento registrado/.test(tail.slice(-600))) {
+    return false;
+  }
+  const summaryStart = tail.lastIndexOf("voy a registrar:");
+  if (summaryStart === -1) return false;
+  const block = tail.slice(summaryStart, summaryStart + 1200);
+  return /responde\s+confirmo/.test(block);
 }
 
 /** Aceptación breve tipo CONFIRMO / sí / dale / ok. */

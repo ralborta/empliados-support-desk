@@ -9,6 +9,8 @@ import {
   extractPlateCorrectionHint,
   hasPendingCertificateConfirmation,
   hasPendingMaintenancePlateRequest,
+  hasPendingMantenimientoConfirmation,
+  looksLikeBriefConfirmation,
 } from "../src/lib/wara.ts";
 import {
   looksLikeChangeCompanyRequest,
@@ -145,6 +147,18 @@ assert(
   route("Quiero hacer un mantenimiento", maintPlateThread) === "mantenimiento",
   "quiero hacer mantenimiento → mantenimiento",
 );
+
+const longMaintThread = [
+  ...Array(8).fill("mensaje previo del hilo"),
+  "Voy a registrar:",
+  "Patente: AD427MC",
+  "Tipo: Plan de mantenimiento",
+  "Prioridad: normal",
+  "Detalle: Mantenimiento preventivo para AD 427 MC",
+  "Si esta correcto, responde CONFIRMO para registrarlo.",
+].join("\n");
+assert(hasPendingMantenimientoConfirmation(longMaintThread), "confirm pendiente hilo largo");
+assert(route("Confirmo", longMaintThread) === "mantenimiento", "Confirmo → mantenimiento");
 
 console.log("— Derivación (asesor / casos / NO derivar de más) —");
 const derivation = [

@@ -450,11 +450,14 @@ export async function POST(req: NextRequest) {
   const lastInbound = await recentLastInboundTextForPhone(rawPhone);
   const pendingMaintConfirm = hasPendingMantenimientoConfirmation(threadText);
   const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
-  const summary = parseMantenimientoSummary(pendingMaintConfirm ? threadText : "");
+  const summary = parseMantenimientoSummary(
+    /voy a registrar:/i.test(threadText) ? threadText : "",
+  );
 
+  const inboundForConfirm = rawInbound || lastInbound;
   const confirmed = isMaintenanceConfirmationAccepted({
     confirmField: confirmation,
-    rawText: rawInbound,
+    rawText: inboundForConfirm,
     lastInbound,
     pendingConfirm: pendingMaintConfirm,
   });
@@ -638,6 +641,7 @@ export async function POST(req: NextRequest) {
   let plate = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
+      (confirmed && summary.patente ? summary.patente : undefined) ??
       (pendingMaintConfirm && confirmed && summary.patente
         ? summary.patente
         : undefined) ??

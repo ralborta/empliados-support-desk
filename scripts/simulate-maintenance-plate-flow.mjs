@@ -6,6 +6,7 @@
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import {
   hasPendingMaintenancePlateRequest,
+  hasPendingMantenimientoConfirmation,
 } from "../src/lib/wara.ts";
 import {
   looksLikeMaintenanceExplorationRequest,
@@ -106,6 +107,18 @@ assert(
   !looksLikeMaintenanceExplorationRequest("Quiero hacer un mantenimiento"),
   "hacer mantenimiento es operativo",
 );
+
+const longMaintThread = [
+  ...Array(8).fill("mensaje previo del hilo"),
+  "Voy a registrar:",
+  "Patente: AD427MC",
+  "Tipo: Plan de mantenimiento",
+  "Prioridad: normal",
+  "Detalle: Mantenimiento preventivo para AD 427 MC",
+  "Si esta correcto, responde CONFIRMO para registrarlo.",
+].join("\n");
+assert(hasPendingMantenimientoConfirmation(longMaintThread), "confirmación pendiente en hilo largo");
+assert(route("Confirmo", longMaintThread) === "mantenimiento", "Confirmo → mantenimiento (no loop)");
 
 const adRules = await resolveUnitQuery({
   rawText: "AD",
