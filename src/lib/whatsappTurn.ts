@@ -17,6 +17,10 @@ import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeSubstantiveCustomerMessage,
 } from "@/lib/waraApi";
+import {
+  buildFleetUnitNotFoundMessage,
+  looksLikeFleetUnitSearchInput,
+} from "@/lib/waraUnitIntent";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
 
 type JsonRecord = Record<string, unknown>;
@@ -213,6 +217,8 @@ export async function handleWhatsAppTurn(params: {
     if (executor === "mantenimiento") {
       finalMessage =
         "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
+    } else if (executor === "unidades" && looksLikeFleetUnitSearchInput(selectionText)) {
+      finalMessage = buildFleetUnitNotFoundMessage({ rawText: selectionText });
     } else {
       finalMessage = buildUnexpectedTurnFallbackMessage(selectionText);
     }

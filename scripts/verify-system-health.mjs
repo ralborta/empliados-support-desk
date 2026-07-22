@@ -167,6 +167,23 @@ const laAd = await resolveUnitQuery({
 assert(laAd.intent === "need_clarification", "La AD → aclaración con opciones AD");
 assert((laAd.clarificationQuestion ?? "").includes("AD 427 MC"), "La AD lista candidatos");
 
+const laXx = await resolveUnitQuery({
+  rawText: "La XX",
+  threadText: listThread,
+  units: fleetUnits,
+});
+assert(laXx.intent === "need_clarification", "La XX → no está en flota");
+assert((laXx.clarificationQuestion ?? "").includes("no está en tu flota"), "La XX dice no está en flota");
+assert((laXx.clarificationQuestion ?? "").includes("XX"), "La XX menciona prefijo XX");
+
+const fakePlate = await resolveUnitQuery({
+  rawText: "NKL 000",
+  threadText: "",
+  units: fleetUnits,
+});
+assert(fakePlate.intent === "need_clarification", "patente inexistente → aclaración");
+assert((fakePlate.clarificationQuestion ?? "").includes("no está en la flota"), "patente inexistente explícita");
+
 console.log("— GPS / ignición (lógica de ticket automático) —");
 const unit = (reportSec, posSec, ignSec, ignOn) => ({
   patente: "TEST",

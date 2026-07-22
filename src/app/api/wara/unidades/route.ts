@@ -22,8 +22,10 @@ import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
+  buildFleetUnitNotFoundMessage,
   filterUnitsByResolvedPlate,
   filterUnitsBySearchTerms,
+  looksLikeFleetUnitSearchInput,
   looksLikeUnitListRequest,
   resolveUnitQuery,
 } from "@/lib/waraUnitIntent";
@@ -315,11 +317,15 @@ function formatUnitNotFoundMessage(opts: {
   companyName: string;
   wantedPlate?: string;
   unitQuery?: UnitQueryRef | null;
+  rawText?: string;
 }): string {
   const company = opts.companyName;
   if (opts.wantedPlate) {
-    const plateDisplay = formatPlateWithSpaces(opts.wantedPlate) ?? opts.wantedPlate;
-    return `No encontré la patente ${plateDisplay} en las unidades de ${company}. Revisá que esté bien escrita o, si corresponde a otra empresa, escribí "cambiar empresa".`;
+    return buildFleetUnitNotFoundMessage({
+      companyName: company,
+      plate: opts.wantedPlate,
+      rawText: opts.rawText,
+    });
   }
   if (opts.unitQuery?.kind === "interno_backoffice") {
     return (
@@ -328,9 +334,12 @@ function formatUnitNotFoundMessage(opts: {
     );
   }
   if (opts.unitQuery?.kind === "nombre") {
-    return `No encontré una unidad con nombre ${opts.unitQuery.value} en ${company}. Probá con la matrícula o revisá el nombre en Wara.`;
+    return (
+      `No hay ninguna unidad con nombre ${opts.unitQuery.value} en la flota de ${company}. ` +
+      `Probá con la matrícula o revisá el nombre en Wara.`
+    );
   }
-  return `No encontré una unidad con ese dato para ${company}. Pasame la matrícula (ej. NKL 952) o el nombre (ej. M300-111).`;
+  return buildFleetUnitNotFoundMessage({ companyName: company, rawText: opts.rawText });
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -831,9 +840,10 @@ export async function POST(req: NextRequest) {
     if (resolved.intent === "list_fleet") {
       forceListFleet = true;
     } else if (resolved.intent === "need_clarification") {
+      const companyName = session.companyName || result.cliente || "tu empresa";
       const clarification =
         resolved.clarificationQuestion ??
-        "¿Me pasás la matrícula exacta o el nombre de la unidad para consultarla en Wara?";
+        buildFleetUnitNotFoundMessage({ companyName, rawText });
       await appendOutboundBotMessage(rawPhone, clarification, {
         source: "wara_unidades_clarification",
         rawText,
@@ -844,6 +854,25 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS }
       );
     } else if (resolved.plate) {
+      const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
+      if (plateMatches.length === 0) {
+        const companyName = session.companyName || result.cliente || "tu empresa";
+        const notFound = buildFleetUnitNotFoundMessage({
+          companyName,
+          plate: resolved.plate,
+          rawText,
+        });
+        await appendOutboundBotMessage(rawPhone, notFound, {
+          source: "wara_unidades_not_in_fleet",
+          rawText,
+          plate: resolved.plate,
+          resolutionSource: resolved.source,
+        });
+        return NextResponse.json(
+          { ok: true, summaryText: notFound, action: "none" as const, unidadesCount: 0 },
+          { status: BB_STATUS }
+        );
+      }
       explicitPlate = formatPlateWithSpaces(resolved.plate) ?? resolved.plate;
     } else if (!unitQuery && resolved.searchTerms.length > 0) {
       const partialMatches = filterUnitsBySearchTerms(result.unidades, resolved.searchTerms);
@@ -920,10 +949,12 @@ export async function POST(req: NextRequest) {
             ? formatUnitNotFoundMessage({
                 companyName: session.companyName || result.cliente || "tu empresa",
                 wantedPlate,
+                rawText,
               })
             : formatUnitNotFoundMessage({
                 companyName: session.companyName || result.cliente || "tu empresa",
                 unitQuery,
+                rawText,
               })
       : filtered.length === 1 && !forceListFleet
         ? summarizeUnit(filtered[0])
@@ -1040,6 +1071,14 @@ export async function POST(req: NextRequest) {
       }
     }
     summaryText = appendLocationIfRequested(summaryText, unit, rawText);
+  }
+
+  if (!summaryText.trim() && looksLikeFleetUnitSearchInput(rawText)) {
+    summaryText = buildFleetUnitNotFoundMessage({
+      companyName: session.companyName || result.cliente || "tu empresa",
+      rawText,
+      plate: wantedPlate || undefined,
+    });
   }
 
   await appendOutboundBotMessage(rawPhone, summaryText, {

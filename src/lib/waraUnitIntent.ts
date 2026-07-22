@@ -7,6 +7,7 @@ import {
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
   extractPlatePrefixFromMessage,
+  formatPlateWithSpaces,
   isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
   looksLikeOdometerIntentStart,
@@ -21,6 +22,46 @@ import {
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
+
+/** Mensaje claro cuando la patente o prefijo no existe en la flota del cliente. */
+export function buildFleetUnitNotFoundMessage(opts: {
+  companyName?: string | null;
+  prefix?: string | null;
+  plate?: string | null;
+  rawText?: string;
+}): string {
+  const company = opts.companyName?.trim() || "tu empresa";
+  const prefixFromText = opts.rawText ? extractPlatePrefixFromMessage(opts.rawText) : null;
+  const barePrefix =
+    opts.rawText && isBarePlatePrefixHint(opts.rawText)
+      ? String(opts.rawText)
+          .trim()
+          .replace(/^(la|el|esa|ese)\s+/i, "")
+          .replace(/[\s\-_.]+/g, "")
+          .toUpperCase()
+      : null;
+  const prefix = (opts.prefix ?? prefixFromText ?? barePrefix)?.trim().toUpperCase() || null;
+
+  if (prefix) {
+    return (
+      `No hay ninguna unidad en la flota de ${company} con patente que empiece con ${prefix}. ` +
+      `Ese prefijo no está en tu flota. Pasame la matrícula completa (ej. NKL 952) o escribí «listado de mis unidades».`
+    );
+  }
+
+  if (opts.plate) {
+    const display = formatPlateWithSpaces(opts.plate) ?? opts.plate;
+    return (
+      `La patente ${display} no está en la flota de ${company}. ` +
+      `Revisá que esté bien escrita. Si la unidad es de otra empresa, escribí «cambiar empresa».`
+    );
+  }
+
+  return (
+    `No encontré esa unidad en la flota de ${company}. ` +
+    `Pasame la matrícula completa o el nombre exacto. Si querés ver opciones, escribí «listado de mis unidades».`
+  );
+}
 
 /** Entrada que debe resolver contra la flota (patente, prefijo, marca, corrección). */
 export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
@@ -506,8 +547,25 @@ function resolveWithRules(
       const fuzzy = fuzzyMatchUnitByPlate(units, plate);
       if (fuzzy) matches = [fuzzy];
     }
+    if (matches.length === 0) {
+      const prefixOnly =
+        isBarePlatePrefixHint(rawText) ||
+        !!extractPlatePrefixFromMessage(rawText) ||
+        !isPlausibleVehiclePlate(plate);
+      return {
+        intent: "need_clarification",
+        searchTerms: [],
+        candidatePlates: [],
+        clarificationQuestion: buildFleetUnitNotFoundMessage({
+          rawText,
+          prefix: prefixOnly ? plate : null,
+          plate: prefixOnly ? null : plate,
+        }),
+        source: "rules",
+      };
+    }
     return {
-      intent: matches.length === 1 ? "consult_status" : matches.length > 1 ? "need_clarification" : "consult_status",
+      intent: matches.length === 1 ? "consult_status" : "need_clarification",
       plate:
         matches.length === 1
           ? normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || plate
@@ -556,7 +614,7 @@ function resolveWithRules(
       intent: "need_clarification",
       searchTerms: [],
       candidatePlates: [],
-      clarificationQuestion: `No encontré unidades con prefijo ${prefixHint} en tu flota. Decime la patente completa o el nombre de la unidad.`,
+      clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText, prefix: prefixHint }),
       source: "rules",
     };
   }
@@ -595,9 +653,7 @@ function resolveWithRules(
     intent: "need_clarification",
     searchTerms: terms,
     candidatePlates: [],
-    clarificationQuestion: extractPlatePrefixFromMessage(rawText)
-      ? `No encontré unidades con ese prefijo en tu flota. Decime la patente completa (ej. AD 427 MC) o el nombre de la unidad.`
-      : undefined,
+    clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText }),
     source: "rules",
   };
 }
@@ -830,7 +886,10 @@ export async function resolvePlateWithWaraFleet(
       reason: "clarification",
       message:
         resolved.clarificationQuestion ??
-        "Encontré varias unidades posibles. ¿Me pasás la matrícula exacta?",
+        buildFleetUnitNotFoundMessage({
+          rawText,
+          companyName: session.ok ? session.companyName : undefined,
+        }),
     };
   }
 
