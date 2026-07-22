@@ -37,6 +37,7 @@ const cases = [
   { name: "cert nuevo", text: "necesito un certificado", thread: "", expect: "certificados" },
   { name: "cert unidad NKL", text: "NKL", thread: certAwaitUnitThread, expect: "certificados" },
   { name: "cert unidad Saveiro", text: "Saveiro", thread: certAwaitUnitThread, expect: "certificados" },
+  { name: "cert unidad Nissan", text: "Nissan", thread: certAwaitUnitThread, expect: "certificados" },
   { name: "cert CONFIRMO", text: "CONFIRMO", thread: certAwaitConfirmThread, expect: "certificados" },
   {
     name: "cert post-done ignicion",

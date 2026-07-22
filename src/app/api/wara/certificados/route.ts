@@ -742,7 +742,10 @@ export async function POST(req: NextRequest) {
   let plate = plateFromDirect;
 
   if (!plate) {
-    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, text, threadText);
+    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, text, threadText, null, {
+      preferAi: true,
+      certificateContext: true,
+    });
     if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
       const message = fleetPlate.message;
       await appendOutboundBotMessage(rawPhone, message, {

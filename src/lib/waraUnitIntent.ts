@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import type { PrismaClient } from "@prisma/client";
 import {
-  certificateFlowState,
   detectLoosePlate,
   detectPlate,
   extractLastPlateFromThread,
@@ -328,10 +327,9 @@ function hasCertificateFlowAwaitingUnit(threadText: string): boolean {
   return /para el certificado de cobertura necesito la unidad/.test(tail);
 }
 
-function shouldSkipAiForUnitResolution(rawText: string, threadText: string): boolean {
-  if (shouldSkipAiPlateInference(rawText)) return true;
-  if (hasCertificateFlowAwaitingUnit(threadText)) return true;
-  return false;
+function shouldSkipAiForUnitResolution(rawText: string, _threadText: string): boolean {
+  // Solo pedidos genéricos de certificado sin unidad concreta; NO bloquear selección (Nissan, NKL, etc.).
+  return shouldSkipAiPlateInference(rawText);
 }
 
 function shouldSkipAiPlateInference(rawText: string): boolean {
@@ -701,7 +699,7 @@ async function resolveWithAi(
   rawText: string,
   threadText: string,
   units: WaraUnidadEstado[],
-  opts?: { prefixHint?: string | null; maintenanceContext?: boolean },
+  opts?: { prefixHint?: string | null; maintenanceContext?: boolean; certificateContext?: boolean },
 ): Promise<UnitQueryResolution | null> {
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
 
@@ -715,12 +713,19 @@ async function resolveWithAi(
 - Resolvé prefijos ("AD", "la que comienza con NKL") contra el catálogo.
 - Una sola coincidencia clara → intent=consult_status con esa patente en candidatePlates.
 - Varias coincidencias → intent=need_clarification listando patentes exactas del catálogo (hasta 8).`
-    : looksLikeLiveUnitConsultIntent(rawText)
+    : opts?.certificateContext
       ? `
+- CONTEXTO: el bot pidió la unidad para certificado de cobertura. El mensaje es selección de unidad (patente, prefijo, marca o nombre).
+- Resolvé marcas/nombres (Nissan, Saveiro) y prefijos contra el catálogo.
+- Una sola coincidencia clara → intent=consult_status con esa patente en candidatePlates.
+- Varias coincidencias → intent=need_clarification listando patentes exactas del catálogo (hasta 8). PROHIBIDO preguntar genérico sin listar opciones.
+- Usá el historial: si el cliente mencionó una marca y recién operó otra unidad (odómetro, GPS), priorizá esa patente si coincide en el catálogo.`
+      : looksLikeLiveUnitConsultIntent(rawText)
+        ? `
 - CONTEXTO: consulta operativa de GPS, ignición o reporte en vivo (no mantenimiento ni certificado).
 - Si el mensaje o el historial mencionan marca/nombre/patente, resolvé contra el catálogo.
 - Si falta la unidad, intent=need_clarification pidiendo patente o marca con ejemplos.`
-      : `
+        : `
 - Si el mensaje es prefijo o frase parcial de patente ("AD", "la q comienza con AD"), buscá en el catálogo.
 - Si es marca o nombre (Nissan, Saveiro), buscá en el catálogo por nombre de unidad o coincidencias razonables.
 - Una coincidencia → consult_status; varias → need_clarification con opciones reales del catálogo.`;
@@ -869,13 +874,19 @@ export async function resolveUnitQuery(params: {
   threadText: string;
   units: WaraUnidadEstado[];
   preferAi?: boolean;
+  maintenanceContext?: boolean;
+  certificateContext?: boolean;
 }): Promise<UnitQueryResolution> {
   const prefixHint = prefixHintFromMessage(params.rawText);
   const brandOrLiveConsult =
     looksLikeVehicleBrandOrUnitSearch(params.rawText) ||
     looksLikeLiveUnitConsultIntent(params.rawText);
+  const certificateCtx =
+    params.certificateContext || hasCertificateFlowAwaitingUnit(params.threadText);
   const shouldPreferAi =
     params.preferAi ||
+    params.maintenanceContext ||
+    certificateCtx ||
     !!prefixHint ||
     isBarePlatePrefixHint(params.rawText) ||
     brandOrLiveConsult;
@@ -892,7 +903,8 @@ export async function resolveUnitQuery(params: {
   if (shouldPreferAi && process.env.OPENAI_API_KEY?.trim()) {
     const aiFirst = await resolveWithAi(params.rawText, params.threadText, params.units, {
       prefixHint,
-      maintenanceContext: !!params.preferAi,
+      maintenanceContext: !!params.maintenanceContext,
+      certificateContext: certificateCtx,
     });
     if (aiFirst?.intent === "consult_status" && aiFirst.plate) return aiFirst;
     if (aiFirst?.intent === "need_clarification" && aiFirst.candidatePlates.length > 0) {
@@ -906,26 +918,23 @@ export async function resolveUnitQuery(params: {
 
   const skipAi = shouldSkipAiForUnitResolution(params.rawText, params.threadText);
   const unitSearch = looksLikeFleetUnitSearchInput(params.rawText);
-  // Certificado genérico: sin IA. Marca/prefijo/patente sin match en reglas: IA acotada al catálogo.
   if (skipAi && !unitSearch) return rules;
-  if (skipAi && unitSearch && rules.intent === "need_clarification" && rules.clarificationQuestion) {
-    return rules;
-  }
-  if (
-    skipAi &&
-    unitSearch &&
-    certificateFlowState(params.threadText) === "awaiting_unit" &&
-    rules.plate
-  ) {
-    return rules;
-  }
 
   const ai = await resolveWithAi(params.rawText, params.threadText, params.units, {
     prefixHint,
-    maintenanceContext: !!params.preferAi,
+    maintenanceContext: !!params.maintenanceContext,
+    certificateContext: certificateCtx,
   });
   if (ai) {
     if (rules.intent === "consult_status" && rules.plate && rules.candidatePlates.length === 1) {
+      return rules;
+    }
+    if (
+      ai.intent === "need_clarification" &&
+      ai.candidatePlates.length === 0 &&
+      rules.candidatePlates.length > 0 &&
+      rules.clarificationQuestion
+    ) {
       return rules;
     }
     if (
@@ -955,6 +964,7 @@ export type PlateFromFleetResult =
 export type ResolvePlateWithWaraFleetOptions = {
   preferAi?: boolean;
   maintenanceContext?: boolean;
+  certificateContext?: boolean;
 };
 
 /** Resuelve patente desde texto + flota Wara (IA/reglas). Uso compartido en todos los trámites. */
@@ -994,7 +1004,9 @@ export async function resolvePlateWithWaraFleet(
     rawText,
     threadText: scopedThread,
     units: fleet.unidades,
-    preferAi: opts?.preferAi || opts?.maintenanceContext,
+    preferAi: opts?.preferAi || opts?.maintenanceContext || opts?.certificateContext,
+    maintenanceContext: opts?.maintenanceContext,
+    certificateContext: opts?.certificateContext,
   });
 
   if (resolved.intent === "need_clarification") {
