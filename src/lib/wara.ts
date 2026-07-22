@@ -258,6 +258,11 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
   ].filter((i) => i >= 0);
   if (markers.length === 0) return false;
   const cutIdx = Math.max(...markers);
+  const afterMarkerBlock = threadText.slice(cutIdx);
+  // Trámite ya registrado con éxito: no bloquear nuevas consultas de odómetro por temas posteriores.
+  if (/listo,\s*registr[eé]|registr[eé] el cambio para la unidad/i.test(afterMarkerBlock)) {
+    return false;
+  }
   const after = threadText.slice(cutIdx + 80).toLowerCase();
   if (!after.trim()) return false;
   return (
@@ -312,23 +317,50 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
   );
 }
 
-/** Ayuda o problema con odómetro sin patente ni km todavía ("me ayudás con mi odómetro"). */
+/** Reporte de falla/desfase del odómetro — no es trámite de actualizar km. */
+export function looksLikeOdometerProblemReport(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
+  if (
+    /\b(actualizar|cambiar|cambio de|registrar|nuevo od[oó]metro|confirmo)\b/.test(t) &&
+    !/\b(problema|problemas|no marca|marcando|incorrecto|falla|mal)\b/.test(t)
+  ) {
+    return false;
+  }
+  return (
+    /\b(problema|problemas|no marca|no marcan|marcando mal|marca mal|no est[aá] marcando|incorrecto|desfasado|no coincide|no funciona|falla|aver[ií]a|revisar|arreglar)\b/.test(
+      t,
+    ) || /\btengo un problema\b/.test(t)
+  );
+}
+
+/** Ayuda para actualizar odómetro (sin reporte de falla). */
 export function looksLikeOdometerHelpRequest(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  if (looksLikeOdometerProblemReport(raw)) return false;
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
   return (
-    /\b(ayuda|ayudame|ayudar|problema|problemas|no marca|marca mal|incorrecto|mal|falla|revisar|arreglar)\b/.test(
-      t,
-    ) ||
+    /\b(ayuda|ayudame|ayudar)\b/.test(t) ||
     /\b(me ayudas|me pod[eé]s ayudar|podes ayudar|pod[eé]s ayudar|necesito ayuda)\b/.test(t) ||
     /\b(con mi|con el|con la)\b/.test(t)
   );
+}
+
+/** Mensaje actual pide trámite de actualización de odómetro (no guía ni otro módulo). */
+export function looksLikeExplicitOdometerUpdateRequest(text: string | undefined | null): boolean {
+  if (looksLikeOdometerProblemReport(text)) return false;
+  return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }
 
 export function looksLikeOdometerFlowStart(text: string | undefined | null): boolean {
@@ -633,6 +665,14 @@ export function detectIncidentType(text: string): WaraIncidentType {
   const lower = text.toLowerCase();
   if (/(no reporta|offline|sin señal|no actualiza|última señal|ultima señal|no registra ubicación)/.test(lower)) {
     return "MISSING_REPORT";
+  }
+  if (
+    /(problema|no marca|marcando mal|marca mal|no funciona|incorrecto|desfasado|falla|aver[ií]a)/.test(
+      lower,
+    ) &&
+    /(od[oó]metro|kilometraje|hor[oó]metro)/.test(lower)
+  ) {
+    return "GENERAL_TECH";
   }
   if (/(od[oó]metro|kilometraje|cambio de od[oó]metro|corregir kil[oó]metros|\bkm\b)/.test(lower)) {
     return "ODOMETER_CHANGE";

@@ -14,6 +14,8 @@ import {
   isMaintenanceFlowSuperseded,
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
+  looksLikeExplicitOdometerUpdateRequest,
+  looksLikeOdometerProblemReport,
   looksLikePostAdvisorCaseThread,
   looksLikeCertificateUnitReply,
   threadAwaitingOdometerPlate,
@@ -80,6 +82,8 @@ function looksLikeCertificateIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeOdometerIntent(text: string, threadText: string): boolean {
+  if (looksLikeOdometerProblemReport(text)) return false;
+  if (looksLikeExplicitOdometerUpdateRequest(text)) return true;
   if (isOdometerFlowSuperseded(threadText)) return false;
   return shouldContinueOdometerFlow(text, threadText);
 }
@@ -118,6 +122,7 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeUnitListRequest(text)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) return false;
+  if (looksLikeOdometerProblemReport(text) || looksLikeExplicitOdometerUpdateRequest(text)) return false;
   if (looksLikeOdometerIntent(text, threadText)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
   if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
@@ -170,6 +175,9 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
   if (looksLikeExplicitReclamoOrTicketRequest(text)) return "odoo_ticket";
 
+  // Falla/desfase de odómetro — soporte, no menú de guías ni pedir km.
+  if (looksLikeOdometerProblemReport(text)) return "odoo_ticket";
+
   // GPS / ignición / reporte en vivo — prioridad sobre guías y mantenimiento arrastrado del hilo.
   if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
     return "unidades";
@@ -177,13 +185,17 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
 
   // Odómetro operativo — antes que guías informativas (el hilo no debe secuestrar con mantenimiento).
   if (
-    !isOdometerFlowSuperseded(threadText) &&
-    (looksLikeOdometerIntent(text, threadText) ||
-      (threadHasActiveOdometerFlow(threadText) &&
-        (isUnitSelectionMessage(text, threadText) ||
-          looksLikePlateCorrectionRequest(text) ||
-          /\bpatente\s+(?:de|del)\b/i.test(norm(text)))) ||
-      (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText))))
+    looksLikeOdometerIntent(text, threadText) ||
+    (looksLikeExplicitOdometerUpdateRequest(text) &&
+      (threadHasActiveOdometerFlow(threadText) ||
+        isUnitSelectionMessage(text, threadText) ||
+        looksLikePlateCorrectionRequest(text))) ||
+    (!isOdometerFlowSuperseded(threadText) &&
+      threadHasActiveOdometerFlow(threadText) &&
+      (isUnitSelectionMessage(text, threadText) ||
+        looksLikePlateCorrectionRequest(text) ||
+        /\bpatente\s+(?:de|del)\b/i.test(norm(text)))) ||
+    (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText)))
   ) {
     return "odometro";
   }

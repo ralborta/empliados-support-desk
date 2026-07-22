@@ -10,6 +10,7 @@ import { resolvePendingConfirmationExecutor } from "../src/lib/pendingConfirmati
 import { loadTurnThreadContext } from "../src/lib/conversationThread.ts";
 import {
   hasPendingMantenimientoConfirmation,
+  isOdometerFlowSuperseded,
   threadTextSinceCompanySelection,
 } from "../src/lib/wara.ts";
 import {
@@ -121,12 +122,25 @@ assert(
   "marca tras consulta ignición va a unidades",
 );
 assert(
-  turnRoute("Mi odometro no marca bien", pollutedMaintThread) === "odometro",
-  "odómetro operativo no va a info_guides",
+  turnRoute("Mi odometro no marca bien", pollutedMaintThread) === "odoo_ticket",
+  "falla odómetro → soporte, no guías",
 );
 assert(
-  turnRoute("Tengo problemas con el odometro", pollutedMaintThread) === "odometro",
-  "problemas odómetro → odometro",
+  turnRoute("Tengo problemas con el odometro", pollutedMaintThread) === "odoo_ticket",
+  "problemas odómetro → odoo_ticket",
+);
+assert(
+  !isOdometerFlowSuperseded([
+    "Voy a registrar:",
+    "Patente: AD 427 MC",
+    "Odómetro: 5567 km",
+    "Si está correcto, respondé CONFIRMO para registrarlo en Wara.",
+    "Si",
+    "Listo, registré el cambio para la unidad AD427MC. Odómetro nuevo: 5567 km.",
+    "Ok quiero un registro",
+    "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
+  ].join("\n")),
+  "odómetro registrado no supersede futuras consultas",
 );
 
 console.log("— Flujo odómetro (patente, corrección, unidad) —");
