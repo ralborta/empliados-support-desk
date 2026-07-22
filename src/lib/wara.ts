@@ -119,11 +119,29 @@ export function detectLoosePlate(text: string): string | null {
 export function threadAwaitingOdometerPlate(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (/voy a registrar:/.test(tail) && /od[oó]metro/.test(tail)) return false;
+  // Solo cuando el BOT pidió patente/odómetro en el turno anterior — no el intent del cliente.
   return (
-    /\b(actualizar|actualiz[aá]|cambiar|cambio de)\s+(el\s+)?od[oó]metro\b/.test(tail) ||
-    (/\bod[oó]metro\b/.test(tail) &&
-      /\b(patente|matr[ií]cula)\b/.test(tail) &&
-      /\b(unidad|cu[aá]l es|indicame|indic[aá]me)\b/.test(tail))
+    /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
+    /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
+    /nuevo od[oó]metro en km/i.test(tail) ||
+    (/(?:cu[aá]l es|indic[aá]me|pas[aá]me|decime|necesito).{0,100}(?:patente|matr[ií]cula)/i.test(tail) &&
+      /od[oó]metro|hor[oó]metro|kilometraje/i.test(tail) &&
+      /(?:atilio|registrar el cambio|nuevo od[oó]metro)/i.test(tail))
+  );
+}
+
+/** Cliente inicia trámite de odómetro/horómetro sin dar patente todavía. */
+export function looksLikeOdometerIntentStart(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(actualizar|cambiar|cambio de|corregir|ajustar|registrar)\b/.test(t) &&
+    /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
   );
 }
 export function lineLooksLikeBotUnitListExample(line: string): boolean {

@@ -8,7 +8,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, looksLikeOdometerIntentStart, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
@@ -353,24 +353,25 @@ export async function POST(req: NextRequest) {
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
-  const fromText = parseFromText(parsed.data.rawText ?? "");
-  // No dependemos de {history} (rompe el JSON): reconstruimos el trámite desde la base.
-  const threadText = await recentThreadText(rawPhone);
+  const rawText = parsed.data.rawText?.trim() ?? "";
+  const odometerIntentStart = looksLikeOdometerIntentStart(rawText);
+  const fromText = parseFromText(rawText);
+  const threadText = odometerIntentStart ? "" : await recentThreadText(rawPhone);
   const threadParsed = parseFromText(threadText);
   let patente = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       fromText.patente ??
-      plateFromSummary(threadText) ??
+      (odometerIntentStart ? "" : plateFromSummary(threadText)) ??
       threadParsed.patente ??
       ""
   );
 
-  if (!patente) {
+  if (!patente && !odometerIntentStart) {
     const fleetPlate = await resolvePlateWithWaraFleet(
       prisma,
       rawPhone,
-      parsed.data.rawText ?? "",
+      rawText,
       threadText
     );
     if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
@@ -388,22 +389,36 @@ export async function POST(req: NextRequest) {
     parsed.data.odometro,
     parsed.data.odometer,
     fromText.odometro,
-    threadParsed.odometro
+    odometerIntentStart ? undefined : threadParsed.odometro
   );
-  const rawText = parsed.data.rawText?.trim() ?? "";
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
   const horometro = resolveHorometroForWara({
     explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
-    parsedHorometro: firstFiniteNumber(fromText.horometro, threadParsed.horometro),
-    combinedText,
+    parsedHorometro: firstFiniteNumber(
+      fromText.horometro,
+      odometerIntentStart ? undefined : threadParsed.horometro,
+    ),
+    combinedText: odometerIntentStart ? rawText : combinedText,
   });
-  const pendingOdoConfirm = hasPendingOdometerConfirmation(threadText);
+  const pendingOdoConfirm = !odometerIntentStart && hasPendingOdometerConfirmation(threadText);
   const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
   const confirmed =
     isConfirmed(confirmSignal) || (pendingOdoConfirm && isConfirmed(rawText));
 
   if (!patente) {
-    const hintText = [rawText, parsed.data.rawText ?? "", threadText].filter(Boolean).join("\n");
+    if (odometerIntentStart) {
+      const message =
+        "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX)";
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "missing_plate",
+      });
+      return NextResponse.json(
+        { ok: false, ok_s: "false", error: "Patente requerida", message },
+        { status: BB_STATUS },
+      );
+    }
+    const hintText = [rawText, threadText].filter(Boolean).join("\n");
     const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, hintText, threadText);
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
@@ -435,7 +450,10 @@ export async function POST(req: NextRequest) {
     }
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
-    return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?" }, { status: BB_STATUS });
+    const message = patente
+      ? `Perfecto, tomo ${formatPlateWithSpaces(patente) ?? patente}. ¿Cuál es el nuevo odómetro en km?`
+      : "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?";
+    return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message }, { status: BB_STATUS });
   }
 
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);

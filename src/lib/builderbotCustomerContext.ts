@@ -7,9 +7,10 @@ import {
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
 import {
-  extractLastPlateFromThread,
   detectLoosePlate,
+  extractLastPlateFromThread,
   formatPlateWithSpaces,
+  looksLikeOdometerIntentStart,
   threadAwaitingOdometerPlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
@@ -546,11 +547,15 @@ export async function customerRegisteredContextResponse(
   } else if (selectionText && looksLikeUnitListRequest(selectionText)) {
     nextFlow = "router";
     responseMessage = "";
+  } else if (selectionText && looksLikeOdometerIntentStart(selectionText)) {
+    nextFlow = "router";
+    responseMessage = "";
   } else if (
     selectionText &&
     !detectLoosePlate(selectionText) &&
     !looksLikeGreeting(selectionText) &&
     !looksLikeUnitListRequest(selectionText) &&
+    !looksLikeOdometerIntentStart(selectionText) &&
     threadAwaitingOdometerPlate(scopedThreadText || fullThreadText)
   ) {
     const fleetPlate = await resolvePlateWithWaraFleet(

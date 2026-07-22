@@ -5,6 +5,7 @@ import {
   detectPlate,
   extractLastPlateFromThread,
   isPlausibleVehiclePlate,
+  looksLikeOdometerIntentStart,
   normalizePlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
@@ -516,6 +517,10 @@ export async function resolvePlateWithWaraFleet(
   const normalizedDirect = directPlate ? normalizePlate(directPlate) : null;
   if (normalizedDirect) {
     return { ok: true, plate: normalizedDirect, source: "direct" };
+  }
+
+  if (looksLikeOdometerIntentStart(rawText) && !detectLoosePlate(rawText)) {
+    return { ok: false, reason: "not_found" };
   }
 
   const session = await resolveWaraSessionByPhone(prisma, rawPhone);
