@@ -680,6 +680,42 @@ export function looksLikeRepeatGreetingInSession(
   );
 }
 
+/** Cliente elige módulo del menú genérico (Opciones / Unidades / Mantenimiento). */
+export function looksLikeInfoGuideModulePick(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "")
+    .replace(/^(ok|dale|si|sip|bueno|perfecto|listo)\s+/, "")
+    .trim();
+  if (!n) return false;
+  return (
+    /^(opciones|unidades|mantenimiento)$/.test(n) ||
+    /^modulo (de )?(opciones|unidades|mantenimiento)$/.test(n)
+  );
+}
+
+/** Pide soporte / atención humana (no guía de módulos). */
+export function looksLikeTechnicalSupportRequest(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "");
+  if (!n) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return true;
+  if (looksLikeExplicitReclamoOrTicketRequest(text)) return true;
+  return (
+    /\b(soporte tecnico|soporte|atencion al cliente|mesa de ayuda|asistencia tecnica)\b/.test(n) ||
+    (/\b(quiero|necesito)\b/.test(n) &&
+      /\b(soporte|asistencia|ayuda tecnica|atencion)\b/.test(n) &&
+      !/\b(modulo|opciones|unidades|mantenimiento|configur)\b/.test(n))
+  );
+}
+
+/** El hilo ya mostró el menú genérico de módulos (riesgo de loop). */
+export function threadHasGenericPlatformMenuOffer(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2500)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /puedo guiarte sobre los modulos opciones, unidades o mantenimiento/.test(tail);
+}
+
 /** Cliente pide abrir reclamo/ticket/caso (no consulta GPS ni unidad). */
 export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");

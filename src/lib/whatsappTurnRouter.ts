@@ -41,10 +41,14 @@ import {
   looksLikePlatformInfoGuideInThread,
   looksLikeUnidadesInfoRequest,
   looksLikeVehicleBrandOrUnitSearch,
+  looksLikeInfoGuideModulePick,
+  looksLikeTechnicalSupportRequest,
+  threadHasGenericPlatformMenuOffer,
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
 import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
+import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
 export type TurnExecutorId =
@@ -125,6 +129,7 @@ function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeOdometerProblemReport(text) || looksLikeExplicitOdometerUpdateRequest(text)) return false;
   if (looksLikeOdometerIntent(text, threadText)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeTechnicalSupportRequest(text)) return false;
   if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
     return false;
   }
@@ -133,16 +138,20 @@ function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   }
   if (looksLikeOperationalMaintenanceIntent(text, threadText)) return false;
   if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return false;
+  if (looksLikeInfoGuideModulePick(text)) return true;
   if (looksLikeOpcionesInfoRequest(text)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return true;
-  if (looksLikeUnidadesInfoRequest(text) || looksLikeUnidadesInfoRequest(threadText)) return true;
-  if (looksLikePlatformInfoGuideInThread(threadText)) return true;
+  if (looksLikeUnidadesInfoRequest(text)) return true;
+  if (looksLikeUnidadesInfoRequest(threadText) && detectInfoGuideKind(text)) return true;
+  const explicitGuide = detectInfoGuideKind(text);
+  if (looksLikePlatformInfoGuideInThread(threadText) && explicitGuide) return true;
   if (looksLikeMaintenanceInfoGuideInThread(threadText) && !looksLikeMaintenanceOperational(text, threadText)) {
-    return true;
+    return !!explicitGuide || looksLikeInfoGuideModulePick(text);
   }
   if (looksLikeMaintenanceGuideContextInThread(threadText) && !looksLikeMaintenanceOperational(text, threadText)) {
-    return true;
+    return !!explicitGuide || looksLikeInfoGuideModulePick(text);
   }
+  if (threadHasGenericPlatformMenuOffer(threadText)) return false;
   return false;
 }
 
@@ -174,6 +183,7 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (looksLikeOpenCaseStatusInquiry(text)) return "odoo_ticket";
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
   if (looksLikeExplicitReclamoOrTicketRequest(text)) return "odoo_ticket";
+  if (looksLikeTechnicalSupportRequest(text)) return "odoo_ticket";
 
   // Falla/desfase de odómetro — soporte, no menú de guías ni pedir km.
   if (looksLikeOdometerProblemReport(text)) return "odoo_ticket";
@@ -212,8 +222,10 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (looksLikeBbcInfoGuide(text, threadText)) return "info_guides";
 
   // Confirmaciones pendientes — resolver único (cert → odo → maint)
-  const pendingConfirmExecutor = resolvePendingConfirmationExecutor(threadText, text);
-  if (pendingConfirmExecutor) return pendingConfirmExecutor;
+  if (!looksLikeFlowControlCommand(text)) {
+    const pendingConfirmExecutor = resolvePendingConfirmationExecutor(threadText, text);
+    if (pendingConfirmExecutor) return pendingConfirmExecutor;
+  }
   if (
     hasPendingMantenimientoConfirmation(threadText) &&
     looksLikeSubstantiveCustomerMessage(text) &&

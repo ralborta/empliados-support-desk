@@ -186,6 +186,28 @@ assert(turnRoute("listame mis unidades") === "unidades", "flota");
 assert(turnRoute("como funciona el modulo de mantenimiento") === "info_guides", "guía maint");
 assert(turnRoute("ultimo reporte NKL 961") === "unidades", "reporte");
 
+console.log("— Anti-loop menú genérico de guías —");
+const genericMenuThread = [
+  "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
+  "Decime cuál te interesa o qué querés configurar.",
+].join("\n");
+assert(
+  turnRoute("Quiero soporte técnico", genericMenuThread) === "odoo_ticket",
+  "soporte técnico no repite menú genérico",
+);
+assert(
+  turnRoute("Ok mantenimiento", genericMenuThread) === "info_guides",
+  "ok mantenimiento elige guía de mantenimiento",
+);
+assert(
+  turnRoute("No el odometro no está marcando bien", genericMenuThread) === "odoo_ticket",
+  "falla odómetro en hilo menú → soporte",
+);
+assert(
+  turnRoute("reinicio", `${genericMenuThread}\nVoy a registrar:\nSi está correcto, respondé CONFIRMO`) === "unidades",
+  "reinicio no cae en confirmación odómetro pendiente",
+);
+
 console.log("— TurnThreadContext (API) —");
 const ctx = await loadTurnThreadContext("+5490000000000", "hola");
 assert(typeof ctx.fullThread === "string", "loadTurnThreadContext full");

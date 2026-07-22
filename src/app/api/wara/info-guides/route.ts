@@ -9,6 +9,12 @@ import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { buildInfoGuideReply, detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import {
+  looksLikeFlowControlCommand,
+  looksLikeInfoGuideModulePick,
+  looksLikeTechnicalSupportRequest,
+  threadHasGenericPlatformMenuOffer,
+} from "@/lib/waraApi";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 
 const bodySchema = z
@@ -75,6 +81,34 @@ export async function POST(req: NextRequest) {
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const rawText = (parsed.data.rawText ?? parsed.data.body ?? "").trim();
+
+  if (looksLikeFlowControlCommand(rawText)) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        skipResponse_s: "true",
+        flowComplete_s: "true",
+        informational: true,
+        informational_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  if (looksLikeTechnicalSupportRequest(rawText)) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        skipResponse_s: "true",
+        flowComplete_s: "true",
+        delegateTo: "odoo_ticket",
+        delegateTo_s: "odoo_ticket",
+      },
+      { status: BB_STATUS },
+    );
+  }
 
   if (rawPhone && !allowPhoneRequest(rawPhone, 20)) {
     return NextResponse.json(

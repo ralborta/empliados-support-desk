@@ -17,6 +17,7 @@ import {
 import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeFlowControlCommand,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeSubstantiveCustomerMessage,
@@ -207,6 +208,25 @@ export async function handleWhatsAppTurn(params: {
         nextFlow_s: "reply",
         executor: "context",
         executor_s: "context",
+      }),
+    );
+  }
+
+  if (looksLikeFlowControlCommand(selectionText)) {
+    const firstName = String(context.name ?? "")
+      .trim()
+      .split(/\s+/)[0];
+    const resetMessage = firstName
+      ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
+      : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(context, {
+        message: resetMessage,
+        nextFlow: "reply",
+        nextFlow_s: "reply",
+        executor: "context",
+        executor_s: "flow_reset",
       }),
     );
   }

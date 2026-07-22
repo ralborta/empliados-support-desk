@@ -11,6 +11,25 @@ export type InfoGuideKind = "opciones" | "unidades" | "mantenimiento";
 export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   const text = rawText.trim();
   if (!text) return null;
+  const pick = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^(ok|dale|si|sip|bueno|perfecto|listo)\s+/, "")
+    .trim();
+  if (pick === "opciones" || pick === "modulo opciones" || pick === "modulo de opciones") {
+    return "opciones";
+  }
+  if (pick === "unidades" || pick === "modulo unidades" || pick === "modulo de unidades") {
+    return "unidades";
+  }
+  if (
+    pick === "mantenimiento" ||
+    pick === "modulo mantenimiento" ||
+    pick === "modulo de mantenimiento"
+  ) {
+    return "mantenimiento";
+  }
   if (looksLikeOpcionesInfoRequest(text) || looksLikeTurnoOrAgendaQuestion(text)) {
     return "opciones";
   }
