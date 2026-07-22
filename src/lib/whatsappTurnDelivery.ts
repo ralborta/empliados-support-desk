@@ -17,8 +17,12 @@ export async function deliverTurnToWhatsApp(
   const message = String(payload.message ?? payload.summaryText ?? "").trim();
   const nextFlow = String(payload.nextFlow_s ?? payload.nextFlow ?? "reply");
 
-  if (!message || nextFlow === "ignore" || nextFlow === "router") {
+  if (!message || nextFlow === "ignore") {
     return { ...payload, message, skipResponse_s: "true" };
+  }
+
+  if (nextFlow === "router") {
+    return { ...payload, message, skipResponse_s: "true", nextFlow, nextFlow_s: nextFlow };
   }
 
   if (!shouldTurnSendWhatsAppToCustomer()) {

@@ -72,13 +72,7 @@ async function main() {
     { conditionRule: "nextFlow_s", conditionValue: "derivar", condition: "===", conditionFlowId: FLOWS.derivar },
     { conditionRule: "nextFlow_s", conditionValue: "ignore", condition: "===", conditionFlowId: FLOWS.ignorar },
     { conditionRule: "nextFlow_s", conditionValue: "router", condition: "===", conditionFlowId: FLOWS.router },
-    {
-      conditionRule: "skipResponse_s",
-      conditionValue: "true",
-      condition: "===",
-      conditionFlowId: FLOWS.ignorar,
-    },
-    // reply → solo messageMapping
+    // reply → BBC envía messageMapping; NO usar skipResponse_s→Ignorar (bloqueaba Router)
   ];
 
   const transport = new SSEClientTransport(new URL(sseUrl), {

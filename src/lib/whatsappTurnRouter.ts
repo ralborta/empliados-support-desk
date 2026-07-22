@@ -46,6 +46,7 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 }
 
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
+  if (looksLikeUnitListRequest(text)) return false;
   if (looksLikeUnidadesInfoRequest(text) || looksLikeUnidadesInfoRequest(threadText)) return true;
   if (looksLikePlatformInfoGuideInThread(threadText)) return true;
   if (looksLikeMaintenanceInfoGuideInThread(threadText) && !looksLikeMaintenanceOperational(text, threadText)) {
@@ -62,11 +63,11 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   const text = selectionText.trim();
   const blob = `${threadText}\n${text}`;
 
-  if (looksLikeBbcInfoGuide(text, threadText)) return "bbc_router";
   if (looksLikeUnitListRequest(text)) return "unidades";
   if (looksLikeCustomerConversationCloseRequest(text)) return "odoo_ticket";
   if (looksLikeOpenCaseStatusInquiry(text)) return "odoo_ticket";
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
+  if (looksLikeBbcInfoGuide(text, threadText)) return "bbc_router";
   if (looksLikeOdometerIntent(text, threadText)) return "odometro";
   if (looksLikeCertificateIntent(text, threadText)) return "certificados";
   if (looksLikeMaintenanceOperational(text, threadText)) return "mantenimiento";
