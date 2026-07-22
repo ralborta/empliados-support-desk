@@ -150,6 +150,9 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     /(modulo opciones|entra a opciones|ingresa a opciones|agenda de contactos|agregar contacto|sum[aá]s un nuevo contacto|mis atajos|modulo unidades|modulo de unidades)/.test(
       after,
     ) ||
+    /\b(certificado|cobertura|monitoreo|constancia)\b/.test(after) ||
+    /\b(necesito|quiero|pedir|solicitar)\b/.test(after) ||
+    /\bde nada\b/.test(after) ||
     (/1\.\s*(entra|ingresa|abri)/.test(after) &&
       /(agenda|opciones|contacto|unidades|grupo)/.test(after))
   );

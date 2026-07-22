@@ -23,15 +23,19 @@ import {
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
   looksLikeGreeting,
+  looksLikeNonOdometerOperationalIntent,
+  looksLikeOdometerContinuationMessage,
   looksLikeOperationalIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeRepeatGreetingInSession,
   looksLikeUnidadesInfoRequest,
+  looksLikeVehicleBrandOrUnitSearch,
   buildAtilioHelpCapabilitiesReply,
   looksLikeAtilioHelpRequest,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   selectCompanyForCustomer,
+  looksLikePlateCorrectionRequest,
 } from "@/lib/waraApi";
 import {
   handleCustomerConversationCloseRequest,
@@ -577,17 +581,17 @@ export async function customerRegisteredContextResponse(
         ? `De nada, ${firstName}. ¿Necesitás algo más?`
         : "De nada. ¿En qué más te ayudo?";
     }
+  } else if (selectionText && looksLikeNonOdometerOperationalIntent(selectionText)) {
+    nextFlow = "router";
+    responseMessage = "";
   } else if (
     selectionText &&
-    !detectLoosePlate(selectionText) &&
-    !looksLikeGreeting(selectionText) &&
-    !looksLikeConversationAcknowledgement(selectionText) &&
-    !looksLikeUnitListRequest(selectionText) &&
-    !looksLikeOdometerIntentStart(selectionText) &&
-    !looksLikeOpcionesInfoRequest(selectionText) &&
-    !looksLikeUnidadesInfoRequest(selectionText) &&
     !isOdometerFlowSuperseded(scopedThreadText || fullThreadText) &&
-    threadAwaitingOdometerPlate(scopedThreadText || fullThreadText)
+    threadAwaitingOdometerPlate(scopedThreadText || fullThreadText) &&
+    (looksLikeOdometerContinuationMessage(selectionText) ||
+      looksLikeVehicleBrandOrUnitSearch(selectionText) ||
+      !!detectLoosePlate(selectionText) ||
+      looksLikePlateCorrectionRequest(selectionText))
   ) {
     const fleetPlate = await resolvePlateWithWaraFleet(
       prisma,

@@ -4,6 +4,7 @@ import { detectIncidentType, detectLoosePlate } from "@/lib/wara";
 import {
   looksLikeHumanAdvisorRequest,
   looksLikeMaintenanceInfoGuideInThread,
+  looksLikeNonOdometerOperationalIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeOperationalIntent,
   looksLikePlatformInfoGuideInThread,
@@ -29,6 +30,9 @@ function norm(text: string): string {
 }
 
 function looksLikeCertificateIntent(text: string, threadText: string): boolean {
+  if (looksLikeNonOdometerOperationalIntent(text) && /\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm(text))) {
+    return true;
+  }
   const blob = norm(`${threadText}\n${text}`);
   return /\b(certificado|cobertura|constancia|monitoreo)\b/.test(blob);
 }
@@ -69,8 +73,8 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (looksLikeOpenCaseStatusInquiry(text)) return "odoo_ticket";
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
   if (looksLikeBbcInfoGuide(text, threadText)) return "bbc_router";
-  if (looksLikeOdometerIntent(text, threadText)) return "odometro";
   if (looksLikeCertificateIntent(text, threadText)) return "certificados";
+  if (looksLikeOdometerIntent(text, threadText)) return "odometro";
   if (looksLikeMaintenanceOperational(text, threadText)) return "mantenimiento";
 
   if (

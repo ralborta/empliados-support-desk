@@ -87,6 +87,13 @@ function buildRules() {
     },
     {
       conditionRule:
+        'CERTIFICADO / COBERTURA (PRIORIDAD SOBRE ODÓMETRO PENDIENTE). El mensaje actual pide certificado, cobertura, constancia o monitoreo ("necesito un certificado", "certificado de LWK", etc.), aunque el bot acabe de pedir odómetro o haya un trámite de odómetro sin cerrar. Incluye corrección de patente para el certificado ("no la LWK", "no es esa patente"). Va a certificados. PROHIBIDO flujo Cambio Odómetro.',
+      conditionValue: "",
+      condition: "",
+      conditionFlowId: F.certificados,
+    },
+    {
+      conditionRule:
         'REPROCESO TRAS GUÍA INFORMATIVA — Por CONTEXTO del historial: el bot ya respondió con pasos de Opciones Wara (Agenda/contactos/Perfiles/Notificaciones), del módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos de color, Crear grupo) o del módulo de Mantenimiento (guía preventiva/correctiva/planes, sin pedir patente) y el cliente NO está iniciando mantenimiento operativo, certificado, consulta de reporte en vivo ni odómetro. Incluye agradecimientos breves tras la guía ("ok gracias", "muchas gracias", "listo"). PROHIBIDO Gestión Mantenimiento, PROHIBIDO pedir patente/km y PROHIBIDO reanudar odómetro pendiente. El turno informativo terminó.',
       conditionValue: "",
       condition: "",

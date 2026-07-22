@@ -7,6 +7,7 @@ import {
   formatPlateWithSpaces,
   hasPendingOdometerConfirmation,
   isOdometerFlowSuperseded,
+  looksLikeOdometerIntentStart,
   normalizePlate,
   threadAwaitingOdometerPlate,
 } from "@/lib/wara";
@@ -111,6 +112,21 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
   }
   if (/\bno es la (correcta|patente|matricula)\b/.test(t)) return true;
   if (/\bme equivoque de (patente|matricula)\b/.test(t)) return true;
+  if (/\bno\b.{0,16}\bla\b/.test(t) && /[a-z0-9]{3,}/.test(t.replace(/\s+/g, ""))) return true;
+  return false;
+}
+
+/** Trámite operativo distinto de odómetro (certificado, reporte, etc.). */
+export function looksLikeNonOdometerOperationalIntent(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "");
+  if (!n) return false;
+  if (looksLikeOdometerIntentStart(text)) return false;
+  if (looksLikePlateCorrectionRequest(text)) return true;
+  if (/\b(certificado|cobertura|monitoreo|constancia)\b/.test(n)) return true;
+  if (/\b(reporte|ultimo reporte|sin reporte|offline|listado|mis unidades)\b/.test(n)) return true;
+  if (/\b(mantenimiento|asesor|ticket|reclamo)\b/.test(n) && !/\b(od[oó]metro|hor[oó]metro)\b/.test(n)) {
+    return true;
+  }
   return false;
 }
 
@@ -272,6 +288,7 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (looksLikeConversationAcknowledgement(raw)) return false;
+  if (looksLikeNonOdometerOperationalIntent(raw)) return false;
   if (looksLikeOdometerConfirmReply(raw)) return true;
   const t = normCompanyToken(raw);
   if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) return true;
@@ -285,10 +302,13 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
 /** ¿Seguir en flujo de odómetro o el cliente cambió de tema? */
 export function shouldContinueOdometerFlow(text: string, threadText: string): boolean {
   if (looksLikeConversationAcknowledgement(text)) return false;
+  if (looksLikeNonOdometerOperationalIntent(text)) return false;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  if (threadAwaitingOdometerPlate(threadText)) return true;
+  if (threadAwaitingOdometerPlate(threadText)) {
+    return looksLikeOdometerContinuationMessage(text);
+  }
   if (hasPendingOdometerConfirmation(threadText)) {
     return looksLikeOdometerContinuationMessage(text);
   }

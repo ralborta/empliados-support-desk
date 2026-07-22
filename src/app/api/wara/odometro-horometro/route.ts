@@ -10,7 +10,7 @@ import {
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
 import { detectPlate, formatPlateWithSpaces, hasPendingOdometerConfirmation, isExamplePlate, isOdometerFlowSuperseded, looksLikeOdometerIntentStart, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
-import { looksLikeConversationAcknowledgement, looksLikeOpcionesInfoRequest, looksLikeUnidadesInfoRequest, shouldContinueOdometerFlow } from "@/lib/waraApi";
+import { looksLikeConversationAcknowledgement, looksLikeNonOdometerOperationalIntent, looksLikeOpcionesInfoRequest, looksLikeUnidadesInfoRequest, shouldContinueOdometerFlow } from "@/lib/waraApi";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
   const n = typeof value === "number" ? value : Number(value.replace(",", ".").trim());
@@ -348,6 +348,7 @@ export async function POST(req: NextRequest) {
     (looksLikeOpcionesInfoRequest(rawText) ||
       looksLikeUnidadesInfoRequest(rawText) ||
       looksLikeConversationAcknowledgement(rawText) ||
+      looksLikeNonOdometerOperationalIntent(rawText) ||
       isOdometerFlowSuperseded(threadText)) &&
     !shouldContinueOdometerFlow(rawText, threadText)
   ) {
