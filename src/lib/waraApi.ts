@@ -416,8 +416,28 @@ export function formatCompanyConfirmMessage(companyName: string): string {
 }
 
 /** Trámite operativo real (programar/registrar), no guía informativa. */
+export function looksLikeMaintenanceExplorationRequest(raw: string | undefined | null): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text) return false;
+  if (!/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) return false;
+  if (
+    /\b(programar|registrar|agendar|generar|abrir|crear|dar de alta|solicito pedir|pedir un)\b/.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  if (/\b(quiero|necesito|me gustaria|quisiera)\s+(saber|conocer|info|informacion)\b/.test(text)) {
+    return true;
+  }
+  const infoCue =
+    /\b(saber|conocer|informacion|consultar|entender|explicar|explicame|contame|decime|que es|como se|cómo se|como funciona|cómo funciona|como hago|cómo hago|como se hace|cómo se hace|para que sirve|modulo|guia|ayuda)\b/;
+  return infoCue.test(text);
+}
+
 export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = ""): boolean {
   const text = normCompanyToken(raw);
+  if (looksLikeMaintenanceExplorationRequest(raw)) return false;
   if (
     /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta|puedo)\b/.test(
       text,
@@ -497,6 +517,7 @@ export function buildUnexpectedTurnFallbackMessage(raw: string | undefined | nul
 export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null): boolean {
   const text = normCompanyToken(raw ?? "");
   if (!text) return false;
+  if (looksLikeMaintenanceExplorationRequest(raw)) return true;
   if (looksLikeOperationalMaintenanceIntent(String(raw ?? ""))) return false;
   if (looksLikeTurnoOrAgendaQuestion(String(raw ?? ""))) return false;
   if (looksLikeOpcionesInfoRequest(raw)) return false;
@@ -504,7 +525,7 @@ export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null):
   const maintenanceDomain =
     /\b(mantenimiento|preventiv|correctiv|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
   const howToCue =
-    /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona)\b/;
+    /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona|saber|conocer|informacion|como se|cómo se|como hago|cómo hago)\b/;
   return maintenanceDomain.test(text) && howToCue.test(text);
 }
 

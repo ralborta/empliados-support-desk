@@ -17,6 +17,8 @@ import {
   looksLikeAtilioHelpRequest,
   looksLikeNonOdometerOperationalIntent,
   looksLikeOperationalMaintenanceIntent,
+  looksLikeMaintenanceExplorationRequest,
+  looksLikeMaintenanceInfoRequest,
   looksLikeMaintenanceCapabilityQuestion,
   formatCompanyConfirmMessage,
 } from "../src/lib/waraApi.ts";
@@ -71,6 +73,7 @@ const routing = [
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
   ["Quiero programar un mantenimiento", "", "mantenimiento"],
   ["como funciona el modulo de mantenimiento", "", "bbc_router"],
+  ["Quiero saber sobre mantenimiento", "", "bbc_router"],
 ];
 for (const [text, thread, expect] of routing) {
   assert(route(text, thread) === expect, `routing "${text}" → ${expect}`);
@@ -80,6 +83,18 @@ console.log("— Post-empresa / mantenimiento (no mudo) —");
 assert(
   looksLikeOperationalMaintenanceIntent("Quiero programar un mantenimiento"),
   "operational maintenance intent",
+);
+assert(
+  !looksLikeOperationalMaintenanceIntent("Quiero saber sobre mantenimiento"),
+  "saber sobre mantenimiento NO es operativo",
+);
+assert(
+  looksLikeMaintenanceExplorationRequest("Quiero saber sobre mantenimiento"),
+  "saber sobre mantenimiento es exploración",
+);
+assert(
+  looksLikeMaintenanceInfoRequest("Quiero saber sobre mantenimiento"),
+  "saber sobre mantenimiento es info",
 );
 assert(
   looksLikeNonOdometerOperationalIntent("Quiero programar un mantenimiento"),

@@ -11,7 +11,9 @@ import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceCapabilityQuestion,
+  looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceInfoGuideInThread,
+  looksLikeMaintenanceInfoRequest,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
   looksLikePlatformInfoGuideInThread,
@@ -87,6 +89,8 @@ function inferPriority(raw: string): Priority {
 }
 
 function isMaintenanceHowToRequest(raw: string): boolean {
+  if (looksLikeMaintenanceInfoRequest(raw)) return true;
+  if (looksLikeMaintenanceExplorationRequest(raw)) return true;
   if (looksLikeOperationalMaintenanceIntent(raw)) return false;
   if (looksLikeTurnoOrAgendaQuestion(raw)) return false;
   if (looksLikeOpcionesInfoRequest(raw)) return false;
@@ -98,7 +102,7 @@ function isMaintenanceHowToRequest(raw: string): boolean {
   const maintenanceDomain =
     /\b(mantenimiento|preventiv|correctiv|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
   const howToCue =
-    /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo)/;
+    /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|saber|conocer|informacion|como se|cómo se|como hago|cómo hago)/;
   return maintenanceDomain.test(text) && howToCue.test(text);
 }
 
@@ -605,6 +609,27 @@ export async function POST(req: NextRequest) {
   );
 
   if (!plate) {
+    if (looksLikeMaintenanceExplorationRequest(text) || looksLikeMaintenanceInfoRequest(text)) {
+      const message = maintenanceHowToMessage(text);
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_mantenimiento_operativo",
+        stage: "how_to_exploration",
+        service,
+        phone: rawPhone,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          informational: true,
+          informational_s: "true",
+          message,
+          service,
+        },
+        { status: BB_STATUS }
+      );
+    }
     const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, text, threadText);
     if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
       await appendOutboundBotMessage(rawPhone, fleetPlate.message, {
