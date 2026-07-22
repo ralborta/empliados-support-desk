@@ -403,7 +403,36 @@ export async function POST(req: NextRequest) {
     isConfirmed(confirmSignal) || (pendingOdoConfirm && isConfirmed(rawText));
 
   if (!patente) {
-    return NextResponse.json({ ok: false, error: "Patente inválida", message: "¿Me pasás la patente de la unidad? Por ejemplo AA123BB." }, { status: BB_STATUS });
+    const hintText = [rawText, parsed.data.rawText ?? "", threadText].filter(Boolean).join("\n");
+    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, hintText, threadText);
+    if (fleetPlate.ok) {
+      patente = fleetPlate.plate;
+    } else if (fleetPlate.reason === "clarification") {
+      await appendOutboundBotMessage(rawPhone, fleetPlate.message, {
+        source: "wara_odometro_response",
+        stage: "unit_clarification",
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          error: "Varias unidades",
+          message: fleetPlate.message,
+        },
+        { status: BB_STATUS },
+      );
+    } else {
+      const message =
+        `No identifiqué la unidad en tu flota. Decime la patente (con guiones si querés), una marca/nombre (ej. Nissan) o escribí "listado de mis unidades".`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "missing_plate",
+      });
+      return NextResponse.json(
+        { ok: false, ok_s: "false", error: "Patente inválida", message },
+        { status: BB_STATUS },
+      );
+    }
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message: "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?" }, { status: BB_STATUS });

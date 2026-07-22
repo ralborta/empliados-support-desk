@@ -8,7 +8,9 @@ import {
 } from "@/lib/conversationThread";
 import {
   extractLastPlateFromThread,
+  detectLoosePlate,
   formatPlateWithSpaces,
+  threadAwaitingOdometerPlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
@@ -34,7 +36,7 @@ import {
   looksLikeOpenCaseStatusInquiry,
   persistCustomerBotReply,
 } from "@/lib/customerTicketInquiry";
-import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
+import { looksLikeUnitListRequest, resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
@@ -516,6 +518,34 @@ export async function customerRegisteredContextResponse(
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "atilio_help_capabilities",
+    });
+    nextFlow = "reply";
+  } else if (
+    selectionText &&
+    !detectLoosePlate(selectionText) &&
+    threadAwaitingOdometerPlate(scopedThreadText || fullThreadText)
+  ) {
+    const fleetPlate = await resolvePlateWithWaraFleet(
+      prisma,
+      trimmed,
+      selectionText,
+      scopedThreadText || fullThreadText,
+    );
+    if (fleetPlate.ok) {
+      const display = formatPlateWithSpaces(fleetPlate.plate) ?? fleetPlate.plate;
+      responseMessage = `Perfecto, tomo ${display}. ¿Cuál es el nuevo odómetro en km?`;
+    } else if (fleetPlate.reason === "clarification") {
+      responseMessage = fleetPlate.message;
+    } else {
+      responseMessage =
+        `No encontré una unidad para "${selectionText.trim()}" en tu flota. ` +
+        `Decime la patente exacta (podés usar guiones) o escribí "listado de mis unidades" para ver opciones.`;
+    }
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "odometer_plate_resolution",
+      input: selectionText,
+      resolved: fleetPlate.ok ? fleetPlate.plate : null,
     });
     nextFlow = "reply";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {

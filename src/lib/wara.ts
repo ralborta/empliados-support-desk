@@ -100,7 +100,17 @@ export function detectLoosePlate(text: string): string | null {
   return null;
 }
 
-/** Líneas del bot con ejemplos de flota; no usar sus patentes como intención del cliente. */
+/** El hilo reciente está pidiendo patente para un trámite de odómetro. */
+export function threadAwaitingOdometerPlate(threadText: string): boolean {
+  const tail = threadText.slice(-2500).toLowerCase();
+  if (/voy a registrar:/.test(tail) && /od[oó]metro/.test(tail)) return false;
+  return (
+    /\b(actualizar|actualiz[aá]|cambiar|cambio de)\s+(el\s+)?od[oó]metro\b/.test(tail) ||
+    (/\bod[oó]metro\b/.test(tail) &&
+      /\b(patente|matr[ií]cula)\b/.test(tail) &&
+      /\b(unidad|cu[aá]l es|indicame|indic[aá]me)\b/.test(tail))
+  );
+}
 export function lineLooksLikeBotUnitListExample(line: string): boolean {
   const l = line.trim();
   if (!l) return false;
