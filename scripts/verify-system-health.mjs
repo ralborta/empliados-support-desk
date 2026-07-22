@@ -269,6 +269,37 @@ const fakePlate = await resolveUnitQuery({
 assert(fakePlate.intent === "need_clarification", "patente inexistente → aclaración");
 assert((fakePlate.clarificationQuestion ?? "").includes("no está en la flota"), "patente inexistente explícita");
 
+console.log("— Marca Nissan en certificado —");
+const certAwaitUnitThread =
+  "Para el certificado de cobertura necesito la unidad: decime la patente (ej. AD 427 MC), el nombre o la marca (ej. Saveiro, Nissan) o un prefijo (ej. HEJ).";
+const fleetWithOneNissan = [
+  { movil_id: 1, patente: "OST 223", unidad: "900-041" },
+  { movil_id: 2, patente: "AD 427 MC", unidad: "CAMION 1" },
+  { movil_id: 3, patente: "AH 562 SP", unidad: "NISSAN FRONTIER" },
+];
+const nissanCert = await resolveUnitQuery({
+  rawText: "Nissan",
+  threadText: certAwaitUnitThread,
+  units: fleetWithOneNissan,
+  preferAi: true,
+  certificateContext: true,
+});
+assert(
+  nissanCert.intent === "consult_status" && nissanCert.plate === "AH562SP",
+  "una Nissan en flota → patente directa (sin OST/AD)",
+);
+const paraLaNissan = await resolveUnitQuery({
+  rawText: "Para la Nissan",
+  threadText: `${certAwaitUnitThread}\n¿Podés confirmar la patente? Opciones: OST 223, AD 427 MC.`,
+  units: fleetWithOneNissan,
+  preferAi: true,
+  certificateContext: true,
+});
+assert(
+  paraLaNissan.intent === "consult_status" && paraLaNissan.plate === "AH562SP",
+  "Para la Nissan → misma unidad única",
+);
+
 console.log("— GPS / ignición (lógica de ticket automático) —");
 const unit = (reportSec, posSec, ignSec, ignOn) => ({
   patente: "TEST",

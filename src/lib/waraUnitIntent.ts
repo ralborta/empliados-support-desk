@@ -191,6 +191,100 @@ function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
 
+/** Búsqueda determinística por marca/nombre en patente + unidad (campo Wara). */
+function resolveBrandOrNameInFleet(
+  rawText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  if (!looksLikeVehicleBrandOrUnitSearch(rawText) && !extractPlateCorrectionHint(rawText)) {
+    return null;
+  }
+  const terms = tokenizeSearchTerms(rawText).filter((t) => t.length >= 3);
+  if (!terms.length) return null;
+  const matches = filterUnitsBySearchTerms(units, terms);
+  const candidatePlates = matches
+    .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+    .filter(Boolean);
+  if (matches.length === 1) {
+    return {
+      intent: "consult_status",
+      plate: candidatePlates[0],
+      searchTerms: terms,
+      candidatePlates,
+      source: "rules",
+    };
+  }
+  if (matches.length > 1) {
+    const labels = matches
+      .slice(0, 8)
+      .map((u) => (u.patente || u.unidad || "").trim())
+      .join(", ");
+    return {
+      intent: "need_clarification",
+      searchTerms: terms,
+      candidatePlates,
+      clarificationQuestion: `Encontré ${matches.length} unidades (${labels}). Decime la patente exacta.`,
+      source: "rules",
+    };
+  }
+  return null;
+}
+
+function filterAiCandidatesByFleetTerms(
+  rawText: string,
+  units: WaraUnidadEstado[],
+  candidatePlates: string[],
+): string[] {
+  const terms = tokenizeSearchTerms(rawText).filter((t) => t.length >= 3);
+  if (!terms.length || candidatePlates.length === 0) return candidatePlates;
+  const matches = filterUnitsBySearchTerms(units, terms);
+  if (!matches.length) return candidatePlates;
+  const allowed = new Set(
+    matches.map((u) => normalizeLoosePlate(u.patente || u.unidad || "")).filter(Boolean),
+  );
+  const filtered = candidatePlates.filter((p) => allowed.has(p));
+  return filtered.length > 0 ? filtered : candidatePlates;
+}
+
+function reconcileAiClarification(
+  ai: UnitQueryResolution,
+  rawText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution {
+  const brandRules = resolveBrandOrNameInFleet(rawText, units);
+  if (brandRules?.intent === "consult_status" && brandRules.plate) {
+    return brandRules;
+  }
+
+  const filtered = filterAiCandidatesByFleetTerms(rawText, units, ai.candidatePlates);
+  if (filtered.length === 1) {
+    return {
+      intent: "consult_status",
+      plate: filtered[0],
+      searchTerms: ai.searchTerms,
+      candidatePlates: filtered,
+      source: "rules",
+    };
+  }
+  if (filtered.length > 1 && filtered.length < ai.candidatePlates.length) {
+    const labels = filtered
+      .slice(0, 8)
+      .map((p) => formatPlateWithSpaces(p) ?? p)
+      .join(", ");
+    return {
+      intent: "need_clarification",
+      searchTerms: ai.searchTerms,
+      candidatePlates: filtered,
+      clarificationQuestion: `Encontré ${filtered.length} unidades (${labels}). Decime la patente exacta.`,
+      source: "rules",
+    };
+  }
+  if (brandRules?.intent === "need_clarification" && brandRules.candidatePlates.length > 0) {
+    return brandRules;
+  }
+  return ai;
+}
+
 function compactUnitsForAi(
   units: WaraUnidadEstado[],
   opts?: { prefixHint?: string | null; limit?: number },
@@ -513,6 +607,10 @@ function resolveUnitSelectionHint(
       source: "rules",
     };
   }
+
+  const brandFromHint = resolveBrandOrNameInFleet(hint || rawText, units);
+  if (brandFromHint) return brandFromHint;
+
   return null;
 }
 
@@ -532,33 +630,8 @@ function resolveWithRules(
   if (unitSelection) return unitSelection;
 
   if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
-    const terms = tokenizeSearchTerms(rawText).filter((t) => t.length >= 3);
-    const matches = filterUnitsBySearchTerms(units, terms.length ? terms : tokenizeSearchTerms(rawText));
-    const candidatePlates = matches
-      .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
-      .filter(Boolean);
-    if (matches.length === 1) {
-      return {
-        intent: "consult_status",
-        plate: candidatePlates[0],
-        searchTerms: terms,
-        candidatePlates,
-        source: "rules",
-      };
-    }
-    if (matches.length > 1) {
-      const labels = matches
-        .slice(0, 5)
-        .map((u) => (u.patente || u.unidad || "").trim())
-        .join(", ");
-      return {
-        intent: "need_clarification",
-        searchTerms: terms,
-        candidatePlates,
-        clarificationQuestion: `Encontré ${matches.length} unidades (${labels}). Decime la patente exacta.`,
-        source: "rules",
-      };
-    }
+    const brandResolution = resolveBrandOrNameInFleet(rawText, units);
+    if (brandResolution) return brandResolution;
   }
 
   // Priorizar lo que escribió ahora; no arrastrar patente del odómetro u otro trámite previo.
@@ -900,15 +973,25 @@ export async function resolveUnitQuery(params: {
     }
   }
 
+  // Marca/nombre en trámite (certificado, etc.): reglas determinísticas antes que IA.
+  if (certificateCtx && looksLikeVehicleBrandOrUnitSearch(params.rawText)) {
+    const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units);
+    if (brandRules) return brandRules;
+  }
+
   if (shouldPreferAi && process.env.OPENAI_API_KEY?.trim()) {
     const aiFirst = await resolveWithAi(params.rawText, params.threadText, params.units, {
       prefixHint,
       maintenanceContext: !!params.maintenanceContext,
       certificateContext: certificateCtx,
     });
-    if (aiFirst?.intent === "consult_status" && aiFirst.plate) return aiFirst;
-    if (aiFirst?.intent === "need_clarification" && aiFirst.candidatePlates.length > 0) {
+    if (aiFirst?.intent === "consult_status" && aiFirst.plate) {
+      const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units);
+      if (brandRules?.intent === "consult_status" && brandRules.plate) return brandRules;
       return aiFirst;
+    }
+    if (aiFirst?.intent === "need_clarification" && aiFirst.candidatePlates.length > 0) {
+      return reconcileAiClarification(aiFirst, params.rawText, params.units);
     }
     // IA vaga (sin patentes del catálogo) → reglas con prefijo/filtro determinístico.
   }
