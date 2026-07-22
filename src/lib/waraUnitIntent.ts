@@ -11,6 +11,7 @@ import {
   isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
   looksLikeOdometerIntentStart,
+  looksLikeOdometerHelpRequest,
   normalizePlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
@@ -312,7 +313,7 @@ function shouldReuseThreadPlateForResolution(rawText: string): boolean {
   if (looksLikePlateCorrectionRequest(rawText)) return false;
   if (detectLoosePlate(rawText)) return false;
   if (extractPlateCorrectionHint(rawText)) return false;
-  if (looksLikeOdometerIntentStart(rawText)) return false;
+  if (looksLikeOdometerIntentStart(rawText) || looksLikeOdometerHelpRequest(rawText)) return false;
   if (looksLikeVagueUnitReference(rawText)) return true;
   const norm = rawText
     .normalize("NFD")
@@ -970,7 +971,7 @@ export async function resolvePlateWithWaraFleet(
     return { ok: true, plate: normalizedDirect, source: "direct" };
   }
 
-  if (looksLikeOdometerIntentStart(rawText) && !detectLoosePlate(rawText)) {
+  if ((looksLikeOdometerIntentStart(rawText) || looksLikeOdometerHelpRequest(rawText)) && !detectLoosePlate(rawText)) {
     return { ok: false, reason: "not_found" };
   }
 

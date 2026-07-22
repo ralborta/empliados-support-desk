@@ -9,12 +9,13 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, normalizePlate, threadHasActiveOdometerFlow, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
   looksLikeFlowControlCommand,
   looksLikeGreeting,
+  looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   resolveWaraSessionByPhone,
   threadHasRecentLiveUnitConsultIntent,
@@ -733,6 +734,27 @@ export async function POST(req: NextRequest) {
         unidadesCount: 0,
       },
       { status: BB_STATUS }
+    );
+  }
+
+  if (
+    threadHasActiveOdometerFlow(threadText) &&
+    looksLikeFleetUnitSearchInput(rawText.trim()) &&
+    !looksLikeLiveUnitConsultIntent(rawText) &&
+    !looksLikeGpsOrUnitStatusQuestion(rawText)
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText: "",
+        message: "",
+        skipResponse_s: "true",
+        topicChange_s: "true",
+        action: "none" as const,
+        unidadesCount: 0,
+      },
+      { status: BB_STATUS },
     );
   }
 

@@ -8,9 +8,29 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
-import { detectPlate, formatPlateWithSpaces, hasPendingOdometerConfirmation, isExamplePlate, isOdometerFlowSuperseded, looksLikeOdometerIntentStart, normalizePlate, resolveWaraPatenteForApi } from "@/lib/wara";
+import {
+  detectPlate,
+  extractPlateCorrectionHint,
+  formatPlateWithSpaces,
+  hasPendingOdometerConfirmation,
+  isExamplePlate,
+  isOdometerFlowSuperseded,
+  looksLikeOdometerHelpRequest,
+  looksLikeOdometerIntentStart,
+  normalizePlate,
+  resolveWaraPatenteForApi,
+  threadHasActiveOdometerFlow,
+} from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
-import { looksLikeConversationAcknowledgement, looksLikeNonOdometerOperationalIntent, looksLikeOpcionesInfoRequest, looksLikeUnidadesInfoRequest, shouldContinueOdometerFlow } from "@/lib/waraApi";
+import {
+  looksLikeConversationAcknowledgement,
+  looksLikeNonOdometerOperationalIntent,
+  looksLikeOpcionesInfoRequest,
+  looksLikePlateCorrectionRequest,
+  looksLikeUnidadesInfoRequest,
+  looksLikeVehicleBrandOrUnitSearch,
+  shouldContinueOdometerFlow,
+} from "@/lib/waraApi";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
   const n = typeof value === "number" ? value : Number(value.replace(",", ".").trim());
@@ -340,15 +360,24 @@ export async function POST(req: NextRequest) {
     ""
   ).trim();
   const odometerIntentStart = looksLikeOdometerIntentStart(rawText);
+  const odometerHelpStart = looksLikeOdometerHelpRequest(rawText);
+  const odometerFlowStart = odometerIntentStart || odometerHelpStart;
   const fromText = parseFromText(rawText);
-  const threadText = odometerIntentStart ? "" : await recentThreadText(rawPhone);
+  const threadText = odometerFlowStart ? "" : await recentThreadText(rawPhone);
+  const activeOdoFlow = threadHasActiveOdometerFlow(threadText);
+  const plateCorrection = looksLikePlateCorrectionRequest(rawText);
+  const unitHintInMessage =
+    looksLikeVehicleBrandOrUnitSearch(rawText) || /\bpatente\s+(?:de|del)\b/i.test(rawText);
+  const skipThreadPlate =
+    odometerFlowStart ||
+    (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
   if (
-    !odometerIntentStart &&
+    !odometerFlowStart &&
     (looksLikeOpcionesInfoRequest(rawText) ||
       looksLikeUnidadesInfoRequest(rawText) ||
       looksLikeConversationAcknowledgement(rawText) ||
-      looksLikeNonOdometerOperationalIntent(rawText) ||
+      (looksLikeNonOdometerOperationalIntent(rawText) && !plateCorrection) ||
       isOdometerFlowSuperseded(threadText)) &&
     !shouldContinueOdometerFlow(rawText, threadText)
   ) {
@@ -366,16 +395,30 @@ export async function POST(req: NextRequest) {
   }
 
   const threadParsed = parseFromText(threadText);
+
+  if (plateCorrection && activeOdoFlow && !extractPlateCorrectionHint(rawText) && !fromText.patente) {
+    const message =
+      "Entendido. ¿Cuál es la patente correcta? Podés pasarme la matrícula (ej. AB 123 CD) o el nombre/marca de la unidad.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_odometro_response",
+      stage: "plate_correction",
+    });
+    return NextResponse.json(
+      { ok: false, ok_s: "false", error: "Patente requerida", message },
+      { status: BB_STATUS },
+    );
+  }
+
   let patente = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       fromText.patente ??
-      (odometerIntentStart ? "" : plateFromSummary(threadText)) ??
-      threadParsed.patente ??
+      (skipThreadPlate ? "" : plateFromSummary(threadText)) ??
+      (skipThreadPlate ? "" : threadParsed.patente) ??
       ""
   );
 
-  if (!patente && !odometerIntentStart) {
+  if (!patente && !odometerFlowStart) {
     const fleetPlate = await resolvePlateWithWaraFleet(
       prisma,
       rawPhone,
@@ -391,29 +434,39 @@ export async function POST(req: NextRequest) {
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
     }
+  } else if (skipThreadPlate && !patente && activeOdoFlow) {
+    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, rawText, threadText);
+    if (fleetPlate.ok) {
+      patente = fleetPlate.plate;
+    } else if (fleetPlate.reason === "clarification") {
+      return NextResponse.json(
+        { ok: false, error: "Varias unidades", message: fleetPlate.message },
+        { status: BB_STATUS },
+      );
+    }
   }
 
   const odometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,
     fromText.odometro,
-    odometerIntentStart ? undefined : threadParsed.odometro
+    odometerFlowStart ? undefined : threadParsed.odometro
   );
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
   const horometro = resolveHorometroForWara({
     explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
     parsedHorometro: firstFiniteNumber(
       fromText.horometro,
-      odometerIntentStart ? undefined : threadParsed.horometro,
+      odometerFlowStart ? undefined : threadParsed.horometro,
     ),
-    combinedText: odometerIntentStart ? rawText : combinedText,
+    combinedText: odometerFlowStart ? rawText : combinedText,
   });
-  const pendingOdoConfirm = !odometerIntentStart && hasPendingOdometerConfirmation(threadText);
+  const pendingOdoConfirm = !odometerFlowStart && hasPendingOdometerConfirmation(threadText);
 
   if (!patente) {
-    if (odometerIntentStart) {
+    if (odometerFlowStart) {
       const message =
-        "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX)";
+        "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_odometro_response",
         stage: "missing_plate",

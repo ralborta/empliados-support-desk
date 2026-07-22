@@ -24,6 +24,7 @@ import {
 import {
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
+  threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import {
   buildFleetUnitNotFoundMessage,
@@ -83,7 +84,11 @@ function executorSkippedSilently(data: JsonRecord): boolean {
 function inferRecoveryExecutor(
   selectionText: string,
   failedExecutor: TurnExecutorId,
+  threadText: string,
 ): TurnExecutorId | null {
+  if (failedExecutor === "odometro" && threadHasActiveOdometerFlow(threadText)) {
+    return null;
+  }
   if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return "unidades";
   if (looksLikeLiveUnitConsultIntent(selectionText)) return "unidades";
   if (looksLikeExplicitReclamoOrTicketRequest(selectionText)) return "odoo_ticket";
@@ -210,7 +215,11 @@ export async function handleWhatsAppTurn(params: {
   let execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
 
   if (executorSkippedSilently(execResult)) {
-    const recovery = inferRecoveryExecutor(selectionText, executor);
+    const recovery = inferRecoveryExecutor(
+      selectionText,
+      executor,
+      threadCtx.classificationThread,
+    );
     if (recovery && recovery !== executor) {
       const retryResult = await invokeExecutor(recovery, rawPhone, body, apiKey);
       if (!executorSkippedSilently(retryResult) || messageFromPayload(retryResult)) {

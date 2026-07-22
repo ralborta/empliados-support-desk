@@ -194,11 +194,12 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
   }
 
   const patterns = [
+    /\bpatente\s+(?:de|del)\s+(?:la\s+|el\s+|los\s+|las\s+)?([a-z]{3,20})\b/i,
     /\b(?:de la|para la)\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,12}\bpara\b.{0,12}\bla\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,16}\bla\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,12}\bpara\b.{0,20}\bpatente\b\s+([a-z0-9]{2,9})\b/i,
-    /\b(?:patente|matricula)\b\s+([a-z0-9]{2,9})\b/i,
+    /\b(?:patente|matricula)\b\s+(?!de\b|del\b)([a-z0-9]{2,9})\b/i,
     /\bla\b\s+([a-z]{2,3}\d{3,4}[a-z]{0,2})\b/i,
   ];
   for (const re of patterns) {
@@ -206,6 +207,12 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
     if (m?.[1]) {
       const hint = m[1].replace(/\s+/g, "").toUpperCase();
       if (hint.length >= 2 && isLikelyPlateOrPrefixToken(hint)) return hint;
+      if (
+        hint.length >= 3 &&
+        !/^(CORRECTA|OTRA|OTRO|ESA|ESE|LA|EL|MIS|UNA|ESA|ESO)$/.test(hint)
+      ) {
+        return hint;
+      }
     }
   }
 
@@ -265,6 +272,12 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
   );
 }
 
+/** Trámite de odómetro activo en el hilo (pide patente/km o confirmación pendiente). */
+export function threadHasActiveOdometerFlow(threadText: string): boolean {
+  if (isOdometerFlowSuperseded(threadText)) return false;
+  return threadAwaitingOdometerPlate(threadText) || hasPendingOdometerConfirmation(threadText);
+}
+
 /** El hilo reciente está pidiendo patente para un trámite de odómetro. */
 export function threadAwaitingOdometerPlate(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
@@ -275,6 +288,9 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
     /nuevo od[oó]metro en km/i.test(tail) ||
+    /(?:entendido|correcta)\.{0,3}\s*(?:cu[aá]l es|decime|pas[aá]me).{0,80}(?:patente|matr[ií]cula|marca|nombre)/i.test(
+      tail,
+    ) ||
     (/(?:cu[aá]l es|indic[aá]me|pas[aá]me|decime|necesito).{0,100}(?:patente|matr[ií]cula)/i.test(tail) &&
       /od[oó]metro|hor[oó]metro|kilometraje/i.test(tail) &&
       /(?:atilio|registrar el cambio|nuevo od[oó]metro)/i.test(tail))
@@ -294,6 +310,29 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
     /\b(actualizar|cambiar|cambio de|corregir|ajustar|registrar)\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
   );
+}
+
+/** Ayuda o problema con odómetro sin patente ni km todavía ("me ayudás con mi odómetro"). */
+export function looksLikeOdometerHelpRequest(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
+  return (
+    /\b(ayuda|ayudame|ayudar|problema|problemas|no marca|marca mal|incorrecto|mal|falla|revisar|arreglar)\b/.test(
+      t,
+    ) ||
+    /\b(me ayudas|me pod[eé]s ayudar|podes ayudar|pod[eé]s ayudar|necesito ayuda)\b/.test(t) ||
+    /\b(con mi|con el|con la)\b/.test(t)
+  );
+}
+
+export function looksLikeOdometerFlowStart(text: string | undefined | null): boolean {
+  return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }
 export function lineLooksLikeBotUnitListExample(line: string): boolean {
   const l = line.trim();

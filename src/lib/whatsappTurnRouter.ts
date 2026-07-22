@@ -17,6 +17,7 @@ import {
   looksLikePostAdvisorCaseThread,
   looksLikeCertificateUnitReply,
   threadAwaitingOdometerPlate,
+  threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import {
   looksLikeConversationAcknowledgement,
@@ -41,7 +42,7 @@ import {
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
+import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
 export type TurnExecutorId =
@@ -178,7 +179,10 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (
     !isOdometerFlowSuperseded(threadText) &&
     (looksLikeOdometerIntent(text, threadText) ||
-      (threadAwaitingOdometerPlate(threadText) && isUnitSelectionMessage(text, threadText)) ||
+      (threadHasActiveOdometerFlow(threadText) &&
+        (isUnitSelectionMessage(text, threadText) ||
+          looksLikePlateCorrectionRequest(text) ||
+          /\bpatente\s+(?:de|del)\b/i.test(norm(text)))) ||
       (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText))))
   ) {
     return "odometro";
@@ -244,6 +248,9 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
     incident !== "OTHER" ||
     looksLikeOperationalIntent(text)
   ) {
+    if (threadHasActiveOdometerFlow(threadText) && looksLikeFleetUnitSearchInput(text)) {
+      return "odometro";
+    }
     return "unidades";
   }
 

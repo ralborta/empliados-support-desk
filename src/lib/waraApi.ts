@@ -129,7 +129,6 @@ export function looksLikeNonOdometerOperationalIntent(text: string | undefined |
   if (!n) return false;
   if (looksLikeOdometerIntentStart(text)) return false;
   if (looksLikeOperationalMaintenanceIntent(text ?? "")) return true;
-  if (looksLikePlateCorrectionRequest(text)) return true;
   if (/\b(certificado|cobertura|monitoreo|constancia)\b/.test(n)) return true;
   if (/\b(reporte|ultimo reporte|sin reporte|offline|listado|mis unidades)\b/.test(n)) return true;
   if (/\b(mantenimiento|asesor|ticket|reclamo)\b/.test(n) && !/\b(od[oó]metro|hor[oó]metro)\b/.test(n)) {
@@ -297,11 +296,14 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   if (!raw) return false;
   if (looksLikeConversationAcknowledgement(raw)) return false;
   if (looksLikeNonOdometerOperationalIntent(raw)) return false;
+  if (looksLikePlateCorrectionRequest(raw)) return true;
   if (looksLikeOdometerConfirmReply(raw)) return true;
   const t = normCompanyToken(raw);
   if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) return true;
   if (/\b(fecha|ayer|hoy)\b/.test(t)) return true;
   if (/\b(cambiar|corregir|modificar).{0,24}(patente|matricula)\b/.test(t)) return true;
+  if (/\bpatente\s+(?:de|del)\b/.test(t)) return true;
+  if (looksLikeVehicleBrandOrUnitSearch(raw)) return true;
   if (/^\d{4,7}$/.test(raw.replace(/\./g, "").replace(/\s+/g, ""))) return true;
   const plate = normalizePlate(raw.replace(/[\s\-_.]+/g, ""));
   return !!(plate && /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(plate));
@@ -310,16 +312,15 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
 /** ¿Seguir en flujo de odómetro o el cliente cambió de tema? */
 export function shouldContinueOdometerFlow(text: string, threadText: string): boolean {
   if (looksLikeConversationAcknowledgement(text)) return false;
-  if (looksLikeNonOdometerOperationalIntent(text)) return false;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  if (threadAwaitingOdometerPlate(threadText)) {
+  if (threadAwaitingOdometerPlate(threadText) || hasPendingOdometerConfirmation(threadText)) {
+    if (looksLikePlateCorrectionRequest(text)) return true;
+    if (looksLikeNonOdometerOperationalIntent(text)) return false;
     return looksLikeOdometerContinuationMessage(text);
   }
-  if (hasPendingOdometerConfirmation(threadText)) {
-    return looksLikeOdometerContinuationMessage(text);
-  }
+  if (looksLikeNonOdometerOperationalIntent(text)) return false;
   const t = normCompanyToken(text);
   return /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t);
 }

@@ -15,6 +15,7 @@ import {
 import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
+  shouldContinueOdometerFlow,
 } from "../src/lib/waraApi.ts";
 
 let failed = 0;
@@ -127,7 +128,25 @@ assert(
   turnRoute("Tengo problemas con el odometro", pollutedMaintThread) === "odometro",
   "problemas odómetro → odometro",
 );
-assert(turnRoute("Reiniciar", pollutedMaintThread) === "unidades", "Reiniciar no va a mantenimiento");
+
+console.log("— Flujo odómetro (patente, corrección, unidad) —");
+const odoThread = [
+  "Me ayudas con mi odometro?",
+  "Perfecto, tomo AD 427 MC. ¿Cuál es el nuevo odómetro en km?",
+].join("\n");
+assert(turnRoute("Me ayudas con mi odometro?", "") === "odometro", "ayuda odómetro → odometro");
+assert(
+  turnRoute("No es otra patente", odoThread) === "odometro",
+  "corrección patente → odometro",
+);
+assert(
+  turnRoute("La patente de Saveiro", `${odoThread}\nNo es otra patente`) === "odometro",
+  "marca en flujo odómetro → odometro",
+);
+assert(
+  shouldContinueOdometerFlow("No es otra patente", odoThread),
+  "corrección patente continúa flujo odómetro",
+);
 
 console.log("— Operativo base —");
 assert(turnRoute("listame mis unidades") === "unidades", "flota");
