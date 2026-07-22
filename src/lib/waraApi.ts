@@ -329,7 +329,7 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
 export function looksLikeOpcionesInfoRequest(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
   if (!t) return false;
-  if (/\b(mantenimiento|preventiv|correctiv|odometro|horometro|certificado)\b/.test(t) && !/\b(agenda|contacto|notific|perfil|opciones)\b/.test(t)) {
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|odometro|horometro|certificado)\b/.test(t) && !/\b(agenda|contacto|notific|perfil|opciones)\b/.test(t)) {
     return false;
   }
   if (
@@ -424,7 +424,7 @@ export function formatCompanyConfirmMessage(companyName: string): string {
 export function looksLikeMaintenanceExplorationRequest(raw: string | undefined | null): boolean {
   const text = normCompanyToken(raw ?? "");
   if (!text) return false;
-  if (!/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) return false;
+  if (!/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)) return false;
   if (
     /\b(programar|registrar|agendar|generar|abrir|crear|dar de alta|solicito pedir|pedir un)\b/.test(
       text,
@@ -447,7 +447,7 @@ export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = 
     /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta|puedo)\b/.test(
       text,
     ) &&
-    /\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)
+    /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)
   ) {
     return true;
   }
@@ -471,7 +471,7 @@ export function looksLikeMaintenanceCapabilityQuestion(
   if (looksLikeMaintenanceInfoRequest(raw)) return false;
 
   const threadHasMaintGuide = looksLikeMaintenanceGuideContextInThread(threadText);
-  const maintInText = /\b(mantenimiento|preventiv|correctiv|tarea|plan|uno|una)\b/.test(text);
+  const maintInText = /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan|uno|una)\b/.test(text);
   const asksBotVsSelf =
     (/\b(vos|tu|atilio|bot|aca|whatsapp|por aca|con vos|contigo)\b/.test(text) &&
       /\b(podes|pod[eé]s|generar|registrar|programar|abrir|crear|hacer|agendar|haces|hac[eé]s)\b/.test(
@@ -493,7 +493,7 @@ export function looksLikeMaintenanceCapabilityQuestion(
 export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
-  if (/\b(mantenimiento|preventiv|correctiv|tarea|plan de mantenimiento)\b/.test(t)) return false;
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan de mantenimiento)\b/.test(t)) return false;
   const gpsUnitCue =
     /\b(gps|ignicio|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
       t,
@@ -510,7 +510,7 @@ export function looksLikeLiveUnitConsultIntent(text: string | undefined | null):
   if (looksLikeGpsOrUnitStatusQuestion(text)) return true;
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
-  if (/\b(mantenimiento|preventiv|correctiv|certificado|cobertura)\b/.test(t)) return false;
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|certificado|cobertura)\b/.test(t)) return false;
   if (
     /\b(quiero|necesito|dame|decime|pasame|ver|consultar|mostrar|estado)\b/.test(t) &&
     /\b(ignicio|ignicion|reporte|gps|ubicacion|posicion|unidad|flota)\b/.test(t)
@@ -549,7 +549,7 @@ export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | nu
 /** Fallback cuando el turno no produjo respuesta pero el cliente escribió algo con sentido. */
 export function buildUnexpectedTurnFallbackMessage(raw: string | undefined | null): string {
   const text = normCompanyToken(raw ?? "");
-  if (/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) {
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)) {
     return (
       "Puedo ayudarte con mantenimiento por acá: decime la patente de la unidad y si es preventivo o correctivo. " +
       "Si preferís hacerlo vos en Wara, entrá a Utilidades → Mantenimiento."
@@ -571,7 +571,7 @@ export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null):
   if (looksLikeOpcionesInfoRequest(raw)) return false;
   if (looksLikeUnidadesInfoRequest(raw)) return false;
   const maintenanceDomain =
-    /\b(mantenimiento|preventiv|correctiv|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
+    /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
   const howToCue =
     /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona|saber|conocer|informacion|como se|cómo se|como hago|cómo hago)\b/;
   return maintenanceDomain.test(text) && howToCue.test(text);
@@ -580,7 +580,7 @@ export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null):
 /** Turno/agenda de Opciones Wara, no mantenimiento operativo de unidades. */
 export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
   const text = normCompanyToken(raw);
-  if (/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) return false;
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)) return false;
   return /\b(turno|turnos|agenda)\b/.test(text);
 }
 
@@ -606,7 +606,7 @@ export function looksLikeMaintenanceGuideContextInThread(threadText: string): bo
       /utilidades|plan de mantenimiento|tarea correctiva|tarea preventiva|ingresa al sistema wara|ingresar al sistema/.test(
         tail,
       )) ||
-    (/queres que te explique/.test(tail) && /mantenimiento|preventiv|correctiv|tarea/.test(tail))
+    (/queres que te explique/.test(tail) && /mantenimiento|preventiv\w*|correctiv\w*|tarea/.test(tail))
   );
 }
 

@@ -9,8 +9,11 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
+    "test": "npx tsx scripts/verify-all.mjs",
+    "test:db": "npx tsx scripts/verify-pending-action-state.mjs",
     "sync-builderbot-maestro": "node scripts/sync-builderbot-maestro.mjs",
-    "sync-builderbot-inicio-turn": "node scripts/sync-builderbot-inicio-turn.mjs"
+    "sync-builderbot-inicio-turn": "node scripts/sync-builderbot-inicio-turn.mjs",
+    "prepare": "husky"
   },
   "dependencies": {
     "@prisma/client": "^6.19.1",
@@ -35,6 +38,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "husky": "^9.1.7",
     "prisma": "^6.19.1",
     "tailwindcss": "^4",
     "typescript": "^5"

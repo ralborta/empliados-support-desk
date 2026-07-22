@@ -8,6 +8,7 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, looksLikeBriefConfirmation, normalizePlate } from "@/lib/wara";
 import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
+import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceCapabilityQuestion,
@@ -100,7 +101,7 @@ function isMaintenanceHowToRequest(raw: string): boolean {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
   const maintenanceDomain =
-    /\b(mantenimiento|preventiv|correctiv|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
+    /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
   const howToCue =
     /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|saber|conocer|informacion|como se|cómo se|como hago|cómo hago)/;
   return maintenanceDomain.test(text) && howToCue.test(text);
@@ -889,6 +890,10 @@ export async function POST(req: NextRequest) {
       plate,
       phone: rawPhone,
     });
+    await setPendingAction(prisma, rawPhone, "mantenimiento", {
+      summary: message,
+      payload: { plate, service, priority },
+    });
     return NextResponse.json(
       {
         ok: true,
@@ -904,6 +909,7 @@ export async function POST(req: NextRequest) {
       { status: BB_STATUS }
     );
   }
+  await clearPendingAction(prisma, rawPhone);
   const title = `${service}${plate ? ` · ${plate}` : ""}`;
 
   const { ticket } = await attachToOpenConversation(prisma, {

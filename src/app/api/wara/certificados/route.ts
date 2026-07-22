@@ -6,6 +6,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
+import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeCertificateUnitReply } from "@/lib/wara";
 import {
   findFleetUnitByPlate,
@@ -808,6 +809,9 @@ export async function POST(req: NextRequest) {
       stage: "plate_not_in_fleet_precheck",
     });
     if (earlyValidation) return earlyValidation;
+  } else {
+    // El trámite se resuelve (confirmado o reenvío explícito) sea cual sea el resultado final.
+    await clearPendingAction(prisma, rawPhone);
   }
 
   if (isConfirmed(confirmation) && !wantsExplicitResend) {
@@ -870,6 +874,10 @@ export async function POST(req: NextRequest) {
       plate,
       companyName: company,
       phone: rawPhone,
+    });
+    await setPendingAction(prisma, rawPhone, "certificados", {
+      summary: message,
+      payload: { plate, companyName: company },
     });
     return NextResponse.json(
       {

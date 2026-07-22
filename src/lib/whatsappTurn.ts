@@ -25,6 +25,7 @@ import {
 import {
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
+  looksLikeBriefConfirmation,
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import {
@@ -32,6 +33,8 @@ import {
   looksLikeFleetUnitSearchInput,
 } from "@/lib/waraUnitIntent";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
+import { clearPendingAction, getPendingAction } from "@/lib/pendingAction";
+import { prisma } from "@/lib/db";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -213,6 +216,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   if (looksLikeFlowControlCommand(selectionText)) {
+    await clearPendingAction(prisma, rawPhone);
     const firstName = String(context.name ?? "")
       .trim()
       .split(/\s+/)[0];
@@ -231,7 +235,17 @@ export async function handleWhatsAppTurn(params: {
     );
   }
 
-  let executor = classifyTurnExecutor(selectionText, threadCtx.classificationThread);
+  // Estado explícito en DB (prioridad sobre heurísticas de texto): si hay un trámite
+  // pendiente de confirmación vigente y el mensaje es una confirmación breve, va directo
+  // a ese ejecutor sin pasar por classifyTurnExecutor. Si no hay estado en DB (conversación
+  // vieja o TTL vencido), cae al comportamiento actual (regex sobre threadText) sin cambios.
+  let executor: TurnExecutorId;
+  if (looksLikeBriefConfirmation(selectionText)) {
+    const pendingAction = await getPendingAction(prisma, rawPhone);
+    executor = pendingAction?.type ?? classifyTurnExecutor(selectionText, threadCtx.classificationThread);
+  } else {
+    executor = classifyTurnExecutor(selectionText, threadCtx.classificationThread);
+  }
   let execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
 
   if (executorSkippedSilently(execResult)) {

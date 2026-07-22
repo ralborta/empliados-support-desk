@@ -22,6 +22,7 @@ import {
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import {
   looksLikeConversationAcknowledgement,
   looksLikeNonOdometerOperationalIntent,
@@ -589,6 +590,13 @@ export async function POST(req: NextRequest) {
         : typeof horometro === "number"
           ? `• Horómetro: ${horometro} h`
           : "";
+    const confirmMessage =
+      `Voy a registrar:\n• Patente: ${plateDisplay}\n${odoLine}\n\n` +
+      `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`;
+    await setPendingAction(prisma, rawPhone, "odometro", {
+      summary: confirmMessage,
+      payload: { patente, odometro, horometro },
+    });
     return NextResponse.json(
       {
         ok: true,
@@ -596,9 +604,7 @@ export async function POST(req: NextRequest) {
         flowComplete_s: "true",
         confirmationRequired: true,
         confirmationRequired_s: "true",
-        message:
-          `Voy a registrar:\n• Patente: ${plateDisplay}\n${odoLine}\n\n` +
-          `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`,
+        message: confirmMessage,
         patente,
         odometro,
         horometro,
@@ -607,6 +613,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  await clearPendingAction(prisma, rawPhone);
   const customerTz =
     session.lookup?.customerTimezone || session.lookup?.userTimezone || "America/Argentina/Buenos_Aires";
   const fecha = fechaWara(

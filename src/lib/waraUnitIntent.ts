@@ -85,7 +85,7 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   if (looksLikeFleetUnitSearchInput(text)) return true;
   return (
     text.length <= 16 &&
-    !/\b(mantenimiento|preventiv|correctiv|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
+    !/\b(mantenimiento|preventiv\w*|correctiv\w*|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
       text,
     )
   );
@@ -969,6 +969,15 @@ export async function resolveUnitQuery(params: {
     const rulesPrefix = resolveWithRules(params.rawText, params.threadText, params.units);
     if (rulesPrefix.intent === "consult_status" && rulesPrefix.plate) return rulesPrefix;
     if (rulesPrefix.intent === "need_clarification" && rulesPrefix.candidatePlates.length > 0) {
+      return rulesPrefix;
+    }
+    // Prefijo que no existe en TODA la flota: respuesta decisiva de reglas.
+    // No tiene sentido preguntarle a la IA por un prefijo inexistente, va a improvisar.
+    if (
+      rulesPrefix.intent === "need_clarification" &&
+      rulesPrefix.candidatePlates.length === 0 &&
+      rulesPrefix.clarificationQuestion
+    ) {
       return rulesPrefix;
     }
   }

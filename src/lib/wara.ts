@@ -506,7 +506,7 @@ export function isMaintenanceFlowSuperseded(
     const liveUnitAsk =
       /\b(quiero|necesito|dame|decime|pasame)\b/.test(current) &&
       /\b(ignicio|ignicion|reporte|gps|unidad)\b/.test(current);
-    const notMaint = !/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(current);
+    const notMaint = !/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(current);
     if ((gpsUnitCue && questionCue && notMaint) || (liveUnitAsk && notMaint)) return true;
     if (
       notMaint &&

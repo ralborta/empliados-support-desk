@@ -1,0 +1,308 @@
+[
+  {
+    "label": "listado de unidades",
+    "text": "Quiero el listado de mis unidades",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "cuantas unidades tengo",
+    "text": "¿Cuántas unidades tengo en Wara?",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "cerrar caso",
+    "text": "Quiero cerrar mi caso",
+    "threadTextPreview": "",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "caso abierto",
+    "text": "¿Tengo algún caso abierto?",
+    "threadTextPreview": "",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "asesor humano",
+    "text": "Quiero hablar con un asesor humano",
+    "threadTextPreview": "",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "reclamo explicito",
+    "text": "Quiero hacer un reclamo formal",
+    "threadTextPreview": "",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "soporte tecnico",
+    "text": "Quiero soporte técnico",
+    "threadTextPreview": "",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "soporte tecnico en menu generico",
+    "text": "Quiero soporte técnico",
+    "threadTextPreview": "Puedo guiarte sobre los módulos Opciones, Unidades o Manteni",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "falla odometro",
+    "text": "El odómetro no me está marcando bien",
+    "threadTextPreview": "",
+    "executor": "odometro"
+  },
+  {
+    "label": "falla odometro en menu generico",
+    "text": "No el odometro no está marcando bien",
+    "threadTextPreview": "Puedo guiarte sobre los módulos Opciones, Unidades o Manteni",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "gps sin reporte",
+    "text": "La unidad AD427MC no está reportando",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "ignicion pregunta",
+    "text": "¿Está encendida la AD 427 MC?",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "consulta viva con patente",
+    "text": "Decime el último reporte de AD427MC",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "odometro explicito con patente",
+    "text": "Quiero actualizar el odómetro de AD427MC a 125000 km",
+    "threadTextPreview": "",
+    "executor": "odometro"
+  },
+  {
+    "label": "odometro activo + patente",
+    "text": "AD 427 MC",
+    "threadTextPreview": "Para registrar el cambio de odómetro necesito la patente de ",
+    "executor": "odometro"
+  },
+  {
+    "label": "odometro activo + correccion patente",
+    "text": "no es esa, es la AH562SP",
+    "threadTextPreview": "Para registrar el cambio de odómetro necesito la patente de ",
+    "executor": "odometro"
+  },
+  {
+    "label": "correccion patente en hilo odometro",
+    "text": "cambiar la patente a AD427MC",
+    "threadTextPreview": "Odómetro: 100000 km registrado ayer",
+    "executor": "odometro"
+  },
+  {
+    "label": "patente tras pedido mantenimiento",
+    "text": "AD427MC",
+    "threadTextPreview": "Para registrar el mantenimiento necesito la patente de la un",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "prefijo tras pedido mantenimiento",
+    "text": "AD",
+    "threadTextPreview": "Para registrar el mantenimiento necesito la patente de la un",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "marca tras pedido mantenimiento + consulta viva reciente",
+    "text": "Nissan",
+    "threadTextPreview": "Para registrar el mantenimiento necesito la patente de la un",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "guia opciones agenda",
+    "text": "¿Cómo configuro la agenda?",
+    "threadTextPreview": "",
+    "executor": "info_guides"
+  },
+  {
+    "label": "guia mantenimiento informativo",
+    "text": "¿Cómo funciona el módulo de mantenimiento?",
+    "threadTextPreview": "",
+    "executor": "info_guides"
+  },
+  {
+    "label": "guia unidades informativo",
+    "text": "¿Qué significa el punto rojo en unidades?",
+    "threadTextPreview": "",
+    "executor": "info_guides"
+  },
+  {
+    "label": "pick modulo tras menu generico",
+    "text": "Ok mantenimiento",
+    "threadTextPreview": "Puedo guiarte sobre los módulos Opciones, Unidades o Manteni",
+    "executor": "info_guides"
+  },
+  {
+    "label": "reproceso tras guia mantenimiento",
+    "text": "ok gracias",
+    "threadTextPreview": "El mantenimiento preventivo se programa cada 10.000km o 6 me",
+    "executor": "unidades"
+  },
+  {
+    "label": "reproceso tras guia opciones",
+    "text": "gracias, muy claro",
+    "threadTextPreview": "Para configurar la Agenda: entrá a Opciones > Agenda > Agreg",
+    "executor": "unidades"
+  },
+  {
+    "label": "pregunta guia tras menu opciones",
+    "text": "¿y cómo agrego otro contacto?",
+    "threadTextPreview": "Para configurar la Agenda: entrá a Opciones > Agenda > Agreg",
+    "executor": "info_guides"
+  },
+  {
+    "label": "confirmo pendiente odometro",
+    "text": "Confirmo",
+    "threadTextPreview": "Voy a registrar:\n• Patente: AD 427 MC\n• Odómetro: 125000 km\n",
+    "executor": "odometro"
+  },
+  {
+    "label": "confirmo pendiente mantenimiento",
+    "text": "Confirmo",
+    "threadTextPreview": "Voy a registrar:\nPatente: AD427MC\nTipo: Correctivo\nPrioridad",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "confirmo pendiente certificado",
+    "text": "Confirmo",
+    "threadTextPreview": "Voy a generar el certificado de cobertura:\nPatente: AE 483 V",
+    "executor": "certificados"
+  },
+  {
+    "label": "si pendiente odometro",
+    "text": "si",
+    "threadTextPreview": "Voy a registrar:\n• Patente: AD 427 MC\n• Odómetro: 125000 km\n",
+    "executor": "odometro"
+  },
+  {
+    "label": "dale pendiente mantenimiento",
+    "text": "dale",
+    "threadTextPreview": "Voy a registrar:\nPatente: AD427MC\nTipo: Correctivo\nPrioridad",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "gracias tras derivacion",
+    "text": "gracias",
+    "threadTextPreview": "Te derivé con un asesor. Tu caso es TCK-000123.\nUn agente te",
+    "executor": "unidades"
+  },
+  {
+    "label": "confirmo tras derivacion sin pendiente",
+    "text": "confirmo",
+    "threadTextPreview": "Te derivé con un asesor. Tu caso es TCK-000123.\nUn agente te",
+    "executor": "unidades"
+  },
+  {
+    "label": "gps tras derivacion",
+    "text": "¿la unidad AD427MC está reportando?",
+    "threadTextPreview": "Te derivé con un asesor. Tu caso es TCK-000123.\nUn agente te",
+    "executor": "unidades"
+  },
+  {
+    "label": "certificado explicito",
+    "text": "Necesito un certificado de cobertura para AD427MC",
+    "threadTextPreview": "",
+    "executor": "certificados"
+  },
+  {
+    "label": "patente tras pedido certificado",
+    "text": "AD 427 MC",
+    "threadTextPreview": "Para el certificado de cobertura necesito la unidad: decime ",
+    "executor": "certificados"
+  },
+  {
+    "label": "marca tras pedido certificado",
+    "text": "Nissan",
+    "threadTextPreview": "Para el certificado de cobertura necesito la unidad: decime ",
+    "executor": "certificados"
+  },
+  {
+    "label": "prefijo tras pedido certificado",
+    "text": "HEJ",
+    "threadTextPreview": "Para el certificado de cobertura necesito la unidad: decime ",
+    "executor": "certificados"
+  },
+  {
+    "label": "mantenimiento operativo directo (palabra completa)",
+    "text": "Quiero programar un mantenimiento correctivo para AD427MC",
+    "threadTextPreview": "",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "mantenimiento operativo directo (solo correctivo, sin palabra completa)",
+    "text": "Quiero programar un correctivo para AD427MC",
+    "threadTextPreview": "",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "mantenimiento operativo directo (solo preventivo, sin palabra completa)",
+    "text": "Necesito agendar un preventivo para AD427MC",
+    "threadTextPreview": "",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "mantenimiento capability question",
+    "text": "¿Atilio puede registrar el mantenimiento por WhatsApp?",
+    "threadTextPreview": "El mantenimiento preventivo se programa cada 10.000km o 6 me",
+    "executor": "mantenimiento"
+  },
+  {
+    "label": "derivacion administrativa",
+    "text": "No puedo entrar a la plataforma, me tira error de acceso",
+    "threadTextPreview": "",
+    "executor": "odoo_ticket"
+  },
+  {
+    "label": "patente suelta sin contexto",
+    "text": "AD427MC",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "prefijo suelto sin contexto",
+    "text": "AD",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "patente suelta con odometro activo en hilo",
+    "text": "AD427MC",
+    "threadTextPreview": "Para registrar el cambio de odómetro necesito la patente de ",
+    "executor": "odometro"
+  },
+  {
+    "label": "palabra clave problema",
+    "text": "Tengo un problema con mi cuenta",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  },
+  {
+    "label": "reinicio con confirmacion pendiente odometro",
+    "text": "reinicio",
+    "threadTextPreview": "Voy a registrar:\n• Patente: AD 427 MC\n• Odómetro: 125000 km\n",
+    "executor": "unidades"
+  },
+  {
+    "label": "cancelar con confirmacion pendiente mantenimiento",
+    "text": "cancelar",
+    "threadTextPreview": "Voy a registrar:\nPatente: AD427MC\nTipo: Correctivo\nPrioridad",
+    "executor": "unidades"
+  },
+  {
+    "label": "mensaje ambiguo corto",
+    "text": "hola de nuevo",
+    "threadTextPreview": "",
+    "executor": "unidades"
+  }
+]

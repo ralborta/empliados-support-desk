@@ -91,3 +91,25 @@ Cuando `WARA_INBOUND_AUDIT_ONLY=true` (default), `/api/whatsapp/turn` envía la 
 
 - `WARA_INBOUND_AUDIT_ONLY=true` — inbound solo panel; BBC envía respuestas (mantener hasta validar).
 - `PULZE_API_KEY` / `BUILDERBOT_CONTEXT_API_KEY` — auth turn + ejecutores.
+
+## Auditoría y refactor 2026-07-22 — cerebro único real + reglas explícitas
+
+Se confirmó y corrigió que **texto y audio** son los dos únicos caminos de entrada reales en BBC
+(`Inicio` y `Mensaje de Voz`, ambos llamando a `/api/whatsapp/turn`). El canal de audio llamaba antes
+a un endpoint viejo que, para clientes registrados, redirigía al Router GPT legacy — bypaseando todos
+los fixes de este documento. Se corrigió y se eliminaron los 17 flows de BBC sin ningún camino de
+entrada alcanzable (detalle y reglas históricas del Router GPT en
+`docs/bbc-flows-eliminados-2026-07-22.md`).
+
+También se encontró y corrigió un bug de regex sistémico (14 ocurrencias en 5 archivos):
+`\b(correctiv|preventiv)\b` no matcheaba "correctivo"/"preventiva" (falta de sufijo `\w*`), por lo que
+un pedido como *"quiero programar un correctivo"* cae en `unidades` en vez de `mantenimiento`. Fix:
+`\b(correctiv\w*|preventiv\w*)\b` en los 14 lugares.
+
+`classifyTurnExecutor` y `looksLikeBbcInfoGuide` (en `src/lib/whatsappTurnRouter.ts`) se reescribieron
+como **tablas de reglas explícitas y ordenadas** (`TURN_RULES`, `INFO_GUIDE_RULES`) en vez de un cascade
+de `if` anónimo — misma lógica exacta por rama, mismo orden, pero cada regla ahora tiene `id` y `reason`
+documentados. Verificado sin ninguna diferencia de comportamiento contra
+`scripts/turn-classification.snapshot.json` (51 casos, foto del comportamiento pre-refactor) + toda la
+suite existente. Ese snapshot corre en cada `npm test` (gate de CI/pre-push) — cualquier cambio futuro
+de clasificación debe pasar por ahí, explicado, no accidental.
