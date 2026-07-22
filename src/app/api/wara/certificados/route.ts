@@ -6,7 +6,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint } from "@/lib/wara";
+import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeCertificateUnitReply } from "@/lib/wara";
 import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
@@ -150,24 +150,28 @@ function isGenericCertificateRequest(text: string): boolean {
   return /\b(certificado|cobertura|monitoreo|constancia)\b/i.test(text) && !detectPlate(text);
 }
 
-/** Hay un resumen pendiente de confirmar en el hilo (evita usar patente vieja del ticket). */
-function hasPendingCertificateConfirmation(threadText: string): boolean {
-  const lines = threadText
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const tail = lines.slice(-6).join("\n").toLowerCase();
-  if (
-    /perfecto,\s*gener[eé] el certificado|ya fue enviado|necesito la patente/.test(tail)
-  ) {
-    return false;
-  }
+function looksLikeCertificateUnitSelection(text: string): boolean {
+  return looksLikeCertificateUnitReply(text) || looksLikePlateCorrectionRequest(text);
+}
+
+function isCertificateRejection(text: string): boolean {
+  const t = text
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (/^(no|nop|nope|incorrecto|mal|otra|otro)[\s!.?]*$/.test(t)) return true;
+  return /^no[\s,]+(esta|es|esa|es esa|es esa patente|para esa)/.test(t);
+}
+
+function askCertificateUnitMessage(): string {
   return (
-    /voy a generar el certificado de cobertura/.test(tail) &&
-    /responde\s+confirmo/.test(tail)
+    "Para el certificado de cobertura necesito la unidad: decime la patente (ej. AD 427 MC), " +
+    "el nombre o la marca (ej. Saveiro, Nissan) o un prefijo (ej. HEJ)."
   );
 }
 
+/** Hay un resumen pendiente de confirmar en el hilo (evita usar patente vieja del ticket). */
 function resolveCertificatePlate(
   text: string,
   opts: {
@@ -189,9 +193,14 @@ function resolveCertificatePlate(
   const fromMessage =
     normalizePlate(opts.explicitPatente ?? opts.explicitPlate ?? undefined) ??
     detectPlate(text) ??
-    extractPlateCorrectionHint(text) ??
     null;
   if (fromMessage && !isExamplePlate(fromMessage)) return fromMessage;
+
+  const hint = extractPlateCorrectionHint(text);
+  if (hint && isPlausibleVehiclePlate(hint)) {
+    const plate = normalizePlate(hint);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
 
   if (!opts.allowThread || !hasPendingCertificateConfirmation(opts.threadText)) {
     return null;
@@ -562,16 +571,86 @@ export async function POST(req: NextRequest) {
   }
 
   const threadText = await recentThreadText(rawPhone);
+  const certState = certificateFlowState(threadText);
   const genericNewRequest =
     isGenericCertificateRequest(text) &&
     !normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) &&
-    !detectPlate(text);
+    !detectPlate(text) &&
+    !looksLikeCertificateUnitSelection(text);
   const pendingConfirm =
-    !genericNewRequest && hasPendingCertificateConfirmation(threadText);
+    !genericNewRequest && certState === "awaiting_confirm";
+  const awaitingUnit = certState === "awaiting_unit";
   const confirmRaw = parsed.data.confirm ?? parsed.data.confirmation;
   const confirmation =
     confirmRaw ??
     (pendingConfirm && (isConfirmed(text) || /\bconf/i.test(text)) ? "confirmo" : undefined);
+
+  if (pendingConfirm && isCertificateRejection(text)) {
+    const message = askCertificateUnitMessage();
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      stage: "rejected_confirmation",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        missing: ["patente"],
+        missing_s: "patente",
+        needsPlate_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  if (genericNewRequest) {
+    const message = askCertificateUnitMessage();
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      stage: "ask_unit",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        missing: ["patente"],
+        missing_s: "patente",
+        needsPlate_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  if (pendingConfirm && looksLikeCertificateUnitSelection(text) && !isConfirmed(text)) {
+    // Cliente corrige la unidad tras el resumen: no reutilizar patente del resumen anterior.
+  } else if (
+    pendingConfirm &&
+    !awaitingUnit &&
+    !isConfirmed(text) &&
+    !looksLikeCertificateUnitSelection(text)
+  ) {
+    const message = askCertificateUnitMessage();
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      stage: "awaiting_unit_after_summary",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        missing: ["patente"],
+        missing_s: "patente",
+        needsPlate_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
 
   if ((isConfirmed(text) || isConfirmed(confirmRaw)) && !pendingConfirm) {
     const plateHint =
@@ -618,7 +697,9 @@ export async function POST(req: NextRequest) {
     threadText,
     allowThread:
       !looksLikePlateCorrectionRequest(text) &&
-      (pendingConfirm || isConfirmed(confirmation)),
+      !looksLikeCertificateUnitSelection(text) &&
+      pendingConfirm &&
+      (isConfirmed(confirmation) || isConfirmed(text)),
   });
 
   let plate = plateFromDirect;
@@ -650,8 +731,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!plate) {
-    const message =
-      "Para el certificado de cobertura necesito la patente de la unidad (por ejemplo AD 427 MC o ABC123). Enviámela en un mensaje.";
+    const message = askCertificateUnitMessage();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       errorStage: "missing_plate",

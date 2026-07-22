@@ -5,6 +5,7 @@ import {
   detectPlate,
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
+  isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
   looksLikeOdometerIntentStart,
   normalizePlate,
@@ -101,6 +102,7 @@ const STOPWORDS = new Set([
   "guara",
   "para",
   "necesito",
+  "quiero",
   "generar",
   "solicitar",
   "pedir",
@@ -159,6 +161,17 @@ function looksLikeVagueUnitReference(rawText: string): boolean {
   );
 }
 
+function shouldAvoidThreadSearchTerms(rawText: string): boolean {
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm) && !detectLoosePlate(rawText)) {
+    return true;
+  }
+  return looksLikePlateCorrectionRequest(rawText) || !!extractPlateCorrectionHint(rawText);
+}
+
 /**
  * Términos de búsqueda: priorizar lo que escribió ahora.
  * Mezclar el hilo (p. ej. listado de flota) contamina marcas como "Nissan" con "alarma", "alex", etc.
@@ -166,6 +179,9 @@ function looksLikeVagueUnitReference(rawText: string): boolean {
 function extractSearchTerms(rawText: string, threadText: string): string[] {
   const fromMessage = tokenizeSearchTerms(rawText);
   if (fromMessage.length > 0 && !looksLikeVagueUnitReference(rawText)) {
+    return fromMessage;
+  }
+  if (shouldAvoidThreadSearchTerms(rawText)) {
     return fromMessage;
   }
   return tokenizeSearchTerms(`${rawText} ${threadText}`.trim());
@@ -201,6 +217,9 @@ function extractPlatePrefixHint(rawText: string): string | null {
     .toLowerCase();
   const correctionHint = extractPlateCorrectionHint(rawText);
   if (correctionHint && correctionHint.length <= 5) return correctionHint.toUpperCase();
+  if (isBarePlatePrefixHint(rawText)) {
+    return rawText.trim().replace(/[\s\-_.]+/g, "").toUpperCase();
+  }
   const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z]{2}\d{0,3})/i);
   if (explicit?.[1]) return explicit[1].replace(/\s+/g, "").toUpperCase();
   const paraPatente = norm.match(/\bpatente\b\s+([a-z0-9]{2,6})\b/i);
@@ -222,6 +241,18 @@ function shouldReuseThreadPlateForResolution(rawText: string): boolean {
     .toLowerCase();
   if (/\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm) && !detectPlate(rawText)) return false;
   return looksLikeOdometerContinuation(rawText);
+}
+
+function hasCertificateFlowAwaitingUnit(threadText: string): boolean {
+  const tail = threadText.slice(-3000).toLowerCase();
+  return /para el certificado de cobertura necesito la unidad/.test(tail);
+}
+
+function shouldSkipAiForUnitResolution(rawText: string, threadText: string): boolean {
+  if (shouldSkipAiPlateInference(rawText)) return true;
+  if (isBarePlatePrefixHint(rawText)) return true;
+  if (hasCertificateFlowAwaitingUnit(threadText)) return true;
+  return false;
 }
 
 function shouldSkipAiPlateInference(rawText: string): boolean {
@@ -351,6 +382,63 @@ function fuzzyMatchUnitByPlate(
   return null;
 }
 
+function resolveUnitSelectionHint(
+  rawText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  const hint = extractPlateCorrectionHint(rawText);
+  if (!hint || looksLikePlateCorrectionRequest(rawText)) return null;
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/\b(de la|para la)\b/.test(norm)) return null;
+
+  const compactHint = hint.replace(/\s+/g, "").toUpperCase();
+  if (isPlausibleVehiclePlate(compactHint)) {
+    const matches = filterUnitsByPlate(units, compactHint);
+    if (matches.length === 1) {
+      const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || compactHint;
+      return {
+        intent: "consult_status",
+        plate,
+        searchTerms: [],
+        candidatePlates: [plate],
+        source: "rules",
+      };
+    }
+  }
+
+  const prefixMatches = filterUnitsByPlatePrefix(units, compactHint);
+  if (prefixMatches.length === 1) {
+    const plate = normalizeLoosePlate(prefixMatches[0].patente || prefixMatches[0].unidad || "");
+    if (!plate) return null;
+    return {
+      intent: "consult_status",
+      plate,
+      searchTerms: [],
+      candidatePlates: [plate],
+      source: "rules",
+    };
+  }
+  if (prefixMatches.length > 1) {
+    const labels = prefixMatches
+      .slice(0, 5)
+      .map((u) => (u.patente || u.unidad || "").trim())
+      .join(", ");
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: prefixMatches
+        .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+        .filter(Boolean),
+      clarificationQuestion: `Encontré ${prefixMatches.length} unidades que empiezan con ${compactHint} (${labels}). Decime la patente exacta.`,
+      source: "rules",
+    };
+  }
+  return null;
+}
+
 function resolveWithRules(
   rawText: string,
   threadText: string,
@@ -362,6 +450,9 @@ function resolveWithRules(
 
   const correction = resolvePlateCorrection(rawText, units);
   if (correction) return correction;
+
+  const unitSelection = resolveUnitSelectionHint(rawText, units);
+  if (unitSelection) return unitSelection;
 
   if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
     const terms = tokenizeSearchTerms(rawText).filter((t) => t.length >= 3);
@@ -427,7 +518,9 @@ function resolveWithRules(
     };
   }
 
-  const prefixHint = extractPlatePrefixHint(rawText) ?? extractPlatePrefixHint(threadText);
+  const prefixHint =
+    extractPlatePrefixHint(rawText) ??
+    (shouldReuseThreadPlateForResolution(rawText) ? extractPlatePrefixHint(threadText) : null);
   if (prefixHint) {
     const prefixMatches = filterUnitsByPlatePrefix(units, prefixHint);
     const candidatePlates = prefixMatches
@@ -455,6 +548,13 @@ function resolveWithRules(
         source: "rules",
       };
     }
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: [],
+      clarificationQuestion: `No encontré unidades con prefijo ${prefixHint} en tu flota. Decime la patente completa o el nombre de la unidad.`,
+      source: "rules",
+    };
   }
 
   const terms = extractSearchTerms(rawText, threadText);
@@ -610,13 +710,17 @@ function isDecisiveRulesResolution(
 ): boolean {
   if (resolution.intent === "list_fleet") return true;
   if (resolution.intent === "consult_status" && resolution.plate) return true;
-  if (resolution.intent === "need_clarification" && resolution.candidatePlates.length > 1) {
-    // Solo acortar con reglas si la ambigüedad viene del mensaje actual, no del hilo.
-    const messageTerms = tokenizeSearchTerms(rawText);
-    if (messageTerms.length > 0 && !looksLikeVagueUnitReference(rawText)) {
-      return true;
+  if (resolution.intent === "need_clarification") {
+    if (isBarePlatePrefixHint(rawText)) return true;
+    if (resolution.clarificationQuestion && !resolution.candidatePlates.length) return true;
+    if (resolution.candidatePlates.length > 1) {
+      // Solo acortar con reglas si la ambigüedad viene del mensaje actual, no del hilo.
+      const messageTerms = tokenizeSearchTerms(rawText);
+      if (messageTerms.length > 0 && !looksLikeVagueUnitReference(rawText)) {
+        return true;
+      }
+      return false;
     }
-    return false;
   }
   return false;
 }
@@ -628,7 +732,7 @@ export async function resolveUnitQuery(params: {
 }): Promise<UnitQueryResolution> {
   const rules = resolveWithRules(params.rawText, params.threadText, params.units);
   if (isDecisiveRulesResolution(rules, params.rawText)) return rules;
-  if (shouldSkipAiPlateInference(params.rawText)) return rules;
+  if (shouldSkipAiForUnitResolution(params.rawText, params.threadText)) return rules;
 
   const ai = await resolveWithAi(params.rawText, params.threadText, params.units);
   if (ai) {
@@ -673,6 +777,14 @@ export async function resolvePlateWithWaraFleet(
   }
 
   if (looksLikeOdometerIntentStart(rawText) && !detectLoosePlate(rawText)) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  if (
+    shouldSkipAiForUnitResolution(rawText, threadText) &&
+    !detectLoosePlate(rawText) &&
+    !extractPlateCorrectionHint(rawText)
+  ) {
     return { ok: false, reason: "not_found" };
   }
 

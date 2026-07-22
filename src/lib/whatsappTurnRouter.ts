@@ -1,14 +1,29 @@
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
-import { detectIncidentType, detectLoosePlate } from "@/lib/wara";
+import {
+  certificateFlowState,
+  detectIncidentType,
+  detectLoosePlate,
+  hasPendingCertificateConfirmation,
+  hasPendingMaintenancePlateRequest,
+  hasPendingMantenimientoConfirmation,
+  hasPendingOdometerConfirmation,
+  isBarePlatePrefixHint,
+  isOdometerFlowSuperseded,
+  looksLikeBriefConfirmation,
+  looksLikeCertificateUnitReply,
+  threadAwaitingOdometerPlate,
+} from "@/lib/wara";
 import {
   looksLikeHumanAdvisorRequest,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeNonOdometerOperationalIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeOperationalIntent,
+  looksLikePlateCorrectionRequest,
   looksLikePlatformInfoGuideInThread,
   looksLikeUnidadesInfoRequest,
+  looksLikeVehicleBrandOrUnitSearch,
   shouldContinueOdometerFlow,
 } from "@/lib/waraApi";
 import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
@@ -30,7 +45,10 @@ function norm(text: string): string {
 }
 
 function looksLikeCertificateIntent(text: string, threadText: string): boolean {
-  if (looksLikeNonOdometerOperationalIntent(text) && /\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm(text))) {
+  if (
+    looksLikeNonOdometerOperationalIntent(text) &&
+    /\b(certificado|cobertura|monitoreo|constancia)\b/.test(norm(text))
+  ) {
     return true;
   }
   const blob = norm(`${threadText}\n${text}`);
@@ -38,6 +56,7 @@ function looksLikeCertificateIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeOdometerIntent(text: string, threadText: string): boolean {
+  if (isOdometerFlowSuperseded(threadText)) return false;
   return shouldContinueOdometerFlow(text, threadText);
 }
 
@@ -60,9 +79,23 @@ function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   return false;
 }
 
+function isCertificateUnitContext(threadText: string): boolean {
+  return certificateFlowState(threadText) === "awaiting_unit";
+}
+
+function isUnitSelectionMessage(text: string): boolean {
+  return (
+    !!detectLoosePlate(text) ||
+    isBarePlatePrefixHint(text) ||
+    looksLikeCertificateUnitReply(text) ||
+    looksLikeVehicleBrandOrUnitSearch(text) ||
+    looksLikePlateCorrectionRequest(text)
+  );
+}
+
 /**
- * Clasifica el ejecutor backend cuando Inicio/context devolvió `router`.
- * Prioridad alineada con sync-builderbot-router-wara.mjs (versión backend).
+ * Clasifica el ejecutor backend (Fase 1 — cerebro único).
+ * Prioridad alineada con sync-builderbot-router-wara.mjs.
  */
 export function classifyTurnExecutor(selectionText: string, threadText: string): TurnExecutorId {
   const text = selectionText.trim();
@@ -72,13 +105,47 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (looksLikeCustomerConversationCloseRequest(text)) return "odoo_ticket";
   if (looksLikeOpenCaseStatusInquiry(text)) return "odoo_ticket";
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
+
+  // Guías informativas → BBC (Opciones, Unidades, Mantenimiento informativo)
   if (looksLikeBbcInfoGuide(text, threadText)) return "bbc_router";
+
+  // Confirmaciones pendientes (prioridad sobre nueva intención)
+  if (hasPendingCertificateConfirmation(threadText) && looksLikeBriefConfirmation(text)) {
+    return "certificados";
+  }
+  if (hasPendingOdometerConfirmation(threadText) && looksLikeBriefConfirmation(text)) {
+    return "odometro";
+  }
+  if (hasPendingMantenimientoConfirmation(threadText) && looksLikeBriefConfirmation(text)) {
+    return "mantenimiento";
+  }
+
+  // Certificado: pedido explícito o respuesta de unidad tras "necesito la unidad"
   if (looksLikeCertificateIntent(text, threadText)) return "certificados";
-  if (looksLikeOdometerIntent(text, threadText)) return "odometro";
+  if (isCertificateUnitContext(threadText) && isUnitSelectionMessage(text)) {
+    return "certificados";
+  }
+
+  // Mantenimiento: patente pedida en contexto de mantenimiento
+  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) {
+    return "mantenimiento";
+  }
+
+  // Odómetro: corrección de patente o continuación del trámite
+  if (
+    !isOdometerFlowSuperseded(threadText) &&
+    (looksLikeOdometerIntent(text, threadText) ||
+      (threadAwaitingOdometerPlate(threadText) && isUnitSelectionMessage(text)) ||
+      (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText))))
+  ) {
+    return "odometro";
+  }
+
   if (looksLikeMaintenanceOperational(text, threadText)) return "mantenimiento";
 
   if (
     detectLoosePlate(text) ||
+    isBarePlatePrefixHint(text) ||
     detectIncidentType(text) !== "OTHER" ||
     looksLikeOperationalIntent(text)
   ) {

@@ -105,6 +105,16 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
   return !!(norm && !isExamplePlate(norm));
 }
 
+/** Prefijo suelto de patente (NKL, HEJ, AG) sin ser patente completa. */
+export function isBarePlatePrefixHint(text: string | undefined | null): boolean {
+  const compact = String(text ?? "")
+    .trim()
+    .replace(/[\s\-_.]+/g, "")
+    .toUpperCase();
+  if (!/^[A-Z]{2,3}\d{0,4}$/.test(compact)) return false;
+  return !isPlausibleVehiclePlate(compact);
+}
+
 /** Patente en el mensaje actual, incluyendo formatos viejos (LWK7902) y respuestas sueltas. */
 export function detectLoosePlate(text: string): string | null {
   const fromRegex = detectPlate(text);
@@ -125,6 +135,7 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
     .toLowerCase();
 
   const patterns = [
+    /\b(?:de la|para la)\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,12}\bpara\b.{0,12}\bla\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,16}\bla\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,12}\bpara\b.{0,20}\bpatente\b\s+([a-z0-9]{2,9})\b/i,
@@ -141,6 +152,10 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
 
   const loose = detectLoosePlate(raw);
   if (loose) return loose;
+
+  if (isBarePlatePrefixHint(raw)) {
+    return raw.trim().replace(/[\s\-_.]+/g, "").toUpperCase();
+  }
   return null;
 }
 
@@ -265,6 +280,88 @@ export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
     /para registrar el mantenimiento necesito la patente/.test(tail) ||
     (/necesito la patente de la unidad/.test(tail) && /mantenimiento/.test(tail))
   );
+}
+
+export type CertificateFlowState = "awaiting_unit" | "awaiting_confirm" | "none";
+
+/** Estado del trámite de certificado según mensajes recientes del hilo. */
+export function certificateFlowState(threadText: string): CertificateFlowState {
+  const lines = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 12; i--) {
+    const lower = lines[i].toLowerCase();
+    if (/para el certificado de cobertura necesito la unidad/.test(lower)) {
+      return "awaiting_unit";
+    }
+    if (/^(no|nop|nope|incorrecto|mal|otra|otro)[\s!.?]*$/i.test(lines[i])) {
+      const prev = lines.slice(Math.max(0, i - 4), i).join("\n").toLowerCase();
+      if (/voy a generar el certificado de cobertura/.test(prev)) {
+        return "awaiting_unit";
+      }
+    }
+    if (
+      /voy a generar el certificado de cobertura/.test(lower) &&
+      /responde\s+confirmo/.test(lower)
+    ) {
+      return "awaiting_confirm";
+    }
+  }
+  return "none";
+}
+
+export function hasPendingCertificateConfirmation(threadText: string): boolean {
+  return certificateFlowState(threadText) === "awaiting_confirm";
+}
+
+export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
+  const lines = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tail = lines.slice(-6).join("\n").toLowerCase();
+  if (/perfecto|deje registrada|orientacion de uso del modulo/.test(tail)) return false;
+  return /voy a registrar:/.test(tail) && /responde\s+confirmo/.test(tail);
+}
+
+/** Aceptación breve tipo CONFIRMO / sí / dale / ok. */
+export function looksLikeBriefConfirmation(text: string | undefined | null): boolean {
+  const t = String(text ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z]/g, "");
+  if (!t) return false;
+  if (t.startsWith("conf")) return true;
+  return new Set([
+    "si",
+    "sii",
+    "sip",
+    "dale",
+    "dalesi",
+    "sidale",
+    "ok",
+    "oka",
+    "okey",
+    "okay",
+    "listo",
+    "correcto",
+    "deacuerdo",
+    "perfecto",
+  ]).has(t);
+}
+
+export function looksLikeCertificateUnitReply(text: string): boolean {
+  if (detectLoosePlate(text) || isBarePlatePrefixHint(text)) return true;
+  if (extractPlateCorrectionHint(text)) return true;
+  const norm = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(de la|para la|la unidad|unidad)\b/.test(norm) && /[a-z0-9]{2,}/.test(norm)) return true;
+  return false;
 }
 
 /** Ignora mensajes anteriores al último cambio/selección de empresa en el hilo. */

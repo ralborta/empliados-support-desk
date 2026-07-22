@@ -108,7 +108,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        "PATENTE PARA CERTIFICADO — Si el bot acaba de pedir la patente para certificado de cobertura (por ejemplo 'necesito la patente' / 'enviámela en un mensaje') y el cliente responde solo con una patente (AB006EX, AD 427 MC, etc.), va a certificados. PRIORIDAD sobre consulta de unidad o listado cuando el contexto reciente es certificado, no consulta de reporte.",
+        "PATENTE / PREFIJO PARA CERTIFICADO — PRIORIDAD SOBRE CONSULTA. Si el bot acaba de pedir la unidad para certificado de cobertura (texto 'necesito la unidad', 'decime la patente', prefijo como HEJ/NKL, marca o nombre) y el cliente responde con patente (AD 427 MC), prefijo corto (NKL, HEJ, AG) o marca/nombre (Saveiro, Nissan), va a certificados. PROHIBIDO consulta de unidad genérica ni reusar patente del historial si el contexto reciente es certificado.",
       conditionValue: "",
       condition: "",
       conditionFlowId: F.certificados,

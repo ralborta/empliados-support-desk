@@ -6,7 +6,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, normalizePlate } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 import {
   looksLikeChangeCompanyRequest,
@@ -99,16 +99,6 @@ function isMaintenanceHowToRequest(raw: string): boolean {
   const howToCue =
     /(como|enseña|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo)/;
   return maintenanceDomain.test(text) && howToCue.test(text);
-}
-
-function hasPendingMantenimientoConfirmation(threadText: string): boolean {
-  const lines = threadText
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const tail = lines.slice(-6).join("\n").toLowerCase();
-  if (/perfecto|deje registrada|orientacion de uso del modulo/.test(tail)) return false;
-  return /voy a registrar:/.test(tail) && /responde\s+confirmo/.test(tail);
 }
 
 function maintenanceHowToMessage(raw: string): string {
