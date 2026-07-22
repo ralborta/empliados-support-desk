@@ -108,9 +108,65 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
   return false;
 }
 
+const VEHICLE_BRAND_TOKENS = new Set([
+  "nissan",
+  "toyota",
+  "ford",
+  "chevrolet",
+  "chevy",
+  "mercedes",
+  "volkswagen",
+  "vw",
+  "renault",
+  "peugeot",
+  "fiat",
+  "iveco",
+  "scania",
+  "volvo",
+  "hyundai",
+  "kia",
+  "honda",
+  "isuzu",
+  "citroen",
+  "ram",
+  "dodge",
+  "jeep",
+  "mitsubishi",
+  "mitsubisi",
+  "subaru",
+  "suzuki",
+  "daf",
+  "man",
+  "agrale",
+  "saveiro",
+  "sprinter",
+  "accelo",
+  "amarok",
+  "hilux",
+  "ranger",
+  "corsa",
+  "cruze",
+  "onix",
+  "etios",
+  "corolla",
+  "frontier",
+  "territory",
+]);
+
+/** Marca o nombre corto de unidad — no es cambiar de empresa Wara. */
+export function looksLikeVehicleBrandOrUnitSearch(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t || t.length > 40) return false;
+  if (/\b(empresa|wara|cacique|guara)\b/.test(t)) return false;
+  const tokens = t.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 3) return false;
+  return tokens.some((token) => VEHICLE_BRAND_TOKENS.has(token));
+}
+
 export function looksLikeChangeCompanyRequest(text: string | undefined | null): boolean {
   const t = (text ?? "").trim().toLowerCase();
   if (!t) return false;
+  if (looksLikeVehicleBrandOrUnitSearch(text)) return false;
   if (looksLikePlateCorrectionRequest(text)) return false;
   if (
     /\b(pasar a|operar con|usar|trabajar con|seguir con)\b/.test(t) &&
@@ -160,6 +216,7 @@ export function looksLikeOperationalIntent(text: string): boolean {
 export function looksLikeCompanySelection(text: string | undefined | null): boolean {
   if (looksLikeCompanyListQuestion(text)) return false;
   if (looksLikeChangeCompanyRequest(text)) return false;
+  if (looksLikeVehicleBrandOrUnitSearch(text)) return false;
   const t = (text ?? "").trim();
   if (!t || t.length > 50) return false;
   if (looksLikeOperationalIntent(t)) return false;

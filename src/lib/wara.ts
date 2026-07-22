@@ -62,6 +62,21 @@ export function isExamplePlate(value: string | null | undefined): boolean {
   return compact ? EXAMPLE_PLATES.has(compact) : false;
 }
 
+/** Patente real (Mercosur o formato anterior), no texto coloquial tipo "para actuali". */
+export function isPlausibleVehiclePlate(value: string | null | undefined): boolean {
+  const compact = normalizePlate(value);
+  if (!compact || compact.length < 5 || compact.length > 9) return false;
+  if (!/\d/.test(compact)) return false;
+  if (isExamplePlate(compact)) return false;
+  const letters = compact.match(/^[A-Z]+/)?.[0] ?? "";
+  if (letters.length === 3 && PLATE_STOPWORDS.has(letters)) return false;
+  return (
+    /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(compact) ||
+    /^[A-Z]{3}\d{3}$/.test(compact) ||
+    /^[A-Z]{3}\d{4}$/.test(compact)
+  );
+}
+
 /**
  * Detecta la primera patente REAL en el texto, ignorando las patentes de ejemplo
  * de los prompts. Si solo hay ejemplos, devuelve null.
@@ -138,15 +153,15 @@ export function extractLastPlateFromThread(text: string): string | null {
     ];
     for (let i = labeled.length - 1; i >= 0; i--) {
       const plate = normalizePlate(labeled[i][1]);
-      if (plate && !isExamplePlate(plate)) return plate;
+      if (plate && isPlausibleVehiclePlate(plate)) return plate;
     }
     const unitMention = [...line.matchAll(/unidad\s+([A-Za-z0-9 ]{5,12})/gi)];
     for (let i = unitMention.length - 1; i >= 0; i--) {
       const plate = normalizePlate(unitMention[i][1]);
-      if (plate && !isExamplePlate(plate)) return plate;
+      if (plate && isPlausibleVehiclePlate(plate)) return plate;
     }
     const plate = detectPlate(line);
-    if (plate) return plate;
+    if (plate && isPlausibleVehiclePlate(plate)) return plate;
   }
   return null;
 }

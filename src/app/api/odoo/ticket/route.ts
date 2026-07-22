@@ -8,7 +8,7 @@ import {
   getOdooConfigStatus,
   OdooError,
 } from "@/lib/odooApi";
-import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, normalizePlate, threadTextSinceCompanySelection, waraIncidentLabels } from "@/lib/wara";
+import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, isPlausibleVehiclePlate, normalizePlate, threadTextSinceCompanySelection, waraIncidentLabels } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import {
@@ -221,7 +221,7 @@ async function findRecentOdooRef(rawPhone: string, plate?: string): Promise<stri
 
 function extractLastPlateFromThreadCompat(text: string): string | null {
   const plate = extractLastPlateFromThread(text);
-  return plate ? normalizePlateForTitle(plate) : null;
+  return plate && isPlausibleVehiclePlate(plate) ? normalizePlateForTitle(plate) : null;
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {

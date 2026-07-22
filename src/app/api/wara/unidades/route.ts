@@ -9,7 +9,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, normalizePlate, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -226,7 +226,7 @@ async function recentThreadText(rawPhone: string): Promise<string> {
 
 function extractLastPlateFromThreadCompat(text: string): string | null {
   const plate = extractLastPlateFromThread(text);
-  return plate ? normalizeLoosePlate(plate) : null;
+  return plate && isPlausibleVehiclePlate(plate) ? normalizeLoosePlate(plate) : null;
 }
 
 /** El cliente habla de otra unidad distinta a la del hilo — no reutilizar patente anterior. */
@@ -811,10 +811,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  let forceListFleet = false;
+  let forceListFleet = looksLikeUnitListRequest(rawText);
   let unitQuery = extractUnitQueryFromText(rawText);
 
   if (
+    !forceListFleet &&
     result.ok &&
     result.unidades.length > 0 &&
     requestedPlates.length === 0 &&

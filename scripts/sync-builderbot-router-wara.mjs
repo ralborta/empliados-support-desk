@@ -52,7 +52,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        'CAMBIAR DE EMPRESA — PRIORIDAD MÁXIMA. Frases: "cambiar empresa", "cambiarme de empresa", "quiero cambiar de empresa", "otra empresa", typos similares. PROHIBIDO si el mensaje es trámite concreto (mantenimiento con detalle, patente, certificado, reporte). PROHIBIDO si dice cambiar/corregir matrícula o patente (corregir la unidad del trámite en curso, NO cambiar de empresa Wara). La elección 1/2/WARA la procesa Inicio.',
+        'CAMBIAR DE EMPRESA — PRIORIDAD MÁXIMA. Frases: "cambiar empresa", "cambiarme de empresa", "quiero cambiar de empresa", "otra empresa", typos similares. PROHIBIDO si el mensaje es trámite concreto (mantenimiento con detalle, patente, certificado, reporte). PROHIBIDO si dice cambiar/corregir matrícula o patente (corregir la unidad del trámite en curso, NO cambiar de empresa Wara). PROHIBIDO si el mensaje es marca o nombre de unidad (Nissan, Toyota, Saveiro, Sprinter, etc.) o búsqueda de unidad — aunque el historial mencione "cambiar empresa" como sugerencia del bot. La elección 1/2/WARA la procesa Inicio.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.cambiarEmpresa,
