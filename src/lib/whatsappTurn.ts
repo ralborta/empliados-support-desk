@@ -200,13 +200,22 @@ export async function handleWhatsAppTurn(params: {
   const execMessage = messageFromPayload(execResult);
   const execOk = execResult.ok !== false && execResult.ok_s !== "false";
   const execSkip = String(execResult.skipResponse_s ?? "") === "true";
+  let finalMessage = execSkip ? "" : execMessage || String(context.message ?? "");
+  if (!finalMessage && !execSkip) {
+    if (executor === "mantenimiento") {
+      finalMessage =
+        "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
+    } else {
+      finalMessage = "Recibí tu consulta. ¿Podés repetirla con un poco más de detalle?";
+    }
+  }
 
   return deliverTurnToWhatsApp(
     rawPhone,
     buildTurnPayload(context, {
       ok: execOk,
       ok_s: execOk ? "true" : "false",
-      message: execSkip ? "" : execMessage || String(context.message ?? ""),
+      message: finalMessage,
       skipResponse_s: execSkip ? "true" : undefined,
       flowComplete_s: execResult.flowComplete_s ?? "true",
       nextFlow: "reply",

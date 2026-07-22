@@ -487,16 +487,18 @@ export async function POST(req: NextRequest) {
     looksLikePlatformInfoGuideInThread(threadText) ||
     looksLikeMaintenanceInfoGuideInThread(threadText)
   ) {
-    return NextResponse.json(
-      {
-        ok: true,
-        ok_s: "true",
-        message: "",
-        skipResponse_s: "true",
-        flowComplete_s: "true",
-      },
-      { status: BB_STATUS }
-    );
+    if (!looksLikeOperationalMaintenanceIntent(text)) {
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          message: "",
+          skipResponse_s: "true",
+          flowComplete_s: "true",
+        },
+        { status: BB_STATUS }
+      );
+    }
   }
 
   if (
@@ -506,16 +508,18 @@ export async function POST(req: NextRequest) {
       lastInbound,
     })
   ) {
-    return NextResponse.json(
-      {
-        ok: true,
-        ok_s: "true",
-        message: "",
-        skipResponse_s: "true",
-        flowComplete_s: "true",
-      },
-      { status: BB_STATUS }
-    );
+    if (!looksLikeOperationalMaintenanceIntent(text)) {
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          message: "",
+          skipResponse_s: "true",
+          flowComplete_s: "true",
+        },
+        { status: BB_STATUS }
+      );
+    }
   }
 
   const threadService = inferServiceFromThread(threadText);

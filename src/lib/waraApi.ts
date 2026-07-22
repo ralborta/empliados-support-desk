@@ -124,6 +124,7 @@ export function looksLikeNonOdometerOperationalIntent(text: string | undefined |
   const n = normCompanyToken(text ?? "");
   if (!n) return false;
   if (looksLikeOdometerIntentStart(text)) return false;
+  if (looksLikeOperationalMaintenanceIntent(text ?? "")) return true;
   if (looksLikePlateCorrectionRequest(text)) return true;
   if (/\b(certificado|cobertura|monitoreo|constancia)\b/.test(n)) return true;
   if (/\b(reporte|ultimo reporte|sin reporte|offline|listado|mis unidades)\b/.test(n)) return true;
@@ -405,6 +406,13 @@ export function looksLikePlatformInfoGuideInThread(threadText: string): boolean 
 
 function isGenericMaintenanceFallbackText(text: string): boolean {
   return normCompanyToken(text) === "solicitud de gestion de mantenimiento";
+}
+
+/** Confirma empresa elegida sin duplicar punto final (p. ej. "S.A." → "S.A.."). */
+export function formatCompanyConfirmMessage(companyName: string): string {
+  const name = companyName.trim().replace(/\.+\s*$/, "").trim();
+  if (!name) return "Perfecto. ¿En qué te puedo ayudar?";
+  return `Perfecto, sigo con ${name}. ¿En qué te puedo ayudar?`;
 }
 
 /** Trámite operativo real (programar/registrar), no guía informativa. */
@@ -2179,7 +2187,7 @@ export async function selectCompanyForCustomer(
       status: 200,
       matchedContact: contact,
       contacts: lookup.contactos,
-      menuMessage: menuMessage ?? `Perfecto, sigo con ${label}. ¿En qué te puedo ayudar?`,
+      menuMessage: menuMessage ?? formatCompanyConfirmMessage(label),
     };
   }
 

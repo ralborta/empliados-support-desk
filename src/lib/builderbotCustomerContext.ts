@@ -18,12 +18,14 @@ import {
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
   buildCompanyMenuPayload,
+  formatCompanyConfirmMessage,
   looksLikeChangeCompanyRequest,
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
   looksLikeGreeting,
   looksLikeNonOdometerOperationalIntent,
+  looksLikeOperationalMaintenanceIntent,
   looksLikeOdometerContinuationMessage,
   looksLikeOperationalIntent,
   looksLikeOpcionesInfoRequest,
@@ -415,7 +417,7 @@ export async function customerRegisteredContextResponse(
         (sameCompany
           ? `Estás operando con ${pickedCompany}. ¿En qué te puedo ayudar?`
           : pickedCompany
-            ? `Perfecto, sigo con ${pickedCompany}. ¿En qué te puedo ayudar?`
+            ? formatCompanyConfirmMessage(pickedCompany)
             : "Perfecto. ¿En qué te puedo ayudar?");
     } else {
       selectionMessage = picked.menuMessage ?? picked.error ?? "";
@@ -586,6 +588,13 @@ export async function customerRegisteredContextResponse(
     responseMessage = "";
   } else if (
     selectionText &&
+    looksLikeOperationalMaintenanceIntent(selectionText)
+  ) {
+    // Trámite de mantenimiento: siempre al ejecutor (nunca ignorar ni quedar mudo).
+    nextFlow = "router";
+    responseMessage = "";
+  } else if (
+    selectionText &&
     !isOdometerFlowSuperseded(scopedThreadText || fullThreadText) &&
     threadAwaitingOdometerPlate(scopedThreadText || fullThreadText) &&
     (looksLikeOdometerContinuationMessage(selectionText) ||
@@ -607,7 +616,13 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       responseMessage = "Perfecto. ¿En qué te puedo ayudar?";
     }
-  } else if (duplicateInicioTurn && !looksLikeGreeting(selectionText)) {
+  } else if (
+    duplicateInicioTurn &&
+    !looksLikeGreeting(selectionText) &&
+    !looksLikeNonOdometerOperationalIntent(selectionText) &&
+    !looksLikeOperationalMaintenanceIntent(selectionText) &&
+    !looksLikeOdometerIntentStart(selectionText)
+  ) {
     nextFlow = "ignore";
     responseMessage = "";
   } else if (
@@ -635,13 +650,25 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
   } else if (activeCompany && requiresCompanySelection) {
     // Empresa ya guardada: no bloquear trámites por flag inconsistente.
-    nextFlow = duplicateInicioTurn && !looksLikeGreeting(selectionText) ? "ignore" : "router";
+    nextFlow =
+      duplicateInicioTurn &&
+      !looksLikeGreeting(selectionText) &&
+      !looksLikeNonOdometerOperationalIntent(selectionText) &&
+      !looksLikeOperationalMaintenanceIntent(selectionText)
+        ? "ignore"
+        : "router";
     responseMessage = "";
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     // Opción de menú inválida (p. ej. "3"): ya tenemos el error en selectionMessage.
     nextFlow = "reply";
   } else {
-    nextFlow = duplicateInicioTurn && !looksLikeGreeting(selectionText) ? "ignore" : "router";
+    nextFlow =
+      duplicateInicioTurn &&
+      !looksLikeGreeting(selectionText) &&
+      !looksLikeNonOdometerOperationalIntent(selectionText) &&
+      !looksLikeOperationalMaintenanceIntent(selectionText)
+        ? "ignore"
+        : "router";
     responseMessage = "";
   }
 

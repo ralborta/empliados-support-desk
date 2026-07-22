@@ -15,6 +15,9 @@ import {
   looksLikeCompanySelection,
   looksLikeHumanAdvisorRequest,
   looksLikeAtilioHelpRequest,
+  looksLikeNonOdometerOperationalIntent,
+  looksLikeOperationalMaintenanceIntent,
+  formatCompanyConfirmMessage,
 } from "../src/lib/waraApi.ts";
 import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry.ts";
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationClose.ts";
@@ -63,11 +66,27 @@ const routing = [
   ["quiero cambiar el odometro de LWK 7902", "", "odometro"],
   ["me ayudas con la agenda", odoPending, "bbc_router"],
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
+  ["Quiero programar un mantenimiento", "", "mantenimiento"],
   ["como funciona el modulo de mantenimiento", "", "bbc_router"],
 ];
 for (const [text, thread, expect] of routing) {
   assert(route(text, thread) === expect, `routing "${text}" → ${expect}`);
 }
+
+console.log("— Post-empresa / mantenimiento (no mudo) —");
+assert(
+  looksLikeOperationalMaintenanceIntent("Quiero programar un mantenimiento"),
+  "operational maintenance intent",
+);
+assert(
+  looksLikeNonOdometerOperationalIntent("Quiero programar un mantenimiento"),
+  "non-odometer operational after company pick",
+);
+assert(
+  formatCompanyConfirmMessage("El Cacique S.A.") ===
+    "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
+  "company confirm without double period",
+);
 
 console.log("— Derivación (asesor / casos / NO derivar de más) —");
 const derivation = [

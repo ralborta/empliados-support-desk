@@ -5,7 +5,12 @@ import {
   requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { selectCompanyForCustomer, resetCustomerCompanyMenu, looksLikeChangeCompanyRequest } from "@/lib/waraApi";
+import {
+  selectCompanyForCustomer,
+  resetCustomerCompanyMenu,
+  looksLikeChangeCompanyRequest,
+  formatCompanyConfirmMessage,
+} from "@/lib/waraApi";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 /** BuilderBot solo interpola {message} y reglas HTTP cuando el status es 2xx. */
@@ -149,7 +154,9 @@ export async function POST(req: NextRequest) {
   // ya fijada, así no encadenamos un clasificador de intención sobre la opción ("1"/"2").
   const message =
     result.menuMessage ??
-    `Perfecto, sigo con ${selectedCompany || "tu empresa"}. ¿En qué te puedo ayudar?`;
+    (selectedCompany
+      ? formatCompanyConfirmMessage(selectedCompany)
+      : "Perfecto. ¿En qué te puedo ayudar?");
   return NextResponse.json({
     ok: true,
     ok_s: "true",
