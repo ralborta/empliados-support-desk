@@ -425,6 +425,23 @@ export function looksLikeOperationalMaintenanceIntent(raw: string): boolean {
   );
 }
 
+/**
+ * Tras una guía informativa: pregunta si Atilio puede registrar el mantenimiento o lo hace el cliente en Wara.
+ * Ej.: «¿Vos podés generar un mantenimiento o lo hago yo?»
+ */
+export function looksLikeMaintenanceCapabilityQuestion(raw: string | undefined | null): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text || !/\b(mantenimiento|preventiv|correctiv|tarea|plan)\b/.test(text)) return false;
+  if (looksLikeMaintenanceInfoRequest(raw)) return false;
+  const asksBotVsSelf =
+    (/\b(vos|tu|atilio|bot|aca|whatsapp|por aca)\b/.test(text) &&
+      /\b(podes|generar|registrar|programar|abrir|crear|hacer)\b/.test(text)) ||
+    /\b(lo hago yo|hago yo|yo mismo|vos o yo|lo hago yo o vos|generar un mantenimiento o)\b/.test(
+      text,
+    );
+  return asksBotVsSelf;
+}
+
 /** Guía informativa del módulo Mantenimiento (cómo usar/configurar), no trámite operativo. */
 export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null): boolean {
   const text = normCompanyToken(raw ?? "");
@@ -470,6 +487,7 @@ export function shouldSkipStrayMaintenanceRequest(
 ): boolean {
   if (opts.pendingPlateRequest || opts.pendingMaintConfirm) return false;
   if (looksLikeOperationalMaintenanceIntent(text)) return false;
+  if (looksLikeMaintenanceCapabilityQuestion(text)) return false;
   if (looksLikeTurnoOrAgendaQuestion(text)) return true;
   if (looksLikeOpcionesInfoRequest(text)) return true;
   if (looksLikeUnidadesInfoRequest(text)) return true;

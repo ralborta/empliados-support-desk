@@ -17,6 +17,7 @@ import {
   looksLikeAtilioHelpRequest,
   looksLikeNonOdometerOperationalIntent,
   looksLikeOperationalMaintenanceIntent,
+  looksLikeMaintenanceCapabilityQuestion,
   formatCompanyConfirmMessage,
 } from "../src/lib/waraApi.ts";
 import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry.ts";
@@ -86,6 +87,20 @@ assert(
   formatCompanyConfirmMessage("El Cacique S.A.") ===
     "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
   "company confirm without double period",
+);
+
+const maintGuideThread = [
+  "El modulo de mantenimiento sirve para gestionar tareas preventivas y correctivas.",
+  "Queres que te explique como crear un plan o una tarea?",
+].join("\n");
+const capabilityQ = "Vos podes generar un mantenimiento o lo hago yo?";
+assert(
+  looksLikeMaintenanceCapabilityQuestion(capabilityQ),
+  "capability question after maint guide",
+);
+assert(
+  route(capabilityQ, maintGuideThread) === "mantenimiento",
+  "capability question routes to mantenimiento (not bbc_router mute)",
 );
 
 console.log("— Derivación (asesor / casos / NO derivar de más) —");

@@ -68,6 +68,16 @@ assert(
   "mantenimiento operativo NO hace skipResponse vacío",
 );
 
+const CAPABILITY_Q = "Vos podes generar un mantenimiento o lo hago yo?";
+const THREAD_AFTER_GUIDE = [
+  "El modulo de mantenimiento sirve para gestionar tareas preventivas y correctivas.",
+  "Queres que te explique como crear un plan o una tarea?",
+].join("\n");
+assert(
+  classifyTurnExecutor(CAPABILITY_Q, THREAD_AFTER_GUIDE) === "mantenimiento",
+  `post-guía "${CAPABILITY_Q}" → mantenimiento (no mudo)`,
+);
+
 const args = process.argv.slice(2);
 const live = args.includes("--live");
 const phoneArg = args.find((a) => a.startsWith("--phone="));

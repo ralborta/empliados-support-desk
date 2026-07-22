@@ -10,6 +10,7 @@ import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, 
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 import {
   looksLikeChangeCompanyRequest,
+  looksLikeMaintenanceCapabilityQuestion,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
@@ -161,6 +162,16 @@ function maintenanceHowToMessage(raw: string): string {
     "5. Guardá y hacé seguimiento desde el estado de la tarea.",
     "",
     "No genero un ticket por esta consulta porque es una orientación de uso del módulo. Si necesitás una guía más puntual, decime qué querés configurar.",
+  ].join("\n");
+}
+
+function maintenanceCapabilityReply(): string {
+  return [
+    "Sí, yo puedo registrar o programar un mantenimiento por acá en WhatsApp.",
+    "",
+    "Decime la patente de la unidad y si es preventivo o correctivo (y un detalle breve si querés). Yo lo dejo cargado en Wara.",
+    "",
+    "También podés hacerlo vos en la plataforma: Utilidades → Mantenimiento, como te conté en la guía anterior.",
   ].join("\n");
 }
 
@@ -552,6 +563,27 @@ export async function POST(req: NextRequest) {
         flowComplete_s: "true",
         informational: true,
         informational_s: "true",
+        message,
+        service,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  if (looksLikeMaintenanceCapabilityQuestion(text)) {
+    const message = maintenanceCapabilityReply();
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "capability_after_guide",
+      service,
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        needsPlate_s: "true",
         message,
         service,
       },

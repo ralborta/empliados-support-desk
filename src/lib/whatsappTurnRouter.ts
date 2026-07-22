@@ -16,9 +16,11 @@ import {
 } from "@/lib/wara";
 import {
   looksLikeHumanAdvisorRequest,
+  looksLikeMaintenanceCapabilityQuestion,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeMaintenanceInfoRequest,
   looksLikeNonOdometerOperationalIntent,
+  looksLikeOperationalMaintenanceIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeOperationalIntent,
   looksLikePlateCorrectionRequest,
@@ -70,6 +72,8 @@ function looksLikeOdometerIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeMaintenanceOperational(text: string, threadText: string): boolean {
+  if (looksLikeOperationalMaintenanceIntent(text)) return true;
+  if (looksLikeMaintenanceCapabilityQuestion(text)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return false;
   const blob = norm(`${threadText}\n${text}`);
   if (looksLikeMaintenanceInfoGuideInThread(threadText) && !/\b(patente|matricula)\b/.test(blob)) {
@@ -80,6 +84,8 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeUnitListRequest(text)) return false;
+  if (looksLikeOperationalMaintenanceIntent(text)) return false;
+  if (looksLikeMaintenanceCapabilityQuestion(text)) return false;
   if (looksLikeOpcionesInfoRequest(text)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return true;
   if (looksLikeUnidadesInfoRequest(text) || looksLikeUnidadesInfoRequest(threadText)) return true;
