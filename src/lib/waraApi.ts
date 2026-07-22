@@ -114,6 +114,7 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
   if (/\bme equivoque de (patente|matricula)\b/.test(t)) return true;
   if (/\bno\b.{0,16}\bla\b/.test(t) && /[a-z0-9]{3,}/.test(t.replace(/\s+/g, ""))) return true;
   if (/\bno\b.{0,12}\bpara\b.{0,16}\bpatente\b/.test(t)) return true;
+  if (/\bno\b.{0,12}\bpara\b.{0,12}\bla\b/.test(t)) return true;
   if (/\b(otra|otro)\b.{0,16}\bpatente\b/.test(t)) return true;
   return false;
 }
@@ -180,10 +181,10 @@ const VEHICLE_BRAND_TOKENS = new Set([
 /** Marca o nombre corto de unidad — no es cambiar de empresa Wara. */
 export function looksLikeVehicleBrandOrUnitSearch(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
-  if (!t || t.length > 40) return false;
+  if (!t || t.length > 48) return false;
   if (/\b(empresa|wara|cacique|guara)\b/.test(t)) return false;
   const tokens = t.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0 || tokens.length > 3) return false;
+  if (tokens.length === 0 || tokens.length > 6) return false;
   return tokens.some((token) => VEHICLE_BRAND_TOKENS.has(token));
 }
 

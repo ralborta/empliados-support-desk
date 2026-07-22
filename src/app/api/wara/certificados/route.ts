@@ -6,7 +6,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, isExamplePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint } from "@/lib/wara";
+import { detectPlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint } from "@/lib/wara";
 import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
@@ -181,7 +181,7 @@ function resolveCertificatePlate(
     const hint = extractPlateCorrectionHint(text);
     if (hint) {
       const plate = normalizePlate(hint);
-      if (plate && !isExamplePlate(plate)) return plate;
+      if (plate && isPlausibleVehiclePlate(plate) && !isExamplePlate(plate)) return plate;
     }
     return null;
   }

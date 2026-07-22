@@ -14,6 +14,7 @@ import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import {
   consultarEstadoUnidades,
   looksLikePlateCorrectionRequest,
+  looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
@@ -98,6 +99,11 @@ const STOPWORDS = new Set([
   "mesa",
   "ayuda",
   "guara",
+  "para",
+  "necesito",
+  "generar",
+  "solicitar",
+  "pedir",
 ]);
 
 function normalizeToken(value: string): string {
@@ -250,12 +256,28 @@ function resolvePlateCorrection(
   const hint = extractPlateCorrectionHint(rawText);
   if (!hint) return null;
 
-  let matches = filterUnitsByPlate(units, hint);
-  if (matches.length === 0 && hint.length >= 2) {
-    matches = filterUnitsByPlatePrefix(units, hint);
+  const compactHint = hint.replace(/\s+/g, "").toUpperCase();
+  const isPlateHint = isPlausibleVehiclePlate(compactHint);
+  const isBrandHint = looksLikeVehicleBrandOrUnitSearch(hint) || looksLikeVehicleBrandOrUnitSearch(compactHint);
+
+  let matches: WaraUnidadEstado[] = [];
+  if (isPlateHint) {
+    matches = filterUnitsByPlate(units, compactHint);
+    if (matches.length === 0) {
+      const fuzzy = fuzzyMatchUnitByPlate(units, compactHint);
+      if (fuzzy) matches = [fuzzy];
+    }
+    if (matches.length === 0 && compactHint.length >= 2) {
+      matches = filterUnitsByPlatePrefix(units, compactHint);
+    }
   }
-  if (matches.length === 0 && hint.length >= 3) {
+
+  if (matches.length === 0 && (isBrandHint || !isPlateHint)) {
     matches = filterUnitsBySearchTerms(units, [hint.toLowerCase()]);
+  }
+
+  if (matches.length === 0 && !isPlateHint && hint.length >= 3) {
+    matches = filterUnitsBySearchTerms(units, tokenizeSearchTerms(hint));
   }
 
   if (matches.length === 1) {
@@ -340,6 +362,36 @@ function resolveWithRules(
 
   const correction = resolvePlateCorrection(rawText, units);
   if (correction) return correction;
+
+  if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
+    const terms = tokenizeSearchTerms(rawText).filter((t) => t.length >= 3);
+    const matches = filterUnitsBySearchTerms(units, terms.length ? terms : tokenizeSearchTerms(rawText));
+    const candidatePlates = matches
+      .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+      .filter(Boolean);
+    if (matches.length === 1) {
+      return {
+        intent: "consult_status",
+        plate: candidatePlates[0],
+        searchTerms: terms,
+        candidatePlates,
+        source: "rules",
+      };
+    }
+    if (matches.length > 1) {
+      const labels = matches
+        .slice(0, 5)
+        .map((u) => (u.patente || u.unidad || "").trim())
+        .join(", ");
+      return {
+        intent: "need_clarification",
+        searchTerms: terms,
+        candidatePlates,
+        clarificationQuestion: `Encontré ${matches.length} unidades (${labels}). Decime la patente exacta.`,
+        source: "rules",
+      };
+    }
+  }
 
   // Priorizar lo que escribió ahora; no arrastrar patente del odómetro u otro trámite previo.
   const threadPlate = extractLastPlateFromThread(threadText);

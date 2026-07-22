@@ -125,7 +125,8 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
     .toLowerCase();
 
   const patterns = [
-    /\bno\b.{0,16}\bla\b\s+([a-z0-9]{2,9})\b/i,
+    /\bno\b.{0,12}\bpara\b.{0,12}\bla\b\s+([a-z0-9]{2,12})\b/i,
+    /\bno\b.{0,16}\bla\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,12}\bpara\b.{0,20}\bpatente\b\s+([a-z0-9]{2,9})\b/i,
     /\b(?:patente|matricula)\b\s+([a-z0-9]{2,9})\b/i,
     /\bla\b\s+([a-z]{2,3}\d{3,4}[a-z]{0,2})\b/i,
