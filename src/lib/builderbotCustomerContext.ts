@@ -13,6 +13,7 @@ import {
   looksLikeOdometerIntentStart,
   threadAwaitingOdometerPlate,
   threadTextSinceCompanySelection,
+  isOdometerFlowSuperseded,
 } from "@/lib/wara";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import {
@@ -20,6 +21,7 @@ import {
   looksLikeChangeCompanyRequest,
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
+  looksLikeConversationAcknowledgement,
   looksLikeGreeting,
   looksLikeOperationalIntent,
   looksLikeOpcionesInfoRequest,
@@ -567,14 +569,24 @@ export async function customerRegisteredContextResponse(
   ) {
     nextFlow = "router";
     responseMessage = "";
+  } else if (selectionText && looksLikeConversationAcknowledgement(selectionText)) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      const firstName = customer?.name?.trim().split(/\s+/)[0];
+      responseMessage = firstName
+        ? `De nada, ${firstName}. ¿Necesitás algo más?`
+        : "De nada. ¿En qué más te ayudo?";
+    }
   } else if (
     selectionText &&
     !detectLoosePlate(selectionText) &&
     !looksLikeGreeting(selectionText) &&
+    !looksLikeConversationAcknowledgement(selectionText) &&
     !looksLikeUnitListRequest(selectionText) &&
     !looksLikeOdometerIntentStart(selectionText) &&
     !looksLikeOpcionesInfoRequest(selectionText) &&
     !looksLikeUnidadesInfoRequest(selectionText) &&
+    !isOdometerFlowSuperseded(scopedThreadText || fullThreadText) &&
     threadAwaitingOdometerPlate(scopedThreadText || fullThreadText)
   ) {
     const fleetPlate = await resolvePlateWithWaraFleet(

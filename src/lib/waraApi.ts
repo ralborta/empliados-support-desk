@@ -6,6 +6,7 @@ import {
 import {
   formatPlateWithSpaces,
   hasPendingOdometerConfirmation,
+  isOdometerFlowSuperseded,
   normalizePlate,
   threadAwaitingOdometerPlate,
 } from "@/lib/wara";
@@ -243,16 +244,34 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
 }
 
 function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean {
+  if (looksLikeConversationAcknowledgement(text)) return false;
   const t = normCompanyToken(text ?? "").replace(/[^a-z]/g, "");
   if (!t) return false;
   if (t.startsWith("conf")) return true;
-  return new Set(["si", "dale", "ok", "listo", "correcto", "perfecto"]).has(t);
+  if (/\b(gracias|chau|chao|nosvemos|denada)\b/.test(t)) return false;
+  return new Set(["si", "dale"]).has(t);
+}
+
+/** Agradecimiento o cierre breve — no es confirmación operativa ni continuación de trámite. */
+export function looksLikeConversationAcknowledgement(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 140) return false;
+  const t = normCompanyToken(raw);
+  if (
+    /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return /^(ok|listo|perfecto|genial|buenisimo|buenisima|dale gracias)[\s!.,¡¿]*$/.test(t);
 }
 
 /** Mensaje que sigue un trámite de odómetro (confirmación, patente, km, fecha). */
 export function looksLikeOdometerContinuationMessage(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  if (looksLikeConversationAcknowledgement(raw)) return false;
   if (looksLikeOdometerConfirmReply(raw)) return true;
   const t = normCompanyToken(raw);
   if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) return true;
@@ -265,8 +284,10 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
 
 /** ¿Seguir en flujo de odómetro o el cliente cambió de tema? */
 export function shouldContinueOdometerFlow(text: string, threadText: string): boolean {
+  if (looksLikeConversationAcknowledgement(text)) return false;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
   if (threadAwaitingOdometerPlate(threadText)) return true;
   if (hasPendingOdometerConfirmation(threadText)) {
     return looksLikeOdometerContinuationMessage(text);

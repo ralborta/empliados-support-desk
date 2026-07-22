@@ -87,7 +87,7 @@ function buildRules() {
     },
     {
       conditionRule:
-        'REPROCESO TRAS GUÍA INFORMATIVA — Por CONTEXTO del historial: el bot ya respondió con pasos de Opciones Wara (Agenda/contactos/Perfiles/Notificaciones), del módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos de color, Crear grupo) o del módulo de Mantenimiento (guía preventiva/correctiva/planes, sin pedir patente) y el cliente NO está iniciando mantenimiento operativo, certificado, consulta de reporte en vivo ni odómetro. PROHIBIDO Gestión Mantenimiento y PROHIBIDO pedir patente. El turno informativo terminó.',
+        'REPROCESO TRAS GUÍA INFORMATIVA — Por CONTEXTO del historial: el bot ya respondió con pasos de Opciones Wara (Agenda/contactos/Perfiles/Notificaciones), del módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos de color, Crear grupo) o del módulo de Mantenimiento (guía preventiva/correctiva/planes, sin pedir patente) y el cliente NO está iniciando mantenimiento operativo, certificado, consulta de reporte en vivo ni odómetro. Incluye agradecimientos breves tras la guía ("ok gracias", "muchas gracias", "listo"). PROHIBIDO Gestión Mantenimiento, PROHIBIDO pedir patente/km y PROHIBIDO reanudar odómetro pendiente. El turno informativo terminó.',
       conditionValue: "",
       condition: "",
       conditionFlowId: F.ignorar,

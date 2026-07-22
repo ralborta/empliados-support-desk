@@ -119,6 +119,7 @@ export function detectLoosePlate(text: string): string | null {
 export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
   return (
     /voy a registrar:/.test(tail) &&
     /od[oó]metro/.test(tail) &&
@@ -126,10 +127,39 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
   );
 }
 
+/**
+ * El cliente siguió con otra cosa (guía Opciones/Unidades, etc.) después de un odómetro a medias.
+ * El hilo conserva contexto pero el trámite queda abandonado.
+ */
+export function isOdometerFlowSuperseded(threadText: string): boolean {
+  if (!threadText.trim()) return false;
+  const lower = threadText.toLowerCase();
+  const markers = [
+    lower.lastIndexOf("voy a registrar:"),
+    lower.lastIndexOf("cuál es el nuevo odómetro"),
+    lower.lastIndexOf("cual es el nuevo odometro"),
+    lower.lastIndexOf("nuevo odómetro en km"),
+    lower.lastIndexOf("nuevo odometro en km"),
+    lower.lastIndexOf("perfecto, tomo "),
+  ].filter((i) => i >= 0);
+  if (markers.length === 0) return false;
+  const cutIdx = Math.max(...markers);
+  const after = threadText.slice(cutIdx + 80).toLowerCase();
+  if (!after.trim()) return false;
+  return (
+    /(modulo opciones|entra a opciones|ingresa a opciones|agenda de contactos|agregar contacto|sum[aá]s un nuevo contacto|mis atajos|modulo unidades|modulo de unidades)/.test(
+      after,
+    ) ||
+    (/1\.\s*(entra|ingresa|abri)/.test(after) &&
+      /(agenda|opciones|contacto|unidades|grupo)/.test(after))
+  );
+}
+
 /** El hilo reciente está pidiendo patente para un trámite de odómetro. */
 export function threadAwaitingOdometerPlate(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
   // Solo cuando el BOT pidió patente/odómetro en el turno anterior — no el intent del cliente.
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
