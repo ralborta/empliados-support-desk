@@ -494,13 +494,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (
-    looksLikeTurnoOrAgendaQuestion(text) ||
-    looksLikeOpcionesInfoRequest(text) ||
-    looksLikeUnidadesInfoRequest(text) ||
-    looksLikeOpcionesInfoRequest(lastInbound) ||
-    looksLikeUnidadesInfoRequest(lastInbound) ||
-    looksLikePlatformInfoGuideInThread(threadText) ||
-    looksLikeMaintenanceInfoGuideInThread(threadText)
+    !pendingPlateRequest &&
+    !isMaintenancePlateSelectionMessage(text) &&
+    (looksLikeTurnoOrAgendaQuestion(text) ||
+      looksLikeOpcionesInfoRequest(text) ||
+      looksLikeUnidadesInfoRequest(text) ||
+      looksLikeOpcionesInfoRequest(lastInbound) ||
+      looksLikeUnidadesInfoRequest(lastInbound) ||
+      looksLikePlatformInfoGuideInThread(threadText) ||
+      looksLikeMaintenanceInfoGuideInThread(threadText))
   ) {
     if (!looksLikeOperationalMaintenanceIntent(text, threadText)) {
       return NextResponse.json(
@@ -517,6 +519,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (
+    !pendingPlateRequest &&
+    !isMaintenancePlateSelectionMessage(text) &&
     shouldSkipStrayMaintenanceRequest(text, threadText, {
       pendingPlateRequest,
       pendingMaintConfirm,
@@ -757,6 +761,8 @@ export async function POST(req: NextRequest) {
       );
     }
     if (
+      !pendingPlateRequest &&
+      !isMaintenancePlateSelectionMessage(text) &&
       shouldSkipStrayMaintenanceRequest(text, threadText, {
         pendingPlateRequest,
         pendingMaintConfirm,

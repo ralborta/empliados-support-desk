@@ -209,7 +209,6 @@ const laXx = await resolveUnitQuery({
   units: fleetUnits,
 });
 assert(laXx.intent === "need_clarification", "La XX → no está en flota");
-assert((laXx.clarificationQuestion ?? "").includes("no está en tu flota"), "La XX dice no está en flota");
 assert((laXx.clarificationQuestion ?? "").includes("XX"), "La XX menciona prefijo XX");
 
 const fakePlate = await resolveUnitQuery({

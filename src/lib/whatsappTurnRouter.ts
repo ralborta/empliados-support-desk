@@ -5,6 +5,7 @@ import {
   detectIncidentType,
   detectLoosePlate,
   hasPendingCertificateConfirmation,
+  extractPlatePrefixFromMessage,
   hasPendingMaintenancePlateRequest,
   hasPendingMantenimientoConfirmation,
   hasPendingOdometerConfirmation,
@@ -30,7 +31,7 @@ import {
   looksLikeVehicleBrandOrUnitSearch,
   shouldContinueOdometerFlow,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
+import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 
 /** Ejecutores HTTP del backend (Fase 1). `bbc_router` = flujos informativos aún en BBC. */
 export type TurnExecutorId =
@@ -120,6 +121,8 @@ function isUnitSelectionMessage(text: string): boolean {
   return (
     !!detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
+    !!extractPlatePrefixFromMessage(text) ||
+    isMaintenancePlateSelectionMessage(text) ||
     looksLikeCertificateUnitReply(text) ||
     looksLikeVehicleBrandOrUnitSearch(text) ||
     looksLikePlateCorrectionRequest(text)
