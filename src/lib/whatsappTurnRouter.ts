@@ -21,6 +21,7 @@ import {
 import {
   looksLikeConversationAcknowledgement,
   looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeFlowControlCommand,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
   looksLikeLiveUnitConsultIntent,
@@ -116,6 +117,8 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeUnitListRequest(text)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) return false;
+  if (looksLikeOdometerIntent(text, threadText)) return false;
+  if (looksLikeFlowControlCommand(text)) return false;
   if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
     return false;
   }
@@ -171,6 +174,16 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
     return "unidades";
   }
 
+  // Odómetro operativo — antes que guías informativas (el hilo no debe secuestrar con mantenimiento).
+  if (
+    !isOdometerFlowSuperseded(threadText) &&
+    (looksLikeOdometerIntent(text, threadText) ||
+      (threadAwaitingOdometerPlate(threadText) && isUnitSelectionMessage(text, threadText)) ||
+      (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText))))
+  ) {
+    return "odometro";
+  }
+
   // Patente/prefijo/marca tras pedido de mantenimiento — salvo que el hilo sea consulta de unidad.
   if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
     if (threadHasRecentLiveUnitConsultIntent(threadText) && looksLikeVehicleBrandOrUnitSearch(text)) {
@@ -216,16 +229,6 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   // Mantenimiento: patente pedida en contexto de mantenimiento (también cubierto arriba; redundante por claridad)
   if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
     return "mantenimiento";
-  }
-
-  // Odómetro: corrección de patente o continuación del trámite
-  if (
-    !isOdometerFlowSuperseded(threadText) &&
-    (looksLikeOdometerIntent(text, threadText) ||
-      (threadAwaitingOdometerPlate(threadText) && isUnitSelectionMessage(text, threadText)) ||
-      (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText))))
-  ) {
-    return "odometro";
   }
 
   if (looksLikeMaintenanceOperational(text, threadText)) return "mantenimiento";

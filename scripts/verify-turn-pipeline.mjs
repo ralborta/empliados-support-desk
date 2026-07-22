@@ -119,6 +119,15 @@ assert(
   turnRoute("Nissan", `${pollutedMaintThread}\nquiero ver la ignicio de mi unidad`) === "unidades",
   "marca tras consulta ignición va a unidades",
 );
+assert(
+  turnRoute("Mi odometro no marca bien", pollutedMaintThread) === "odometro",
+  "odómetro operativo no va a info_guides",
+);
+assert(
+  turnRoute("Tengo problemas con el odometro", pollutedMaintThread) === "odometro",
+  "problemas odómetro → odometro",
+);
+assert(turnRoute("Reiniciar", pollutedMaintThread) === "unidades", "Reiniciar no va a mantenimiento");
 
 console.log("— Operativo base —");
 assert(turnRoute("listame mis unidades") === "unidades", "flota");

@@ -22,6 +22,7 @@ import {
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
+  looksLikeFlowControlCommand,
   looksLikeGreeting,
   looksLikeOperationalIntent,
   looksLikeRepeatGreetingInSession,
@@ -524,6 +525,12 @@ export async function customerRegisteredContextResponse(
       stage: "atilio_help_capabilities",
     });
     nextFlow = "reply";
+  } else if (selectionText && looksLikeFlowControlCommand(selectionText)) {
+    nextFlow = "reply";
+    const firstName = customer?.name?.trim().split(/\s+/)[0];
+    responseMessage = firstName
+      ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
+      : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
   } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {

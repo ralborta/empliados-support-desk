@@ -655,6 +655,16 @@ export function looksLikeGreeting(text: string | undefined | null): boolean {
   );
 }
 
+/** Comando para reiniciar la conversación (no es patente, marca ni trámite). */
+export function looksLikeFlowControlCommand(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm) return false;
+  if (looksLikeChangeCompanyRequest(text)) return false;
+  return /^(reiniciar|inicio|menu|volver|cancelar|reset|empezar de nuevo|comenzar de nuevo|arrancar de nuevo)$/.test(
+    norm,
+  );
+}
+
 /** Saludo repetido en una conversación que ya venía en curso (no primer contacto). */
 export function looksLikeRepeatGreetingInSession(
   threadText: string,

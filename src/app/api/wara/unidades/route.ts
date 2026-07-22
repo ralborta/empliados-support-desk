@@ -13,6 +13,7 @@ import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateW
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
+  looksLikeFlowControlCommand,
   looksLikeGreeting,
   looksLikeLiveUnitConsultIntent,
   resolveWaraSessionByPhone,
@@ -706,6 +707,21 @@ export async function POST(req: NextRequest) {
     parsed.data.patente ?? parsed.data.plate ?? detectLoosePlate(rawText) ?? "";
 
   if (looksLikeCompanySelection(rawText.trim()) && !explicitPlate) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText: "",
+        message: "",
+        skipResponse_s: "true",
+        action: "none" as const,
+        unidadesCount: 0,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  if (looksLikeFlowControlCommand(rawText.trim())) {
     return NextResponse.json(
       {
         ok: true,

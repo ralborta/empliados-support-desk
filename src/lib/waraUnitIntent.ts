@@ -17,6 +17,7 @@ import {
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import {
   consultarEstadoUnidades,
+  looksLikeFlowControlCommand,
   looksLikeLiveUnitConsultIntent,
   looksLikePlateCorrectionRequest,
   looksLikeVehicleBrandOrUnitSearch,
@@ -80,8 +81,14 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
 export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   const text = rawText.trim();
   if (!text) return false;
+  if (looksLikeFlowControlCommand(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
-  return text.length <= 16 && !/\b(mantenimiento|preventiv|correctiv|quiero|necesito|programar|registrar)\b/i.test(text);
+  return (
+    text.length <= 16 &&
+    !/\b(mantenimiento|preventiv|correctiv|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
+      text,
+    )
+  );
 }
 
 export type UnitQueryIntent = "list_fleet" | "consult_status" | "need_clarification";
