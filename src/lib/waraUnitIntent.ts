@@ -20,6 +20,17 @@ import {
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
 
+/** Entrada que debe resolver contra la flota (patente, prefijo, marca, corrección). */
+export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
+  return (
+    !!detectLoosePlate(rawText) ||
+    isBarePlatePrefixHint(rawText) ||
+    !!extractPlateCorrectionHint(rawText) ||
+    looksLikeVehicleBrandOrUnitSearch(rawText) ||
+    looksLikePlateCorrectionRequest(rawText)
+  );
+}
+
 export type UnitQueryIntent = "list_fleet" | "consult_status" | "need_clarification";
 
 export type UnitQueryResolution = {
@@ -780,11 +791,7 @@ export async function resolvePlateWithWaraFleet(
     return { ok: false, reason: "not_found" };
   }
 
-  if (
-    shouldSkipAiForUnitResolution(rawText, threadText) &&
-    !detectLoosePlate(rawText) &&
-    !extractPlateCorrectionHint(rawText)
-  ) {
+  if (shouldSkipAiForUnitResolution(rawText, threadText) && !looksLikeFleetUnitSearchInput(rawText)) {
     return { ok: false, reason: "not_found" };
   }
 

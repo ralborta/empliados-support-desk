@@ -11,6 +11,7 @@ import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
   looksLikePlateCorrectionRequest,
+  looksLikeVehicleBrandOrUnitSearch,
   isWaraPlateValidationError,
   obtenerCertificadoCobertura,
   resolveCustomerByWaraPhone,
@@ -151,7 +152,11 @@ function isGenericCertificateRequest(text: string): boolean {
 }
 
 function looksLikeCertificateUnitSelection(text: string): boolean {
-  return looksLikeCertificateUnitReply(text) || looksLikePlateCorrectionRequest(text);
+  return (
+    looksLikeCertificateUnitReply(text) ||
+    looksLikePlateCorrectionRequest(text) ||
+    looksLikeVehicleBrandOrUnitSearch(text)
+  );
 }
 
 function isCertificateRejection(text: string): boolean {
