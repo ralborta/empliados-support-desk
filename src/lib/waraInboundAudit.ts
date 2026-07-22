@@ -35,5 +35,6 @@ export function shouldTurnSendWhatsAppToCustomer(): boolean {
   const raw = process.env.WARA_TURN_BACKEND_SEND?.trim().toLowerCase();
   if (raw === "false" || raw === "0" || raw === "no" || raw === "legacy") return false;
   if (raw === "true" || raw === "1" || raw === "yes") return true;
-  return isWaraInboundAuditOnly();
+  // Emergencia: BBC envía vía messageMapping hasta validar Fase 2 en producción.
+  return false;
 }

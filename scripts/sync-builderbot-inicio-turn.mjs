@@ -36,7 +36,7 @@ const ANSWERS = {
   cambiarSelect: "a81b5c62-f672-4030-9648-63f20ce8dbd0",
 };
 
-/** Fase 2: backend envía WA; BBC solo rutea (nunca messageMapping). */
+/** BBC envía {message} desde /turn; backend no manda WA (rollback Fase 2). */
 function turnHttpPlugin(apiKey, rules) {
   return {
     http: {
@@ -44,8 +44,8 @@ function turnHttpPlugin(apiKey, rules) {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey },
       body: { from: "{from}", body: "{body}", api_key: apiKey },
-      messageMapping: "",
-      avoidResponse: true,
+      messageMapping: "{message}",
+      avoidResponse: false,
       rules,
     },
   };
