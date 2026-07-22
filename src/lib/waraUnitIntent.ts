@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { PrismaClient } from "@prisma/client";
 import {
+  certificateFlowState,
   detectLoosePlate,
   detectPlate,
   extractLastPlateFromThread,
@@ -743,7 +744,22 @@ export async function resolveUnitQuery(params: {
 }): Promise<UnitQueryResolution> {
   const rules = resolveWithRules(params.rawText, params.threadText, params.units);
   if (isDecisiveRulesResolution(rules, params.rawText)) return rules;
-  if (shouldSkipAiForUnitResolution(params.rawText, params.threadText)) return rules;
+
+  const skipAi = shouldSkipAiForUnitResolution(params.rawText, params.threadText);
+  const unitSearch = looksLikeFleetUnitSearchInput(params.rawText);
+  // Certificado genérico: sin IA. Marca/prefijo/patente sin match en reglas: IA acotada al catálogo.
+  if (skipAi && !unitSearch) return rules;
+  if (skipAi && unitSearch && rules.intent === "need_clarification" && rules.clarificationQuestion) {
+    return rules;
+  }
+  if (
+    skipAi &&
+    unitSearch &&
+    certificateFlowState(params.threadText) === "awaiting_unit" &&
+    rules.plate
+  ) {
+    return rules;
+  }
 
   const ai = await resolveWithAi(params.rawText, params.threadText, params.units);
   if (ai) {

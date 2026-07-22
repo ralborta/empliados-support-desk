@@ -736,10 +736,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (!plate) {
-    const message = askCertificateUnitMessage();
+    const message = looksLikeCertificateUnitSelection(text)
+      ? `No encontré una unidad para "${text.trim()}" en tu flota. Decime la patente exacta (ej. NKL 961) o un prefijo (ej. NKL).`
+      : askCertificateUnitMessage();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
-      errorStage: "missing_plate",
+      errorStage: looksLikeCertificateUnitSelection(text) ? "unit_not_in_fleet" : "missing_plate",
       phone: rawPhone,
     });
     return NextResponse.json(
