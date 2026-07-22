@@ -338,11 +338,15 @@ export function extractLastPlateFromThread(text: string): string | null {
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */
 export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
-  return (
+  const askedForPlate =
     /para programar mantenimiento preventivo necesito la patente/.test(tail) ||
     /para registrar el mantenimiento necesito la patente/.test(tail) ||
-    (/necesito la patente de la unidad/.test(tail) && /mantenimiento/.test(tail))
-  );
+    /necesito la patente de la unidad/.test(tail) ||
+    /decime la patente de la unidad/.test(tail) ||
+    (/patente de la unidad/.test(tail) && /preventivo o correctivo/.test(tail)) ||
+    (/yo lo dejo cargado en wara/.test(tail) && /patente/.test(tail)) ||
+    (/puedo registrar o programar un mantenimiento/.test(tail) && /patente/.test(tail));
+  return askedForPlate && /mantenimiento/.test(tail);
 }
 
 export type CertificateFlowState = "awaiting_unit" | "awaiting_confirm" | "none";

@@ -18,6 +18,10 @@ import {
   looksLikeSubstantiveCustomerMessage,
 } from "@/lib/waraApi";
 import {
+  hasPendingMaintenancePlateRequest,
+  isBarePlatePrefixHint,
+} from "@/lib/wara";
+import {
   buildFleetUnitNotFoundMessage,
   looksLikeFleetUnitSearchInput,
 } from "@/lib/waraUnitIntent";
@@ -136,8 +140,13 @@ export async function handleWhatsAppTurn(params: {
   const contextNextFlow = String(context.nextFlow ?? "derivar");
 
   if (contextNextFlow === "ignore") {
-    if (looksLikeSubstantiveCustomerMessage(selectionText)) {
-      // No silenciar preguntas reales por reproceso duplicado de Inicio.
+    const threadHint = await recentThreadTextForPhone(rawPhone);
+    if (
+      looksLikeSubstantiveCustomerMessage(selectionText) ||
+      isBarePlatePrefixHint(selectionText) ||
+      hasPendingMaintenancePlateRequest(threadHint)
+    ) {
+      // No silenciar preguntas reales ni respuestas de patente/prefijo tras mantenimiento.
     } else {
       return deliverTurnToWhatsApp(
         rawPhone,

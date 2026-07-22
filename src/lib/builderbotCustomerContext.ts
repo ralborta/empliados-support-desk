@@ -10,6 +10,8 @@ import {
   detectLoosePlate,
   extractLastPlateFromThread,
   formatPlateWithSpaces,
+  hasPendingMaintenancePlateRequest,
+  isBarePlatePrefixHint,
   looksLikeOdometerIntentStart,
   threadAwaitingOdometerPlate,
   threadTextSinceCompanySelection,
@@ -625,7 +627,10 @@ export async function customerRegisteredContextResponse(
     !looksLikeNonOdometerOperationalIntent(selectionText) &&
     !looksLikeOperationalMaintenanceIntent(selectionText, threadForMaintIntent) &&
     !looksLikeMaintenanceCapabilityQuestion(selectionText, threadForMaintIntent) &&
-    !looksLikeOdometerIntentStart(selectionText)
+    !looksLikeOdometerIntentStart(selectionText) &&
+    !isBarePlatePrefixHint(selectionText) &&
+    !detectLoosePlate(selectionText) &&
+    !hasPendingMaintenancePlateRequest(threadForMaintIntent)
   ) {
     nextFlow = "ignore";
     responseMessage = "";

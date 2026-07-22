@@ -76,6 +76,10 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
   if (looksLikeOperationalMaintenanceIntent(text, threadText)) return true;
   if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return true;
   if (looksLikeMaintenanceInfoRequest(text)) return false;
+  // Prefijo o patente suelta: no arrastrar "mantenimiento" del hilo (evita skip silencioso).
+  if (isUnitSelectionMessage(text) && !/\b(mantenimiento|preventiv|correctiv)\b/.test(norm(text))) {
+    return false;
+  }
   const blob = norm(`${threadText}\n${text}`);
   if (
     looksLikeMaintenanceGuideContextInThread(threadText) &&

@@ -8,6 +8,7 @@ import {
   certificateFlowState,
   extractPlateCorrectionHint,
   hasPendingCertificateConfirmation,
+  hasPendingMaintenancePlateRequest,
 } from "../src/lib/wara.ts";
 import {
   looksLikeChangeCompanyRequest,
@@ -123,6 +124,17 @@ assert(
 assert(
   looksLikeMaintenanceCapabilityQuestion(capabilityQ),
   "capability question after maint guide",
+);
+
+const maintPlateThread = [
+  "Sí, yo puedo registrar o programar un mantenimiento por acá en WhatsApp.",
+  "Decime la patente de la unidad y si es preventivo o correctivo (y un detalle breve si querés).",
+].join("\n");
+assert(hasPendingMaintenancePlateRequest(maintPlateThread), "capability reply detecta pedido de patente");
+assert(route("AD", maintPlateThread) === "mantenimiento", "AD tras pedido patente → mantenimiento");
+assert(
+  route("La q comienza con AD", maintPlateThread) === "mantenimiento",
+  "prefijo AD tras pedido patente → mantenimiento",
 );
 
 console.log("— Derivación (asesor / casos / NO derivar de más) —");

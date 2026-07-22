@@ -6,10 +6,14 @@ import {
 import {
   formatPlateWithSpaces,
   hasPendingOdometerConfirmation,
+  hasPendingMaintenancePlateRequest,
+  isBarePlatePrefixHint,
   isOdometerFlowSuperseded,
   looksLikeOdometerIntentStart,
   normalizePlate,
   threadAwaitingOdometerPlate,
+  detectLoosePlate,
+  extractPlatePrefixFromMessage,
 } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
@@ -573,6 +577,14 @@ export function shouldSkipStrayMaintenanceRequest(
   }
 ): boolean {
   if (opts.pendingPlateRequest || opts.pendingMaintConfirm) return false;
+  if (
+    hasPendingMaintenancePlateRequest(threadText) &&
+    (isBarePlatePrefixHint(text) ||
+      !!detectLoosePlate(text) ||
+      !!extractPlatePrefixFromMessage(text))
+  ) {
+    return false;
+  }
   if (looksLikeOperationalMaintenanceIntent(text, threadText)) return false;
   if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return false;
   if (looksLikeTurnoOrAgendaQuestion(text)) return true;
