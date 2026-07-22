@@ -73,6 +73,10 @@ assert(route("Puedo programar un mantenimiento con vos?", GUIDE_THREAD) === "man
 
 assert(hasPendingMaintenancePlateRequest(THREAD_AFTER_CAPABILITY), "pedido de patente tras capability");
 assert(route("AD", THREAD_AFTER_CAPABILITY) === "mantenimiento", "AD tras pedido patente → mantenimiento");
+assert(
+  route("AD", THREAD_AFTER_CAPABILITY) !== "bbc_router",
+  "AD NO va a bbc_router tras guía + pedido patente",
+);
 assert(route("La q comienza con AD", THREAD_AFTER_CAPABILITY) === "mantenimiento", "prefijo AD → mantenimiento");
 
 assert(

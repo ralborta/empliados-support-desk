@@ -93,6 +93,10 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
 
 function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
   if (looksLikeUnitListRequest(text)) return false;
+  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) return false;
+  if (isUnitSelectionMessage(text) && looksLikeMaintenanceGuideContextInThread(threadText)) {
+    return false;
+  }
   if (looksLikeOperationalMaintenanceIntent(text, threadText)) return false;
   if (looksLikeMaintenanceCapabilityQuestion(text, threadText)) return false;
   if (looksLikeOpcionesInfoRequest(text)) return true;
@@ -135,6 +139,11 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
   if (looksLikeOpenCaseStatusInquiry(text)) return "odoo_ticket";
   if (looksLikeHumanAdvisorRequest(text)) return "odoo_ticket";
 
+  // Patente/prefijo tras pedido de mantenimiento — ANTES que BBC (si no, AD queda mudo en bbc_router).
+  if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) {
+    return "mantenimiento";
+  }
+
   // Guías informativas → BBC (Opciones, Unidades, Mantenimiento informativo)
   if (looksLikeBbcInfoGuide(text, threadText)) return "bbc_router";
 
@@ -155,7 +164,7 @@ export function classifyTurnExecutor(selectionText: string, threadText: string):
     return "certificados";
   }
 
-  // Mantenimiento: patente pedida en contexto de mantenimiento
+  // Mantenimiento: patente pedida en contexto de mantenimiento (también cubierto arriba; redundante por claridad)
   if (hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text)) {
     return "mantenimiento";
   }
