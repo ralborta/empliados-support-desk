@@ -599,6 +599,42 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const plateSelectionReply = isMaintenancePlateSelectionMessage(text);
+  const maintenanceTramiteStart =
+    looksLikeOperationalMaintenanceIntent(text, threadText) &&
+    !plateSelectionReply &&
+    !detectPlate(text) &&
+    !parsed.data.patente?.trim() &&
+    !parsed.data.plate?.trim();
+
+  if (maintenanceTramiteStart) {
+    const preventivo = /preventiv/i.test(text);
+    const message = preventivo
+      ? "Para programar mantenimiento preventivo necesito la patente de la unidad (por ejemplo AD427MC o ABC123). Si querés, agregá también la prioridad."
+      : "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "needs_plate",
+      service,
+      priority,
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        needsPlate_s: "true",
+        message,
+        missing: ["patente"],
+        missing_s: "patente",
+        service,
+        priority,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   let plate = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
@@ -606,7 +642,7 @@ export async function POST(req: NextRequest) {
         ? summary.patente
         : undefined) ??
       detectPlate(text) ??
-      (pendingMaintConfirm || pendingPlateRequest
+      (plateSelectionReply && (pendingMaintConfirm || pendingPlateRequest)
         ? summary.patente ?? detectPlate(threadText)
         : undefined) ??
       undefined
@@ -635,8 +671,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const plateSelection =
-      pendingPlateRequest || isMaintenancePlateSelectionMessage(text);
+    const plateSelection = plateSelectionReply;
 
     if (looksLikeOperationalMaintenanceIntent(text, threadText) && !plateSelection) {
       const preventivo = /preventiv/i.test(text);
