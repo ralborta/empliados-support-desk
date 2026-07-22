@@ -7,12 +7,13 @@ import { POST as unidadesPost } from "@/app/api/wara/unidades/route";
 import { customerRegisteredContextResponse } from "@/lib/builderbotCustomerContext";
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
-import { bbcShouldSendExecutorMessage } from "@/lib/waraInboundAudit";
+import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import {
   classifyTurnExecutor,
   TURN_EXECUTOR_PATH,
   type TurnExecutorId,
 } from "@/lib/whatsappTurnRouter";
+import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -69,7 +70,13 @@ function buildTurnPayload(
   ).trim();
   const skipResponse =
     overrides.skipResponse_s ??
-    (message ? (bbcShouldSendExecutorMessage() ? "false" : "true") : "true");
+    (shouldTurnSendWhatsAppToCustomer()
+      ? "true"
+      : message
+        ? bbcShouldSendExecutorMessage()
+          ? "false"
+          : "true"
+        : "true");
 
   return {
     ...context,
@@ -97,17 +104,20 @@ export async function handleWhatsAppTurn(params: {
   const selectionText = body.trim();
 
   if (!allowPhoneRequest(rawPhone, 20)) {
-    return buildTurnPayload(
-      { registered: true, registered_s: "true" },
-      {
-        ok: false,
-        ok_s: "false",
-        nextFlow: "reply",
-        nextFlow_s: "reply",
-        message: "Recibí muchas solicitudes seguidas. Esperá un momento e intentá de nuevo.",
-        executor: "rate_limit",
-        executor_s: "rate_limit",
-      },
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(
+        { registered: true, registered_s: "true" },
+        {
+          ok: false,
+          ok_s: "false",
+          nextFlow: "reply",
+          nextFlow_s: "reply",
+          message: "Recibí muchas solicitudes seguidas. Esperá un momento e intentá de nuevo.",
+          executor: "rate_limit",
+          executor_s: "rate_limit",
+        },
+      ),
     );
   }
 
@@ -118,32 +128,41 @@ export async function handleWhatsAppTurn(params: {
   const contextNextFlow = String(context.nextFlow ?? "derivar");
 
   if (contextNextFlow === "ignore") {
-    return buildTurnPayload(context, {
-      message: "",
-      skipResponse_s: "true",
-      nextFlow: "ignore",
-      nextFlow_s: "ignore",
-      executor: "context",
-      executor_s: "context",
-    });
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(context, {
+        message: "",
+        skipResponse_s: "true",
+        nextFlow: "ignore",
+        nextFlow_s: "ignore",
+        executor: "context",
+        executor_s: "context",
+      }),
+    );
   }
 
   if (contextNextFlow === "derivar") {
-    return buildTurnPayload(context, {
-      nextFlow: "derivar",
-      nextFlow_s: "derivar",
-      executor: "context",
-      executor_s: "context",
-    });
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(context, {
+        nextFlow: "derivar",
+        nextFlow_s: "derivar",
+        executor: "context",
+        executor_s: "context",
+      }),
+    );
   }
 
   if (contextNextFlow === "reply") {
-    return buildTurnPayload(context, {
-      nextFlow: "reply",
-      nextFlow_s: "reply",
-      executor: "context",
-      executor_s: "context",
-    });
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(context, {
+        nextFlow: "reply",
+        nextFlow_s: "reply",
+        executor: "context",
+        executor_s: "context",
+      }),
+    );
   }
 
   // router → backend clasifica y ejecuta
@@ -151,32 +170,37 @@ export async function handleWhatsAppTurn(params: {
   const executor = classifyTurnExecutor(selectionText, threadHint);
 
   if (executor === "bbc_router") {
-    return buildTurnPayload(context, {
-      nextFlow: "router",
-      nextFlow_s: "router",
-      message: "",
-      skipResponse_s: "true",
-      executor: "bbc_router",
-      executor_s: "bbc_router",
-    });
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(context, {
+        nextFlow: "router",
+        nextFlow_s: "router",
+        message: "",
+        skipResponse_s: "true",
+        executor: "bbc_router",
+        executor_s: "bbc_router",
+      }),
+    );
   }
 
   const execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
   const execMessage = messageFromPayload(execResult);
   const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+  const execSkip = String(execResult.skipResponse_s ?? "") === "true";
 
-  return buildTurnPayload(context, {
-    ok: execOk,
-    ok_s: execOk ? "true" : "false",
-    message: execMessage || String(context.message ?? ""),
-    skipResponse_s:
-      execResult.skipResponse_s ??
-      (execMessage ? (bbcShouldSendExecutorMessage() ? "false" : "true") : "true"),
-    flowComplete_s: execResult.flowComplete_s ?? "true",
-    nextFlow: "reply",
-    nextFlow_s: "reply",
-    executor,
-    executor_s: executor,
-    executorResult: execResult,
-  });
+  return deliverTurnToWhatsApp(
+    rawPhone,
+    buildTurnPayload(context, {
+      ok: execOk,
+      ok_s: execOk ? "true" : "false",
+      message: execSkip ? "" : execMessage || String(context.message ?? ""),
+      skipResponse_s: execSkip ? "true" : undefined,
+      flowComplete_s: execResult.flowComplete_s ?? "true",
+      nextFlow: "reply",
+      nextFlow_s: "reply",
+      executor,
+      executor_s: executor,
+      executorResult: execResult,
+    }),
+  );
 }

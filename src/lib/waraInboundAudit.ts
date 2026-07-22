@@ -17,9 +17,23 @@ export function shouldInboundSendWhatsAppToCustomer(): boolean {
 }
 
 /**
- * En audit-only el ejecutor HTTP debe devolver skipResponse_s=false para que BBC envíe
- * el message al cliente (el inbound ya no manda WA directo).
+ * Fase 1 (legacy): BBC envía vía messageMapping cuando skipResponse_s=false.
+ * @deprecated Preferir shouldTurnSendWhatsAppToCustomer (Fase 2).
  */
 export function bbcShouldSendExecutorMessage(): boolean {
+  if (shouldTurnSendWhatsAppToCustomer()) return false;
+  return isWaraInboundAuditOnly();
+}
+
+/**
+ * Fase 2 — el turno (/api/whatsapp/turn) envía WhatsApp por API (sendWhatsAppMessage).
+ * BBC queda mudo (skipResponse_s=true) salvo fallback si falla el envío.
+ *
+ * Rollback: WARA_TURN_BACKEND_SEND=false en Vercel → vuelve messageMapping de BBC.
+ */
+export function shouldTurnSendWhatsAppToCustomer(): boolean {
+  const raw = process.env.WARA_TURN_BACKEND_SEND?.trim().toLowerCase();
+  if (raw === "false" || raw === "0" || raw === "no" || raw === "legacy") return false;
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
   return isWaraInboundAuditOnly();
 }

@@ -57,6 +57,12 @@ Vuelve Inicio → POST `/api/builderbot/customer-registered/check` + Router BBC.
 
 Revertir commits de Fase 1; `/check` sigue funcionando si BBC no se sincronizó.
 
+## Fase 2 — Backend envía WhatsApp (activa por defecto con audit-only)
+
+Cuando `WARA_INBOUND_AUDIT_ONLY=true` (default), `/api/whatsapp/turn` envía la respuesta al cliente con `sendWhatsAppMessage` y BBC recibe `skipResponse_s=true` (no usa `{message}`).
+
+**Rollback Fase 2:** en Vercel → `WARA_TURN_BACKEND_SEND=false` → BBC vuelve a enviar vía messageMapping.
+
 ## Qué migra en Fase 1
 
 | Trámite | Ejecutor |

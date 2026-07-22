@@ -33,6 +33,14 @@ WARA_INBOUND_AUDIT_ONLY=true
 
 O **borrar** la variable (por defecto el código usa audit-only = ON).
 
+### Rollback Fase 2 (BBC vuelve a enviar `{message}`)
+
+```text
+WARA_TURN_BACKEND_SEND=false
+```
+
+Redeploy. Útil si falla `BUILDERBOT_API_KEY` / envío por API; BBC reenvía el JSON de `/turn`.
+
 ---
 
 ## Nivel 2 — Revertir solo Fase 0 en código (10–15 min)
