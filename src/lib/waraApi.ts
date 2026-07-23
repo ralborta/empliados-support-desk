@@ -809,6 +809,22 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
 
   if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
 
+  // Si ya menciona un tema concreto ("me podés ayudar con la agenda/configuración/
+  // mantenimiento..."), NO es un pedido genérico de "¿podés ayudarme?" — hay que dejar
+  // que pase por el router real (classifyTurnExecutor / guías informativas) para que
+  // conteste sobre ese tema puntual, en vez de cortar acá con el menú fijo de
+  // capacidades. Bug real, producción 2026-07-23: "me podes ayudar con una
+  // configuracion?" nunca llegaba a la guía de Opciones porque esta capa lo interceptaba
+  // antes, con un mensaje genérico que no usa la base de conocimiento.
+  if (
+    /\bconf\w*gura\w*\b/.test(norm) ||
+    /\b(agenda|aenda|contacto|contactos|perfil|perfiles|notific|opciones|unidad|unidades|mantenimiento|preventiv\w*|correctiv\w*|certificado|odometro|horometro|alarma|alarmas)\b/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
+
   return (
     /\b(vos|tu|atilio|bot|chatbot)\b/.test(norm) ||
     /\bno\s+me\s+(podes|pod[eé]s)\s+ayudar\b/.test(norm) ||

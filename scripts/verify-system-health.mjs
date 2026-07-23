@@ -91,6 +91,7 @@ const routing = [
   ["que tipos de usuarios hay", "", "info_guides"],
   ["cuantos tipos de usuario hay en wara", "", "info_guides"],
   ["no puedo entrar con mi usuario, dice contraseña incorrecta", "", "odoo_ticket"],
+  ["me podes ayudar con una configuracion?", "", "info_guides"],
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
   ["Quiero programar un mantenimiento", "", "mantenimiento"],
   ["como funciona el modulo de mantenimiento", "", "info_guides"],
@@ -237,6 +238,17 @@ assert(looksLikeOpenCaseStatusInquiry("tengo un caso abierto?"), "detecta caso a
 assert(looksLikeCustomerConversationCloseRequest("cerrar caso"), "detecta cerrar caso");
 assert(looksLikeAtilioHelpRequest("me podes ayudar vos?"), "detecta ayuda Atilio");
 assert(!looksLikeAtilioHelpRequest("hablar con un asesor"), "asesor ≠ ayuda Atilio");
+// Bug real (producción, 2026-07-23): "me podes ayudar con una configuracion?" quedaba
+// atrapado en esta capa genérica (menú fijo de capacidades, sin base de conocimiento) en
+// vez de llegar al router y responder con la guía real de Opciones.
+assert(
+  !looksLikeAtilioHelpRequest("me podes ayudar con una configuracion?"),
+  "pedido de ayuda CON tema puntual no lo atrapa el menú genérico de capacidades",
+);
+assert(
+  !looksLikeAtilioHelpRequest("me podes ayudar con la agenda?"),
+  "pedido de ayuda con agenda tampoco lo atrapa el menú genérico",
+);
 
 for (const t of [
   "puedo ver los usuarios de mi empresa",
