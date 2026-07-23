@@ -8,7 +8,8 @@ import {
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
-import { buildInfoGuideReply, detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import { buildGroundedInfoGuideReply, detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
   looksLikeFlowControlCommand,
   looksLikeInfoGuideModulePick,
@@ -143,8 +144,11 @@ export async function POST(req: NextRequest) {
   }
 
   const kind = parsed.data.guide ?? detectInfoGuideKind(rawText);
-  const previousMessage = await lastBotMessage(rawPhone);
-  const message = buildInfoGuideReply(rawText, kind ?? undefined, previousMessage);
+  const [previousMessage, threadText] = await Promise.all([
+    lastBotMessage(rawPhone),
+    recentThreadTextForPhone(rawPhone),
+  ]);
+  const message = await buildGroundedInfoGuideReply(rawText, kind ?? undefined, previousMessage, threadText);
 
   await appendOutboundBotMessage(rawPhone, message, {
     source: "wara_info_guides",

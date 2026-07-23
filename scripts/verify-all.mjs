@@ -18,6 +18,7 @@ const SUITES = [
   "verify-unit-resolution-grounding.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-info-guide-replies.mjs",
+  "verify-knowledge-base.mjs",
   "simulate-maintenance-plate-flow.mjs",
   "snapshot-turn-classification.mjs",
 ];

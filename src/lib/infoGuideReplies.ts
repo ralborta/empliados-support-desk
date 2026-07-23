@@ -5,6 +5,7 @@ import {
   looksLikeTurnoOrAgendaQuestion,
   looksLikeUnidadesInfoRequest,
 } from "@/lib/waraApi";
+import { answerFromKnowledgeBase } from "@/lib/knowledgeBaseAI";
 
 export type InfoGuideKind = "opciones" | "unidades" | "mantenimiento";
 
@@ -244,4 +245,35 @@ export function buildInfoGuideReply(
     return buildRepeatFallback(detected);
   }
   return message;
+}
+
+/**
+ * Igual que `buildInfoGuideReply`, pero para "opciones" y "unidades" intenta primero
+ * responder con IA anclada al manual real de Wara (`@/lib/knowledgeBaseAI`) en vez de la
+ * plantilla fija por palabra clave — así preguntas puntuales ("qué es un perfil", "cómo
+ * registro un contacto") se contestan con precisión real y no con el bloque genérico del
+ * módulo. Si la IA no está disponible o falla, cae al comportamiento estático de siempre
+ * (nunca deja al cliente sin respuesta). "mantenimiento" no tiene manual cargado todavía,
+ * así que sigue usando solo las plantillas estáticas.
+ */
+export async function buildGroundedInfoGuideReply(
+  rawText: string,
+  kind?: InfoGuideKind | null,
+  lastBotMessage?: string | null,
+  threadText?: string,
+): Promise<string> {
+  const detected = kind ?? detectInfoGuideKind(rawText);
+  const fallback = () => buildInfoGuideReply(rawText, detected, lastBotMessage);
+
+  if (detected !== "opciones" && detected !== "unidades") {
+    return fallback();
+  }
+
+  const grounded = await answerFromKnowledgeBase(detected, rawText, threadText);
+  if (!grounded) return fallback();
+
+  if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
+    return buildRepeatFallback(detected);
+  }
+  return grounded;
 }
