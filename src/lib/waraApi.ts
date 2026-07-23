@@ -185,10 +185,20 @@ const VEHICLE_BRAND_TOKENS = new Set([
 /** Marca o nombre corto de unidad — no es cambiar de empresa Wara. */
 export function looksLikeVehicleBrandOrUnitSearch(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
-  if (!t || t.length > 48) return false;
+  // Bug real, producción 2026-07-23: "Ok quiero saber si Nissan está marcando
+  // posición?" (51 caracteres normalizados, 8 tokens) mencionaba la marca en la
+  // PRIMERA pregunta, pero los topes de 48 caracteres / 6 tokens de abajo estaban
+  // pensados solo para respuestas cortas tipo "Nissan" o "es la Saveiro" — cualquier
+  // pregunta natural un poco más larga con la marca ya incluida se descartaba acá,
+  // y looksLikeFleetUnitSearchInput (que gatea el pedido temprano de patente en
+  // unidades/route.ts) nunca se enteraba de que el cliente ya había nombrado la
+  // unidad. Se alinea el tope de longitud con el usado en looksLikeAtilioHelpRequest
+  // (160) y se saca el tope de cantidad de palabras: alcanza con que el mensaje no
+  // sea un párrafo larguísimo y que mencione una marca real del catálogo cerrado.
+  if (!t || t.length > 160) return false;
   if (/\b(empresa|wara|cacique|guara)\b/.test(t)) return false;
   const tokens = t.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0 || tokens.length > 6) return false;
+  if (tokens.length === 0) return false;
   return tokens.some((token) => VEHICLE_BRAND_TOKENS.has(token));
 }
 
