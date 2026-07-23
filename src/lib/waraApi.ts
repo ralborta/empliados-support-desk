@@ -9,6 +9,7 @@ import {
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
   isOdometerFlowSuperseded,
+  looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerIntentStart,
   normalizePlate,
   threadAwaitingOdometerPlate,
@@ -640,6 +641,11 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
 /** Consulta en vivo de unidad (ignición, reporte, GPS) — prioridad sobre mantenimiento/certificado. */
 export function looksLikeLiveUnitConsultIntent(text: string | undefined | null): boolean {
   if (looksLikeGpsOrUnitStatusQuestion(text)) return true;
+  // Bug real, producción 2026-07-23: "Quiero hacer un cambio de horómetro de la unidad
+  // M600-026" matcheaba "quiero" + "unidad" y caía al ejecutor de GPS/estado en vivo
+  // (ignición, reporte) en vez del trámite operativo de odómetro/horómetro — el bot
+  // respondía el estado GPS de AH 881 VG como si el cliente hubiese pedido eso.
+  if (looksLikeExplicitOdometerUpdateRequest(text)) return false;
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|certificado|cobertura)\b/.test(t)) return false;

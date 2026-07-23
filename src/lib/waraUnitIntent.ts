@@ -12,6 +12,7 @@ import {
   isPlausibleVehiclePlate,
   looksLikeOdometerIntentStart,
   looksLikeOdometerHelpRequest,
+  looksLikeOdometerFlowReminder,
   normalizePlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
@@ -131,6 +132,13 @@ async function customerOnlyThreadText(prisma: PrismaClient, rawPhone: string): P
   }
 }
 
+/** Nombre interno de unidad Wara (ej. M600-026, 300-092) — no es una patente. */
+export function looksLikeUnitNameInMessage(rawText: string | undefined | null): boolean {
+  const norm = String(rawText ?? "").trim();
+  if (!norm) return false;
+  return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm);
+}
+
 /** Entrada que debe resolver contra la flota (patente, prefijo, marca, corrección). */
 export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   return (
@@ -139,7 +147,8 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
     !!extractPlatePrefixFromMessage(rawText) ||
     !!extractPlateCorrectionHint(rawText) ||
     looksLikeVehicleBrandOrUnitSearch(rawText) ||
-    looksLikePlateCorrectionRequest(rawText)
+    looksLikePlateCorrectionRequest(rawText) ||
+    looksLikeUnitNameInMessage(rawText)
   );
 }
 
@@ -522,7 +531,15 @@ function shouldAvoidThreadSearchTerms(rawText: string): boolean {
  */
 function extractSearchTerms(rawText: string, threadText: string): string[] {
   const fromMessage = tokenizeSearchTerms(rawText);
-  if (fromMessage.length > 0 && !looksLikeVagueUnitReference(rawText)) {
+  // Bug real, producción 2026-07-23: "te pedi un cambio de horometro" (corrección tras
+  // misrouteo a GPS) aporta términos propios ("pedi") pero NO el identificador de
+  // unidad — que quedó en un mensaje anterior del hilo ("M600-026"). Sin mezclar el
+  // hilo, resolveUnitQuery no recupera la unidad ya mencionada.
+  if (
+    fromMessage.length > 0 &&
+    !looksLikeVagueUnitReference(rawText) &&
+    !looksLikeOdometerFlowReminder(rawText)
+  ) {
     return fromMessage;
   }
   // Regresión encontrada en auditoría (2026-07-23): cuando el mensaje actual no aporta

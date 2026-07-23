@@ -430,6 +430,28 @@ export function looksLikeExplicitOdometerUpdateRequest(text: string | undefined 
   return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }
 
+/**
+ * El cliente recuerda/corrige al bot tras una respuesta equivocada ("te pedí un cambio de
+ * horómetro") — NO es un arranque en blanco de trámite que deba vaciar el hilo.
+ */
+export function looksLikeOdometerFlowReminder(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
+  return (
+    /\bte ped[ií]\b/.test(t) ||
+    /\byo te ped[ií]\b/.test(t) ||
+    /\bte dije\b/.test(t) ||
+    /\bte solicit[eé]\b/.test(t) ||
+    /\bno te ped[ií]\b/.test(t) ||
+    /\bquer[ií]a\b/.test(t)
+  );
+}
+
 export function looksLikeOdometerFlowStart(text: string | undefined | null): boolean {
   return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }

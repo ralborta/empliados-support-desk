@@ -32,6 +32,7 @@ const SUITES = [
   "verify-new-case-request-not-fleet-search.mjs",
   "verify-odometer-vague-unit-start.mjs",
   "verify-odometer-pending-confirm-context.mjs",
+  "verify-horometro-unit-name-context.mjs",
   "verify-conversation-closing.mjs",
   "verify-certificate-confirm-pivot.mjs",
   "verify-info-guide-replies.mjs",

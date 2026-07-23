@@ -16,6 +16,8 @@ import {
   hasPendingOdometerConfirmation,
   isExamplePlate,
   isOdometerFlowSuperseded,
+  looksLikeExplicitOdometerUpdateRequest,
+  looksLikeOdometerFlowReminder,
   looksLikeOdometerHelpRequest,
   looksLikeOdometerIntentStart,
   looksLikeUnitRejection,
@@ -23,7 +25,12 @@ import {
   resolveWaraPatenteForApi,
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
-import { looksLikeVagueUnitReference, resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import {
+  looksLikeFleetUnitSearchInput,
+  looksLikeUnitNameInMessage,
+  looksLikeVagueUnitReference,
+  resolvePlateWithWaraFleet,
+} from "@/lib/waraUnitIntent";
 import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } from "@/lib/odometroFecha";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
@@ -356,8 +363,23 @@ export async function POST(req: NextRequest) {
   // nada todavía.
   const preliminaryThreadText = odometerFlowStart ? await recentThreadText(rawPhone) : "";
   const hasPendingConfirmInThread = hasPendingOdometerConfirmation(preliminaryThreadText);
+  const hasUnitHintInCurrentMessage =
+    looksLikeFleetUnitSearchInput(rawText) || looksLikeUnitNameInMessage(rawText);
+  const isOdometerReminder = looksLikeOdometerFlowReminder(rawText);
+  const threadHasPriorOdometerUnitRequest = preliminaryThreadText
+    .split("\n")
+    .some(
+      (line) =>
+        looksLikeExplicitOdometerUpdateRequest(line) &&
+        (looksLikeFleetUnitSearchInput(line) || looksLikeUnitNameInMessage(line)),
+    );
   const treatAsBlankFlowStart =
-    odometerFlowStart && !explicitVagueUnitReference && !hasPendingConfirmInThread;
+    odometerFlowStart &&
+    !explicitVagueUnitReference &&
+    !hasPendingConfirmInThread &&
+    !hasUnitHintInCurrentMessage &&
+    !isOdometerReminder &&
+    !threadHasPriorOdometerUnitRequest;
   const fromText = parseFromText(rawText);
   const threadText = treatAsBlankFlowStart
     ? ""
@@ -538,8 +560,14 @@ export async function POST(req: NextRequest) {
     }
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
+    const wantsHorometro =
+      /\bhor[oó]metro\b/i.test(rawText) ||
+      (!/\bod[oó]metro\b/i.test(rawText) && /\bhor[oó]metro\b/i.test(threadText));
+    const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
     const message = patente
-      ? `Perfecto, tomo ${formatPlateWithSpaces(patente) ?? patente}. ¿Cuál es el nuevo odómetro en km?`
+      ? wantsHorometro
+        ? `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo horómetro en horas?`
+        : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo odómetro en km?`
       : "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?";
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message }, { status: BB_STATUS });
   }
