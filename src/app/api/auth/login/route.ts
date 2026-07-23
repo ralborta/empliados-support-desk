@@ -27,9 +27,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Email y contraseña requeridos" }, { status: 400 });
   }
 
+  // Bug real, producción 2026-07-23: si el mismo email/contraseña matchea TANTO una
+  // cuenta de variables de entorno (PANEL_USER_ADMIN_*/PANEL_USER_WARA_*) COMO un
+  // AgentUser real en base, tryPanelLogin (env) ganaba SIEMPRE por ir primero — la
+  // sesión quedaba con un id sintético ("panel-admin"/"panel-wara") sin fila en la
+  // base. Eso rompe todo lo que depende de un AgentUser real: presencia para el
+  // monitor externo, notificaciones (AgentNotification), y reparto de casos. Se
+  // prioriza la cuenta real en base (con su propio passwordHash) cuando existe; las
+  // cuentas de entorno quedan como respaldo de emergencia si no hay una fila en base
+  // con ese email/contraseña.
   const user =
-    tryPanelLogin(parsed.data.email, parsed.data.password) ??
-    (await tryAgentUserLogin(parsed.data.email, parsed.data.password));
+    (await tryAgentUserLogin(parsed.data.email, parsed.data.password)) ??
+    tryPanelLogin(parsed.data.email, parsed.data.password);
   if (!user) {
     return NextResponse.json({ error: "Credenciales inválidas" }, { status: 401 });
   }
