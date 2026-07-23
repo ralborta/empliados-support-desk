@@ -29,7 +29,11 @@ import {
 import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry.ts";
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationClose.ts";
 import { assessUnitReporting } from "../src/lib/waraGpsAssessment.ts";
-import { extractPlatePrefixFromMessage, isBarePlatePrefixHint } from "../src/lib/wara.ts";
+import {
+  extractPlatePrefixFromMessage,
+  isBarePlatePrefixHint,
+  looksLikeOdometerHelpRequest,
+} from "../src/lib/wara.ts";
 import { resolveUnitQuery, isMaintenancePlateSelectionMessage } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
@@ -252,6 +256,15 @@ assert(
 assert(
   !looksLikeAtilioHelpRequest("me podes ayudar con la agenda?"),
   "pedido de ayuda con agenda tampoco lo atrapa el menú genérico",
+);
+// Auditoría 2026-07-23: mismo patrón de bug (lista cerrada de conjugaciones de "ayudar")
+// encontrado también en looksLikeAtilioHelpRequest y looksLikeOdometerHelpRequest —
+// generalizados a la raíz "ayud" igual que looksLikeOpcionesInfoRequest.
+assert(looksLikeAtilioHelpRequest("vos no me ayudan nunca?"), "detecta 'ayudan' (plural) dirigido al bot");
+assert(looksLikeAtilioHelpRequest("pueden ayudarme?"), "detecta 'pueden ayudarme' (plural)");
+assert(
+  looksLikeOdometerHelpRequest("me ayudan con el odometro?"),
+  "ayuda de odómetro detecta 'ayudan' (plural)",
 );
 
 for (const t of [

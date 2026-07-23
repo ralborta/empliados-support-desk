@@ -350,9 +350,11 @@ export function looksLikeOdometerHelpRequest(text: string | undefined | null): b
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
+  // Raíz del verbo en vez de lista cerrada de conjugaciones (mismo patrón de bug
+  // corregido en waraApi.ts looksLikeOpcionesInfoRequest/looksLikeAtilioHelpRequest,
+  // producción 2026-07-23): no cubría plural/3ra persona ("me ayudan con el odómetro").
   return (
-    /\b(ayuda|ayudame|ayudar)\b/.test(t) ||
-    /\b(me ayudas|me pod[eé]s ayudar|podes ayudar|pod[eé]s ayudar|necesito ayuda)\b/.test(t) ||
+    /\bayud\w*\b/.test(t) ||
     /\b(con mi|con el|con la)\b/.test(t)
   );
 }

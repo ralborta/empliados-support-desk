@@ -807,9 +807,11 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
   if (/\b(por que|porque|por qué)\s+me\s+deriv/.test(norm)) return true;
   if (/\bno\s+me\s+(deriv|pases|pase)\b/.test(norm)) return true;
 
-  const asksForHelp =
-    /\b(me\s+)?(podes|pod[eé]s|puede)\s+(ayudar|ayudarme)\b/.test(norm) ||
-    /\b(ayudarme|ayudame|ayudáme|ayudame)\b/.test(norm);
+  // Raíz del verbo en vez de lista cerrada de conjugaciones ("podes/podés/puede" +
+  // "ayudar/ayudarme", o el imperativo suelto) — no cubría plural/3ra persona ("me
+  // ayudan", "podrían ayudarme", "pueden ayudarme"). Mismo patrón de bug ya corregido en
+  // looksLikeOpcionesInfoRequest (producción 2026-07-23).
+  const asksForHelp = /\bayud\w*\b/.test(norm);
   if (!asksForHelp) return false;
 
   if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
@@ -832,8 +834,9 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
 
   return (
     /\b(vos|tu|atilio|bot|chatbot)\b/.test(norm) ||
-    /\bno\s+me\s+(podes|pod[eé]s)\s+ayudar\b/.test(norm) ||
-    /\bme\s+(podes|pod[eé]s)\s+ayudar\b/.test(norm)
+    // Raíz "ayud" + cualquier forma de "poder" (incluye plural/condicional: "pueden
+    // ayudarme", "podrían ayudar"), no solo 2da persona singular.
+    /\b(no\s+me\s+)?(podes|pod[eé]s|puede|pueden|podr[ií]an|podr[ií]as)\s+ayud\w*\b/.test(norm)
   );
 }
 
