@@ -9,7 +9,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, normalizePlate, threadHasActiveOdometerFlow, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, looksLikeUnitRejection, normalizePlate, threadHasActiveOdometerFlow, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -34,7 +34,7 @@ import {
   looksLikeUnitListRequest,
   resolveUnitQuery,
 } from "@/lib/waraUnitIntent";
-import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
+import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 
 const bodySchema = z
   .object({
@@ -796,30 +796,44 @@ export async function POST(req: NextRequest) {
 
   const unitQueryInMessage = extractUnitQueryFromText(rawText);
   const scopedThreadEarly = threadTextSinceCompanySelection(threadText);
+  // Rechazo explícito de la unidad activa/del hilo ("no quiero ver esa, es otra") sin
+  // nombrar la alternativa. Bug real, producción 2026-07-23: sin este chequeo, el
+  // respaldo de "unidad activa" (y también extractLastPlateFromThreadCompat/detectPlate,
+  // que agarran CUALQUIER patente mencionada en el hilo, incluida la del propio reporte
+  // exitoso del bot sobre la unidad que se está rechazando) volvían a devolver la MISMA
+  // unidad recién rechazada — loop infinito ante cualquier mensaje sin marca nueva.
+  const explicitRejection = looksLikeUnitRejection(rawText);
   // "Unidad activa" (@/lib/activeUnit): respaldo explícito en DB para cuando ni el
   // texto del hilo ni el mensaje actual traen ninguna patente reconocible, pero la
   // conversación sigue siendo sobre la última unidad resuelta (bug real, producción
   // 2026-07-23: "¿me podés decir qué unidad estamos consultando?" no matchea ningún
   // patrón de "referencia vaga" existente y sin esto volvía a pedir la patente).
-  // NUNCA se usa si el cliente pide explícitamente OTRA unidad distinta.
-  const activeUnitRecord = !looksLikeAnotherUnitRequest(rawText)
+  // NUNCA se usa si el cliente pide explícitamente OTRA unidad distinta o rechaza la actual.
+  const activeUnitRecord = !looksLikeAnotherUnitRequest(rawText) && !explicitRejection
     ? await getActiveUnit(prisma, rawPhone)
     : null;
-  const threadPlateEarly =
-    extractLastPlateFromThreadCompat(scopedThreadEarly) ??
-    detectPlate(scopedThreadEarly) ??
-    activeUnitRecord?.plate ??
-    null;
+  const threadPlateEarly = explicitRejection
+    ? null
+    : extractLastPlateFromThreadCompat(scopedThreadEarly) ??
+      detectPlate(scopedThreadEarly) ??
+      activeUnitRecord?.plate ??
+      null;
 
   if (
     !explicitPlate &&
     !unitQueryInMessage &&
     !threadPlateEarly &&
-    (looksLikeAnotherUnitRequest(rawText) ||
+    (explicitRejection ||
+      looksLikeAnotherUnitRequest(rawText) ||
       mentionsMissingReportWithoutPlate(rawText) ||
       (looksLikeLiveUnitConsultIntent(rawText) && !looksLikeFleetUnitSearchInput(rawText)))
   ) {
-    const askPlate = looksLikeLiveUnitConsultIntent(rawText)
+    if (explicitRejection) {
+      await clearActiveUnit(prisma, rawPhone);
+    }
+    const askPlate = explicitRejection
+      ? "Entendido, no era esa. ¿Cuál es la otra unidad? Pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan)."
+      : looksLikeLiveUnitConsultIntent(rawText)
       ? "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan)."
       : "¿Cuál es la matrícula o el nombre de la unidad? Pasámela (por ejemplo NKL 952 o M300-111) y la consulto en Wara.";
     await appendOutboundBotMessage(rawPhone, askPlate, {
@@ -1003,6 +1017,7 @@ export async function POST(req: NextRequest) {
     !looksLikeInternoMetaQuestion(rawText) &&
     !looksLikeUnitListRequest(rawText) &&
     !looksLikeAnotherUnitRequest(rawText) &&
+    !explicitRejection &&
     requestedPlates.length === 0;
   const wantedPlate = normalizeLoosePlate(
     explicitPlate ||

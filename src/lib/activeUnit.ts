@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { looksLikePlateCorrectionRequest } from "@/lib/waraApi";
 import { looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
+import { looksLikeUnitRejection } from "@/lib/wara";
 
 /**
  * Estado explícito de "unidad activa" — de qué unidad de la flota está hablando la
@@ -58,9 +59,18 @@ export function isActiveUnitFresh(record: Pick<ActiveUnitRecord, "resolvedAt">, 
  * (`looksLikeFleetUnitSearchInput`) ni es una corrección explícita de patente — en
  * cualquiera de esos dos casos, el cliente está señalando una unidad concreta (la misma
  * u otra distinta) y no corresponde pisarla con la unidad activa guardada.
+ *
+ * Tampoco corresponde cuando el cliente RECHAZA explícitamente la unidad activa
+ * (`looksLikeUnitRejection`, ej. "no quiero ver esa, es otra") aunque no diga cuál es
+ * la alternativa — bug real, producción 2026-07-23: sin este chequeo, cualquier mensaje
+ * de rechazo sin marca nueva volvía a devolver la MISMA unidad recién rechazada (loop).
  */
 export function shouldUseActiveUnitFallback(rawText: string): boolean {
-  return !looksLikeFleetUnitSearchInput(rawText) && !looksLikePlateCorrectionRequest(rawText);
+  return (
+    !looksLikeFleetUnitSearchInput(rawText) &&
+    !looksLikePlateCorrectionRequest(rawText) &&
+    !looksLikeUnitRejection(rawText)
+  );
 }
 
 export async function setActiveUnit(

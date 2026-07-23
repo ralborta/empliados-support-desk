@@ -487,6 +487,41 @@ export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
   return askedForPlate && /mantenimiento/.test(tail);
 }
 
+/**
+ * El cliente RECHAZA explícitamente la unidad que el bot acaba de mostrar/usar, sin
+ * necesariamente nombrar la correcta ("no quiero ver esa, es otra", "no es esa", "esa
+ * no es", "es otra unidad"). Superset de la vieja lista cerrada de frases con "otra
+ * unidad/patente/vehículo/...".
+ *
+ * Por qué hace falta esto (bug real, producción 2026-07-23, MISMO hilo que shouldUseActiveUnitFallback):
+ * tras resolver AG 562 SP, el cliente escribió "No quiero ver esa es otra" — no menciona
+ * ninguna marca/patente alternativa, así que ni looksLikeFleetUnitSearchInput ni
+ * looksLikePlateCorrectionRequest lo detectan, y el respaldo de "unidad activa" volvía a
+ * devolver la MISMA unidad recién rechazada — loop infinito: cualquier mensaje sin marca
+ * nueva reincide en el mismo resultado. Un rechazo explícito, aunque no traiga la
+ * alternativa, tiene que bloquear TODA reutilización de contexto (unidad activa Y
+ * patente vieja del hilo) y forzar a pedir la unidad de nuevo — nunca repetir la
+ * rechazada.
+ */
+export function looksLikeUnitRejection(rawText: string | undefined | null): boolean {
+  const norm = (rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return false;
+  return (
+    /\b(otra unidad|otro unidad|otro vehiculo|otra patente|la otra unidad|segunda unidad|otra camioneta|tengo otra|otro movil)\b/.test(
+      norm,
+    ) ||
+    /\bno\s+(es|era|son|eran)\s+(esa|ese|esta|este)\b/.test(norm) ||
+    /\b(esa|ese|esta|este)\s+no\s+(es|era)\b/.test(norm) ||
+    /\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm) ||
+    /\bno\s+es\s+(la|el)\s+(correcta|correcto)\b/.test(norm) ||
+    /\b(es|era)\s+otra\b/.test(norm)
+  );
+}
+
 export type CertificateFlowState = "awaiting_unit" | "awaiting_confirm" | "none";
 
 /**

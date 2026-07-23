@@ -24,6 +24,7 @@ const SUITES = [
   "verify-brand-mention-in-question.mjs",
   "verify-active-unit-memory.mjs",
   "verify-certificate-flow-superseded.mjs",
+  "verify-unit-rejection-loop.mjs",
   "verify-info-guide-replies.mjs",
   "verify-knowledge-base.mjs",
   "simulate-maintenance-plate-flow.mjs",

@@ -18,6 +18,7 @@ import {
   isOdometerFlowSuperseded,
   looksLikeOdometerHelpRequest,
   looksLikeOdometerIntentStart,
+  looksLikeUnitRejection,
   normalizePlate,
   resolveWaraPatenteForApi,
   threadHasActiveOdometerFlow,
@@ -371,8 +372,14 @@ export async function POST(req: NextRequest) {
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
     looksLikeVehicleBrandOrUnitSearch(rawText) || /\bpatente\s+(?:de|del)\b/i.test(rawText);
+  // Rechazo explícito ("no quiero esa, es otra") sin marca/patente alternativa: igual que
+  // una corrección de patente, no corresponde reutilizar ninguna patente vieja del hilo
+  // ni la unidad activa — bug real, producción 2026-07-23 (mismo mecanismo que en
+  // unidades/route.ts, ver looksLikeUnitRejection en @/lib/wara).
+  const explicitRejection = looksLikeUnitRejection(rawText);
   const skipThreadPlate =
     odometerFlowStart ||
+    explicitRejection ||
     (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
   if (
