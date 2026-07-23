@@ -164,6 +164,7 @@ function looksLikeCertificateUnitSelection(text: string, threadText = ""): boole
   );
 }
 
+/** El cliente rechaza la UNIDAD propuesta en el resumen (quiere corregirla), no el trámite entero. */
 function isCertificateRejection(text: string): boolean {
   const t = text
     .trim()
@@ -172,6 +173,30 @@ function isCertificateRejection(text: string): boolean {
     .replace(/[\u0300-\u036f]/g, "");
   if (/^(no|nop|nope|incorrecto|mal|otra|otro)[\s!.?]*$/.test(t)) return true;
   return /^no[\s,]+(esta|es|esa|es esa|es esa patente|para esa)/.test(t);
+}
+
+/**
+ * El cliente cancela/no quiere el certificado en absoluto (no una corrección de unidad).
+ *
+ * Bug real, producción 2026-07-23: "No quiero el certificado" no matcheaba
+ * isCertificateRejection (pensada solo para "no, esa no es") ni looksLikeCertificateUnitSelection,
+ * así que caía a la rama genérica de "necesito la unidad" — el bot insistía pidiendo la
+ * patente en vez de entender que el cliente quería CANCELAR el trámite y preguntarle qué
+ * necesitaba en su lugar.
+ */
+function isCertificateCancellation(text: string): boolean {
+  const t = text
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (!t) return false;
+  return (
+    /\bno\s+(quiero|necesito)\b[^.!?]*\b(certificado|cobertura)\b/.test(t) ||
+    /\bya\s+no\s+(lo\s+)?(quiero|necesito)\b/.test(t) ||
+    /\b(cancelar|cancela|cancelalo|cancele|anular|anulalo)\b/.test(t) ||
+    /\bolvidal[oa]\b/.test(t)
+  );
 }
 
 /** Hay un resumen pendiente de confirmar en el hilo (evita usar patente vieja del ticket). */
@@ -639,6 +664,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (pendingConfirm && isCertificateCancellation(text)) {
+    const message = "Entendido, no genero el certificado. ¿En qué más te puedo ayudar?";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      stage: "certificate_cancelled",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        cancelled: true,
+        cancelled_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   if (pendingConfirm && isCertificateRejection(text)) {
     const message = askCertificateUnitMessage();
     await appendOutboundBotMessage(rawPhone, message, {
@@ -687,21 +731,33 @@ export async function POST(req: NextRequest) {
     !isConfirmed(text) &&
     !looksLikeCertificateUnitSelection(text)
   ) {
-    const message = askCertificateUnitMessage();
+    // Bug real, producción 2026-07-23: la unidad YA está resuelta y confirmada en el
+    // resumen (ver "Voy a generar el certificado... Patente: X") — decirle al cliente
+    // "necesito la unidad" acá es FALSO y confunde ("¿Y cuál es su estado?", "De la misma
+    // unidad" recibían la misma respuesta que un mensaje sin sentido). En vez de insistir
+    // con un pedido de dato que ya tenemos, recordamos la confirmación pendiente y le
+    // preguntamos qué necesita si es otra cosa — sin mentir sobre qué falta.
+    const pendingPlate = extractPlateFromCertificateSummary(threadText);
+    const pendingPlateDisplay = pendingPlate ? formatPlateWithSpaces(pendingPlate) ?? pendingPlate : null;
+    const message = pendingPlateDisplay
+      ? `Todavía tengo pendiente confirmar el certificado de cobertura para la patente ${pendingPlateDisplay}. Respondé CONFIRMO para pedirlo, o contame qué necesitás si es otra cosa.`
+      : askCertificateUnitMessage();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       stage: "awaiting_unit_after_summary",
     });
     return NextResponse.json(
-      {
-        ok: true,
-        ok_s: "true",
-        flowComplete_s: "true",
-        message,
-        missing: ["patente"],
-        missing_s: "patente",
-        needsPlate_s: "true",
-      },
+      pendingPlateDisplay
+        ? { ok: true, ok_s: "true", flowComplete_s: "true", message, needsPlate_s: "false" }
+        : {
+            ok: true,
+            ok_s: "true",
+            flowComplete_s: "true",
+            message,
+            missing: ["patente"],
+            missing_s: "patente",
+            needsPlate_s: "true",
+          },
       { status: BB_STATUS },
     );
   }

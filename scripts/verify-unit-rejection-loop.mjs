@@ -43,6 +43,12 @@ const rejectionPhrases = [
   "no quiero esa",
   "es otra unidad",
   "otra patente",
+  // Bug real #2, misma familia, producción 2026-07-23 (captura posterior): "No de otra"
+  // es la forma coloquial en la que el cliente dijo "no, es de otra unidad" y no
+  // matcheaba ninguna variante anterior — el respaldo de unidad activa repetía la misma
+  // unidad recién rechazada.
+  "No de otra",
+  "no, de otra",
 ];
 for (const text of rejectionPhrases) {
   assert(looksLikeUnitRejection(text), `looksLikeUnitRejection("${text}") === true`);

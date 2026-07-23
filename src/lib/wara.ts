@@ -518,7 +518,11 @@ export function looksLikeUnitRejection(rawText: string | undefined | null): bool
     /\b(esa|ese|esta|este)\s+no\s+(es|era)\b/.test(norm) ||
     /\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm) ||
     /\bno\s+es\s+(la|el)\s+(correcta|correcto)\b/.test(norm) ||
-    /\b(es|era)\s+otra\b/.test(norm)
+    /\b(es|era)\s+otra\b/.test(norm) ||
+    // Bug real, producción 2026-07-23: "No de otra" (forma coloquial de "no, es de otra
+    // unidad") no matcheaba ninguna variante de arriba y el respaldo de unidad activa
+    // volvía a repetir la misma unidad recién rechazada.
+    /\bde\s+otra\b/.test(norm)
   );
 }
 
