@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { PrismaClient } from "@prisma/client";
 import {
+  detectAllPlates,
   detectLoosePlate,
   detectPlate,
   extractLastPlateFromThread,
@@ -480,6 +481,21 @@ function extractSearchTerms(rawText: string, threadText: string): string[] {
   if (fromMessage.length > 0 && !looksLikeVagueUnitReference(rawText)) {
     return fromMessage;
   }
+  // Regresión encontrada en auditoría (2026-07-23): cuando el mensaje actual no aporta
+  // NINGÚN término propio (p. ej. un saludo suelto: "hola, buenas", que queda vacío
+  // tras filtrar STOPWORDS) y tampoco es una referencia vaga a una unidad ya resuelta
+  // ("esa unidad", "la unidad mencionada"), no hay que mezclar el texto del hilo. Antes
+  // de hoy esto era inofensivo porque filterUnitsBySearchTerms exigía matchear TODAS
+  // las palabras sueltas del hilo (AND), lo que casi nunca coincidía por casualidad.
+  // Al arreglar ese AND para ignorar ruido conversacional ("que pasa con la saveiro"),
+  // un saludo sin ningún término propio pasó a "heredar" sin querer una patente vieja
+  // mencionada antes en el mismo hilo por otro trámite (p. ej. "OST 223" quedaba
+  // matcheando solo por aparecer en un mensaje anterior). Sin término propio y sin
+  // referencia vaga explícita, no hay ninguna señal real de que el cliente esté
+  // preguntando por una unidad — no corresponde buscar nada.
+  if (fromMessage.length === 0 && !looksLikeVagueUnitReference(rawText)) {
+    return fromMessage;
+  }
   if (shouldAvoidThreadSearchTerms(rawText)) {
     return fromMessage;
   }
@@ -576,6 +592,30 @@ function resolvePlateCorrection(
   units: WaraUnidadEstado[],
 ): UnitQueryResolution | null {
   if (!looksLikePlateCorrectionRequest(rawText)) return null;
+
+  // Bug real detectado en auditoría (2026-07-23): cuando el mensaje de corrección
+  // menciona DOS patentes completas en un mismo texto ("no es la OST 223, es la AD 427
+  // MC"), extractPlateCorrectionHint puede capturar la RECHAZADA (la que sigue a "no la")
+  // en vez de la CORREGIDA (la que sigue al "es la" posterior), porque sus patrones
+  // regex priorizan la primera coincidencia de "no...la <token>". Si el texto trae dos
+  // patentes completas y válidas, la corrección siempre es la última mencionada — el
+  // cliente primero nombra lo que está mal y después aclara lo correcto.
+  const allPlates = detectAllPlates(rawText);
+  if (allPlates.length >= 2) {
+    const correctedPlate = allPlates[allPlates.length - 1];
+    const matches = filterUnitsByPlate(units, correctedPlate);
+    if (matches.length === 1) {
+      const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || correctedPlate;
+      return {
+        intent: "consult_status",
+        plate,
+        searchTerms: [],
+        candidatePlates: [plate],
+        source: "rules",
+      };
+    }
+  }
+
   const hint = extractPlateCorrectionHint(rawText);
   if (!hint) return null;
 

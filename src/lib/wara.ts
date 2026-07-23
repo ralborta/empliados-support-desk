@@ -95,6 +95,25 @@ export function detectPlate(text: string): string | null {
   return null;
 }
 
+/**
+ * Todas las patentes completas y válidas mencionadas en el texto, en el orden en que
+ * aparecen. A diferencia de detectPlate (que devuelve solo la primera), esta función
+ * permite distinguir mensajes que mencionan más de una patente en un mismo texto, como
+ * las correcciones explícitas ("no es la OST 223, es la AD 427 MC").
+ */
+export function detectAllPlates(text: string): string[] {
+  if (!text) return [];
+  const out: string[] = [];
+  for (const match of text.matchAll(PLATE_REGEX_GLOBAL)) {
+    const plate = normalizePlate(match[1]);
+    if (!plate || EXAMPLE_PLATES.has(plate)) continue;
+    const letters = plate.match(/^[A-Z]+/)?.[0] ?? "";
+    if (letters.length === 3 && PLATE_STOPWORDS.has(letters)) continue;
+    out.push(plate);
+  }
+  return out;
+}
+
 /** Mensaje corto que parece ser solo una patente (ej. "Lwk7902"). */
 export function looksLikePlateOnlyMessage(text: string): boolean {
   const compact = (text ?? "").trim().replace(/[\s\-_.]+/g, "");
