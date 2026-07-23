@@ -51,14 +51,31 @@ function opcionesReply(rawText: string): string {
   const t = norm(rawText);
   if (/\b(usuario|usuarios|perfil|perfiles)\b/.test(t)) {
     return [
-      "Para ver o gestionar usuarios y perfiles de tu empresa en Wara:",
+      "Un perfil es una plantilla de permisos: define qué secciones y acciones puede ver o usar " +
+        "cada contacto dentro de Wara (por ejemplo, ver reportes, editar unidades, generar certificados, etc.).",
+      "",
+      "Para ver o gestionar perfiles de tu empresa en Wara:",
       "",
       "1. Entrá a Utilidades → Opciones → Perfiles.",
-      "2. Ahí definís qué puede ver y hacer cada perfil (permisos).",
-      "3. En Opciones → Agenda asignás un perfil a cada contacto.",
-      "4. Para listar usuarios de la empresa, revisá Perfiles y los contactos vinculados en Agenda.",
+      "2. Ahí creás o editás perfiles y marcás qué permisos tiene cada uno.",
+      "3. En Opciones → Agenda asignás uno de esos perfiles a cada contacto.",
+      "4. Para ver qué perfil tiene cada contacto, revisá la sección Agenda.",
       "",
       "Si necesitás un permiso puntual que no ves, un administrador de la cuenta en Wara puede ajustarlo.",
+    ].join("\n");
+  }
+  if (
+    /\b(regist\w*|agreg\w*|sum\w*|carg\w*|anot\w*|crear|dar de alta)\b/.test(t) &&
+    /\bcontacto\b/.test(t)
+  ) {
+    return [
+      "Para registrar un contacto nuevo en la Agenda de Wara:",
+      "",
+      "1. Entrá a Utilidades → Opciones → Agenda.",
+      "2. Tocá «Nuevo contacto» (o el botón + de la sección).",
+      "3. Cargá nombre y, al menos, mail o teléfono.",
+      "4. Elegile un perfil (define qué puede ver/hacer en la plataforma).",
+      "5. Guardá — el contacto ya queda disponible para usarlo en Notificaciones y avisos.",
     ].join("\n");
   }
   if (/\b(notific|alerta|alarma|mail|correo)\b/.test(t)) {
@@ -178,13 +195,53 @@ function mantenimientoReply(rawText: string): string {
   ].join("\n");
 }
 
-export function buildInfoGuideReply(rawText: string, kind?: InfoGuideKind | null): string {
+/**
+ * Cuando la respuesta calculada es TEXTUALMENTE igual a lo último que dijo el bot,
+ * significa que la pregunta de seguimiento cayó en el mismo balde de palabras clave
+ * que la anterior y no aporta nada nuevo — mejor pedir el detalle puntual que admitirle
+ * al cliente que "no entendimos" repitiendo el mismo bloque (bug real, 2026-07-22:
+ * "y como registro un contacto?" devolvía el mismo texto que "quiero configurar la agenda").
+ */
+function buildRepeatFallback(detected: InfoGuideKind | null): string {
+  if (detected === "opciones") {
+    return [
+      "Ya te pasé ese paso a paso. Contame puntualmente qué parte no te quedó clara: por ejemplo,",
+      "qué perfil elegirle a un contacto, cómo cargar el mail/teléfono, o cómo armar una notificación.",
+    ].join("\n");
+  }
+  if (detected === "unidades") {
+    return [
+      "Ya te pasé ese paso a paso del módulo Unidades. Contame qué parte específica necesitás:",
+      "atajos de una unidad, grupos, o el significado de los colores/estados.",
+    ].join("\n");
+  }
+  if (detected === "mantenimiento") {
+    return [
+      "Ya te pasé ese paso a paso de Mantenimiento. Contame si tu duda es sobre preventivo o correctivo,",
+      "o si preferís que lo registre yo por acá (pasame la patente).",
+    ].join("\n");
+  }
+  return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
+}
+
+export function buildInfoGuideReply(
+  rawText: string,
+  kind?: InfoGuideKind | null,
+  lastBotMessage?: string | null,
+): string {
   const detected = kind ?? detectInfoGuideKind(rawText);
-  if (detected === "opciones") return opcionesReply(rawText);
-  if (detected === "unidades") return unidadesReply(rawText);
-  if (detected === "mantenimiento") return mantenimientoReply(rawText);
-  return [
-    "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
-    "Decime cuál te interesa o qué querés configurar.",
-  ].join("\n");
+  let message: string;
+  if (detected === "opciones") message = opcionesReply(rawText);
+  else if (detected === "unidades") message = unidadesReply(rawText);
+  else if (detected === "mantenimiento") message = mantenimientoReply(rawText);
+  else
+    message = [
+      "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
+      "Decime cuál te interesa o qué querés configurar.",
+    ].join("\n");
+
+  if (lastBotMessage?.trim() && message.trim() === lastBotMessage.trim()) {
+    return buildRepeatFallback(detected);
+  }
+  return message;
 }

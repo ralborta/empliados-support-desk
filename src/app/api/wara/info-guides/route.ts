@@ -54,6 +54,27 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
   });
 }
 
+/** Último mensaje saliente del bot en el ticket abierto (para no repetir la misma guía). */
+async function lastBotMessage(rawPhone: string): Promise<string | null> {
+  try {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (!customer) return null;
+    const ticket = await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    });
+    if (!ticket) return null;
+    const message = await prisma.ticketMessage.findFirst({
+      where: { ticketId: ticket.id, direction: "OUTBOUND", from: "BOT" },
+      orderBy: { createdAt: "desc" },
+      select: { text: true },
+    });
+    return message?.text ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json({ ok: false, ok_s: "false", error: "Auth no configurada" }, { status: 503 });
@@ -122,7 +143,8 @@ export async function POST(req: NextRequest) {
   }
 
   const kind = parsed.data.guide ?? detectInfoGuideKind(rawText);
-  const message = buildInfoGuideReply(rawText, kind ?? undefined);
+  const previousMessage = await lastBotMessage(rawPhone);
+  const message = buildInfoGuideReply(rawText, kind ?? undefined, previousMessage);
 
   await appendOutboundBotMessage(rawPhone, message, {
     source: "wara_info_guides",
