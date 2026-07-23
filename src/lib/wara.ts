@@ -489,8 +489,49 @@ export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
 
 export type CertificateFlowState = "awaiting_unit" | "awaiting_confirm" | "none";
 
+/**
+ * El cliente siguió con otra cosa (consulta de GPS/estado, odómetro, mantenimiento,
+ * otra guía) DESPUÉS de que el certificado pidiera la unidad. La frase del bot ("para
+ * el certificado de cobertura necesito la unidad...") sigue dentro de la ventana de
+ * 12 líneas que mira certificateFlowState más abajo, pero el trámite real quedó
+ * abandonado — no corresponde seguir enrutando mensajes nuevos hacia ese trámite viejo.
+ *
+ * Bug real, producción 2026-07-23: tras "¿qué unidad estamos viendo?" (certificado pide
+ * la unidad) el cliente preguntó "quiero ver el estado de mi unidad" (otro trámite,
+ * respondido con el estado GPS de una unidad) y después corrigió "no era esa, era la
+ * Nissan" — como esa corrección menciona una marca (looksLikeVehicleBrandOrUnitSearch),
+ * certificateFlowState todavía devolvía "awaiting_unit" (la frase seguía en las últimas
+ * 12 líneas) y el router mandaba la corrección al certificado, que contestó "ya fue
+ * enviado" — totalmente fuera de contexto de lo que el cliente estaba corrigiendo.
+ */
+export function isCertificateFlowSuperseded(threadText: string): boolean {
+  if (!threadText.trim()) return false;
+  const lower = threadText.toLowerCase();
+  const markers = [
+    lower.lastIndexOf("para el certificado de cobertura necesito la unidad"),
+    lower.lastIndexOf("voy a generar el certificado de cobertura"),
+  ].filter((i) => i >= 0);
+  if (markers.length === 0) return false;
+  const cutIdx = Math.max(...markers);
+  const after = threadText
+    .slice(cutIdx + 80)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!after.trim()) return false;
+  return (
+    /(esta detenida|esta funcionando normalmente|la ignicion|ultima posicion|no se generara un ticket|reportando y posicion)/.test(
+      after,
+    ) ||
+    /\b(odometro|horometro|mantenimiento|preventiv\w*|correctiv\w*)\b/.test(after) ||
+    /(modulo opciones|modulo unidades|agenda de contactos|mis atajos)/.test(after) ||
+    /\bde nada\b/.test(after)
+  );
+}
+
 /** Estado del trámite de certificado según mensajes recientes del hilo. */
 export function certificateFlowState(threadText: string): CertificateFlowState {
+  if (isCertificateFlowSuperseded(threadText)) return "none";
   const lines = threadText
     .split("\n")
     .map((l) => l.trim())

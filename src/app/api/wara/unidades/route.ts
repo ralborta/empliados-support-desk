@@ -890,86 +890,107 @@ export async function POST(req: NextRequest) {
     !parsed.data.plate?.trim()
   ) {
     const liveUnitConsult = looksLikeLiveUnitConsultIntent(rawText);
-    const resolutionThread = `${scopedThread}\n${rawText}`.trim();
-    const recentLiveConsult = threadHasRecentLiveUnitConsultIntent(resolutionThread);
-    const preferAiResolution =
-      looksLikeFleetUnitSearchInput(rawText) || liveUnitConsult || recentLiveConsult;
 
-    const aiHistorial = threadTextSinceCompanySelection(await customerOnlyThreadText(prisma, rawPhone));
-    const resolved = await resolveUnitQuery({
-      rawText,
-      threadText: preferAiResolution ? resolutionThread : scopedThread,
-      units: result.unidades,
-      preferAi: preferAiResolution,
-      aiHistorial,
-    });
-
-    // Diagnóstico liviano: cuando la resolución no encuentra nada, dejar rastro de
-    // cuántas unidades trajo Wara en esta llamada puntual. Ayuda a distinguir un bug
-    // de matching de una intermitencia real de la API de Wara en vivo (documentada en
-    // consultarEstadoUnidades) sin tener que reproducir el caso a ciegas.
-    if (resolved.intent === "need_clarification") {
-      console.log(
-        `[WaraUnidades] Sin match para "${rawText}" — unidades recibidas de Wara: ${result.unidades.length}, source: ${resolved.source}`,
-      );
-    }
-
-    if (resolved.intent === "list_fleet") {
-      forceListFleet = true;
-    } else if (
-      resolved.intent === "need_clarification" &&
-      resolved.candidatePlates.length === 0 &&
+    // "Unidad activa" ANTES de dejar que la IA revise todo el historial del día: si el
+    // mensaje pide claramente el estado/GPS de "una unidad" pero no dice cuál
+    // (shouldUseActiveUnitFallback), preferimos la última unidad CONFIRMADA en
+    // cualquier trámite (fresca, con TTL) antes que dejar a la IA "elegir" una marca
+    // mencionada en algún punto de un historial largo y con muchos trámites viejos sin
+    // relación. Bug real, producción 2026-07-23: "quiero ver el estado de mi unidad"
+    // (sin ninguna marca/patente) resolvió a una unidad completamente distinta a la que
+    // se venía hablando, aparentemente por una mención vieja y ya irrelevante en el
+    // historial extenso de la conversación. Acotado a liveUnitConsult (pedido de estado
+    // real, no saludos ni acuses de recibo) para no repetir la regresión de "hola"
+    // heredando una patente vieja que ya se corrigió en extractSearchTerms.
+    if (
+      liveUnitConsult &&
       shouldUseActiveUnitFallback(rawText) &&
       activeUnitRecord?.plate &&
       filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
     ) {
-      // Ni el mensaje ni el hilo trajeron ninguna señal de patente/marca (rules e IA se
-      // rindieron), pero hay una unidad activa vigente y sigue existiendo en la flota:
-      // se asume que la conversación sigue siendo sobre esa unidad en vez de volver a
-      // pedir la patente desde cero.
       explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
-    } else if (resolved.intent === "need_clarification") {
-      const companyName = session.companyName || result.cliente || "tu empresa";
-      const clarification =
-        resolved.clarificationQuestion ??
-        buildFleetUnitNotFoundMessage({ companyName, rawText });
-      await appendOutboundBotMessage(rawPhone, clarification, {
-        source: "wara_unidades_clarification",
+    } else {
+      const resolutionThread = `${scopedThread}\n${rawText}`.trim();
+      const recentLiveConsult = threadHasRecentLiveUnitConsultIntent(resolutionThread);
+      const preferAiResolution =
+        looksLikeFleetUnitSearchInput(rawText) || liveUnitConsult || recentLiveConsult;
+
+      const aiHistorial = threadTextSinceCompanySelection(await customerOnlyThreadText(prisma, rawPhone));
+      const resolved = await resolveUnitQuery({
         rawText,
-        resolutionSource: resolved.source,
+        threadText: preferAiResolution ? resolutionThread : scopedThread,
+        units: result.unidades,
+        preferAi: preferAiResolution,
+        aiHistorial,
       });
-      return NextResponse.json(
-        { ok: true, summaryText: clarification, action: "none" as const, unidadesCount: 0 },
-        { status: BB_STATUS }
-      );
-    } else if (resolved.plate) {
-      const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
-      if (plateMatches.length === 0) {
+
+      // Diagnóstico liviano: cuando la resolución no encuentra nada, dejar rastro de
+      // cuántas unidades trajo Wara en esta llamada puntual. Ayuda a distinguir un bug
+      // de matching de una intermitencia real de la API de Wara en vivo (documentada en
+      // consultarEstadoUnidades) sin tener que reproducir el caso a ciegas.
+      if (resolved.intent === "need_clarification") {
+        console.log(
+          `[WaraUnidades] Sin match para "${rawText}" — unidades recibidas de Wara: ${result.unidades.length}, source: ${resolved.source}`,
+        );
+      }
+
+      if (resolved.intent === "list_fleet") {
+        forceListFleet = true;
+      } else if (
+        resolved.intent === "need_clarification" &&
+        resolved.candidatePlates.length === 0 &&
+        shouldUseActiveUnitFallback(rawText) &&
+        activeUnitRecord?.plate &&
+        filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
+      ) {
+        // Ni el mensaje ni el hilo trajeron ninguna señal de patente/marca (rules e IA se
+        // rindieron), pero hay una unidad activa vigente y sigue existiendo en la flota:
+        // se asume que la conversación sigue siendo sobre esa unidad en vez de volver a
+        // pedir la patente desde cero.
+        explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
+      } else if (resolved.intent === "need_clarification") {
         const companyName = session.companyName || result.cliente || "tu empresa";
-        const notFound = buildFleetUnitNotFoundMessage({
-          companyName,
-          plate: resolved.plate,
+        const clarification =
+          resolved.clarificationQuestion ??
+          buildFleetUnitNotFoundMessage({ companyName, rawText });
+        await appendOutboundBotMessage(rawPhone, clarification, {
+          source: "wara_unidades_clarification",
           rawText,
-        });
-        await appendOutboundBotMessage(rawPhone, notFound, {
-          source: "wara_unidades_not_in_fleet",
-          rawText,
-          plate: resolved.plate,
           resolutionSource: resolved.source,
         });
         return NextResponse.json(
-          { ok: true, summaryText: notFound, action: "none" as const, unidadesCount: 0 },
+          { ok: true, summaryText: clarification, action: "none" as const, unidadesCount: 0 },
           { status: BB_STATUS }
         );
-      }
-      explicitPlate = formatPlateWithSpaces(resolved.plate) ?? resolved.plate;
-    } else if (!unitQuery && resolved.searchTerms.length > 0) {
-      const partialMatches = filterUnitsBySearchTerms(result.unidades, resolved.searchTerms);
-      if (partialMatches.length === 1) {
-        explicitPlate =
-          formatPlateWithSpaces(partialMatches[0].patente || partialMatches[0].unidad || "") ??
-          partialMatches[0].patente ??
-          "";
+      } else if (resolved.plate) {
+        const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
+        if (plateMatches.length === 0) {
+          const companyName = session.companyName || result.cliente || "tu empresa";
+          const notFound = buildFleetUnitNotFoundMessage({
+            companyName,
+            plate: resolved.plate,
+            rawText,
+          });
+          await appendOutboundBotMessage(rawPhone, notFound, {
+            source: "wara_unidades_not_in_fleet",
+            rawText,
+            plate: resolved.plate,
+            resolutionSource: resolved.source,
+          });
+          return NextResponse.json(
+            { ok: true, summaryText: notFound, action: "none" as const, unidadesCount: 0 },
+            { status: BB_STATUS }
+          );
+        }
+        explicitPlate = formatPlateWithSpaces(resolved.plate) ?? resolved.plate;
+      } else if (!unitQuery && resolved.searchTerms.length > 0) {
+        const partialMatches = filterUnitsBySearchTerms(result.unidades, resolved.searchTerms);
+        if (partialMatches.length === 1) {
+          explicitPlate =
+            formatPlateWithSpaces(partialMatches[0].patente || partialMatches[0].unidad || "") ??
+            partialMatches[0].patente ??
+            "";
+        }
       }
     }
   }
