@@ -22,6 +22,7 @@ import {
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
+  looksLikeConversationClosing,
   looksLikeFlowControlCommand,
   looksLikeGreeting,
   looksLikeOperationalIntent,
@@ -565,6 +566,18 @@ export async function customerRegisteredContextResponse(
           ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
           : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
       }
+    }
+  } else if (selectionText && looksLikeConversationClosing(selectionText)) {
+    // Despedida real ("adiós", "nada más gracias", "no gracias", "hasta luego"): cerrar
+    // la charla con calidez, SIN pregunta de seguimiento (evita el loop de "¿necesitás
+    // algo más?" repetido) y SIN caer al router (que reabría el último trámite operativo
+    // y repetía un reporte viejo — bug real, producción 2026-07-23).
+    nextFlow = "reply";
+    if (!responseMessage) {
+      const firstName = customer?.name?.trim().split(/\s+/)[0];
+      responseMessage = firstName
+        ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
+        : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
     }
   } else if (selectionText && looksLikeConversationAcknowledgement(selectionText)) {
     nextFlow = "reply";

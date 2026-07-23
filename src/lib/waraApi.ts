@@ -300,6 +300,27 @@ export function looksLikeConversationAcknowledgement(text: string | undefined | 
   return /^(ok|listo|perfecto|genial|buenisimo|buenisima|dale gracias)[\s!.,¡¿]*$/.test(t);
 }
 
+/**
+ * El cliente se está despidiendo / dando la charla por terminada ("adiós", "nada más
+ * gracias", "no gracias", "hasta luego"), a diferencia de un simple agradecimiento que
+ * todavía puede seguir pidiendo cosas ("gracias" solo, "ok", "perfecto").
+ *
+ * Por qué hace falta esto (bug real, producción 2026-07-23): "No nada adiós" no
+ * matcheaba NINGUNA rama de builderbotCustomerContext.ts (looksLikeConversationAcknowledgement
+ * no incluye "adiós"), así que caía al fallback `nextFlow = "router"` — que reabría el
+ * último trámite operativo (unidad LWK 7902) y repitió el reporte de GPS ya cerrado, en
+ * vez de despedirse. Además, "No nada más gracias" SÍ matcheaba el agradecimiento, pero
+ * repetía la misma pregunta "¿Necesitás algo más?" en loop en vez de cerrar la charla.
+ */
+export function looksLikeConversationClosing(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 140) return false;
+  const t = normCompanyToken(raw);
+  return /\b(adios|adi[oó]s|chau|chao|hasta luego|hasta pronto|nos vemos|bye|nada mas|no gracias|no nada mas|no nada|eso es todo|eso seria todo|nada por ahora|nada mas por ahora)\b/.test(
+    t,
+  );
+}
+
 /** Mensaje que sigue un trámite de odómetro (confirmación, patente, km, fecha). */
 export function looksLikeOdometerContinuationMessage(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();

@@ -25,6 +25,7 @@ const SUITES = [
   "verify-active-unit-memory.mjs",
   "verify-certificate-flow-superseded.mjs",
   "verify-unit-rejection-loop.mjs",
+  "verify-conversation-closing.mjs",
   "verify-info-guide-replies.mjs",
   "verify-knowledge-base.mjs",
   "simulate-maintenance-plate-flow.mjs",
