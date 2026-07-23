@@ -53,6 +53,24 @@ const continuationPhrases = [
   "prefiero quedarme en el cacique",
   "dale, seguimos con wara",
 ];
+console.log(
+  "\n— Bug real #2: CAMBIO de empresa implícito con un verbo nuevo ('operar', no solo 'continuar/seguir') —",
+);
+const implicitSwitchPhrases = [
+  "Quiero operar en Wara",
+  "quiero operar en wara",
+  "necesito trabajar con el cacique",
+  "quiero pasarme a wara",
+  "quiero cambiarme al cacique",
+];
+for (const text of implicitSwitchPhrases) {
+  const matched = matchCompanyContinuationMention(text, contacts);
+  assert(!!matched, `matchCompanyContinuationMention("${text}") encuentra un contacto (verbo distinto de continuar/seguir)`);
+}
+assert(
+  matchCompanyContinuationMention("Quiero operar en Wara", contacts)?.empresa === "WARA",
+  "'Quiero operar en Wara' matchea específicamente WARA",
+);
 for (const text of continuationPhrases) {
   const matched = matchCompanyContinuationMention(text, contacts);
   assert(!!matched, `matchCompanyContinuationMention("${text}") encuentra un contacto`);

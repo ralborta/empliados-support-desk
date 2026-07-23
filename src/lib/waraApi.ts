@@ -277,25 +277,6 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
 }
 
 /**
- * Detecta que el cliente esté confirmando/continuando con una empresa YA asociada a su
- * teléfono (ej. "quiero continuar con el cacique", "sigamos con Wara", "prefiero
- * quedarme en El Cacique"), a diferencia de `looksLikeCompanySelection`, que descarta
- * estos casos porque "quiero" activa `looksLikeOperationalIntent` (pensada para no
- * confundir un pedido operativo real con una elección de empresa).
- *
- * Bug real, producción 2026-07-23: "quiero continuar con el cacique" no calificaba
- * como selección de empresa (por el "quiero") ni como ningún otro caso especial, así
- * que caía al router genérico → ejecutor de unidades por defecto → el respaldo de
- * "unidad activa" repetía el último reporte de GPS ya mostrado, como si el cliente
- * hubiese preguntado por el estado de una unidad en vez de simplemente confirmar la
- * empresa con la que seguía operando.
- *
- * Generalizado contra los contactos REALES del teléfono (vía `contactMatchesSelection`,
- * la misma función usada para la selección explícita de empresa) en vez de un catálogo
- * fijo de nombres — funciona para cualquier empresa asociada, no solo "Wara"/"El
- * Cacique".
- */
-/**
  * Match "fuerte" contra el nombre real de la empresa (no la variante débil de
  * `contactMatchesSelection` que también acepta que coincida solo la PRIMERA palabra —
  * suficiente cuando ya se sabe con certeza que el mensaje ES una selección de empresa,
@@ -310,20 +291,63 @@ function strongCompanyNameMatch(contact: WaraEmpresaContact, mentionedNorm: stri
   );
 }
 
+/** Palabras/raíces sin ningún valor para identificar QUÉ empresa se menciona (verbos de
+ * intención, conectores, pronombres) — lo que sobrevive después de sacarlas es, con
+ * suerte, el nombre de la empresa. */
+const COMPANY_MENTION_EXACT_FILLERS = new Set([
+  "en", "con", "de", "del", "la", "los", "las", "el", "al", "y", "o", "que", "mi", "tu", "su",
+  "por", "para", "a", "dale", "ok", "porfa", "porfavor", "favor", "che", "bueno", "buena",
+]);
+/** Raíces (prefijos) para tolerar conjugaciones sin enumerar cada forma — mismo patrón
+ * ya usado en el resto del archivo (ej. "ayud\w*", "preventiv\w*"). */
+const COMPANY_MENTION_FILLER_STEMS = [
+  "quier", "quisier", "necesit", "pued", "prefier", "gustar",
+  "segu", "sig", "continu", "qued", "permanec",
+  "oper", "trabaj", "estar", "and", "pasar", "cambi", "mov", "ir",
+];
+function isCompanyMentionFiller(word: string): boolean {
+  if (COMPANY_MENTION_EXACT_FILLERS.has(word)) return true;
+  return COMPANY_MENTION_FILLER_STEMS.some((stem) => word.startsWith(stem));
+}
+
+/**
+ * Detecta que el cliente esté nombrando (para confirmar, continuar CON, o cambiarse A)
+ * una empresa YA asociada a su teléfono en Wara — sin depender de un verbo puntual.
+ * Ej.: "quiero continuar con el cacique", "sigamos con Wara", "quiero operar en Wara",
+ * "prefiero trabajar con El Cacique". A diferencia de `looksLikeCompanySelection`, que
+ * descarta estos casos porque "quiero" activa `looksLikeOperationalIntent` (pensada
+ * para no confundir un pedido operativo real con una elección de empresa).
+ *
+ * Bugs reales, producción 2026-07-23:
+ *   1. "quiero continuar con el cacique" no calificaba como selección de empresa (por
+ *      el "quiero") ni como ningún otro caso especial, así que caía al router genérico
+ *      → ejecutor de unidades por defecto → el respaldo de "unidad activa" repetía el
+ *      último reporte de GPS ya mostrado, como si el cliente hubiese preguntado por el
+ *      estado de una unidad.
+ *   2. "Quiero operar en Wara" (cambio de empresa IMPLÍCITO, sin decir "cambiar
+ *      empresa") tampoco calificaba: un primer fix solo cubrió los verbos
+ *      "continuar/seguir/quedarme/permanecer", pero "operar"/"trabajar" quedaron
+ *      afuera — cualquier verbo nuevo que aparezca requeriría otro parche puntual. En
+ *      vez de seguir enumerando verbos, se sacan las palabras SIN valor identificador
+ *      (verbos de intención, conectores) del mensaje y se compara lo que queda contra
+ *      las empresas reales — así cubre cualquier forma de decir "quiero estar/trabajar/
+ *      operar/pasarme a la empresa X" sin adivinar cada verbo posible.
+ *
+ * Generalizado contra los contactos REALES del teléfono (no un catálogo fijo de
+ * nombres) — funciona para cualquier empresa asociada, no solo "Wara"/"El Cacique".
+ */
 export function matchCompanyContinuationMention(
   text: string | undefined | null,
   contacts: WaraEmpresaContact[],
 ): WaraEmpresaContact | null {
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 80 || contacts.length === 0) return null;
-  const norm = normCompanyToken(raw);
-  // "seguir" es irregular (sigo/sigue/sigamos vs. seguimos/seguir) — dos raíces
-  // (segu\w*, sig\w*) para cubrir toda la conjugación sin enumerar cada forma.
-  const match = norm.match(
-    /\b(?:continu\w*|segu\w*|sig\w*|quedar\w*|permanec\w*)\b.{0,25}?\b(?:con|en)\s+(.+)$/,
-  );
-  const mentioned = match?.[1]?.trim();
-  if (!mentioned || mentioned.split(/\s+/).length > 4) return null;
+  const norm = normCompanyToken(raw).replace(/[.,!?;:()¿¡]/g, " ");
+  const words = norm.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 10) return null;
+  const remaining = words.filter((w) => !isCompanyMentionFiller(w));
+  if (remaining.length === 0 || remaining.length > 4) return null;
+  const mentioned = remaining.join(" ");
   return contacts.find((c) => strongCompanyNameMatch(c, mentioned)) ?? null;
 }
 
@@ -850,8 +874,16 @@ export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined
   ) {
     return true;
   }
-  if (/\b(abrir|crear|generar|levantar)\s+(un\s+)?(ticket|caso|reclamo)\b/.test(n)) return true;
-  if (/\b(necesito|quiero)\s+(un\s+)?(ticket|reclamo|caso)\b/.test(n)) return true;
+  // Bug real, producción 2026-07-23: "necesito abrir un NUEVO caso" no matcheaba (el
+  // "\s+(un\s+)?" exige que el sustantivo venga PEGADO al verbo, sin tolerar ningún
+  // adjetivo intermedio como "nuevo"/"otro") y el mensaje caía al ejecutor de unidades
+  // por defecto — ahí, peor todavía, la palabra suelta "nuevo" matcheaba contra
+  // nombres de unidad reales que terminan en "NUEVO" (ej. "M600-071 NUEVO"), devolviendo
+  // una lista de unidades sin relación alguna con lo que pidió el cliente. Se tolera
+  // cualquier palabra intermedia corta (adjetivos, artículos) entre el verbo y el
+  // sustantivo en vez de exigir adyacencia exacta.
+  if (/\b(abrir|crear|generar|levantar)\b.{0,15}\b(ticket|caso|reclamo)\b/.test(n)) return true;
+  if (/\b(necesito|quiero)\b.{0,20}\b(ticket|reclamo|caso)\b/.test(n)) return true;
   return false;
 }
 
