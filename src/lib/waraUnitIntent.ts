@@ -230,6 +230,15 @@ function resolveBrandOrNameInFleet(
   return null;
 }
 
+/**
+ * Verifica los candidatos de la IA contra coincidencias reales de texto en la flota.
+ * IMPORTANTE: si el término (marca/nombre) no aparece en NINGÚN patente/unidad real,
+ * no hay que confiar en la lista de la IA — ese caso suele significar que la IA se
+ * "ancló" repitiendo su propia respuesta anterior (la ve en el historial que le
+ * pasamos como contexto) en vez de admitir que no encuentra la unidad. Devolver la
+ * lista sin filtrar ahí generaba loops: el mismo mensaje de clarificación se repetía
+ * turno tras turno aunque el cliente rechazara las opciones.
+ */
 function filterAiCandidatesByFleetTerms(
   rawText: string,
   units: WaraUnidadEstado[],
@@ -238,12 +247,15 @@ function filterAiCandidatesByFleetTerms(
   const terms = tokenizeSearchTerms(rawText).filter((t) => t.length >= 3);
   if (!terms.length || candidatePlates.length === 0) return candidatePlates;
   const matches = filterUnitsBySearchTerms(units, terms);
-  if (!matches.length) return candidatePlates;
-  const allowed = new Set(
-    matches.map((u) => normalizeLoosePlate(u.patente || u.unidad || "")).filter(Boolean),
-  );
+  if (!matches.length) return [];
+  const groundedPlates = matches
+    .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+    .filter(Boolean);
+  const allowed = new Set(groundedPlates);
   const filtered = candidatePlates.filter((p) => allowed.has(p));
-  return filtered.length > 0 ? filtered : candidatePlates;
+  // Si la IA propuso patentes que no coinciden con ninguna unidad real para ese
+  // término, preferimos las coincidencias reales de texto en vez de su respuesta.
+  return filtered.length > 0 ? filtered : groundedPlates;
 }
 
 function reconcileAiClarification(
@@ -257,6 +269,10 @@ function reconcileAiClarification(
   }
 
   const filtered = filterAiCandidatesByFleetTerms(rawText, units, ai.candidatePlates);
+  const sameAsAi =
+    filtered.length === ai.candidatePlates.length &&
+    filtered.every((p) => ai.candidatePlates.includes(p));
+
   if (filtered.length === 1) {
     return {
       intent: "consult_status",
@@ -266,7 +282,18 @@ function reconcileAiClarification(
       source: "rules",
     };
   }
-  if (filtered.length > 1 && filtered.length < ai.candidatePlates.length) {
+  if (filtered.length === 0 && looksLikeVehicleBrandOrUnitSearch(rawText)) {
+    // Marca/nombre sin ninguna unidad real coincidente: cortar acá, no repetir
+    // candidatos ajenos al pedido (evita el loop por anclaje en el historial).
+    return {
+      intent: "need_clarification",
+      searchTerms: ai.searchTerms,
+      candidatePlates: [],
+      clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText }),
+      source: "rules",
+    };
+  }
+  if (filtered.length > 1 && !sameAsAi) {
     const labels = filtered
       .slice(0, 8)
       .map((p) => formatPlateWithSpaces(p) ?? p)
@@ -1122,4 +1149,10 @@ export async function resolvePlateWithWaraFleet(
   return { ok: false, reason: "not_found" };
 }
 
-export { looksLikeUnitListRequest, filterUnitsBySearchTerms, fuzzyMatchUnitByPlate };
+export {
+  looksLikeUnitListRequest,
+  filterUnitsBySearchTerms,
+  fuzzyMatchUnitByPlate,
+  reconcileAiClarification,
+  filterAiCandidatesByFleetTerms,
+};
