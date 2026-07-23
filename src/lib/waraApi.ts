@@ -338,17 +338,23 @@ export function looksLikeOpcionesInfoRequest(text: string | undefined | null): b
   ) {
     return true;
   }
+  // Fragmento tolerante a errores de tipeo comunes de "configuración" (ej. "confuguracion",
+  // swap i/u) — bug real, producción 2026-07-22: "me ayudas con la confuguracion?" no
+  // matcheaba el literal "configuracion\w*" y caía al executor de unidades pidiendo patente.
+  const CONFIG_WORD = /\bconf\w*gura\w*\b/;
+  const hasConfigWord = CONFIG_WORD.test(t);
   if (
-    /\b(configuracion\w*|configurar)\b/.test(t) &&
+    hasConfigWord &&
     /\b(aenda|agenda|contacto|contactos|opciones|perfil|perfiles|usuario|usuarios|notific)\b/.test(t)
   ) {
     return true;
   }
-  return /\b(agenda|aenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|configuracion\w*|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base|configurar una alarma|configurar alarma)\b/.test(
+  return /\b(agenda|aenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base)\b/.test(
     t
   ) ||
+    (hasConfigWord && /\b(alarma|una alarma)\b/.test(t)) ||
     (/\b(me ayudas|ayudame|ayudarme|podes ayudar|pod[eé]s ayudar)\b/.test(t) &&
-      /\b(agenda|aenda|opciones|contacto|notific|perfil|alarma|configuracion\w*|configurar)\b/.test(t)) ||
+      (hasConfigWord || /\b(agenda|aenda|opciones|contacto|notific|perfil|alarma)\b/.test(t))) ||
     (/\bcomo funciona\b/.test(t) && /\b(agenda|aenda|opciones|contacto|notific|perfil)\b/.test(t));
 }
 

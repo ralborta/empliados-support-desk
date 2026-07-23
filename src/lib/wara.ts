@@ -187,7 +187,7 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
     .toLowerCase();
 
   if (
-    /\b(configuracion|configurar)\b/.test(norm) &&
+    /\bconf\w*gura\w*\b/.test(norm) &&
     /\b(aenda|agenda|contacto|contactos|opciones|perfil|perfiles|usuario|usuarios)\b/.test(norm)
   ) {
     return null;

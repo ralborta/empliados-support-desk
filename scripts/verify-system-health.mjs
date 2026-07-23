@@ -80,6 +80,10 @@ const routing = [
   // regex de \bconfiguracion\b y el mensaje caía en el default "unidades", pidiendo
   // una patente para una pregunta genérica de ayuda con configuraciones.
   ["ok otra cosa me ayudas con las configuraciones?", "", "info_guides"],
+  // Bug real (producción, 2026-07-23): "confuguracion" (typo, swap i/u) no matcheaba el
+  // literal "configuracion\w*" y caía en el default "unidades", pidiendo matrícula para
+  // una pregunta genérica de ayuda con la configuración.
+  ["me ayudas con la confuguracion?", "", "info_guides"],
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
   ["Quiero programar un mantenimiento", "", "mantenimiento"],
   ["como funciona el modulo de mantenimiento", "", "info_guides"],
