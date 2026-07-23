@@ -27,6 +27,7 @@ import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedS
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
   buildFleetUnitNotFoundMessage,
+  customerOnlyThreadText,
   filterUnitsByResolvedPlate,
   filterUnitsBySearchTerms,
   looksLikeFleetUnitSearchInput,
@@ -881,11 +882,13 @@ export async function POST(req: NextRequest) {
     const preferAiResolution =
       looksLikeFleetUnitSearchInput(rawText) || liveUnitConsult || recentLiveConsult;
 
+    const aiHistorial = threadTextSinceCompanySelection(await customerOnlyThreadText(prisma, rawPhone));
     const resolved = await resolveUnitQuery({
       rawText,
       threadText: preferAiResolution ? resolutionThread : scopedThread,
       units: result.unidades,
       preferAi: preferAiResolution,
+      aiHistorial,
     });
 
     if (resolved.intent === "list_fleet") {

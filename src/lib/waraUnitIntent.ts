@@ -15,6 +15,7 @@ import {
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
+import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
@@ -63,6 +64,46 @@ export function buildFleetUnitNotFoundMessage(opts: {
     `No encontré esa unidad en la flota de ${company}. ` +
     `Pasame la matrícula completa o el nombre exacto. Si querés ver opciones, escribí «listado de mis unidades».`
   );
+}
+
+/**
+ * Deja solo lo que escribió el cliente, descartando los mensajes del propio bot.
+ * Se usa exclusivamente para el "historial" que se le manda a la IA al buscar una
+ * unidad por marca/nombre: si le mostramos su propia respuesta anterior (p.ej. una
+ * clarificación con patentes que no eran correctas), la IA tiende a "anclarse" y
+ * repetirla en vez de volver a resolver contra el catálogo real de la flota. El
+ * catálogo (API real) sigue siendo la única fuente de verdad para las patentes.
+ */
+function buildCustomerOnlyText(
+  messages: Array<{ direction: string; text: string | null }>,
+): string {
+  return messages
+    .filter((m) => m.direction !== "OUTBOUND")
+    .map((m) => m.text)
+    .filter((t): t is string => !!t)
+    .join("\n");
+}
+
+/** Historial de solo-cliente para el prompt de la IA (ver `buildCustomerOnlyText`). */
+async function customerOnlyThreadText(prisma: PrismaClient, rawPhone: string): Promise<string> {
+  try {
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    if (!customer) return "";
+    const ticket = await prisma.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    });
+    if (!ticket) return "";
+    const msgs = await prisma.ticketMessage.findMany({
+      where: { ticketId: ticket.id },
+      orderBy: { createdAt: "desc" },
+      take: 24,
+      select: { text: true, direction: true },
+    });
+    return buildCustomerOnlyText(msgs.reverse());
+  } catch {
+    return "";
+  }
 }
 
 /** Entrada que debe resolver contra la flota (patente, prefijo, marca, corrección). */
@@ -976,7 +1017,15 @@ export async function resolveUnitQuery(params: {
   preferAi?: boolean;
   maintenanceContext?: boolean;
   certificateContext?: boolean;
+  /**
+   * Historial "solo cliente" para el prompt de la IA (ver `buildCustomerOnlyText`).
+   * Si no se pasa, se usa `threadText` tal cual (compatibilidad con callers que no
+   * tienen acceso a la base, p.ej. tests). Las reglas determinísticas SIEMPRE usan
+   * `threadText` completo — esto solo afecta qué ve la IA como "historial".
+   */
+  aiHistorial?: string;
 }): Promise<UnitQueryResolution> {
+  const historialForAi = params.aiHistorial ?? params.threadText;
   const prefixHint = prefixHintFromMessage(params.rawText);
   const brandOrLiveConsult =
     looksLikeVehicleBrandOrUnitSearch(params.rawText) ||
@@ -1016,7 +1065,7 @@ export async function resolveUnitQuery(params: {
   }
 
   if (shouldPreferAi && process.env.OPENAI_API_KEY?.trim()) {
-    const aiFirst = await resolveWithAi(params.rawText, params.threadText, params.units, {
+    const aiFirst = await resolveWithAi(params.rawText, historialForAi, params.units, {
       prefixHint,
       maintenanceContext: !!params.maintenanceContext,
       certificateContext: certificateCtx,
@@ -1039,7 +1088,7 @@ export async function resolveUnitQuery(params: {
   const unitSearch = looksLikeFleetUnitSearchInput(params.rawText);
   if (skipAi && !unitSearch) return rules;
 
-  const ai = await resolveWithAi(params.rawText, params.threadText, params.units, {
+  const ai = await resolveWithAi(params.rawText, historialForAi, params.units, {
     prefixHint,
     maintenanceContext: !!params.maintenanceContext,
     certificateContext: certificateCtx,
@@ -1119,6 +1168,7 @@ export async function resolvePlateWithWaraFleet(
   }
 
   const scopedThread = threadTextSinceCompanySelection(threadText);
+  const aiHistorial = threadTextSinceCompanySelection(await customerOnlyThreadText(prisma, rawPhone));
   const resolved = await resolveUnitQuery({
     rawText,
     threadText: scopedThread,
@@ -1126,6 +1176,7 @@ export async function resolvePlateWithWaraFleet(
     preferAi: opts?.preferAi || opts?.maintenanceContext || opts?.certificateContext,
     maintenanceContext: opts?.maintenanceContext,
     certificateContext: opts?.certificateContext,
+    aiHistorial,
   });
 
   if (resolved.intent === "need_clarification") {
@@ -1155,4 +1206,6 @@ export {
   fuzzyMatchUnitByPlate,
   reconcileAiClarification,
   filterAiCandidatesByFleetTerms,
+  buildCustomerOnlyText,
+  customerOnlyThreadText,
 };

@@ -17,6 +17,7 @@
 import {
   reconcileAiClarification,
   filterAiCandidatesByFleetTerms,
+  buildCustomerOnlyText,
 } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
@@ -102,6 +103,33 @@ assert(
 assert(
   filterAiCandidatesByFleetTerms("Nissan", fleetWithNissan, ["AH562SP"]).length === 1,
   "filterAiCandidatesByFleetTerms mantiene candidatos grounded",
+);
+
+console.log("— Historial de la IA no incluye respuestas del propio bot —");
+
+// Endurecimiento adicional: el "historial" que ve la IA para buscar por marca/nombre
+// no debe incluir lo que el propio bot respondió antes (para no anclarse ahí), solo
+// lo que escribió el cliente. Las reglas (threadText completo) no se ven afectadas.
+const mixedThread = [
+  { direction: "INBOUND", text: "Tengo problemas con el odometro" },
+  { direction: "OUTBOUND", text: "Ya existe un caso abierto (N° 2107264) para este reclamo." },
+  { direction: "INBOUND", text: "Pero es para otra patente" },
+  { direction: "OUTBOUND", text: "Perfecto, tomo OST 223. ¿Cuál es el nuevo odómetro en km?" },
+  { direction: "INBOUND", text: "No es la Saveiro" },
+  { direction: "OUTBOUND", text: "¿Podés confirmar la patente? Opciones: OST 223, AD 427 MC." },
+];
+const customerOnly = buildCustomerOnlyText(mixedThread);
+assert(
+  customerOnly.includes("Tengo problemas con el odometro") &&
+    customerOnly.includes("Pero es para otra patente") &&
+    customerOnly.includes("No es la Saveiro"),
+  "historial solo-cliente conserva los mensajes del cliente",
+);
+assert(
+  !customerOnly.includes("OST 223") &&
+    !customerOnly.includes("AD 427 MC") &&
+    !customerOnly.includes("Ya existe un caso abierto"),
+  "historial solo-cliente descarta las respuestas previas del bot (evita el anclaje)",
 );
 
 if (failed > 0) {
