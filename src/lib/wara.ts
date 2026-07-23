@@ -519,9 +519,15 @@ export function looksLikeUnitRejection(rawText: string | undefined | null): bool
     .trim();
   if (!norm) return false;
   return (
-    /\b(otra unidad|otro unidad|otro vehiculo|otra patente|la otra unidad|segunda unidad|otra camioneta|tengo otra|otro movil)\b/.test(
+    // Generalizado a raíz + plural/género (\w*) en vez de un catálogo cerrado de frases
+    // exactas. Bug real, producción 2026-07-23: "Quiero consultar por OTRAS unidades"
+    // (plural, pidiendo unidades DISTINTAS a la activa) no matcheaba "otra unidad"
+    // (singular) y el respaldo de unidad activa volvía a repetir la misma unidad recién
+    // mostrada, como si el cliente hubiese preguntado por su estado otra vez.
+    /\b(otra|otro|otras|otros|segunda|segundo)\s+(unidad\w*|vehicul\w*|patente\w*|camionet\w*|movile?s?)\b/.test(
       norm,
     ) ||
+    /\btengo\s+otra\b/.test(norm) ||
     /\bno\s+(es|era|son|eran)\s+(esa|ese|esta|este)\b/.test(norm) ||
     /\b(esa|ese|esta|este)\s+no\s+(es|era)\b/.test(norm) ||
     /\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm) ||

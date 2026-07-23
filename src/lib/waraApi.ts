@@ -276,6 +276,57 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
   return false;
 }
 
+/**
+ * Detecta que el cliente esté confirmando/continuando con una empresa YA asociada a su
+ * teléfono (ej. "quiero continuar con el cacique", "sigamos con Wara", "prefiero
+ * quedarme en El Cacique"), a diferencia de `looksLikeCompanySelection`, que descarta
+ * estos casos porque "quiero" activa `looksLikeOperationalIntent` (pensada para no
+ * confundir un pedido operativo real con una elección de empresa).
+ *
+ * Bug real, producción 2026-07-23: "quiero continuar con el cacique" no calificaba
+ * como selección de empresa (por el "quiero") ni como ningún otro caso especial, así
+ * que caía al router genérico → ejecutor de unidades por defecto → el respaldo de
+ * "unidad activa" repetía el último reporte de GPS ya mostrado, como si el cliente
+ * hubiese preguntado por el estado de una unidad en vez de simplemente confirmar la
+ * empresa con la que seguía operando.
+ *
+ * Generalizado contra los contactos REALES del teléfono (vía `contactMatchesSelection`,
+ * la misma función usada para la selección explícita de empresa) en vez de un catálogo
+ * fijo de nombres — funciona para cualquier empresa asociada, no solo "Wara"/"El
+ * Cacique".
+ */
+/**
+ * Match "fuerte" contra el nombre real de la empresa (no la variante débil de
+ * `contactMatchesSelection` que también acepta que coincida solo la PRIMERA palabra —
+ * suficiente cuando ya se sabe con certeza que el mensaje ES una selección de empresa,
+ * pero demasiado laxo aquí: "el problema", "el mismo" también empiezan con "el" y no
+ * tienen nada que ver con "El Cacique S.A.").
+ */
+function strongCompanyNameMatch(contact: WaraEmpresaContact, mentionedNorm: string): boolean {
+  const empresa = normCompanyToken(contact.empresa);
+  if (!empresa || !mentionedNorm) return false;
+  return expandCompanyAliases(mentionedNorm).some(
+    (wanted) => !!wanted && (empresa === wanted || empresa.includes(wanted) || wanted.includes(empresa)),
+  );
+}
+
+export function matchCompanyContinuationMention(
+  text: string | undefined | null,
+  contacts: WaraEmpresaContact[],
+): WaraEmpresaContact | null {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 80 || contacts.length === 0) return null;
+  const norm = normCompanyToken(raw);
+  // "seguir" es irregular (sigo/sigue/sigamos vs. seguimos/seguir) — dos raíces
+  // (segu\w*, sig\w*) para cubrir toda la conjugación sin enumerar cada forma.
+  const match = norm.match(
+    /\b(?:continu\w*|segu\w*|sig\w*|quedar\w*|permanec\w*)\b.{0,25}?\b(?:con|en)\s+(.+)$/,
+  );
+  const mentioned = match?.[1]?.trim();
+  if (!mentioned || mentioned.split(/\s+/).length > 4) return null;
+  return contacts.find((c) => strongCompanyNameMatch(c, mentioned)) ?? null;
+}
+
 function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean {
   if (looksLikeConversationAcknowledgement(text)) return false;
   const t = normCompanyToken(text ?? "").replace(/[^a-z]/g, "");

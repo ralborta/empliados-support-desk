@@ -49,6 +49,13 @@ const rejectionPhrases = [
   // unidad recién rechazada.
   "No de otra",
   "no, de otra",
+  // Bug real #3, misma familia, producción 2026-07-23: "Quiero consultar por OTRAS
+  // unidades" (plural) no matcheaba "otra unidad" (singular) — el bot repitió
+  // literalmente el mismo reporte de GPS ya mostrado, como si el cliente hubiese
+  // preguntado por el estado de esa misma unidad otra vez.
+  "Quiero consultar por otras unidades",
+  "quiero ver otras patentes",
+  "tengo otros vehiculos también",
 ];
 for (const text of rejectionPhrases) {
   assert(looksLikeUnitRejection(text), `looksLikeUnitRejection("${text}") === true`);

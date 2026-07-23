@@ -26,6 +26,7 @@ import {
   looksLikeFlowControlCommand,
   looksLikeGreeting,
   looksLikeOperationalIntent,
+  matchCompanyContinuationMention,
   looksLikeRepeatGreetingInSession,
   buildAtilioHelpCapabilitiesReply,
   looksLikeAtilioHelpRequest,
@@ -448,6 +449,17 @@ export async function customerRegisteredContextResponse(
     resolution.selectedCompanyName ?? customer?.companyName?.trim() ?? "";
   /** Solo pedir menú si falta elegir; si ya hay empresa guardada, seguir el trámite. */
   const needsCompanyMenu = requiresCompanySelection && !activeCompany;
+  /**
+   * "Quiero continuar con el cacique" / "sigamos con Wara": confirmación (o cambio) de
+   * empresa que NO califica como `looksLikeCompanySelection` (el "quiero" activa
+   * `looksLikeOperationalIntent`, que la descarta a propósito). Sin esto, caía al router
+   * genérico → ejecutor de unidades por defecto → el respaldo de "unidad activa" repetía
+   * el último reporte de GPS ya mostrado (bug real, producción 2026-07-23).
+   */
+  const matchedCompanyMention =
+    selectionText && contacts.length > 0
+      ? matchCompanyContinuationMention(selectionText, contacts)
+      : null;
   const menuPayload = contacts.length
     ? await buildCompanyMenuPayload(contacts, normalized)
     : null;
@@ -621,6 +633,18 @@ export async function customerRegisteredContextResponse(
   ) {
     nextFlow = "ignore";
     responseMessage = "";
+  } else if (matchedCompanyMention) {
+    nextFlow = "reply";
+    const picked = await selectCompanyForCustomer(prisma, trimmed, {
+      waraContactId: matchedCompanyMention.id,
+    });
+    if (!responseMessage) {
+      responseMessage =
+        picked.menuMessage ??
+        formatCompanyConfirmMessage(
+          picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
+        );
+    }
   } else if (registered && selectionText.trim()) {
     // Fase 1 completa: /turn clasifica y ejecuta (operativo + guías + derivación).
     nextFlow = "router";
