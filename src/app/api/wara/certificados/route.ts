@@ -26,7 +26,7 @@ import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/tic
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
-import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import { resolvePlateWithWaraFleet, looksLikeVagueUnitReference } from "@/lib/waraUnitIntent";
 import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
 
 const bodySchema = z
@@ -592,11 +592,22 @@ export async function POST(req: NextRequest) {
       { status: BB_STATUS },
     );
   }
+  // Bug real, producción 2026-07-23: "quiero ver el estado de la Nissan" (resuelve
+  // AG 562 SP en el flujo de GPS/estado) seguido de "me podés emitir un certificado
+  // para ESA unidad?" volvía a pedir la patente desde cero. looksLikeCertificateUnitSelection
+  // exige que el trámite de certificado YA esté en "awaiting_unit" (es decir, que el
+  // propio certificado ya haya preguntado por la unidad antes) para reconocer una
+  // referencia vaga como "esa unidad" — pero acá la unidad se estableció en OTRO
+  // trámite (consulta de estado), no en uno de certificado. Una referencia vaga
+  // ("esa unidad", "la unidad mencionada") alcanza para intentar la resolución
+  // contextual real (resolvePlateWithWaraFleet más abajo, que sí mira todo el hilo),
+  // en vez de cortar acá mismo sin darle la chance.
   const genericNewRequest =
     isGenericCertificateRequest(text) &&
     !normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) &&
     !detectPlate(text) &&
-    !looksLikeCertificateUnitSelection(text);
+    !looksLikeCertificateUnitSelection(text, threadText) &&
+    !looksLikeVagueUnitReference(text);
   let pendingConfirm =
     !genericNewRequest && certState === "awaiting_confirm";
   const awaitingUnit = certState === "awaiting_unit";

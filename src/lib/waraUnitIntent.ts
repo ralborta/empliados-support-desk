@@ -438,7 +438,7 @@ function tokenizeSearchTerms(text: string): string[] {
 }
 
 /** Referencia vaga al hilo — ahí sí conviene mezclar historial. */
-function looksLikeVagueUnitReference(rawText: string): boolean {
+export function looksLikeVagueUnitReference(rawText: string): boolean {
   const norm = rawText
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
