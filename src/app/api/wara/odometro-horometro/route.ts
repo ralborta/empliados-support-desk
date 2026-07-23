@@ -24,6 +24,7 @@ import {
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import { fechaWara, formatFechaDisplay, parseFechaFromText } from "@/lib/odometroFecha";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
@@ -78,27 +79,6 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
   );
 }
 
-function fechaWara(value: string | undefined, timezone?: string): string {
-  const target = value?.trim() ? new Date(value) : new Date();
-  if (Number.isNaN(target.getTime())) return "";
-  const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
-  try {
-    const parts = new Intl.DateTimeFormat("sv-SE", {
-      timeZone: tz,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).formatToParts(target);
-    const pick = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
-    return `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}`;
-  } catch {
-    return target.toISOString().slice(0, 19);
-  }
-}
 
 function parseNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
@@ -262,25 +242,11 @@ function plateFromSummary(text: string): string | undefined {
   return undefined;
 }
 
-/** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada. */
-function parseFechaFromText(text: string): string | undefined {
-  const matches = [
-    ...(text || "").matchAll(
-      /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[\sT,]+(\d{1,2}):(\d{2}))?/g
-    ),
-  ];
-  if (matches.length === 0) return undefined;
-  const m = matches[matches.length - 1];
-  const dd = m[1].padStart(2, "0");
-  const mm = m[2].padStart(2, "0");
-  let year = Number(m[3]);
-  if (year < 100) year += 2000;
-  const hh = (m[4] ?? "00").padStart(2, "0");
-  const min = (m[5] ?? "00").padStart(2, "0");
-  return `${year}-${mm}-${dd}T${hh}:${min}:00`;
-}
-
-function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>>, patente: string): string {
+function formatSuccessMessage(
+  result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>>,
+  patente: string,
+  fechaDisplay?: string | null,
+): string {
   if (!result.ok) return result.error || "No pude registrar el cambio en Wara.";
   const parts = [`Listo, registré el cambio para la unidad ${patente}.`];
   if (result.odometro?.valor_nuevo_km != null) {
@@ -288,6 +254,11 @@ function formatSuccessMessage(result: Awaited<ReturnType<typeof registrarCambioO
   }
   if (result.horometro?.valor_nuevo_horas != null) {
     parts.push(`Horómetro nuevo: ${result.horometro.valor_nuevo_horas} h.`);
+  }
+  // Confirmar la fecha/hora registrada evita el "¿se guardó como te la pedí?" a
+  // ciegas: bug real, producción 2026-07-23 (ver fechaWara/parseFechaFromText).
+  if (fechaDisplay) {
+    parts.push(`Fecha registrada: ${fechaDisplay}.`);
   }
   return parts.join(" ");
 }
@@ -588,6 +559,19 @@ export async function POST(req: NextRequest) {
 
   await setActiveUnit(prisma, rawPhone, patente, { source: "odometro" });
 
+  const customerTz =
+    session.lookup?.customerTimezone || session.lookup?.userTimezone || "America/Argentina/Buenos_Aires";
+  // Bug real, producción 2026-07-23: el cliente dio fecha y hora del cambio ("Hora:
+  // 10:35 / Fecha 21/07/26") pero el resumen de confirmación nunca las mostraba —
+  // solo patente y odómetro. El cliente no tenía forma de verificar ANTES de
+  // confirmar qué fecha/hora se iba a registrar, y terminó preguntando después "¿se
+  // registró como te la pedí?" sin que el bot pudiera contestarle con ese dato. Se
+  // calcula la fecha ACÁ (antes del resumen) y se muestra siempre que el cliente haya
+  // dado una explícita (no la de "ahora", para no confundir con un dato que no pidió).
+  const fechaExplicita = parsed.data.fecha ?? parsed.data.date ?? parseFechaFromText(threadText);
+  const fecha = fechaWara(fechaExplicita, customerTz);
+  const fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
+
   const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
   const hasCompleteOdoPayload =
     !!patente &&
@@ -618,8 +602,9 @@ export async function POST(req: NextRequest) {
         : typeof horometro === "number"
           ? `• Horómetro: ${horometro} h`
           : "";
+    const fechaLine = fechaDisplay ? `\n• Fecha: ${fechaDisplay}` : "";
     const confirmMessage =
-      `Voy a registrar:\n• Patente: ${plateDisplay}\n${odoLine}\n\n` +
+      `Voy a registrar:\n• Patente: ${plateDisplay}\n${odoLine}${fechaLine}\n\n` +
       `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`;
     await setPendingAction(prisma, rawPhone, "odometro", {
       summary: confirmMessage,
@@ -642,12 +627,6 @@ export async function POST(req: NextRequest) {
   }
 
   await clearPendingAction(prisma, rawPhone);
-  const customerTz =
-    session.lookup?.customerTimezone || session.lookup?.userTimezone || "America/Argentina/Buenos_Aires";
-  const fecha = fechaWara(
-    parsed.data.fecha ?? parsed.data.date ?? parseFechaFromText(threadText),
-    customerTz
-  );
   if (!fecha) {
     return NextResponse.json(
       { ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." },
@@ -665,7 +644,7 @@ export async function POST(req: NextRequest) {
     ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
   });
 
-  let responseMessage = formatSuccessMessage(result, patente);
+  let responseMessage = formatSuccessMessage(result, patente, fechaDisplay);
   // Si Wara no encontró la unidad y el cliente tiene más de una empresa, avisamos
   // en cuál estamos buscando y sugerimos cambiar de empresa (la patente puede ser de otra).
   if (!result.ok) {

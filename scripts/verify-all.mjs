@@ -18,6 +18,7 @@ const SUITES = [
   "verify-unit-resolution-grounding.mjs",
   "verify-unit-name-vs-plate.mjs",
   "verify-odometer-plate-continuity.mjs",
+  "verify-odometer-fecha-hora.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-context-continuity-safety.mjs",
   "verify-outbound-dedup.mjs",
