@@ -21,6 +21,7 @@ import {
   resolveUnitQuery,
   buildFleetUnitNotFoundMessage,
 } from "../src/lib/waraUnitIntent.ts";
+import { extractPlateCorrectionHint, extractPlatePrefixFromMessage } from "../src/lib/wara.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -203,6 +204,54 @@ for (const [text, label] of [
   assert(
     resolved.intent === "consult_status" && resolved.plate === "LWK891",
     `${label} → resuelve la Saveiro real a pesar del relleno conversacional`,
+  );
+}
+
+console.log("— \"La unidad mencionada\" reusa la patente ya resuelta en el hilo (no dice 'empiece con UNIDAD') —");
+
+// Bug real (producción, 2026-07-23): tras resolver "la nissan" → AG 562 SP y reportar
+// su estado, el cliente pidió "dame el certificado de la unidad mencionada". Dos bugs
+// encadenados causaban una respuesta absurda ("No hay ninguna unidad... con patente
+// que empiece con UNIDAD"):
+//   1) extractPlateCorrectionHint matcheaba "de la <palabra>" y devolvía "UNIDAD"
+//      (palabra genérica de vocabulario de flota) como si fuera un dato útil.
+//   2) looksLikeVagueUnitReference no reconocía "la unidad mencionada"/"dicha unidad"
+//      como referencia al contexto, así que nunca se reusaba la última patente real
+//      del hilo (AG 562 SP) — quedaba código muerto por un `?? ""` que nunca fallaba.
+assert(
+  !extractPlateCorrectionHint("dame el certificado de la unidad mencionada"),
+  "'unidad mencionada' no es un hint de patente válido (palabra genérica de flota)",
+);
+assert(
+  !extractPlatePrefixFromMessage("dame el certificado de la unidad mencionada"),
+  "'unidad mencionada' tampoco es un prefijo de patente válido",
+);
+
+const fleetNissan = [
+  { movil_id: 1, patente: "AG 562 SP", unidad: "NISSAN 2404" },
+  { movil_id: 2, patente: "OST 223", unidad: "CAMION 1" },
+];
+const threadAfterNissanResolved = [
+  "La unidad es la nissan",
+  "La unidad AG 562 SP (NISSAN 2404 - AG 562 SP) presenta una falla de ignición. El reporte y la posición están actualizados, pero la ignición está apagada desde hace cinco horas. He generado el caso N° 35784 para Atención al Cliente.",
+  "Puede ser que la unidad este detenidos por qué dejo de trabajar hace 4 horas",
+  "La unidad AG 562 SP (NISSAN 2404 - AG 562 SP) presenta una falla de ignición. El reporte y la posición están actualizados, pero la ignición está apagada desde hace cinco horas. He generado el caso N° 35784 para Atención al Cliente.",
+].join("\n");
+
+for (const [text, label] of [
+  ["Bien entendido, dame el certificado de la unidad mencionada", "'la unidad mencionada'"],
+  ["dame el certificado de esa unidad", "'esa unidad'"],
+  ["dame el certificado de dicha unidad", "'dicha unidad'"],
+]) {
+  const resolved = await resolveUnitQuery({
+    rawText: text,
+    threadText: threadAfterNissanResolved,
+    units: fleetNissan,
+    certificateContext: true,
+  });
+  assert(
+    resolved.intent === "consult_status" && resolved.plate === "AG562SP",
+    `${label} → reusa AG562SP (la unidad ya resuelta en el hilo), no pide una patente que "empiece con UNIDAD"`,
   );
 }
 

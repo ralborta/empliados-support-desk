@@ -127,7 +127,15 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
   const correctionHint = extractPlateCorrectionHint(rawText);
   if (correctionHint) {
     const compact = correctionHint.replace(/\s+/g, "").toUpperCase();
-    if (compact.length <= 6 && !isPlausibleVehiclePlate(compact)) return compact;
+    // Bug real, producción 2026-07-23: "dame el certificado de la unidad mencionada"
+    // hacía matchear el patrón "de la <palabra>" de extractPlateCorrectionHint y
+    // devolvía "UNIDAD" (6 letras, sin dígitos) como si fuera un prefijo de patente
+    // válido — el bot respondía "no hay ninguna unidad que empiece con UNIDAD" en vez
+    // de resolver por contexto la unidad ya mencionada en el hilo (AG 562 SP). Un
+    // prefijo real de flota es corto y con forma de patente/prefijo (2-3 letras +
+    // hasta 4 dígitos), nunca una palabra genérica completa como "unidad"/"patente"/
+    // "vehiculo"/"mencionada". Se exige esa forma en vez de solo "<=6 caracteres".
+    if (!isPlausibleVehiclePlate(compact) && /^[A-Z]{2,3}\d{0,4}$/.test(compact)) return compact;
   }
 
   if (isBarePlatePrefixHint(rawText)) {
@@ -207,9 +215,19 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
     if (m?.[1]) {
       const hint = m[1].replace(/\s+/g, "").toUpperCase();
       if (hint.length >= 2 && isLikelyPlateOrPrefixToken(hint)) return hint;
+      // Bug real, producción 2026-07-23: "dame el certificado de la unidad mencionada"
+      // matcheaba el patrón "de la <palabra>" y devolvía "UNIDAD" como si fuera un
+      // dato útil (patente/marca), pisando la resolución por contexto (la unidad ya
+      // confirmada en el hilo). Es imposible enumerar cada palabra genérica de
+      // vehículo/referencia que puede aparecer ahí (mismo patrón de listas cerradas
+      // de hoy) — se excluye cualquier término del propio vocabulario de "flota"
+      // (unidad, patente, vehículo, mismo/a, anterior, mencionado/a, etc.), dejando
+      // pasar nombres de marca reales ("Saveiro", "Nissan") que sí ayudan a resolver.
       if (
         hint.length >= 3 &&
-        !/^(CORRECTA|OTRA|OTRO|ESA|ESE|LA|EL|MIS|UNA|ESA|ESO)$/.test(hint)
+        !/^(CORRECTA|OTRA|OTRO|ESA|ESE|LA|EL|MIS|UNA|ESA|ESO|UNIDAD|UNIDADES|VEHICULO|VEHICULOS|PATENTE|PATENTES|MATRICULA|MATRICULAS|CAMION|CAMIONES|AUTO|AUTOS|COCHE|MOTO|FLOTA|MENCIONADA|MENCIONADO|ANTERIOR|MISMA|MISMO|DICHA|DICHO|REFERIDA|REFERIDO|CUESTION)$/.test(
+          hint,
+        )
       ) {
         return hint;
       }

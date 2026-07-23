@@ -442,9 +442,22 @@ function looksLikeVagueUnitReference(rawText: string): boolean {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  return /\b(esa|ese|esa unidad|ese vehiculo|ese veh[ií]culo|la misma|el mismo|la anterior|la del hilo|la que dije|la que mencione|la que mencion[eé])\b/.test(
-    norm
-  );
+  if (
+    /\b(esa|ese|la misma|el mismo|la anterior|el anterior|la del hilo|la que dije|la que mencione|la que mencion[eé])\b/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
+  // Generalización (auditoría 2026-07-23, mismo patrón de listas cerradas de hoy):
+  // "la unidad mencionada"/"el vehículo mencionado"/"dicha unidad"/"la unidad en
+  // cuestión" son formas habituales de referirse a la unidad ya resuelta en el hilo,
+  // no solo las frases exactas de arriba. Bug real: "dame el certificado de la unidad
+  // mencionada" (tras resolver "la nissan" → AG 562 SP) no se reconocía como
+  // referencia vaga y no reusaba la patente ya confirmada.
+  return /\b(unidad|vehiculo|veh[ií]culo|camion|patente)\s+(mencionada|mencionado|anterior|en cuestion|referida|referido)\b/.test(
+    norm,
+  ) || /\b(dicha|dicho)\s+(unidad|vehiculo|veh[ií]culo|camion|patente)\b/.test(norm);
 }
 
 function shouldAvoidThreadSearchTerms(rawText: string): boolean {
@@ -744,19 +757,26 @@ function resolveWithRules(
 
   // Priorizar lo que escribió ahora; no arrastrar patente del odómetro u otro trámite previo.
   const threadPlate = extractLastPlateFromThread(threadText);
+  // Bug real, producción 2026-07-23: esta cadena usa `??` para ir probando fuentes de
+  // patente cada vez más "sueltas" (mensaje actual → hint de corrección → última
+  // patente del hilo), pero el paso del medio devolvía `""` (string vacío) en vez de
+  // `null` cuando no encontraba nada útil. Como `??` solo avanza al siguiente valor
+  // ante `null`/`undefined` (NO ante `""`), el fallback al hilo quedaba MUERTO: nunca
+  // se llegaba a reusar la unidad ya resuelta en la conversación (ej. "dame el
+  // certificado de la unidad mencionada" tras haber resuelto la Nissan → AG 562 SP).
   const plateFromMessage =
     detectLoosePlate(rawText) ??
     (() => {
       const hint = extractPlateCorrectionHint(rawText);
-      if (!hint) return "";
-      if (isBarePlatePrefixHint(rawText) || extractPlatePrefixFromMessage(rawText)) return "";
+      if (!hint) return null;
+      if (isBarePlatePrefixHint(rawText) || extractPlatePrefixFromMessage(rawText)) return null;
       return hint;
     })() ??
     (shouldReuseThreadPlateForResolution(rawText) &&
     threadPlate &&
     isPlausibleVehiclePlate(threadPlate)
       ? threadPlate
-      : "") ??
+      : null) ??
     "";
   if (plateFromMessage) {
     const plate = normalizeLoosePlate(plateFromMessage);

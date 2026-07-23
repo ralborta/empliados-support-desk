@@ -10,6 +10,7 @@ import {
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
 import {
   detectPlate,
+  extractLastPlateFromThread,
   extractPlateCorrectionHint,
   formatPlateWithSpaces,
   hasPendingOdometerConfirmation,
@@ -396,6 +397,13 @@ export async function POST(req: NextRequest) {
   }
 
   const threadParsed = parseFromText(threadText);
+  // detectPlate(threadText) devuelve la PRIMERA patente que aparece en todo el hilo
+  // (los últimos 24 mensajes), no la más reciente. Bug real, producción 2026-07-23:
+  // el cliente pidió cambiar el odómetro de "la nissan", el bot resolvió y confirmó
+  // "tomo AG 562 SP", pero al mandar el km nuevo el registro se intentó contra "OST
+  // 223" (una patente mencionada antes en la misma conversación por otro trámite).
+  // extractLastPlateFromThread recorre el hilo de más reciente a más antiguo.
+  const lastThreadPlate = extractLastPlateFromThread(threadText);
 
   if (plateCorrection && activeOdoFlow && !extractPlateCorrectionHint(rawText) && !fromText.patente) {
     const message =
@@ -415,7 +423,7 @@ export async function POST(req: NextRequest) {
       parsed.data.plate ??
       fromText.patente ??
       (skipThreadPlate ? "" : plateFromSummary(threadText)) ??
-      (skipThreadPlate ? "" : threadParsed.patente) ??
+      (skipThreadPlate ? "" : lastThreadPlate) ??
       ""
   );
 
