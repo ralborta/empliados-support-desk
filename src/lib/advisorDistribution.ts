@@ -525,17 +525,30 @@ export async function getUnreadNotificationCount(agentUserId: string): Promise<n
   });
 }
 
-/** Ping desde el panel: mantiene al asesor como conectado mientras la pestaña esté abierta. */
+/**
+ * Ping desde el panel: mantiene al asesor como conectado mientras la pestaña esté abierta.
+ *
+ * Si el asesor NO estaba presente (sesión nueva, o venía de un timeout por inactividad),
+ * el heartbeat también dispara un reparto de la cola. Esto cubre el caso de una sesión de
+ * navegador ya abierta (cookie persistente) que nunca vuelve a pasar por `onAdvisorLogin`:
+ * sin este chequeo, los casos sin asignar quedaban "invisibles" hasta el próximo login
+ * explícito o el próximo mensaje entrante del cliente.
+ */
 export async function advisorHeartbeat(agentUserId: string): Promise<{ ok: boolean }> {
   if (!isDbAgentUserId(agentUserId)) return { ok: false };
 
   const agent = await prisma.agentUser.findUnique({
     where: { id: agentUserId },
-    select: { role: true },
+    select: { role: true, sessionActive: true, lastSeenAt: true },
   });
   if (!agent || agent.role !== "SUPPORT") return { ok: false };
 
   await expireStaleAdvisorSessions();
+
+  const wasPresent = isAdvisorPresentlyOnline({
+    sessionActive: agent.sessionActive,
+    lastSeenAt: agent.lastSeenAt,
+  });
 
   await prisma.agentUser.update({
     where: { id: agentUserId },
@@ -546,6 +559,11 @@ export async function advisorHeartbeat(agentUserId: string): Promise<{ ok: boole
       casesReleaseAt: null,
     },
   });
+
+  if (!wasPresent) {
+    console.log(`[advisorDistribution] Asesor reconectado vía heartbeat: ${agentUserId}`);
+    await rebalanceAmongActiveAdvisors();
+  }
 
   return { ok: true };
 }
