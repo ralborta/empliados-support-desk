@@ -475,13 +475,23 @@ function extractSearchTerms(rawText: string, threadText: string): string[] {
 
 function filterUnitsBySearchTerms(units: WaraUnidadEstado[], terms: string[]): WaraUnidadEstado[] {
   if (!terms.length) return [];
+  // Exigir que TODOS los términos matcheen (AND) rompe la búsqueda cuando el mensaje
+  // trae una palabra de relleno que STOPWORDS no cubre (imposible enumerarlas todas —
+  // mismo patrón de bug que las conjugaciones de "ayudar"). Bug real: "que pasa con la
+  // saveiro" no resolvía porque "pasa" no está en ningún patente/unidad, aunque
+  // "saveiro" sí matcheaba una unidad real. Se descartan primero los términos que no
+  // aparecen en NINGUNA unidad de la flota (ruido conversacional) y se exige AND solo
+  // sobre los términos que sí son "conocidos" por el catálogo real.
+  const haystacks = units.map((unit) => normalizeToken(`${unit.patente ?? ""} ${unit.unidad ?? ""}`));
+  const knownTerms = terms.filter((term) => {
+    const norm = normalizeToken(term);
+    if (!norm || norm.length < 3) return false;
+    return haystacks.some((h) => h.includes(norm));
+  });
+  if (!knownTerms.length) return [];
   return units.filter((unit) => {
     const haystack = normalizeToken(`${unit.patente ?? ""} ${unit.unidad ?? ""}`);
-    return terms.every((term) => {
-      const norm = normalizeToken(term);
-      if (!norm || norm.length < 3) return false;
-      return haystack.includes(norm);
-    });
+    return knownTerms.every((term) => haystack.includes(normalizeToken(term)));
   });
 }
 

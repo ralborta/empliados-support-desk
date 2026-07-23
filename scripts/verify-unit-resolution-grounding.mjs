@@ -181,6 +181,31 @@ assert(
   "queja genérica → el mensaje NO dice \"no encontré esa unidad\" (nunca se buscó nada concreto)",
 );
 
+console.log("— Marca real + relleno conversacional no listado en STOPWORDS —");
+
+// Bug real encontrado en auditoría (2026-07-23): la búsqueda por marca/nombre exigía
+// que TODAS las palabras no-stopword matchearan (AND) contra patente+unidad. Es
+// imposible enumerar en STOPWORDS todas las palabras de relleno de una queja en
+// español ("pasa", "onda", "anda", etc. — mismo patrón de listas cerradas que las
+// conjugaciones de "ayudar"). "que pasa con la saveiro" no resolvía porque "pasa" no
+// aparece en ningún patente/unidad, aunque "saveiro" sí. Ahora se descartan primero
+// los términos que no aparecen en NINGUNA unidad de la flota antes de exigir el AND.
+const fleetWithSaveiro = [
+  { movil_id: 1, patente: "AD 427 MC", unidad: "FORD RANGER" },
+  { movil_id: 2, patente: "LWK 891", unidad: "VOLKSWAGEN SAVEIRO" },
+];
+for (const [text, label] of [
+  ["que pasa con la saveiro", "'que pasa con la saveiro'"],
+  ["que onda con la saveiro", "'que onda con la saveiro'"],
+  ["hola que tal como anda la saveiro", "'hola que tal como anda la saveiro'"],
+]) {
+  const resolved = await resolveUnitQuery({ rawText: text, threadText: "", units: fleetWithSaveiro });
+  assert(
+    resolved.intent === "consult_status" && resolved.plate === "LWK891",
+    `${label} → resuelve la Saveiro real a pesar del relleno conversacional`,
+  );
+}
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);
