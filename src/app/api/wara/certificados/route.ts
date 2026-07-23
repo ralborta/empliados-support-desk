@@ -27,6 +27,7 @@ import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { resolvePlateWithWaraFleet, looksLikeVagueUnitReference } from "@/lib/waraUnitIntent";
+import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
 
 const bodySchema = z
@@ -602,12 +603,22 @@ export async function POST(req: NextRequest) {
   // ("esa unidad", "la unidad mencionada") alcanza para intentar la resolución
   // contextual real (resolvePlateWithWaraFleet más abajo, que sí mira todo el hilo),
   // en vez de cortar acá mismo sin darle la chance.
+  //
+  // Bug real #2, mismo día, mismo hilo: "Ok quiero obtener el certificado también" NO
+  // matchea ninguna frase de referencia vaga reconocida ("también" no está en ese
+  // catálogo cerrado) y seguía cortando acá. En vez de seguir agregando frases sueltas
+  // al catálogo cerrado, se usa la "unidad activa" (@/lib/activeUnit): si hay una
+  // unidad resuelta hace poco en CUALQUIER trámite, no se corta temprano — se deja que
+  // la resolución de más abajo (que ya sabe usar esa unidad activa como respaldo) haga
+  // su trabajo.
+  const activeUnitRecord = await getActiveUnit(prisma, rawPhone);
   const genericNewRequest =
     isGenericCertificateRequest(text) &&
     !normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) &&
     !detectPlate(text) &&
     !looksLikeCertificateUnitSelection(text, threadText) &&
-    !looksLikeVagueUnitReference(text);
+    !looksLikeVagueUnitReference(text) &&
+    !activeUnitRecord?.plate;
   let pendingConfirm =
     !genericNewRequest && certState === "awaiting_confirm";
   const awaitingUnit = certState === "awaiting_unit";
@@ -752,27 +763,38 @@ export async function POST(req: NextRequest) {
       preferAi: true,
       certificateContext: true,
     });
-    if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
-      const message = anchorToCertificateUnitFlow(fleetPlate.message);
-      await appendOutboundBotMessage(rawPhone, message, {
-        source: "wara_certificados",
-        errorStage: "unit_clarification",
-      });
-      return NextResponse.json(
-        {
-          ok: true,
-          ok_s: "true",
-          flowComplete_s: "true",
-          message,
-          missing: ["patente"],
-          missing_s: "patente",
-          needsPlate_s: "true",
-        },
-        { status: BB_STATUS }
-      );
-    }
     if (fleetPlate.ok) {
       plate = fleetPlate.plate;
+    } else {
+      // "Unidad activa" (@/lib/activeUnit): si el mensaje NO trae ninguna señal propia
+      // de patente/marca/prefijo ni es una corrección explícita, y venimos de resolver
+      // una unidad hace poco en OTRO trámite (estado/odómetro/mantenimiento), se asume
+      // que el certificado es para esa misma unidad en vez de volver a pedirla. Bug
+      // real, producción 2026-07-23: "Ok quiero obtener el certificado también" (sin
+      // "esa unidad" ni ninguna otra frase de referencia vaga reconocida) volvía a
+      // pedir la patente segundos después de resolver la unidad en la consulta de GPS.
+      if (shouldUseActiveUnitFallback(text) && activeUnitRecord?.plate) {
+        plate = activeUnitRecord.plate;
+      }
+      if (!plate && fleetPlate.reason === "clarification") {
+        const message = anchorToCertificateUnitFlow(fleetPlate.message);
+        await appendOutboundBotMessage(rawPhone, message, {
+          source: "wara_certificados",
+          errorStage: "unit_clarification",
+        });
+        return NextResponse.json(
+          {
+            ok: true,
+            ok_s: "true",
+            flowComplete_s: "true",
+            message,
+            missing: ["patente"],
+            missing_s: "patente",
+            needsPlate_s: "true",
+          },
+          { status: BB_STATUS }
+        );
+      }
     }
   }
 
@@ -800,6 +822,8 @@ export async function POST(req: NextRequest) {
       { status: BB_STATUS }
     );
   }
+
+  await setActiveUnit(prisma, rawPhone, plate, { source: "certificado" });
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
   const plateDisplay = formatPlateWithSpaces(plate) ?? plate;

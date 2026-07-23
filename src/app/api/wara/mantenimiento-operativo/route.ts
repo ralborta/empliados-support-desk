@@ -8,6 +8,7 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, looksLikeBriefConfirmation, normalizePlate } from "@/lib/wara";
 import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
+import { setActiveUnit } from "@/lib/activeUnit";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import {
   looksLikeChangeCompanyRequest,
@@ -880,6 +881,8 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS }
       );
     }
+
+    await setActiveUnit(prisma, rawPhone, plate, { source: "mantenimiento" });
 
     const message = `Voy a registrar:\nPatente: ${plate}\nTipo: ${service}\nPrioridad: ${priorityLabel(priority)}\nDetalle: ${text}\n\nSi esta correcto, responde CONFIRMO para registrarlo.`;
     await appendOutboundBotMessage(rawPhone, message, {

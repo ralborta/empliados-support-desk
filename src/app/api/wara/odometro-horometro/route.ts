@@ -24,6 +24,7 @@ import {
 } from "@/lib/wara";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
   looksLikeConversationAcknowledgement,
   looksLikeNonOdometerOperationalIntent,
@@ -418,12 +419,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // "Unidad activa" (@/lib/activeUnit): respaldo cuando ni el mensaje ni el hilo traen
+  // ninguna patente reconocible, pero venimos de resolver una unidad hace poco en
+  // CUALQUIER trámite (estado/certificado/mantenimiento). Nunca se usa cuando
+  // skipThreadPlate ya indica que el cliente está señalando explícitamente OTRA
+  // unidad (corrección de patente o marca/nombre distinto en el mensaje).
+  const activeUnitRecord = skipThreadPlate ? null : await getActiveUnit(prisma, rawPhone);
   let patente = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       fromText.patente ??
       (skipThreadPlate ? "" : plateFromSummary(threadText)) ??
       (skipThreadPlate ? "" : lastThreadPlate) ??
+      (skipThreadPlate ? "" : activeUnitRecord?.plate) ??
       ""
   );
 
@@ -434,14 +442,15 @@ export async function POST(req: NextRequest) {
       rawText,
       threadText
     );
-    if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
+    if (fleetPlate.ok) {
+      patente = fleetPlate.plate;
+    } else if (fleetPlate.reason === "clarification") {
       return NextResponse.json(
         { ok: false, error: "Varias unidades", message: fleetPlate.message },
         { status: BB_STATUS }
       );
-    }
-    if (fleetPlate.ok) {
-      patente = fleetPlate.plate;
+    } else if (shouldUseActiveUnitFallback(rawText) && activeUnitRecord?.plate) {
+      patente = activeUnitRecord.plate;
     }
   } else if (skipThreadPlate && !patente && activeOdoFlow) {
     const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, rawText, threadText);
@@ -503,6 +512,8 @@ export async function POST(req: NextRequest) {
         },
         { status: BB_STATUS },
       );
+    } else if (shouldUseActiveUnitFallback(hintText) && activeUnitRecord?.plate) {
+      patente = activeUnitRecord.plate;
     } else {
       const message =
         `No identifiqué la unidad en tu flota. Decime la patente (con guiones si querés), una marca/nombre (ej. Nissan) o escribí "listado de mis unidades".`;
@@ -567,6 +578,8 @@ export async function POST(req: NextRequest) {
       { status: BB_STATUS },
     );
   }
+
+  await setActiveUnit(prisma, rawPhone, patente, { source: "odometro" });
 
   const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
   const hasCompleteOdoPayload =

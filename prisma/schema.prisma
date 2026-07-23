@@ -89,6 +89,11 @@ model Customer {
   /// Trámite pendiente de confirmación (certificado/odómetro/mantenimiento) esperando CONFIRMO del cliente.
   /// Estado explícito — reemplaza la inferencia por regex sobre el texto del hilo. Null = sin trámite pendiente.
   pendingAction            Json?
+  /// Última unidad resuelta con éxito (patente + metadata), para reusar como "de qué unidad estamos
+  /// hablando" en el siguiente mensaje sin depender de que el cliente repita la marca/patente ni de que
+  /// una regex reconozca la frase exacta con la que se refiere a ella ("esa unidad", "también", etc.).
+  /// Null = sin unidad activa (o vencida, ver ACTIVE_UNIT_TTL_MS en @/lib/activeUnit).
+  activeUnit               Json?
   tickets                  Ticket[]
   createdAt                DateTime  @default(now())
 }

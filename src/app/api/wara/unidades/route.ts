@@ -34,6 +34,7 @@ import {
   looksLikeUnitListRequest,
   resolveUnitQuery,
 } from "@/lib/waraUnitIntent";
+import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 
 const bodySchema = z
   .object({
@@ -795,8 +796,20 @@ export async function POST(req: NextRequest) {
 
   const unitQueryInMessage = extractUnitQueryFromText(rawText);
   const scopedThreadEarly = threadTextSinceCompanySelection(threadText);
+  // "Unidad activa" (@/lib/activeUnit): respaldo explícito en DB para cuando ni el
+  // texto del hilo ni el mensaje actual traen ninguna patente reconocible, pero la
+  // conversación sigue siendo sobre la última unidad resuelta (bug real, producción
+  // 2026-07-23: "¿me podés decir qué unidad estamos consultando?" no matchea ningún
+  // patrón de "referencia vaga" existente y sin esto volvía a pedir la patente).
+  // NUNCA se usa si el cliente pide explícitamente OTRA unidad distinta.
+  const activeUnitRecord = !looksLikeAnotherUnitRequest(rawText)
+    ? await getActiveUnit(prisma, rawPhone)
+    : null;
   const threadPlateEarly =
-    extractLastPlateFromThreadCompat(scopedThreadEarly) ?? detectPlate(scopedThreadEarly);
+    extractLastPlateFromThreadCompat(scopedThreadEarly) ??
+    detectPlate(scopedThreadEarly) ??
+    activeUnitRecord?.plate ??
+    null;
 
   if (
     !explicitPlate &&
@@ -903,6 +916,18 @@ export async function POST(req: NextRequest) {
 
     if (resolved.intent === "list_fleet") {
       forceListFleet = true;
+    } else if (
+      resolved.intent === "need_clarification" &&
+      resolved.candidatePlates.length === 0 &&
+      shouldUseActiveUnitFallback(rawText) &&
+      activeUnitRecord?.plate &&
+      filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
+    ) {
+      // Ni el mensaje ni el hilo trajeron ninguna señal de patente/marca (rules e IA se
+      // rindieron), pero hay una unidad activa vigente y sigue existiendo en la flota:
+      // se asume que la conversación sigue siendo sobre esa unidad en vez de volver a
+      // pedir la patente desde cero.
+      explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
     } else if (resolved.intent === "need_clarification") {
       const companyName = session.companyName || result.cliente || "tu empresa";
       const clarification =
@@ -961,7 +986,10 @@ export async function POST(req: NextRequest) {
   const wantedPlate = normalizeLoosePlate(
     explicitPlate ||
       (useThreadPlate
-        ? extractLastPlateFromThreadCompat(scopedThread) ?? detectPlate(scopedThread) ?? ""
+        ? extractLastPlateFromThreadCompat(scopedThread) ??
+          detectPlate(scopedThread) ??
+          activeUnitRecord?.plate ??
+          ""
         : "")
   );
   const filterUnits = (units: WaraUnidadEstado[], plate: string) =>
@@ -1032,6 +1060,13 @@ export async function POST(req: NextRequest) {
 
   if (result.ok && filtered.length === 1 && isSingleUnitQuery) {
     const unit = filtered[0];
+    const resolvedPlateForActiveUnit = normalizeLoosePlate(unit.patente || unit.unidad || "");
+    if (resolvedPlateForActiveUnit) {
+      await setActiveUnit(prisma, rawPhone, resolvedPlateForActiveUnit, {
+        label: formatUnitLabel(unit),
+        source: "estado",
+      });
+    }
     if (unitHasNoInstalledEquipment(unit)) {
       action = "ticket";
       const created = await createNoEquipmentTicket({

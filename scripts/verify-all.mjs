@@ -22,6 +22,7 @@ const SUITES = [
   "verify-outbound-dedup.mjs",
   "verify-certificate-crossflow-vague-reference.mjs",
   "verify-brand-mention-in-question.mjs",
+  "verify-active-unit-memory.mjs",
   "verify-info-guide-replies.mjs",
   "verify-knowledge-base.mjs",
   "simulate-maintenance-plate-flow.mjs",
