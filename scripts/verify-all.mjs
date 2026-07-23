@@ -30,6 +30,7 @@ const SUITES = [
   "verify-company-continuation-mention.mjs",
   "verify-close-case-resolver-verb.mjs",
   "verify-new-case-request-not-fleet-search.mjs",
+  "verify-odometer-vague-unit-start.mjs",
   "verify-conversation-closing.mjs",
   "verify-certificate-confirm-pivot.mjs",
   "verify-info-guide-replies.mjs",

@@ -23,7 +23,7 @@ import {
   resolveWaraPatenteForApi,
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
-import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import { looksLikeVagueUnitReference, resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
 import { fechaWara, formatFechaDisplay, parseFechaFromText } from "@/lib/odometroFecha";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
@@ -337,8 +337,18 @@ export async function POST(req: NextRequest) {
   const odometerIntentStart = looksLikeOdometerIntentStart(rawText);
   const odometerHelpStart = looksLikeOdometerHelpRequest(rawText);
   const odometerFlowStart = odometerIntentStart || odometerHelpStart;
+  // Bug real, producción 2026-07-23: "hagamos un cambio de odómetro de ESA unidad"
+  // (arranque de trámite CON referencia explícita a una unidad ya resuelta antes, ej.
+  // por una consulta de GPS/reporte previa) perdía esa referencia por completo: al ser
+  // "odometerFlowStart", el hilo se vaciaba a "" y ni siquiera se llegaba a mirar la
+  // "unidad activa" (Customer.activeUnit) antes de pedir la patente de cero — como si
+  // el cliente no hubiese dicho "esa unidad" en absoluto. Un arranque de trámite con
+  // referencia vaga explícita NO debe tratarse igual que uno realmente "en blanco"
+  // ("quiero cambiar el odómetro" sin ninguna pista de unidad).
+  const explicitVagueUnitReference = looksLikeVagueUnitReference(rawText);
+  const treatAsBlankFlowStart = odometerFlowStart && !explicitVagueUnitReference;
   const fromText = parseFromText(rawText);
-  const threadText = odometerFlowStart ? "" : await recentThreadText(rawPhone);
+  const threadText = treatAsBlankFlowStart ? "" : await recentThreadText(rawPhone);
   const activeOdoFlow = threadHasActiveOdometerFlow(threadText);
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
@@ -349,7 +359,7 @@ export async function POST(req: NextRequest) {
   // unidades/route.ts, ver looksLikeUnitRejection en @/lib/wara).
   const explicitRejection = looksLikeUnitRejection(rawText);
   const skipThreadPlate =
-    odometerFlowStart ||
+    treatAsBlankFlowStart ||
     explicitRejection ||
     (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
@@ -460,7 +470,7 @@ export async function POST(req: NextRequest) {
   const pendingOdoConfirm = !odometerFlowStart && hasPendingOdometerConfirmation(threadText);
 
   if (!patente) {
-    if (odometerFlowStart) {
+    if (treatAsBlankFlowStart) {
       const message =
         "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
       await appendOutboundBotMessage(rawPhone, message, {

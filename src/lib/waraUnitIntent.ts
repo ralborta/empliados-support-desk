@@ -475,9 +475,34 @@ export function looksLikeVagueUnitReference(rawText: string): boolean {
   // no solo las frases exactas de arriba. Bug real: "dame el certificado de la unidad
   // mencionada" (tras resolver "la nissan" → AG 562 SP) no se reconocía como
   // referencia vaga y no reusaba la patente ya confirmada.
-  return /\b(unidad|vehiculo|veh[ií]culo|camion|patente)\s+(mencionada|mencionado|anterior|en cuestion|referida|referido)\b/.test(
-    norm,
-  ) || /\b(dicha|dicho)\s+(unidad|vehiculo|veh[ií]culo|camion|patente)\b/.test(norm);
+  if (
+    /\b(unidad|vehiculo|veh[ií]culo|camion|patente)\s+(mencionada|mencionado|anterior|en cuestion|referida|referido)\b/.test(
+      norm,
+    ) ||
+    /\b(dicha|dicho)\s+(unidad|vehiculo|veh[ií]culo|camion|patente)\b/.test(norm)
+  ) {
+    return true;
+  }
+  // Bug real, producción 2026-07-23: "la unidad que estamos hablando" y "es la unidad
+  // por la que te consulté por reporte" (referencia a la unidad ya resuelta en OTRO
+  // trámite, ej. una consulta de GPS/reporte previa) no matcheaban ninguna frase de
+  // arriba — el bot terminaba pidiendo confirmar "la matrícula exacta" de una unidad
+  // que el cliente ya había dejado clara por contexto, en vez de reusar esa unidad.
+  if (
+    /\b(?:la|el)\s+(?:(?:unidad|vehiculo|veh[ií]culo|camion|patente)\s+)?que\s+.{0,20}?\b(hablando|hablamos|hablabamos|consulte|consulto|pregunte|preguntaba|dije|mencione|hable)\b/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:por|de|sobre)\s+(?:la|el)\s+que\s+.{0,20}?\b(hablando|hablamos|hablabamos|consulte|consulto|pregunte|preguntaba|dije|mencione|hable|reporte|reportes)\b/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function shouldAvoidThreadSearchTerms(rawText: string): boolean {
