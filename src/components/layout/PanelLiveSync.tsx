@@ -1,24 +1,36 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { usePollWhenVisible } from "@/lib/hooks/usePollWhenVisible";
 
 type PanelLiveSyncProps = {
   userRole?: string | null;
 };
 
-/** Heartbeat de asesores + refresh suave de listas del panel. */
+/**
+ * Heartbeat de presencia (soporte + admin, para el monitor externo) + refresh suave de
+ * listas del panel. El heartbeat en sí sigue siendo SUPPORT-only para el reparto de
+ * casos (ver advisorHeartbeat en @/lib/advisorDistribution); para ADMIN solo actualiza
+ * presencia (recordAdminPresence), sin tocar nada de cola/asignación.
+ */
 export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const isSupport = userRole === "SUPPORT";
+  const isAdmin = userRole === "ADMIN";
+  const tracksPresence = isSupport || isAdmin;
 
   usePollWhenVisible(
     () => {
-      if (!isSupport) return;
-      void fetch("/api/advisor/heartbeat", { method: "POST" }).catch(() => undefined);
+      if (!tracksPresence) return;
+      void fetch("/api/advisor/heartbeat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPage: pathname }),
+      }).catch(() => undefined);
     },
     30_000,
-    isSupport,
+    tracksPresence,
   );
 
   usePollWhenVisible(

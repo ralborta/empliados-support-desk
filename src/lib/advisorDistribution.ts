@@ -634,7 +634,10 @@ export async function getUnreadNotificationCount(agentUserId: string): Promise<n
  * sin este chequeo, los casos sin asignar quedaban "invisibles" hasta el próximo login
  * explícito o el próximo mensaje entrante del cliente.
  */
-export async function advisorHeartbeat(agentUserId: string): Promise<{ ok: boolean }> {
+export async function advisorHeartbeat(
+  agentUserId: string,
+  currentPage?: string,
+): Promise<{ ok: boolean }> {
   if (!isDbAgentUserId(agentUserId)) return { ok: false };
 
   const agent = await prisma.agentUser.findUnique({
@@ -657,6 +660,12 @@ export async function advisorHeartbeat(agentUserId: string): Promise<{ ok: boole
       lastSeenAt: new Date(),
       sessionActiveAt: new Date(),
       casesReleaseAt: null,
+      // presenceStartedAt sólo se pisa al pasar de desconectado a conectado (para el
+      // monitor externo de "conectado desde") — nunca en cada heartbeat, a diferencia
+      // de sessionActiveAt (que sí se refresca siempre, por el orden de reparto de
+      // casos, y por eso no sirve para mostrar "conectado desde").
+      ...(wasPresent ? {} : { presenceStartedAt: new Date() }),
+      ...(currentPage !== undefined ? { currentPage: currentPage.slice(0, 200) } : {}),
     },
   });
 
@@ -664,6 +673,42 @@ export async function advisorHeartbeat(agentUserId: string): Promise<{ ok: boole
     console.log(`[advisorDistribution] Asesor reconectado vía heartbeat: ${agentUserId}`);
     await rebalanceAmongActiveAdvisors();
   }
+
+  return { ok: true };
+}
+
+/**
+ * Presencia genérica para roles que NO participan del reparto de casos (ADMIN). Usa los
+ * mismos campos que advisorHeartbeat (sessionActive/lastSeenAt/presenceStartedAt/
+ * currentPage) para que el monitor externo pueda leerlos igual para cualquier rol, pero
+ * sin ninguna de las consecuencias de reparto/cola de advisorHeartbeat.
+ */
+export async function recordAdminPresence(
+  agentUserId: string,
+  currentPage?: string,
+): Promise<{ ok: boolean }> {
+  if (!isDbAgentUserId(agentUserId)) return { ok: false };
+
+  const agent = await prisma.agentUser.findUnique({
+    where: { id: agentUserId },
+    select: { role: true, sessionActive: true, lastSeenAt: true },
+  });
+  if (!agent || agent.role !== "ADMIN") return { ok: false };
+
+  const wasPresent = isAdvisorPresentlyOnline({
+    sessionActive: agent.sessionActive,
+    lastSeenAt: agent.lastSeenAt,
+  });
+
+  await prisma.agentUser.update({
+    where: { id: agentUserId },
+    data: {
+      sessionActive: true,
+      lastSeenAt: new Date(),
+      ...(wasPresent ? {} : { presenceStartedAt: new Date() }),
+      ...(currentPage !== undefined ? { currentPage: currentPage.slice(0, 200) } : {}),
+    },
+  });
 
   return { ok: true };
 }

@@ -99,23 +99,31 @@ model Customer {
 }
 
 model AgentUser {
-  id              String              @id @default(cuid())
-  email           String              @unique
-  name            String
-  phone           String // Legacy; avisos al asesor van al panel, no WhatsApp
-  role            AgentRole
+  id                String              @id @default(cuid())
+  email             String              @unique
+  name              String
+  phone             String // Legacy; avisos al asesor van al panel, no WhatsApp
+  role              AgentRole
   /// Hash scrypt para login al panel (opcional; si null, no puede iniciar sesión).
-  passwordHash    String?
+  passwordHash      String?
   /// Asesor conectado al backoffice y disponible para recibir casos (solo rol SUPPORT).
-  sessionActive   Boolean             @default(false)
-  sessionActiveAt DateTime?
+  sessionActive     Boolean             @default(false)
+  sessionActiveAt   DateTime?
   /// Tras logout: liberar casos a la cola cuando llegue este timestamp (gracia 5 min).
-  casesReleaseAt  DateTime?
+  casesReleaseAt    DateTime?
   /// Último ping del panel; define si el asesor está realmente conectado.
-  lastSeenAt      DateTime?
-  tickets         Ticket[]            @relation("AgentAssignments")
-  notifications   AgentNotification[]
-  createdAt       DateTime            @default(now())
+  lastSeenAt        DateTime?
+  /// Cuándo arrancó la sesión de presencia ACTUAL. A diferencia de sessionActiveAt (que
+  /// se refresca en cada heartbeat, por el orden de reparto de casos), esto solo se
+  /// pisa cuando pasa de desconectado a conectado. Usado por el monitor externo para
+  /// mostrar "conectado desde".
+  presenceStartedAt DateTime?
+  /// Última pantalla/ruta del panel vista por este usuario (soporte o admin). Usado por
+  /// el monitor externo, no tiene efecto en el routing/reparto de casos.
+  currentPage       String?
+  tickets           Ticket[]            @relation("AgentAssignments")
+  notifications     AgentNotification[]
+  createdAt         DateTime            @default(now())
 
   @@index([sessionActive])
   @@index([casesReleaseAt])
