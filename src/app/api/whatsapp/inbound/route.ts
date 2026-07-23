@@ -23,7 +23,7 @@ import {
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
 import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
-import { buildWebhookMessageId } from "@/lib/webhookMessageId";
+import { buildWebhookMessageId, hasStableWebhookMessageId } from "@/lib/webhookMessageId";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import {
   isWaraInboundAuditOnly,
@@ -683,32 +683,6 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     return NextResponse.json({ ok: true, message: "No hay ticket" });
   }
 
-  // Verificar si ya existe un mensaje similar reciente (para evitar duplicados cuando se envía desde la plataforma)
-  // Buscar mensajes OUTBOUND del mismo ticket con el mismo texto en los últimos 2 minutos
-  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
-  const existingMessage = await prisma.ticketMessage.findFirst({
-    where: {
-      ticketId: targetTicket.id,
-      direction: "OUTBOUND",
-      text: messageText || "[Archivo adjunto]",
-      createdAt: {
-        gte: twoMinutesAgo,
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  if (existingMessage) {
-    console.log(`ℹ️ Mensaje saliente ya existe (probablemente enviado desde la plataforma), ignorando duplicado`);
-    return NextResponse.json({
-      ok: true,
-      ticketId: targetTicket.id,
-      ticketCode: targetTicket.code,
-      duplicate: true,
-      existingMessageId: existingMessage.id,
-    });
-  }
-
   // Generar messageId estable (reintentos / stress)
   const messageId = buildWebhookMessageId({
     data: data as Record<string, unknown>,
@@ -716,14 +690,18 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     direction: "outbound",
     body: messageText,
   });
+  const hasStableId = hasStableWebhookMessageId(data as Record<string, unknown>);
 
-  // Verificar idempotencia por externalMessageId
+  // Verificar idempotencia por externalMessageId (wamid real u otro id propio del
+  // proveedor). Es la señal más confiable: dos envíos legítimos y distintos (aunque
+  // tengan el mismo texto, p. ej. la misma aclaración repetida en turnos separados)
+  // nunca comparten wamid.
   const existingById = await prisma.ticketMessage.findFirst({
-    where: { 
+    where: {
       externalMessageId: messageId,
     },
   });
-  
+
   if (existingById) {
     console.log("ℹ️ Mensaje saliente duplicado por ID, ignorando");
     return NextResponse.json({
@@ -731,6 +709,45 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
       ticketId: existingById.ticketId,
       idempotent: true,
     });
+  }
+
+  // Respaldo por contenido: SOLO cuando el payload no trae ningún id estable del
+  // proveedor (fallback a hash por texto+segundo, que no distingue envíos reales
+  // separados por más de un segundo). Ventana corta (nunca minutos): esto existe
+  // para la carrera interna entre appendOutboundBotMessage (guardado directo) y el
+  // webhook `message.outgoing` de BuilderBot notificando el mismo envío, que ocurre
+  // en segundos, no en minutos.
+  //
+  // Bug real, producción 2026-07-23: con ventana de 2 minutos y sin distinguir por
+  // id, dos respuestas de aclaración IDÉNTICAS pero de turnos reales distintos (el
+  // cliente mandó "Nissan" ~11s después de la primera aclaración) se trataban como
+  // "el mismo envío duplicado" y la segunda nunca se guardaba — el bot respondía bien
+  // por WhatsApp pero el panel se quedaba sin ese mensaje.
+  if (!hasStableId) {
+    const dedupeWindowMs = 8 * 1000;
+    const recentWindow = new Date(Date.now() - dedupeWindowMs);
+    const existingMessage = await prisma.ticketMessage.findFirst({
+      where: {
+        ticketId: targetTicket.id,
+        direction: "OUTBOUND",
+        text: messageText || "[Archivo adjunto]",
+        createdAt: {
+          gte: recentWindow,
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (existingMessage) {
+      console.log(`ℹ️ Mensaje saliente ya existe (probablemente enviado desde la plataforma), ignorando duplicado`);
+      return NextResponse.json({
+        ok: true,
+        ticketId: targetTicket.id,
+        ticketCode: targetTicket.code,
+        duplicate: true,
+        existingMessageId: existingMessage.id,
+      });
+    }
   }
 
   const rawPayload = { eventName, data };

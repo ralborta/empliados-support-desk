@@ -417,6 +417,33 @@ export function lineLooksLikeBotUnitListExample(line: string): boolean {
 }
 
 /**
+ * El bot está RECHAZANDO/no encontrando una patente (mensaje de error), no confirmando
+ * una unidad vigente. Bug real, producción 2026-07-23: el cliente resolvió "Nissan" →
+ * "tomo AG 562 SP", pero el bot igual intentó registrar el odómetro contra "OST 223"
+ * porque su PROPIO mensaje de error ("No encontré la patente OST 223...") menciona esa
+ * patente inválida, y al ser la línea más reciente del hilo, extractLastPlateFromThread
+ * la tomaba como "la última patente vigente" — creando un loop autoalimentado: cada
+ * respuesta de error volvía a "confirmar" (para el propio sistema) la patente rechazada,
+ * sin importar lo que el cliente dijera después. Cualquier línea de rechazo/no-encontrado
+ * debe ignorarse por completo al buscar la última patente real.
+ */
+export function lineLooksLikeBotPlateRejection(line: string): boolean {
+  const l = line.trim();
+  if (!l) return false;
+  const norm = l
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /no encontre la patente/.test(norm) ||
+    /no encontre esa unidad/.test(norm) ||
+    /no hay ninguna unidad/.test(norm) ||
+    /la patente .* no esta en la flota/.test(norm) ||
+    (/no encontr/.test(norm) && /(patente|unidad|matricula)/.test(norm))
+  );
+}
+
+/**
  * Última patente real mencionada en el hilo (resúmenes del bot, "unidad XX", o patente suelta).
  * Ignora patentes de ejemplo de los prompts y patentes solo citadas en listados de ejemplo del bot.
  */
@@ -427,6 +454,7 @@ export function extractLastPlateFromThread(text: string): string | null {
   for (let li = lines.length - 1; li >= 0; li--) {
     const line = lines[li];
     if (lineLooksLikeBotUnitListExample(line)) continue;
+    if (lineLooksLikeBotPlateRejection(line)) continue;
     const labeled = [
       ...line.matchAll(/(?:Patente|Matr[ií]cula)[^\n:]*[:\-]\s*([A-Za-z0-9 ]{5,12})/gi),
     ];

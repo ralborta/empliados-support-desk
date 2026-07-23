@@ -61,6 +61,27 @@ assert(
   "extractLastPlateFromThread sigue el orden real del hilo (no hardcodea una patente fija)",
 );
 
+// Bug real #2 (producción, 2026-07-23, MISMO ticket, después del primer fix): el
+// mensaje de ERROR del propio bot ("No encontré la patente OST 223...") vuelve a
+// mencionar la patente rechazada. Al ser la línea más reciente del hilo, quedaba
+// "ganando" sobre la AG 562 SP recién confirmada — el bot quedaba auto-envenenado
+// repitiendo el mismo error para siempre, sin importar lo que el cliente dijera
+// después (incluso un simple "Buenos días!").
+console.log("— Bug real #2: el propio mensaje de error del bot no debe 'ganarle' a la patente confirmada —");
+const threadWithOwnRejectionEcho = [
+  "Necesito cambiar el odometro de la nissan",
+  "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)",
+  "Nissan",
+  "Perfecto, tomo AG 562 SP. ¿Cuál es el nuevo odómetro en km?",
+  "189000 el día 18 de julio a las 23:59 horas",
+  'No encontré la patente OST 223 en las unidades de WARA. Revisá que esté bien escrita. Si la unidad es de otra de tus empresas, escribí "cambiar empresa", elegí la correcta y volvé a registrar el odómetro.',
+  "Buenos días!",
+].join("\n");
+assert(
+  extractLastPlateFromThread(threadWithOwnRejectionEcho) === "AG562SP",
+  "extractLastPlateFromThread ignora la patente citada en el propio mensaje de rechazo del bot y resuelve AG562SP",
+);
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);

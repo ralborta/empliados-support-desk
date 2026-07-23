@@ -891,6 +891,16 @@ export async function POST(req: NextRequest) {
       aiHistorial,
     });
 
+    // Diagnóstico liviano: cuando la resolución no encuentra nada, dejar rastro de
+    // cuántas unidades trajo Wara en esta llamada puntual. Ayuda a distinguir un bug
+    // de matching de una intermitencia real de la API de Wara en vivo (documentada en
+    // consultarEstadoUnidades) sin tener que reproducir el caso a ciegas.
+    if (resolved.intent === "need_clarification") {
+      console.log(
+        `[WaraUnidades] Sin match para "${rawText}" — unidades recibidas de Wara: ${result.unidades.length}, source: ${resolved.source}`,
+      );
+    }
+
     if (resolved.intent === "list_fleet") {
       forceListFleet = true;
     } else if (resolved.intent === "need_clarification") {

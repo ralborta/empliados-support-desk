@@ -19,6 +19,7 @@ const SUITES = [
   "verify-odometer-plate-continuity.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-context-continuity-safety.mjs",
+  "verify-outbound-dedup.mjs",
   "verify-info-guide-replies.mjs",
   "verify-knowledge-base.mjs",
   "simulate-maintenance-plate-flow.mjs",
