@@ -366,7 +366,12 @@ export function looksLikeOpcionesInfoRequest(text: string | undefined | null): b
     t
   ) ||
     (hasConfigWord && /\b(alarma|una alarma)\b/.test(t)) ||
-    (/\b(me ayudas|ayudame|ayudarme|podes ayudar|pod[eé]s ayudar)\b/.test(t) &&
+    // Raíz del verbo "ayudar" en vez de lista cerrada de conjugaciones — "me ayudas",
+    // "ayudame", "ayudarme", "podés ayudar" cubrían solo 1ra/2da persona singular. Bug
+    // real, producción 2026-07-23: "quiero q me ayuden con la configuracion" (3ra
+    // persona plural) no matcheaba ninguna, caía al executor de unidades pidiendo
+    // patente en vez de ir a la guía de Opciones.
+    (/\bayud\w*\b/.test(t) &&
       (hasConfigWord || /\b(agenda|aenda|opciones|contacto|notific|perfil|alarma)\b/.test(t))) ||
     (/\bcomo funciona\b/.test(t) && /\b(agenda|aenda|opciones|contacto|notific|perfil)\b/.test(t));
 }

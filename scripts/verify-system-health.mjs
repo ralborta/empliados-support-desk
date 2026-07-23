@@ -92,6 +92,10 @@ const routing = [
   ["cuantos tipos de usuario hay en wara", "", "info_guides"],
   ["no puedo entrar con mi usuario, dice contraseña incorrecta", "", "odoo_ticket"],
   ["me podes ayudar con una configuracion?", "", "info_guides"],
+  // Bug real (producción, 2026-07-23): "ayuden" (3ra persona plural) no matcheaba la
+  // lista cerrada de conjugaciones ("me ayudas", "ayudame", "ayudarme", "podés ayudar")
+  // y caía en el default "unidades", pidiendo matrícula. Se generalizó a la raíz "ayud".
+  ["quiero q me ayuden con la configuracion", "", "info_guides"],
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
   ["Quiero programar un mantenimiento", "", "mantenimiento"],
   ["como funciona el modulo de mantenimiento", "", "info_guides"],
