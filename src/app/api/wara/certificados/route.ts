@@ -27,6 +27,7 @@ import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
+import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
 
 const bodySchema = z
   .object({
@@ -170,13 +171,6 @@ function isCertificateRejection(text: string): boolean {
     .replace(/[\u0300-\u036f]/g, "");
   if (/^(no|nop|nope|incorrecto|mal|otra|otro)[\s!.?]*$/.test(t)) return true;
   return /^no[\s,]+(esta|es|esa|es esa|es esa patente|para esa)/.test(t);
-}
-
-function askCertificateUnitMessage(): string {
-  return (
-    "Para el certificado de cobertura necesito la unidad: decime la patente (ej. AD 427 MC), " +
-    "el nombre o la marca (ej. Saveiro, Nissan) o un prefijo (ej. HEJ)."
-  );
 }
 
 /** Hay un resumen pendiente de confirmar en el hilo (evita usar patente vieja del ticket). */
@@ -748,7 +742,7 @@ export async function POST(req: NextRequest) {
       certificateContext: true,
     });
     if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
-      const message = fleetPlate.message;
+      const message = anchorToCertificateUnitFlow(fleetPlate.message);
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_certificados",
         errorStage: "unit_clarification",
@@ -773,7 +767,9 @@ export async function POST(req: NextRequest) {
 
   if (!plate) {
     const message = looksLikeCertificateUnitSelection(text)
-      ? `No encontré una unidad para "${text.trim()}" en tu flota. Decime la patente exacta (ej. NKL 961) o un prefijo (ej. NKL).`
+      ? anchorToCertificateUnitFlow(
+          `No encontré una unidad para "${text.trim()}" en tu flota. Decime la patente exacta (ej. NKL 961) o un prefijo (ej. NKL).`,
+        )
       : askCertificateUnitMessage();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
