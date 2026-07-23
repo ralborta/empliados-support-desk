@@ -16,6 +16,7 @@ const SUITES = [
   "verify-turn-routing.mjs",
   "verify-system-health.mjs",
   "verify-unit-resolution-grounding.mjs",
+  "verify-unit-name-vs-plate.mjs",
   "verify-odometer-plate-continuity.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-context-continuity-safety.mjs",

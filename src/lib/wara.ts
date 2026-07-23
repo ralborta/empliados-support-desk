@@ -120,6 +120,14 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
   if (!compact || compact.length < 5 || compact.length > 12) return false;
   if (!/^[A-Za-z0-9-]+$/.test(compact)) return false;
   if (!/\d/.test(compact)) return false;
+  // Bug real, producción 2026-07-23: "300-092" y "M300-093" (formato de NOMBRE de
+  // unidad, como el propio bot sugiere de ejemplo: "M300-111") pasaban esta función
+  // porque solo exigía "al menos un dígito" — ninguna patente real (vieja o Mercosur)
+  // es puramente numérica o tiene un único carácter de letra. Sin este chequeo se
+  // interpretaban como un intento de patente suelta (y fallaban ahí, con mensajes de
+  // "prefijo inexistente"), en vez de tratarse como búsqueda por nombre de unidad
+  // (que sí puede resolver contra el catálogo real vía filterUnitsByNombre).
+  if (!/^[A-Za-z]{2,3}/.test(compact)) return false;
   const norm = normalizePlate(compact);
   return !!(norm && !isExamplePlate(norm));
 }

@@ -182,6 +182,32 @@ assert(
   "queja genérica → el mensaje NO dice \"no encontré esa unidad\" (nunca se buscó nada concreto)",
 );
 
+console.log("— Código de unidad tipo \"300-092\"/\"M300-093\" que NO está en la flota —");
+
+// Bug real, producción 2026-07-23: "300-092" y "M300-093" (formato nombre de unidad,
+// como el propio bot sugiere de ejemplo: "M300-111") SÍ generan términos de búsqueda
+// reales (tokenizeSearchTerms → ["300","092"] / ["m300","093"]), a diferencia de la
+// queja genérica de arriba. Pero como ninguna unidad de la flota coincidía, se
+// respondía con el MISMO "¿Cuál unidad?" genérico que si el cliente no hubiese
+// escrito nada — confuso, porque el cliente sí dio un dato concreto, dos veces.
+const codeNotInFleet = await resolveUnitQuery({
+  rawText: "300-092",
+  threadText: "",
+  units: fleetAny,
+});
+assert(
+  codeNotInFleet.intent === "need_clarification",
+  "código que no está en la flota → pide aclaración (no rompe ni inventa una unidad)",
+);
+assert(
+  (codeNotInFleet.clarificationQuestion ?? "").toLowerCase().includes("300-092"),
+  "código que no está en la flota → el mensaje SÍ reconoce lo que se buscó (no dice '¿Cuál unidad?' genérico)",
+);
+assert(
+  (codeNotInFleet.clarificationQuestion ?? "").toLowerCase().includes("no encontré"),
+  "código que no está en la flota → dice explícitamente que no lo encontró (a diferencia de la queja sin datos)",
+);
+
 console.log("— Marca real + relleno conversacional no listado en STOPWORDS —");
 
 // Bug real encontrado en auditoría (2026-07-23): la búsqueda por marca/nombre exigía

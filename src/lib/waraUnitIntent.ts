@@ -33,6 +33,16 @@ export function buildFleetUnitNotFoundMessage(opts: {
   prefix?: string | null;
   plate?: string | null;
   rawText?: string;
+  /**
+   * El cliente SÍ escribió algo identificable (ej. "300-092", "M300-093") que se usó
+   * como término de búsqueda, pero no matcheó ninguna unidad de su flota — a
+   * diferencia del caso "sin dato" (ver más abajo). Bug real, producción 2026-07-23:
+   * ambos casos devolvían el mismo "¿Cuál unidad?" genérico, como si el cliente nunca
+   * hubiese escrito nada, cuando en realidad sí dio un dato concreto que simplemente no
+   * está en la flota (o lo escribió distinto a como figura ahí) — confuso, porque
+   * parece que el bot ignoró por completo lo que le pasaron.
+   */
+  searchedText?: string | null;
 }): string {
   const company = opts.companyName?.trim() || "tu empresa";
   const prefixFromText = opts.rawText ? extractPlatePrefixFromMessage(opts.rawText) : null;
@@ -58,6 +68,15 @@ export function buildFleetUnitNotFoundMessage(opts: {
     return (
       `La patente ${display} no está en la flota de ${company}. ` +
       `Revisá que esté bien escrita. Si la unidad es de otra empresa, escribí «cambiar empresa».`
+    );
+  }
+
+  const searched = opts.searchedText?.trim();
+  if (searched) {
+    return (
+      `No encontré ninguna unidad que coincida con "${searched}" en la flota de ${company}. ` +
+      `Revisá que esté bien escrito, o pasame la matrícula completa (ej. NKL 952) o el nombre/marca exacto. ` +
+      `Si querés ver todas, escribí «listado de mis unidades».`
     );
   }
 
@@ -927,11 +946,24 @@ function resolveWithRules(
     };
   }
 
+  // Bug real, producción 2026-07-23: "300-092" / "M300-093" (formato de nombre de
+  // unidad, sin letras suficientes para matchear como patente/prefijo) SÍ generaban
+  // términos de búsqueda reales que simplemente no matchearon ninguna unidad de la
+  // flota — pero se respondía con el "¿Cuál unidad?" genérico, como si el cliente no
+  // hubiese escrito nada. No alcanza con "terms.length > 0": una queja con un typo
+  // suelto ("tenmgo problemas con una unidad" → sobrevive "tenmgo") también deja
+  // terms.length > 0 sin que el cliente haya dado ningún identificador real. La señal
+  // más confiable es que el mensaje sea CORTO (1-2 palabras) — es decir, que sea
+  // básicamente el propio identificador y no una oración con una palabra suelta.
+  const rawWordCount = rawText.trim().split(/\s+/).filter(Boolean).length;
+  const looksLikeBareIdentifierAttempt = terms.length > 0 && rawWordCount <= 2;
   return {
     intent: "need_clarification",
     searchTerms: terms,
     candidatePlates: [],
-    clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText }),
+    clarificationQuestion: buildFleetUnitNotFoundMessage(
+      looksLikeBareIdentifierAttempt ? { rawText, searchedText: rawText.trim() } : { rawText },
+    ),
     source: "rules",
   };
 }
@@ -1165,6 +1197,30 @@ export async function resolveUnitQuery(params: {
   if (looksLikeVehicleBrandOrUnitSearch(params.rawText)) {
     const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units);
     if (brandRules) return brandRules;
+  }
+
+  // Bug real, producción 2026-07-23: "Me podrías dar las coordenadas de la última
+  // ubicación de la unidad AI 154 GD" trae una patente EXPLÍCITA y con formato válido
+  // en el propio mensaje, pero como también es una "consulta en vivo" (coordenadas/
+  // ubicación), `shouldPreferAi` se activaba y la IA respondía primero — con un
+  // catálogo recortado (120 de 414 unidades de esta flota) que no necesariamente
+  // incluye esa patente. El bot terminaba pidiendo "¿Cuál unidad?" genérico como si el
+  // cliente no hubiese dicho nada, cuando en realidad dio una patente concreta que las
+  // reglas (que sí miran la flota COMPLETA) pueden resolver o rechazar de forma
+  // decisiva. Igual que con marca/nombre arriba: una patente explícita en el mensaje
+  // actual siempre se resuelve primero contra el catálogo real, nunca contra una
+  // muestra parcial pensada para la IA.
+  const explicitPlateInMessage = detectLoosePlate(params.rawText);
+  if (explicitPlateInMessage) {
+    const plateRules = resolveWithRules(params.rawText, params.threadText, params.units);
+    if (plateRules.intent === "consult_status" && plateRules.plate) return plateRules;
+    if (
+      plateRules.intent === "need_clarification" &&
+      plateRules.candidatePlates.length === 0 &&
+      plateRules.clarificationQuestion
+    ) {
+      return plateRules;
+    }
   }
 
   if (shouldPreferAi && process.env.OPENAI_API_KEY?.trim()) {
