@@ -1,16 +1,20 @@
 /**
- * Emails opcionales del panel vía SMTP (Nodemailer).
- * Compatible con Gmail, Office 365, SendGrid SMTP, Mailgun, SES, etc.
+ * Emails del panel. Dos backends posibles, probados en este orden:
+ *
+ * 1) Resend (RESEND_API_KEY) — preferido, no requiere infraestructura SMTP propia.
+ * 2) SMTP vía Nodemailer (SMTP_HOST/SMTP_USER/SMTP_PASS) — fallback si algún día
+ *    se prefiere un proveedor SMTP propio (Gmail, Office 365, SES, etc.).
  *
  * Variables:
- *   SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS
- *   SMTP_SECURE=true  → puerto 465 TLS implícito
- *   PANEL_EMAIL_FROM  → ej. "Atilio <notificaciones@waragps.com>"
+ *   RESEND_API_KEY    → API key de Resend (dominio remitente debe estar verificado ahí)
+ *   PANEL_EMAIL_FROM  → ej. "Atilio <notificaciones@nivel41.com>"
  *   PANEL_BASE_URL    → https://wara.nivel41.com
+ *   SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_SECURE=true (fallback opcional)
  */
 
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
+import { Resend } from "resend";
 
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL?.trim() || "https://wara.nivel41.com";
 
@@ -59,13 +63,35 @@ function getTransport(cfg: SmtpConfig): Transporter {
   return transport;
 }
 
-export function panelEmailConfigured(): boolean {
-  return readSmtpConfig() !== null;
+let cachedResend: Resend | null = null;
+
+function getResendClient(): Resend | null {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) return null;
+  if (!cachedResend) cachedResend = new Resend(apiKey);
+  return cachedResend;
 }
 
-async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+export function panelEmailConfigured(): boolean {
+  return !!process.env.RESEND_API_KEY?.trim() || readSmtpConfig() !== null;
+}
+
+async function sendViaResend(to: string, subject: string, html: string): Promise<boolean> {
+  const resend = getResendClient();
+  const from = process.env.PANEL_EMAIL_FROM?.trim();
+  if (!resend || !from) return false;
+
+  const { error } = await resend.emails.send({ from, to: to.trim(), subject, html });
+  if (error) {
+    console.error("[panelEmail] Error Resend:", error.message ?? error);
+    return false;
+  }
+  return true;
+}
+
+async function sendViaSmtp(to: string, subject: string, html: string): Promise<boolean> {
   const cfg = readSmtpConfig();
-  if (!cfg || !to.trim()) return false;
+  if (!cfg) return false;
 
   try {
     const transport = getTransport(cfg);
@@ -80,6 +106,15 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
     console.error("[panelEmail] Error SMTP:", err instanceof Error ? err.message : err);
     return false;
   }
+}
+
+async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+  if (!to.trim()) return false;
+
+  if (process.env.RESEND_API_KEY?.trim()) {
+    return sendViaResend(to, subject, html);
+  }
+  return sendViaSmtp(to, subject, html);
 }
 
 export async function sendAdvisorWelcomeEmail(params: {

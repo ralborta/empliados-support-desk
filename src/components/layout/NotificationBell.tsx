@@ -22,6 +22,53 @@ type NotificationItem = {
   };
 };
 
+/** Beep de dos tonos generado con Web Audio API (sin depender de un archivo de audio). */
+function playAlertSound() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const playTone = (freq: number, startAt: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.25, startAt + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startAt);
+      osc.stop(startAt + duration);
+    };
+    const now = ctx.currentTime;
+    playTone(880, now, 0.18);
+    playTone(1320, now + 0.16, 0.22);
+    setTimeout(() => ctx.close().catch(() => undefined), 600);
+  } catch {
+    /* Autoplay bloqueado u otro error: no rompe el flujo. */
+  }
+}
+
+function notifyDesktop(n: NotificationItem) {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  const company = n.ticket.customer.companyName || n.ticket.customer.name || "Cliente";
+  try {
+    const notif = new Notification(`Nuevo caso asignado: ${n.ticket.code}`, {
+      body: `${company} — ${n.ticket.title}`,
+      tag: n.id,
+      icon: "/favicon.ico",
+    });
+    notif.onclick = () => {
+      window.focus();
+      window.location.href = `/tickets/${n.ticket.id}`;
+    };
+  } catch {
+    /* ignore */
+  }
+}
+
 export function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -29,16 +76,37 @@ export function NotificationBell() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const seenIdsRef = useRef<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/notifications");
       if (!res.ok) return;
       const data = await res.json();
+      const notifications: NotificationItem[] = data.notifications ?? [];
       setUnreadCount(data.unreadCount ?? 0);
-      setItems(data.notifications ?? []);
+      setItems(notifications);
+
+      const unread = notifications.filter((n) => !n.readAt);
+      if (seenIdsRef.current === null) {
+        // Primera carga: no alertar retroactivamente por notificaciones ya existentes.
+        seenIdsRef.current = new Set(unread.map((n) => n.id));
+      } else {
+        const brandNew = unread.filter((n) => !seenIdsRef.current!.has(n.id));
+        if (brandNew.length > 0) {
+          playAlertSound();
+          brandNew.forEach(notifyDesktop);
+          brandNew.forEach((n) => seenIdsRef.current!.add(n.id));
+        }
+      }
     } catch {
       /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission();
     }
   }, []);
 
