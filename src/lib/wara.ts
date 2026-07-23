@@ -326,7 +326,16 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
       after,
     ) ||
     /\b(certificado|cobertura|monitoreo|constancia)\b/.test(after) ||
-    /\b(necesito|quiero|pedir|solicitar)\b/.test(after) ||
+    // Bug real, producción 2026-07-23: tras "Voy a registrar: ...", el propio bot
+    // reaccionó a un mensaje del cliente sin patente re-preguntando "Para registrar
+    // el cambio de odómetro NECESITO la patente de la unidad..." — esa respuesta del
+    // BOT (todavía dentro del MISMO trámite de odómetro) quedaba en el hilo y hacía
+    // matchear este "necesito/quiero" genérico, marcando el trámite como abandonado
+    // cuando en realidad seguía activo. Si "necesito/quiero/pedir/solicitar" aparece
+    // junto con contexto de odómetro/patente, es el propio trámite continuando, no un
+    // pedido distinto.
+    (/\b(necesito|quiero|pedir|solicitar)\b/.test(after) &&
+      !/\b(od[oó]metro|hor[oó]metro|kilometraje|patente|matr[ií]cula)\b/.test(after)) ||
     /\bde nada\b/.test(after) ||
     (/1\.\s*(entra|ingresa|abri)/.test(after) &&
       /(agenda|opciones|contacto|unidades|grupo)/.test(after))

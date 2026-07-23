@@ -4,13 +4,56 @@
  * @/lib/certificateFlowMessages).
  */
 
-/** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada. */
-export function parseFechaFromText(text: string): string | undefined {
+/** Hoy (año/mes/día) en una zona horaria dada, sin depender de la hora local del server. */
+function todayPartsInTz(timezone: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const pick = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  return { year: pick("year"), month: pick("month"), day: pick("day") };
+}
+
+/** Suma/resta días de una fecha calendario, usando mediodía UTC para no pisar el día por DST. */
+function shiftCalendarDay(
+  { year, month, day }: { year: number; month: number; day: number },
+  deltaDays: number,
+): { year: number; month: number; day: number } {
+  const base = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  base.setUTCDate(base.getUTCDate() + deltaDays);
+  return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
+}
+
+/** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada.
+ * También reconoce fechas relativas ("ayer", "hoy", "anteayer") combinadas con una hora
+ * ("a las 12:00", "hora: 12:00") — bug real, producción 2026-07-23: "kilometro 111111 el
+ * dia de ayer a las 12:00" no matcheaba el patrón numérico dd/mm/aaaa y quedaba sin fecha
+ * (se registraba con la fecha/hora ACTUAL del servidor, no "ayer a las 12:00" como pidió
+ * el cliente). */
+export function parseFechaFromText(text: string, timezone?: string): string | undefined {
   const raw = text || "";
   const matches = [
     ...raw.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[\sT,]+(\d{1,2}):(\d{2}))?/g),
   ];
-  if (matches.length === 0) return undefined;
+  if (matches.length === 0) {
+    const norm = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const relative = norm.match(/\b(anteayer|ayer|hoy)\b/);
+    if (!relative) return undefined;
+    const deltaDays = relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
+    const timeMatch = norm.match(/\b(?:a las|hora:?)\s*(\d{1,2}):(\d{2})\b/);
+    const { year, month, day } = shiftCalendarDay(
+      todayPartsInTz(timezone?.trim() || "America/Argentina/Buenos_Aires"),
+      deltaDays,
+    );
+    const hh = (timeMatch?.[1] ?? "00").padStart(2, "0");
+    const mi = (timeMatch?.[2] ?? "00").padStart(2, "0");
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${hh}:${mi}:00`;
+  }
   const m = matches[matches.length - 1];
   const dd = m[1].padStart(2, "0");
   const mm = m[2].padStart(2, "0");
@@ -84,6 +127,17 @@ export function fechaWara(value: string | undefined, timezone?: string): string 
     return "";
   }
   return formatDateInTz(new Date(), timezone);
+}
+
+/** ¿La fecha/hora (formato Wara, "YYYY-MM-DDTHH:mm:ss") es posterior a AHORA en esa zona
+ * horaria? Un odómetro no puede registrarse para un momento que todavía no pasó — mejora
+ * pedida por el cliente (producción 2026-07-23): evitar registrar en silencio una fecha
+ * futura por un día mal tipeado. Comparación lexicográfica: ambos strings son el mismo
+ * formato "YYYY-MM-DDTHH:mm:ss", así que el orden alfabético coincide con el cronológico. */
+export function isFechaEnFuturo(fecha: string, timezone?: string): boolean {
+  if (!fecha) return false;
+  const now = formatDateInTz(new Date(), timezone);
+  return fecha > now;
 }
 
 /** "2026-07-21T10:35:00" → "21/07/2026 10:35" (para mostrarle al cliente, no para Wara). */

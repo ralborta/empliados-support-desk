@@ -24,7 +24,7 @@ import {
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import { looksLikeVagueUnitReference, resolvePlateWithWaraFleet } from "@/lib/waraUnitIntent";
-import { fechaWara, formatFechaDisplay, parseFechaFromText } from "@/lib/odometroFecha";
+import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } from "@/lib/odometroFecha";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
@@ -346,9 +346,24 @@ export async function POST(req: NextRequest) {
   // referencia vaga explícita NO debe tratarse igual que uno realmente "en blanco"
   // ("quiero cambiar el odómetro" sin ninguna pista de unidad).
   const explicitVagueUnitReference = looksLikeVagueUnitReference(rawText);
-  const treatAsBlankFlowStart = odometerFlowStart && !explicitVagueUnitReference;
+  // Bug real, producción 2026-07-23: "Aun no te dije la hora o el dia del cambio de
+  // odometro" contiene "cambio de odometro" → looksLikeOdometerIntentStart lo
+  // clasifica como arranque de trámite, pero el cliente en realidad está AMPLIANDO
+  // una confirmación YA PENDIENTE (patente + km recién propuestos, esperando
+  // CONFIRMO). Sin mirar esto ANTES de decidir si el arranque es "en blanco", el
+  // hilo se vaciaba a "" y esa patente/km ya propuestos se perdían por completo — el
+  // bot terminaba pidiendo la patente de cero, como si el cliente no hubiese dicho
+  // nada todavía.
+  const preliminaryThreadText = odometerFlowStart ? await recentThreadText(rawPhone) : "";
+  const hasPendingConfirmInThread = hasPendingOdometerConfirmation(preliminaryThreadText);
+  const treatAsBlankFlowStart =
+    odometerFlowStart && !explicitVagueUnitReference && !hasPendingConfirmInThread;
   const fromText = parseFromText(rawText);
-  const threadText = treatAsBlankFlowStart ? "" : await recentThreadText(rawPhone);
+  const threadText = treatAsBlankFlowStart
+    ? ""
+    : odometerFlowStart
+      ? preliminaryThreadText
+      : await recentThreadText(rawPhone);
   const activeOdoFlow = threadHasActiveOdometerFlow(threadText);
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
@@ -452,22 +467,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Bug real, producción 2026-07-23 (mismo caso de "Aun no te dije la hora..."):
+  // estos tres puntos seguían mirando `odometerFlowStart` (arranque de trámite en el
+  // mensaje actual), no `treatAsBlankFlowStart` (arranque REALMENTE en blanco). Con
+  // una confirmación pendiente en el hilo, `odometerFlowStart` sigue siendo true
+  // (el mensaje actual menciona "cambio de odometro"), así que el km/hs ya
+  // propuestos en la confirmación pendiente (ej. 600 km) se descartaban igual,
+  // aunque ya no se vaciara el hilo.
   const odometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,
     fromText.odometro,
-    odometerFlowStart ? undefined : threadParsed.odometro
+    treatAsBlankFlowStart ? undefined : threadParsed.odometro
   );
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
   const horometro = resolveHorometroForWara({
     explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
     parsedHorometro: firstFiniteNumber(
       fromText.horometro,
-      odometerFlowStart ? undefined : threadParsed.horometro,
+      treatAsBlankFlowStart ? undefined : threadParsed.horometro,
     ),
-    combinedText: odometerFlowStart ? rawText : combinedText,
+    combinedText: treatAsBlankFlowStart ? rawText : combinedText,
   });
-  const pendingOdoConfirm = !odometerFlowStart && hasPendingOdometerConfirmation(threadText);
+  const pendingOdoConfirm = hasPendingOdometerConfirmation(threadText);
 
   if (!patente) {
     if (treatAsBlankFlowStart) {
@@ -578,9 +600,29 @@ export async function POST(req: NextRequest) {
   // registró como te la pedí?" sin que el bot pudiera contestarle con ese dato. Se
   // calcula la fecha ACÁ (antes del resumen) y se muestra siempre que el cliente haya
   // dado una explícita (no la de "ahora", para no confundir con un dato que no pidió).
-  const fechaExplicita = parsed.data.fecha ?? parsed.data.date ?? parseFechaFromText(threadText);
+  const fechaExplicita =
+    parsed.data.fecha ?? parsed.data.date ?? parseFechaFromText(threadText, customerTz);
   const fecha = fechaWara(fechaExplicita, customerTz);
   const fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
+
+  // Mejora pedida por el cliente (producción 2026-07-23): "¿cómo contempla el caso de
+  // que alguien pida el cambio de odómetro para un día POSTERIOR a la fecha en la que
+  // lo solicita?" — un odómetro no puede ser de un momento que todavía no pasó. Solo
+  // se valida cuando el cliente dio una fecha explícita (nunca la de "ahora", que por
+  // definición no puede ser futura).
+  if (fechaExplicita && isFechaEnFuturo(fecha, customerTz)) {
+    const message =
+      `La fecha que me pasaste (${fechaDisplay}) es posterior a la fecha y hora actuales. ` +
+      `¿Podés confirmarme la fecha y hora correctas del cambio de odómetro?`;
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_odometro_response",
+      stage: "fecha_futura",
+    });
+    return NextResponse.json(
+      { ok: false, ok_s: "false", error: "Fecha futura", message },
+      { status: BB_STATUS },
+    );
+  }
 
   const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
   const hasCompleteOdoPayload =
