@@ -683,7 +683,18 @@ export function detectIncidentType(text: string): WaraIncidentType {
   if (/(certificado|habilitar monitoreo|certificado de monitoreo)/.test(lower)) {
     return "CERTIFICATE_ISSUE";
   }
-  if (/(acceso|login|usuario|contraseñ|plataforma|no puedo entrar)/.test(lower)) {
+  // "usuario"/"plataforma"/"acceso" solos son demasiado genéricos — matchean también
+  // preguntas informativas ("qué tipos de usuarios hay", "cómo son los perfiles de
+  // usuarios") que no son un problema real. Exigimos que aparezca junto a lenguaje de
+  // problema real (bug real, producción 2026-07-23: derivaba a ticket humano en vez de
+  // responder la guía de Opciones/Perfiles).
+  if (
+    /(acceso|login|usuario|contraseñ|plataforma)/.test(lower) &&
+    /(no puedo|no me deja|no anda|no funciona|bloquead|olvid|error|problema|no entra|no ingresa)/.test(lower)
+  ) {
+    return "ACCESS_PLATFORM";
+  }
+  if (/no puedo entrar/.test(lower)) {
     return "ACCESS_PLATFORM";
   }
   if (/(factur|administraci[oó]n|cobro|pago)/.test(lower)) {

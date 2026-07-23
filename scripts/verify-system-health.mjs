@@ -84,6 +84,13 @@ const routing = [
   // literal "configuracion\w*" y caía en el default "unidades", pidiendo matrícula para
   // una pregunta genérica de ayuda con la configuración.
   ["me ayudas con la confuguracion?", "", "info_guides"],
+  // Bug real (producción, 2026-07-23): "usuario"/"plataforma" sueltos disparaban
+  // detectIncidentType=ACCESS_PLATFORM y el mensaje se derivaba a ticket humano en vez de
+  // contestar sobre Perfiles — el bare-word matching no distinguía intención informativa
+  // de un problema real de acceso.
+  ["que tipos de usuarios hay", "", "info_guides"],
+  ["cuantos tipos de usuario hay en wara", "", "info_guides"],
+  ["no puedo entrar con mi usuario, dice contraseña incorrecta", "", "odoo_ticket"],
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
   ["Quiero programar un mantenimiento", "", "mantenimiento"],
   ["como funciona el modulo de mantenimiento", "", "info_guides"],

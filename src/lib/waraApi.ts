@@ -338,6 +338,19 @@ export function looksLikeOpcionesInfoRequest(text: string | undefined | null): b
   ) {
     return true;
   }
+  // Detección por FORMA de la pregunta ("qué es", "qué tipos de", "cómo son", "para qué
+  // sirve") en vez de listas cerradas de frases exactas — más robusto a variaciones de
+  // redacción que ir agregando frases literales una por una. Bug real, producción
+  // 2026-07-23: "qué tipos de usuarios hay" no matcheaba ninguna combinación literal y
+  // terminaba derivado a ticket humano en vez de contestar sobre Perfiles.
+  if (
+    /\b(que es|que son|que significa|para que sirve|para que sirven|como es|como son|como funciona|como funcionan|que tipos? de|cuantos? tipos? de|que clases? de)\b/.test(
+      t,
+    ) &&
+    /\b(usuarios?|perfil|perfiles|agenda|aenda|notificacion\w*|opciones|contactos?)\b/.test(t)
+  ) {
+    return true;
+  }
   // Fragmento tolerante a errores de tipeo comunes de "configuración" (ej. "confuguracion",
   // swap i/u) — bug real, producción 2026-07-22: "me ayudas con la confuguracion?" no
   // matcheaba el literal "configuracion\w*" y caía al executor de unidades pidiendo patente.
@@ -390,7 +403,9 @@ export function looksLikeUnidadesInfoRequest(text: string | undefined | null): b
     /\b(modulo unidades|modulo de unidades|mis atajos|chevron|ficha expandida|grupo de unidades|crear grupo|mover unidades|punto rojo|punto verde|punto azul|mostrar ocultar|lista o tarjetas|encabezado del modulo|configurar unidad|compartir posicion|orden de trabajo|flujo del operador|barra lateral|icono del auto|seguimiento y control|ataljos|historial en el modulo)\b/.test(
       t
     ) ||
-    (/\b(como|donde|que es|que significa|para que sirve)\b/.test(t) &&
+    (/\b(como|donde|que es|que son|que significa|para que sirve|para que sirven|que tipos? de|cuantos? tipos? de|que clases? de|como funciona|como funcionan)\b/.test(
+      t,
+    ) &&
       /\b(unidades|unidad|flota|mapa|grupo|ficha|historial|ataljos|panel)\b/.test(t) &&
       !/\b(reporta|reporte|consultar|patente|certificado|offline)\b/.test(t))
   );
