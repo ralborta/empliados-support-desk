@@ -49,12 +49,20 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
     return true;
   }
 
-  if (/\bcerrar\s+(mi|el|un)\s+(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(t)) {
+  if (/\b(cerrar|resolver)\s+(mi|el|un)\s+(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(t)) {
     return true;
   }
 
   if (
-    /\b(quiero|necesito)\s+.*\b(cerrar|finalizar|terminar)\b.*\b(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(
+    // Bug real, producción 2026-07-23: "Quiero resolver el actual caso 2107263" no
+    // matcheaba ninguna variante (todas exigían "cerrar" en la combinación con
+    // "quiero", o que el mensaje empezara directo con el verbo) — "resolver" queda
+    // afuera del combo "quiero/necesito ... verbo ... caso/ticket/..." a propósito en
+    // otras ramas para no confundir "resolver UN PROBLEMA técnico" con un pedido de
+    // cierre, pero acá SIGUE exigiéndose que además aparezca la palabra de
+    // caso/ticket/reclamo/etc. (nunca "problema"), así que agregarlo aquí no reintroduce
+    // ese riesgo.
+    /\b(quiero|necesito)\s+.*\b(cerrar|resolver|finalizar|terminar)\b.*\b(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(
       t,
     )
   ) {
