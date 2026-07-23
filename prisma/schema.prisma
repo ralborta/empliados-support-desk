@@ -65,6 +65,9 @@ enum TicketEventType {
 enum AgentNotificationType {
   ASSIGNED
   REASSIGNED
+  /// Nadie SUPPORT estaba activo cuando llegó el ticket: alerta de escalamiento a ADMIN
+  /// para que no quede "perdido" en la cola sin que nadie se entere (ver advisorDistribution.ts).
+  UNASSIGNED_ALERT
 }
 
 model Customer {

@@ -165,6 +165,34 @@ export async function sendTicketAssignedEmail(params: {
   if (ok) console.log(`[panelEmail] Asignación ${params.ticketCode} → ${params.to}`);
 }
 
+export async function sendUnassignedTicketAlertEmail(params: {
+  to: string;
+  adminName: string;
+  ticketCode: string;
+  ticketTitle: string;
+  companyName: string;
+  ticketId: string;
+}): Promise<void> {
+  const url = `${PANEL_BASE_URL}/tickets/${params.ticketId}`;
+  const html = `
+    <p>Hola ${escapeHtml(params.adminName)},</p>
+    <p>Llegó un caso nuevo y <strong>no hay ningún asesor conectado</strong> en el panel Atilio para asignarlo automáticamente:</p>
+    <ul>
+      <li><strong>${escapeHtml(params.ticketCode)}</strong> — ${escapeHtml(params.ticketTitle)}</li>
+      <li>Empresa: ${escapeHtml(params.companyName)}</li>
+    </ul>
+    <p><a href="${url}">Abrir caso en el panel</a></p>
+    <p style="color:#64748b;font-size:12px;">Te avisamos a vos como administrador porque este caso quedaría sin nadie atendiéndolo hasta que un asesor se conecte. Se te notifica una sola vez por caso.</p>
+  `;
+
+  const ok = await sendEmail(
+    params.to,
+    `${params.ticketCode} — caso sin asesor conectado`,
+    html,
+  );
+  if (ok) console.log(`[panelEmail] Alerta de caso sin asignar ${params.ticketCode} → ${params.to}`);
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")

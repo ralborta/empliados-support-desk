@@ -1,6 +1,6 @@
 import type { Prisma, TicketPriority, TicketStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { sendTicketAssignedEmail } from "@/lib/panelEmail";
+import { sendTicketAssignedEmail, sendUnassignedTicketAlertEmail } from "@/lib/panelEmail";
 import {
   findConversationAdvisorId,
   mergeDuplicateOpenTicketsForCustomer,
@@ -139,6 +139,94 @@ async function notifyAssignment(
   })();
 }
 
+/**
+ * Cuando llega un ticket y NO hay ningún asesor SUPPORT conectado, nadie recibe la
+ * asignación (ni notificación, ni email) — el caso queda "invisible" hasta que alguien
+ * abra el panel. Esto escala a los ADMIN por email + campana, una sola vez por ticket
+ * (dedupe con AgentNotification), para que no se pierda un caso real solo porque nadie
+ * tenía la pestaña abierta en ese momento. Bug real reportado en producción 2026-07-23.
+ */
+async function notifyAdminsOfUnassignedTicket(ticketId: string): Promise<void> {
+  const admins = await prisma.agentUser.findMany({
+    where: { role: "ADMIN" },
+    select: { id: true, name: true, email: true },
+  });
+
+  const existing = admins.length
+    ? await prisma.agentNotification.findMany({
+        where: { ticketId, type: "UNASSIGNED_ALERT", agentUserId: { in: admins.map((a) => a.id) } },
+        select: { agentUserId: true },
+      })
+    : [];
+  const alreadyNotified = new Set(existing.map((n) => n.agentUserId));
+  const pending = admins.filter((a) => !alreadyNotified.has(a.id));
+
+  // El login "Administración" (PANEL_USER_ADMIN_EMAIL/PASSWORD) es una cuenta por
+  // variable de entorno, SIN fila en AgentUser (id "panel-admin") — no puede recibir
+  // AgentNotification (requiere FK a AgentUser) ni aparecer en la campana, pero sí
+  // conviene mandarle el email de alerta. Se deduplica reutilizando TicketEvent (no
+  // requiere una tabla nueva). Bug real, producción 2026-07-23: quien loguea con esa
+  // cuenta nunca vio "no está asignando y no hay alertas" resuelto porque esta cuenta
+  // queda fuera de cualquier alerta basada en AgentUser.
+  const envAdminEmail = process.env.PANEL_USER_ADMIN_EMAIL?.trim();
+  let envAdminPending = false;
+  if (envAdminEmail && !admins.some((a) => a.email?.toLowerCase() === envAdminEmail.toLowerCase())) {
+    const envAlreadyNotified = await prisma.ticketEvent.findFirst({
+      where: { ticketId, type: "ESCALATED", payload: { path: ["channel"], equals: "env_admin_email" } },
+      select: { id: true },
+    });
+    envAdminPending = !envAlreadyNotified;
+  }
+
+  if (pending.length === 0 && !envAdminPending) return;
+
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: {
+      code: true,
+      title: true,
+      customer: { select: { companyName: true, name: true } },
+    },
+  });
+  if (!ticket) return;
+  const companyName = ticket.customer.companyName || ticket.customer.name || "Cliente";
+
+  for (const admin of pending) {
+    await prisma.agentNotification.create({
+      data: { agentUserId: admin.id, ticketId, type: "UNASSIGNED_ALERT" },
+    });
+
+    if (admin.email) {
+      void sendUnassignedTicketAlertEmail({
+        to: admin.email,
+        adminName: admin.name,
+        ticketCode: ticket.code,
+        ticketTitle: ticket.title,
+        companyName,
+        ticketId,
+      }).catch((err) => console.error("[advisorDistribution] Email alerta sin asignar:", err));
+    }
+  }
+
+  if (envAdminPending && envAdminEmail) {
+    await prisma.ticketEvent.create({
+      data: { ticketId, type: "ESCALATED", payload: { channel: "env_admin_email", to: envAdminEmail } },
+    });
+    void sendUnassignedTicketAlertEmail({
+      to: envAdminEmail,
+      adminName: "Administración",
+      ticketCode: ticket.code,
+      ticketTitle: ticket.title,
+      companyName,
+      ticketId,
+    }).catch((err) => console.error("[advisorDistribution] Email alerta sin asignar (env admin):", err));
+  }
+
+  console.log(
+    `[advisorDistribution] Ticket ${ticketId} sin asesor conectado: alerta enviada a ${pending.length + (envAdminPending ? 1 : 0)} admin(s)`,
+  );
+}
+
 async function assignTicketInternal(
   ticketId: string,
   agentUserId: string,
@@ -258,6 +346,15 @@ export async function rebalanceAmongActiveAdvisors(options?: {
 
   const activeIds = await getActiveSupportAdvisorIds();
   if (activeIds.length === 0) {
+    // Ningún asesor conectado: los casos liberados (p. ej. por desconexión) quedan en
+    // cola sin nadie viéndolos. Alertamos a los ADMIN para no perder casos ya en curso.
+    const orphaned = await prisma.ticket.findMany({
+      where: { status: { in: ADVISOR_ACTIVE_TICKET_STATUSES }, assignedToUserId: null },
+      select: { id: true },
+    });
+    for (const t of orphaned) {
+      await notifyAdminsOfUnassignedTicket(t.id);
+    }
     return { assigned: 0, activeAdvisors: 0 };
   }
 
@@ -378,7 +475,10 @@ export async function autoAssignNewTicket(ticketId: string): Promise<boolean> {
   }
 
   const activeIds = await getActiveSupportAdvisorIds();
-  if (activeIds.length === 0) return false;
+  if (activeIds.length === 0) {
+    await notifyAdminsOfUnassignedTicket(ticketId);
+    return false;
+  }
 
   let minId = activeIds[0];
   let minLoad = await countActiveTickets(minId);

@@ -50,12 +50,17 @@ function playAlertSound() {
   }
 }
 
+function notificationTitle(n: NotificationItem): string {
+  if (n.type === "UNASSIGNED_ALERT") return `Caso sin asesor conectado: ${n.ticket.code}`;
+  return `Nuevo caso asignado: ${n.ticket.code}`;
+}
+
 function notifyDesktop(n: NotificationItem) {
   if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   const company = n.ticket.customer.companyName || n.ticket.customer.name || "Cliente";
   try {
-    const notif = new Notification(`Nuevo caso asignado: ${n.ticket.code}`, {
+    const notif = new Notification(notificationTitle(n), {
       body: `${company} — ${n.ticket.title}`,
       tag: n.id,
       icon: "/favicon.ico",
@@ -199,6 +204,11 @@ export function NotificationBell() {
                       {priorityLabels[n.ticket.priority as keyof typeof priorityLabels] ?? n.ticket.priority}
                     </span>
                   </div>
+                  {n.type === "UNASSIGNED_ALERT" ? (
+                    <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-amber-600">
+                      Sin asesor conectado
+                    </p>
+                  ) : null}
                   <p className="mt-1 truncate text-sm font-medium text-slate-800">{n.ticket.title}</p>
                   <p className="mt-0.5 truncate text-xs text-slate-500">
                     {n.ticket.customer.companyName || n.ticket.customer.name || "Cliente"}
