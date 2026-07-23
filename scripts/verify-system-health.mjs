@@ -76,6 +76,10 @@ const routing = [
   ["listame mis unidades", "", "unidades"],
   ["quiero cambiar el odometro de LWK 7902", "", "odometro"],
   ["me ayudas con la agenda", odoPending, "info_guides"],
+  // Bug real (producción, 2026-07-22): "configuraciones" (plural) no matcheaba el
+  // regex de \bconfiguracion\b y el mensaje caía en el default "unidades", pidiendo
+  // una patente para una pregunta genérica de ayuda con configuraciones.
+  ["ok otra cosa me ayudas con las configuraciones?", "", "info_guides"],
   ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
   ["Quiero programar un mantenimiento", "", "mantenimiento"],
   ["como funciona el modulo de mantenimiento", "", "info_guides"],

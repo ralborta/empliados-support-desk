@@ -339,16 +339,16 @@ export function looksLikeOpcionesInfoRequest(text: string | undefined | null): b
     return true;
   }
   if (
-    /\b(configuracion|configurar)\b/.test(t) &&
+    /\b(configuracion\w*|configurar)\b/.test(t) &&
     /\b(aenda|agenda|contacto|contactos|opciones|perfil|perfiles|usuario|usuarios|notific)\b/.test(t)
   ) {
     return true;
   }
-  return /\b(agenda|aenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base|configurar una alarma|configurar alarma)\b/.test(
+  return /\b(agenda|aenda|contacto|contactos|perfil|perfiles|permiso|permisos|notificacion|notificaciones|alerta|alertas|alarma|alarmas|destino|destinos|evento|eventos|opciones|configuracion\w*|telegram|chofer|supervisor|administrador|correo|anadir contacto|añadir contacto|agregar contacto|asignar perfil|asignar usuario|geocerca|punto|base|configurar una alarma|configurar alarma)\b/.test(
     t
   ) ||
     (/\b(me ayudas|ayudame|ayudarme|podes ayudar|pod[eé]s ayudar)\b/.test(t) &&
-      /\b(agenda|aenda|opciones|contacto|notific|perfil|alarma|configuracion|configurar)\b/.test(t)) ||
+      /\b(agenda|aenda|opciones|contacto|notific|perfil|alarma|configuracion\w*|configurar)\b/.test(t)) ||
     (/\bcomo funciona\b/.test(t) && /\b(agenda|aenda|opciones|contacto|notific|perfil)\b/.test(t));
 }
 
