@@ -60,9 +60,14 @@ export function buildFleetUnitNotFoundMessage(opts: {
     );
   }
 
+  // Caso sin prefijo/patente detectados: puede ser que el cliente no haya dado
+  // ningún dato concreto todavía (p. ej. "tengo problemas con una unidad") — no
+  // hay que decir "no encontré ESA unidad" como si se hubiese rechazado una
+  // patente puntual, porque puede que nunca se haya mencionado ninguna. Se pide
+  // el dato con una frase neutra que sirve para ambos casos.
   return (
-    `No encontré esa unidad en la flota de ${company}. ` +
-    `Pasame la matrícula completa o el nombre exacto. Si querés ver opciones, escribí «listado de mis unidades».`
+    `¿Cuál unidad? Pasame la matrícula completa o el nombre/marca exacto para buscarla en la flota de ${company}. ` +
+    `Si querés ver todas, escribí «listado de mis unidades».`
   );
 }
 
@@ -218,6 +223,31 @@ const STOPWORDS = new Set([
   "generar",
   "solicitar",
   "pedir",
+  "con",
+  "una",
+  "unos",
+  "unas",
+  "uno",
+  "algo",
+  "problema",
+  "problemas",
+  "anda",
+  "andar",
+  "andando",
+  "funciona",
+  "funcionando",
+  "rota",
+  "roto",
+  "fallo",
+  "falla",
+  "fallando",
+  "asi",
+  "así",
+  "tiene",
+  "tienen",
+  "hay",
+  "estan",
+  "están",
 ]);
 
 function normalizeToken(value: string): string {

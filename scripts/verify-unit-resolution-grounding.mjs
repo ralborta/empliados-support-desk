@@ -19,6 +19,7 @@ import {
   filterAiCandidatesByFleetTerms,
   buildCustomerOnlyText,
   resolveUnitQuery,
+  buildFleetUnitNotFoundMessage,
 } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
@@ -149,6 +150,35 @@ assert(
     nissanNoCertContext.plate === "AH562SP" &&
     nissanNoCertContext.source === "rules",
   "Nissan sin certificateContext también resuelve directo por catálogo real (no solo en certificados)",
+);
+
+console.log("— Queja genérica sin patente/marca no dice \"no encontré esa unidad\" —");
+
+// Bug real (producción, 2026-07-22): "tengo problemas con una unidad" no menciona
+// ninguna patente/prefijo/marca — no se buscó nada todavía. Antes, esto terminaba
+// filtrando la flota por palabras sueltas de la frase ("problemas", "con", "una") y
+// respondía "No encontré esa unidad en la flota", como si hubiese rechazado una
+// patente concreta que el cliente nunca dio. Debe pedir el dato, no decir "no está".
+const fleetAny = [
+  { movil_id: 1, patente: "OST 223", unidad: "900-041" },
+  { movil_id: 2, patente: "AD 427 MC", unidad: "CAMION 1" },
+];
+const genericComplaint = await resolveUnitQuery({
+  rawText: "tenmgo problemas con una unidad",
+  threadText: "",
+  units: fleetAny,
+});
+assert(
+  genericComplaint.intent === "need_clarification",
+  "queja genérica → pide aclaración (no resuelve una patente al azar)",
+);
+assert(
+  (genericComplaint.clarificationQuestion ?? "") === buildFleetUnitNotFoundMessage({}),
+  "queja genérica → usa el mensaje neutro de \"pedir identificador\"",
+);
+assert(
+  !(genericComplaint.clarificationQuestion ?? "").toLowerCase().includes("no encontré"),
+  "queja genérica → el mensaje NO dice \"no encontré esa unidad\" (nunca se buscó nada concreto)",
 );
 
 if (failed > 0) {
