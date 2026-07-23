@@ -18,6 +18,7 @@ import {
   reconcileAiClarification,
   filterAiCandidatesByFleetTerms,
   buildCustomerOnlyText,
+  resolveUnitQuery,
 } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
@@ -130,6 +131,24 @@ assert(
     !customerOnly.includes("AD 427 MC") &&
     !customerOnly.includes("Ya existe un caso abierto"),
   "historial solo-cliente descarta las respuestas previas del bot (evita el anclaje)",
+);
+
+console.log("— Marca/nombre: catálogo real primero, en CUALQUIER trámite —");
+
+// Antes, la búsqueda por marca/nombre priorizaba reglas contra el catálogo real
+// solo en certificados (certificateContext). Ahora aplica siempre: si hay una sola
+// unidad real que coincide, resuelve directo sin pasar por la IA.
+const nissanNoCertContext = await resolveUnitQuery({
+  rawText: "Nissan",
+  threadText: "",
+  units: fleetWithNissan,
+  // sin certificateContext ni preferAi: simula odómetro/mantenimiento/unidades general
+});
+assert(
+  nissanNoCertContext.intent === "consult_status" &&
+    nissanNoCertContext.plate === "AH562SP" &&
+    nissanNoCertContext.source === "rules",
+  "Nissan sin certificateContext también resuelve directo por catálogo real (no solo en certificados)",
 );
 
 if (failed > 0) {

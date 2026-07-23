@@ -1058,8 +1058,11 @@ export async function resolveUnitQuery(params: {
     }
   }
 
-  // Marca/nombre en trámite (certificado, etc.): reglas determinísticas antes que IA.
-  if (certificateCtx && looksLikeVehicleBrandOrUnitSearch(params.rawText)) {
+  // Marca/nombre (Nissan, Saveiro, etc.) en CUALQUIER trámite: buscar primero por
+  // texto contra el catálogo real de la flota (API) antes de considerar la IA.
+  // Si hay una coincidencia única o varias reales, resolvemos directo con eso —
+  // la IA nunca debe ser la primera fuente de verdad para una patente.
+  if (looksLikeVehicleBrandOrUnitSearch(params.rawText)) {
     const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units);
     if (brandRules) return brandRules;
   }
