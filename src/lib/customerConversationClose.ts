@@ -69,6 +69,30 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
     return true;
   }
 
+  if (
+    /\b(pasar|poner|dejar|marcar)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta)\s+a\s+(resuelto|resuelta|cerrado|cerrada|finalizado|finalizada)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  if (/\b(pasar|poner|marcar)\s+a\s+(resuelto|resuelta|cerrado|cerrada|finalizado|finalizada)\b/.test(t)) {
+    return true;
+  }
+
+  if (
+    /^(si|sí|dale|ok|bueno|si por favor|sí por favor)[,.\s]+(resolver|cerrar|finalizar)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  if (/\b(resolver|cerrar|finalizar)\s+(la\s+)?(conversacion|charla|chat)\b/.test(t)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -123,7 +147,8 @@ export async function handleCustomerConversationCloseRequest(params: {
     });
 
     if (lastClosed) {
-      const replyMessage = `Tu caso *${lastClosed.code}* ya estaba cerrado. Si necesitás algo más, escribime y abrimos una nueva consulta.`;
+      const replyMessage =
+        "Tu consulta ya estaba cerrada. Si necesitás algo más, escribime y abrimos una nueva consulta.";
       await sendCloseReply({
         ticketId: lastClosed.id,
         customerPhone: params.rawPhone,
@@ -191,7 +216,8 @@ export async function handleCustomerConversationCloseRequest(params: {
     },
   });
 
-  const replyMessage = `Listo, cerré el caso *${openTicket.code}*. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.`;
+  const replyMessage =
+    "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.";
 
   await sendCloseReply({
     ticketId: openTicket.id,

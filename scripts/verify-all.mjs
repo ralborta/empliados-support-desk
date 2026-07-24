@@ -29,6 +29,7 @@ const SUITES = [
   "verify-unit-rejection-loop.mjs",
   "verify-company-continuation-mention.mjs",
   "verify-close-case-resolver-verb.mjs",
+  "verify-ticket-status-after-outbound.mjs",
   "verify-new-case-request-not-fleet-search.mjs",
   "verify-odometer-vague-unit-start.mjs",
   "verify-odometer-pending-confirm-context.mjs",

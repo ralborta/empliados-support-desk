@@ -8,6 +8,8 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { summarizeConversation } from "@/lib/openai";
 import { uploadFileToBlob } from "@/lib/blob";
 import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
+import type { TicketStatus } from "@/lib/types";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
@@ -103,12 +105,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   // Si es un mensaje OUTBOUND, enviarlo a BuilderBot primero
+  let ticketForStatus: { status: TicketStatus } | null = null;
   if (direction === "OUTBOUND") {
     // Obtener el teléfono del cliente del ticket
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: { customer: true },
     });
+    ticketForStatus = ticket;
 
     if (!ticket) {
       return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
@@ -173,7 +177,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     where: { id },
     data: {
       lastMessageAt: new Date(),
-      status: direction === "OUTBOUND" ? "WAITING_CUSTOMER" : undefined,
+      ...(direction === "OUTBOUND" && ticketForStatus
+        ? { status: statusAfterOutboundMessage(ticketForStatus.status) }
+        : {}),
     },
   });
 

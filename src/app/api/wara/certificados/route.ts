@@ -24,6 +24,7 @@ import {
   waraCertificateFailureCategory,
 } from "@/lib/waraApi";
 import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
+import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
@@ -249,7 +250,7 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
   });
   await prisma.ticket.update({
     where: { id: targetTicket.id },
-    data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
+    data: { lastMessageAt: new Date(), status: statusAfterOutboundMessage(targetTicket.status) },
   });
 }
 

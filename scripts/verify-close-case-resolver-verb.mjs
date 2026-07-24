@@ -43,6 +43,12 @@ const closeRequests = [
   "Quiero resolver el caso",
   "necesito resolver mi reclamo",
   "necesito resolver el ticket",
+  "Gracias, pasar conversación a resuelta",
+  "pasar conversacion a resuelta",
+  "Sí, resolver conversación",
+  "si, resolver conversacion",
+  "resolver la conversacion",
+  "marcar a resuelta",
 ];
 for (const text of closeRequests) {
   assert(

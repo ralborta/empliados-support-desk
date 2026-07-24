@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import {
   isCustomerContextAuthConfigured,
@@ -301,7 +302,7 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
   });
   await prisma.ticket.update({
     where: { id: targetTicket.id },
-    data: { lastMessageAt: new Date(), status: "WAITING_CUSTOMER" },
+    data: { lastMessageAt: new Date(), status: statusAfterOutboundMessage(targetTicket.status) },
   });
 }
 

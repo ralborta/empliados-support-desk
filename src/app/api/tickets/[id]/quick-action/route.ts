@@ -17,21 +17,18 @@ const bodySchema = z.object({
   ]),
 });
 
-function buildCustomerMessage(
-  action: z.infer<typeof bodySchema>["action"],
-  code: string
-): string | null {
+function buildCustomerMessage(action: z.infer<typeof bodySchema>["action"]): string | null {
   switch (action) {
     case "request_data":
-      return `Hola, para avanzar con tu ticket *${code}* necesitamos más datos o detalle del problema. ¿Podés enviarnos lo que falte o aclarar el caso? Gracias.`;
+      return `Hola, para avanzar con tu consulta necesitamos más datos o detalle del problema. ¿Podés enviarnos lo que falte o aclarar el caso? Gracias.`;
     case "in_analysis":
-      return `Tu consulta *${code}* está en análisis. Te mantendremos informados.`;
+      return `Tu consulta está en análisis. Te mantendremos informados.`;
     case "derive":
-      return `Derivamos tu caso *${code}* al área correspondiente. Te contactarán a la brevedad.`;
+      return `Derivamos tu caso al área correspondiente. Te contactarán a la brevedad.`;
     case "resolve":
-      return `Hemos registrado tu caso *${code}* como resuelto. Si necesitás algo más, escribinos.`;
+      return `Registramos tu consulta como resuelta. Si necesitás algo más, escribinos.`;
     case "close":
-      return `Cerramos el ticket *${code}*. Gracias por contactarnos.`;
+      return `Cerramos tu consulta. Gracias por contactarnos.`;
     case "internal_note":
       return null;
     default:
@@ -61,7 +58,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
   }
 
-  const outboundText = buildCustomerMessage(action, ticket.code);
+  const outboundText = buildCustomerMessage(action);
 
   if (action === "internal_note") {
     await prisma.ticketMessage.create({

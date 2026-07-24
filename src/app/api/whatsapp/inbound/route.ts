@@ -15,6 +15,8 @@ import {
   waraIncidentLabels,
 } from "@/lib/wara";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
+import type { TicketStatus } from "@/lib/types";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { looksLikeGreeting, resolveCustomerByWaraPhone } from "@/lib/waraApi";
@@ -606,9 +608,11 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
         candidate: string;
         openTicketId?: string;
         openTicketCode?: string;
+        openTicketStatus?: TicketStatus;
         openTicketLastMessageAt?: Date;
         anyTicketId?: string;
         anyTicketCode?: string;
+        anyTicketStatus?: TicketStatus;
         anyTicketLastMessageAt?: Date;
         score: number;
       }
@@ -620,12 +624,12 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     const openTicket = await prisma.ticket.findFirst({
       where: { customerId: found.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
       orderBy: { lastMessageAt: "desc" },
-      select: { id: true, code: true, lastMessageAt: true },
+      select: { id: true, code: true, status: true, lastMessageAt: true },
     });
     const anyTicket = await prisma.ticket.findFirst({
       where: { customerId: found.id },
       orderBy: { lastMessageAt: "desc" },
-      select: { id: true, code: true, lastMessageAt: true },
+      select: { id: true, code: true, status: true, lastMessageAt: true },
     });
     const score = openTicket ? 3 : anyTicket ? 2 : 1;
     const current = {
@@ -633,9 +637,11 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
       candidate,
       openTicketId: openTicket?.id,
       openTicketCode: openTicket?.code,
+      openTicketStatus: openTicket?.status,
       openTicketLastMessageAt: openTicket?.lastMessageAt,
       anyTicketId: anyTicket?.id,
       anyTicketCode: anyTicket?.code,
+      anyTicketStatus: anyTicket?.status,
       anyTicketLastMessageAt: anyTicket?.lastMessageAt,
       score,
     };
@@ -673,11 +679,13 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
       ? {
           id: chosen.openTicketId,
           code: chosen.openTicketCode || "",
+          status: chosen.openTicketStatus ?? "OPEN",
         }
       : chosen.anyTicketId
         ? {
             id: chosen.anyTicketId,
             code: chosen.anyTicketCode || "",
+            status: chosen.anyTicketStatus ?? "OPEN",
           }
         : null;
 
@@ -801,7 +809,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     where: { id: targetTicket.id },
     data: {
       lastMessageAt: new Date(),
-      status: "WAITING_CUSTOMER", // El agente envió un mensaje, ahora esperamos respuesta del cliente
+      status: statusAfterOutboundMessage(targetTicket.status),
     },
   });
 

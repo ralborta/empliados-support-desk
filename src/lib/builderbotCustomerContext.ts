@@ -599,6 +599,24 @@ export async function customerRegisteredContextResponse(
         ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
         : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
     }
+  } else if (
+    selectionText &&
+    lastTicket &&
+    (lastTicket.status === "RESOLVED" || lastTicket.status === "CLOSED") &&
+    (looksLikeConversationAcknowledgement(selectionText) ||
+      looksLikeConversationClosing(selectionText))
+  ) {
+    // Tras resolver/cerrar el ticket, un "gracias" o despedida no debe reabrir trámites
+    // ni preguntar "¿necesitás algo más?" (bug real, producción 2026-07-24).
+    nextFlow = "reply";
+    const firstName = customer?.name?.trim().split(/\s+/)[0];
+    responseMessage = firstName
+      ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
+      : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "post_resolved_farewell",
+    });
   } else if (selectionText && looksLikeConversationAcknowledgement(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
