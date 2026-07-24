@@ -24,6 +24,16 @@ export const waraIncidentLabels: Record<WaraIncidentType, string> = {
   OTHER: "Otro",
 };
 
+/** Trámites resueltos por Atilio sin intervención humana — no auto-asignar al asesor online. */
+export const BOT_ONLY_INCIDENT_TYPES: ReadonlySet<WaraIncidentType> = new Set([
+  "CERTIFICATE_ISSUE",
+  "ODOMETER_CHANGE",
+]);
+
+export function shouldAutoAssignInboundTicket(incidentType: WaraIncidentType): boolean {
+  return !BOT_ONLY_INCIDENT_TYPES.has(incidentType);
+}
+
 export const resolutionModeLabels: Record<ResolutionMode, string> = {
   CHAT_RESOLVED: "Resuelto en chat",
   PENDING_VALIDATION: "Pendiente de validación",

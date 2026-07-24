@@ -10,6 +10,7 @@ import {
   detectLoosePlate,
   detectMissingData,
   looksLikePlateOnlyMessage,
+  shouldAutoAssignInboundTicket,
   suggestPriority,
   toLegacyCategory,
   waraIncidentLabels,
@@ -510,7 +511,9 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       select: { assignedToUserId: true },
     });
     if (isNewTicket || !fresh?.assignedToUserId) {
-      await autoAssignNewTicket(ticket.id);
+      if (shouldAutoAssignInboundTicket(incidentType)) {
+        await autoAssignNewTicket(ticket.id);
+      }
     }
   } catch (e) {
     console.error("[whatsapp/inbound] autoAssign:", e);

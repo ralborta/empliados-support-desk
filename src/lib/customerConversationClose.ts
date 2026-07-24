@@ -96,6 +96,45 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
   return false;
 }
 
+const CUSTOMER_CLOSE_SUCCESS_MESSAGE =
+  "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.";
+
+const RECENT_CUSTOMER_CLOSE_MS = 2 * 60 * 1000;
+
+async function wasRecentlyClosedByCustomer(
+  db: PrismaClient,
+  ticketId: string,
+): Promise<boolean> {
+  const event = await db.ticketEvent.findFirst({
+    where: {
+      ticketId,
+      type: "STATUS_CHANGED",
+      createdAt: { gte: new Date(Date.now() - RECENT_CUSTOMER_CLOSE_MS) },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!event?.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) {
+    return false;
+  }
+  return (event.payload as Record<string, unknown>).source === "customer_whatsapp_close_request";
+}
+
+async function hasRecentCloseConfirmation(db: PrismaClient, ticketId: string): Promise<boolean> {
+  const recent = await db.ticketMessage.findFirst({
+    where: {
+      ticketId,
+      direction: "OUTBOUND",
+      from: "BOT",
+      createdAt: { gte: new Date(Date.now() - RECENT_CUSTOMER_CLOSE_MS) },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!recent?.rawPayload || typeof recent.rawPayload !== "object" || Array.isArray(recent.rawPayload)) {
+    return false;
+  }
+  return (recent.rawPayload as Record<string, unknown>).autoReplyKind === "customer_requested_close";
+}
+
 export type CustomerConversationCloseResult = {
   handled: boolean;
   closed: boolean;
@@ -147,17 +186,22 @@ export async function handleCustomerConversationCloseRequest(params: {
     });
 
     if (lastClosed) {
-      const replyMessage =
-        "Tu consulta ya estaba cerrada. Si necesitás algo más, escribime y abrimos una nueva consulta.";
-      await sendCloseReply({
-        ticketId: lastClosed.id,
-        customerPhone: params.rawPhone,
-        replyMessage,
-        source: params.source ?? "customer_close",
-      });
+      const justClosedByCustomer = await wasRecentlyClosedByCustomer(db, lastClosed.id);
+      const replyMessage = justClosedByCustomer
+        ? CUSTOMER_CLOSE_SUCCESS_MESSAGE
+        : "Tu consulta ya estaba cerrada. Si necesitás algo más, escribime y abrimos una nueva consulta.";
+      const alreadySent = justClosedByCustomer && (await hasRecentCloseConfirmation(db, lastClosed.id));
+      if (!alreadySent) {
+        await sendCloseReply({
+          ticketId: lastClosed.id,
+          customerPhone: params.rawPhone,
+          replyMessage,
+          source: params.source ?? "customer_close",
+        });
+      }
       return {
         handled: true,
-        closed: false,
+        closed: justClosedByCustomer,
         ticketCode: lastClosed.code,
         ticketId: lastClosed.id,
         replyMessage,
@@ -216,8 +260,7 @@ export async function handleCustomerConversationCloseRequest(params: {
     },
   });
 
-  const replyMessage =
-    "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.";
+  const replyMessage = CUSTOMER_CLOSE_SUCCESS_MESSAGE;
 
   await sendCloseReply({
     ticketId: openTicket.id,
