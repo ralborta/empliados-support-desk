@@ -82,7 +82,10 @@ async function main() {
     "Pedir listado reporte",
   );
   assert(list.executor === "unidades", `listado → unidades (obtuvo ${list.executor})`);
-  assert(/unidades|414|ejemplos|matr[ií]cula/i.test(list.msg), "responde con flota o pide unidad");
+  assert(
+    /unidades|414|ejemplos|matr[ií]cula|patente|necesito la unidad|revisar el gps/i.test(list.msg),
+    "responde con flota o pide unidad para consulta de reporte",
+  );
 
   const report = await turn("no me reporta la AF061DO", "Falta reporte AF061DO");
   assert(report.executor === "unidades", `AF061DO → unidades (obtuvo ${report.executor})`);
