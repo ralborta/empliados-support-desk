@@ -13,7 +13,8 @@
  *
  * Uso: npx tsx scripts/verify-odometer-plate-continuity.mjs
  */
-import { detectPlate, extractLastPlateFromThread } from "../src/lib/wara.ts";
+import { detectPlate, extractLastPlateFromThread, resolveOdometerContextPlate } from "../src/lib/wara.ts";
+import { looksLikeVagueUnitReference } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -81,6 +82,33 @@ assert(
   extractLastPlateFromThread(threadWithOwnRejectionEcho) === "AG562SP",
   "extractLastPlateFromThread ignora la patente citada en el propio mensaje de rechazo del bot y resuelve AG562SP",
 );
+
+console.log(
+  "— Bug real 2026-07-24: 'unidad mencionada' no debe tomar Patente: de certificado viejo —",
+);
+const threadCertThenReport = [
+  "Voy a generar el certificado de cobertura:\nPatente: AF 337 EO\nEmpresa: El Cacique S.A.",
+  "Perfecto, generé el certificado de cobertura para El Cacique S.A., patente AF 337 EO.",
+  "La unidad AD 507 MB (nombre M900-160) presenta falta de reporte, ya que el GPS no envía datos desde hace 70 días.",
+].join("\n");
+const horometerMsg = "quiero hacer un cambio de horometro de la unidad mencionada";
+assert(looksLikeVagueUnitReference(horometerMsg), "detecta referencia vaga 'unidad mencionada'");
+const wrongDefault = resolveOdometerContextPlate({
+  threadText: threadCertThenReport,
+  lastThreadPlate: extractLastPlateFromThread(threadCertThenReport),
+  activeUnitPlate: "AF337EO",
+  explicitVagueUnitReference: false,
+  hasPendingOdometerConfirm: false,
+});
+assert(wrongDefault === "AF337EO", "sin referencia vaga, resumen Patente: sigue siendo prioridad (certificado)");
+const fixed = resolveOdometerContextPlate({
+  threadText: threadCertThenReport,
+  lastThreadPlate: extractLastPlateFromThread(threadCertThenReport),
+  activeUnitPlate: "AF337EO",
+  explicitVagueUnitReference: true,
+  hasPendingOdometerConfirm: false,
+});
+assert(fixed === "AD507MB", `referencia vaga → AD507MB (obtuvo ${fixed})`);
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

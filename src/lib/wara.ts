@@ -606,6 +606,47 @@ export function extractLastPlateFromThread(text: string): string | null {
   return null;
 }
 
+/**
+ * Patente del resumen confirmado de odómetro/horómetro ("Patente: AD 427 MC").
+ * Toma la última ocurrencia del hilo (resumen más reciente).
+ */
+export function extractPlateFromOdometerSummary(text: string): string | undefined {
+  const matches = [
+    ...(text || "").matchAll(
+      /patente[^\n:]*[:\-]\s*([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})/gi,
+    ),
+  ];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(matches[i][1]);
+    if (plate && !isExamplePlate(plate)) return plate;
+  }
+  return undefined;
+}
+
+/**
+ * Resuelve patente de contexto para odómetro/horómetro sin pisar referencias vagas
+ * ("la unidad mencionada") con resúmenes viejos de certificado u otro trámite.
+ */
+export function resolveOdometerContextPlate(params: {
+  threadText: string;
+  lastThreadPlate: string | null;
+  activeUnitPlate?: string | null;
+  explicitVagueUnitReference: boolean;
+  hasPendingOdometerConfirm: boolean;
+}): string {
+  const summary = extractPlateFromOdometerSummary(params.threadText);
+  const last = params.lastThreadPlate ?? undefined;
+  const active = params.activeUnitPlate?.trim() || undefined;
+
+  if (params.hasPendingOdometerConfirm) {
+    return summary ?? last ?? active ?? "";
+  }
+  if (params.explicitVagueUnitReference) {
+    return last ?? active ?? summary ?? "";
+  }
+  return summary ?? last ?? active ?? "";
+}
+
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */
 export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
   if (certificateFlowState(threadText) === "awaiting_unit") return false;

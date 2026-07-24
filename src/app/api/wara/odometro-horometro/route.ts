@@ -13,6 +13,7 @@ import {
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
   formatPlateWithSpaces,
+  resolveOdometerContextPlate,
   hasPendingOdometerConfirmation,
   isExamplePlate,
   isOdometerFlowSuperseded,
@@ -236,23 +237,6 @@ async function recentThreadText(rawPhone: string): Promise<string> {
   }
 }
 
-/**
- * Extrae la patente del resumen confirmado ("Voy a registrar:\n• Patente: AD 427 MC").
- * Es la fuente más confiable: es el dato que el bot armó y el cliente confirmó.
- * Ignora patentes de ejemplo. Toma la última ocurrencia (el resumen más reciente).
- */
-function plateFromSummary(text: string): string | undefined {
-  const matches = [
-    ...(text || "").matchAll(
-      /patente[^\n:]*[:\-]\s*([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})/gi
-    ),
-  ];
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const plate = normalizePlate(matches[i][1]);
-    if (plate && !isExamplePlate(plate)) return plate;
-  }
-  return undefined;
-}
 
 function formatSuccessMessage(
   result: Awaited<ReturnType<typeof registrarCambioOdometroHorometro>>,
@@ -463,9 +447,15 @@ export async function POST(req: NextRequest) {
     parsed.data.patente ??
       parsed.data.plate ??
       fromText.patente ??
-      (skipThreadPlate ? "" : plateFromSummary(threadText)) ??
-      (skipThreadPlate ? "" : lastThreadPlate) ??
-      (skipThreadPlate ? "" : activeUnitRecord?.plate) ??
+      (skipThreadPlate
+        ? ""
+        : resolveOdometerContextPlate({
+            threadText,
+            lastThreadPlate,
+            activeUnitPlate: activeUnitRecord?.plate,
+            explicitVagueUnitReference,
+            hasPendingOdometerConfirm: hasPendingConfirmInThread,
+          })) ??
       ""
   );
 
