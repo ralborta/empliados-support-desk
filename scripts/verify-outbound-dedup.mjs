@@ -19,6 +19,10 @@
  * Uso: npx tsx scripts/verify-outbound-dedup.mjs
  */
 import { buildWebhookMessageId, hasStableWebhookMessageId } from "../src/lib/webhookMessageId.ts";
+import {
+  findPlatformPresavedOutboundDuplicate,
+  mergeWebhookIntoPlatformOutbound,
+} from "../src/lib/outboundMessageDedup.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -73,6 +77,16 @@ assert(idRetry === id1, "el mismo wamid genera el mismo id (reintentos siguen si
 console.log("\n— Payload sin ningún id de proveedor cae al respaldo por hash (y se marca como no-estable) —");
 const noIdPayload = { answer: "Hola", from: phone, body: "Hola" };
 assert(!hasStableWebhookMessageId(noIdPayload), "sin ids reconocidos, hasStableWebhookMessageId es false");
+
+console.log("\n— Webhook con wamid debe fusionar pre-guardado del backend (no duplicar) —");
+assert(
+  typeof findPlatformPresavedOutboundDuplicate === "function",
+  "findPlatformPresavedOutboundDuplicate exportada",
+);
+assert(
+  typeof mergeWebhookIntoPlatformOutbound === "function",
+  "mergeWebhookIntoPlatformOutbound exportada",
+);
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

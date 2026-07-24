@@ -24,6 +24,11 @@ import {
 } from "@/lib/customerConversationClose";
 import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
 import { buildWebhookMessageId, hasStableWebhookMessageId } from "@/lib/webhookMessageId";
+import {
+  findPlatformPresavedOutboundDuplicate,
+  mergeWebhookIntoPlatformOutbound,
+  normalizeOutboundDedupText,
+} from "@/lib/outboundMessageDedup";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import {
   isWaraInboundAuditOnly,
@@ -711,6 +716,32 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
+  const normalizedOutboundText = normalizeOutboundDedupText(messageText);
+
+  // Pre-guardado del backend (turn/unidades/certificados) + webhook con wamid estable:
+  // fusionar en la fila existente en vez de duplicar en el panel.
+  const platformPresave = await findPlatformPresavedOutboundDuplicate(prisma, {
+    ticketId: targetTicket.id,
+    text: normalizedOutboundText,
+  });
+  if (platformPresave) {
+    await mergeWebhookIntoPlatformOutbound(prisma, {
+      messageId: platformPresave.id,
+      externalMessageId: messageId,
+      webhookRawPayload: { eventName, data } as Prisma.InputJsonObject,
+    });
+    console.log(
+      `ℹ️ Mensaje saliente fusionado con pre-guardado del backend (${platformPresave.id})`,
+    );
+    return NextResponse.json({
+      ok: true,
+      ticketId: targetTicket.id,
+      ticketCode: targetTicket.code,
+      merged: true,
+      existingMessageId: platformPresave.id,
+    });
+  }
+
   // Respaldo por contenido: SOLO cuando el payload no trae ningún id estable del
   // proveedor (fallback a hash por texto+segundo, que no distingue envíos reales
   // separados por más de un segundo). Ventana corta (nunca minutos): esto existe
@@ -730,7 +761,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
       where: {
         ticketId: targetTicket.id,
         direction: "OUTBOUND",
-        text: messageText || "[Archivo adjunto]",
+        text: normalizedOutboundText,
         createdAt: {
           gte: recentWindow,
         },
