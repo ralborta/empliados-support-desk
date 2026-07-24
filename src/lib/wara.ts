@@ -931,8 +931,28 @@ export function looksLikePostAdvisorCaseThread(threadText: string | undefined | 
     /gener[eé] el caso n[°º]?\s*\d+/.test(tail) ||
     /caso n[°º]?\s*\d+.{0,120}(revisi[oó]n|asesor)/.test(tail) ||
     /asesor.{0,100}(contact|revis|va a)/.test(tail) ||
-    /un asesor de atenci[oó]n al cliente/.test(tail)
+    /un asesor de atenci[oó]n al cliente/.test(tail) ||
+    /sumar algo m[aá]s al reclamo/.test(tail)
   );
+}
+
+/** Cliente agrega detalle a un caso ya derivado — no reabrir consulta GPS/unidades. */
+export function looksLikePostAdvisorCaseSupplement(
+  text: string | undefined | null,
+  threadText: string | undefined | null,
+): boolean {
+  if (!looksLikePostAdvisorCaseThread(threadText)) return false;
+  const n = String(text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!n || n.length > 220) return false;
+  if (/^(si|sí|dale|ok)\b/.test(n) && n.length > 4) return true;
+  if (/\b(hoy mismo|urgente|sumar|agregar|unidades sin reportar|sin reportar|solucionado)\b/.test(n)) {
+    return true;
+  }
+  return false;
 }
 
 /** Aceptación breve tipo CONFIRMO / sí / dale / ok. */

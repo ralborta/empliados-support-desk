@@ -8,7 +8,7 @@ import {
   getOdooConfigStatus,
   OdooError,
 } from "@/lib/odooApi";
-import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, isPlausibleVehiclePlate, normalizePlate, threadTextSinceCompanySelection, waraIncidentLabels } from "@/lib/wara";
+import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, isPlausibleVehiclePlate, looksLikePostAdvisorCaseSupplement, normalizePlate, threadTextSinceCompanySelection, waraIncidentLabels } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import {
@@ -16,9 +16,15 @@ import {
   looksLikeAtilioHelpRequest,
   looksLikeGreeting,
   looksLikeHumanAdvisorRequest,
+  looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest } from "@/lib/waraUnitIntent";
+import {
+  buildFleetUnitNotFoundMessage,
+  extractExplicitUnitSearchLabel,
+  looksLikeUnitListRequest,
+  resolveUnitQuery,
+} from "@/lib/waraUnitIntent";
 import { bbcShouldSendExecutorMessage } from "@/lib/waraInboundAudit";
 import {
   handleCustomerConversationCloseRequest,
@@ -394,7 +400,7 @@ export async function POST(req: NextRequest) {
   const canReuseThreadPlate =
     !looksLikeOpenCaseStatusInquiry(rawText) &&
     !looksLikeCustomerConversationCloseRequest(rawText);
-  const plate = normalizePlateForTitle(
+  let plate = normalizePlateForTitle(
     data.plate ??
       data.patente ??
       plateInMessage ??
@@ -403,6 +409,43 @@ export async function POST(req: NextRequest) {
         : undefined) ??
       undefined,
   );
+
+  if (looksLikePostAdvisorCaseSupplement(rawText, scopedThread)) {
+    const existingRef = await findRecentOdooRef(rawPhone);
+    if (existingRef) {
+      const message = `Perfecto, anoté este detalle en el caso ${existingRef}. Un asesor lo va a revisar con esa información.`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "odoo_ticket",
+        stage: "advisor_case_supplement",
+        ref: existingRef,
+      });
+      if (localCustomer) {
+        const openTicket = await prisma.ticket.findFirst({
+          where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+          orderBy: { lastMessageAt: "desc" },
+        });
+        if (openTicket) {
+          await prisma.ticketMessage.create({
+            data: {
+              ticketId: openTicket.id,
+              direction: "INBOUND",
+              from: "CUSTOMER",
+              text: rawText,
+              rawPayload: { source: "advisor_case_supplement", odooRef: existingRef },
+            },
+          });
+        }
+      }
+      return NextResponse.json({
+        ok: true,
+        ok_s: "true",
+        ref: existingRef,
+        reused: true,
+        reused_s: "true",
+        message,
+      });
+    }
+  }
 
   const event = buildEvent(data.event ?? data.evento, data.rawText);
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
@@ -430,6 +473,46 @@ export async function POST(req: NextRequest) {
   }
 
   if (!plate && !explicitSubject && !advisorRequest) {
+    if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
+      const waraSession = await resolveWaraSessionByPhone(prisma, rawPhone);
+      if (waraSession.sessionToken) {
+        const fleet = await consultarEstadoUnidades(waraSession.sessionToken, []);
+        if (fleet.ok) {
+          const resolved = await resolveUnitQuery({
+            rawText,
+            threadText: scopedThread,
+            units: fleet.unidades,
+            preferAi: true,
+          });
+          if (resolved.intent === "consult_status" && resolved.plate) {
+            plate = normalizePlateForTitle(resolved.plate);
+          } else {
+            const message =
+              resolved.clarificationQuestion ??
+              buildFleetUnitNotFoundMessage({
+                companyName,
+                rawText,
+                searchedText: extractExplicitUnitSearchLabel(rawText) ?? undefined,
+              });
+            await appendOutboundBotMessage(rawPhone, message, {
+              source: "odoo_ticket",
+              errorStage: "unit_not_in_fleet",
+            });
+            return NextResponse.json(
+              {
+                ok: false,
+                ok_s: "false",
+                message,
+                missing: ["patente"],
+                missing_s: "patente",
+              },
+              { status: BB_STATUS },
+            );
+          }
+        }
+      }
+    }
+    if (!plate) {
     const message =
       "Para registrar el caso necesito la patente de la unidad y qué está pasando (ej: NKL 940 no reporta desde ayer).";
     await appendOutboundBotMessage(rawPhone, message, {
@@ -446,6 +529,7 @@ export async function POST(req: NextRequest) {
       },
       { status: BB_STATUS }
     );
+    }
   }
 
   const ticketRegistrationAttempt = !!plateInMessage || !!explicitSubject || !!plate;

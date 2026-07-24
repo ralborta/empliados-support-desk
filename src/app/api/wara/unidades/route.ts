@@ -946,7 +946,11 @@ export async function POST(req: NextRequest) {
         const companyName = session.companyName || result.cliente || "tu empresa";
         const clarification =
           resolved.clarificationQuestion ??
-          buildFleetUnitNotFoundMessage({ companyName, rawText });
+          buildFleetUnitNotFoundMessage({
+            companyName,
+            rawText,
+            searchedText: extractExplicitUnitSearchLabel(rawText) ?? undefined,
+          });
         await appendOutboundBotMessage(rawPhone, clarification, {
           source: "wara_unidades_clarification",
           rawText,
@@ -1040,7 +1044,7 @@ export async function POST(req: NextRequest) {
     if (unitQuery?.kind === "nombre") {
       return `Encontré ${units.length} unidades con nombre parecido a ${unitQuery.value} en ${cliente}. ${head}${suffix}. Decime la matrícula exacta si querés ver una sola.`;
     }
-    return `Tenés ${units.length} unidades en ${cliente}. Algunas: ${head}${suffix}. Decime una matrícula (ej. NKL 952), un nombre (ej. SAVEIRO) o una marca para ver una sola.`;
+    return `Tenés ${units.length} unidades en ${cliente}. Te muestro ${max} como referencia: ${head}${suffix}. Por WhatsApp no puedo enviar las ${units.length} de una sola vez — decime matrícula, nombre de unidad (ej. M600-157) o marca para buscar una en particular.`;
   };
   let action: "none" | "observation" | "ticket" = "none";
   let ticketRef = "";

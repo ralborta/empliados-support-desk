@@ -19,6 +19,7 @@ import {
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerProblemReport,
   looksLikePostAdvisorCaseThread,
+  looksLikePostAdvisorCaseSupplement,
   looksLikeCertificateUnitReply,
   threadAwaitingOdometerPlate,
   threadHasActiveOdometerFlow,
@@ -340,6 +341,12 @@ const TURN_RULES: TurnRule[] = [
     id: "odometer_problem_report",
     reason: "Falla/desfase de odómetro es soporte, no menú de guías ni pedir km.",
     decide: ({ text }) => (looksLikeOdometerProblemReport(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "post_advisor_case_supplement",
+    reason: "Detalle adicional sobre caso ya derivado a asesor — no reabrir GPS/unidades.",
+    decide: ({ text, threadText }) =>
+      looksLikePostAdvisorCaseSupplement(text, threadText) ? "odoo_ticket" : null,
   },
   {
     id: "gps_or_live_unit_consult",

@@ -93,6 +93,18 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
     return true;
   }
 
+  if (/\b(resolverme|resolv[eé]me|resolveme)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta)\b/.test(t)) {
+    return true;
+  }
+
+  if (
+    /\b(no te preocupes|no importa|olvida|olvidalo)\b.{0,50}\b(resolver|cerrar|finalizar)\s+(la\s+)?(conversacion|charla|chat)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
   return false;
 }
 

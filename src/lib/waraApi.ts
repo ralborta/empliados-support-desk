@@ -936,8 +936,8 @@ export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined
   // una lista de unidades sin relación alguna con lo que pidió el cliente. Se tolera
   // cualquier palabra intermedia corta (adjetivos, artículos) entre el verbo y el
   // sustantivo en vez de exigir adyacencia exacta.
-  if (/\b(abrir|crear|generar|levantar)\b.{0,15}\b(ticket|caso|reclamo)\b/.test(n)) return true;
-  if (/\b(necesito|quiero)\b.{0,20}\b(ticket|reclamo|caso)\b/.test(n)) return true;
+  if (/\b(abrir|crear|generar|levantar)\b.{0,25}\b(ticket|caso|reclamo)\b/.test(n)) return true;
+  if (/\b(necesito|quiero)\b.{0,30}\b(ticket|reclamo|caso)\b/.test(n)) return true;
   return false;
 }
 

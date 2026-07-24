@@ -75,9 +75,9 @@ export function buildFleetUnitNotFoundMessage(opts: {
   const searched = opts.searchedText?.trim();
   if (searched) {
     return (
-      `No encontré ninguna unidad que coincida con "${searched}" en la flota de ${company}. ` +
-      `Revisá que esté bien escrito, o pasame la matrícula completa (ej. NKL 952) o el nombre/marca exacto. ` +
-      `Si querés ver todas, escribí «listado de mis unidades».`
+      `No encontré ninguna unidad que coincida con «${searched}» en la flota de ${company}. ` +
+      `Revisá que esté bien escrito o pasame la matrícula completa (ej. NKL 952). ` +
+      `Si querés ver opciones de tu flota, escribí «listado de mis unidades».`
     );
   }
 
@@ -327,6 +327,16 @@ function resolveBrandOrNameInFleet(
       source: "rules",
     };
   }
+  const label = extractExplicitUnitSearchLabel(rawText) ?? terms.join(" ");
+  if (label) {
+    return {
+      intent: "need_clarification",
+      searchTerms: terms,
+      candidatePlates: [],
+      clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText, searchedText: label }),
+      source: "rules",
+    };
+  }
   return null;
 }
 
@@ -383,13 +393,15 @@ function reconcileAiClarification(
     };
   }
   if (filtered.length === 0 && looksLikeVehicleBrandOrUnitSearch(rawText)) {
-    // Marca/nombre sin ninguna unidad real coincidente: cortar acá, no repetir
-    // candidatos ajenos al pedido (evita el loop por anclaje en el historial).
+    const label = extractExplicitUnitSearchLabel(rawText);
     return {
       intent: "need_clarification",
       searchTerms: ai.searchTerms,
       candidatePlates: [],
-      clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText }),
+      clarificationQuestion: buildFleetUnitNotFoundMessage({
+        rawText,
+        searchedText: label ?? undefined,
+      }),
       source: "rules",
     };
   }
@@ -466,6 +478,22 @@ export function threadHasRecentFleetUnitSearchRequest(threadText: string): boole
     /\b(encontrar|buscar)\b.{0,80}\b(unidad|matricula|patente)\b/.test(tail) ||
     /\bno encuentro\b.{0,40}\b(unidad|patente|matricula)\b/.test(tail)
   );
+}
+
+/** Extrae la marca/nombre que el cliente intentó buscar ("es la NISSAN", "la Saveiro"). */
+export function extractExplicitUnitSearchLabel(rawText: string): string | null {
+  let t = String(rawText ?? "").trim();
+  if (!t) return null;
+  t = t
+    .replace(/^(?:si|sí|ok|dale|bueno)[,.\s!]+/i, "")
+    .replace(/^(?:es|son|sería|seria)\s+(?:la|el|una|un)\s+/i, "")
+    .replace(/^(?:la|el)\s+/i, "")
+    .trim();
+  if (!t || t.length < 2) return null;
+  if (detectLoosePlate(t) || looksLikeUnitNameInMessage(t) || looksLikeVehicleBrandOrUnitSearch(t)) {
+    return t;
+  }
+  return null;
 }
 
 function tokenizeSearchTerms(text: string): string[] {
@@ -1082,13 +1110,17 @@ function resolveWithRules(
   // más confiable es que el mensaje sea CORTO (1-2 palabras) — es decir, que sea
   // básicamente el propio identificador y no una oración con una palabra suelta.
   const rawWordCount = rawText.trim().split(/\s+/).filter(Boolean).length;
-  const looksLikeBareIdentifierAttempt = terms.length > 0 && rawWordCount <= 2;
+  const searchedLabel = extractExplicitUnitSearchLabel(rawText);
+  const looksLikeIdentifierAttempt =
+    (terms.length > 0 && rawWordCount <= 2) || !!searchedLabel;
   return {
     intent: "need_clarification",
     searchTerms: terms,
     candidatePlates: [],
     clarificationQuestion: buildFleetUnitNotFoundMessage(
-      looksLikeBareIdentifierAttempt ? { rawText, searchedText: rawText.trim() } : { rawText },
+      looksLikeIdentifierAttempt
+        ? { rawText, searchedText: searchedLabel ?? rawText.trim() }
+        : { rawText },
     ),
     source: "rules",
   };
