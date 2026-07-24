@@ -36,6 +36,7 @@ const SUITES = [
   "verify-odometer-ajuste-horometro.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-conversation-closing.mjs",
+  "verify-customer-conversation-reset.mjs",
   "verify-certificate-confirm-pivot.mjs",
   "verify-info-guide-replies.mjs",
   "verify-knowledge-base.mjs",

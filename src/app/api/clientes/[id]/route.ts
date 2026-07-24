@@ -140,6 +140,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
           await tx.ticketMessage.deleteMany({ where: { ticketId: { in: ticketIds } } });
           await tx.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
           await tx.ticketTag.deleteMany({ where: { ticketId: { in: ticketIds } } });
+          await tx.agentNotification.deleteMany({ where: { ticketId: { in: ticketIds } } });
           await tx.ticket.deleteMany({ where: { customerId: id } });
         }
         await tx.customer.delete({ where: { id } });

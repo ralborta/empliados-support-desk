@@ -19,6 +19,7 @@ import {
 } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { clearActiveUnit } from "@/lib/activeUnit";
+import { clearCustomerTicketHistory } from "@/lib/customerConversationReset";
 import { clearPendingAction } from "@/lib/pendingAction";
 
 export type WaraEmpresaContact = {
@@ -1797,6 +1798,7 @@ export async function resetCustomerCompanyMenu(
   const normalized = normalizeWhatsAppPhone(rawPhone);
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (customer) {
+    await clearCustomerTicketHistory(prisma, rawPhone);
     await clearActiveUnit(prisma, rawPhone);
     await clearPendingAction(prisma, rawPhone);
     await prisma.customer.update({
@@ -1817,9 +1819,9 @@ export async function resetCustomerCompanyMenu(
   const waraContactsText = menu?.waraContactsText ?? "";
   const multi = waraRequiresCompanyConfirmation(contacts);
   const message = multi
-    ? `Listo, reinicié la empresa. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
+    ? `Listo, reinicié la empresa y limpié el historial de conversación. ¿Con cuál seguimos?\n\n${waraContactsText}\n\nRespondé con el número de la opción o con el nombre de la empresa.`
     : waraCanAutoSelectCompany(contacts)
-      ? `Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}). ¿En qué te puedo ayudar?`
+      ? `Reinicié la empresa y limpié el historial. Tu número tiene una sola empresa asociada (${contacts[0].empresa || contacts[0].nombre}). ¿En qué te puedo ayudar?`
       : `No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.`;
   return {
     message,
