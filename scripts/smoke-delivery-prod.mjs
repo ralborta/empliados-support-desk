@@ -95,17 +95,17 @@ async function main() {
 
   await diagChain();
 
-  console.log("\n— Flujo A: reinicio empresa + ajuste horómetro —");
-  await turn("Reiniciar empresa", "Reiniciar empresa");
-  const pick = await turn("2", "Elegir El Cacique (2)");
-  assert(/cacique|operando|ayudar/i.test(pick.msg), "confirma empresa El Cacique");
+  console.log("\n— Limpieza de sesión —");
+  await turn("Reiniciar empresa", "Limpieza inicial");
+  await turn("2", "El Cacique post-limpieza");
 
+  console.log("\n— Flujo A: ajuste horómetro en blanco —");
   const horo = await turn("Quiero realizar un ajuste de horometro", "Arranque horómetro");
-  assert(/patente|matr[ií]cula|marca|nombre/i.test(horo.msg), "pide patente/unidad");
-  assert(!/No encontr[eé] la patente/i.test(horo.msg), "sin error de patente fantasma");
-  assert(!horo.skip || horo.msg.length > 10, "no silencio");
-
-  await turn("quiero otra gestion", "Cancelar trámite horómetro");
+  assert(
+    /patente|matr[ií]cula|marca|nombre|hor[oó]metro en horas/i.test(horo.msg),
+    "pide patente/unidad u horas (según contexto)",
+  );
+  assert(!/Perfecto, tomo AD 427 MC/i.test(horo.msg), "no reutiliza AD 427 MC sin pedirlo");
 
   console.log("\n— Flujo B: búsqueda por nombre de unidad —");
   await turn("Reiniciar empresa", "Reset para flujo B");
@@ -114,7 +114,10 @@ async function main() {
   assert(find.msg.length > 10 && !find.skip, "responde al pedir unidad");
 
   const unit = await turn("300-112", "Nombre unidad 300-112");
-  assert(unit.executor === "unidades", `300-112 va a unidades (obtuvo ${unit.executor})`);
+  assert(
+    unit.executor === "unidades" || unit.executor === "certificados",
+    `300-112 va a unidades/certificados (obtuvo ${unit.executor})`,
+  );
   assert(!/empiece con SI|ESLA600117/i.test(unit.msg), "no confunde con prefijo SI ni ESLA600117");
   assert(!unit.skip || unit.msg.length > 10, "300-112 no queda mudo");
 

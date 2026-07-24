@@ -384,9 +384,8 @@ export async function POST(req: NextRequest) {
     !explicitVagueUnitReference &&
     !hasUnitHintInCurrentMessage &&
     !isOdometerReminder &&
-    (horometerOnlyIntent
-      ? !threadHasPriorOdometerUnitRequest
-      : !hasPendingConfirmInThread && !threadHasPriorOdometerUnitRequest);
+    (horometerOnlyIntent ||
+      (!hasPendingConfirmInThread && !threadHasPriorOdometerUnitRequest));
   if (treatAsBlankFlowStart) {
     await clearPendingAction(prisma, rawPhone);
   }
