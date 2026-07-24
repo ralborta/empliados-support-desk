@@ -265,7 +265,7 @@ type UnitQueryRef =
   | { kind: "nombre"; value: string };
 
 function normalizeUnitToken(value: string): string {
-  return value.replace(/\s+/g, "").toLowerCase();
+  return value.replace(/[\s-]+/g, "").toLowerCase();
 }
 
 /** Interno del backoffice (ej. 003-111): empieza con 0; distinto del nombre M300-111. */
@@ -290,7 +290,7 @@ function extractUnitQueryFromText(rawText: string | undefined | null): UnitQuery
     return { kind: "nombre", value };
   }
 
-  const nombreMatch = text.match(/\b(M?\d{3}-\d{3})\b/i);
+  const nombreMatch = text.match(/\b(M?\d{3}-\d{2,3})\b/i);
   if (nombreMatch?.[1]) return { kind: "nombre", value: nombreMatch[1] };
 
   if (detectPlate(text)) return null;
@@ -745,13 +745,18 @@ export async function POST(req: NextRequest) {
     !looksLikeLiveUnitConsultIntent(rawText) &&
     !looksLikeGpsOrUnitStatusQuestion(rawText)
   ) {
+    const message =
+      "Seguimos con el cambio de odómetro/horómetro. Decime la patente de la unidad (ej. NKL 954) o el nombre interno (ej. M300-112).";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_unidades_odometer_handoff",
+      rawText,
+    });
     return NextResponse.json(
       {
         ok: true,
         ok_s: "true",
-        summaryText: "",
-        message: "",
-        skipResponse_s: "true",
+        summaryText: message,
+        message,
         topicChange_s: "true",
         action: "none" as const,
         unidadesCount: 0,

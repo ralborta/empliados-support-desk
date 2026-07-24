@@ -20,10 +20,12 @@ import {
   looksLikeOdometerFlowReminder,
   looksLikeOdometerHelpRequest,
   looksLikeOdometerIntentStart,
+  looksLikeHorometerOnlyIntent,
   looksLikeUnitRejection,
   normalizePlate,
   resolveWaraPatenteForApi,
   threadHasActiveOdometerFlow,
+  threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import {
   looksLikeFleetUnitSearchInput,
@@ -40,6 +42,7 @@ import {
   looksLikeOpcionesInfoRequest,
   looksLikePlateCorrectionRequest,
   looksLikeUnidadesInfoRequest,
+  looksLikeOdometerConfirmationRejection,
   looksLikeVehicleBrandOrUnitSearch,
   shouldContinueOdometerFlow,
 } from "@/lib/waraApi";
@@ -221,11 +224,13 @@ async function recentThreadText(rawPhone: string): Promise<string> {
       take: 24,
       select: { text: true },
     });
-    return msgs
-      .reverse()
-      .map((m) => m.text)
-      .filter(Boolean)
-      .join("\n");
+    return threadTextSinceCompanySelection(
+      msgs
+        .reverse()
+        .map((m) => m.text)
+        .filter(Boolean)
+        .join("\n"),
+    );
   } catch {
     return "";
   }
@@ -343,6 +348,7 @@ export async function POST(req: NextRequest) {
   ).trim();
   const odometerIntentStart = looksLikeOdometerIntentStart(rawText);
   const odometerHelpStart = looksLikeOdometerHelpRequest(rawText);
+  const horometerOnlyIntent = looksLikeHorometerOnlyIntent(rawText);
   const odometerFlowStart = odometerIntentStart || odometerHelpStart;
   // Bug real, producción 2026-07-23: "hagamos un cambio de odómetro de ESA unidad"
   // (arranque de trámite CON referencia explícita a una unidad ya resuelta antes, ej.
@@ -500,7 +506,7 @@ export async function POST(req: NextRequest) {
     parsed.data.odometro,
     parsed.data.odometer,
     fromText.odometro,
-    treatAsBlankFlowStart ? undefined : threadParsed.odometro
+    horometerOnlyIntent ? undefined : treatAsBlankFlowStart ? undefined : threadParsed.odometro,
   );
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
   const horometro = resolveHorometroForWara({
@@ -511,12 +517,15 @@ export async function POST(req: NextRequest) {
     ),
     combinedText: treatAsBlankFlowStart ? rawText : combinedText,
   });
-  const pendingOdoConfirm = hasPendingOdometerConfirmation(threadText);
+  const pendingOdoConfirm = horometerOnlyIntent
+    ? false
+    : hasPendingOdometerConfirmation(threadText);
 
   if (!patente) {
     if (treatAsBlankFlowStart) {
-      const message =
-        "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
+      const message = horometerOnlyIntent
+        ? "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)"
+        : "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_odometro_response",
         stage: "missing_plate",
@@ -561,6 +570,7 @@ export async function POST(req: NextRequest) {
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
     const wantsHorometro =
+      horometerOnlyIntent ||
       /\bhor[oó]metro\b/i.test(rawText) ||
       (!/\bod[oó]metro\b/i.test(rawText) && /\bhor[oó]metro\b/i.test(threadText));
     const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
@@ -629,7 +639,9 @@ export async function POST(req: NextRequest) {
   // calcula la fecha ACÁ (antes del resumen) y se muestra siempre que el cliente haya
   // dado una explícita (no la de "ahora", para no confundir con un dato que no pidió).
   const fechaExplicita =
-    parsed.data.fecha ?? parsed.data.date ?? parseFechaFromText(threadText, customerTz);
+    parsed.data.fecha ??
+    parsed.data.date ??
+    parseFechaFromText([threadText, rawText].filter(Boolean).join("\n"), customerTz);
   const fecha = fechaWara(fechaExplicita, customerTz);
   const fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
 
@@ -663,21 +675,46 @@ export async function POST(req: NextRequest) {
     (isConfirmed(rawText) && hasCompleteOdoPayload);
 
   if (!confirmed) {
-    if (pendingOdoConfirm) {
+    if (pendingOdoConfirm && looksLikeOdometerConfirmationRejection(rawText)) {
+      await clearPendingAction(prisma, rawPhone);
+      const message =
+        "Entendido, no registro ese cambio. ¿Qué necesitás? Podés pedirme otro trámite (odómetro, horómetro, certificado, estado de unidad, etc.).";
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "confirmation_rejected",
+      });
       return NextResponse.json(
         {
           ok: true,
           ok_s: "true",
           flowComplete_s: "true",
-          message: "",
-          skipResponse_s: "true",
+          message,
+          topicChange_s: "true",
+          cancelled_s: "true",
+        },
+        { status: BB_STATUS },
+      );
+    }
+    if (pendingOdoConfirm) {
+      const remindMessage =
+        "Para registrar el cambio respondé CONFIRMO. Si algo no está bien, decime la patente o el valor correcto, o escribí que querés hacer otra gestión.";
+      await appendOutboundBotMessage(rawPhone, remindMessage, {
+        source: "wara_odometro_response",
+        stage: "confirmation_reminder",
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          message: remindMessage,
         },
         { status: BB_STATUS },
       );
     }
     const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
     const odoLine =
-      typeof odometro === "number"
+      !horometerOnlyIntent && typeof odometro === "number"
         ? `• Odómetro: ${odometro} km`
         : typeof horometro === "number"
           ? `• Horómetro: ${horometro} h`

@@ -591,8 +591,75 @@ function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnida
   return units.filter((u) => {
     const unitPlate = normalizeLoosePlate(u.patente || u.unidad || "");
     if (!unitPlate) return false;
-    return unitPlate === wanted || unitPlate.includes(wanted) || wanted.includes(unitPlate);
+    if (unitPlate === wanted) return true;
+    if (!isPlausibleVehiclePlate(wanted)) return false;
+    return unitPlate.includes(wanted) || wanted.includes(unitPlate);
   });
+}
+
+function normalizeUnitNameToken(value: string): string {
+  return value.replace(/[\s-]+/g, "").toLowerCase();
+}
+
+function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
+  const norm = normalizeUnitNameToken(query);
+  if (!norm) return [];
+  return units.filter((u) => {
+    const nombre = normalizeUnitNameToken(u.unidad || "");
+    if (!nombre) return false;
+    return nombre === norm || nombre.includes(norm) || norm.includes(nombre);
+  });
+}
+
+function extractUnitNameFromText(rawText: string): string | null {
+  const text = String(rawText ?? "").trim();
+  if (!text) return null;
+  const labeled = text.match(/\bunidad\s+(?:es\s+)?(M?\d{3}-\d{2,3})\b/i);
+  if (labeled?.[1]) return labeled[1];
+  const bare = text.match(/\b(M?\d{3}-\d{2,3})\b/i);
+  return bare?.[1] ?? null;
+}
+
+function resolveByUnitName(
+  rawText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  const unitName = extractUnitNameFromText(rawText);
+  if (!unitName || !looksLikeUnitNameInMessage(rawText)) return null;
+  const matches = filterUnitsByUnitName(units, unitName);
+  if (matches.length === 1) {
+    const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "");
+    if (!plate) return null;
+    return {
+      intent: "consult_status",
+      plate,
+      searchTerms: [],
+      candidatePlates: [plate],
+      source: "rules",
+    };
+  }
+  if (matches.length > 1) {
+    const labels = matches
+      .slice(0, 5)
+      .map((u) => `${(u.patente || u.unidad || "").trim()}${u.unidad && u.patente ? ` (${u.unidad.trim()})` : ""}`)
+      .join(", ");
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: matches
+        .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+        .filter(Boolean),
+      clarificationQuestion: `Encontré ${matches.length} unidades con nombre parecido a ${unitName} (${labels}). Decime la matrícula exacta.`,
+      source: "rules",
+    };
+  }
+  return {
+    intent: "need_clarification",
+    searchTerms: [],
+    candidatePlates: [],
+    clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText, searchedText: unitName }),
+    source: "rules",
+  };
 }
 
 /** Prefijo de patente en frases como "la que empieza con AG". */
@@ -855,6 +922,9 @@ function resolveWithRules(
     const brandResolution = resolveBrandOrNameInFleet(rawText, units);
     if (brandResolution) return brandResolution;
   }
+
+  const unitNameResolution = resolveByUnitName(rawText, units);
+  if (unitNameResolution) return unitNameResolution;
 
   // Priorizar lo que escribió ahora; no arrastrar patente del odómetro u otro trámite previo.
   const threadPlate = extractLastPlateFromThread(threadText);

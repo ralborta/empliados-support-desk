@@ -9,6 +9,7 @@ import {
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
   isOdometerFlowSuperseded,
+  looksLikeBriefConfirmation,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerIntentStart,
   normalizePlate,
@@ -17,6 +18,7 @@ import {
   extractPlatePrefixFromMessage,
 } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import { clearActiveUnit } from "@/lib/activeUnit";
 
 export type WaraEmpresaContact = {
   id: number;
@@ -122,6 +124,47 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
   if (/\bno\b.{0,12}\bpara\b.{0,12}\bla\b/.test(t)) return true;
   if (/\b(otra|otro)\b.{0,16}\bpatente\b/.test(t)) return true;
   return false;
+}
+
+/** Rechazo o cancelación durante confirmación pendiente de odómetro/horómetro. */
+export function looksLikeOdometerConfirmationRejection(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  if (looksLikeBriefConfirmation(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/^0$/.test(raw)) return true;
+  return (
+    /\b(no es correcto|no confirmo|no quiero|incorrecto|cancelar|cancelalo|olvidalo|otra gesti[oó]n|quiero otra)\b/.test(
+      t,
+    ) || /\bno\b.{0,20}\b(correcto|confirmo)\b/.test(t)
+  );
+}
+
+/** "Dale cámbialo" tras pedido de cambiar empresa en el hilo reciente. */
+export function looksLikeImplicitCompanyChangeAffirmation(
+  text: string | undefined | null,
+  threadText = "",
+): boolean {
+  const t = String(text ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (!t) return false;
+  if (!/^(dale|si|sí|ok|bueno|perfecto|listo)\b/.test(t)) return false;
+  if (!/\b(cambialo|cambiala|cambiemos|hacelo|seguimos|dale)\b/.test(t) && t.split(/\s+/).length > 3) {
+    return false;
+  }
+  const tail = threadText.slice(-2500).toLowerCase();
+  return (
+    /cambiar empresa/.test(tail) ||
+    /reinici[eé] la empresa/.test(tail) ||
+    /equivocada/.test(tail) ||
+    /otra empresa/.test(tail)
+  );
 }
 
 /** Trámite operativo distinto de odómetro (certificado, reporte, etc.). */
@@ -1750,6 +1793,7 @@ export async function resetCustomerCompanyMenu(
   const normalized = normalizeWhatsAppPhone(rawPhone);
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (customer) {
+    await clearActiveUnit(prisma, rawPhone);
     await prisma.customer.update({
       where: { id: customer.id },
       data: {
@@ -2551,6 +2595,10 @@ export async function selectCompanyForCustomer(
   async function persistCompanyChoice(contact: WaraEmpresaContact) {
     const company = contact.empresa || contact.nombre;
     const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    const companyChanged = local?.selectedCompanyContactId != null && local.selectedCompanyContactId !== contact.id;
+    if (companyChanged || !local?.selectedCompanyContactId) {
+      await clearActiveUnit(prisma, rawPhone);
+    }
     const customer = local
       ? await prisma.customer.update({
           where: { id: local.id },

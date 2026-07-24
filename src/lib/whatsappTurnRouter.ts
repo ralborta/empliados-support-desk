@@ -14,6 +14,7 @@ import {
   isMaintenanceFlowSuperseded,
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
+  looksLikeExplicitCertificateResendRequest,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerProblemReport,
   looksLikePostAdvisorCaseThread,
@@ -47,7 +48,7 @@ import {
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
+import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput, looksLikeUnitNameInMessage } from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
@@ -68,6 +69,7 @@ function norm(text: string): string {
 
 function looksLikeCertificateIntent(text: string, threadText: string): boolean {
   const nText = norm(text);
+  if (looksLikeExplicitCertificateResendRequest(text)) return true;
   if (
     looksLikeNonOdometerOperationalIntent(text) &&
     /\b(certificado|cobertura|monitoreo|constancia)\b/.test(nText)
@@ -135,7 +137,8 @@ function isUnitSelectionMessage(text: string, threadText = ""): boolean {
     isMaintenancePlateSelectionMessage(text) ||
     looksLikeCertificateUnitReply(text, threadText) ||
     looksLikeVehicleBrandOrUnitSearch(text) ||
-    looksLikePlateCorrectionRequest(text)
+    looksLikePlateCorrectionRequest(text) ||
+    looksLikeUnitNameInMessage(text)
   );
 }
 

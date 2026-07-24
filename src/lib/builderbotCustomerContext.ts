@@ -19,6 +19,7 @@ import {
   buildCompanyMenuPayload,
   formatCompanyConfirmMessage,
   looksLikeChangeCompanyRequest,
+  looksLikeImplicitCompanyChangeAffirmation,
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
@@ -351,7 +352,14 @@ export async function customerRegisteredContextResponse(
   }
 
   const selectionText = opts?.selectionText?.trim() || "";
-  if (selectionText && looksLikeChangeCompanyRequest(selectionText)) {
+  const earlyThreadForCompany = selectionText
+    ? threadTextSinceCompanySelection(await recentThreadTextForPhone(trimmed, 24))
+    : "";
+  if (
+    selectionText &&
+    (looksLikeChangeCompanyRequest(selectionText) ||
+      looksLikeImplicitCompanyChangeAffirmation(selectionText, earlyThreadForCompany))
+  ) {
     const reset = await resetCustomerCompanyMenu(prisma, trimmed);
     const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
     const customer = resolution.customer;

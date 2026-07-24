@@ -43,6 +43,7 @@ const PLATE_REGEX_GLOBAL =
  */
 export const EXAMPLE_PLATES = new Set([
   "AB123CD",
+  "AB006EX",
   "AA123BB",
   "AA999AA",
   "ABC123",
@@ -134,6 +135,7 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
 
 /** Prefijo suelto de patente (NKL, HEJ, AG) sin ser patente completa. */
 export function isBarePlatePrefixHint(text: string | undefined | null): boolean {
+  if (looksLikeBriefConfirmation(text)) return false;
   const stripped = String(text ?? "")
     .trim()
     .replace(/^(la|el|esa|ese)\s+/i, "");
@@ -367,6 +369,33 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   );
 }
 
+/** Trámite explícito de horómetro sin pedir odómetro/km en el mismo mensaje. */
+export function looksLikeHorometerOnlyIntent(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\bhor[oó]metro\b/.test(t) &&
+    !/\b(od[oó]metro|kilometraje|kil[oó]metros|\bkm\b)\b/.test(t)
+  );
+}
+
+/** Reenvío explícito de certificado ya emitido. */
+export function looksLikeExplicitCertificateResendRequest(value: string | undefined | null): boolean {
+  const t = String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, " ");
+  return (
+    /\b(reenvi\w*|re envi|envia.*(otra vez|nuevamente|de nuevo)|mand(a|ame|alo).*(otra vez|nuevamente|de nuevo)|volver.*(enviar|mandar)|no me llego|no lo recibi|pasamelo de nuevo|ped[ií].*expl[ií]citamente.*reenvi\w*)\b/i.test(
+      t,
+    ) && /\b(certificado|cobertura|archivo|pdf|link|url|documento|lo|me|unidad)\b/i.test(t)
+  );
+}
+
 /** Cliente inicia trámite de odómetro/horómetro sin dar patente todavía. */
 export function looksLikeOdometerIntentStart(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
@@ -377,7 +406,7 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   return (
-    /\b(actualizar|cambiar|cambio de|corregir|ajustar|registrar)\b/.test(t) &&
+    /\b(actualizar|cambiar|cambio de|corregir|ajust\w*|registrar|realizar)\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
   );
 }
@@ -493,6 +522,20 @@ export function lineLooksLikeBotPlateRejection(line: string): boolean {
   );
 }
 
+/** El bot está pidiendo la patente (con ejemplos tipo "AB 006 EX") — no es una unidad confirmada. */
+export function lineLooksLikeBotMissingPlatePrompt(line: string): boolean {
+  const norm = line
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    (/para registrar el cambio de odometro necesito la patente/.test(norm) ||
+      (/necesito la patente de la unidad/.test(norm) &&
+        /odometro|horometro|kilometraje/.test(norm))) &&
+    /(ej\.|ejemplo|marca\/nombre)/.test(norm)
+  );
+}
+
 /**
  * Última patente real mencionada en el hilo (resúmenes del bot, "unidad XX", o patente suelta).
  * Ignora patentes de ejemplo de los prompts y patentes solo citadas en listados de ejemplo del bot.
@@ -505,6 +548,7 @@ export function extractLastPlateFromThread(text: string): string | null {
     const line = lines[li];
     if (lineLooksLikeBotUnitListExample(line)) continue;
     if (lineLooksLikeBotPlateRejection(line)) continue;
+    if (lineLooksLikeBotMissingPlatePrompt(line)) continue;
     const labeled = [
       ...line.matchAll(/(?:Patente|Matr[ií]cula)[^\n:]*[:\-]\s*([A-Za-z0-9 ]{5,12})/gi),
     ];

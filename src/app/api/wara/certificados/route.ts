@@ -6,8 +6,9 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
-import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeCertificateUnitReply } from "@/lib/wara";
+import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadTextSinceCompanySelection } from "@/lib/wara";
+import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
@@ -102,40 +103,12 @@ function isConfirmed(value: string | undefined): boolean {
 }
 
 function isExplicitCertificateResendRequest(value: string): boolean {
-  const t = value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, " ");
-  return (
-    /\b(reenvi|re envi|envia.*(otra vez|nuevamente|de nuevo)|mand(a|ame|alo).*(otra vez|nuevamente|de nuevo)|volver.*(enviar|mandar)|no me llego|no lo recibi|pasamelo de nuevo)\b/i.test(
-      t
-    ) && /\b(certificado|cobertura|archivo|pdf|link|url|documento|lo|me)\b/i.test(t)
-  );
+  return looksLikeExplicitCertificateResendRequest(value);
 }
 
 async function recentThreadText(rawPhone: string): Promise<string> {
-  try {
-    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
-    if (!customer) return "";
-    const ticket = await prisma.ticket.findFirst({
-      where: { customerId: customer.id },
-      orderBy: { lastMessageAt: "desc" },
-    });
-    if (!ticket) return "";
-    const msgs = await prisma.ticketMessage.findMany({
-      where: { ticketId: ticket.id },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: { text: true },
-    });
-    return msgs
-      .reverse()
-      .map((m) => m.text)
-      .filter(Boolean)
-      .join("\n");
-  } catch {
-    return "";
-  }
+  const full = await recentThreadTextForPhone(rawPhone, 48);
+  return threadTextSinceCompanySelection(full);
 }
 
 function extractPlateFromCertificateSummary(text: string): string | null {
@@ -313,6 +286,70 @@ async function findGeneratedCertificate(rawPhone: string, plate: string): Promis
     return { message: message.text, url: urlMatch?.[0] };
   }
   return null;
+}
+
+async function findLatestGeneratedCertificatePlate(rawPhone: string): Promise<string | null> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return null;
+  const ticket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!ticket) return null;
+  const recentMessages = await prisma.ticketMessage.findMany({
+    where: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+    select: { rawPayload: true },
+  });
+  for (const message of recentMessages) {
+    const payload = message.rawPayload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
+    const record = payload as Record<string, unknown>;
+    if (record.generatedBy !== "wara_certificadocobertura") continue;
+    if (typeof record.plate !== "string") continue;
+    const normalized = normalizePlate(record.plate);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+async function countExplicitCertificateResends(rawPhone: string, plate: string): Promise<number> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return 0;
+  const ticket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!ticket) return 0;
+  const wanted = normalizePlate(plate);
+  const recentMessages = await prisma.ticketMessage.findMany({
+    where: {
+      ticketId: ticket.id,
+      direction: "OUTBOUND",
+      from: "BOT",
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 40,
+    select: { rawPayload: true },
+  });
+  let count = 0;
+  for (const message of recentMessages) {
+    const payload = message.rawPayload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
+    const record = payload as Record<string, unknown>;
+    if (record.generatedBy !== "wara_certificadocobertura") continue;
+    if (record.wasExplicitResend !== true) continue;
+    if (typeof record.plate !== "string" || normalizePlate(record.plate) !== wanted) continue;
+    count++;
+  }
+  return count;
 }
 
 /** Quita del texto de Wara frases que mandan al cliente a otra mesa de ayuda. */
@@ -650,7 +687,13 @@ export async function POST(req: NextRequest) {
   const confirmRaw = parsed.data.confirm ?? parsed.data.confirmation;
   let confirmation =
     confirmRaw ??
-    (pendingConfirm && (isConfirmed(text) || /\bconf/i.test(text)) ? "confirmo" : undefined);
+    (pendingConfirm && (isConfirmed(text) || looksLikeBriefConfirmation(text)) ? "confirmo" : undefined);
+
+  const dbPending = await getPendingAction(prisma, rawPhone);
+  if (dbPending?.type === "certificados" && (looksLikeBriefConfirmation(text) || isConfirmed(text))) {
+    pendingConfirm = true;
+    confirmation = confirmation ?? "confirmo";
+  }
 
   // Red de seguridad: resumen multilínea en hilo + CONFIRMO/Sí.
   if ((isConfirmed(text) || isConfirmed(confirmRaw)) && !pendingConfirm) {
@@ -698,6 +741,30 @@ export async function POST(req: NextRequest) {
         missing: ["patente"],
         missing_s: "patente",
         needsPlate_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  if (
+    pendingConfirm &&
+    !isConfirmed(text) &&
+    !isConfirmed(confirmRaw) &&
+    !isCertificateCancellation(text) &&
+    !looksLikeExplicitCertificateResendRequest(text)
+  ) {
+    const remindMessage =
+      "Para generar el certificado respondé CONFIRMO. Si la unidad no es correcta, decime la patente o el nombre correcto.";
+    await appendOutboundBotMessage(rawPhone, remindMessage, {
+      source: "wara_certificados",
+      stage: "confirmation_reminder",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message: remindMessage,
       },
       { status: BB_STATUS },
     );
@@ -854,6 +921,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (!plate && looksLikeExplicitCertificateResendRequest(text)) {
+    plate =
+      normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) ??
+      detectPlate(text) ??
+      extractPlateFromCertificateSummary(threadText) ??
+      activeUnitRecord?.plate ??
+      (await findLatestGeneratedCertificatePlate(rawPhone)) ??
+      "";
+  }
+
   if (!plate) {
     const message = looksLikeCertificateUnitSelection(text)
       ? anchorToCertificateUnitFlow(
@@ -886,6 +963,29 @@ export async function POST(req: NextRequest) {
   const wantsExplicitResend = isExplicitCertificateResendRequest(
     `${text}\n${confirmation ?? ""}`
   );
+
+  if (wantsExplicitResend) {
+    const resendCount = await countExplicitCertificateResends(rawPhone, plate);
+    if (resendCount >= 3) {
+      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado varias veces en las últimas horas. Si seguís sin recibirlo, escribí "hablar con un asesor".`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_certificados",
+        stage: "resend_limit_reached",
+        plate,
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          alreadyGenerated: true,
+          resendLimitReached_s: "true",
+          message,
+        },
+        { status: BB_STATUS },
+      );
+    }
+  }
 
   const confirmedNow = isConfirmed(confirmation) || wantsExplicitResend;
   if (!confirmedNow) {
