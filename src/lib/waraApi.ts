@@ -19,6 +19,7 @@ import {
 } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { clearActiveUnit } from "@/lib/activeUnit";
+import { clearPendingAction } from "@/lib/pendingAction";
 
 export type WaraEmpresaContact = {
   id: number;
@@ -1794,6 +1795,7 @@ export async function resetCustomerCompanyMenu(
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (customer) {
     await clearActiveUnit(prisma, rawPhone);
+    await clearPendingAction(prisma, rawPhone);
     await prisma.customer.update({
       where: { id: customer.id },
       data: {
@@ -2598,6 +2600,7 @@ export async function selectCompanyForCustomer(
     const companyChanged = local?.selectedCompanyContactId != null && local.selectedCompanyContactId !== contact.id;
     if (companyChanged || !local?.selectedCompanyContactId) {
       await clearActiveUnit(prisma, rawPhone);
+      await clearPendingAction(prisma, rawPhone);
     }
     const customer = local
       ? await prisma.customer.update({

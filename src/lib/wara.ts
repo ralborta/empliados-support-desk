@@ -357,6 +357,9 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
   // Solo cuando el BOT pidió patente/odómetro en el turno anterior — no el intent del cliente.
   return (
+    /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
+    /cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
+    /nuevo hor[oó]metro en horas/i.test(tail) ||
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
     /nuevo od[oó]metro en km/i.test(tail) ||

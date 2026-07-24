@@ -350,6 +350,10 @@ const TURN_RULES: TurnRule[] = [
     id: "odometer_operational",
     reason: "Odómetro operativo — antes que guías informativas (el hilo no debe secuestrar con mantenimiento).",
     decide: ({ text, threadText }) => {
+      if (looksLikeNonOdometerOperationalIntent(text)) return null;
+      if (/\b(encontrar|buscar|listado de mis unidades|listado de unidades)\b/.test(norm(text))) {
+        return null;
+      }
       const match =
         looksLikeOdometerIntent(text, threadText) ||
         (looksLikeExplicitOdometerUpdateRequest(text) &&

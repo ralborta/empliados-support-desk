@@ -382,10 +382,14 @@ export async function POST(req: NextRequest) {
   const treatAsBlankFlowStart =
     odometerFlowStart &&
     !explicitVagueUnitReference &&
-    !hasPendingConfirmInThread &&
     !hasUnitHintInCurrentMessage &&
     !isOdometerReminder &&
-    !threadHasPriorOdometerUnitRequest;
+    (horometerOnlyIntent
+      ? !threadHasPriorOdometerUnitRequest
+      : !hasPendingConfirmInThread && !threadHasPriorOdometerUnitRequest);
+  if (treatAsBlankFlowStart) {
+    await clearPendingAction(prisma, rawPhone);
+  }
   const fromText = parseFromText(rawText);
   const threadText = treatAsBlankFlowStart
     ? ""
@@ -520,6 +524,30 @@ export async function POST(req: NextRequest) {
   const pendingOdoConfirm = horometerOnlyIntent
     ? false
     : hasPendingOdometerConfirmation(threadText);
+
+  if (
+    looksLikeOdometerConfirmationRejection(rawText) &&
+    (pendingOdoConfirm || activeOdoFlow || threadHasActiveOdometerFlow(threadText))
+  ) {
+    await clearPendingAction(prisma, rawPhone);
+    const message =
+      "Entendido, no registro ese cambio. ¿Qué necesitás? Podés pedirme otro trámite (odómetro, horómetro, certificado, estado de unidad, etc.).";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_odometro_response",
+      stage: "flow_cancelled",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        topicChange_s: "true",
+        cancelled_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
 
   if (!patente) {
     if (treatAsBlankFlowStart) {
