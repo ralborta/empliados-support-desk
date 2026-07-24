@@ -740,32 +740,6 @@ export async function POST(req: NextRequest) {
   }
 
   if (
-    threadHasActiveOdometerFlow(threadText) &&
-    looksLikeFleetUnitSearchInput(rawText.trim()) &&
-    !looksLikeLiveUnitConsultIntent(rawText) &&
-    !looksLikeGpsOrUnitStatusQuestion(rawText)
-  ) {
-    const message =
-      "Seguimos con el cambio de odómetro/horómetro. Decime la patente de la unidad (ej. NKL 954) o el nombre interno (ej. M300-112).";
-    await appendOutboundBotMessage(rawPhone, message, {
-      source: "wara_unidades_odometer_handoff",
-      rawText,
-    });
-    return NextResponse.json(
-      {
-        ok: true,
-        ok_s: "true",
-        summaryText: message,
-        message,
-        topicChange_s: "true",
-        action: "none" as const,
-        unidadesCount: 0,
-      },
-      { status: BB_STATUS },
-    );
-  }
-
-  if (
     looksLikeGreeting(rawText.trim()) &&
     !explicitPlate &&
     !extractUnitQueryFromText(rawText) &&

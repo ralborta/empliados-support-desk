@@ -671,6 +671,9 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan de mantenimiento)\b/.test(t)) return false;
+  if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|dejo de reportar|offline|sin señal|sin senal)\b/.test(t)) {
+    return true;
+  }
   const gpsUnitCue =
     /\b(gps|ignicio|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
       t,

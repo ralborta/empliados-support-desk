@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ADVISOR_PRESENCE_TIMEOUT_MS, isAdvisorPresentlyOnline } from "@/lib/advisorDistribution";
+import { getMonitorRecentActivity } from "@/lib/monitorActivity";
 import { getPanelScreenLabel } from "@/lib/panelScreenLabels";
 
 /**
  * Pantalla externa de monitoreo (fuera del login normal del panel): quién está
- * conectado, desde cuándo, y en qué pantalla. Protegida por una contraseña propia
- * (MONITOR_ACCESS_PASSWORD), independiente del login de AgentUser — a propósito, para
- * que sea una "vista de solo lectura" separada sin exponer sesiones de panel.
+ * conectado, desde cuándo, en qué pantalla, y actividad reciente de WhatsApp.
+ * Protegida por una contraseña propia (MONITOR_ACCESS_PASSWORD), independiente
+ * del login de AgentUser — a propósito, para que sea una "vista de solo lectura"
+ * separada sin exponer sesiones de panel.
  */
 function checkAccess(req: NextRequest): boolean {
   const expected = process.env.MONITOR_ACCESS_PASSWORD?.trim();
@@ -57,10 +59,13 @@ export async function GET(req: NextRequest) {
     };
   });
 
+  const activity = await getMonitorRecentActivity();
+
   return NextResponse.json({
     ok: true,
     generatedAt: new Date().toISOString(),
     presenceTimeoutMs: ADVISOR_PRESENCE_TIMEOUT_MS,
     agents: rows,
+    activity,
   });
 }

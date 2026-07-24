@@ -14,10 +14,35 @@ type MonitorAgent = {
   currentPageLabel: string;
 };
 
+type MonitorActivityMessage = {
+  id: string;
+  at: string;
+  direction: "INBOUND" | "OUTBOUND";
+  from: string;
+  textPreview: string;
+  ticketCode: string;
+  ticketStatus: string;
+  phone: string;
+  contactName: string | null;
+  companyName: string | null;
+};
+
+type MonitorActivitySummary = {
+  windowMinutes: number;
+  inboundCount: number;
+  outboundCount: number;
+  activePhones: number;
+  lastInboundAt: string | null;
+};
+
 type MonitorResponse = {
   ok: boolean;
   generatedAt?: string;
   agents?: MonitorAgent[];
+  activity?: {
+    summary: MonitorActivitySummary;
+    messages: MonitorActivityMessage[];
+  };
   error?: string;
 };
 
@@ -51,10 +76,25 @@ function formatElapsed(iso: string | null): string {
   return `hace ${hours} h ${minutes} min`;
 }
 
+function formatPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length >= 10) {
+    return `+${digits.slice(0, 2)} ${digits.slice(2, -4)}…${digits.slice(-4)}`;
+  }
+  return phone;
+}
+
+function directionLabel(msg: MonitorActivityMessage): string {
+  if (msg.direction === "INBOUND") return "Cliente";
+  if (msg.from === "BOT") return "Bot";
+  return "Panel";
+}
+
 export default function MonitorPage() {
   const [password, setPassword] = useState<string>("");
   const [unlocked, setUnlocked] = useState(false);
   const [agents, setAgents] = useState<MonitorAgent[]>([]);
+  const [activity, setActivity] = useState<MonitorResponse["activity"]>(undefined);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,6 +124,7 @@ export default function MonitorPage() {
       setError(null);
       setUnlocked(true);
       setAgents(data.agents ?? []);
+      setActivity(data.activity);
       setGeneratedAt(data.generatedAt ?? null);
       window.sessionStorage.setItem(STORAGE_KEY, pwd);
     } catch {
@@ -111,9 +152,9 @@ export default function MonitorPage() {
           }}
           className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-8 shadow-xl"
         >
-          <h1 className="mb-1 text-lg font-semibold text-slate-100">Monitor de presencia</h1>
+          <h1 className="mb-1 text-lg font-semibold text-slate-100">Monitor Wara</h1>
           <p className="mb-6 text-sm text-slate-400">
-            Vista externa de solo lectura. Ingresá la contraseña de acceso.
+            Vista externa de solo lectura: presencia del equipo y actividad de pruebas por WhatsApp.
           </p>
           <input
             type="password"
@@ -137,16 +178,20 @@ export default function MonitorPage() {
   }
 
   const onlineCount = agents.filter((a) => a.online).length;
+  const summary = activity?.summary;
+  const recentMessages = activity?.messages ?? [];
+  const windowHours = summary ? Math.round(summary.windowMinutes / 60) : 3;
 
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-8">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="mx-auto max-w-6xl space-y-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold">Monitor de presencia — Panel</h1>
+            <h1 className="text-xl font-semibold">Monitor Wara</h1>
             <p className="text-sm text-slate-400">
-              {onlineCount} de {agents.length} conectados ahora
+              Presencia del panel · actividad WhatsApp (solo lectura)
               {generatedAt ? ` · actualizado ${formatDateTime(generatedAt)}` : ""}
+              {loading ? " · refrescando…" : ""}
             </p>
           </div>
           <button
@@ -161,58 +206,150 @@ export default function MonitorPage() {
           </button>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-800">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
-              <tr>
-                <th className="px-4 py-3">Estado</th>
-                <th className="px-4 py-3">Nombre</th>
-                <th className="px-4 py-3">Rol</th>
-                <th className="px-4 py-3">Conectado desde</th>
-                <th className="px-4 py-3">Última actividad</th>
-                <th className="px-4 py-3">Pantalla</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {agents.map((agent) => (
-                <tr key={agent.id} className={agent.online ? "bg-slate-900/40" : "bg-transparent"}>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-block h-2.5 w-2.5 rounded-full ${
-                        agent.online ? "bg-emerald-500" : "bg-slate-600"
-                      }`}
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-slate-100">{agent.name}</div>
-                    <div className="text-xs text-slate-500">{agent.email}</div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-300">
-                    {agent.role === "ADMIN" ? "Administrador" : "Soporte"}
-                  </td>
-                  <td className="px-4 py-3 text-slate-300">
-                    {agent.online ? (
-                      <span title={formatDateTime(agent.connectedSince)}>
-                        {formatElapsed(agent.connectedSince)}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-slate-400">{formatDateTime(agent.lastSeenAt)}</td>
-                  <td className="px-4 py-3 text-slate-300">{agent.currentPageLabel}</td>
-                </tr>
-              ))}
-              {agents.length === 0 && (
+        {summary && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Mensajes cliente</p>
+              <p className="mt-1 text-2xl font-semibold text-emerald-400">{summary.inboundCount}</p>
+              <p className="text-xs text-slate-500">últimas {windowHours} h</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Respuestas bot</p>
+              <p className="mt-1 text-2xl font-semibold text-sky-400">{summary.outboundCount}</p>
+              <p className="text-xs text-slate-500">últimas {windowHours} h</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Teléfonos activos</p>
+              <p className="mt-1 text-2xl font-semibold text-amber-300">{summary.activePhones}</p>
+              <p className="text-xs text-slate-500">con mensaje entrante</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Último mensaje cliente</p>
+              <p className="mt-1 text-lg font-semibold text-slate-100">
+                {summary.lastInboundAt ? formatElapsed(summary.lastInboundAt) : "—"}
+              </p>
+              <p className="text-xs text-slate-500">
+                {summary.lastInboundAt ? formatDateTime(summary.lastInboundAt) : "sin actividad"}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <section>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-slate-400">
+            Actividad WhatsApp reciente
+          </h2>
+          <div className="overflow-hidden rounded-xl border border-slate-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
-                    No hay agentes registrados.
-                  </td>
+                  <th className="px-4 py-3">Hora</th>
+                  <th className="px-4 py-3">Quién</th>
+                  <th className="px-4 py-3">Empresa</th>
+                  <th className="px-4 py-3">Tipo</th>
+                  <th className="px-4 py-3">Mensaje</th>
+                  <th className="px-4 py-3">Ticket</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {recentMessages.map((msg) => (
+                  <tr key={msg.id} className="bg-slate-900/20 hover:bg-slate-900/40">
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-400" title={formatDateTime(msg.at)}>
+                      {formatElapsed(msg.at)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-100">
+                        {msg.contactName ?? formatPhone(msg.phone)}
+                      </div>
+                      <div className="text-xs text-slate-500">{formatPhone(msg.phone)}</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">{msg.companyName ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-block rounded-full px-2 py-0.5 text-xs ${
+                          msg.direction === "INBOUND"
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : "bg-sky-500/15 text-sky-300"
+                        }`}
+                      >
+                        {directionLabel(msg)}
+                      </span>
+                    </td>
+                    <td className="max-w-md px-4 py-3 text-slate-300">{msg.textPreview}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-400">
+                      {msg.ticketCode}
+                    </td>
+                  </tr>
+                ))}
+                {recentMessages.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                      Sin mensajes en las últimas {windowHours} horas.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-slate-400">
+            Presencia del equipo ({onlineCount} de {agents.length} conectados)
+          </h2>
+          <div className="overflow-hidden rounded-xl border border-slate-800">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-4 py-3">Estado</th>
+                  <th className="px-4 py-3">Nombre</th>
+                  <th className="px-4 py-3">Rol</th>
+                  <th className="px-4 py-3">Conectado desde</th>
+                  <th className="px-4 py-3">Última actividad</th>
+                  <th className="px-4 py-3">Pantalla</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {agents.map((agent) => (
+                  <tr key={agent.id} className={agent.online ? "bg-slate-900/40" : "bg-transparent"}>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-block h-2.5 w-2.5 rounded-full ${
+                          agent.online ? "bg-emerald-500" : "bg-slate-600"
+                        }`}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-100">{agent.name}</div>
+                      <div className="text-xs text-slate-500">{agent.email}</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">
+                      {agent.role === "ADMIN" ? "Administrador" : "Soporte"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">
+                      {agent.online ? (
+                        <span title={formatDateTime(agent.connectedSince)}>
+                          {formatElapsed(agent.connectedSince)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400">{formatDateTime(agent.lastSeenAt)}</td>
+                    <td className="px-4 py-3 text-slate-300">{agent.currentPageLabel}</td>
+                  </tr>
+                ))}
+                {agents.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                      No hay agentes registrados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </div>
   );

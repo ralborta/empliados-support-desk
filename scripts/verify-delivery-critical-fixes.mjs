@@ -12,8 +12,11 @@ import {
   looksLikeExplicitCertificateResendRequest,
   looksLikeHorometerOnlyIntent,
   looksLikeOdometerIntentStart,
+  threadHasActiveOdometerFlow,
+  threadHasRecentUnitStatusConsultIntent,
   threadTextSinceCompanySelection,
 } from "../src/lib/wara.ts";
+import { looksLikeGpsOrUnitStatusQuestion } from "../src/lib/waraApi.ts";
 import { threadHasRecentFleetUnitSearchRequest } from "../src/lib/waraUnitIntent.ts";
 import {
   looksLikeImplicitCompanyChangeAffirmation,
@@ -119,6 +122,18 @@ assert(
   classifyTurnExecutor("300-112", pollutedUnitAsk) === "unidades",
   "300-112 tras pedido matrícula → unidades",
 );
+
+console.log("\n— AF061DO falta de reporte no secuestrada por odómetro —");
+const reportThread = [
+  "Para registrar el cambio de horómetro necesito la patente de la unidad.",
+  "Quiero consultar por el estado de reporte de mis unidades",
+  "En El Cacique S.A. tenés 414 unidades registradas.",
+  "no me reporta la AF061DO",
+].join("\n");
+assert(threadHasRecentUnitStatusConsultIntent(reportThread), "detecta consulta de reporte reciente");
+assert(!threadHasActiveOdometerFlow(reportThread), "odómetro no activo tras consulta reporte");
+assert(looksLikeGpsOrUnitStatusQuestion("no me reporta la AF061DO"), "no me reporta = consulta GPS");
+assert(classifyTurnExecutor("no me reporta la AF061DO", reportThread) === "unidades", "AF061DO → unidades");
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

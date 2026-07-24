@@ -308,8 +308,14 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
   const lower = threadText.toLowerCase();
   const markers = [
     lower.lastIndexOf("voy a registrar:"),
+    lower.lastIndexOf("para registrar el cambio de horómetro"),
+    lower.lastIndexOf("para registrar el cambio de horometro"),
+    lower.lastIndexOf("para registrar el cambio de odómetro"),
+    lower.lastIndexOf("para registrar el cambio de odometro"),
     lower.lastIndexOf("cuál es el nuevo odómetro"),
     lower.lastIndexOf("cual es el nuevo odometro"),
+    lower.lastIndexOf("cuál es el nuevo horómetro"),
+    lower.lastIndexOf("cual es el nuevo horometro"),
     lower.lastIndexOf("nuevo odómetro en km"),
     lower.lastIndexOf("nuevo odometro en km"),
     lower.lastIndexOf("perfecto, tomo "),
@@ -328,6 +334,12 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
       after,
     ) ||
     /\b(certificado|cobertura|monitoreo|constancia)\b/.test(after) ||
+    /\b(no reporta|no me reporta|sin reporte|estado de reporte|reporte de mis unidades|listado de mis unidades)\b/.test(
+      after,
+    ) ||
+    /\b(consultar|quiero consultar).{0,80}\b(reporte|unidades|gps|ignicion)\b/.test(after) ||
+    /\bunidades registradas\b/.test(after) ||
+    /ten[eé]s\s+\d+\s+unidades/.test(after) ||
     // Bug real, producción 2026-07-23: tras "Voy a registrar: ...", el propio bot
     // reaccionó a un mensaje del cliente sin patente re-preguntando "Para registrar
     // el cambio de odómetro NECESITO la patente de la unidad..." — esa respuesta del
@@ -344,9 +356,32 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
   );
 }
 
+/** Cliente consultó estado/reporte/GPS en las últimas líneas — pausa trámite de odómetro arrastrado. */
+export function threadHasRecentUnitStatusConsultIntent(threadText: string): boolean {
+  const tail = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-12);
+  return tail.some((line) => {
+    const t = line
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|offline|sin señal|sin senal)\b/.test(t)) {
+      return true;
+    }
+    return (
+      /\b(consultar|quiero|necesito|ver|estado|brindas|listado)\b/.test(t) &&
+      /\b(reporte|unidades|gps|ignicion|flota)\b/.test(t)
+    );
+  });
+}
+
 /** Trámite de odómetro activo en el hilo (pide patente/km o confirmación pendiente). */
 export function threadHasActiveOdometerFlow(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
+  if (threadHasRecentUnitStatusConsultIntent(threadText)) return false;
   return threadAwaitingOdometerPlate(threadText) || hasPendingOdometerConfirmation(threadText);
 }
 
@@ -355,6 +390,7 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
+  if (threadHasRecentUnitStatusConsultIntent(threadText)) return false;
   // Solo cuando el BOT pidió patente/odómetro en el turno anterior — no el intent del cliente.
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||

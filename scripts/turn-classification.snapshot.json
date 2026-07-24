@@ -279,7 +279,7 @@
     "label": "patente suelta con odometro activo en hilo",
     "text": "AD427MC",
     "threadTextPreview": "Para registrar el cambio de odómetro necesito la patente de ",
-    "executor": "odometro"
+    "executor": "unidades"
   },
   {
     "label": "palabra clave problema",
