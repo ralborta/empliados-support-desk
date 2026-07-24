@@ -6,6 +6,7 @@ import { POST as mantenimientoPost } from "@/app/api/wara/mantenimiento-operativ
 import { POST as odometroPost } from "@/app/api/wara/odometro-horometro/route";
 import { POST as unidadesPost } from "@/app/api/wara/unidades/route";
 import { customerRegisteredContextResponse } from "@/lib/builderbotCustomerContext";
+import { persistCustomerInbound } from "@/lib/customerTicketInquiry";
 import { loadTurnThreadContext } from "@/lib/conversationThread";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
@@ -26,17 +27,28 @@ import {
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
   looksLikeBriefConfirmation,
+  detectLoosePlate,
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import {
   buildFleetUnitNotFoundMessage,
   looksLikeFleetUnitSearchInput,
+  looksLikeUnitNameInMessage,
 } from "@/lib/waraUnitIntent";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
 import { clearPendingAction, getPendingAction } from "@/lib/pendingAction";
 import { prisma } from "@/lib/db";
 
 type JsonRecord = Record<string, unknown>;
+
+function looksLikePendingCertificateUnitReply(text: string): boolean {
+  return (
+    !!detectLoosePlate(text) ||
+    isBarePlatePrefixHint(text) ||
+    looksLikeFleetUnitSearchInput(text) ||
+    looksLikeUnitNameInMessage(text)
+  );
+}
 
 type ExecutorHandler = (req: NextRequest) => Promise<NextResponse>;
 
@@ -143,6 +155,11 @@ export async function handleWhatsAppTurn(params: {
 }): Promise<JsonRecord> {
   const { rawPhone, body, apiKey } = params;
   const selectionText = body.trim();
+  if (selectionText) {
+    await persistCustomerInbound(rawPhone, selectionText, { source: "whatsapp_turn" }).catch(
+      () => undefined,
+    );
+  }
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
 
   if (!allowPhoneRequest(rawPhone, 20)) {
@@ -240,8 +257,15 @@ export async function handleWhatsAppTurn(params: {
   // a ese ejecutor sin pasar por classifyTurnExecutor. Si no hay estado en DB (conversación
   // vieja o TTL vencido), cae al comportamiento actual (regex sobre threadText) sin cambios.
   let executor: TurnExecutorId;
-  if (looksLikeBriefConfirmation(selectionText)) {
-    const pendingAction = await getPendingAction(prisma, rawPhone);
+  const pendingAction = await getPendingAction(prisma, rawPhone);
+  if (
+    pendingAction?.type === "certificados" &&
+    pendingAction.payload?.stage === "awaiting_unit" &&
+    looksLikePendingCertificateUnitReply(selectionText) &&
+    !looksLikeBriefConfirmation(selectionText)
+  ) {
+    executor = "certificados";
+  } else if (looksLikeBriefConfirmation(selectionText)) {
     executor = pendingAction?.type ?? classifyTurnExecutor(selectionText, threadCtx.classificationThread);
   } else {
     executor = classifyTurnExecutor(selectionText, threadCtx.classificationThread);

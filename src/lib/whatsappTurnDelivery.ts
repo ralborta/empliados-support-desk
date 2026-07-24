@@ -25,8 +25,15 @@ export async function deliverTurnToWhatsApp(
     return { ...payload, message, skipResponse_s: "true", nextFlow, nextFlow_s: nextFlow };
   }
 
+  const persistMeta = {
+    source: "whatsapp_turn",
+    executor: payload.executor_s ?? payload.executor ?? "turn",
+    waDelivery: shouldTurnSendWhatsAppToCustomer() ? "backend" : "bbc",
+  };
+
   if (!shouldTurnSendWhatsAppToCustomer()) {
     const bbcSends = bbcShouldSendExecutorMessage();
+    await persistCustomerBotReply(rawPhone, message, persistMeta).catch(() => undefined);
     return {
       ...payload,
       message,
@@ -37,11 +44,7 @@ export async function deliverTurnToWhatsApp(
 
   try {
     await sendWhatsAppMessage({ number: rawPhone, message });
-    await persistCustomerBotReply(rawPhone, message, {
-      source: "whatsapp_turn",
-      executor: payload.executor_s ?? payload.executor ?? "turn",
-      waDelivery: "backend",
-    });
+    await persistCustomerBotReply(rawPhone, message, { ...persistMeta, waDelivery: "backend" });
     return {
       ...payload,
       message,

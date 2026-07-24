@@ -454,6 +454,20 @@ function looksLikeUnitListRequest(rawText: string): boolean {
   );
 }
 
+/** Cliente pidió ayuda para encontrar una unidad en el hilo reciente (respuesta de patente/nombre). */
+export function threadHasRecentFleetUnitSearchRequest(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2200)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\bayudame a encontrar mi unidad\b/.test(tail) ||
+    /\b(encontrar|buscar)\b.{0,80}\b(unidad|matricula|patente)\b/.test(tail) ||
+    /\bno encuentro\b.{0,40}\b(unidad|patente|matricula)\b/.test(tail)
+  );
+}
+
 function tokenizeSearchTerms(text: string): string[] {
   const tokens = text
     .normalize("NFD")

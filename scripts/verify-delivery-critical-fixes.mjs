@@ -4,6 +4,9 @@
  */
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import {
+  certificateFlowState,
+  hasPendingMaintenancePlateRequest,
+  hasPendingUnitConsultPlateRequest,
   isBarePlatePrefixHint,
   looksLikeBriefConfirmation,
   looksLikeExplicitCertificateResendRequest,
@@ -11,6 +14,7 @@ import {
   looksLikeOdometerIntentStart,
   threadTextSinceCompanySelection,
 } from "../src/lib/wara.ts";
+import { threadHasRecentFleetUnitSearchRequest } from "../src/lib/waraUnitIntent.ts";
 import {
   looksLikeImplicitCompanyChangeAffirmation,
   looksLikeOdometerConfirmationRejection,
@@ -71,6 +75,50 @@ const scoped = threadTextSinceCompanySelection(
   ["No encontré AE 483 VE", "Perfecto, sigo con El Cacique S.A.", "Quiero certificado"].join("\n"),
 );
 assert(!scoped.includes("AE 483"), "patente vieja fuera del hilo scoped");
+
+console.log("\n— 300-112 no va a odómetro tras buscar unidad —");
+const pollutedB = [
+  "Para registrar el cambio de horómetro necesito la patente de la unidad.",
+  "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
+  "Ayudame a encontrar mi unidad",
+  "300-112",
+].join("\n");
+assert(
+  classifyTurnExecutor("300-112", pollutedB) === "unidades",
+  "300-112 tras buscar unidad → unidades",
+);
+assert(threadHasRecentFleetUnitSearchRequest(pollutedB), "detecta pedido de búsqueda");
+
+console.log("\n— 300-112 en certificado gana sobre mantenimiento viejo —");
+const certMsg =
+  "Para el certificado de cobertura necesito la unidad: decime la patente (ej. AD 427 MC).";
+const pollutedC = [
+  "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
+  "Quiero mantenimiento preventivo",
+  "Para programar mantenimiento preventivo necesito la patente de la unidad",
+  "Necesito un certificado de cobertura",
+  certMsg,
+  "300-112",
+].join("\n");
+assert(certificateFlowState(pollutedC) === "awaiting_unit", "cert en awaiting_unit");
+assert(!hasPendingMaintenancePlateRequest(pollutedC), "mantenimiento no secuestra cert");
+assert(
+  classifyTurnExecutor("300-112", pollutedC) === "certificados",
+  "300-112 en certificado → certificados",
+);
+
+console.log("\n— Consulta unidad reciente gana sobre odómetro viejo —");
+const pollutedUnitAsk = [
+  "Perfecto, tomo AG562SP. ¿Cuál es el nuevo horómetro en horas?",
+  "Ayudame a encontrar mi unidad",
+  "Por favor, indicame la matrícula exacta de tu unidad.",
+  "300-112",
+].join("\n");
+assert(hasPendingUnitConsultPlateRequest(pollutedUnitAsk), "detecta pedido de matrícula");
+assert(
+  classifyTurnExecutor("300-112", pollutedUnitAsk) === "unidades",
+  "300-112 tras pedido matrícula → unidades",
+);
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

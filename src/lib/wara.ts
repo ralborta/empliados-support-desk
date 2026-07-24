@@ -572,6 +572,7 @@ export function extractLastPlateFromThread(text: string): string | null {
 
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */
 export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
+  if (certificateFlowState(threadText) === "awaiting_unit") return false;
   const tail = threadText.slice(-2500).toLowerCase();
   const askedForPlate =
     /para programar mantenimiento preventivo necesito la patente/.test(tail) ||
@@ -582,6 +583,51 @@ export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
     (/yo lo dejo cargado en wara/.test(tail) && /patente/.test(tail)) ||
     (/puedo registrar o programar un mantenimiento/.test(tail) && /patente/.test(tail));
   return askedForPlate && /mantenimiento/.test(tail);
+}
+
+/** El bot pidió patente/nombre para consultar una unidad (GPS, estado, búsqueda), no odómetro/mantenimiento/cert. */
+export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
+  if (certificateFlowState(threadText) !== "none") return false;
+  if (hasPendingMaintenancePlateRequest(threadText)) return false;
+
+  const lower = threadText.toLowerCase();
+  const unitConsultMarkers = [
+    lower.lastIndexOf("para revisar el gps"),
+    lower.lastIndexOf("cuál es la matrícula o el nombre"),
+    lower.lastIndexOf("cual es la matricula o el nombre"),
+    lower.lastIndexOf("indicame la matricula"),
+    lower.lastIndexOf("indicáme la matrícula"),
+    lower.lastIndexOf("matrícula exacta"),
+    lower.lastIndexOf("matricula exacta"),
+    lower.lastIndexOf("entendido, no era esa"),
+    lower.lastIndexOf("decime la matrícula exacta"),
+    lower.lastIndexOf("decime la matricula exacta"),
+  ].filter((i) => i >= 0);
+  if (!unitConsultMarkers.length) return false;
+
+  const lastUnitAsk = Math.max(...unitConsultMarkers);
+  const odoMarkers = [
+    lower.lastIndexOf("para registrar el cambio de horómetro"),
+    lower.lastIndexOf("para registrar el cambio de horometro"),
+    lower.lastIndexOf("para registrar el cambio de odómetro"),
+    lower.lastIndexOf("para registrar el cambio de odometro"),
+    lower.lastIndexOf("perfecto, tomo "),
+    lower.lastIndexOf("cuál es el nuevo horómetro"),
+    lower.lastIndexOf("cual es el nuevo horometro"),
+    lower.lastIndexOf("cuál es el nuevo odómetro"),
+    lower.lastIndexOf("cual es el nuevo odometro"),
+  ].filter((i) => i >= 0);
+  const lastOdo = odoMarkers.length ? Math.max(...odoMarkers) : -1;
+  if (lastOdo >= 0 && lastOdo > lastUnitAsk) return false;
+
+  const tail = threadText.slice(lastUnitAsk, lastUnitAsk + 800).toLowerCase();
+  return (
+    /para revisar el gps.*necesito la unidad/.test(tail) ||
+    /(?:entendido, no era esa|cu[aá]l es la otra unidad)/.test(tail) ||
+    /(?:cu[aá]l es la matr[ií]cula|decime la matr[ií]cula|matr[ií]cula exacta|indic[aá]me la matr[ií]cula|pas[aá]me la patente|marca\/nombre \(ej\.)/.test(
+      tail,
+    )
+  );
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   hasPendingCertificateConfirmation,
   extractPlatePrefixFromMessage,
   hasPendingMaintenancePlateRequest,
+  hasPendingUnitConsultPlateRequest,
   hasPendingMantenimientoConfirmation,
   hasPendingOdometerConfirmation,
   isBarePlatePrefixHint,
@@ -48,7 +49,7 @@ import {
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput, looksLikeUnitNameInMessage } from "@/lib/waraUnitIntent";
+import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput, looksLikeUnitNameInMessage, threadHasRecentFleetUnitSearchRequest } from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
@@ -347,11 +348,39 @@ const TURN_RULES: TurnRule[] = [
       looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? "unidades" : null,
   },
   {
+    id: "certificate_unit_context_selection",
+    reason: "Respuesta de unidad tras 'necesito la unidad' del flujo de certificado.",
+    decide: ({ text, threadText }) =>
+      isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText) ? "certificados" : null,
+  },
+  {
+    id: "unit_consult_plate_selection",
+    reason: "Patente/nombre tras pedido de consulta de unidad (GPS, estado, búsqueda).",
+    decide: ({ text, threadText }) =>
+      hasPendingUnitConsultPlateRequest(threadText) && isUnitSelectionMessage(text, threadText)
+        ? "unidades"
+        : null,
+  },
+  {
+    id: "fleet_unit_search_followup",
+    reason: "Patente/nombre tras pedir ayuda para encontrar una unidad.",
+    decide: ({ text, threadText }) =>
+      threadHasRecentFleetUnitSearchRequest(threadText) &&
+      isUnitSelectionMessage(text, threadText) &&
+      certificateFlowState(threadText) === "none"
+        ? "unidades"
+        : null,
+  },
+  {
     id: "odometer_operational",
     reason: "Odómetro operativo — antes que guías informativas (el hilo no debe secuestrar con mantenimiento).",
     decide: ({ text, threadText }) => {
       if (looksLikeNonOdometerOperationalIntent(text)) return null;
       if (certificateFlowState(threadText) !== "none") return null;
+      if (hasPendingUnitConsultPlateRequest(threadText)) return null;
+      if (threadHasRecentFleetUnitSearchRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
+        return null;
+      }
       if (/\b(encontrar|buscar|listado de mis unidades|listado de unidades)\b/.test(norm(text))) {
         return null;
       }
@@ -375,6 +404,7 @@ const TURN_RULES: TurnRule[] = [
     reason:
       "Patente/prefijo/marca tras pedido de mantenimiento — salvo que el hilo sea consulta de unidad reciente.",
     decide: ({ text, threadText }) => {
+      if (certificateFlowState(threadText) !== "none") return null;
       if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
         return null;
       }
@@ -434,16 +464,12 @@ const TURN_RULES: TurnRule[] = [
     decide: ({ text, threadText }) => (looksLikeCertificateIntent(text, threadText) ? "certificados" : null),
   },
   {
-    id: "certificate_unit_context_selection",
-    reason: "Respuesta de unidad tras 'necesito la unidad' del flujo de certificado.",
-    decide: ({ text, threadText }) =>
-      isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText) ? "certificados" : null,
-  },
-  {
     id: "pending_maintenance_plate_selection_redundant",
     reason: "Patente pedida en contexto de mantenimiento (también cubierto arriba; redundante por claridad).",
     decide: ({ text, threadText }) =>
-      hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)
+      certificateFlowState(threadText) === "none" &&
+      hasPendingMaintenancePlateRequest(threadText) &&
+      isUnitSelectionMessage(text, threadText)
         ? "mantenimiento"
         : null,
   },

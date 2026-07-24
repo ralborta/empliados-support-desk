@@ -46,6 +46,52 @@ export async function persistCustomerBotReply(
   });
 }
 
+/** Persiste mensaje entrante del cliente (panel / hilo de clasificación). */
+export async function persistCustomerInbound(
+  rawPhone: string,
+  text: string,
+  payload: Record<string, unknown>,
+  client: PrismaClient = prisma,
+): Promise<void> {
+  const message = text?.trim();
+  if (!message) return;
+  const customer = await findCustomerByWhatsAppNumber(client, rawPhone);
+  if (!customer) return;
+  const targetTicket =
+    (await client.ticket.findFirst({
+      where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+      orderBy: { lastMessageAt: "desc" },
+    })) ??
+    (await client.ticket.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { lastMessageAt: "desc" },
+    }));
+  if (!targetTicket) return;
+  const recent = await client.ticketMessage.findFirst({
+    where: {
+      ticketId: targetTicket.id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text: message,
+      createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+  });
+  if (recent) return;
+  await client.ticketMessage.create({
+    data: {
+      ticketId: targetTicket.id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text: message,
+      rawPayload: payload as never,
+    },
+  });
+  await client.ticket.update({
+    where: { id: targetTicket.id },
+    data: { lastMessageAt: new Date() },
+  });
+}
+
 function normInquiryText(text: string): string {
   return text
     .normalize("NFD")

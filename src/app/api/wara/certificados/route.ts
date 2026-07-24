@@ -776,6 +776,10 @@ export async function POST(req: NextRequest) {
       source: "wara_certificados",
       stage: "ask_unit",
     });
+    await setPendingAction(prisma, rawPhone, "certificados", {
+      summary: message,
+      payload: { stage: "awaiting_unit" },
+    });
     return NextResponse.json(
       {
         ok: true,
