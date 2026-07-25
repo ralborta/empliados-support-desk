@@ -29,6 +29,7 @@ import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
   buildFleetUnitNotFoundMessage,
   customerOnlyThreadText,
+  extractExplicitUnitSearchLabel,
   filterUnitsByResolvedPlate,
   filterUnitsBySearchTerms,
   looksLikeFleetUnitSearchInput,
