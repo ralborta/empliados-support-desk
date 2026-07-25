@@ -28,6 +28,9 @@ import {
   looksLikeFleetUnitSearchInput,
   looksLikeUnitNameInMessage,
 } from "@/lib/waraUnitIntent";
+import { waitUntil } from "@vercel/functions";
+import { sendWhatsAppMessage } from "@/lib/builderbot";
+import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction } from "@/lib/pendingAction";
 import { prisma } from "@/lib/db";
 
@@ -123,21 +126,32 @@ export function scheduleDeferredTurnExecutor(params: {
   selectionText: string;
   apiKey: string;
 }): void {
-  const url = turnExecuteUrl();
-  void fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": params.apiKey,
-    },
-    body: JSON.stringify({
-      from: params.rawPhone,
-      body: params.selectionText,
-      api_key: params.apiKey,
-    }),
-  }).catch((err) => {
-    console.error("[whatsappTurn] deferred execute fetch failed:", err);
-  });
+  // En Vercel un fetch fire-and-forget se cancela al terminar /turn — el cliente quedaba mudo.
+  waitUntil(
+    (async () => {
+      try {
+        const result = await runTurnExecutorPhase(params);
+        if (!result.message) return;
+        await sendWhatsAppMessage({ number: params.rawPhone, message: result.message });
+        await persistCustomerBotReply(params.rawPhone, result.message, {
+          source: "whatsapp_turn_execute",
+          executor: result.executor,
+          waDelivery: "backend_deferred",
+        }).catch(() => undefined);
+      } catch (err) {
+        console.error("[whatsappTurn] deferred execute failed:", err);
+        try {
+          await sendWhatsAppMessage({
+            number: params.rawPhone,
+            message:
+              "Tuve un problema procesando la consulta. Intentá de nuevo en un momento o escribí la patente/unidad con más detalle.",
+          });
+        } catch {
+          /* último recurso */
+        }
+      }
+    })(),
+  );
 }
 
 export async function runTurnExecutorPhase(params: {

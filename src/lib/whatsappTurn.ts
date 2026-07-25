@@ -199,11 +199,17 @@ export async function handleWhatsAppTurn(params: {
 
   if (shouldDeferTurnExecutor()) {
     scheduleDeferredTurnExecutor({ rawPhone, selectionText, apiKey });
+    const firstName = String(context.name ?? "")
+      .trim()
+      .split(/\s+/)[0];
+    const ack = firstName
+      ? `Dame un momento ${firstName}, estoy procesando tu consulta…`
+      : "Dame un momento, estoy procesando tu consulta…";
     return deliverTurnToWhatsApp(
       rawPhone,
       buildTurnPayload(context, {
-        message: "",
-        skipResponse_s: "true",
+        message: ack,
+        skipResponse_s: "false",
         nextFlow: "reply",
         nextFlow_s: "reply",
         executor: "deferred",
