@@ -35,6 +35,17 @@ type MonitorActivitySummary = {
   lastInboundAt: string | null;
 };
 
+type WaraHealth = {
+  healthy: boolean;
+  stage: string;
+  message: string;
+  apiBaseUrl: string;
+  isStagingUrl: boolean;
+  configWarning?: string;
+  checkedAt: string;
+  httpStatus?: number;
+};
+
 type MonitorResponse = {
   ok: boolean;
   generatedAt?: string;
@@ -43,6 +54,7 @@ type MonitorResponse = {
     summary: MonitorActivitySummary;
     messages: MonitorActivityMessage[];
   };
+  wara?: WaraHealth;
   error?: string;
 };
 
@@ -90,11 +102,29 @@ function directionLabel(msg: MonitorActivityMessage): string {
   return "Panel";
 }
 
+function waraStageLabel(stage: string): string {
+  switch (stage) {
+    case "ok":
+      return "Operativa";
+    case "network_error":
+      return "Sin conexión";
+    case "token_invalid":
+      return "Token inválido";
+    case "misconfigured":
+      return "Mal configurada";
+    case "wrong_environment":
+      return "Entorno incorrecto";
+    default:
+      return stage;
+  }
+}
+
 export default function MonitorPage() {
   const [password, setPassword] = useState<string>("");
   const [unlocked, setUnlocked] = useState(false);
   const [agents, setAgents] = useState<MonitorAgent[]>([]);
   const [activity, setActivity] = useState<MonitorResponse["activity"]>(undefined);
+  const [wara, setWara] = useState<WaraHealth | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,6 +155,7 @@ export default function MonitorPage() {
       setUnlocked(true);
       setAgents(data.agents ?? []);
       setActivity(data.activity);
+      setWara(data.wara ?? null);
       setGeneratedAt(data.generatedAt ?? null);
       window.sessionStorage.setItem(STORAGE_KEY, pwd);
     } catch {
@@ -205,6 +236,51 @@ export default function MonitorPage() {
             Salir
           </button>
         </div>
+
+        {wara && (
+          <section
+            className={`rounded-xl border px-4 py-4 ${
+              wara.healthy
+                ? wara.configWarning
+                  ? "border-amber-700/60 bg-amber-950/40"
+                  : "border-emerald-800/60 bg-emerald-950/30"
+                : "border-red-800/70 bg-red-950/40"
+            }`}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
+                  API Wara (Visionblo)
+                </h2>
+                <p className="mt-1 text-sm text-slate-300">{wara.message}</p>
+                {!wara.healthy && (
+                  <p className="mt-2 text-sm text-red-200">
+                    El bot sigue respondiendo por WhatsApp, pero no puede consultar unidades ni datos en Wara.
+                    Esto <strong>no es un fallo del bot</strong>.
+                  </p>
+                )}
+                {wara.configWarning && (
+                  <p className="mt-2 text-sm text-amber-200">{wara.configWarning}</p>
+                )}
+                <p className="mt-2 font-mono text-xs text-slate-500">{wara.apiBaseUrl}</p>
+              </div>
+              <div className="text-right">
+                <span
+                  className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${
+                    wara.healthy
+                      ? wara.configWarning
+                        ? "bg-amber-500/20 text-amber-200"
+                        : "bg-emerald-500/20 text-emerald-200"
+                      : "bg-red-500/20 text-red-200"
+                  }`}
+                >
+                  {wara.healthy ? (wara.configWarning ? "Advertencia" : "OK") : waraStageLabel(wara.stage)}
+                </span>
+                <p className="mt-2 text-xs text-slate-500">probado {formatDateTime(wara.checkedAt)}</p>
+              </div>
+            </div>
+          </section>
+        )}
 
         {summary && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/wara-health",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

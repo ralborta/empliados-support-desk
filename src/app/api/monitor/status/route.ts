@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { ADVISOR_PRESENCE_TIMEOUT_MS, isAdvisorPresentlyOnline } from "@/lib/advisorDistribution";
 import { getMonitorRecentActivity } from "@/lib/monitorActivity";
 import { getPanelScreenLabel } from "@/lib/panelScreenLabels";
+import { checkWaraApiHealth } from "@/lib/waraHealthCheck";
 
 /**
  * Pantalla externa de monitoreo (fuera del login normal del panel): quién está
@@ -60,6 +61,7 @@ export async function GET(req: NextRequest) {
   });
 
   const activity = await getMonitorRecentActivity();
+  const wara = await checkWaraApiHealth();
 
   return NextResponse.json({
     ok: true,
@@ -67,5 +69,6 @@ export async function GET(req: NextRequest) {
     presenceTimeoutMs: ADVISOR_PRESENCE_TIMEOUT_MS,
     agents: rows,
     activity,
+    wara,
   });
 }

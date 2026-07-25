@@ -15,6 +15,7 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { Resend } from "resend";
+import type { WaraHealthStatus } from "@/lib/waraHealthCheck";
 
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL?.trim() || "https://wara.nivel41.com";
 
@@ -191,6 +192,41 @@ export async function sendUnassignedTicketAlertEmail(params: {
     html,
   );
   if (ok) console.log(`[panelEmail] Alerta de caso sin asignar ${params.ticketCode} → ${params.to}`);
+}
+
+let lastWaraHealthAlertAt = 0;
+const WARA_HEALTH_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
+
+/** Email ops cuando Wara no responde (cron / monitor). Cooldown 30 min. */
+export async function sendWaraHealthAlertEmail(health: WaraHealthStatus): Promise<boolean> {
+  const raw = process.env.WARA_OPS_ALERT_EMAIL?.trim() || "";
+  const recipients = raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  if (!recipients.length) return false;
+
+  const now = Date.now();
+  if (now - lastWaraHealthAlertAt < WARA_HEALTH_ALERT_COOLDOWN_MS) return false;
+
+  const html = `
+    <p><strong>Alerta: API de Wara no disponible o mal configurada</strong></p>
+    <p>Esto <strong>no es un fallo del bot</strong> — la plataforma no pudo consultar datos en Wara.</p>
+    <ul>
+      <li>Estado: ${escapeHtml(health.stage)}</li>
+      <li>URL: ${escapeHtml(health.apiBaseUrl)}</li>
+      <li>Detalle: ${escapeHtml(health.message)}</li>
+      ${health.configWarning ? `<li>Aviso config: ${escapeHtml(health.configWarning)}</li>` : ""}
+    </ul>
+    <p>Revisá <a href="${PANEL_BASE_URL}/monitor">monitor de operaciones</a> o variables WARA_* en Vercel.</p>
+  `;
+
+  let sent = false;
+  for (const to of recipients) {
+    if (await sendEmail(to, "[Wara] API no disponible — no es fallo del bot", html)) sent = true;
+  }
+  if (sent) {
+    lastWaraHealthAlertAt = now;
+    console.log("[panelEmail] Alerta Wara health enviada");
+  }
+  return sent;
 }
 
 function escapeHtml(value: string): string {
