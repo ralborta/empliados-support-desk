@@ -7,7 +7,11 @@ import { POST as odometroPost } from "@/app/api/wara/odometro-horometro/route";
 import { POST as unidadesPost } from "@/app/api/wara/unidades/route";
 import { customerRegisteredContextResponse } from "@/lib/builderbotCustomerContext";
 import { persistCustomerInbound } from "@/lib/customerTicketInquiry";
-import { loadTurnThreadContext } from "@/lib/conversationThread";
+import {
+  loadTurnThreadContext,
+  recentLastInboundTextForPhone,
+  shouldIgnoreDuplicateInicioTurn,
+} from "@/lib/conversationThread";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import {
@@ -21,6 +25,7 @@ import {
   looksLikeFlowControlCommand,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeOperationalIntent,
   looksLikeSubstantiveCustomerMessage,
 } from "@/lib/waraApi";
 import {
@@ -154,9 +159,41 @@ export async function handleWhatsAppTurn(params: {
   apiKey: string;
 }): Promise<JsonRecord> {
   const { rawPhone, body, apiKey } = params;
-  const selectionText = body.trim();
-  if (selectionText) {
-    await persistCustomerInbound(rawPhone, selectionText, { source: "whatsapp_turn" }).catch(
+  const rawBody = body.trim();
+  let selectionText = rawBody;
+
+  // BuilderBot a veces re-ejecuta Inicio sin {body} (webhook duplicado). Un cuerpo vacío
+  // caía en el saludo repetido ("seguimos por acá") en vez del trámite real — bug prod 2026-07-25.
+  if (!selectionText) {
+    const lastInbound = await recentLastInboundTextForPhone(rawPhone);
+    if (lastInbound) {
+      if (await shouldIgnoreDuplicateInicioTurn(rawPhone, lastInbound)) {
+        return deliverTurnToWhatsApp(
+          rawPhone,
+          buildTurnPayload(
+            { registered: true, registered_s: "true" },
+            {
+              message: "",
+              skipResponse_s: "true",
+              nextFlow: "ignore",
+              nextFlow_s: "ignore",
+              executor: "context",
+              executor_s: "empty_body_duplicate",
+            },
+          ),
+        );
+      }
+      if (
+        looksLikeOperationalIntent(lastInbound) ||
+        looksLikeSubstantiveCustomerMessage(lastInbound)
+      ) {
+        selectionText = lastInbound;
+      }
+    }
+  }
+
+  if (rawBody) {
+    await persistCustomerInbound(rawPhone, rawBody, { source: "whatsapp_turn" }).catch(
       () => undefined,
     );
   }
@@ -270,7 +307,7 @@ export async function handleWhatsAppTurn(params: {
   } else {
     executor = classifyTurnExecutor(selectionText, threadCtx.classificationThread);
   }
-  let execResult = await invokeExecutor(executor, rawPhone, body, apiKey);
+  let execResult = await invokeExecutor(executor, rawPhone, selectionText, apiKey);
 
   if (executorSkippedSilently(execResult)) {
     const recovery = inferRecoveryExecutor(
@@ -279,7 +316,7 @@ export async function handleWhatsAppTurn(params: {
       threadCtx.classificationThread,
     );
     if (recovery && recovery !== executor) {
-      const retryResult = await invokeExecutor(recovery, rawPhone, body, apiKey);
+      const retryResult = await invokeExecutor(recovery, rawPhone, selectionText, apiKey);
       if (!executorSkippedSilently(retryResult) || messageFromPayload(retryResult)) {
         execResult = retryResult;
         executor = recovery;

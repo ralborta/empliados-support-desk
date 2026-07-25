@@ -20,6 +20,7 @@ const SUITES = [
   "verify-odometer-plate-continuity.mjs",
   "verify-odometer-fecha-hora.mjs",
   "verify-certificate-flow-continuity.mjs",
+  "verify-certificate-not-greeting-loop.mjs",
   "verify-context-continuity-safety.mjs",
   "verify-outbound-dedup.mjs",
   "verify-certificate-crossflow-vague-reference.mjs",

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureBuilderBotContactActive } from "@/lib/builderbot";
 import {
+  recentLastInboundTextForPhone,
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
@@ -556,7 +557,30 @@ export async function customerRegisteredContextResponse(
       source: "builderbot_context",
       stage: "flow_reset",
     });
-  } else if (!selectionText.trim() || looksLikeGreeting(selectionText)) {
+  } else if (!selectionText.trim()) {
+    // Cuerpo vacío (re-ejecución BBC sin {body}): no repetir saludo; reintentar trámite o ignorar.
+    const lastInbound = await recentLastInboundTextForPhone(trimmed);
+    if (lastInbound && looksLikeOperationalIntent(lastInbound)) {
+      if (await shouldIgnoreDuplicateInicioTurn(trimmed, lastInbound)) {
+        nextFlow = "ignore";
+        responseMessage = "";
+      } else {
+        nextFlow = "router";
+        responseMessage = "";
+      }
+    } else if (lastInbound && (await shouldIgnoreDuplicateInicioTurn(trimmed, lastInbound))) {
+      nextFlow = "ignore";
+      responseMessage = "";
+    } else {
+      nextFlow = "reply";
+      if (!responseMessage) {
+        const firstName = customer?.name?.trim().split(/\s+/)[0];
+        responseMessage = firstName
+          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
+          : "Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?";
+      }
+    }
+  } else if (looksLikeGreeting(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
@@ -635,6 +659,10 @@ export async function customerRegisteredContextResponse(
     looksLikeCompanyListQuestion(selectionText)
   ) {
     nextFlow = "reply";
+  } else if (selectionText && looksLikeOperationalIntent(selectionText)) {
+    // Trámites operativos (certificado, odómetro, etc.) van al router aunque falte menú empresa.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (needsCompanyMenu && selectionText && looksLikeCompanySelection(selectionText)) {
     nextFlow = "reply";
     if (!responseMessage) {
@@ -644,7 +672,7 @@ export async function customerRegisteredContextResponse(
     }
   } else if (needsCompanyMenu && selectionText && !looksLikeOperationalIntent(selectionText)) {
     nextFlow = "reply";
-  } else if (needsCompanyMenu) {
+  } else if (needsCompanyMenu && !selectionText.trim()) {
     nextFlow = "reply";
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     nextFlow = "reply";
