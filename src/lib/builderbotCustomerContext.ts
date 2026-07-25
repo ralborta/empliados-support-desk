@@ -35,6 +35,7 @@ import {
   looksLikeSubstantiveCustomerMessage,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
+  resolveCustomerForTurnContext,
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
 import {
@@ -391,7 +392,7 @@ export async function customerRegisteredContextResponse(
     });
   }
 
-  let resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+  let resolution = await resolveCustomerForTurnContext(prisma, trimmed);
   const activeCompanyEarly =
     resolution.selectedCompanyName ?? resolution.customer?.companyName?.trim() ?? "";
   const needsCompanyPick =

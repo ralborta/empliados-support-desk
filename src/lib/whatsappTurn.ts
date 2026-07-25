@@ -1,10 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
-import { POST as odooTicketPost } from "@/app/api/odoo/ticket/route";
-import { POST as certificadosPost } from "@/app/api/wara/certificados/route";
-import { POST as infoGuidesPost } from "@/app/api/wara/info-guides/route";
-import { POST as mantenimientoPost } from "@/app/api/wara/mantenimiento-operativo/route";
-import { POST as odometroPost } from "@/app/api/wara/odometro-horometro/route";
-import { POST as unidadesPost } from "@/app/api/wara/unidades/route";
 import { customerRegisteredContextResponse } from "@/lib/builderbotCustomerContext";
 import { persistCustomerInbound } from "@/lib/customerTicketInquiry";
 import {
@@ -15,107 +8,24 @@ import {
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import {
-  classifyTurnExecutor,
-  TURN_EXECUTOR_PATH,
-  type TurnExecutorId,
-} from "@/lib/whatsappTurnRouter";
-import {
-  buildUnexpectedTurnFallbackMessage,
-  looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
-  looksLikeGpsOrUnitStatusQuestion,
-  looksLikeLiveUnitConsultIntent,
   looksLikeOperationalIntent,
   looksLikeSubstantiveCustomerMessage,
 } from "@/lib/waraApi";
 import {
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
-  looksLikeBriefConfirmation,
-  detectLoosePlate,
-  threadHasActiveOdometerFlow,
 } from "@/lib/wara";
-import {
-  buildFleetUnitNotFoundMessage,
-  looksLikeFleetUnitSearchInput,
-  looksLikeUnitNameInMessage,
-} from "@/lib/waraUnitIntent";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
-import { clearPendingAction, getPendingAction } from "@/lib/pendingAction";
+import {
+  runTurnExecutorPhase,
+  scheduleDeferredTurnExecutor,
+  shouldDeferTurnExecutor,
+} from "@/lib/whatsappTurnExecutor";
+import { clearPendingAction } from "@/lib/pendingAction";
 import { prisma } from "@/lib/db";
 
 type JsonRecord = Record<string, unknown>;
-
-function looksLikePendingCertificateUnitReply(text: string): boolean {
-  return (
-    !!detectLoosePlate(text) ||
-    isBarePlatePrefixHint(text) ||
-    looksLikeFleetUnitSearchInput(text) ||
-    looksLikeUnitNameInMessage(text)
-  );
-}
-
-type ExecutorHandler = (req: NextRequest) => Promise<NextResponse>;
-
-const EXECUTOR_HANDLERS: Record<TurnExecutorId, ExecutorHandler> = {
-  unidades: unidadesPost,
-  odometro: odometroPost,
-  certificados: certificadosPost,
-  mantenimiento: mantenimientoPost,
-  odoo_ticket: odooTicketPost,
-  info_guides: infoGuidesPost,
-};
-
-function executorBody(rawPhone: string, body: string): JsonRecord {
-  return {
-    from: rawPhone,
-    phone: rawPhone,
-    body,
-    rawText: body,
-  };
-}
-
-async function invokeExecutor(
-  executor: TurnExecutorId,
-  rawPhone: string,
-  body: string,
-  apiKey: string,
-): Promise<JsonRecord> {
-  const handler = EXECUTOR_HANDLERS[executor];
-  const req = new NextRequest(`http://internal${TURN_EXECUTOR_PATH[executor]}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-    },
-    body: JSON.stringify(executorBody(rawPhone, body)),
-  });
-  const res = await handler(req);
-  return (await res.json().catch(() => ({}))) as JsonRecord;
-}
-
-function messageFromPayload(data: JsonRecord): string {
-  return String(data.message ?? data.summaryText ?? "").trim();
-}
-
-function executorSkippedSilently(data: JsonRecord): boolean {
-  return String(data.skipResponse_s ?? "") === "true" && !messageFromPayload(data);
-}
-
-function inferRecoveryExecutor(
-  selectionText: string,
-  failedExecutor: TurnExecutorId,
-  threadText: string,
-): TurnExecutorId | null {
-  if (failedExecutor === "odometro" && threadHasActiveOdometerFlow(threadText)) {
-    return null;
-  }
-  if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return "unidades";
-  if (looksLikeLiveUnitConsultIntent(selectionText)) return "unidades";
-  if (looksLikeExplicitReclamoOrTicketRequest(selectionText)) return "odoo_ticket";
-  if (failedExecutor === "info_guides") return null;
-  return null;
-}
 
 function buildTurnPayload(
   context: JsonRecord,
@@ -162,8 +72,6 @@ export async function handleWhatsAppTurn(params: {
   const rawBody = body.trim();
   let selectionText = rawBody;
 
-  // BuilderBot a veces re-ejecuta Inicio sin {body} (webhook duplicado). Un cuerpo vacío
-  // caía en el saludo repetido ("seguimos por acá") en vez del trámite real — bug prod 2026-07-25.
   if (!selectionText) {
     const lastInbound = await recentLastInboundTextForPhone(rawPhone);
     if (lastInbound) {
@@ -289,77 +197,33 @@ export async function handleWhatsAppTurn(params: {
     );
   }
 
-  // Estado explícito en DB (prioridad sobre heurísticas de texto): si hay un trámite
-  // pendiente de confirmación vigente y el mensaje es una confirmación breve, va directo
-  // a ese ejecutor sin pasar por classifyTurnExecutor. Si no hay estado en DB (conversación
-  // vieja o TTL vencido), cae al comportamiento actual (regex sobre threadText) sin cambios.
-  let executor: TurnExecutorId;
-  const pendingAction = await getPendingAction(prisma, rawPhone);
-  if (
-    pendingAction?.type === "certificados" &&
-    pendingAction.payload?.stage === "awaiting_unit" &&
-    looksLikePendingCertificateUnitReply(selectionText) &&
-    !looksLikeBriefConfirmation(selectionText)
-  ) {
-    executor = "certificados";
-  } else if (looksLikeBriefConfirmation(selectionText)) {
-    executor = pendingAction?.type ?? classifyTurnExecutor(selectionText, threadCtx.classificationThread);
-  } else {
-    executor = classifyTurnExecutor(selectionText, threadCtx.classificationThread);
-  }
-  let execResult = await invokeExecutor(executor, rawPhone, selectionText, apiKey);
-
-  if (executorSkippedSilently(execResult)) {
-    const recovery = inferRecoveryExecutor(
-      selectionText,
-      executor,
-      threadCtx.classificationThread,
+  if (shouldDeferTurnExecutor()) {
+    scheduleDeferredTurnExecutor({ rawPhone, selectionText, apiKey });
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(context, {
+        message: "",
+        skipResponse_s: "true",
+        nextFlow: "reply",
+        nextFlow_s: "reply",
+        executor: "deferred",
+        executor_s: "deferred",
+        deferredExecute_s: "true",
+      }),
     );
-    if (recovery && recovery !== executor) {
-      const retryResult = await invokeExecutor(recovery, rawPhone, selectionText, apiKey);
-      if (!executorSkippedSilently(retryResult) || messageFromPayload(retryResult)) {
-        execResult = retryResult;
-        executor = recovery;
-      }
-    }
   }
 
-  const execMessage = messageFromPayload(execResult);
-  const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-  let execSkip = executorSkippedSilently(execResult);
-  let finalMessage = execSkip ? "" : execMessage || String(context.message ?? "");
-
-  if (!finalMessage) {
-    if (executor === "mantenimiento") {
-      finalMessage =
-        "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
-    } else if (executor === "unidades" && looksLikeFleetUnitSearchInput(selectionText)) {
-      finalMessage = buildFleetUnitNotFoundMessage({ rawText: selectionText });
-    } else if (
-      executor === "unidades" &&
-      (looksLikeLiveUnitConsultIntent(selectionText) || looksLikeGpsOrUnitStatusQuestion(selectionText))
-    ) {
-      finalMessage =
-        "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan).";
-    } else {
-      finalMessage = buildUnexpectedTurnFallbackMessage(selectionText);
-    }
-    execSkip = false;
-  }
-
+  const execPhase = await runTurnExecutorPhase({ rawPhone, selectionText, apiKey });
   return deliverTurnToWhatsApp(
     rawPhone,
     buildTurnPayload(context, {
-      ok: execOk,
-      ok_s: execOk ? "true" : "false",
-      message: finalMessage,
-      skipResponse_s: execSkip ? "true" : undefined,
-      flowComplete_s: execResult.flowComplete_s ?? "true",
+      ok: execPhase.ok,
+      ok_s: execPhase.ok ? "true" : "false",
+      message: execPhase.message,
       nextFlow: "reply",
       nextFlow_s: "reply",
-      executor,
-      executor_s: executor,
-      executorResult: execResult,
+      executor: execPhase.executor,
+      executor_s: execPhase.executor,
     }),
   );
 }

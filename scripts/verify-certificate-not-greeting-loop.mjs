@@ -40,6 +40,15 @@ assert(
   "router envía certificado a certificados",
 );
 
+const maintPendingThread = [
+  ...threadAfterGreeting.split("\n"),
+  "Bot: Para registrar el mantenimiento necesito la patente de la unidad.",
+].join("\n");
+assert(
+  classifyTurnExecutor(certMsg, maintPendingThread) === "certificados",
+  "certificado explícito gana sobre mantenimiento pendiente en el hilo",
+);
+
 console.log("— Cuerpo vacío (bug BBC) no debe repetir saludo operativo —");
 assert(looksLikeGreeting(""), "documenta: texto vacío = saludo (por eso hay que tratarlo aparte)");
 assert(

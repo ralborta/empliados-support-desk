@@ -407,10 +407,16 @@ const TURN_RULES: TurnRule[] = [
     },
   },
   {
+    id: "certificate_intent",
+    reason: "Certificado: pedido explícito o hilo con trámite de certificado activo (antes que mantenimiento pendiente).",
+    decide: ({ text, threadText }) => (looksLikeCertificateIntent(text, threadText) ? "certificados" : null),
+  },
+  {
     id: "pending_maintenance_plate_selection",
     reason:
-      "Patente/prefijo/marca tras pedido de mantenimiento — salvo que el hilo sea consulta de unidad reciente.",
+      "Patente/prefijo/marca tras pedido de mantenimiento — salvo certificado u otra intención explícita.",
     decide: ({ text, threadText }) => {
+      if (looksLikeCertificateIntent(text, threadText)) return null;
       if (certificateFlowState(threadText) !== "none") return null;
       if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
         return null;
@@ -466,19 +472,16 @@ const TURN_RULES: TurnRule[] = [
     },
   },
   {
-    id: "certificate_intent",
-    reason: "Certificado: pedido explícito o hilo con trámite de certificado activo.",
-    decide: ({ text, threadText }) => (looksLikeCertificateIntent(text, threadText) ? "certificados" : null),
-  },
-  {
     id: "pending_maintenance_plate_selection_redundant",
     reason: "Patente pedida en contexto de mantenimiento (también cubierto arriba; redundante por claridad).",
     decide: ({ text, threadText }) =>
-      certificateFlowState(threadText) === "none" &&
-      hasPendingMaintenancePlateRequest(threadText) &&
-      isUnitSelectionMessage(text, threadText)
-        ? "mantenimiento"
-        : null,
+      looksLikeCertificateIntent(text, threadText)
+        ? null
+        : certificateFlowState(threadText) === "none" &&
+            hasPendingMaintenancePlateRequest(threadText) &&
+            isUnitSelectionMessage(text, threadText)
+          ? "mantenimiento"
+          : null,
   },
   {
     id: "maintenance_operational",

@@ -7,6 +7,8 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { handleWhatsAppTurn } from "@/lib/whatsappTurn";
 
+export const maxDuration = 60;
+
 const bodySchema = z
   .object({
     phone: z.string().min(8).optional(),

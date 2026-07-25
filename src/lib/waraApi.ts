@@ -51,7 +51,7 @@ export type WaraEmpresaLookupResult = {
 export type WaraCustomerResolution = {
   customer: Customer | null;
   registered: boolean;
-  source: "wara" | "local_fallback" | "none" | "test_blocked";
+  source: "wara" | "local_fallback" | "local_fast" | "none" | "test_blocked";
   lookup: WaraEmpresaLookupResult | null;
   /**
    * Cuando Wara devuelve más de un contacto y aún no se persistió la empresa elegida,
@@ -2332,6 +2332,33 @@ export async function obtenerCertificadoCobertura(
     raw: data,
     error: json?.ok === false ? errorFromWara(json, "Wara no generó el certificado") : undefined,
   };
+}
+
+export async function resolveCustomerForTurnContext(
+  prisma: PrismaClient,
+  rawPhone: string,
+  opts?: { contactName?: string; forceWaraLookup?: boolean },
+): Promise<WaraCustomerResolution> {
+  if (opts?.forceWaraLookup) {
+    return resolveCustomerByWaraPhone(prisma, rawPhone, opts);
+  }
+  const local = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (local?.companyName?.trim() && local.selectedCompanyContactId != null) {
+    return {
+      customer: local,
+      registered: true,
+      source: "local_fast",
+      lookup: {
+        configured: isWaraEmpresaLookupConfigured(),
+        ok: true,
+        encontrado: true,
+        contactos: [],
+      },
+      requiresCompanySelection: false,
+      selectedCompanyName: local.companyName.trim(),
+    };
+  }
+  return resolveCustomerByWaraPhone(prisma, rawPhone, opts);
 }
 
 export async function resolveCustomerByWaraPhone(
