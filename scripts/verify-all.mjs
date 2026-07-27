@@ -21,6 +21,7 @@ const SUITES = [
   "verify-odometer-fecha-hora.mjs",
   "verify-odometer-ai-extract.mjs",
   "verify-odometer-prefix-selection.mjs",
+  "verify-customer-thread-isolation.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-certificate-not-greeting-loop.mjs",
   "verify-context-continuity-safety.mjs",

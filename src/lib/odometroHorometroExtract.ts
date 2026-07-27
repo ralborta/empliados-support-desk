@@ -177,6 +177,8 @@ Reglas CRÍTICAS:
     unidad_activa: ctx.activeUnitPlate ?? null,
     mensaje_nuevo: ctx.mensaje.slice(-1500),
     historial: ctx.historial.slice(-2500),
+    nota_aislamiento:
+      "Este historial pertenece EXCLUSIVAMENTE a este cliente/número. Nunca inferir datos de otro contacto.",
   });
 
   try {

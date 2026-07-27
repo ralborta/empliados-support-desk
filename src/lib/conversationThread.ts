@@ -118,7 +118,9 @@ export async function loadTurnThreadContext(
   return { fullThread, scopedThread, classificationThread };
 }
 
-/** Texto reciente del ticket del cliente (mensajes persistidos en el panel). */
+/** Texto reciente del ticket del cliente (mensajes persistidos en el panel).
+ * AISLAMIENTO: siempre keyed por rawPhone → Customer.id → Ticket del mismo cliente.
+ * Nunca mezclar hilos entre números distintos. */
 export async function recentThreadTextForPhone(rawPhone: string, take = DEFAULT_THREAD_TAKE): Promise<string> {
   try {
     const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
