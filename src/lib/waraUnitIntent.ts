@@ -14,6 +14,8 @@ import {
   looksLikeOdometerHelpRequest,
   looksLikeOdometerFlowReminder,
   normalizePlate,
+  threadAwaitingHorometerPlate,
+  threadAwaitingOdometerPlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -1130,7 +1132,7 @@ async function resolveWithAi(
   rawText: string,
   threadText: string,
   units: WaraUnidadEstado[],
-  opts?: { prefixHint?: string | null; maintenanceContext?: boolean; certificateContext?: boolean },
+  opts?: { prefixHint?: string | null; maintenanceContext?: boolean; certificateContext?: boolean; odometerContext?: boolean },
 ): Promise<UnitQueryResolution | null> {
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
 
@@ -1144,7 +1146,14 @@ async function resolveWithAi(
 - Resolvé prefijos ("AD", "la que comienza con NKL") contra el catálogo.
 - Una sola coincidencia clara → intent=consult_status con esa patente en candidatePlates.
 - Varias coincidencias → intent=need_clarification listando patentes exactas del catálogo (hasta 8).`
-    : opts?.certificateContext
+    : opts?.odometerContext
+      ? `
+- CONTEXTO: el bot pidió la unidad para registrar cambio de ODÓMETRO u HORÓMETRO. El mensaje es selección de unidad (patente, prefijo como "la que empieza con RMX", marca o nombre).
+- Resolvé prefijos y frases parciales SOLO contra el catálogo — NUNCA uses una patente del historial si el cliente indicó otro prefijo o unidad distinta en mensaje_nuevo.
+- Una sola coincidencia clara → intent=consult_status con esa patente en candidatePlates.
+- Varias coincidencias → intent=need_clarification listando patentes exactas del catálogo (hasta 8). PROHIBIDO tomar otra patente que no matchee lo pedido.
+- "14:00" u hora del reloj NO es horómetro; horómetro = horas de motor.`
+      : opts?.certificateContext
       ? `
 - CONTEXTO: el bot pidió la unidad para certificado de cobertura. El mensaje es selección de unidad (patente, prefijo, marca o nombre).
 - Resolvé marcas/nombres (Nissan, Saveiro) y prefijos contra el catálogo.
@@ -1307,6 +1316,7 @@ export async function resolveUnitQuery(params: {
   preferAi?: boolean;
   maintenanceContext?: boolean;
   certificateContext?: boolean;
+  odometerContext?: boolean;
   /**
    * Historial "solo cliente" para el prompt de la IA (ver `buildCustomerOnlyText`).
    * Si no se pasa, se usa `threadText` tal cual (compatibilidad con callers que no
@@ -1322,10 +1332,15 @@ export async function resolveUnitQuery(params: {
     looksLikeLiveUnitConsultIntent(params.rawText);
   const certificateCtx =
     params.certificateContext || hasCertificateFlowAwaitingUnit(params.threadText);
+  const odometerCtx =
+    params.odometerContext ||
+    threadAwaitingOdometerPlate(params.threadText) ||
+    threadAwaitingHorometerPlate(params.threadText);
   const shouldPreferAi =
     params.preferAi ||
     params.maintenanceContext ||
     certificateCtx ||
+    odometerCtx ||
     !!prefixHint ||
     isBarePlatePrefixHint(params.rawText) ||
     brandOrLiveConsult;
@@ -1386,6 +1401,7 @@ export async function resolveUnitQuery(params: {
       prefixHint,
       maintenanceContext: !!params.maintenanceContext,
       certificateContext: certificateCtx,
+      odometerContext: odometerCtx,
     });
     if (aiFirst?.intent === "consult_status" && aiFirst.plate) {
       const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units);
@@ -1409,6 +1425,7 @@ export async function resolveUnitQuery(params: {
     prefixHint,
     maintenanceContext: !!params.maintenanceContext,
     certificateContext: certificateCtx,
+    odometerContext: odometerCtx,
   });
   if (ai) {
     if (rules.intent === "consult_status" && rules.plate && rules.candidatePlates.length === 1) {
@@ -1450,6 +1467,7 @@ export type ResolvePlateWithWaraFleetOptions = {
   preferAi?: boolean;
   maintenanceContext?: boolean;
   certificateContext?: boolean;
+  odometerContext?: boolean;
 };
 
 /** Resuelve patente desde texto + flota Wara (IA/reglas). Uso compartido en todos los trámites. */
@@ -1490,9 +1508,10 @@ export async function resolvePlateWithWaraFleet(
     rawText,
     threadText: scopedThread,
     units: fleet.unidades,
-    preferAi: opts?.preferAi || opts?.maintenanceContext || opts?.certificateContext,
+    preferAi: opts?.preferAi || opts?.maintenanceContext || opts?.certificateContext || opts?.odometerContext,
     maintenanceContext: opts?.maintenanceContext,
     certificateContext: opts?.certificateContext,
+    odometerContext: opts?.odometerContext,
     aiHistorial,
   });
 

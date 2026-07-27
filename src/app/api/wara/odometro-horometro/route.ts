@@ -28,7 +28,9 @@ import {
   resolveWaraPatenteForApi,
   threadHasActiveOdometerFlow,
   threadAwaitingHorometerPlate,
+  threadAwaitingOdometerPlate,
   threadTextSinceCompanySelection,
+  extractPlatePrefixFromMessage,
 } from "@/lib/wara";
 import {
   looksLikeFleetUnitSearchInput,
@@ -463,24 +465,67 @@ export async function POST(req: NextRequest) {
   // skipThreadPlate ya indica que el cliente está señalando explícitamente OTRA
   // unidad (corrección de patente o marca/nombre distinto en el mensaje).
   const activeUnitRecord = activeUnitRecordEarly;
-  let patente = normalizePlate(
+  const explicitMessagePlate = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       fromText.patente ??
       mergedFields.patente ??
-      (skipThreadPlate
-        ? ""
-        : resolveOdometerContextPlate({
-            threadText,
-            lastThreadPlate,
-            activeUnitPlate: activeUnitRecord?.plate,
-            explicitVagueUnitReference,
-            hasPendingOdometerConfirm: hasPendingConfirmInThread,
-          })) ??
-      ""
+      "",
   );
+  const isFleetUnitSelection = looksLikeFleetUnitSearchInput(rawText);
+  const awaitingPlateSelection =
+    threadAwaitingOdometerPlate(threadText) ||
+    threadAwaitingHorometerPlate(threadText) ||
+    (activeOdoFlow && !hasPendingConfirmInThread);
 
-  if (!patente && !odometerFlowStart) {
+  let patente = explicitMessagePlate;
+
+  // Bug real 2026-07-27: "La q empieza con RMX" tomaba OST 223 del hilo/unidad activa
+  // porque resolveOdometerContextPlate corría ANTES que la flota. Prefijo/marca/patente
+  // en el mensaje actual → SIEMPRE resolvePlateWithWaraFleet (IA + reglas).
+  if (isFleetUnitSelection || (awaitingPlateSelection && rawText.trim())) {
+    const fleetPlate = await resolvePlateWithWaraFleet(
+      prisma,
+      rawPhone,
+      rawText,
+      threadText,
+      explicitMessagePlate || null,
+      { preferAi: true, odometerContext: true },
+    );
+    if (fleetPlate.ok) {
+      patente = fleetPlate.plate;
+    } else if (fleetPlate.reason === "clarification") {
+      await appendOutboundBotMessage(rawPhone, fleetPlate.message, {
+        source: "wara_odometro_response",
+        stage: "unit_clarification",
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          error: "Varias unidades",
+          message: fleetPlate.message,
+        },
+        { status: BB_STATUS },
+      );
+    } else if (isFleetUnitSelection) {
+      patente = "";
+    }
+  }
+
+  if (!patente && !skipThreadPlate && !isFleetUnitSelection) {
+    patente = normalizePlate(
+      resolveOdometerContextPlate({
+        threadText,
+        lastThreadPlate,
+        activeUnitPlate: activeUnitRecord?.plate,
+        explicitVagueUnitReference,
+        hasPendingOdometerConfirm: hasPendingConfirmInThread,
+      }) ?? "",
+    );
+  }
+
+  if (!patente && !odometerFlowStart && !isFleetUnitSelection) {
     const fleetPlate = await resolvePlateWithWaraFleet(
       prisma,
       rawPhone,
@@ -497,7 +542,7 @@ export async function POST(req: NextRequest) {
     } else if (shouldUseActiveUnitFallback(rawText) && activeUnitRecord?.plate) {
       patente = activeUnitRecord.plate;
     }
-  } else if (skipThreadPlate && !patente && activeOdoFlow) {
+  } else if (skipThreadPlate && !patente && activeOdoFlow && !isFleetUnitSelection) {
     const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, rawText, threadText);
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;

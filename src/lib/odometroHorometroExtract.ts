@@ -6,7 +6,7 @@
  */
 
 import OpenAI from "openai";
-import { normalizePlate } from "@/lib/wara";
+import { extractPlatePrefixFromMessage, normalizePlate } from "@/lib/wara";
 import { parseFechaFromText } from "@/lib/odometroFecha";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 
@@ -93,7 +93,12 @@ export function mergeOdometerFieldExtractions(
   if (useAiFields && aiPatente && (!patente || aiPatente === patente)) {
     patente = aiPatente;
   }
-  if (!patente && ctx.activeUnitPlate && (ctx.horometerFlowActive || /\b(recien|mencion|esa unidad|la misma)\b/i.test(ctx.mensaje))) {
+  if (
+    !patente &&
+    ctx.activeUnitPlate &&
+    !extractPlatePrefixFromMessage(ctx.mensaje) &&
+    (ctx.horometerFlowActive || /\b(recien|mencion|esa unidad|la misma)\b/i.test(ctx.mensaje))
+  ) {
     patente = normalizePlate(ctx.activeUnitPlate);
   }
 
