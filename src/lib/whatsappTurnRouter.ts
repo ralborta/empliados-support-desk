@@ -50,7 +50,7 @@ import {
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput, looksLikeUnitNameInMessage, threadHasRecentFleetUnitSearchRequest } from "@/lib/waraUnitIntent";
+import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput, looksLikeUnitNameInMessage, looksLikeVagueUnitReference, threadHasRecentFleetUnitSearchRequest } from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
@@ -371,12 +371,17 @@ const TURN_RULES: TurnRule[] = [
   {
     id: "fleet_unit_search_followup",
     reason: "Patente/nombre tras pedir ayuda para encontrar una unidad.",
-    decide: ({ text, threadText }) =>
-      threadHasRecentFleetUnitSearchRequest(threadText) &&
-      isUnitSelectionMessage(text, threadText) &&
-      certificateFlowState(threadText) === "none"
-        ? "unidades"
-        : null,
+    decide: ({ text, threadText }) => {
+      if (
+        !threadHasRecentFleetUnitSearchRequest(threadText) ||
+        !isUnitSelectionMessage(text, threadText) ||
+        certificateFlowState(threadText) !== "none"
+      ) {
+        return null;
+      }
+      if (threadHasActiveOdometerFlow(threadText)) return "odometro";
+      return "unidades";
+    },
   },
   {
     id: "odometer_operational",
@@ -400,6 +405,7 @@ const TURN_RULES: TurnRule[] = [
         (!isOdometerFlowSuperseded(threadText) &&
           threadHasActiveOdometerFlow(threadText) &&
           (isUnitSelectionMessage(text, threadText) ||
+            looksLikeVagueUnitReference(text) ||
             looksLikePlateCorrectionRequest(text) ||
             /\bpatente\s+(?:de|del)\b/i.test(norm(text)))) ||
         (looksLikePlateCorrectionRequest(text) && /od[oó]metro|hor[oó]metro|kilometraje/.test(norm(threadText)));
@@ -504,7 +510,12 @@ const TURN_RULES: TurnRule[] = [
       const match =
         detectLoosePlate(text) || isBarePlatePrefixHint(text) || incident !== "OTHER" || looksLikeOperationalIntent(text);
       if (!match) return null;
-      if (threadHasActiveOdometerFlow(threadText) && looksLikeFleetUnitSearchInput(text)) {
+      if (
+        threadHasActiveOdometerFlow(threadText) &&
+        (looksLikeFleetUnitSearchInput(text) ||
+          detectLoosePlate(text) ||
+          looksLikeVagueUnitReference(text))
+      ) {
         return "odometro";
       }
       return "unidades";

@@ -366,6 +366,59 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
   );
 }
 
+function lastOdometerFlowMarkerIndex(threadText: string): number {
+  const lower = threadText.toLowerCase();
+  const markers = [
+    lower.lastIndexOf("voy a registrar:"),
+    lower.lastIndexOf("para registrar el cambio de horómetro"),
+    lower.lastIndexOf("para registrar el cambio de horometro"),
+    lower.lastIndexOf("para registrar el cambio de odómetro"),
+    lower.lastIndexOf("para registrar el cambio de odometro"),
+    lower.lastIndexOf("cuál es el nuevo odómetro"),
+    lower.lastIndexOf("cual es el nuevo odometro"),
+    lower.lastIndexOf("cuál es el nuevo horómetro"),
+    lower.lastIndexOf("cual es el nuevo horometro"),
+    lower.lastIndexOf("nuevo odómetro en km"),
+    lower.lastIndexOf("nuevo odometro en km"),
+    lower.lastIndexOf("perfecto, tomo "),
+  ].filter((i) => i >= 0);
+  return markers.length ? Math.max(...markers) : -1;
+}
+
+/** Trámite de odómetro pausado por búsqueda/GPS/consulta de unidad DESPUÉS del último marcador. */
+function odometerFlowPausedByLaterTramite(threadText: string): boolean {
+  const markerIdx = lastOdometerFlowMarkerIndex(threadText);
+  if (markerIdx < 0) return false;
+  const after = threadText.slice(markerIdx);
+  if (/\bayudame a encontrar mi unidad\b/i.test(after)) return true;
+  if (/\bno encuentro\b.{0,40}\b(unidad|patente|matricula|matr[ií]cula)\b/i.test(after)) return true;
+  const lower = threadText.toLowerCase();
+  const unitConsultMarkers = [
+    lower.lastIndexOf("para revisar el gps"),
+    lower.lastIndexOf("cuál es la matrícula o el nombre"),
+    lower.lastIndexOf("cual es la matricula o el nombre"),
+    lower.lastIndexOf("indicame la matricula"),
+    lower.lastIndexOf("indicáme la matrícula"),
+    lower.lastIndexOf("matrícula exacta"),
+    lower.lastIndexOf("matricula exacta"),
+    lower.lastIndexOf("decime la matrícula exacta"),
+    lower.lastIndexOf("decime la matricula exacta"),
+  ].filter((i) => i >= 0);
+  if (unitConsultMarkers.length && Math.max(...unitConsultMarkers) > markerIdx) return true;
+  const afterTail = after.slice(80).toLowerCase();
+  if (/\b(consultar|quiero consultar).{0,80}\b(reporte|unidades|gps|ignicion)\b/.test(afterTail)) {
+    return true;
+  }
+  if (
+    /\b(no reporta|no me reporta|sin reporte|estado de reporte|listado de mis unidades)\b/.test(
+      afterTail,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Cliente consultó estado/reporte/GPS en las últimas líneas — pausa trámite de odómetro arrastrado. */
 export function threadHasRecentUnitStatusConsultIntent(threadText: string): boolean {
   const tail = threadText
@@ -391,7 +444,6 @@ export function threadHasRecentUnitStatusConsultIntent(threadText: string): bool
 /** Trámite de odómetro activo en el hilo (pide patente/km o confirmación pendiente). */
 export function threadHasActiveOdometerFlow(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
-  if (threadHasRecentUnitStatusConsultIntent(threadText)) return false;
   return threadAwaitingOdometerPlate(threadText) || hasPendingOdometerConfirmation(threadText);
 }
 
@@ -400,9 +452,10 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  if (threadHasRecentUnitStatusConsultIntent(threadText)) return false;
-  // Solo cuando el BOT pidió patente/odómetro en el turno anterior — no el intent del cliente.
-  return (
+  // Si el bot acaba de pedir patente/km para odómetro, el trámite sigue activo aunque
+  // antes en el hilo hubo listado de flota o consulta GPS (bug 2026-07-27: "Pásame la
+  // lista de mi flota" + cambio de odómetro + "La Ad 626 UG" caía a estado GPS).
+  const botAwaitingOdometerData =
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
     /nuevo hor[oó]metro en horas/i.test(tail) ||
@@ -414,8 +467,13 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
     ) ||
     (/(?:cu[aá]l es|indic[aá]me|pas[aá]me|decime|necesito).{0,100}(?:patente|matr[ií]cula)/i.test(tail) &&
       /od[oó]metro|hor[oó]metro|kilometraje/i.test(tail) &&
-      /(?:atilio|registrar el cambio|nuevo od[oó]metro)/i.test(tail))
-  );
+      /(?:atilio|registrar el cambio|nuevo od[oó]metro)/i.test(tail));
+  if (botAwaitingOdometerData) {
+    if (odometerFlowPausedByLaterTramite(threadText)) return false;
+    return true;
+  }
+  if (threadHasRecentUnitStatusConsultIntent(threadText)) return false;
+  return false;
 }
 
 /** El hilo reciente pide patente o valor para un trámite de horómetro (no odómetro). */
