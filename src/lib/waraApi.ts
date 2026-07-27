@@ -12,6 +12,8 @@ import {
   looksLikeBriefConfirmation,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerIntentStart,
+  looksLikeFreshOdometerRestartRequest,
+  looksLikeOdometerPendingDataAmendment,
   normalizePlate,
   threadAwaitingOdometerPlate,
   detectLoosePlate,
@@ -143,6 +145,27 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
       t,
     ) || /\bno\b.{0,20}\b(correcto|confirmo)\b/.test(t)
   );
+}
+
+/**
+ * El cliente corrige o reinicia mientras hay confirmación pendiente — no repetir "respondé CONFIRMO".
+ * Bug 2026-07-27: "La q empieza con MYQ" / "Quiero hacer un cambio de odometro" quedaban
+ * atrapados en el recordatorio de confirmación vieja.
+ */
+export function clientSupersedesOdometerConfirmation(
+  rawText: string | undefined | null,
+  threadText: string,
+): boolean {
+  if (!hasPendingOdometerConfirmation(threadText)) return false;
+  const raw = String(rawText ?? "").trim();
+  if (!raw || looksLikeBriefConfirmation(raw)) return false;
+  if (looksLikeOdometerPendingDataAmendment(raw)) return false;
+  if (looksLikeOdometerConfirmationRejection(raw)) return true;
+  if (extractPlatePrefixFromMessage(raw)) return true;
+  if (detectLoosePlate(raw)) return true;
+  if (looksLikePlateCorrectionRequest(raw)) return true;
+  if (looksLikeFreshOdometerRestartRequest(raw)) return true;
+  return false;
 }
 
 /** "Dale cámbialo" tras pedido de cambiar empresa en el hilo reciente. */

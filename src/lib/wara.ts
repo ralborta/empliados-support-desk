@@ -471,6 +471,40 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
   );
 }
 
+/**
+ * Reinicio explícito del trámite de odómetro (no ampliación de datos sobre confirmación pendiente).
+ * Bug 2026-07-27: "Quiero hacer un cambio de odometro" con confirmación vieja en el hilo
+ * debe reiniciar; "Aun no te dije la hora del cambio" NO debe reiniciar.
+ */
+export function looksLikeFreshOdometerRestartRequest(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || !looksLikeOdometerIntentStart(raw)) return false;
+  if (looksLikeOdometerPendingDataAmendment(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(quiero|necesito|hagamos|podemos|vamos a|deseo)\b/.test(t);
+}
+
+/** Ampliación de datos sobre confirmación pendiente (fecha/hora/km), no reinicio ni corrección de patente. */
+export function looksLikeOdometerPendingDataAmendment(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(aun no te dije|todavia no|no te dije|me falta|faltaria|falta el|falta la)\b/.test(t)) return true;
+  if (
+    /\b(hora|fecha|dia|kilometraje|km)\b/.test(t) &&
+    /\b(od[oó]metro|hor[oó]metro|cambio de)\b/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Reporte de falla/desfase del odómetro — no es trámite de actualizar km. */
 export function looksLikeOdometerProblemReport(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();

@@ -30,11 +30,13 @@
 import {
   hasPendingOdometerConfirmation,
   isOdometerFlowSuperseded,
+  looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerIntentStart,
   threadHasActiveOdometerFlow,
 } from "../src/lib/wara.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import { isFechaEnFuturo, parseFechaFromText } from "../src/lib/odometroFecha.ts";
+import { clientSupersedesOdometerConfirmation } from "../src/lib/waraApi.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -131,6 +133,34 @@ assert(
   "isFechaEnFuturo === false para una fecha claramente pasada (2020)",
 );
 assert(!isFechaEnFuturo(""), "isFechaEnFuturo === false con string vacío (no rompe)");
+
+console.log("\n— Bug 2026-07-27: confirmación vieja no bloquea MYQ ni reinicio explícito —");
+const pendingThread = [
+  "Voy a registrar:",
+  "• Patente: RMX 246",
+  "• Odómetro: 223 km",
+  "Si está correcto, respondé CONFIRMO para registrarlo en Wara.",
+].join("\n");
+assert(hasPendingOdometerConfirmation(pendingThread), "sanity: hilo con confirmación pendiente");
+assert(
+  clientSupersedesOdometerConfirmation("La q empieza con MYQ", pendingThread),
+  "prefijo MYQ supersede confirmación pendiente",
+);
+assert(
+  clientSupersedesOdometerConfirmation("Quiero hacer un cambio de odometro", pendingThread),
+  "reinicio explícito supersede confirmación vieja",
+);
+assert(
+  looksLikeFreshOdometerRestartRequest("Quiero hacer un cambio de odometro"),
+  "fresh restart detecta 'Quiero hacer un cambio de odometro'",
+);
+assert(
+  !clientSupersedesOdometerConfirmation(
+    "Aun no te dije la hora o el dia del cambio de odometro",
+    pendingThread,
+  ),
+  "ampliar fecha/hora NO supersede confirmación pendiente",
+);
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

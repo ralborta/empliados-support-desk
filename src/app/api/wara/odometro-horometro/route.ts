@@ -51,6 +51,7 @@ import {
   looksLikeOdometerConfirmationRejection,
   looksLikeVehicleBrandOrUnitSearch,
   shouldContinueOdometerFlow,
+  clientSupersedesOdometerConfirmation,
 } from "@/lib/waraApi";
 
 const numericValue = z.union([z.number(), z.string()]).transform((value) => {
@@ -375,8 +376,9 @@ export async function POST(req: NextRequest) {
   // hilo se vaciaba a "" y esa patente/km ya propuestos se perdían por completo — el
   // bot terminaba pidiendo la patente de cero, como si el cliente no hubiese dicho
   // nada todavía.
-  const preliminaryThreadText = odometerFlowStart ? await recentThreadText(rawPhone) : "";
+  const preliminaryThreadText = await recentThreadText(rawPhone);
   const hasPendingConfirmInThread = hasPendingOdometerConfirmation(preliminaryThreadText);
+  const supersedesPendingConfirm = clientSupersedesOdometerConfirmation(rawText, preliminaryThreadText);
   const hasUnitHintInCurrentMessage =
     looksLikeFleetUnitSearchInput(rawText) || looksLikeUnitNameInMessage(rawText);
   const isOdometerReminder = looksLikeOdometerFlowReminder(rawText);
@@ -393,16 +395,13 @@ export async function POST(req: NextRequest) {
     !hasUnitHintInCurrentMessage &&
     !isOdometerReminder &&
     (horometerOnlyIntent ||
+      supersedesPendingConfirm ||
       (!hasPendingConfirmInThread && !threadHasPriorOdometerUnitRequest));
-  if (treatAsBlankFlowStart) {
+  if (treatAsBlankFlowStart || supersedesPendingConfirm) {
     await clearPendingAction(prisma, rawPhone);
   }
   const fromText = parseFromText(rawText);
-  const threadText = treatAsBlankFlowStart
-    ? ""
-    : odometerFlowStart
-      ? preliminaryThreadText
-      : await recentThreadText(rawPhone);
+  const threadText = treatAsBlankFlowStart ? "" : preliminaryThreadText;
   const activeOdoFlow = threadHasActiveOdometerFlow(threadText);
   const horometerFlowActive =
     horometerOnlyIntent ||
@@ -602,9 +601,10 @@ export async function POST(req: NextRequest) {
   // (el mensaje actual menciona "cambio de odometro"), así que el km/hs ya
   // propuestos en la confirmación pendiente (ej. 600 km) se descartaban igual,
   // aunque ya no se vaciara el hilo.
-  const pendingOdoConfirm = horometerFlowActive || horometerOnlyIntent
-    ? false
-    : hasPendingOdometerConfirmation(threadText);
+  const pendingOdoConfirm =
+    horometerFlowActive || horometerOnlyIntent || supersedesPendingConfirm
+      ? false
+      : hasPendingOdometerConfirmation(threadText);
   const explicitKmInMessage = messageExplicitlyStatesKm(rawText);
   const allowThreadKm =
     explicitKmInMessage ||
