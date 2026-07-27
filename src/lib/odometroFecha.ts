@@ -26,6 +26,30 @@ function shiftCalendarDay(
   return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
 }
 
+/** Hora de lectura explícita ("Hora: 16:16", "16:16Hs") — no confundir con horómetro en horas. */
+const HORA_LECTURA_RE = /\bhoras?\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/gi;
+
+function parseHoraLecturaNearDate(
+  raw: string,
+  dateIdx: number,
+  dateLen: number,
+): { hh: string; min: string } | null {
+  const windowStart = Math.max(0, dateIdx - 80);
+  const windowEnd = Math.min(raw.length, dateIdx + dateLen + 80);
+  const nearby = raw.slice(windowStart, windowEnd);
+  const dateCenter = dateIdx + dateLen / 2;
+
+  let best: { hh: string; min: string; dist: number } | null = null;
+  for (const match of nearby.matchAll(HORA_LECTURA_RE)) {
+    const idx = (match.index ?? 0) + windowStart;
+    const dist = Math.abs(idx - dateCenter);
+    const hh = match[1];
+    const min = match[2];
+    if (!best || dist < best.dist) best = { hh, min, dist };
+  }
+  return best ? { hh: best.hh, min: best.min } : null;
+}
+
 /** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada.
  * También reconoce fechas relativas ("ayer", "hoy", "anteayer") combinadas con una hora
  * ("a las 12:00", "hora: 12:00") — bug real, producción 2026-07-23: "kilometro 111111 el
@@ -45,7 +69,7 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
     const relative = norm.match(/\b(anteayer|ayer|hoy)\b/);
     if (!relative) return undefined;
     const deltaDays = relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
-    const timeMatch = norm.match(/\b(?:a las|hora:?)\s*(\d{1,2}):(\d{2})\b/);
+    const timeMatch = norm.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/);
     const { year, month, day } = shiftCalendarDay(
       todayPartsInTz(timezone?.trim() || "America/Argentina/Buenos_Aires"),
       deltaDays,
@@ -62,19 +86,15 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
   let hh = m[4];
   let min = m[5];
   if (hh == null || min == null) {
-    // Bug real, producción 2026-07-23: el cliente mandó "Km actual: 210.222 / Hora:
-    // 10:35 / Fecha 21/07/26" en líneas separadas (plantilla de respuesta rápida), no
-    // "21/07/26 10:35" pegado. El regex de arriba solo captura la hora si viene
-    // inmediatamente después de la fecha en el mismo match, así que la hora quedaba
-    // ignorada y se registraba 00:00. Se busca "Hora: HH:MM" cerca de la fecha (no en
-    // cualquier parte del hilo, para no agarrar una hora de un trámite viejo).
+    // Bug real, producción 2026-07-23: plantilla con hora en línea separada ("Hora: 10:35 /
+    // Fecha 21/07/26"). Bug 2026-07-27: otra plantilla común pone Fecha ANTES de Hora
+    // ("Fecha: 26/07/26" + "Hora: 16:16Hs") — hay que buscar en ventana antes Y después
+    // de la fecha, y aceptar sufijo "Hs" pegado a los minutos.
     const dateIdx = m.index ?? 0;
-    const windowStart = Math.max(0, dateIdx - 80);
-    const nearby = raw.slice(windowStart, dateIdx + m[0].length);
-    const horaMatch = nearby.match(/\bhoras?\b\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})\b/i);
+    const horaMatch = parseHoraLecturaNearDate(raw, dateIdx, m[0].length);
     if (horaMatch) {
-      hh = horaMatch[1];
-      min = horaMatch[2];
+      hh = horaMatch.hh;
+      min = horaMatch.min;
     }
   }
   const hhPadded = (hh ?? "00").padStart(2, "0");

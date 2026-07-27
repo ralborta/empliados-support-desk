@@ -30,6 +30,24 @@ const threadReal = "Km actual: 210.222\nHora: 10:35\nFecha 21/07/26";
 const parsed = parseFechaFromText(threadReal);
 assert(parsed === "2026-07-21T10:35:00", `parseFechaFromText captura hora separada de la fecha (obtuve: ${parsed})`);
 
+console.log("— Fecha antes de Hora + sufijo Hs (plantilla horómetro, bug 2026-07-27) —");
+
+const horoTemplate =
+  "Patente: AD 427 MC\nFecha: 26/07/26\nHora: 16:16Hs\nHorometro real: 168HS";
+const parsedHoro = parseFechaFromText(horoTemplate);
+assert(
+  parsedHoro === "2026-07-26T16:16:00",
+  `fecha antes de hora con Hs (obtuve: ${parsedHoro})`,
+);
+assert(
+  parseFechaFromText("Fecha: 26/07/26\nHora: 16:16") === "2026-07-26T16:16:00",
+  "fecha antes de hora sin sufijo Hs",
+);
+assert(
+  parseFechaFromText("Hora: 16:16Hs\nFecha: 26/07/26") === "2026-07-26T16:16:00",
+  "hora con Hs antes de fecha",
+);
+
 console.log("— Fecha+hora pegadas en el mismo texto sigue funcionando igual que antes —");
 
 assert(
