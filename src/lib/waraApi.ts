@@ -139,7 +139,7 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
     .toLowerCase();
   if (/^0$/.test(raw)) return true;
   return (
-    /\b(no es correcto|no confirmo|no quiero|incorrecto|cancelar|cancelalo|olvidalo|otra gesti[oó]n|quiero otra)\b/.test(
+    /\b(no es correcto|no confirmo|no quiero|incorrecto|cancelar|cancelalo|olvidalo|otra gesti[oó]n|quiero otra|negativo)\b/.test(
       t,
     ) || /\bno\b.{0,20}\b(correcto|confirmo)\b/.test(t)
   );

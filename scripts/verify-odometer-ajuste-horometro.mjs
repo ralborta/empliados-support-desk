@@ -12,8 +12,10 @@ import {
   isExamplePlate,
   lineLooksLikeBotMissingPlatePrompt,
   looksLikeOdometerIntentStart,
+  threadAwaitingHorometerPlate,
   threadTextSinceCompanySelection,
 } from "../src/lib/wara.ts";
+import { looksLikeOdometerConfirmationRejection } from "../src/lib/waraApi.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -66,6 +68,24 @@ assert(
 assert(
   extractLastPlateFromThread(scopedThread) === null,
   "extractLastPlateFromThread no devuelve patente fantasma tras reinicio de empresa",
+);
+
+console.log("\n— Bug 2026-07-27: horómetro tras odómetro OK no reusa km del hilo —");
+const threadAfterOdoSuccess = [
+  "unidad: AD 626 UE\nfecha: 26/07/26\nHora: 13:58 Hs\nKilometraje: 55986",
+  "Voy a registrar:\n• Patente: AD 626 UE\n• Odómetro: 55986 km\n• Fecha: 26/07/2026 13:58\n\nSi está correcto, respondé CONFIRMO",
+  "confirmo",
+  "Listo, registré el cambio para la unidad AD626UE. Odómetro nuevo: 55986 km.",
+  "hagamos cambio de horometro",
+  "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es?",
+].join("\n");
+assert(
+  threadAwaitingHorometerPlate(threadAfterOdoSuccess),
+  "detecta trámite de horómetro pendiente de patente",
+);
+assert(
+  looksLikeOdometerConfirmationRejection("negativo"),
+  "'negativo' cancela confirmación pendiente",
 );
 
 if (failed > 0) {

@@ -27,6 +27,7 @@ import {
   normalizePlate,
   resolveWaraPatenteForApi,
   threadHasActiveOdometerFlow,
+  threadAwaitingHorometerPlate,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import {
@@ -381,6 +382,10 @@ export async function POST(req: NextRequest) {
       ? preliminaryThreadText
       : await recentThreadText(rawPhone);
   const activeOdoFlow = threadHasActiveOdometerFlow(threadText);
+  const horometerFlowActive =
+    horometerOnlyIntent ||
+    threadAwaitingHorometerPlate(threadText) ||
+    (mentionsHorometroIntent(threadText) && !hasPendingOdometerConfirmation(threadText));
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
     looksLikeVehicleBrandOrUnitSearch(rawText) || /\bpatente\s+(?:de|del)\b/i.test(rawText);
@@ -500,7 +505,11 @@ export async function POST(req: NextRequest) {
     parsed.data.odometro,
     parsed.data.odometer,
     fromText.odometro,
-    horometerOnlyIntent ? undefined : treatAsBlankFlowStart ? undefined : threadParsed.odometro,
+    horometerFlowActive || horometerOnlyIntent
+      ? undefined
+      : treatAsBlankFlowStart
+        ? undefined
+        : threadParsed.odometro,
   );
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
   const horometro = resolveHorometroForWara({
@@ -511,13 +520,16 @@ export async function POST(req: NextRequest) {
     ),
     combinedText: treatAsBlankFlowStart ? rawText : combinedText,
   });
-  const pendingOdoConfirm = horometerOnlyIntent
+  const pendingOdoConfirm = horometerFlowActive || horometerOnlyIntent
     ? false
     : hasPendingOdometerConfirmation(threadText);
 
   if (
     looksLikeOdometerConfirmationRejection(rawText) &&
-    (pendingOdoConfirm || activeOdoFlow || threadHasActiveOdometerFlow(threadText))
+    (pendingOdoConfirm ||
+      activeOdoFlow ||
+      threadHasActiveOdometerFlow(threadText) ||
+      (horometerFlowActive && (patente || typeof horometro === "number" || typeof odometro === "number")))
   ) {
     await clearPendingAction(prisma, rawPhone);
     const message =
@@ -588,6 +600,7 @@ export async function POST(req: NextRequest) {
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
     const wantsHorometro =
+      horometerFlowActive ||
       horometerOnlyIntent ||
       /\bhor[oó]metro\b/i.test(rawText) ||
       (!/\bod[oó]metro\b/i.test(rawText) && /\bhor[oó]metro\b/i.test(threadText));
@@ -659,7 +672,9 @@ export async function POST(req: NextRequest) {
   const fechaExplicita =
     parsed.data.fecha ??
     parsed.data.date ??
-    parseFechaFromText([threadText, rawText].filter(Boolean).join("\n"), customerTz);
+    (horometerFlowActive && typeof horometro !== "number"
+      ? parseFechaFromText(rawText, customerTz)
+      : parseFechaFromText([threadText, rawText].filter(Boolean).join("\n"), customerTz));
   const fecha = fechaWara(fechaExplicita, customerTz);
   const fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
 
@@ -732,7 +747,9 @@ export async function POST(req: NextRequest) {
     }
     const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
     const odoLine =
-      !horometerOnlyIntent && typeof odometro === "number"
+      !horometerFlowActive &&
+      !horometerOnlyIntent &&
+      typeof odometro === "number"
         ? `• Odómetro: ${odometro} km`
         : typeof horometro === "number"
           ? `• Horómetro: ${horometro} h`

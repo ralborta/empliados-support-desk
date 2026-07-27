@@ -199,17 +199,12 @@ export async function handleWhatsAppTurn(params: {
 
   if (shouldDeferTurnExecutor()) {
     scheduleDeferredTurnExecutor({ rawPhone, selectionText, apiKey });
-    const firstName = String(context.name ?? "")
-      .trim()
-      .split(/\s+/)[0];
-    const ack = firstName
-      ? `Dame un momento ${firstName}, estoy procesando tu consulta…`
-      : "Dame un momento, estoy procesando tu consulta…";
+    // Sin mensaje intermedio: el cliente recibe solo la respuesta real vía waitUntil + API WA.
     return deliverTurnToWhatsApp(
       rawPhone,
       buildTurnPayload(context, {
-        message: ack,
-        skipResponse_s: "false",
+        message: "",
+        skipResponse_s: "true",
         nextFlow: "reply",
         nextFlow_s: "reply",
         executor: "deferred",
