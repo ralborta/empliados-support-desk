@@ -26,8 +26,9 @@ function shiftCalendarDay(
   return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
 }
 
-/** Hora de lectura explícita ("Hora: 16:16", "16:16Hs") — no confundir con horómetro en horas. */
-const HORA_LECTURA_RE = /\bhoras?\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/gi;
+/** Hora de lectura explícita ("Hora: 16:16", "a las 14:00 Hs") — no confundir con horómetro en horas. */
+const HORA_LECTURA_RE =
+  /\b(?:a\s+las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/gi;
 
 function parseHoraLecturaNearDate(
   raw: string,

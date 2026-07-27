@@ -48,6 +48,16 @@ assert(
   "hora con Hs antes de fecha",
 );
 
+console.log("— Fecha numérica + \"a las HH:MM\" en prosa (bug 2026-07-27) —");
+
+const prosaReal =
+  "el kilometraje es 25566, la fecha de lectura el dia 21/07/26 a las 14:00 Hs";
+const parsedProsa = parseFechaFromText(prosaReal);
+assert(
+  parsedProsa === "2026-07-21T14:00:00",
+  `fecha con "a las" en la misma oración (obtuve: ${parsedProsa})`,
+);
+
 console.log("— Fecha+hora pegadas en el mismo texto sigue funcionando igual que antes —");
 
 assert(
