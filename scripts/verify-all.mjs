@@ -19,6 +19,7 @@ const SUITES = [
   "verify-unit-name-vs-plate.mjs",
   "verify-odometer-plate-continuity.mjs",
   "verify-odometer-fecha-hora.mjs",
+  "verify-odometer-ai-extract.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-certificate-not-greeting-loop.mjs",
   "verify-context-continuity-safety.mjs",

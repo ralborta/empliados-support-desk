@@ -37,6 +37,7 @@ import {
   resolvePlateWithWaraFleet,
 } from "@/lib/waraUnitIntent";
 import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } from "@/lib/odometroFecha";
+import { resolveOdometerHorometerFields } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
@@ -399,6 +400,8 @@ export async function POST(req: NextRequest) {
     explicitRejection ||
     (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
+  const activeUnitRecordEarly = skipThreadPlate ? null : await getActiveUnit(prisma, rawPhone);
+
   if (
     !odometerFlowStart &&
     (looksLikeOpcionesInfoRequest(rawText) ||
@@ -422,6 +425,17 @@ export async function POST(req: NextRequest) {
   }
 
   const threadParsed = parseFromText(threadText);
+  const mergedFields = await resolveOdometerHorometerFields({
+    tramite: horometerFlowActive || horometerOnlyIntent ? "horometro" : "odometro",
+    mensaje: rawText,
+    historial: treatAsBlankFlowStart ? "" : threadText,
+    horometerFlowActive,
+    treatAsBlankFlowStart,
+    activeUnitPlate: activeUnitRecordEarly?.plate,
+    timezone: "America/Argentina/Buenos_Aires",
+    regexMessage: fromText,
+    regexThread: treatAsBlankFlowStart ? {} : threadParsed,
+  });
   // detectPlate(threadText) devuelve la PRIMERA patente que aparece en todo el hilo
   // (los últimos 24 mensajes), no la más reciente. Bug real, producción 2026-07-23:
   // el cliente pidió cambiar el odómetro de "la nissan", el bot resolvió y confirmó
@@ -448,11 +462,12 @@ export async function POST(req: NextRequest) {
   // CUALQUIER trámite (estado/certificado/mantenimiento). Nunca se usa cuando
   // skipThreadPlate ya indica que el cliente está señalando explícitamente OTRA
   // unidad (corrección de patente o marca/nombre distinto en el mensaje).
-  const activeUnitRecord = skipThreadPlate ? null : await getActiveUnit(prisma, rawPhone);
+  const activeUnitRecord = activeUnitRecordEarly;
   let patente = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       fromText.patente ??
+      mergedFields.patente ??
       (skipThreadPlate
         ? ""
         : resolveOdometerContextPlate({
@@ -504,6 +519,7 @@ export async function POST(req: NextRequest) {
   const odometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,
+    mergedFields.odometro,
     fromText.odometro,
     horometerFlowActive || horometerOnlyIntent
       ? undefined
@@ -515,6 +531,7 @@ export async function POST(req: NextRequest) {
   const horometro = resolveHorometroForWara({
     explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
     parsedHorometro: firstFiniteNumber(
+      mergedFields.horometro,
       fromText.horometro,
       treatAsBlankFlowStart ? undefined : threadParsed.horometro,
     ),
@@ -672,6 +689,7 @@ export async function POST(req: NextRequest) {
   const fechaExplicita =
     parsed.data.fecha ??
     parsed.data.date ??
+    mergedFields.fechaNaive ??
     (horometerFlowActive && typeof horometro !== "number"
       ? parseFechaFromText(rawText, customerTz)
       : parseFechaFromText([threadText, rawText].filter(Boolean).join("\n"), customerTz));
