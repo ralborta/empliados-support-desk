@@ -28,7 +28,9 @@ import {
   resolveWaraPatenteForApi,
   threadHasActiveOdometerFlow,
   threadAwaitingHorometerPlate,
+  threadAwaitingHorometerKmValue,
   threadAwaitingOdometerPlate,
+  threadAwaitingOdometerKmValue,
   threadTextSinceCompanySelection,
   extractPlatePrefixFromMessage,
 } from "@/lib/wara";
@@ -100,10 +102,10 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
 function isPlausibleOdometerReading(
   value: number | undefined,
   rawText: string,
-  opts: { pendingConfirm: boolean; explicitKmInMessage: boolean },
+  opts: { pendingConfirm: boolean; explicitKmInMessage: boolean; awaitingKmValue: boolean },
 ): value is number {
   if (typeof value !== "number" || !Number.isFinite(value)) return false;
-  if (opts.pendingConfirm || opts.explicitKmInMessage) return true;
+  if (opts.pendingConfirm || opts.explicitKmInMessage || opts.awaitingKmValue) return true;
   // Bug 2026-07-27: "OST 223" en el hilo filtraba 223 como km (dígitos de patente).
   if (value < 1000) return false;
   return true;
@@ -114,6 +116,21 @@ function messageExplicitlyStatesKm(rawText: string): boolean {
     /\b(km|kil[oó]metros?|kilometraje|od[oó]metro)\b/i.test(rawText) &&
     /\d/.test(rawText)
   );
+}
+
+/** "97880" tras "¿Cuál es el nuevo odómetro en km?" — sin palabra km. */
+function parseBareOdometerKm(rawText: string): number | undefined {
+  const t = rawText.trim().replace(/\./g, "").replace(/\s+/g, "");
+  if (!/^\d{4,7}$/.test(t)) return undefined;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseBareHorometerHours(rawText: string): number | undefined {
+  const t = rawText.trim().replace(/\./g, "").replace(/\s+/g, "");
+  if (!/^\d{1,7}$/.test(t)) return undefined;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function parseNumber(value: string | undefined): number | undefined {
@@ -492,10 +509,15 @@ export async function POST(req: NextRequest) {
   if (!isFleetUnitSelection && !prefixInMessage && mergedFields.patente) {
     explicitMessagePlate = normalizePlate(explicitMessagePlate || mergedFields.patente);
   }
+  const awaitingOdometerKm = threadAwaitingOdometerKmValue(threadText);
+  const awaitingHorometerKm = threadAwaitingHorometerKmValue(threadText);
   const awaitingPlateSelection =
-    threadAwaitingOdometerPlate(threadText) ||
-    threadAwaitingHorometerPlate(threadText) ||
-    (activeOdoFlow && !hasPendingConfirmInThread);
+    (threadAwaitingOdometerPlate(threadText) && !awaitingOdometerKm) ||
+    (threadAwaitingHorometerPlate(threadText) && !awaitingHorometerKm) ||
+    (activeOdoFlow &&
+      !hasPendingConfirmInThread &&
+      !awaitingOdometerKm &&
+      !awaitingHorometerKm);
   const freshOdometerIntentWithoutUnit =
     odometerIntentStart &&
     !hasUnitHintInCurrentMessage &&
@@ -609,12 +631,16 @@ export async function POST(req: NextRequest) {
   const allowThreadKm =
     explicitKmInMessage ||
     pendingOdoConfirm ||
+    awaitingOdometerKm ||
     (!isFleetUnitSelection && !awaitingPlateSelection);
+
+  const bareKmInMessage = awaitingOdometerKm ? parseBareOdometerKm(rawText) : undefined;
 
   const rawOdometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,
     mergedFields.odometro,
+    bareKmInMessage,
     fromText.odometro,
     horometerFlowActive || horometerOnlyIntent
       ? undefined
@@ -627,6 +653,7 @@ export async function POST(req: NextRequest) {
   const odometro = isPlausibleOdometerReading(rawOdometro, rawText, {
     pendingConfirm: pendingOdoConfirm,
     explicitKmInMessage,
+    awaitingKmValue: awaitingOdometerKm,
   })
     ? rawOdometro
     : undefined;

@@ -476,6 +476,28 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   return false;
 }
 
+/** El bot pidió el nuevo odómetro en km (patente ya confirmada). */
+export function threadAwaitingOdometerKmValue(threadText: string): boolean {
+  const tail = threadText.slice(-2500).toLowerCase();
+  if (hasPendingOdometerConfirmation(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
+  return (
+    /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
+    /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
+    /nuevo od[oó]metro en km/i.test(tail)
+  );
+}
+
+/** El bot pidió el nuevo horómetro en horas (patente ya confirmada). */
+export function threadAwaitingHorometerKmValue(threadText: string): boolean {
+  const tail = threadText.slice(-2500).toLowerCase();
+  if (hasPendingOdometerConfirmation(threadText)) return false;
+  return (
+    /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
+    /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail)
+  );
+}
+
 /** El hilo reciente pide patente o valor para un trámite de horómetro (no odómetro). */
 export function threadAwaitingHorometerPlate(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
