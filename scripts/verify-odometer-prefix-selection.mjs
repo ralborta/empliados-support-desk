@@ -7,7 +7,7 @@ import {
   extractPlatePrefixFromMessage,
   resolveOdometerContextPlate,
 } from "../src/lib/wara.ts";
-import { looksLikeFleetUnitSearchInput } from "../src/lib/waraUnitIntent.ts";
+import { looksLikeFleetUnitSearchInput, shouldBypassDirectPlateForFleetLookup } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -44,6 +44,16 @@ assert(
 assert(
   looksLikeFleetUnitSearchInput(msg) && contextPlateIfIgnored !== "RMX",
   "RMX es prefijo — hay que resolver contra flota, no usar OST223 del hilo",
+);
+
+console.log("\n— MYQ: prefijo explícito no usa patente directa del hilo —");
+assert(
+  shouldBypassDirectPlateForFleetLookup("La q empieza con MYQ", "OST223"),
+  "prefijo MYQ ignora directPlate OST223 del hilo/IA",
+);
+assert(
+  !shouldBypassDirectPlateForFleetLookup("AD 427 MC", "AD427MC"),
+  "patente completa en el mensaje sí se acepta como directPlate",
 );
 
 if (failed > 0) {

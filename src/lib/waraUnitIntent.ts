@@ -1471,6 +1471,21 @@ export type ResolvePlateWithWaraFleetOptions = {
 };
 
 /** Resuelve patente desde texto + flota Wara (IA/reglas). Uso compartido en todos los trámites. */
+export function shouldBypassDirectPlateForFleetLookup(
+  rawText: string,
+  directPlate?: string | null,
+): boolean {
+  if (!directPlate?.trim()) return false;
+  const plateInMessage = detectLoosePlate(rawText);
+  if (plateInMessage && normalizePlate(plateInMessage) === normalizePlate(directPlate)) {
+    return false;
+  }
+  if (extractPlatePrefixFromMessage(rawText)) return true;
+  if (looksLikePlateCorrectionRequest(rawText)) return true;
+  if (looksLikeFleetUnitSearchInput(rawText) && !plateInMessage) return true;
+  return false;
+}
+
 export async function resolvePlateWithWaraFleet(
   prisma: PrismaClient,
   rawPhone: string,
@@ -1479,7 +1494,10 @@ export async function resolvePlateWithWaraFleet(
   directPlate?: string | null,
   opts?: ResolvePlateWithWaraFleetOptions,
 ): Promise<PlateFromFleetResult> {
-  const normalizedDirect = directPlate ? normalizePlate(directPlate) : null;
+  const normalizedDirect =
+    directPlate && !shouldBypassDirectPlateForFleetLookup(rawText, directPlate)
+      ? normalizePlate(directPlate)
+      : null;
   if (normalizedDirect) {
     return { ok: true, plate: normalizedDirect, source: "direct" };
   }

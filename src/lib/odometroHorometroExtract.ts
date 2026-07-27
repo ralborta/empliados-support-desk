@@ -88,9 +88,10 @@ export function mergeOdometerFieldExtractions(
   const aiPatente = ai?.patente ? normalizePlate(String(ai.patente)) : "";
   const msgPatente = regex.message.patente ? normalizePlate(regex.message.patente) : "";
   const threadPatente = regex.thread.patente ? normalizePlate(regex.thread.patente) : "";
+  const prefixInMessage = extractPlatePrefixFromMessage(ctx.mensaje);
 
   let patente = msgPatente || (ctx.treatAsBlankFlowStart ? "" : threadPatente);
-  if (useAiFields && aiPatente && (!patente || aiPatente === patente)) {
+  if (useAiFields && aiPatente && !prefixInMessage && (!patente || aiPatente === patente)) {
     patente = aiPatente;
   }
   if (
@@ -118,6 +119,9 @@ export function mergeOdometerFieldExtractions(
   } else {
     odometro = msgOdometro ?? (useAiFields ? aiOdometro : undefined) ?? threadOdometro;
     horometro = msgHorometro ?? (useAiFields ? aiHorometro : undefined);
+  }
+  if (typeof odometro === "number" && odometro < 1000 && !/\b(km|kilometraje|od[oó]metro)\b/i.test(ctx.mensaje)) {
+    odometro = undefined;
   }
 
   const regexFecha = regexFechaFromCombined(ctx);

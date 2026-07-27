@@ -96,6 +96,25 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
 }
 
 
+function isPlausibleOdometerReading(
+  value: number | undefined,
+  rawText: string,
+  opts: { pendingConfirm: boolean; explicitKmInMessage: boolean },
+): value is number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  if (opts.pendingConfirm || opts.explicitKmInMessage) return true;
+  // Bug 2026-07-27: "OST 223" en el hilo filtraba 223 como km (dígitos de patente).
+  if (value < 1000) return false;
+  return true;
+}
+
+function messageExplicitlyStatesKm(rawText: string): boolean {
+  return (
+    /\b(km|kil[oó]metros?|kilometraje|od[oó]metro)\b/i.test(rawText) &&
+    /\d/.test(rawText)
+  );
+}
+
 function parseNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const n = Number(value.replace(/\./g, "").replace(",", "."));
@@ -465,18 +484,24 @@ export async function POST(req: NextRequest) {
   // skipThreadPlate ya indica que el cliente está señalando explícitamente OTRA
   // unidad (corrección de patente o marca/nombre distinto en el mensaje).
   const activeUnitRecord = activeUnitRecordEarly;
-  const explicitMessagePlate = normalizePlate(
-    parsed.data.patente ??
-      parsed.data.plate ??
-      fromText.patente ??
-      mergedFields.patente ??
-      "",
-  );
   const isFleetUnitSelection = looksLikeFleetUnitSearchInput(rawText);
+  const prefixInMessage = extractPlatePrefixFromMessage(rawText);
+  const plateInMessage = normalizePlate(fromText.patente ?? detectPlate(rawText) ?? "");
+  let explicitMessagePlate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? plateInMessage ?? "");
+  // Bug 2026-07-27: mergedFields/IA inferían OST223 del hilo y resolvePlateWithWaraFleet
+  // los tomaba como directPlate — saltaba búsqueda por prefijo MYQ/RMX.
+  if (!isFleetUnitSelection && !prefixInMessage && mergedFields.patente) {
+    explicitMessagePlate = normalizePlate(explicitMessagePlate || mergedFields.patente);
+  }
   const awaitingPlateSelection =
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
     (activeOdoFlow && !hasPendingConfirmInThread);
+  const freshOdometerIntentWithoutUnit =
+    odometerIntentStart &&
+    !hasUnitHintInCurrentMessage &&
+    !explicitVagueUnitReference &&
+    !isFleetUnitSelection;
 
   let patente = explicitMessagePlate;
 
@@ -489,7 +514,7 @@ export async function POST(req: NextRequest) {
       rawPhone,
       rawText,
       threadText,
-      explicitMessagePlate || null,
+      null,
       { preferAi: true, odometerContext: true },
     );
     if (fleetPlate.ok) {
@@ -513,13 +538,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (!patente && !skipThreadPlate && !isFleetUnitSelection) {
+  if (!patente && !skipThreadPlate && !isFleetUnitSelection && !freshOdometerIntentWithoutUnit) {
     patente = normalizePlate(
       resolveOdometerContextPlate({
         threadText,
         lastThreadPlate,
         activeUnitPlate: activeUnitRecord?.plate,
         explicitVagueUnitReference,
+        hasPendingOdometerConfirm: hasPendingConfirmInThread,
+      }) ?? "",
+    );
+  } else if (
+    !patente &&
+    !skipThreadPlate &&
+    !isFleetUnitSelection &&
+    freshOdometerIntentWithoutUnit &&
+    explicitVagueUnitReference
+  ) {
+    patente = normalizePlate(
+      resolveOdometerContextPlate({
+        threadText,
+        lastThreadPlate,
+        activeUnitPlate: activeUnitRecord?.plate,
+        explicitVagueUnitReference: true,
         hasPendingOdometerConfirm: hasPendingConfirmInThread,
       }) ?? "",
     );
@@ -561,7 +602,16 @@ export async function POST(req: NextRequest) {
   // (el mensaje actual menciona "cambio de odometro"), así que el km/hs ya
   // propuestos en la confirmación pendiente (ej. 600 km) se descartaban igual,
   // aunque ya no se vaciara el hilo.
-  const odometro = firstFiniteNumber(
+  const pendingOdoConfirm = horometerFlowActive || horometerOnlyIntent
+    ? false
+    : hasPendingOdometerConfirmation(threadText);
+  const explicitKmInMessage = messageExplicitlyStatesKm(rawText);
+  const allowThreadKm =
+    explicitKmInMessage ||
+    pendingOdoConfirm ||
+    (!isFleetUnitSelection && !awaitingPlateSelection);
+
+  const rawOdometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,
     mergedFields.odometro,
@@ -570,8 +620,16 @@ export async function POST(req: NextRequest) {
       ? undefined
       : treatAsBlankFlowStart
         ? undefined
-        : threadParsed.odometro,
+        : allowThreadKm
+          ? threadParsed.odometro
+          : undefined,
   );
+  const odometro = isPlausibleOdometerReading(rawOdometro, rawText, {
+    pendingConfirm: pendingOdoConfirm,
+    explicitKmInMessage,
+  })
+    ? rawOdometro
+    : undefined;
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
   const horometro = resolveHorometroForWara({
     explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
@@ -582,9 +640,6 @@ export async function POST(req: NextRequest) {
     ),
     combinedText: treatAsBlankFlowStart ? rawText : combinedText,
   });
-  const pendingOdoConfirm = horometerFlowActive || horometerOnlyIntent
-    ? false
-    : hasPendingOdometerConfirmation(threadText);
 
   if (
     looksLikeOdometerConfirmationRejection(rawText) &&
