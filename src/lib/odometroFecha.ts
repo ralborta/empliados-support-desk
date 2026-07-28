@@ -105,9 +105,16 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
     if (deltaDays === undefined) {
       // Solo hora del reloj, sin fecha explícita → asumimos "hoy" (lectura en el día actual).
       // Ej. "16:45", "a las 16:45", "Hora: 16:45" — no confundir con horómetro decimal.
+      // También reconoce la hora quiando queda dentro de una oración más larga (bug real,
+      // producción 2026-07-28: "me equivoque la hora es a las13:05" durante una corrección
+      // de confirmación pendiente no matcheaba porque el patrón exigía que el mensaje
+      // ENTERO fuera solo la hora — el dato quedaba sin fecha detectada y desaparecía del
+      // resumen en vez de actualizarse).
       const bareClock =
         norm.match(/^(?:(?:hora|horas)\s*:?\s*|a\s+las\s+)?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\.?$/) ??
-        norm.match(/\b(\d{1,2}):(\d{2})\b\s*(?:de\s+)?(?:hoy|ayer|anteayer)\b/);
+        norm.match(/\b(\d{1,2}):(\d{2})\b\s*(?:de\s+)?(?:hoy|ayer|anteayer)\b/) ??
+        norm.match(/\b(?:hora|horas)\b[^0-9]{0,20}?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\b/) ??
+        norm.match(/\ba\s+las\s*(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\b/);
       if (bareClock) {
         const hh = Number(bareClock[1]);
         const mm = Number(bareClock[2]);

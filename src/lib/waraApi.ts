@@ -15,6 +15,7 @@ import {
   looksLikeHorometerOnlyIntent,
   looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerPendingDataAmendment,
+  looksLikeGenericCorrectionIntent,
   looksLikeCertificateKeyword,
   looksLikeMaintenanceKeyword,
   normalizePlate,
@@ -488,6 +489,12 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   if (looksLikeNonOdometerOperationalIntent(raw)) return false;
   if (looksLikePlateCorrectionRequest(raw)) return true;
   if (looksLikeOdometerConfirmReply(raw)) return true;
+  // Bug real, producción 2026-07-28: "quiero corregir el/un dato" durante una confirmación
+  // pendiente no mencionaba odómetro/horómetro/patente/fecha explícitamente, así que el
+  // router (shouldContinueOdometerFlow) no lo reconocía como continuación del trámite y el
+  // mensaje se iba al executor por defecto (unidades) — el fix que ya maneja este caso
+  // dentro de odometro-horometro/route.ts nunca llegaba a correr.
+  if (looksLikeGenericCorrectionIntent(raw)) return true;
   const t = normCompanyToken(raw);
   if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) return true;
   if (/\b(fecha|ayer|hoy)\b/.test(t)) return true;

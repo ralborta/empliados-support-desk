@@ -743,6 +743,9 @@ export async function POST(req: NextRequest) {
     horometro = undefined;
   }
 
+  // Fecha ya confirmada en el resumen pendiente, para no perderla si la corrección de
+  // este turno no la vuelve a mencionar (ver uso en fechaExplicita más abajo).
+  let pendingPayloadFecha: string | undefined;
   if (amendsPendingOdoConfirm) {
     const pending = await getPendingAction(prisma, rawPhone);
     const payload = pending?.payload;
@@ -753,6 +756,9 @@ export async function POST(req: NextRequest) {
       }
       if (typeof odometro !== "number" && typeof payload.odometro === "number") {
         odometro = payload.odometro as number;
+      }
+      if (typeof payload.fecha === "string" && payload.fecha.trim()) {
+        pendingPayloadFecha = payload.fecha;
       }
     }
     await clearPendingAction(prisma, rawPhone);
@@ -950,7 +956,7 @@ export async function POST(req: NextRequest) {
     parsed.data.date ??
     fechaFromMessage ??
     (amendsPendingOdoConfirm
-      ? undefined
+      ? pendingPayloadFecha
       : clientExplicitFechaThisTurn
         ? mergedFields.fechaNaive
         : undefined) ??
