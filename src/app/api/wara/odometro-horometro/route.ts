@@ -664,7 +664,7 @@ export async function POST(req: NextRequest) {
           ? threadParsed.odometro
           : undefined,
   );
-  const odometro = isPlausibleOdometerReading(rawOdometro, rawText, {
+  let odometro = isPlausibleOdometerReading(rawOdometro, rawText, {
     pendingConfirm: effectivePendingOdoConfirm,
     explicitKmInMessage,
     awaitingKmValue: awaitingOdometerKm,
