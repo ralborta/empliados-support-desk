@@ -126,7 +126,8 @@ export function mergeOdometerFieldExtractions(
 
   const regexFecha = regexFechaFromCombined(ctx);
   const aiFecha = normalizeFechaNaive(ai?.fecha_lectura);
-  const fechaNaive = useAiFields && aiFecha ? aiFecha : regexFecha ?? (useAiFields ? aiFecha : undefined);
+  const msgFecha = parseFechaFromText(ctx.mensaje, ctx.timezone);
+  const fechaNaive = msgFecha ?? regexFecha ?? (useAiFields ? aiFecha : undefined);
 
   const usedAi =
     useAiFields &&

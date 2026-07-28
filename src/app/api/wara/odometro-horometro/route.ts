@@ -22,6 +22,7 @@ import {
   looksLikeOdometerFlowReminder,
   looksLikeOdometerHelpRequest,
   looksLikeOdometerIntentStart,
+  looksLikeOdometerPendingDataAmendment,
   looksLikeHorometerOnlyIntent,
   looksLikeUnitRejection,
   normalizePlate,
@@ -42,7 +43,7 @@ import {
 } from "@/lib/waraUnitIntent";
 import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields } from "@/lib/odometroHorometroExtract";
-import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
   looksLikeConversationAcknowledgement,
@@ -187,6 +188,16 @@ function mentionsHorometroIntent(text: string): boolean {
     /\bcambio de horometro\b/.test(t) ||
     /\bactualizar horometro\b/.test(t)
   );
+}
+
+function stripHorometroConfusedWithClockTime(
+  rawText: string,
+  horometro: number | undefined,
+): number | undefined {
+  if (typeof horometro !== "number" || !Number.isFinite(horometro)) return horometro;
+  const clock = rawText.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})/i);
+  if (clock && Number(clock[1]) === horometro) return undefined;
+  return horometro;
 }
 
 function resolveHorometroForWara(opts: {
@@ -627,10 +638,13 @@ export async function POST(req: NextRequest) {
     horometerFlowActive || horometerOnlyIntent || supersedesPendingConfirm
       ? false
       : hasPendingOdometerConfirmation(threadText);
+  const amendsPendingOdoConfirm =
+    pendingOdoConfirm && looksLikeOdometerPendingDataAmendment(rawText);
+  const effectivePendingOdoConfirm = pendingOdoConfirm && !amendsPendingOdoConfirm;
   const explicitKmInMessage = messageExplicitlyStatesKm(rawText);
   const allowThreadKm =
     explicitKmInMessage ||
-    pendingOdoConfirm ||
+    effectivePendingOdoConfirm ||
     awaitingOdometerKm ||
     (!isFleetUnitSelection && !awaitingPlateSelection);
 
@@ -651,22 +665,40 @@ export async function POST(req: NextRequest) {
           : undefined,
   );
   const odometro = isPlausibleOdometerReading(rawOdometro, rawText, {
-    pendingConfirm: pendingOdoConfirm,
+    pendingConfirm: effectivePendingOdoConfirm,
     explicitKmInMessage,
     awaitingKmValue: awaitingOdometerKm,
   })
     ? rawOdometro
     : undefined;
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
-  const horometro = resolveHorometroForWara({
-    explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
-    parsedHorometro: firstFiniteNumber(
-      mergedFields.horometro,
-      fromText.horometro,
-      treatAsBlankFlowStart ? undefined : threadParsed.horometro,
-    ),
-    combinedText: treatAsBlankFlowStart ? rawText : combinedText,
-  });
+  let horometro = stripHorometroConfusedWithClockTime(
+    rawText,
+    resolveHorometroForWara({
+      explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
+      parsedHorometro: firstFiniteNumber(
+        mergedFields.horometro,
+        fromText.horometro,
+        treatAsBlankFlowStart ? undefined : threadParsed.horometro,
+      ),
+      combinedText: treatAsBlankFlowStart ? rawText : combinedText,
+    }),
+  );
+
+  if (amendsPendingOdoConfirm) {
+    const pending = await getPendingAction(prisma, rawPhone);
+    const payload = pending?.payload;
+    if (payload) {
+      if (!patente && payload.patente) patente = normalizePlate(String(payload.patente));
+      if (typeof horometro !== "number" && typeof payload.horometro === "number") {
+        horometro = payload.horometro as number;
+      }
+      if (typeof odometro !== "number" && typeof payload.odometro === "number") {
+        odometro = payload.odometro as number;
+      }
+    }
+    await clearPendingAction(prisma, rawPhone);
+  }
 
   if (
     looksLikeOdometerConfirmationRejection(rawText) &&
@@ -813,13 +845,13 @@ export async function POST(req: NextRequest) {
   // registró como te la pedí?" sin que el bot pudiera contestarle con ese dato. Se
   // calcula la fecha ACÁ (antes del resumen) y se muestra siempre que el cliente haya
   // dado una explícita (no la de "ahora", para no confundir con un dato que no pidió).
+  const fechaFromMessage = parseFechaFromText(rawText, customerTz);
   const fechaExplicita =
     parsed.data.fecha ??
     parsed.data.date ??
+    fechaFromMessage ??
     mergedFields.fechaNaive ??
-    (horometerFlowActive && typeof horometro !== "number"
-      ? parseFechaFromText(rawText, customerTz)
-      : parseFechaFromText([threadText, rawText].filter(Boolean).join("\n"), customerTz));
+    parseFechaFromText(threadText, customerTz);
   const fecha = fechaWara(fechaExplicita, customerTz);
   const fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
 
@@ -849,11 +881,11 @@ export async function POST(req: NextRequest) {
       (typeof horometro === "number" && Number.isFinite(horometro)));
   const confirmed =
     isConfirmed(confirmSignal) ||
-    (pendingOdoConfirm && isConfirmed(rawText)) ||
+    (effectivePendingOdoConfirm && isConfirmed(rawText)) ||
     (isConfirmed(rawText) && hasCompleteOdoPayload);
 
   if (!confirmed) {
-    if (pendingOdoConfirm && looksLikeOdometerConfirmationRejection(rawText)) {
+    if (effectivePendingOdoConfirm && looksLikeOdometerConfirmationRejection(rawText)) {
       await clearPendingAction(prisma, rawPhone);
       const message =
         "Entendido, no registro ese cambio. ¿Qué necesitás? Podés pedirme otro trámite (odómetro, horómetro, certificado, estado de unidad, etc.).";
@@ -873,7 +905,7 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS },
       );
     }
-    if (pendingOdoConfirm) {
+    if (effectivePendingOdoConfirm) {
       const remindMessage =
         "Para registrar el cambio respondé CONFIRMO. Si algo no está bien, decime la patente o el valor correcto, o escribí que querés hacer otra gestión.";
       await appendOutboundBotMessage(rawPhone, remindMessage, {

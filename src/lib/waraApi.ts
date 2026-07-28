@@ -476,6 +476,9 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   const t = normCompanyToken(raw);
   if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) return true;
   if (/\b(fecha|ayer|hoy)\b/.test(t)) return true;
+  if (/\b(la fecha es|fecha es la|es la de hoy)\b/.test(t)) return true;
+  if (/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(raw)) return true;
+  if (/\b\d{1,2}\s*h(?:rs?|s)?\b/i.test(raw)) return true;
   if (/\b(cambiar|corregir|modificar).{0,24}(patente|matricula)\b/.test(t)) return true;
   if (/\bpatente\s+(?:de|del)\b/.test(t)) return true;
   if (looksLikeVehicleBrandOrUnitSearch(raw)) return true;

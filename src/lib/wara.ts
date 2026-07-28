@@ -304,7 +304,7 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
   return (
     /voy a registrar:/.test(tail) &&
-    /od[oó]metro/.test(tail) &&
+    /od[oó]metro|hor[oó]metro/.test(tail) &&
     /respond[eé]\s+confirmo/.test(tail)
   );
 }
@@ -567,7 +567,7 @@ export function looksLikeFreshOdometerRestartRequest(text: string | undefined | 
   return /\b(quiero|necesito|hagamos|podemos|vamos a|deseo)\b/.test(t);
 }
 
-/** Ampliación de datos sobre confirmación pendiente (fecha/hora/km), no reinicio ni corrección de patente. */
+/** Ampliación o corrección sobre confirmación pendiente (fecha/hora/km/horómetro). */
 export function looksLikeOdometerPendingDataAmendment(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
@@ -576,6 +576,10 @@ export function looksLikeOdometerPendingDataAmendment(text: string | undefined |
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (/\b(aun no te dije|todavia no|no te dije|me falta|faltaria|falta el|falta la)\b/.test(t)) return true;
+  if (/\b(la fecha es|fecha es la|es la de hoy|es hoy|fecha correcta|la hora es|hora correcta)\b/.test(t)) {
+    return true;
+  }
+  if (/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(raw)) return true;
   if (
     /\b(hora|fecha|dia|kilometraje|km)\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|cambio de)\b/.test(t)

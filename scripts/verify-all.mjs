@@ -41,6 +41,7 @@ const SUITES = [
   "verify-odometer-pending-confirm-context.mjs",
   "verify-odometer-after-fleet-list.mjs",
   "verify-odometer-bare-km.mjs",
+  "verify-odometer-horometer-fecha.mjs",
   "verify-horometro-unit-name-context.mjs",
   "verify-odometer-ajuste-horometro.mjs",
   "verify-delivery-critical-fixes.mjs",
