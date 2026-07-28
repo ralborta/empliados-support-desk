@@ -13,6 +13,7 @@ import {
   detectPlate,
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
+  extractPlateFromOdometerSummary,
   formatPlateWithSpaces,
   resolveOdometerContextPlate,
   hasPendingOdometerConfirmation,
@@ -42,7 +43,7 @@ import {
   resolvePlateWithWaraFleet,
 } from "@/lib/waraUnitIntent";
 import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } from "@/lib/odometroFecha";
-import { resolveOdometerHorometerFields } from "@/lib/odometroHorometroExtract";
+import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
@@ -188,24 +189,6 @@ function mentionsHorometroIntent(text: string): boolean {
     /\bcambio de horometro\b/.test(t) ||
     /\bactualizar horometro\b/.test(t)
   );
-}
-
-function stripHorometroConfusedWithClockTime(
-  rawText: string,
-  horometro: number | undefined,
-): number | undefined {
-  if (typeof horometro !== "number" || !Number.isFinite(horometro)) return horometro;
-  const clock = rawText.match(/\b(\d{1,2}):(\d{2})\b/);
-  if (clock) {
-    const hh = Number(clock[1]);
-    const mm = Number(clock[2]);
-    const asDecimal = Math.round((hh + mm / 60) * 100) / 100;
-    if (Math.abs(horometro - asDecimal) < 0.02 || horometro === hh) return undefined;
-    return horometro;
-  }
-  const alt = rawText.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})/i);
-  if (alt && Number(alt[1]) === horometro) return undefined;
-  return horometro;
 }
 
 function resolveHorometroForWara(opts: {
@@ -530,6 +513,7 @@ export async function POST(req: NextRequest) {
   }
   const awaitingOdometerKm = threadAwaitingOdometerKmValue(threadText);
   const awaitingHorometerKm = threadAwaitingHorometerKmValue(threadText);
+  const clockTimeOnlyReading = looksLikeClockTimeOnlyReading(rawText);
   const awaitingPlateSelection =
     (threadAwaitingOdometerPlate(threadText) && !awaitingOdometerKm) ||
     (threadAwaitingHorometerPlate(threadText) && !awaitingHorometerKm) ||
@@ -606,7 +590,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!patente && !odometerFlowStart && !isFleetUnitSelection) {
+  if (!patente && !odometerFlowStart && !isFleetUnitSelection && !clockTimeOnlyReading) {
     const fleetPlate = await resolvePlateWithWaraFleet(
       prisma,
       rawPhone,
@@ -623,7 +607,7 @@ export async function POST(req: NextRequest) {
     } else if (shouldUseActiveUnitFallback(rawText) && activeUnitRecord?.plate) {
       patente = activeUnitRecord.plate;
     }
-  } else if (skipThreadPlate && !patente && activeOdoFlow && !isFleetUnitSelection) {
+  } else if (skipThreadPlate && !patente && activeOdoFlow && !isFleetUnitSelection && !clockTimeOnlyReading) {
     const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, rawText, threadText);
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
@@ -642,10 +626,9 @@ export async function POST(req: NextRequest) {
   // (el mensaje actual menciona "cambio de odometro"), así que el km/hs ya
   // propuestos en la confirmación pendiente (ej. 600 km) se descartaban igual,
   // aunque ya no se vaciara el hilo.
-  const pendingOdoConfirm =
-    horometerFlowActive || horometerOnlyIntent || supersedesPendingConfirm
-      ? false
-      : hasPendingOdometerConfirmation(threadText);
+  const pendingOdoConfirm = supersedesPendingConfirm
+    ? false
+    : hasPendingOdometerConfirmation(threadText);
   const amendsPendingOdoConfirm =
     pendingOdoConfirm && looksLikeOdometerPendingDataAmendment(rawText);
   const effectivePendingOdoConfirm = pendingOdoConfirm && !amendsPendingOdoConfirm;
@@ -681,6 +664,7 @@ export async function POST(req: NextRequest) {
     ? rawOdometro
     : undefined;
   const combinedText = [threadText, rawText].filter(Boolean).join("\n");
+  const clockScanText = [rawText, threadText.slice(-800)].filter(Boolean).join("\n");
   let horometro = stripHorometroConfusedWithClockTime(
     rawText,
     resolveHorometroForWara({
@@ -693,7 +677,18 @@ export async function POST(req: NextRequest) {
       ),
       combinedText: treatAsBlankFlowStart ? rawText : combinedText,
     }),
+    clockScanText,
   );
+
+  const fechaFromMessageEarly = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
+  if (
+    (awaitingHorometerKm || horometerFlowActive) &&
+    fechaFromMessageEarly &&
+    !bareHorometerInMessage &&
+    typeof fromText.horometro !== "number"
+  ) {
+    horometro = undefined;
+  }
 
   if (amendsPendingOdoConfirm) {
     const pending = await getPendingAction(prisma, rawPhone);
@@ -866,14 +861,14 @@ export async function POST(req: NextRequest) {
   // calcula la fecha ACÁ (antes del resumen) y se muestra siempre que el cliente haya
   // dado una explícita (no la de "ahora", para no confundir con un dato que no pidió).
   const fechaFromMessage = parseFechaFromText(rawText, customerTz);
-  const fechaExplicita =
+  let fechaExplicita =
     parsed.data.fecha ??
     parsed.data.date ??
     fechaFromMessage ??
     mergedFields.fechaNaive ??
     parseFechaFromText(threadText, customerTz);
-  const fecha = fechaWara(fechaExplicita, customerTz);
-  const fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
+  let fecha = fechaWara(fechaExplicita, customerTz);
+  let fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
 
   // Mejora pedida por el cliente (producción 2026-07-23): "¿cómo contempla el caso de
   // que alguien pida el cambio de odómetro para un día POSTERIOR a la fecha en la que
@@ -903,6 +898,28 @@ export async function POST(req: NextRequest) {
     isConfirmed(confirmSignal) ||
     (effectivePendingOdoConfirm && isConfirmed(rawText)) ||
     (isConfirmed(rawText) && hasCompleteOdoPayload);
+
+  if (confirmed) {
+    const pendingConfirm = await getPendingAction(prisma, rawPhone);
+    const payload = pendingConfirm?.type === "odometro" ? pendingConfirm.payload : undefined;
+    if (payload) {
+      if (payload.patente) patente = normalizePlate(String(payload.patente));
+      if (typeof payload.horometro === "number" && Number.isFinite(payload.horometro)) {
+        horometro = payload.horometro as number;
+      }
+      if (typeof payload.odometro === "number" && Number.isFinite(payload.odometro)) {
+        odometro = payload.odometro as number;
+      }
+      if (typeof payload.fecha === "string" && payload.fecha.trim()) {
+        fechaExplicita = payload.fecha.trim();
+        fecha = fechaWara(fechaExplicita, customerTz);
+        fechaDisplay = formatFechaDisplay(fecha);
+      }
+    } else if (effectivePendingOdoConfirm) {
+      const summaryPlate = extractPlateFromOdometerSummary(threadText);
+      if (summaryPlate) patente = normalizePlate(summaryPlate);
+    }
+  }
 
   if (!confirmed) {
     if (effectivePendingOdoConfirm && looksLikeOdometerConfirmationRejection(rawText)) {
@@ -957,7 +974,7 @@ export async function POST(req: NextRequest) {
       `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`;
     await setPendingAction(prisma, rawPhone, "odometro", {
       summary: confirmMessage,
-      payload: { patente, odometro, horometro },
+      payload: { patente, odometro, horometro, fecha: fechaExplicita ?? undefined },
     });
     return NextResponse.json(
       {
@@ -980,6 +997,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." },
       { status: BB_STATUS }
+    );
+  }
+  if (!patente) {
+    return NextResponse.json(
+      { ok: false, error: "Patente requerida", message: "No pude identificar la patente para registrar." },
+      { status: BB_STATUS },
     );
   }
 

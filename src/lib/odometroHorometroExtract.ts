@@ -243,3 +243,35 @@ export async function resolveOdometerHorometerFields(
     ai,
   );
 }
+
+/** True si el texto parece solo hora/fecha de lectura (ej. "14:55 de hoy"), no horas de motor. */
+export function looksLikeClockTimeOnlyReading(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/^\d{1,2}:\d{2}(\s+de\s+(hoy|ayer|anteayer))?$/i.test(t)) return true;
+  if (/\b\d{1,2}:\d{2}\b/.test(t) && !/\b\d+\s*h(?:oras?)?\b/i.test(t) && !/\bhor[oó]metro\b/i.test(t)) {
+    return !!parseFechaFromText(t, "America/Argentina/Buenos_Aires");
+  }
+  return false;
+}
+
+/** Descarta horómetro si coincide con HH:MM del reloj (hora de lectura, no horas de motor). */
+export function stripHorometroConfusedWithClockTime(
+  rawText: string,
+  horometro: number | undefined,
+  clockSourceText?: string,
+): number | undefined {
+  if (typeof horometro !== "number" || !Number.isFinite(horometro)) return horometro;
+  const clockText = clockSourceText ?? rawText;
+  const clock = clockText.match(/\b(\d{1,2}):(\d{2})\b/);
+  if (clock) {
+    const hh = Number(clock[1]);
+    const mm = Number(clock[2]);
+    const asDecimal = Math.round((hh + mm / 60) * 100) / 100;
+    if (Math.abs(horometro - asDecimal) < 0.02 || horometro === hh) return undefined;
+    return horometro;
+  }
+  const alt = clockText.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})/i);
+  if (alt && Number(alt[1]) === horometro) return undefined;
+  return horometro;
+}

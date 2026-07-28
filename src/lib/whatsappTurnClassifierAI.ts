@@ -10,6 +10,18 @@ import {
   classifyTurnExecutorSafetyGuards,
   type TurnExecutorId,
 } from "@/lib/whatsappTurnRouter";
+import {
+  threadAwaitingHorometerKmValue,
+  threadHasActiveOdometerFlow,
+} from "@/lib/wara";
+import {
+  looksLikeCustomerConversationCloseRequest,
+} from "@/lib/customerConversationClose";
+import {
+  looksLikeHumanAdvisorRequest,
+  looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeTechnicalSupportRequest,
+} from "@/lib/waraApi";
 
 const TURN_AI_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_CONFIDENCE = 0.78;
@@ -34,7 +46,9 @@ export function isTurnAiClassifyEnabled(): boolean {
   const raw = process.env.WARA_TURN_AI_CLASSIFY?.trim().toLowerCase();
   if (raw === "false" || raw === "0" || raw === "no") return false;
   if (raw === "true" || raw === "1" || raw === "yes") return true;
-  return !!process.env.OPENAI_API_KEY?.trim();
+  // Desactivado por defecto: la IA de routing sumaba latencia y desvíos (GPS/Nissan
+  // en medio de horómetro). Activar explícitamente con WARA_TURN_AI_CLASSIFY=true.
+  return false;
 }
 
 const SYSTEM_PROMPT = `Sos el clasificador de intención de Atilio (Mesa de Ayuda Wara por WhatsApp).
@@ -145,6 +159,18 @@ export async function resolveTurnExecutor(
   const guard = classifyTurnExecutorSafetyGuards(selectionText, threadText);
   if (guard) {
     return { executor: guard.executor, source: "safety_guard", ruleId: guard.ruleId };
+  }
+
+  const text = selectionText.trim();
+  const inOdometerFlow =
+    threadHasActiveOdometerFlow(threadText) || threadAwaitingHorometerKmValue(threadText);
+  const hardOdooIntent =
+    looksLikeCustomerConversationCloseRequest(text) ||
+    looksLikeHumanAdvisorRequest(text) ||
+    looksLikeExplicitReclamoOrTicketRequest(text) ||
+    looksLikeTechnicalSupportRequest(text);
+  if (inOdometerFlow && !hardOdooIntent) {
+    return { executor: "odometro", source: "safety_guard", ruleId: "active_odometer_flow" };
   }
 
   if (isTurnAiClassifyEnabled()) {

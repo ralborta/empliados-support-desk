@@ -12,6 +12,7 @@ import {
   looksLikeBriefConfirmation,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerIntentStart,
+  looksLikeHorometerOnlyIntent,
   looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerPendingDataAmendment,
   normalizePlate,
@@ -167,6 +168,9 @@ export function clientSupersedesOdometerConfirmation(
   if (detectLoosePlate(raw)) return true;
   if (looksLikePlateCorrectionRequest(raw)) return true;
   if (looksLikeFreshOdometerRestartRequest(raw)) return true;
+  if (looksLikeOdometerIntentStart(raw) || looksLikeHorometerOnlyIntent(raw)) return true;
+  const t = normCompanyToken(raw);
+  if (/\bcambiar de unidad\b/.test(t) || /\bcambiar la unidad\b/.test(t)) return true;
   return false;
 }
 
