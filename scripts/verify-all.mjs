@@ -55,6 +55,7 @@ const SUITES = [
   "verify-odometer-glued-typo-and-hallucination.mjs",
   "verify-odometer-mantenimiento-pivot-and-weekday.mjs",
   "verify-odometer-plate-correction-reopens-confirm.mjs",
+  "verify-odometer-prefix-without-con.mjs",
   "verify-horometro-unit-name-context.mjs",
   "verify-odometer-ajuste-horometro.mjs",
   "verify-delivery-critical-fixes.mjs",

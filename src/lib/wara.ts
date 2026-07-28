@@ -157,7 +157,28 @@ export function isBarePlatePrefixHint(text: string | undefined | null): boolean 
 /** Pronombres/conectores cortos (2-3 letras, sin dígitos) que jamás son un prefijo de
  * patente real, aunque calcen con la forma "letras cortas sin dígitos" que exige el
  * patrón "la/el/esa/ese + <hint>" de abajo. */
-const NON_PLATE_PREFIX_WORDS = new Set(["que", "los", "por", "con", "una", "uno", "eso", "esa", "ese"]);
+const NON_PLATE_PREFIX_WORDS = new Set([
+  "que",
+  "los",
+  "por",
+  "con",
+  "una",
+  "uno",
+  "eso",
+  "esa",
+  "ese",
+  "el",
+  "la",
+  "las",
+  "unos",
+  "unas",
+  "de",
+  "del",
+  "al",
+  "en",
+  "para",
+  "a",
+]);
 
 /** Prefijo de patente en frases como "la AD", "la que comienza con AG", "empieza con NKL". */
 export function extractPlatePrefixFromMessage(rawText: string | undefined | null): string | null {
@@ -188,13 +209,24 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
       .toUpperCase();
   }
 
+  // Bug real, producción 2026-07-28: "cambiar el odometro de la q comienza OST" (sin la
+  // palabra "con") no matcheaba este patrón porque exigía "empieza/comienza CON X" a
+  // rajatabla. Al no detectarse el prefijo acá, el caller (odometro-horometro/route.ts)
+  // asumía que no había prefijo en el mensaje y dejaba pasar sin validar contra la flota
+  // lo que la IA/regex hubiera extraído como "patente" — terminando en "Perfecto, tomo
+  // OST" (un prefijo con VARIAS unidades reales: OST 223, OST 224, OST 225, OST 226...)
+  // en vez de listar las coincidencias y pedir cuál. Ahora "con" es opcional.
   const laQue = norm.match(
-    /\b(?:la|el|esa|ese)\s+(?:q|que)\s+(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z0-9]{2,6})\b/,
+    /\b(?:la|el|esa|ese)\s+(?:q|que)\s+(?:empieza|empiezan|comienza|comienzan)\s+(?:con\s+)?([a-z0-9]{2,6})\b/,
   );
-  if (laQue?.[1]) return laQue[1].replace(/\s+/g, "").toUpperCase();
+  if (laQue?.[1] && !NON_PLATE_PREFIX_WORDS.has(laQue[1].toLowerCase())) {
+    return laQue[1].replace(/\s+/g, "").toUpperCase();
+  }
 
-  const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+con\s+([a-z0-9]{2,6})/i);
-  if (explicit?.[1]) return explicit[1].replace(/\s+/g, "").toUpperCase();
+  const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+(?:con\s+)?([a-z0-9]{2,6})\b/i);
+  if (explicit?.[1] && !NON_PLATE_PREFIX_WORDS.has(explicit[1].toLowerCase())) {
+    return explicit[1].replace(/\s+/g, "").toUpperCase();
+  }
 
   const laPrefix = norm.match(/\b(?:la|el|esa|ese)\s+([a-z]{2,3}\d{0,3})\b/);
   if (laPrefix?.[1]) {
