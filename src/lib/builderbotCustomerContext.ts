@@ -26,6 +26,7 @@ import {
   looksLikeCompanyListQuestion,
   looksLikeCompanySelection,
   looksLikeConversationAcknowledgement,
+  looksLikeBareAtilioMention,
   looksLikeConversationClosing,
   looksLikeFlowControlCommand,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
@@ -551,6 +552,23 @@ export async function customerRegisteredContextResponse(
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "open_case_status_inquiry",
+    });
+    nextFlow = "reply";
+  } else if (
+    selectionText &&
+    !looksLikeAtilioHelpRequest(selectionText) &&
+    looksLikeBareAtilioMention(selectionText)
+  ) {
+    // Bug real, producción 2026-07-28 (3ra vuelta): tras ya haber mandado el párrafo
+    // completo de capacidades, el cliente escribió solo "Atilio" de nuevo y el bot
+    // repetía TEXTUALMENTE el mismo párrafo largo. Pedido explícito: "cuando se le diga
+    // Atilio... mejor pregunta cómo puede ayudar después de un Hola XXX" — respuesta
+    // corta, no la lista completa de capacidades otra vez.
+    const firstName = customer?.name?.trim().split(/\s+/)[0];
+    responseMessage = firstName ? `Hola ${firstName}, ¿en qué te puedo ayudar?` : "Hola, ¿en qué te puedo ayudar?";
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "atilio_bare_name_mention",
     });
     nextFlow = "reply";
   } else if (

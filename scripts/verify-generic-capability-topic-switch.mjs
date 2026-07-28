@@ -21,6 +21,8 @@
 import assert from "node:assert";
 import {
   looksLikeGenericCapabilityOrTopicSwitchRequest,
+  looksLikeExplicitCapabilityQuestion,
+  looksLikeBareAtilioMention,
   looksLikeAtilioHelpRequest,
 } from "../src/lib/waraApi.ts";
 
@@ -79,5 +81,24 @@ check(
   '"me podes ayudar con el mantenimiento" NO matchea (va a la guía puntual)',
   !looksLikeAtilioHelpRequest("me podes ayudar con el mantenimiento"),
 );
+
+console.log(
+  "\n▶ Bug real, producción 2026-07-28 (3ra vuelta): 'Atilio' solo NO debe repetir el párrafo completo de capacidades",
+);
+for (const msg of ["Atilio", "atilio", "hola atilio", "atilio?", "atilio estas ahi"]) {
+  check(`"${msg}" es mención pelada (respuesta corta)`, looksLikeBareAtilioMention(msg));
+  check(`"${msg}" NO es pregunta explícita de capacidades`, !looksLikeExplicitCapabilityQuestion(msg));
+}
+
+console.log("\n▶ Las preguntas explícitas de capacidades SÍ deben dar la respuesta completa (no la corta)");
+for (const msg of [
+  "Perfecto, indícame que gestiones puedo hacer con vos?",
+  "Quiero hacerte otras consultas",
+  "perfecto ahora decime que puedo gestionar con vos",
+  "atilio decime que puedo hacer",
+]) {
+  check(`"${msg}" es pregunta explícita de capacidades`, looksLikeExplicitCapabilityQuestion(msg));
+  check(`"${msg}" NO es mención pelada`, !looksLikeBareAtilioMention(msg));
+}
 
 console.log(`\n✓ ${passed} checks OK — verify-generic-capability-topic-switch`);

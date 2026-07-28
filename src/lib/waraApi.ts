@@ -1134,11 +1134,73 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
   );
 }
 
+/** Excluye mensajes con un tema concreto (patente, certificado, mantenimiento, etc.),
+ * incluida una patente/matrícula suelta — mismo criterio que looksLikeAtilioHelpRequest. */
+function hasConcreteOperationalTopic(text: string, norm: string): boolean {
+  return (
+    /\bconf\w*gura\w*\b/.test(norm) ||
+    /\b(agenda|contacto|contactos|perfil|perfiles|notific|opciones|unidad|unidades|patente|matr[ií]cula|mantenimiento|preventiv\w*|correctiv\w*|certificado|odometro|horometro|alarma|alarmas|gps|ubicacion|estado|reporte)\b/.test(
+      norm,
+    ) ||
+    !!detectLoosePlate(text ?? "")
+  );
+}
+
+/**
+ * Pregunta EXPLÍCITA de capacidades ("qué gestiones puedo hacer con vos", "qué puedo
+ * gestionar/pedir/consultar con vos") o aviso de que quiere pasar a otro tema ("quiero
+ * hacerte otras consultas", "otra consulta"), sin especificar todavía nada concreto.
+ * Amerita la respuesta completa de capacidades (buildAtilioHelpCapabilitiesReply).
+ */
+export function looksLikeExplicitCapabilityQuestion(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm || norm.length > 160) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+  if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
+  if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
+  if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
+  // Cualquier verbo razonable de pedido ("gestionar", "pedir", "consultar", "solicitar",
+  // "tramitar"), no solo "hacer" — bug real, producción 2026-07-28 (2da vuelta): "decime
+  // que puedo gestionar con vos" no matcheaba porque solo se contemplaba "hacer".
+  if (
+    /\bque\s+(puedo|podria|podr[ií]a|podes|pod[eé]s)\s+(hacer|pedirte|pedir|consultar|gestionar|solicitar|tramitar|realizar)\b/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
+  if (/\b(quiero|tengo|necesito)\b.*\botr\w*\s+consultas?\b/.test(norm)) return true;
+  if (/^otra\s+consulta[.,!?\s]*$/.test(norm)) return true;
+  return false;
+}
+
+/**
+ * Solo el nombre del bot como llamado de atención — "Atilio", "hola atilio", "Atilio?",
+ * "atilio estás ahí" — sin pregunta de capacidades ni tema concreto. Distinto de
+ * looksLikeExplicitCapabilityQuestion a propósito: bug real, producción 2026-07-28 (3ra
+ * vuelta): el cliente ya había recibido el mensaje completo de capacidades y, al volver a
+ * escribir solo "Atilio", el bot repetía TEXTUALMENTE el mismo párrafo largo en vez de
+ * saludar corto y preguntar en qué ayudar — así que esta mención "pelada" del nombre
+ * amerita una respuesta breve, no la lista completa de capacidades de nuevo.
+ */
+export function looksLikeBareAtilioMention(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim();
+  if (!norm || norm.length > 40) return false;
+  if (!/\batilio\b/.test(norm)) return false;
+  if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
+  return /^(hola\s+)?atilio(\s+(estas|esta)\s*(ahi)?)?$/.test(norm);
+}
+
 /**
  * "Qué gestiones puedo hacer con vos", "quiero hacerte otras consultas", o simplemente
  * escribir el nombre del bot ("Atilio") sin nada más: el cliente quiere saber qué puede
- * pedir o avisa que quiere pasar a otra cosa, pero sin especificar todavía nada concreto
- * (patente, certificado, mantenimiento, etc.).
+ * pedir, avisa que quiere pasar a otra cosa, o solo llama al bot por su nombre — en
+ * cualquier caso, sin especificar todavía nada concreto (patente, certificado,
+ * mantenimiento, etc.). Unión de looksLikeExplicitCapabilityQuestion y
+ * looksLikeBareAtilioMention, para decidir si HAY que interceptar el mensaje (el caller
+ * decide qué texto responder según cuál de las dos matcheó).
  *
  * Bug real, producción 2026-07-28: ninguno de estos mensajes calificaba como pedido de
  * unidad/patente ni como ningún trámite puntual, así que caían al ejecutor "unidades" por
@@ -1149,39 +1211,7 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
  * "Resolver conversación".
  */
 export function looksLikeGenericCapabilityOrTopicSwitchRequest(text: string | undefined | null): boolean {
-  const norm = normCompanyToken(text ?? "");
-  if (!norm || norm.length > 160) return false;
-  if (looksLikeHumanAdvisorRequest(text)) return false;
-  if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
-  // Si ya trae un tema concreto (incluida una patente/matrícula suelta), dejar que pase
-  // por el router/guía real de ese tema en vez de interceptar acá con el genérico de
-  // capacidades (mismo criterio que looksLikeAtilioHelpRequest).
-  const hasConcreteTopic =
-    /\bconf\w*gura\w*\b/.test(norm) ||
-    /\b(agenda|contacto|contactos|perfil|perfiles|notific|opciones|unidad|unidades|patente|matr[ií]cula|mantenimiento|preventiv\w*|correctiv\w*|certificado|odometro|horometro|alarma|alarmas|gps|ubicacion|estado|reporte)\b/.test(
-      norm,
-    ) ||
-    !!detectLoosePlate(text ?? "");
-  if (hasConcreteTopic) return false;
-  // Bug real, producción 2026-07-28 (2da vuelta): "decime que puedo gestionar con vos"
-  // no matcheaba porque solo se contemplaba el verbo "hacer" — cualquier verbo razonable
-  // de pedido ("gestionar", "pedir", "consultar", "solicitar", "tramitar") debe contar.
-  if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
-  if (
-    /\bque\s+(puedo|podria|podr[ií]a|podes|pod[eé]s)\s+(hacer|pedirte|pedir|consultar|gestionar|solicitar|tramitar|realizar)\b/.test(
-      norm,
-    )
-  ) {
-    return true;
-  }
-  if (/\b(quiero|tengo|necesito)\b.*\botr\w*\s+consultas?\b/.test(norm)) return true;
-  if (/^otra\s+consulta[.,!?\s]*$/.test(norm)) return true;
-  // Pedido explícito: "el agente debe contestar cuando se lo llame por su nombre" — si el
-  // cliente nombra al bot y no hay ningún tema concreto en el mensaje (ya descartado
-  // arriba), es una llamada de atención / pedido de ayuda genérico, no una pregunta sobre
-  // la última unidad consultada.
-  if (/\batilio\b/.test(norm)) return true;
-  return false;
+  return looksLikeExplicitCapabilityQuestion(text) || looksLikeBareAtilioMention(text);
 }
 
 export function buildAtilioHelpCapabilitiesReply(firstName?: string): string {
