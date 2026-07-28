@@ -48,6 +48,15 @@ for (const msg of [
   "tengo otra consulta",
   "necesito hacerte otra consulta",
   "otra consulta",
+  // Bug real, producción 2026-07-28 (2da vuelta): "gestionar" no estaba entre los verbos
+  // reconocidos, y el mensaje repitió el reporte de GPS de una unidad no relacionada.
+  "perfecto ahora decime que puedo gestionar con vos",
+  "que puedo gestionar con vos",
+  "que podes hacer vos",
+  // Pedido explícito: el bot debe responder cuando lo llaman por su nombre, aunque no
+  // sea exactamente "solo el nombre" (siempre que no traiga un tema concreto).
+  "atilio decime que puedo hacer",
+  "atilio estas ahi",
 ]) {
   check(`"${msg}"`, looksLikeGenericCapabilityOrTopicSwitchRequest(msg));
 }

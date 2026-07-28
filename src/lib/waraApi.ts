@@ -1153,23 +1153,34 @@ export function looksLikeGenericCapabilityOrTopicSwitchRequest(text: string | un
   if (!norm || norm.length > 160) return false;
   if (looksLikeHumanAdvisorRequest(text)) return false;
   if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
-  // Si ya trae un tema concreto, dejar que pase por el router/guía real de ese tema en vez
-  // de interceptar acá con el genérico de capacidades (mismo criterio que
-  // looksLikeAtilioHelpRequest).
-  if (
+  // Si ya trae un tema concreto (incluida una patente/matrícula suelta), dejar que pase
+  // por el router/guía real de ese tema en vez de interceptar acá con el genérico de
+  // capacidades (mismo criterio que looksLikeAtilioHelpRequest).
+  const hasConcreteTopic =
     /\bconf\w*gura\w*\b/.test(norm) ||
-    /\b(agenda|contacto|contactos|perfil|perfiles|notific|opciones|unidad|unidades|patente|matr[ií]cula|mantenimiento|preventiv\w*|correctiv\w*|certificado|odometro|horometro|alarma|alarmas|gps|ubicacion|reporte)\b/.test(
+    /\b(agenda|contacto|contactos|perfil|perfiles|notific|opciones|unidad|unidades|patente|matr[ií]cula|mantenimiento|preventiv\w*|correctiv\w*|certificado|odometro|horometro|alarma|alarmas|gps|ubicacion|estado|reporte)\b/.test(
+      norm,
+    ) ||
+    !!detectLoosePlate(text ?? "");
+  if (hasConcreteTopic) return false;
+  // Bug real, producción 2026-07-28 (2da vuelta): "decime que puedo gestionar con vos"
+  // no matcheaba porque solo se contemplaba el verbo "hacer" — cualquier verbo razonable
+  // de pedido ("gestionar", "pedir", "consultar", "solicitar", "tramitar") debe contar.
+  if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
+  if (
+    /\bque\s+(puedo|podria|podr[ií]a|podes|pod[eé]s)\s+(hacer|pedirte|pedir|consultar|gestionar|solicitar|tramitar|realizar)\b/.test(
       norm,
     )
   ) {
-    return false;
+    return true;
   }
-  // Solo el nombre del bot, sin nada más (p. ej. "Atilio", "hola atilio", "Atilio?").
-  if (/^(hola[,.\s]*)?atilio[.,!?\s]*$/.test(norm)) return true;
-  if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
-  if (/\bque\s+puedo\s+(hacer|pedirte|pedir|consultar)\b/.test(norm)) return true;
   if (/\b(quiero|tengo|necesito)\b.*\botr\w*\s+consultas?\b/.test(norm)) return true;
   if (/^otra\s+consulta[.,!?\s]*$/.test(norm)) return true;
+  // Pedido explícito: "el agente debe contestar cuando se lo llame por su nombre" — si el
+  // cliente nombra al bot y no hay ningún tema concreto en el mensaje (ya descartado
+  // arriba), es una llamada de atención / pedido de ayuda genérico, no una pregunta sobre
+  // la última unidad consultada.
+  if (/\batilio\b/.test(norm)) return true;
   return false;
 }
 
