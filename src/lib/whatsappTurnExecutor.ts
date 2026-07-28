@@ -7,10 +7,10 @@ import { POST as odometroPost } from "@/app/api/wara/odometro-horometro/route";
 import { POST as unidadesPost } from "@/app/api/wara/unidades/route";
 import { loadTurnThreadContext } from "@/lib/conversationThread";
 import {
-  classifyTurnExecutor,
   TURN_EXECUTOR_PATH,
   type TurnExecutorId,
 } from "@/lib/whatsappTurnRouter";
+import { resolveTurnExecutor } from "@/lib/whatsappTurnClassifierAI";
 import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeExplicitReclamoOrTicketRequest,
@@ -172,9 +172,11 @@ export async function runTurnExecutorPhase(params: {
   ) {
     executor = "certificados";
   } else if (looksLikeBriefConfirmation(selectionText)) {
-    executor = pendingAction?.type ?? classifyTurnExecutor(selectionText, threadCtx.classificationThread);
+    const resolved = await resolveTurnExecutor(selectionText, threadCtx.classificationThread);
+    executor = pendingAction?.type ?? resolved.executor;
   } else {
-    executor = classifyTurnExecutor(selectionText, threadCtx.classificationThread);
+    const resolved = await resolveTurnExecutor(selectionText, threadCtx.classificationThread);
+    executor = resolved.executor;
   }
 
   let execResult = await invokeExecutor(executor, rawPhone, selectionText, apiKey);

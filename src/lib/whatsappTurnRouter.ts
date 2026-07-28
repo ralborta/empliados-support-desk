@@ -542,6 +542,38 @@ const TURN_RULES: TurnRule[] = [
   },
 ];
 
+/** Reglas que NUNCA delega la IA (confirmaciones, Odoo, GPS en vivo, cert awaiting unit). */
+export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
+  "unit_list_request",
+  "conversation_close_request",
+  "open_case_status_inquiry",
+  "human_advisor_request",
+  "explicit_reclamo_or_ticket_request",
+  "technical_support_request",
+  "odometer_problem_report",
+  "post_advisor_case_supplement",
+  "gps_or_live_unit_consult",
+  "certificate_unit_context_selection",
+  "unit_consult_plate_selection",
+  "pending_confirmation_resolver",
+  "pending_mantenimiento_confirmation_diverted_by_new_topic",
+  "post_advisor_case_no_reopen",
+  "incident_admin_or_access",
+]);
+
+export function classifyTurnExecutorSafetyGuards(
+  selectionText: string,
+  threadText: string,
+): { executor: TurnExecutorId; ruleId: string } | null {
+  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText };
+  for (const rule of TURN_RULES) {
+    if (!TURN_SAFETY_GUARD_RULE_IDS.has(rule.id)) continue;
+    const executor = rule.decide(ctx);
+    if (executor) return { executor, ruleId: rule.id };
+  }
+  return null;
+}
+
 /**
  * Clasifica el ejecutor backend (Fase 1 — cerebro único).
  * Prioridad alineada con sync-builderbot-router-wara.mjs (histórico, ver docs/bbc-flows-eliminados-2026-07-22.md).

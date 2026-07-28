@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SUITES = [
   "verify-turn-pipeline.mjs",
   "verify-turn-routing.mjs",
+  "verify-turn-ai-classifier.mjs",
   "verify-system-health.mjs",
   "verify-unit-resolution-grounding.mjs",
   "verify-unit-name-vs-plate.mjs",
