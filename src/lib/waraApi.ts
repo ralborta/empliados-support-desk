@@ -16,6 +16,7 @@ import {
   looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerPendingDataAmendment,
   looksLikeCertificateKeyword,
+  looksLikeMaintenanceKeyword,
   normalizePlate,
   threadAwaitingOdometerPlate,
   threadAwaitingHorometerPlate,
@@ -646,7 +647,9 @@ export function formatCompanyConfirmMessage(companyName: string): string {
 export function looksLikeMaintenanceExplorationRequest(raw: string | undefined | null): boolean {
   const text = normCompanyToken(raw ?? "");
   if (!text) return false;
-  if (!/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)) return false;
+  if (!/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text) && !looksLikeMaintenanceKeyword(raw)) {
+    return false;
+  }
   if (
     /\b(programar|registrar|agendar|generar|abrir|crear|dar de alta|solicito pedir|pedir un)\b/.test(
       text,
@@ -669,7 +672,7 @@ export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = 
     /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta|puedo)\b/.test(
       text,
     ) &&
-    /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)
+    (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text) || looksLikeMaintenanceKeyword(raw))
   ) {
     return true;
   }

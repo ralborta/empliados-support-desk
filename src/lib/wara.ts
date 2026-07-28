@@ -754,6 +754,35 @@ export function looksLikeCertificateKeyword(text: string | undefined | null): bo
     .some((word) => word.length >= 9 && word.length <= 13 && levenshteinDistance(word, "certificado") <= 2);
 }
 
+/**
+ * Mantenimiento (preventivo/correctivo), incluyendo typos de teclado frecuentes en
+ * WhatsApp. Bug real, producción 2026-07-28: "me ayudasa agendar un mantenimineto?"
+ * (typo "mantenimineto", no una letra repetida) no matcheaba ningún \b(mantenimiento...)\b
+ * literal en TODA la cadena de detección (looksLikeOperationalMaintenanceIntent,
+ * looksLikeMaintenanceExplorationRequest, etc.) — el pedido de agendar mantenimiento
+ * caía al fallback genérico de "consulta operativa" (unidades/GPS) en vez de arrancar
+ * el trámite de mantenimiento, y terminaba mostrando el estado de ignición de la
+ * unidad elegida en vez de agendar nada.
+ */
+export function looksLikeMaintenanceKeyword(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const n = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*)\b/.test(n)) return true;
+  const collapsed = collapseRepeatedLetters(raw);
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*)\b/.test(collapsed)) return true;
+  // Solo "mantenimiento" tolera distancia de edición: es una palabra larga y única, sin
+  // riesgo real de falso positivo. "preventivo"/"correctivo" quedan afuera de este
+  // chequeo difuso a propósito — son más cortas y palabras comunes como "correcto"
+  // caen a distancia 2 de "correctivo", lo que dispararía falsos positivos constantes.
+  return n
+    .split(/[^a-z]+/)
+    .some((word) => word.length >= 10 && word.length <= 16 && levenshteinDistance(word, "mantenimiento") <= 2);
+}
+
 /** Bot pidió la unidad para un certificado (incluye mis-rutas a unidades). */
 export function threadHasCertificateUnitPrompt(threadText: string): boolean {
   if (!threadText.trim()) return false;
