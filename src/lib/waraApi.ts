@@ -105,11 +105,38 @@ export function isTestWhitelistEnabled(): boolean {
 export function looksLikeCompanyListQuestion(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
   if (!n) return false;
-  if (/\b(que|q|cuales|cuantas)\b.*\bempresa/.test(n)) return true;
+  if (/\b(que|q|cuales|cuantas|cual)\b.*\bempresa/.test(n)) return true;
   if (/\bempresa/.test(n) && /\b(tengo|asociad|vinculad|lista|figur|estoy|operando|uso|usando)\b/.test(n)) {
     return true;
   }
   return false;
+}
+
+/**
+ * Respuesta a "en qué empresa estoy operando" / "qué empresas tengo asociadas", con lo
+ * que ya sabemos del cliente (sin llamar a Wara de nuevo ni depender de la IA).
+ *
+ * Bug real, producción 2026-07-28: el caller que maneja `looksLikeCompanyListQuestion`
+ * solo marcaba `nextFlow="reply"` confiando en que OTRO chequeo previo (que además exigía
+ * `contactsCount > 1`) ya hubiese completado el mensaje. Si Wara devolvía 0 o 1 contacto
+ * en ese turno (intermitencia, o porque ya había una sola empresa resuelta), el mensaje
+ * quedaba vacío y el cliente terminaba recibiendo el genérico "¿En qué te puedo ayudar?"
+ * en vez de una respuesta a lo que preguntó. Esta función centraliza la respuesta para que
+ * cualquier caller la arme sin esa dependencia oculta.
+ */
+export function buildCompanyStatusReply(
+  activeCompany: string,
+  contactsCount: number,
+  waraContactsText: string,
+): string {
+  if (activeCompany) {
+    return contactsCount > 1 && waraContactsText
+      ? `Estás operando con ${activeCompany}.\n\nEste número también está asociado en Wara a:\n\n${waraContactsText}\n\nPara cambiar de empresa, escribí "cambiar empresa" y elegí una opción.`
+      : `Estás operando con ${activeCompany}. ¿En qué te puedo ayudar?`;
+  }
+  return waraContactsText
+    ? `Este número está asociado en Wara a:\n\n${waraContactsText}\n\nElegí con el número de la opción o el nombre de la empresa.`
+    : `Todavía no tengo una empresa asociada a este número en Wara. Decime el nombre de tu empresa para continuar.`;
 }
 
 /** Frases para cambiar/reiniciar empresa (flujo Cambiar en BuilderBot, no selección del menú). */

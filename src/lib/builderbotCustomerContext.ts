@@ -19,6 +19,7 @@ import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsapp
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
   buildCompanyMenuPayload,
+  buildCompanyStatusReply,
   formatCompanyConfirmMessage,
   looksLikeChangeCompanyRequest,
   looksLikeImplicitCompanyChangeAffirmation,
@@ -516,10 +517,7 @@ export async function customerRegisteredContextResponse(
     selectionText &&
     looksLikeCompanyListQuestion(selectionText)
   ) {
-    responseMessage = activeCompany
-      ? `Estás operando con ${activeCompany}.\n\nEste número también está asociado en Wara a:\n\n${waraContactsText}\n\nPara cambiar de empresa, escribí "cambiar empresa" y elegí una opción.`
-      : `Este número está asociado en Wara a:\n\n${waraContactsText}\n\n` +
-        `Elegí con el número de la opción o el nombre de la empresa.`;
+    responseMessage = buildCompanyStatusReply(activeCompany, contacts.length, waraContactsText);
   } else if (!responseMessage && needsCompanyMenu && waraContactsText) {
     responseMessage =
       `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
@@ -673,7 +671,19 @@ export async function customerRegisteredContextResponse(
     selectionText &&
     looksLikeCompanyListQuestion(selectionText)
   ) {
+    // Bug real, producción 2026-07-28: esta rama solo ponía nextFlow="reply" confiando en
+    // que el pre-check de arriba (línea ~512, que exige `contacts.length > 1`) ya hubiese
+    // completado `responseMessage`. Si el lookup de Wara devolvía 0 o 1 contacto en este
+    // turno (intermitencia, o porque ya había una sola empresa resuelta), esa condición no
+    // se cumplía y responseMessage quedaba vacío — el cliente preguntaba "en qué empresa
+    // estoy operando" y el bot terminaba respondiendo el genérico "¿En qué te puedo
+    // ayudar?", ignorando la pregunta. Esta rama ahora arma su propia respuesta con
+    // buildCompanyStatusReply (lo que ya sabemos: activeCompany / waraContactsText), sin
+    // depender de esa otra condición.
     nextFlow = "reply";
+    if (!responseMessage) {
+      responseMessage = buildCompanyStatusReply(activeCompany, contacts.length, waraContactsText);
+    }
   } else if (explicitCompanyMentionWhilePending) {
     // "la empresa es el cacique, la unidad es la AF061DO": declaración explícita de
     // empresa aunque venga con contenido operativo pegado — tiene que resolverse ANTES
