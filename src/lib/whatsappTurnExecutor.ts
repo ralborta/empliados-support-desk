@@ -22,6 +22,7 @@ import {
   looksLikeBriefConfirmation,
   detectLoosePlate,
   threadHasActiveOdometerFlow,
+  threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
 import {
   buildFleetUnitNotFoundMessage,
@@ -92,12 +93,28 @@ function executorSkippedSilently(data: JsonRecord): boolean {
   return String(data.skipResponse_s ?? "") === "true" && !messageFromPayload(data);
 }
 
+function looksLikeCertificateRequest(text: string): boolean {
+  const n = String(text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(n) ||
+    /\bemitir\b.{0,40}\b(certificado|certficado)\b/.test(n)
+  );
+}
+
 function inferRecoveryExecutor(
   selectionText: string,
   failedExecutor: TurnExecutorId,
   threadText: string,
 ): TurnExecutorId | null {
-  if (failedExecutor === "odometro" && threadHasActiveOdometerFlow(threadText)) {
+  if (looksLikeCertificateRequest(selectionText)) return "certificados";
+  if (
+    failedExecutor === "odometro" &&
+    threadHasActiveOdometerFlow(threadText) &&
+    !threadOdometerRegistrationCompleted(threadText)
+  ) {
     return null;
   }
   if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return "unidades";

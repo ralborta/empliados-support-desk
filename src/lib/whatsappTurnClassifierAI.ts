@@ -13,6 +13,7 @@ import {
 import {
   threadAwaitingHorometerKmValue,
   threadHasActiveOdometerFlow,
+  threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
 import {
   looksLikeCustomerConversationCloseRequest,
@@ -162,14 +163,20 @@ export async function resolveTurnExecutor(
   }
 
   const text = selectionText.trim();
+  const normalized = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const certificadoPivot = /\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(normalized);
   const inOdometerFlow =
-    threadHasActiveOdometerFlow(threadText) || threadAwaitingHorometerKmValue(threadText);
+    !threadOdometerRegistrationCompleted(threadText) &&
+    (threadHasActiveOdometerFlow(threadText) || threadAwaitingHorometerKmValue(threadText));
   const hardOdooIntent =
     looksLikeCustomerConversationCloseRequest(text) ||
     looksLikeHumanAdvisorRequest(text) ||
     looksLikeExplicitReclamoOrTicketRequest(text) ||
     looksLikeTechnicalSupportRequest(text);
-  if (inOdometerFlow && !hardOdooIntent) {
+  if (inOdometerFlow && !hardOdooIntent && !certificadoPivot) {
     return { executor: "odometro", source: "safety_guard", ruleId: "active_odometer_flow" };
   }
 

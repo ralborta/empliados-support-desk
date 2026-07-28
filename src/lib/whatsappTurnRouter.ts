@@ -76,12 +76,12 @@ function looksLikeCertificateIntent(text: string, threadText: string): boolean {
   if (looksLikeExplicitCertificateResendRequest(text)) return true;
   if (
     looksLikeNonOdometerOperationalIntent(text) &&
-    /\b(certificado|cobertura|monitoreo|constancia)\b/.test(nText)
+    /\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(nText)
   ) {
     return true;
   }
   if (
-    /\b(certificado|cobertura|constancia|monitoreo|reenvi\w*\s+certificado|certificado\s+nuevo)\b/.test(
+    /\b(certificado|certficado|cobertura|constancia|monitoreo|reenvi\w*\s+cert(?:ificado|ficado)|cert(?:ificado|ficado)\s+nuevo)\b/.test(
       nText,
     )
   ) {

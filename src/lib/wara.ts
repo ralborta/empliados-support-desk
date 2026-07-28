@@ -299,6 +299,30 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
   return null;
 }
 
+/** Trámite de odómetro/horómetro ya registrado con éxito sin un trámite nuevo posterior. */
+export function threadOdometerRegistrationCompleted(threadText: string): boolean {
+  const lower = threadText.toLowerCase();
+  const successIdx = Math.max(
+    lower.lastIndexOf("listo, registr"),
+    lower.lastIndexOf("registré el cambio para la unidad"),
+    lower.lastIndexOf("registre el cambio para la unidad"),
+  );
+  if (successIdx < 0) return false;
+  const afterSuccess = threadText.slice(successIdx).toLowerCase();
+  if (
+    /\b(cambiar|cambio de|actualizar|registrar|ajust\w*|hagamos|quiero|necesito)\b.{0,100}\b(od[oó]metro|hor[oó]metro)\b/.test(
+      afterSuccess,
+    ) ||
+    /\b(od[oó]metro|hor[oó]metro)\b.{0,100}\b(cambiar|actualizar|ajust\w*)\b/.test(afterSuccess) ||
+    /para registrar el cambio de hor[oó]metro necesito la patente/.test(afterSuccess) ||
+    /para registrar el cambio de od[oó]metro necesito la patente/.test(afterSuccess) ||
+    /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/.test(afterSuccess)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /** Resumen de odómetro pendiente de confirmación (ChatPDF o backend). */
 export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
@@ -460,6 +484,7 @@ export function threadHasOdometerUnitClarificationPending(threadText: string): b
 
 /** Trámite de odómetro activo en el hilo (pide patente/km o confirmación pendiente). */
 export function threadHasActiveOdometerFlow(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
   return (
     threadAwaitingOdometerPlate(threadText) ||
@@ -492,6 +517,7 @@ function threadTailSinceFleetUnitSearch(text: string): string {
 
 /** El hilo reciente está pidiendo patente para un trámite de odómetro. */
 export function threadAwaitingOdometerPlate(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
   const scoped = threadTailSinceFleetUnitSearch(threadText);
   const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
@@ -522,6 +548,7 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
 
 /** El bot pidió el nuevo odómetro en km (patente ya confirmada). */
 export function threadAwaitingOdometerKmValue(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
@@ -534,6 +561,7 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
 
 /** El bot pidió el nuevo horómetro en horas (patente ya confirmada). */
 export function threadAwaitingHorometerKmValue(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
   return (
@@ -545,6 +573,7 @@ export function threadAwaitingHorometerKmValue(threadText: string): boolean {
 
 /** El hilo reciente pide patente o valor para un trámite de horómetro (no odómetro). */
 export function threadAwaitingHorometerPlate(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
   const scoped = threadTailSinceFleetUnitSearch(threadText);
   const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;

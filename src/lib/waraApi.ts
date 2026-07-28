@@ -204,7 +204,7 @@ export function looksLikeNonOdometerOperationalIntent(text: string | undefined |
   if (!n) return false;
   if (looksLikeOdometerIntentStart(text)) return false;
   if (looksLikeOperationalMaintenanceIntent(text ?? "")) return true;
-  if (/\b(certificado|cobertura|monitoreo|constancia)\b/.test(n)) return true;
+  if (/\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(n)) return true;
   if (/\b(reporte|ultimo reporte|sin reporte|offline|listado|mis unidades)\b/.test(n)) return true;
   if (/\b(mantenimiento|asesor|ticket|reclamo)\b/.test(n) && !/\b(od[oó]metro|hor[oó]metro)\b/.test(n)) {
     return true;
