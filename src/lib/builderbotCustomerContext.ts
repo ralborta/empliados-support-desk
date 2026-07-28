@@ -30,6 +30,7 @@ import {
   looksLikeGreeting,
   looksLikeOperationalIntent,
   matchCompanyContinuationMention,
+  extractExplicitCompanyMention,
   looksLikeRepeatGreetingInSession,
   buildAtilioHelpCapabilitiesReply,
   looksLikeAtilioHelpRequest,
@@ -472,6 +473,17 @@ export async function customerRegisteredContextResponse(
     selectionText && contacts.length > 0
       ? matchCompanyContinuationMention(selectionText, contacts)
       : null;
+  /**
+   * Declaración explícita de empresa ("la empresa es el cacique, la unidad es la
+   * AF061DO"): a diferencia de `matchedCompanyMention`, tolera contenido operativo extra
+   * en el mismo mensaje. Solo se usa cuando TODAVÍA falta elegir empresa (needsCompanyMenu
+   * se calcula debajo, así que se recalcula la misma condición acá) para no interferir con
+   * mensajes operativos normales de un cliente que ya tiene empresa resuelta.
+   */
+  const explicitCompanyMentionWhilePending =
+    requiresCompanySelection && !activeCompany && selectionText && contacts.length > 0
+      ? extractExplicitCompanyMention(selectionText, contacts)
+      : null;
   const menuPayload = contacts.length
     ? await buildCompanyMenuPayload(contacts, normalized)
     : null;
@@ -662,6 +674,22 @@ export async function customerRegisteredContextResponse(
     looksLikeCompanyListQuestion(selectionText)
   ) {
     nextFlow = "reply";
+  } else if (explicitCompanyMentionWhilePending) {
+    // "la empresa es el cacique, la unidad es la AF061DO": declaración explícita de
+    // empresa aunque venga con contenido operativo pegado — tiene que resolverse ANTES
+    // que la rama de abajo (que de otro modo manda el mensaje al router genérico sin
+    // haber registrado la empresa, y el trámite vuelve a pedirla en loop).
+    nextFlow = "reply";
+    const picked = await selectCompanyForCustomer(prisma, trimmed, {
+      waraContactId: explicitCompanyMentionWhilePending.id,
+    });
+    if (!responseMessage) {
+      responseMessage =
+        picked.menuMessage ??
+        formatCompanyConfirmMessage(
+          picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
+        );
+    }
   } else if (selectionText && looksLikeOperationalIntent(selectionText)) {
     // Trámites operativos (certificado, odómetro, etc.) van al router aunque falte menú empresa.
     nextFlow = "router";

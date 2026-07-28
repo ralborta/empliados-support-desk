@@ -436,6 +436,37 @@ export function matchCompanyContinuationMention(
   return contacts.find((c) => strongCompanyNameMatch(c, mentioned)) ?? null;
 }
 
+/**
+ * Declaración explícita de empresa ("la empresa es el cacique", "empresa: Wara") aunque
+ * venga PEGADA a otro pedido en el mismo mensaje ("la empresa es el cacique, la unidad es
+ * la AF061DO"). A diferencia de `matchCompanyContinuationMention` (que exige que, sacando
+ * conectores, casi todo el mensaje sea el nombre de la empresa — por eso descarta este
+ * caso: sobran palabras como "unidad"/"AF061DO"), acá se recorta al segmento que sigue a
+ * "la empresa es/:" hasta la próxima cláusula (coma, punto, "la unidad", "patente", etc.),
+ * así que tolera contenido operativo adicional en el mismo mensaje.
+ *
+ * Bug real, producción 2026-07-28: un cliente sin empresa asociada respondió "la empresa
+ * es el cacique, la unidad es la AF061DO" al pedido de elegir empresa. Como el mensaje
+ * también calificaba como intención operativa (mencionaba "unidad" + una patente), el
+ * mensaje se mandaba al router genérico sin haber reconocido "el cacique" como selección
+ * de empresa, y el bot repetía en loop "necesito que elijas la empresa asociada".
+ */
+export function extractExplicitCompanyMention(
+  text: string | undefined | null,
+  contacts: WaraEmpresaContact[],
+): WaraEmpresaContact | null {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 160 || contacts.length === 0) return null;
+  const norm = normCompanyToken(raw);
+  const m = norm.match(/\bla\s+empresa\s+(?:es|:|=)\s*(.+)/) ?? norm.match(/\bempresa\s*(?:es|:|=)\s*(.+)/);
+  if (!m) return null;
+  const segment = (m[1] ?? "")
+    .split(/[,.;]|\by\s+la\s+unidad\b|\bla\s+unidad\b|\bunidad\b|\bpatente\b|\bmatricula\b|\bmovil\b/)[0]
+    ?.trim();
+  if (!segment) return null;
+  return contacts.find((c) => strongCompanyNameMatch(c, segment)) ?? null;
+}
+
 function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean {
   if (looksLikeConversationAcknowledgement(text)) return false;
   const t = normCompanyToken(text ?? "").replace(/[^a-z]/g, "");
