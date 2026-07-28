@@ -494,7 +494,8 @@ export function threadAwaitingHorometerKmValue(threadText: string): boolean {
   if (hasPendingOdometerConfirmation(threadText)) return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
-    /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail)
+    /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail) ||
+    /tom[eé] la fecha.+?cu[aá]ntas horas de motor/i.test(tail)
   );
 }
 

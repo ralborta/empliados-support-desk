@@ -6,6 +6,7 @@ import { parseFechaFromText } from "../src/lib/odometroFecha.ts";
 import { mergeOdometerFieldExtractions } from "../src/lib/odometroHorometroExtract.ts";
 import {
   looksLikeOdometerPendingDataAmendment,
+  threadAwaitingHorometerKmValue,
 } from "../src/lib/wara.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import { looksLikeOdometerContinuationMessage } from "../src/lib/waraApi.ts";
@@ -79,6 +80,23 @@ const mergedClock = mergeOdometerFieldExtractions(
 );
 assert(mergedClock.horometro === undefined, "16:45 de hoy no produce horómetro 16.75");
 assert(mergedClock.fechaNaive?.includes("T16:45"), `fecha con 16:45 (obtuve: ${mergedClock.fechaNaive})`);
+
+console.log("\n— Solo '16:45' (sin 'de hoy') → fecha hoy, no horómetro —");
+const soloHora = parseFechaFromText("16:45", tz) ?? "";
+assert(soloHora.includes("T16:45"), "16:45 solo → hora 16:45");
+assert(soloHora.startsWith("2026-07-27"), "16:45 solo → hoy");
+
+console.log("\n— Tras 'Tomé la fecha…', el hilo sigue pidiendo horas de motor —");
+const threadTomoFecha =
+  "Tomé la fecha 27/07/2026 16:45. ¿Cuántas horas de motor tiene LWK 7902 ahora?";
+assert(
+  threadAwaitingHorometerKmValue(threadTomoFecha),
+  "detecta hilo esperando horas tras tomar fecha",
+);
+assert(
+  parseFechaFromText(threadTomoFecha, tz)?.includes("T16:45"),
+  "fecha del hilo conservada para el siguiente turno",
+);
 
 if (failed > 0) process.exit(1);
 console.log("\n✓ Verificación fecha/horómetro OK");

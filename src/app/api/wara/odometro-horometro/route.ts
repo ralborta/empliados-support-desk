@@ -657,6 +657,7 @@ export async function POST(req: NextRequest) {
     (!isFleetUnitSelection && !awaitingPlateSelection);
 
   const bareKmInMessage = awaitingOdometerKm ? parseBareOdometerKm(rawText) : undefined;
+  const bareHorometerInMessage = awaitingHorometerKm ? parseBareHorometerHours(rawText) : undefined;
 
   const rawOdometro = firstFiniteNumber(
     parsed.data.odometro,
@@ -686,6 +687,7 @@ export async function POST(req: NextRequest) {
       explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
       parsedHorometro: firstFiniteNumber(
         mergedFields.horometro,
+        bareHorometerInMessage,
         fromText.horometro,
         treatAsBlankFlowStart ? undefined : threadParsed.horometro,
       ),
@@ -800,6 +802,10 @@ export async function POST(req: NextRequest) {
           : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo horómetro en horas?`
         : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo odómetro en km?`
       : "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_odometro_response",
+      stage: earlyFechaDisplay ? "horometro_awaiting_hours" : "missing_value",
+    });
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message }, { status: BB_STATUS });
   }
 

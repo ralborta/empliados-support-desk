@@ -68,7 +68,24 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
     const relative = norm.match(/\b(anteayer|ayer|hoy)\b/);
-    if (!relative) return undefined;
+    if (!relative) {
+      // Solo hora del reloj, sin fecha explícita → asumimos "hoy" (lectura en el día actual).
+      // Ej. "16:45", "a las 16:45", "Hora: 16:45" — no confundir con horómetro decimal.
+      const bareClock =
+        norm.match(/^(?:(?:hora|horas)\s*:?\s*|a\s+las\s+)?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\.?$/) ??
+        norm.match(/\b(\d{1,2}):(\d{2})\b\s*(?:de\s+)?(?:hoy|ayer|anteayer)\b/);
+      if (bareClock) {
+        const hh = Number(bareClock[1]);
+        const mm = Number(bareClock[2]);
+        if (hh <= 23 && mm <= 59) {
+          const { year, month, day } = todayPartsInTz(
+            timezone?.trim() || "America/Argentina/Buenos_Aires",
+          );
+          return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00`;
+        }
+      }
+      return undefined;
+    }
     const deltaDays = relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
     const timeMatch =
       norm.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/) ??

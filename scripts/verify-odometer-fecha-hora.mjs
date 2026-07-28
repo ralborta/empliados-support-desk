@@ -53,6 +53,16 @@ const deHoy = parseFechaFromText("16:45 de hoy", "America/Argentina/Buenos_Aires
 assert(deHoy?.includes("T16:45"), `16:45 de hoy → hora 16:45 (obtuve: ${deHoy})`);
 assert(deHoy?.startsWith("2026-07-27"), `16:45 de hoy → fecha hoy (obtuve: ${deHoy?.slice(0, 10)})`);
 
+console.log("— Solo hora, sin fecha → hoy a esa hora —");
+const tz = "America/Argentina/Buenos_Aires";
+for (const sample of ["16:45", "a las 16:45", "Hora: 16:45", "16:45 hs"]) {
+  const parsedBare = parseFechaFromText(sample, tz);
+  assert(parsedBare?.includes("T16:45"), `"${sample}" → 16:45 (obtuve: ${parsedBare})`);
+  assert(parsedBare?.startsWith("2026-07-27"), `"${sample}" → fecha hoy`);
+}
+assert(parseFechaFromText("168", tz) === undefined, "168 solo no es fecha");
+assert(parseFechaFromText("168 horas", tz) === undefined, "168 horas no es hora del reloj");
+
 console.log("\n— Fecha numérica + \"a las HH:MM\" en prosa (bug 2026-07-27) —");
 
 const prosaReal =
