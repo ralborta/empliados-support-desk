@@ -144,7 +144,15 @@ function isUnitSelectionMessage(text: string, threadText = ""): boolean {
     looksLikeCertificateUnitReply(text, threadText) ||
     looksLikeVehicleBrandOrUnitSearch(text) ||
     looksLikePlateCorrectionRequest(text) ||
-    looksLikeUnitNameInMessage(text)
+    looksLikeUnitNameInMessage(text) ||
+    // Bug real, producción 2026-07-28: tras "Para programar mantenimiento preventivo
+    // necesito la patente de la unidad...", el cliente respondió "para la misma
+    // unidad" (referencia vaga, no una patente/prefijo/nombre explícito). Ninguna de
+    // las condiciones de arriba la reconocía como "el cliente está indicando la
+    // unidad", así que caía al fallback genérico (loose_plate_or_operational_fallback)
+    // y terminaba en el chequeo de GPS/estado en vez de continuar el mantenimiento
+    // pendiente — el bot repetía el reporte de falta de GPS en loop.
+    looksLikeVagueUnitReference(text)
   );
 }
 

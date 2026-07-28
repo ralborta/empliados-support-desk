@@ -64,6 +64,8 @@ const SUITES = [
   "verify-certificate-confirm-pivot.mjs",
   "verify-info-guide-replies.mjs",
   "verify-knowledge-base.mjs",
+  "verify-certificate-prefix-clarification-continuity.mjs",
+  "verify-maintenance-vague-unit-reference.mjs",
   "simulate-maintenance-plate-flow.mjs",
   "snapshot-turn-classification.mjs",
 ];

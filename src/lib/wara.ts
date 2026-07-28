@@ -712,6 +712,27 @@ export function collapseRepeatedLetters(text: string): string {
     .replace(/(.)\1+/g, "$1");
 }
 
+/** Distancia de edición (Levenshtein) — solo para palabras cortas/puntuales, no texto libre. */
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const la = a.length;
+  const lb = b.length;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+  let prev = new Array(lb + 1);
+  let curr = new Array(lb + 1);
+  for (let j = 0; j <= lb; j++) prev[j] = j;
+  for (let i = 1; i <= la; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[lb];
+}
+
 /** Certificado de cobertura/monitoreo, incluyendo typos frecuentes en WhatsApp. */
 export function looksLikeCertificateKeyword(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
@@ -722,7 +743,15 @@ export function looksLikeCertificateKeyword(text: string | undefined | null): bo
     .toLowerCase();
   if (/\b(certificado|certficado|cobertura|monitoreo|constancia|sertificado)\b/.test(n)) return true;
   const collapsed = collapseRepeatedLetters(raw);
-  return /\b(certificado|certficado|cobertura|monitoreo|constancia|sertificado)\b/.test(collapsed);
+  if (/\b(certificado|certficado|cobertura|monitoreo|constancia|sertificado)\b/.test(collapsed)) return true;
+  // Bug real, producción 2026-07-28: "ceryficado" (typo de teclado sobre "certificado",
+  // no una simple letra repetida) no matcheaba ninguna variante literal ni el colapso de
+  // repetidas — el propio arranque del trámite de certificado quedaba sin ancla de
+  // "certificado" en el hilo, rompiendo threadHasCertificateUnitPrompt más adelante.
+  // Cualquier palabra de 9-13 letras a distancia de edición <=2 de "certificado" cuenta.
+  return n
+    .split(/[^a-z]+/)
+    .some((word) => word.length >= 9 && word.length <= 13 && levenshteinDistance(word, "certificado") <= 2);
 }
 
 /** Bot pidió la unidad para un certificado (incluye mis-rutas a unidades). */
@@ -734,11 +763,41 @@ export function threadHasCertificateUnitPrompt(threadText: string): boolean {
     .filter(Boolean);
   const tail = lines.slice(-12).join("\n").toLowerCase();
   if (/para el certificado de cobertura necesito la unidad/.test(tail)) return true;
+
+  // Ancla: el "¿Cuál unidad?" genérico, pero SOLO cuando el pedido que lo motivó fue
+  // de certificado (looksLikeCertificateKeyword sobre lo anterior).
   for (let i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) {
     const line = lines[i].toLowerCase();
     if (/cu[aá]l unidad\?\s*pasame la matr[ií]cula/.test(line)) {
       const prior = lines.slice(Math.max(0, i - 8), i).join("\n");
       if (looksLikeCertificateKeyword(prior)) return true;
+    }
+  }
+
+  // Bug real, producción 2026-07-28: tras "la q empieza con OST" (dentro de un trámite
+  // de certificado ya anclado por un "¿Cuál unidad?" anterior en el hilo), la
+  // resolución de flota responde con el mensaje GENÉRICO de aclaración de
+  // prefijo/candidatos ("Encontré N unidades que empiezan con OST (...). Decime cuál
+  // querés consultar/la patente exacta." o "Encontré varias unidades posibles. Decime
+  // la matrícula exacta.") — el mismo texto compartido que usa la resolución de flota
+  // para ESTADO/GPS/mantenimiento, sin mencionar "certificado" en ningún lado. Al no
+  // reconocerse como continuación del certificado, certificateFlowState volvía a
+  // "none" y la siguiente selección de unidad ("la OST226") se enrutaba al chequeo de
+  // GPS/estado en vez de continuar el certificado — el cliente recibía un reporte de
+  // ignición en vez de su certificado. Por eso: si HUBO un "¿Cuál unidad?" anclado a
+  // certificado en algún punto anterior del hilo (no solo en la ventana de arriba),
+  // cualquier "Encontré... unidades..." posterior sigue perteneciendo a ese mismo
+  // trámite — no hace falta que repita la palabra "certificado". La supersesión por
+  // cambio real de tema ya la filtra isCertificateFlowSuperseded en el caller.
+  const hadCertUnitPromptEarlier = lines.some((l, i) => {
+    if (!/cu[aá]l unidad\?\s*pasame la matr[ií]cula/.test(l.toLowerCase())) return false;
+    const prior = lines.slice(Math.max(0, i - 8), i).join("\n");
+    return looksLikeCertificateKeyword(prior);
+  });
+  if (!hadCertUnitPromptEarlier) return false;
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) {
+    if (/encontr[eé].{0,90}unidad(es)?.{0,90}(decime|pasame|cu[aá]l)/.test(lines[i].toLowerCase())) {
+      return true;
     }
   }
   return false;

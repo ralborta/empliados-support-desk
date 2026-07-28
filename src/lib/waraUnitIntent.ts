@@ -164,6 +164,12 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
+  // Bug real, producción 2026-07-28: tras "necesito la patente de la unidad" el
+  // cliente respondió "para la misma unidad" (referencia vaga a la última unidad
+  // resuelta en el hilo, ej. HEJ) — no es patente/prefijo/nombre explícito, y supera
+  // los 16 caracteres del heurístico de abajo, así que la unidad nunca se resolvía y
+  // el trámite de mantenimiento quedaba sin poder avanzar.
+  if (looksLikeVagueUnitReference(text)) return true;
   return (
     text.length <= 16 &&
     !/\b(mantenimiento|preventiv\w*|correctiv\w*|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
