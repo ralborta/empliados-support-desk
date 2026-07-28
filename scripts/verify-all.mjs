@@ -37,6 +37,7 @@ const SUITES = [
   "verify-close-case-resolver-verb.mjs",
   "verify-ticket-status-after-outbound.mjs",
   "verify-bot-only-no-advisor-assign.mjs",
+  "verify-rebalance-bot-only.mjs",
   "verify-nissan-not-found-human.mjs",
   "verify-new-case-request-not-fleet-search.mjs",
   "verify-odometer-vague-unit-start.mjs",

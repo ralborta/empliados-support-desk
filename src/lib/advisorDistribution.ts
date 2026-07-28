@@ -1,10 +1,12 @@
-import type { Prisma, TicketPriority, TicketStatus } from "@prisma/client";
+import type { Prisma, TicketChannel, TicketPriority, TicketStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { sendTicketAssignedEmail, sendUnassignedTicketAlertEmail } from "@/lib/panelEmail";
 import {
   findConversationAdvisorId,
   mergeDuplicateOpenTicketsForCustomer,
 } from "@/lib/ticketThreading";
+import { detectIncidentType } from "@/lib/wara";
+import { shouldAutoAssignInboundMessage } from "@/lib/waraApi";
 
 /** Casos que cuentan para carga del asesor y cola operativa. */
 export const ADVISOR_ACTIVE_TICKET_STATUSES: TicketStatus[] = [
@@ -334,6 +336,50 @@ export async function processScheduledAdvisorReleases(): Promise<number> {
 }
 
 /**
+ * ¿Este ticket SIN asignar de WhatsApp fue dejado así a propósito porque Atilio lo
+ * resolvió solo? Re-deriva la misma decisión que ya toma el webhook entrante
+ * (shouldAutoAssignInboundMessage) a partir del último mensaje INBOUND, en vez de
+ * confiar en `Ticket.incidentType` (ese campo se pisa en cada mensaje con la
+ * clasificación del texto más reciente y no sirve como marca estable).
+ *
+ * Bug real, producción 2026-07-28: el fix de la lista blanca solo corría dentro del
+ * webhook de WhatsApp. En cuanto un asesor se conectaba o mandaba heartbeat,
+ * `rebalanceAmongActiveAdvisors` barría CUALQUIER ticket abierto sin asignar (p. ej.
+ * una consulta de GPS ya resuelta por el bot) sin mirar de qué se trataba, así que
+ * terminaba igual en la bandeja del asesor.
+ */
+export async function isUnassignedWhatsappTicketBotResolved(
+  ticketId: string,
+  channel: TicketChannel,
+): Promise<boolean> {
+  if (channel !== "WHATSAPP") return false;
+  const lastInbound = await prisma.ticketMessage.findFirst({
+    where: { ticketId, direction: "INBOUND" },
+    orderBy: { createdAt: "desc" },
+    select: { text: true },
+  });
+  const text = lastInbound?.text?.trim();
+  if (!text) return false;
+  const incidentType = detectIncidentType(text);
+  return !shouldAutoAssignInboundMessage(incidentType, text);
+}
+
+async function filterOutBotResolvedTickets<
+  T extends { id: string; assignedToUserId: string | null; channel: TicketChannel },
+>(tickets: T[]): Promise<T[]> {
+  const kept: T[] = [];
+  for (const t of tickets) {
+    if (t.assignedToUserId) {
+      kept.push(t);
+      continue;
+    }
+    if (await isUnassignedWhatsappTicketBotResolved(t.id, t.channel)) continue;
+    kept.push(t);
+  }
+  return kept;
+}
+
+/**
  * Reparte equitativamente casos activos (cola + asignados a asesores activos)
  * entre todos los asesores SUPPORT conectados.
  */
@@ -348,10 +394,11 @@ export async function rebalanceAmongActiveAdvisors(options?: {
   if (activeIds.length === 0) {
     // Ningún asesor conectado: los casos liberados (p. ej. por desconexión) quedan en
     // cola sin nadie viéndolos. Alertamos a los ADMIN para no perder casos ya en curso.
-    const orphaned = await prisma.ticket.findMany({
+    const orphanedRaw = await prisma.ticket.findMany({
       where: { status: { in: ADVISOR_ACTIVE_TICKET_STATUSES }, assignedToUserId: null },
-      select: { id: true },
+      select: { id: true, assignedToUserId: true, channel: true },
     });
+    const orphaned = await filterOutBotResolvedTickets(orphanedRaw);
     for (const t of orphaned) {
       await notifyAdminsOfUnassignedTicket(t.id);
     }
@@ -377,7 +424,7 @@ export async function rebalanceAmongActiveAdvisors(options?: {
     await mergeDuplicateOpenTicketsForCustomer(prisma, customerId);
   }
 
-  const freshPool = await prisma.ticket.findMany({
+  const freshPoolRaw = await prisma.ticket.findMany({
     where: {
       status: { in: ADVISOR_ACTIVE_TICKET_STATUSES },
       OR: [{ assignedToUserId: null }, { assignedToUserId: { in: activeIds } }],
@@ -388,8 +435,10 @@ export async function rebalanceAmongActiveAdvisors(options?: {
       priority: true,
       lastMessageAt: true,
       assignedToUserId: true,
+      channel: true,
     },
   });
+  const freshPool = await filterOutBotResolvedTickets(freshPoolRaw);
 
   const byCustomer = new Map<string, typeof freshPool>();
   for (const ticket of freshPool) {
