@@ -47,6 +47,7 @@ const SUITES = [
   "verify-odometer-nissan-stuck.mjs",
   "verify-post-odometer-certificate.mjs",
   "verify-certificate-typo-routing.mjs",
+  "verify-certificate-completed-not-stuck.mjs",
   "verify-company-reset-phrases.mjs",
   "verify-odometer-confirm-amendment.mjs",
   "verify-horometro-unit-name-context.mjs",

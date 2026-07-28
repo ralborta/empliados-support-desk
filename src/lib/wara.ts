@@ -1069,7 +1069,18 @@ export function isCertificateFlowSuperseded(threadText: string): boolean {
     ) ||
     /\b(odometro|horometro|mantenimiento|preventiv\w*|correctiv\w*)\b/.test(after) ||
     /(modulo opciones|modulo unidades|agenda de contactos|mis atajos)/.test(after) ||
-    /\bde nada\b/.test(after)
+    /\bde nada\b/.test(after) ||
+    // Bug real, producción 2026-07-27: tras "Perfecto, generé el certificado de
+    // cobertura..." (trámite YA resuelto), el resumen previo ("Voy a generar...
+    // responde CONFIRMO") seguía dentro de la ventana de 12 líneas que mira
+    // certificateFlowState, así que un mensaje NUEVO sin relación ("ahora me das su
+    // estado?") volvía a caer en "awaiting_confirm" y el bot repetía "para generar el
+    // certificado respondé CONFIRMO" en loop, aunque el certificado ya se hubiese
+    // emitido/resuelto minutos antes.
+    /genere el certificado de cobertura/.test(after) ||
+    /ya fue enviado/.test(after) ||
+    /no pude (emitir|generar|validar) (el certificado|la sesion)/.test(after) ||
+    /necesito que elijas la empresa/.test(after)
   );
 }
 
