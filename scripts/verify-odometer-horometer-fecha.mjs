@@ -40,8 +40,8 @@ const merged = mergeOdometerFieldExtractions(
 );
 assert(merged.fechaNaive?.startsWith("2026-07-27"), "fecha del mensaje gana sobre hilo 2023");
 assert(
-  merged.horometro === 16,
-  "horómetro IA sin filtrar acá (se filtra en route con stripHorometro)",
+  merged.horometro === undefined,
+  "16:55 del mensaje no se confunde con horómetro 16 h",
 );
 
 console.log("\n— Corrección 'La fecha es la de hoy' —");
@@ -64,5 +64,22 @@ assert(
   "router → odometro (no unidades/GPS)",
 );
 
+console.log("\n— '16:45 de hoy' NO es horómetro 16.75 h —");
+const mergedClock = mergeOdometerFieldExtractions(
+  {
+    tramite: "horometro",
+    mensaje: "16:45 de hoy",
+    historial: "Atilio: Perfecto, tomo LWK 7902. ¿Cuál es el nuevo horómetro en horas?",
+    horometerFlowActive: true,
+    treatAsBlankFlowStart: false,
+    timezone: tz,
+  },
+  { message: {}, thread: {} },
+  { horometro_horas: 16.75, fecha_lectura: "2026-07-27T00:00:00", confidence: 0.95 },
+);
+assert(mergedClock.horometro === undefined, "16:45 de hoy no produce horómetro 16.75");
+assert(mergedClock.fechaNaive?.includes("T16:45"), `fecha con 16:45 (obtuve: ${mergedClock.fechaNaive})`);
+
 if (failed > 0) process.exit(1);
 console.log("\n✓ Verificación fecha/horómetro OK");
+

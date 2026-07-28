@@ -195,8 +195,16 @@ function stripHorometroConfusedWithClockTime(
   horometro: number | undefined,
 ): number | undefined {
   if (typeof horometro !== "number" || !Number.isFinite(horometro)) return horometro;
-  const clock = rawText.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})/i);
-  if (clock && Number(clock[1]) === horometro) return undefined;
+  const clock = rawText.match(/\b(\d{1,2}):(\d{2})\b/);
+  if (clock) {
+    const hh = Number(clock[1]);
+    const mm = Number(clock[2]);
+    const asDecimal = Math.round((hh + mm / 60) * 100) / 100;
+    if (Math.abs(horometro - asDecimal) < 0.02 || horometro === hh) return undefined;
+    return horometro;
+  }
+  const alt = rawText.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})/i);
+  if (alt && Number(alt[1]) === horometro) return undefined;
   return horometro;
 }
 
@@ -781,9 +789,15 @@ export async function POST(req: NextRequest) {
       /\bhor[oó]metro\b/i.test(rawText) ||
       (!/\bod[oó]metro\b/i.test(rawText) && /\bhor[oó]metro\b/i.test(threadText));
     const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
+    const earlyFechaNaive = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
+    const earlyFechaDisplay = earlyFechaNaive
+      ? formatFechaDisplay(fechaWara(earlyFechaNaive, "America/Argentina/Buenos_Aires"))
+      : null;
     const message = patente
       ? wantsHorometro
-        ? `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo horómetro en horas?`
+        ? earlyFechaDisplay
+          ? `Tomé la fecha ${earlyFechaDisplay}. ¿Cuántas horas de motor tiene ${plateDisplay} ahora?`
+          : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo horómetro en horas?`
         : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo odómetro en km?`
       : "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?";
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message }, { status: BB_STATUS });

@@ -116,6 +116,13 @@ export function mergeOdometerFieldExtractions(
   if (ctx.tramite === "horometro" || ctx.horometerFlowActive) {
     horometro = msgHorometro ?? (useAiFields ? aiHorometro : undefined) ?? threadHorometro;
     odometro = msgOdometro ?? (useAiFields && ctx.tramite !== "horometro" ? aiOdometro : undefined);
+    const clock = ctx.mensaje.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (clock && typeof horometro === "number") {
+      const hh = Number(clock[1]);
+      const mm = Number(clock[2]);
+      const asDecimal = Math.round((hh + mm / 60) * 100) / 100;
+      if (Math.abs(horometro - asDecimal) < 0.02 || horometro === hh) horometro = undefined;
+    }
   } else {
     odometro = msgOdometro ?? (useAiFields ? aiOdometro : undefined) ?? threadOdometro;
     horometro = msgHorometro ?? (useAiFields ? aiHorometro : undefined);

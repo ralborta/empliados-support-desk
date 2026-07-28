@@ -48,7 +48,12 @@ assert(
   "hora con Hs antes de fecha",
 );
 
-console.log("— Fecha numérica + \"a las HH:MM\" en prosa (bug 2026-07-27) —");
+console.log("— '16:45 de hoy' (hora de lectura, no horómetro decimal) —");
+const deHoy = parseFechaFromText("16:45 de hoy", "America/Argentina/Buenos_Aires");
+assert(deHoy?.includes("T16:45"), `16:45 de hoy → hora 16:45 (obtuve: ${deHoy})`);
+assert(deHoy?.startsWith("2026-07-27"), `16:45 de hoy → fecha hoy (obtuve: ${deHoy?.slice(0, 10)})`);
+
+console.log("\n— Fecha numérica + \"a las HH:MM\" en prosa (bug 2026-07-27) —");
 
 const prosaReal =
   "el kilometraje es 25566, la fecha de lectura el dia 21/07/26 a las 14:00 Hs";

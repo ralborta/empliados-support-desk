@@ -70,7 +70,10 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
     const relative = norm.match(/\b(anteayer|ayer|hoy)\b/);
     if (!relative) return undefined;
     const deltaDays = relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
-    const timeMatch = norm.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/);
+    const timeMatch =
+      norm.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/) ??
+      norm.match(/\b(\d{1,2}):(\d{2})\b\s*(?:de\s+)?(?:hoy|ayer|anteayer)\b/) ??
+      norm.match(/\b(\d{1,2}):(\d{2})\b/);
     const { year, month, day } = shiftCalendarDay(
       todayPartsInTz(timezone?.trim() || "America/Argentina/Buenos_Aires"),
       deltaDays,
