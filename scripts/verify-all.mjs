@@ -65,6 +65,7 @@ const SUITES = [
   "verify-explicit-company-mention-with-plate.mjs",
   "verify-odoo-partner-name-match.mjs",
   "verify-company-status-question.mjs",
+  "verify-generic-capability-topic-switch.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-conversation-closing.mjs",
   "verify-customer-conversation-reset.mjs",

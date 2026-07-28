@@ -28,6 +28,7 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
   looksLikeFlowControlCommand,
+  looksLikeGenericCapabilityOrTopicSwitchRequest,
   looksLikeGreeting,
   looksLikeOperationalIntent,
   matchCompanyContinuationMention,
@@ -552,7 +553,11 @@ export async function customerRegisteredContextResponse(
       stage: "open_case_status_inquiry",
     });
     nextFlow = "reply";
-  } else if (selectionText && looksLikeAtilioHelpRequest(selectionText)) {
+  } else if (
+    selectionText &&
+    (looksLikeAtilioHelpRequest(selectionText) ||
+      looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText))
+  ) {
     const firstName = customer?.name?.trim().split(/\s+/)[0];
     responseMessage = buildAtilioHelpCapabilitiesReply(firstName);
     await persistCustomerBotReply(trimmed, responseMessage, {

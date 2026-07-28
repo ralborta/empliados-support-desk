@@ -1134,6 +1134,45 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
   );
 }
 
+/**
+ * "Qué gestiones puedo hacer con vos", "quiero hacerte otras consultas", o simplemente
+ * escribir el nombre del bot ("Atilio") sin nada más: el cliente quiere saber qué puede
+ * pedir o avisa que quiere pasar a otra cosa, pero sin especificar todavía nada concreto
+ * (patente, certificado, mantenimiento, etc.).
+ *
+ * Bug real, producción 2026-07-28: ninguno de estos mensajes calificaba como pedido de
+ * unidad/patente ni como ningún trámite puntual, así que caían al ejecutor "unidades" por
+ * defecto (classifyTurnExecutor) y, dentro de él, al respaldo de "unidad activa"
+ * (shouldUseActiveUnitFallback) — el bot terminaba repitiendo TEXTUALMENTE el último
+ * reporte de GPS ya mostrado ("La unidad AE 483 VE... está detenida..."), sin relación
+ * con lo que el cliente preguntó, incluso después de haber cerrado la conversación con
+ * "Resolver conversación".
+ */
+export function looksLikeGenericCapabilityOrTopicSwitchRequest(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm || norm.length > 160) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+  if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
+  // Si ya trae un tema concreto, dejar que pase por el router/guía real de ese tema en vez
+  // de interceptar acá con el genérico de capacidades (mismo criterio que
+  // looksLikeAtilioHelpRequest).
+  if (
+    /\bconf\w*gura\w*\b/.test(norm) ||
+    /\b(agenda|contacto|contactos|perfil|perfiles|notific|opciones|unidad|unidades|patente|matr[ií]cula|mantenimiento|preventiv\w*|correctiv\w*|certificado|odometro|horometro|alarma|alarmas|gps|ubicacion|reporte)\b/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
+  // Solo el nombre del bot, sin nada más (p. ej. "Atilio", "hola atilio", "Atilio?").
+  if (/^(hola[,.\s]*)?atilio[.,!?\s]*$/.test(norm)) return true;
+  if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
+  if (/\bque\s+puedo\s+(hacer|pedirte|pedir|consultar)\b/.test(norm)) return true;
+  if (/\b(quiero|tengo|necesito)\b.*\botr\w*\s+consultas?\b/.test(norm)) return true;
+  if (/^otra\s+consulta[.,!?\s]*$/.test(norm)) return true;
+  return false;
+}
+
 export function buildAtilioHelpCapabilitiesReply(firstName?: string): string {
   const prefix = firstName?.trim() ? `${firstName.trim()}, ` : "";
   return (
