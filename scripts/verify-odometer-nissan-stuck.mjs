@@ -30,7 +30,22 @@ const fleet = [
   { movil_id: 4, patente: "OST 225", unidad: "z" },
 ];
 
-console.log("— Nissan no encontrada en flota —");
+console.log("— Nissan en el mismo mensaje que el trámite (bug WARA 2026-07-27) —");
+const combinedMsg = "cambiar el horometro dela nissan";
+const combined = await resolveUnitQuery({
+  rawText: combinedMsg,
+  threadText: "",
+  units: fleet,
+  preferAi: false,
+  odometerContext: true,
+});
+assert(combined.intent === "need_clarification", "horómetro + Nissan en un mensaje → need_clarification");
+assert(
+  (combined.clarificationQuestion ?? "").toLowerCase().includes("nissan"),
+  "mensaje menciona Nissan (no genérico vacío)",
+);
+
+console.log("\n— Nissan no encontrada en flota —");
 const nissanResolved = await resolveUnitQuery({
   rawText: "Cambiar horometro a la Nissan",
   threadText: "",

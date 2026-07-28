@@ -1559,7 +1559,14 @@ export async function resolvePlateWithWaraFleet(
     return { ok: true, plate: normalizedDirect, source: "direct" };
   }
 
-  if ((looksLikeOdometerIntentStart(rawText) || looksLikeOdometerHelpRequest(rawText)) && !detectLoosePlate(rawText)) {
+  // Arranque de trámite sin unidad ("quiero cambiar el odómetro") → no buscar flota aún.
+  // Si en el mismo mensaje hay marca/prefijo/patente ("cambiar horómetro de la Nissan"),
+  // SÍ hay que resolver contra la flota.
+  if (
+    (looksLikeOdometerIntentStart(rawText) || looksLikeOdometerHelpRequest(rawText)) &&
+    !detectLoosePlate(rawText) &&
+    !looksLikeFleetUnitSearchInput(rawText)
+  ) {
     return { ok: false, reason: "not_found" };
   }
 
