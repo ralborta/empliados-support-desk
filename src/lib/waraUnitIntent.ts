@@ -467,7 +467,9 @@ function looksLikeUnitListRequest(rawText: string): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (detectPlate(rawText)) return false;
-  return /\b(listado|lista de unidad|lista de unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma)\b/.test(
+  // Nota: "norm" ya viene sin acentos (NFD + strip de diacríticos), así que alcanza con
+  // matchear "mas" (sin tilde) para cubrir "más"/"mas" indistintamente.
+  return /\b(listado|lista de unidad|lista de unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma|mas unidades|otras unidades|mas opciones|ver mas unidades|dame mas unidades|mostrame mas unidades|mas camiones)\b/.test(
     norm
   );
 }
