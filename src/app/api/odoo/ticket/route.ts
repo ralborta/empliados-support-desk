@@ -35,6 +35,7 @@ import {
   looksLikeOpenCaseStatusInquiry,
 } from "@/lib/customerTicketInquiry";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
+import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 
 /**
@@ -615,6 +616,14 @@ export async function POST(req: NextRequest) {
         const message = ensured.created
           ? `Listo, generé el caso N° ${ref} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
           : `Ya tenés el caso ${ref} en revisión. Un asesor de Atención al cliente te va a contactar por este medio.`;
+
+        if (advisorRequest) {
+          try {
+            await autoAssignNewTicket(localTicket.id);
+          } catch (e) {
+            console.error("[OdooTicket] autoAssign:", e);
+          }
+        }
 
         if (ensured.created) {
           await appendOutboundBotMessage(rawPhone, message, {

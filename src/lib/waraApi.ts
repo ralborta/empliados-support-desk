@@ -18,6 +18,8 @@ import {
   looksLikeCertificateKeyword,
   looksLikeMaintenanceKeyword,
   normalizePlate,
+  shouldAutoAssignInboundTicket,
+  type WaraIncidentType,
   threadAwaitingOdometerPlate,
   threadAwaitingHorometerPlate,
   threadHasOdometerUnitClarificationPending,
@@ -1008,6 +1010,18 @@ export function looksLikeHumanAdvisorRequest(text: string | undefined | null): b
     /\b(quiero|necesito|pod[eé]s|podes|me gustar[ií]a|dame|pasame|pas[aá]me|solicito|por favor)\b/.test(norm) ||
     /\b(comunicarme|contactar|hablar)\b/.test(norm);
   return wantsHuman && (intent || /\b(asesor humano|atenci[oó]n humana|agente humano)\b/.test(norm));
+}
+
+/** Inbound WhatsApp: ¿asignar al asesor conectado? Solo incidentes de la lista blanca o pedido explícito de humano/reclamo. */
+export function shouldAutoAssignInboundMessage(
+  incidentType: WaraIncidentType,
+  text?: string | null,
+): boolean {
+  if (shouldAutoAssignInboundTicket(incidentType)) return true;
+  if (!text?.trim()) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return true;
+  if (looksLikeExplicitReclamoOrTicketRequest(text)) return true;
+  return false;
 }
 
 /**

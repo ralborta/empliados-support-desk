@@ -31,7 +31,6 @@ import {
 import { recentLastInboundTextForPhone } from "@/lib/conversationThread";
 import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
-import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 
@@ -938,12 +937,6 @@ export async function POST(req: NextRequest) {
       resolution.selectedCompanyName || resolution.customer.name || "sin nombre"
     }.`,
   });
-
-  try {
-    await autoAssignNewTicket(ticket.id);
-  } catch (e) {
-    console.error("[Mantenimiento] autoAssign:", e);
-  }
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
   const { odooRef } = await ensureWaraOdooTicket(prisma, {

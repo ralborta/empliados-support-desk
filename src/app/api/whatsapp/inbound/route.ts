@@ -10,7 +10,6 @@ import {
   detectLoosePlate,
   detectMissingData,
   looksLikePlateOnlyMessage,
-  shouldAutoAssignInboundTicket,
   suggestPriority,
   toLegacyCategory,
   waraIncidentLabels,
@@ -20,7 +19,7 @@ import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import type { TicketStatus } from "@/lib/types";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
-import { looksLikeGreeting, resolveCustomerByWaraPhone } from "@/lib/waraApi";
+import { looksLikeGreeting, resolveCustomerByWaraPhone, shouldAutoAssignInboundMessage } from "@/lib/waraApi";
 import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
@@ -511,7 +510,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       select: { assignedToUserId: true },
     });
     if (isNewTicket || !fresh?.assignedToUserId) {
-      if (shouldAutoAssignInboundTicket(incidentType)) {
+      if (shouldAutoAssignInboundMessage(incidentType, actualMessage)) {
         await autoAssignNewTicket(ticket.id);
       }
     }

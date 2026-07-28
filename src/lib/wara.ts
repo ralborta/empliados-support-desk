@@ -30,8 +30,22 @@ export const BOT_ONLY_INCIDENT_TYPES: ReadonlySet<WaraIncidentType> = new Set([
   "ODOMETER_CHANGE",
 ]);
 
+/**
+ * Incidentes que SÍ requieren asesor humano cuando llegan por inbound (regla acordada
+ * post-reunión Emma/Lucas 2026-07): solo derivar si hay falta de reporte, acceso/
+ * administración, o el cliente pide humano explícitamente (ver shouldAutoAssignInboundMessage
+ * en waraApi.ts). Todo lo demás (saludos, "Otro", guías, trámites bot-only) queda sin
+ * asignar — el asesor no lo ve; el admin sí.
+ */
+export const ADVISOR_ASSIGN_INCIDENT_TYPES: ReadonlySet<WaraIncidentType> = new Set([
+  "MISSING_REPORT",
+  "ADMIN_DERIVATION",
+  "ACCESS_PLATFORM",
+]);
+
 export function shouldAutoAssignInboundTicket(incidentType: WaraIncidentType): boolean {
-  return !BOT_ONLY_INCIDENT_TYPES.has(incidentType);
+  if (BOT_ONLY_INCIDENT_TYPES.has(incidentType)) return false;
+  return ADVISOR_ASSIGN_INCIDENT_TYPES.has(incidentType);
 }
 
 export const resolutionModeLabels: Record<ResolutionMode, string> = {
@@ -1533,7 +1547,11 @@ export function resolveWaraPatenteForApi(
 
 export function detectIncidentType(text: string): WaraIncidentType {
   const lower = text.toLowerCase();
-  if (/(no reporta|offline|sin señal|no actualiza|última señal|ultima señal|no registra ubicación)/.test(lower)) {
+  if (
+    /\b(no reporta|no me reporta|no le reporta|dejo de reportar|sin reporte|falta de reporte|offline|sin señal|sin senal|no actualiza|última señal|ultima señal|no registra ubicaci[oó]n)\b/.test(
+      lower,
+    )
+  ) {
     return "MISSING_REPORT";
   }
   if (
