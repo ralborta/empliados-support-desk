@@ -328,10 +328,29 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
+  // Bug real, producción 2026-07-28: tras confirmar patente incorrecta ("Voy a
+  // registrar: Patente LWK 7902...respondé CONFIRMO"), el cliente corrigió la unidad
+  // ("no para la unidad HEJ") y el bot volvió a preguntar el valor ("Perfecto, tomo
+  // HEJ. ¿Cuál es el nuevo odómetro en km?"). El "Voy a registrar" VIEJO seguía
+  // dentro de la ventana de 2500 caracteres, así que este chequeo (presencia simple
+  // de las 3 frases en cualquier parte del tail) seguía devolviendo "true" pese a que
+  // el trámite ya había sido reabierto pidiendo un valor NUEVO — el número que el
+  // cliente acababa de dar (ej. "123551") quedaba atrapado por el recordatorio de
+  // CONFIRMO de la confirmación vieja en lugar de generarse el resumen nuevo.
+  // Ahora se ancla al ÚLTIMO bloque "voy a registrar:" y se verifica que no haya
+  // sido reabierto después por un nuevo "perfecto, tomo" / "cuál es el nuevo
+  // odómetro/horómetro" / "necesito la patente".
+  const lastConfirmIdx = tail.lastIndexOf("voy a registrar:");
+  if (lastConfirmIdx < 0) return false;
+  const afterLastConfirm = tail.slice(lastConfirmIdx);
+  const reopenedAfterConfirm =
+    /perfecto, tomo /.test(afterLastConfirm.slice(16)) ||
+    /cu[aá]l es el nuevo (od[oó]metro|hor[oó]metro)/.test(afterLastConfirm.slice(16)) ||
+    /necesito la patente/.test(afterLastConfirm.slice(16));
+  if (reopenedAfterConfirm) return false;
   return (
-    /voy a registrar:/.test(tail) &&
-    /od[oó]metro|hor[oó]metro/.test(tail) &&
-    /respond[eé]\s+confirmo/.test(tail)
+    /od[oó]metro|hor[oó]metro/.test(afterLastConfirm) &&
+    /respond[eé]\s+confirmo/.test(afterLastConfirm)
   );
 }
 
