@@ -282,6 +282,30 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
   return null;
 }
 
+/** Sufijo de patente en frases como "la que termina con TL", "termina en GD". */
+export function extractPlateSuffixFromMessage(rawText: string | undefined | null): string | null {
+  const norm = String(rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return null;
+
+  const laQue = norm.match(
+    /\b(?:la|el|esa|ese)\s+(?:q|que)\s+(?:termina|finaliza|acaba)\s+(?:con|en)\s+([a-z0-9]{2,6})\b/,
+  );
+  if (laQue?.[1] && !NON_PLATE_PREFIX_WORDS.has(laQue[1].toLowerCase())) {
+    return laQue[1].replace(/\s+/g, "").toUpperCase();
+  }
+
+  const explicit = norm.match(/\b(?:termina|finaliza|acaba)\s+(?:con|en)\s+([a-z0-9]{2,6})\b/);
+  if (explicit?.[1] && !NON_PLATE_PREFIX_WORDS.has(explicit[1].toLowerCase())) {
+    return explicit[1].replace(/\s+/g, "").toUpperCase();
+  }
+
+  return null;
+}
+
 /** Patente en el mensaje actual, incluyendo formatos viejos (LWK7902) y respuestas sueltas. */
 export function detectLoosePlate(text: string): string | null {
   const fromRegex = detectPlate(text);

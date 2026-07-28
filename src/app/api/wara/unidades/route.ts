@@ -33,6 +33,7 @@ import {
   extractExplicitUnitSearchLabel,
   filterUnitsByResolvedPlate,
   filterUnitsBySearchTerms,
+  filterUnitsByUnitName,
   looksLikeFleetUnitSearchInput,
   looksLikeUnitListRequest,
   resolveUnitQuery,
@@ -267,10 +268,6 @@ type UnitQueryRef =
   | { kind: "interno_backoffice"; value: string }
   | { kind: "nombre"; value: string };
 
-function normalizeUnitToken(value: string): string {
-  return value.replace(/[\s-]+/g, "").toLowerCase();
-}
-
 /** Interno del backoffice (ej. 003-111): empieza con 0; distinto del nombre M300-111. */
 function looksLikeBackofficeInternoCode(value: string): boolean {
   const compact = value.replace(/\s+/g, "");
@@ -323,15 +320,9 @@ function looksLikeInternoMetaQuestion(rawText: string | undefined | null): boole
   );
 }
 
-/** Busca por campo API `unidad` (= nombre en backoffice), parcial como el buscador web. */
+/** Busca por campo API `unidad` (= nombre en backoffice), coincidencia exacta de código. */
 function filterUnitsByNombre(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
-  const norm = normalizeUnitToken(query);
-  if (!norm) return [];
-  return units.filter((u) => {
-    const nombre = normalizeUnitToken(u.unidad || "");
-    if (!nombre) return false;
-    return nombre === norm || nombre.includes(norm) || norm.includes(nombre);
-  });
+  return filterUnitsByUnitName(units, query);
 }
 
 function formatUnitNotFoundMessage(opts: {

@@ -7,6 +7,7 @@ import {
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
   extractPlatePrefixFromMessage,
+  extractPlateSuffixFromMessage,
   formatPlateWithSpaces,
   isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
@@ -695,14 +696,23 @@ function normalizeUnitNameToken(value: string): string {
   return value.replace(/[\s-]+/g, "").toLowerCase();
 }
 
-function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
+/** Códigos M600-170 / 300-092 presentes como token en el campo unidad de Wara. */
+function unitNameCodesFromField(unidad: string): string[] {
+  const tokens = new Set<string>();
+  const normalized = normalizeUnitNameToken(unidad);
+  if (normalized) tokens.add(normalized);
+  for (const match of unidad.matchAll(/\b(M?\d{3}-\d{2,3})\b/gi)) {
+    const code = normalizeUnitNameToken(match[1]);
+    if (code) tokens.add(code);
+  }
+  return [...tokens];
+}
+
+/** Búsqueda por nombre de unidad (M600-170): coincidencia exacta de código, no substring suelto. */
+export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
   const norm = normalizeUnitNameToken(query);
   if (!norm) return [];
-  return units.filter((u) => {
-    const nombre = normalizeUnitNameToken(u.unidad || "");
-    if (!nombre) return false;
-    return nombre === norm || nombre.includes(norm) || norm.includes(nombre);
-  });
+  return units.filter((u) => unitNameCodesFromField(u.unidad || "").some((code) => code === norm));
 }
 
 function extractUnitNameFromText(rawText: string): string | null {
@@ -997,6 +1007,136 @@ function resolveUnitSelectionHint(
   return null;
 }
 
+function extractCandidatePlatesFromThread(threadText: string): string[] {
+  const lines = threadText.slice(-2500).split("\n").reverse();
+  for (const line of lines) {
+    const plates = extractPlatesFromClarificationMessage(line);
+    if (plates.length >= 2) return plates;
+  }
+  return [];
+}
+
+/** Tras "Encontré 2 unidades (AI 329 TL, OOC 237)": resolver "termina con TL" / "comienza con AI". */
+function resolveClarificationCandidateSelection(
+  rawText: string,
+  threadText: string,
+): UnitQueryResolution | null {
+  const candidates = extractCandidatePlatesFromThread(threadText);
+  if (candidates.length < 2) return null;
+
+  const prefix = extractPlatePrefixFromMessage(rawText);
+  if (prefix) {
+    const p = prefix.replace(/\s+/g, "").toUpperCase();
+    const matches = candidates.filter((plate) => plate.startsWith(p));
+    if (matches.length === 1) {
+      return {
+        intent: "consult_status",
+        plate: matches[0],
+        searchTerms: [],
+        candidatePlates: [matches[0]],
+        source: "rules",
+      };
+    }
+    if (matches.length > 1) {
+      const labels = matches.map((plate) => formatPlateWithSpaces(plate) ?? plate).join(", ");
+      return {
+        intent: "need_clarification",
+        searchTerms: [],
+        candidatePlates: matches,
+        clarificationQuestion: `Encontré ${matches.length} unidades (${labels}). Decime la patente exacta.`,
+        source: "rules",
+      };
+    }
+  }
+
+  const suffix = extractPlateSuffixFromMessage(rawText);
+  if (suffix) {
+    const s = suffix.replace(/\s+/g, "").toUpperCase();
+    const matches = candidates.filter((plate) => plate.endsWith(s));
+    if (matches.length === 1) {
+      return {
+        intent: "consult_status",
+        plate: matches[0],
+        searchTerms: [],
+        candidatePlates: [matches[0]],
+        source: "rules",
+      };
+    }
+    if (matches.length > 1) {
+      const labels = matches.map((plate) => formatPlateWithSpaces(plate) ?? plate).join(", ");
+      return {
+        intent: "need_clarification",
+        searchTerms: [],
+        candidatePlates: matches,
+        clarificationQuestion: `Encontré ${matches.length} unidades (${labels}). Decime la patente exacta.`,
+        source: "rules",
+      };
+    }
+  }
+
+  return null;
+}
+
+function resolveExplicitPlateInMessage(
+  rawText: string,
+  threadText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  const threadPlate = extractLastPlateFromThread(threadText);
+  const plateFromMessage =
+    detectLoosePlate(rawText) ??
+    (() => {
+      const hint = extractPlateCorrectionHint(rawText);
+      if (!hint) return null;
+      if (isBarePlatePrefixHint(rawText) || extractPlatePrefixFromMessage(rawText)) return null;
+      return hint;
+    })() ??
+    (shouldReuseThreadPlateForResolution(rawText) &&
+    threadPlate &&
+    isPlausibleVehiclePlate(threadPlate)
+      ? threadPlate
+      : null);
+  if (!plateFromMessage) return null;
+
+  const plate = normalizeLoosePlate(plateFromMessage);
+  let matches = filterUnitsByPlate(units, plate);
+  if (matches.length === 0) {
+    const fuzzy = fuzzyMatchUnitByPlate(units, plate);
+    if (fuzzy) matches = [fuzzy];
+  }
+  if (matches.length === 0) {
+    const prefixOnly =
+      isBarePlatePrefixHint(rawText) ||
+      !!extractPlatePrefixFromMessage(rawText) ||
+      !isPlausibleVehiclePlate(plate);
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: [],
+      clarificationQuestion: buildFleetUnitNotFoundMessage({
+        rawText,
+        prefix: prefixOnly ? plate : null,
+        plate: prefixOnly ? null : plate,
+      }),
+      source: "rules",
+    };
+  }
+  return {
+    intent: matches.length === 1 ? "consult_status" : "need_clarification",
+    plate:
+      matches.length === 1
+        ? normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || plate
+        : plate,
+    searchTerms: [],
+    candidatePlates: matches.map((u) => normalizeLoosePlate(u.patente || u.unidad || "")).filter(Boolean),
+    clarificationQuestion:
+      matches.length > 1
+        ? `Encontré varias unidades parecidas a ${plateFromMessage}. Decime la matrícula exacta.`
+        : undefined,
+    source: "rules",
+  };
+}
+
 function extractPlatesFromClarificationMessage(text: string): string[] {
   const paren = text.match(/\(([^)]+)\)\s*\.?\s*(?:Decime|decime)/i);
   if (!paren?.[1]) return [];
@@ -1040,6 +1180,9 @@ function resolveWithRules(
     }
   }
 
+  const clarificationPick = resolveClarificationCandidateSelection(rawText, threadText);
+  if (clarificationPick) return clarificationPick;
+
   if (looksLikeUnitListRequest(rawText)) {
     return { intent: "list_fleet", searchTerms: [], candidatePlates: [], source: "rules" };
   }
@@ -1055,71 +1198,12 @@ function resolveWithRules(
     if (brandResolution) return brandResolution;
   }
 
+  // Patente explícita en el mensaje (ej. "matricula AI 329 TL") antes que nombre M600-170.
+  const explicitPlateResolution = resolveExplicitPlateInMessage(rawText, threadText, units);
+  if (explicitPlateResolution) return explicitPlateResolution;
+
   const unitNameResolution = resolveByUnitName(rawText, units);
   if (unitNameResolution) return unitNameResolution;
-
-  // Priorizar lo que escribió ahora; no arrastrar patente del odómetro u otro trámite previo.
-  const threadPlate = extractLastPlateFromThread(threadText);
-  // Bug real, producción 2026-07-23: esta cadena usa `??` para ir probando fuentes de
-  // patente cada vez más "sueltas" (mensaje actual → hint de corrección → última
-  // patente del hilo), pero el paso del medio devolvía `""` (string vacío) en vez de
-  // `null` cuando no encontraba nada útil. Como `??` solo avanza al siguiente valor
-  // ante `null`/`undefined` (NO ante `""`), el fallback al hilo quedaba MUERTO: nunca
-  // se llegaba a reusar la unidad ya resuelta en la conversación (ej. "dame el
-  // certificado de la unidad mencionada" tras haber resuelto la Nissan → AG 562 SP).
-  const plateFromMessage =
-    detectLoosePlate(rawText) ??
-    (() => {
-      const hint = extractPlateCorrectionHint(rawText);
-      if (!hint) return null;
-      if (isBarePlatePrefixHint(rawText) || extractPlatePrefixFromMessage(rawText)) return null;
-      return hint;
-    })() ??
-    (shouldReuseThreadPlateForResolution(rawText) &&
-    threadPlate &&
-    isPlausibleVehiclePlate(threadPlate)
-      ? threadPlate
-      : null) ??
-    "";
-  if (plateFromMessage) {
-    const plate = normalizeLoosePlate(plateFromMessage);
-    let matches = filterUnitsByPlate(units, plate);
-    if (matches.length === 0) {
-      const fuzzy = fuzzyMatchUnitByPlate(units, plate);
-      if (fuzzy) matches = [fuzzy];
-    }
-    if (matches.length === 0) {
-      const prefixOnly =
-        isBarePlatePrefixHint(rawText) ||
-        !!extractPlatePrefixFromMessage(rawText) ||
-        !isPlausibleVehiclePlate(plate);
-      return {
-        intent: "need_clarification",
-        searchTerms: [],
-        candidatePlates: [],
-        clarificationQuestion: buildFleetUnitNotFoundMessage({
-          rawText,
-          prefix: prefixOnly ? plate : null,
-          plate: prefixOnly ? null : plate,
-        }),
-        source: "rules",
-      };
-    }
-    return {
-      intent: matches.length === 1 ? "consult_status" : "need_clarification",
-      plate:
-        matches.length === 1
-          ? normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || plate
-          : plate,
-      searchTerms: [],
-      candidatePlates: matches.map((u) => normalizeLoosePlate(u.patente || u.unidad || "")).filter(Boolean),
-      clarificationQuestion:
-        matches.length > 1
-          ? `Encontré varias unidades parecidas a ${plateFromMessage}. Decime la matrícula exacta.`
-          : undefined,
-      source: "rules",
-    };
-  }
 
   const prefixHint =
     extractPlatePrefixHint(rawText) ??
@@ -1423,6 +1507,9 @@ export async function resolveUnitQuery(params: {
     };
   }
 
+  const clarificationPick = resolveClarificationCandidateSelection(params.rawText, params.threadText);
+  if (clarificationPick) return clarificationPick;
+
   const historialForAi = params.aiHistorial ?? params.threadText;
   const prefixHint = prefixHintFromMessage(params.rawText);
   const brandOrLiveConsult =
@@ -1493,6 +1580,12 @@ export async function resolveUnitQuery(params: {
     ) {
       return plateRules;
     }
+  }
+
+  // Nombre de unidad explícito (M600-170): reglas contra catálogo completo antes que IA.
+  if (looksLikeUnitNameInMessage(params.rawText)) {
+    const unitNameRules = resolveByUnitName(params.rawText, params.units);
+    if (unitNameRules) return unitNameRules;
   }
 
   const rulesOnlyOdometer =
