@@ -36,6 +36,17 @@ assert(extractPlatePrefixFromMessage("empieza OST") === "OST", "variante 'empiez
 assert(extractPlatePrefixFromMessage("no se cuando comienza el mantenimiento") === null, "'comienza el' no matchea (stopword 'el')");
 assert(extractPlatePrefixFromMessage("la reunion comienza a las 10") === null, "'comienza a' no matchea (stopword 'a')");
 
+// Regresión producción 2026-07-28 (misma tanda, segunda vuelta): typo "empiza" (sin la
+// segunda "e" de "empieza") en un pedido de ESTADO/GPS (no odómetro) también debía
+// detectar el prefijo, para no perder el listado de candidatos reales y caer en el
+// genérico "Encontré varias unidades posibles" de la IA.
+assert(
+  extractPlatePrefixFromMessage("quiero el estado de la unidad q empiza con OST") === "OST",
+  "typo 'empiza' (sin la segunda e) se detecta igual",
+);
+assert(extractPlatePrefixFromMessage("la que comenza con MYQ") === "MYQ", "typo 'comenza' se detecta igual");
+assert(extractPlatePrefixFromMessage("la que cominza con RMX") === "RMX", "typo 'cominza' se detecta igual");
+
 const fleet = [
   { movil_id: 1, patente: "OST223", unidad: "900-041viejo" },
   { movil_id: 2, patente: "OST224", unidad: "900-042" },
@@ -59,8 +70,31 @@ assert(
   `lista las 4 unidades candidatas (obtuvo ${(uq.candidatePlates ?? []).length})`,
 );
 
+// Mismo caso pero en el flujo de ESTADO/GPS (unidades/route.ts), que llama a
+// resolveUnitQuery sin odometerContext/certificateContext — antes del fix, el typo
+// "empiza" hacía que se saltee la ruta de reglas y la IA respondiera con el genérico
+// "Encontré varias unidades posibles" sin listar las patentes reales.
+const uqEstado = await resolveUnitQuery({
+  rawText: "quiero el estado de la unidad q empiza con OST",
+  threadText: "",
+  units: fleet,
+  preferAi: true,
+});
+assert(
+  uqEstado.intent === "need_clarification",
+  `estado/GPS con typo 'empiza': pide aclaración (intent=${uqEstado.intent})`,
+);
+assert(
+  (uqEstado.candidatePlates ?? []).length === 4,
+  `estado/GPS con typo 'empiza': lista las 4 patentes (obtuvo ${(uqEstado.candidatePlates ?? []).length})`,
+);
+assert(
+  /OST\s*22[3-6]/.test(uqEstado.clarificationQuestion ?? ""),
+  `estado/GPS con typo 'empiza': el mensaje menciona las patentes reales (${uqEstado.clarificationQuestion})`,
+);
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);
 }
-console.log("\n✓ Prefijo 'comienza/empieza X' sin la palabra 'con' se detecta y pide aclaración con varias unidades");
+console.log("\n✓ Prefijo 'comienza/empieza X' (con typos, sin 'con', en odómetro y estado/GPS) se detecta y lista candidatos");

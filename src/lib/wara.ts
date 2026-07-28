@@ -180,6 +180,12 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "a",
 ]);
 
+// Tolerantes a la letra de más/de menos más común en "empieza"/"comienza"
+// (empieza/empiza/empeza, comienza/cominza/comenza), sin abrir tanto el patrón como
+// para matchear palabras no relacionadas.
+const EMPIEZA_RE = "emp(?:ie|i|e)za(?:n)?";
+const COMIENZA_RE = "com(?:ie|i|e)nza(?:n)?";
+
 /** Prefijo de patente en frases como "la AD", "la que comienza con AG", "empieza con NKL". */
 export function extractPlatePrefixFromMessage(rawText: string | undefined | null): string | null {
   const norm = String(rawText ?? "")
@@ -216,14 +222,27 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
   // lo que la IA/regex hubiera extraído como "patente" — terminando en "Perfecto, tomo
   // OST" (un prefijo con VARIAS unidades reales: OST 223, OST 224, OST 225, OST 226...)
   // en vez de listar las coincidencias y pedir cuál. Ahora "con" es opcional.
+  //
+  // Bug real, producción 2026-07-28 (mismo día, segunda vuelta): "quiero el estado de
+  // la unidad q empiza con OST" (typo "empiza" en vez de "empieza") tampoco matcheaba
+  // ninguna de las 4 alternativas literales — al no detectarse el prefijo, la consulta
+  // de estado se iba directo a la IA SIN el catálogo filtrado por prefijo (ni la ruta
+  // de reglas que arma el listado "Encontré N unidades que empiezan con X..."), y el
+  // cliente recibía un genérico "Encontré varias unidades posibles" sin ver las
+  // patentes reales — peor que antes. EMPIEZA_RE/COMIENZA_RE toleran letras de más o de
+  // menos en el medio de la palabra (empieza/empiza/empeza, comienza/cominza/comenza).
   const laQue = norm.match(
-    /\b(?:la|el|esa|ese)\s+(?:q|que)\s+(?:empieza|empiezan|comienza|comienzan)\s+(?:con\s+)?([a-z0-9]{2,6})\b/,
+    new RegExp(
+      `\\b(?:la|el|esa|ese)\\s+(?:q|que)\\s+(?:${EMPIEZA_RE}|${COMIENZA_RE})\\s+(?:con\\s+)?([a-z0-9]{2,6})\\b`,
+    ),
   );
   if (laQue?.[1] && !NON_PLATE_PREFIX_WORDS.has(laQue[1].toLowerCase())) {
     return laQue[1].replace(/\s+/g, "").toUpperCase();
   }
 
-  const explicit = norm.match(/(?:empieza|empiezan|comienza|comienzan)\s+(?:con\s+)?([a-z0-9]{2,6})\b/i);
+  const explicit = norm.match(
+    new RegExp(`(?:${EMPIEZA_RE}|${COMIENZA_RE})\\s+(?:con\\s+)?([a-z0-9]{2,6})\\b`, "i"),
+  );
   if (explicit?.[1] && !NON_PLATE_PREFIX_WORDS.has(explicit[1].toLowerCase())) {
     return explicit[1].replace(/\s+/g, "").toUpperCase();
   }
