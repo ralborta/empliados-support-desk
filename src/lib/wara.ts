@@ -584,14 +584,28 @@ export function threadAwaitingHorometerPlate(threadText: string): boolean {
   );
 }
 
+/**
+ * Bug real, producción 2026-07-28: "cambio de horometroa a la q empieza con MYQ" (typing
+ * rápido en el celular, sin espacio entre "horometro" y la palabra siguiente) no matcheaba
+ * \bhor[oó]metro\b porque no hay límite de palabra tras la "o" — el mensaje se perdía
+ * entero y el bot lo ruteaba como consulta de GPS/estado en vez de arrancar el trámite.
+ * Se separa la palabra clave pegada a la palabra siguiente antes de correr las regex de
+ * intención (no toca nada que ya venga bien espaciado).
+ */
+function insertMissingSpaceAfterOdometerKeywords(t: string): string {
+  return t.replace(/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)([a-z])/g, "$1 $2");
+}
+
 /** Trámite explícito de horómetro sin pedir odómetro/km en el mismo mensaje. */
 export function looksLikeHorometerOnlyIntent(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
-  const t = raw
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+  const t = insertMissingSpaceAfterOdometerKeywords(
+    raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase(),
+  );
   return (
     /\bhor[oó]metro\b/.test(t) &&
     !/\b(od[oó]metro|kilometraje|kil[oó]metros|\bkm\b)\b/.test(t)
@@ -657,10 +671,12 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (detectLoosePlate(raw) || detectPlate(raw)) return false;
-  const t = raw
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+  const t = insertMissingSpaceAfterOdometerKeywords(
+    raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase(),
+  );
   return (
     /\b(actualizar|cambiar|cambio de|corregir|ajust\w*|registrar|realizar)\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
@@ -737,10 +753,12 @@ export function looksLikeOdometerHelpRequest(text: string | undefined | null): b
   if (!raw) return false;
   if (detectLoosePlate(raw) || detectPlate(raw)) return false;
   if (looksLikeOdometerProblemReport(raw)) return false;
-  const t = raw
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+  const t = insertMissingSpaceAfterOdometerKeywords(
+    raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase(),
+  );
   if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
   // Raíz del verbo en vez de lista cerrada de conjugaciones (mismo patrón de bug
   // corregido en waraApi.ts looksLikeOpcionesInfoRequest/looksLikeAtilioHelpRequest,

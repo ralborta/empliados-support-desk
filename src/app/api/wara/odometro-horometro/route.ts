@@ -494,6 +494,18 @@ export async function POST(req: NextRequest) {
 
   const historialForExtract = treatAsBlankFlowStart || supersedesPendingConfirm ? "" : flowThreadText;
   const threadParsed = parseFromText(historialForExtract);
+  // Bug real, producción 2026-07-28: parseFromText() usa detectPlate(), que devuelve la
+  // PRIMERA patente de TODO el texto, no la más reciente. Con varias patentes en el hilo
+  // (ej. una lista de candidatos "OST 223, OST 226, OST 224, OST 225" antes de que el
+  // cliente confirme "OST 224"), el resumen final terminaba anclado a la primera opción
+  // listada en vez de la unidad realmente elegida. Mismo patrón que el bug histórico de
+  // más abajo (comentario "detectPlate(threadText) devuelve la PRIMERA patente..."),
+  // corregido ahí con extractLastPlateFromThread — pero ese fix corre DESPUÉS de este
+  // merge y nunca llegaba a corregir mergedFields.patente. Se aplica la misma corrección acá.
+  if (historialForExtract) {
+    const lastPlateForExtract = extractLastPlateFromThread(historialForExtract);
+    if (lastPlateForExtract) threadParsed.patente = lastPlateForExtract;
+  }
   const mergedFields = await resolveOdometerHorometerFields({
     tramite: horometerFlowActive || horometerOnlyIntent ? "horometro" : "odometro",
     mensaje: rawText,

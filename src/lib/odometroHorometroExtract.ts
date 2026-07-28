@@ -109,13 +109,19 @@ export function mergeOdometerFieldExtractions(
   const threadOdometro = ctx.treatAsBlankFlowStart || ctx.horometerFlowActive ? undefined : regex.thread.odometro;
   const msgHorometro = regex.message.horometro;
   const threadHorometro = ctx.treatAsBlankFlowStart ? undefined : regex.thread.horometro;
+  // Bug real, producción 2026-07-28: mensaje "quiero cambiar el horometro" (sin ningún
+  // dígito) devolvió "Horómetro: 4 h" — la IA tomó el "4" de "Encontré 4 unidades..." del
+  // historial que se le pasa como contexto. Si el mensaje actual no trae ningún número, no
+  // hay ningún dato nuevo que extraer de él: no se usa el valor "adivinado" por la IA.
+  const msgHasDigit = /\d/.test(ctx.mensaje);
+  const trustAiNumber = useAiFields && msgHasDigit;
 
   let odometro: number | undefined;
   let horometro: number | undefined;
 
   if (ctx.tramite === "horometro" || ctx.horometerFlowActive) {
-    horometro = msgHorometro ?? (useAiFields ? aiHorometro : undefined) ?? threadHorometro;
-    odometro = msgOdometro ?? (useAiFields && ctx.tramite !== "horometro" ? aiOdometro : undefined);
+    horometro = msgHorometro ?? (trustAiNumber ? aiHorometro : undefined) ?? threadHorometro;
+    odometro = msgOdometro ?? (trustAiNumber && ctx.tramite !== "horometro" ? aiOdometro : undefined);
     const clock = ctx.mensaje.match(/\b(\d{1,2}):(\d{2})\b/);
     if (clock && typeof horometro === "number") {
       const hh = Number(clock[1]);
@@ -124,8 +130,8 @@ export function mergeOdometerFieldExtractions(
       if (Math.abs(horometro - asDecimal) < 0.02 || horometro === hh) horometro = undefined;
     }
   } else {
-    odometro = msgOdometro ?? (useAiFields ? aiOdometro : undefined) ?? threadOdometro;
-    horometro = msgHorometro ?? (useAiFields ? aiHorometro : undefined);
+    odometro = msgOdometro ?? (trustAiNumber ? aiOdometro : undefined) ?? threadOdometro;
+    horometro = msgHorometro ?? (trustAiNumber ? aiHorometro : undefined);
   }
   if (typeof odometro === "number" && odometro < 1000 && !/\b(km|kilometraje|od[oó]metro)\b/i.test(ctx.mensaje)) {
     odometro = undefined;

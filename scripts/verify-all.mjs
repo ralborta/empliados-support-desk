@@ -52,6 +52,7 @@ const SUITES = [
   "verify-more-units-request-routing.mjs",
   "verify-fleet-term-word-boundary.mjs",
   "verify-odometer-confirm-amendment.mjs",
+  "verify-odometer-glued-typo-and-hallucination.mjs",
   "verify-horometro-unit-name-context.mjs",
   "verify-odometer-ajuste-horometro.mjs",
   "verify-delivery-critical-fixes.mjs",
