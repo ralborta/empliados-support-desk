@@ -28,7 +28,15 @@ export const ODOO_PARTNER_ALIASES: OdooPartnerAliasEntry[] = [
     ],
   },
   {
-    odooName: "El Cacique S.A.",
+    // Bug real, producción 2026-07-28: el partner real en Odoo se llama "El Cacique Sa"
+    // (sin puntos), pero el alias buscaba "El Cacique S.A." (con puntos) — ninguna
+    // búsqueda por nombre (exacta, prefijo, contiene) los reconocía como el mismo
+    // registro, así que se creaba un partner NUEVO cada vez que se escalaba un ticket
+    // para esta empresa (el cliente lo reportó como "está generando contactos en Odoo").
+    // partnerId fijo = resuelve directo al partner real de siempre, sin depender de que
+    // el nombre coincida.
+    odooName: "El Cacique Sa",
+    partnerId: 320,
     aliases: ["cacique", "el cacique", "el cacique sa", "el cacique s.a.", "el cacique s.a"],
   },
 ];

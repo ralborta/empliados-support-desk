@@ -1,4 +1,8 @@
-import { resolveOdooPartnerCompanyName, resolveOdooPartnerLookup } from "@/config/odooPartnerAliases";
+import {
+  normOdooPartnerToken,
+  resolveOdooPartnerCompanyName,
+  resolveOdooPartnerLookup,
+} from "@/config/odooPartnerAliases";
 
 /**
  * Cliente Odoo (JSON-RPC) para registrar tickets de reclamo en Helpdesk.
@@ -316,6 +320,71 @@ function pickBestPartnerByName(
   return rows[0]?.id ? rows[0] : null;
 }
 
+/** Nombre de partner sin acentos/puntuación/espacios — "El Cacique S.A." y "El Cacique
+ * Sa" (o "El Cacique SA") compactan a la misma clave "elcaciquesa". */
+export function compactPartnerToken(name: string | undefined | null): string {
+  return normOdooPartnerToken(name ?? "").replace(/\s+/g, "");
+}
+
+const PARTNER_LEGAL_SUFFIXES = new Set([
+  "sa", "srl", "sac", "sacei", "sapem", "sas", "sociedad", "anonima", "limitada",
+]);
+
+/** Palabra más significativa del nombre (sin sufijos societarios) para acotar la
+ * búsqueda ilike en Odoo antes de comparar por clave compacta. */
+function significantNameWord(term: string): string | null {
+  const words = normOdooPartnerToken(term)
+    .split(" ")
+    .filter((w) => w.length >= 3 && !PARTNER_LEGAL_SUFFIXES.has(w));
+  if (words.length === 0) return null;
+  return [...words].sort((a, b) => b.length - a.length)[0];
+}
+
+/**
+ * Matchea por clave compacta (sin acentos/puntuación/espacios) contra una lista YA
+ * obtenida de candidatos — separado de la llamada a Odoo para poder testearlo sin red.
+ * Solo devuelve resultado si hay EXACTAMENTE un candidato compatible: ante ambigüedad,
+ * mejor no adivinar (evita fusionar con la empresa equivocada).
+ */
+export function pickPartnerByCompactMatch(
+  rows: Array<{ id: number; name?: string }>,
+  term: string
+): { id: number; name?: string } | null {
+  const target = compactPartnerToken(term);
+  if (target.length < 5) return null;
+  const matches = rows.filter((row) => compactPartnerToken(row.name) === target);
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  // Ambigüedad entre variantes equivalentes (ej. un duplicado viejo creado por este mismo
+  // bug antes de este fix): preferir el id más chico (partner más antiguo, con más
+  // historial real) en vez de no matchear nada y arriesgar crear otro duplicado más.
+  return [...matches].sort((a, b) => a.id - b.id)[0];
+}
+
+/**
+ * Bug real, producción 2026-07-28: el alias configurado "El Cacique S.A." no matcheaba
+ * el partner real ya cargado en Odoo, "El Cacique Sa" (sin puntos) — ninguna de las
+ * búsquedas de `findPartnerByName` compara ignorando puntuación, así que se creaba un
+ * partner NUEVO cada vez que se escalaba un ticket para esa empresa (el cliente lo
+ * reportó como "está generando contactos en Odoo"). Este fallback ignora
+ * puntos/mayúsculas/espacios para reconocer variantes de razón social equivalentes.
+ */
+async function findPartnerByNormalizedName(
+  cfg: OdooConfig,
+  term: string
+): Promise<{ id: number; name?: string } | null> {
+  const coreWord = significantNameWord(term);
+  if (!coreWord) return null;
+  const candidates = await odooExecuteKw<Array<{ id: number; name?: string }>>(
+    cfg,
+    "res.partner",
+    "search_read",
+    [[["name", "ilike", coreWord], ["is_company", "=", true]]],
+    { fields: ["id", "name"], limit: 30 }
+  );
+  return pickPartnerByCompactMatch(candidates ?? [], term);
+}
+
 async function findPartnerByName(
   cfg: OdooConfig,
   name?: string
@@ -352,7 +421,10 @@ async function findPartnerByName(
     [[["name", "ilike", term]]],
     { fields: ["id", "name"], limit: 8 }
   );
-  return pickBestPartnerByName(containsRows ?? [], term);
+  const containsMatch = pickBestPartnerByName(containsRows ?? [], term);
+  if (containsMatch?.id) return containsMatch;
+
+  return findPartnerByNormalizedName(cfg, term);
 }
 
 /**
