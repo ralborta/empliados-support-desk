@@ -60,6 +60,7 @@ const SUITES = [
   "verify-odometer-prefix-without-con.mjs",
   "verify-horometro-unit-name-context.mjs",
   "verify-odometer-ajuste-horometro.mjs",
+  "verify-odometer-generic-correction-intent.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-conversation-closing.mjs",
   "verify-customer-conversation-reset.mjs",

@@ -25,6 +25,7 @@ import {
   looksLikeOdometerHelpRequest,
   looksLikeOdometerIntentStart,
   looksLikeOdometerPendingDataAmendment,
+  looksLikeGenericCorrectionIntent,
   looksLikeHorometerOnlyIntent,
   looksLikeUnitRejection,
   normalizePlate,
@@ -1025,6 +1026,32 @@ export async function POST(req: NextRequest) {
           message,
           topicChange_s: "true",
           cancelled_s: "true",
+        },
+        { status: BB_STATUS },
+      );
+    }
+    // Bug real, producción 2026-07-28: "corregir datos" (sin decir todavía cuál dato ni
+    // el valor nuevo) caía en el recordatorio genérico de CONFIRMO como si no hubiera
+    // dicho nada — el cliente no sentía que el bot entendió el pedido de corrección.
+    if (
+      effectivePendingOdoConfirm &&
+      !fromText.patente &&
+      typeof odometro !== "number" &&
+      typeof horometro !== "number" &&
+      looksLikeGenericCorrectionIntent(rawText)
+    ) {
+      const message =
+        "Decime qué dato querés corregir: la patente correcta, el odómetro (en km) o el horómetro (en hs), con el valor correcto, y actualizo el registro antes de pedirte el CONFIRMO.";
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "correction_intent_no_value",
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          ok_s: "true",
+          flowComplete_s: "true",
+          message,
         },
         { status: BB_STATUS },
       );

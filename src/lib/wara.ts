@@ -926,6 +926,36 @@ export function looksLikeOdometerPendingDataAmendment(text: string | undefined |
   ) {
     return true;
   }
+  // Bug real, producción 2026-07-28: "corregir datos" tras el resumen de confirmación
+  // solo tocaba el gancho de fecha/hora ("esta mal" + fecha/hora, etc.) — un valor nuevo
+  // de odómetro/horómetro sin esas palabras (ej. "el horómetro correcto es 350",
+  // "corrijo el odómetro a 12000") quedaba atrapado repitiendo el recordatorio de
+  // CONFIRMO en vez de reabrir el trámite con el valor nuevo.
+  if (/\b(od[oó]metro|hor[oó]metro)\b/.test(t) && /\d/.test(raw)) return true;
+  return false;
+}
+
+/**
+ * Intención genérica de corregir datos SIN especificar todavía cuál (ej. "corregir
+ * datos", "quiero corregir eso", "hay un error", "corregilo"). Distinto de una
+ * corrección de patente (looksLikePlateCorrectionRequest) o una que ya trae el valor
+ * nuevo (looksLikeOdometerPendingDataAmendment) — acá el cliente todavía no dio nada
+ * para actualizar, solo avisó que algo está mal.
+ */
+export function looksLikeGenericCorrectionIntent(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(corregir|modificar|cambiar|rectificar)\b.{0,20}\b(datos?|informaci[oó]n|eso|esto)\b/.test(t)) {
+    return true;
+  }
+  if (/\bcorrij(o|amos|elo|ela)\b/.test(t)) return true;
+  if (/\bcorregirlo|corregirla\b/.test(t)) return true;
+  if (/\b(hay|tiene|tuvo)\b.{0,12}\b(un\s+)?error\b/.test(t)) return true;
+  if (/\bquiero\s+corregir\b/.test(t) && !/\b(patente|matricula)\b/.test(t)) return true;
   return false;
 }
 
