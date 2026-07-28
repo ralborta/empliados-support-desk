@@ -832,6 +832,16 @@ export async function POST(req: NextRequest) {
     }
   }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
+    // Bug real, producción 2026-07-28: la "unidad activa" (usada como respaldo por
+    // OTROS trámites cuando no hay patente explícita) solo se actualizaba al completar
+    // el registro con éxito. Si el trámite quedaba a medias en este paso intermedio
+    // (pidiendo las horas/km), activeUnit seguía apuntando a una consulta vieja de
+    // OTRO trámite (ej. una consulta de GPS de varios minutos antes) — y ese valor
+    // desactualizado terminaba filtrándose en un resumen posterior. Se actualiza acá
+    // también, apenas se confirma la patente, no solo al final.
+    if (patente) {
+      await setActiveUnit(prisma, rawPhone, patente, { source: "odometro" });
+    }
     const wantsHorometro =
       horometerFlowActive ||
       horometerOnlyIntent ||

@@ -26,6 +26,23 @@ function shiftCalendarDay(
   return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
 }
 
+const WEEKDAY_NAMES: Record<string, number> = {
+  domingo: 0,
+  lunes: 1,
+  martes: 2,
+  miercoles: 3,
+  jueves: 4,
+  viernes: 5,
+  sabado: 6,
+};
+
+/** Días transcurridos desde la última vez que cayó ese día de la semana (0 si es hoy). */
+function daysSinceLastWeekday(targetDow: number, timezone: string): number {
+  const { year, month, day } = todayPartsInTz(timezone);
+  const todayDow = new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
+  return (todayDow - targetDow + 7) % 7;
+}
+
 /** Hora de lectura explícita ("Hora: 16:16", "a las 14:00 Hs") — no confundir con horómetro en horas. */
 const HORA_LECTURA_RE =
   /\b(?:a\s+las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/gi;
@@ -63,12 +80,29 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
     ...raw.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[\sT,]+(\d{1,2}):(\d{2}))?/g),
   ];
   if (matches.length === 0) {
+    const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
     const norm = raw
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
     const relative = norm.match(/\b(anteayer|ayer|hoy)\b/);
-    if (!relative) {
+    // Bug real, producción 2026-07-28: "11:45 del domingo" y "la fecha es de hace 2
+    // dias" no matcheaban NINGÚN patrón (solo se reconocían "hoy/ayer/anteayer" y
+    // fechas numéricas) — se ignoraban en silencio y el trámite quedaba con la fecha
+    // de HOY, sin avisarle al cliente que no se entendió la corrección.
+    const haceDias = norm.match(/\bhace\s+(\d{1,2})\s+d[ií]as?\b/);
+    const weekdayMatch = norm.match(
+      /\b(domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b/,
+    );
+    let deltaDays: number | undefined;
+    if (relative) {
+      deltaDays = relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
+    } else if (haceDias) {
+      deltaDays = -Number(haceDias[1]);
+    } else if (weekdayMatch) {
+      deltaDays = -daysSinceLastWeekday(WEEKDAY_NAMES[weekdayMatch[1]], tz);
+    }
+    if (deltaDays === undefined) {
       // Solo hora del reloj, sin fecha explícita → asumimos "hoy" (lectura en el día actual).
       // Ej. "16:45", "a las 16:45", "Hora: 16:45" — no confundir con horómetro decimal.
       const bareClock =
@@ -78,23 +112,19 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
         const hh = Number(bareClock[1]);
         const mm = Number(bareClock[2]);
         if (hh <= 23 && mm <= 59) {
-          const { year, month, day } = todayPartsInTz(
-            timezone?.trim() || "America/Argentina/Buenos_Aires",
-          );
+          const { year, month, day } = todayPartsInTz(tz);
           return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00`;
         }
       }
       return undefined;
     }
-    const deltaDays = relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
     const timeMatch =
       norm.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/) ??
-      norm.match(/\b(\d{1,2}):(\d{2})\b\s*(?:de\s+)?(?:hoy|ayer|anteayer)\b/) ??
+      norm.match(
+        /\b(\d{1,2}):(\d{2})\b\s*(?:de(?:l)?\s+)?(?:hoy|ayer|anteayer|domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b/,
+      ) ??
       norm.match(/\b(\d{1,2}):(\d{2})\b/);
-    const { year, month, day } = shiftCalendarDay(
-      todayPartsInTz(timezone?.trim() || "America/Argentina/Buenos_Aires"),
-      deltaDays,
-    );
+    const { year, month, day } = shiftCalendarDay(todayPartsInTz(tz), deltaDays);
     const hh = (timeMatch?.[1] ?? "00").padStart(2, "0");
     const mi = (timeMatch?.[2] ?? "00").padStart(2, "0");
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${hh}:${mi}:00`;

@@ -53,6 +53,7 @@ const SUITES = [
   "verify-fleet-term-word-boundary.mjs",
   "verify-odometer-confirm-amendment.mjs",
   "verify-odometer-glued-typo-and-hallucination.mjs",
+  "verify-odometer-mantenimiento-pivot-and-weekday.mjs",
   "verify-horometro-unit-name-context.mjs",
   "verify-odometer-ajuste-horometro.mjs",
   "verify-delivery-critical-fixes.mjs",

@@ -373,6 +373,14 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     /\b(no reporta|no me reporta|sin reporte|estado de reporte|reporte de mis unidades|listado de mis unidades)\b/.test(
       after,
     ) ||
+    // Bug real, producción 2026-07-28: tras un pedido de mantenimiento ("Puedo ayudarte
+    // con mantenimiento por acá: decime la patente de la unidad y si es preventivo o
+    // correctivo..."), el trámite de horómetro seguía "activo" de fondo — un mensaje
+    // ambiguo posterior ("la misma patente") volvía a caer en el recordatorio de
+    // horómetro en vez de seguir el mantenimiento, aunque el propio bot ya había
+    // pivotado de tema. Mismo patrón de detección que hasPendingMaintenancePlateRequest.
+    (/patente de la unidad/.test(after) && /preventivo o correctivo/.test(after)) ||
+    /\bmantenimiento (preventivo|correctivo)\b/.test(after) ||
     /\b(consultar|quiero consultar).{0,80}\b(reporte|unidades|gps|ignicion)\b/.test(after) ||
     /\bunidades registradas\b/.test(after) ||
     /ten[eé]s\s+\d+\s+unidades/.test(after) ||
