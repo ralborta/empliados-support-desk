@@ -16,6 +16,7 @@ import {
   normalizePlate,
   threadAwaitingHorometerPlate,
   threadAwaitingOdometerPlate,
+  threadHasFailedUnitSearch,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -947,11 +948,49 @@ function resolveUnitSelectionHint(
   return null;
 }
 
+function extractPlatesFromClarificationMessage(text: string): string[] {
+  const paren = text.match(/\(([^)]+)\)\s*\.?\s*(?:Decime|decime)/i);
+  if (!paren?.[1]) return [];
+  return paren[1]
+    .split(/,\s*/)
+    .map((part) => normalizeLoosePlate(part.trim()))
+    .filter(Boolean);
+}
+
+/** "1" / "2" tras listado "Encontré 4 unidades (OST 223, OST 226...)". */
+export function resolveNumericUnitSelection(rawText: string, threadText: string): string | null {
+  const t = rawText.trim();
+  if (!/^\d{1,2}$/.test(t)) return null;
+  const idx = parseInt(t, 10) - 1;
+  if (idx < 0) return null;
+  const lines = threadText.slice(-2500).split("\n").reverse();
+  for (const line of lines) {
+    const plates = extractPlatesFromClarificationMessage(line);
+    if (plates.length > 1 && idx < plates.length) return plates[idx];
+  }
+  return null;
+}
+
 function resolveWithRules(
   rawText: string,
   threadText: string,
   units: WaraUnidadEstado[]
 ): UnitQueryResolution {
+  const numericPlate = resolveNumericUnitSelection(rawText, threadText);
+  if (numericPlate) {
+    const matches = filterUnitsByPlate(units, numericPlate);
+    if (matches.length === 1) {
+      const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "") || numericPlate;
+      return {
+        intent: "consult_status",
+        plate,
+        searchTerms: [],
+        candidatePlates: [plate],
+        source: "rules",
+      };
+    }
+  }
+
   if (looksLikeUnitListRequest(rawText)) {
     return { intent: "list_fleet", searchTerms: [], candidatePlates: [], source: "rules" };
   }
@@ -1150,6 +1189,7 @@ async function resolveWithAi(
       ? `
 - CONTEXTO: el bot pidió la unidad para registrar cambio de ODÓMETRO u HORÓMETRO. El mensaje es selección de unidad (patente, prefijo como "la que empieza con RMX", marca o nombre).
 - Resolvé prefijos y frases parciales SOLO contra el catálogo — NUNCA uses una patente del historial si el cliente indicó otro prefijo o unidad distinta en mensaje_nuevo.
+- Si el historial dice que NO se encontró una marca (ej. Nissan) y mensaje_nuevo trae otra patente/prefijo/número, IGNORÁ la marca fallida — usá solo mensaje_nuevo.
 - Una sola coincidencia clara → intent=consult_status con esa patente en candidatePlates.
 - Varias coincidencias → intent=need_clarification listando patentes exactas del catálogo (hasta 8). PROHIBIDO tomar otra patente que no matchee lo pedido.
 - "14:00" u hora del reloj NO es horómetro; horómetro = horas de motor.`
@@ -1384,7 +1424,8 @@ export async function resolveUnitQuery(params: {
   // actual siempre se resuelve primero contra el catálogo real, nunca contra una
   // muestra parcial pensada para la IA.
   const explicitPlateInMessage = detectLoosePlate(params.rawText);
-  if (explicitPlateInMessage) {
+  const numericPlate = resolveNumericUnitSelection(params.rawText, params.threadText);
+  if (explicitPlateInMessage || numericPlate) {
     const plateRules = resolveWithRules(params.rawText, params.threadText, params.units);
     if (plateRules.intent === "consult_status" && plateRules.plate) return plateRules;
     if (
@@ -1393,6 +1434,22 @@ export async function resolveUnitQuery(params: {
       plateRules.clarificationQuestion
     ) {
       return plateRules;
+    }
+  }
+
+  const rulesOnlyOdometer =
+    odometerCtx &&
+    (explicitPlateInMessage ||
+      numericPlate ||
+      !!prefixHint ||
+      isBarePlatePrefixHint(params.rawText) ||
+      (threadHasFailedUnitSearch(params.threadText) &&
+        !looksLikeVehicleBrandOrUnitSearch(params.rawText)));
+  if (rulesOnlyOdometer) {
+    const rulesOnly = resolveWithRules(params.rawText, params.threadText, params.units);
+    if (rulesOnly.intent === "consult_status" && rulesOnly.plate) return rulesOnly;
+    if (rulesOnly.intent === "need_clarification" && rulesOnly.clarificationQuestion) {
+      return rulesOnly;
     }
   }
 

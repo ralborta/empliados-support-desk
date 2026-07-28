@@ -447,7 +447,9 @@ export function threadHasRecentUnitStatusConsultIntent(threadText: string): bool
 export function threadHasOdometerUnitClarificationPending(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-3500).toLowerCase();
-  if (!/encontr[eé] varias unidades|patente exacta|empiezan con/i.test(tail)) return false;
+  if (!/encontr[eé] varias unidades|patente exacta|empiezan con|no encontr[eé] ninguna unidad/i.test(tail)) {
+    return false;
+  }
   return (
     /\b(cambiar|cambio de|actualizar|registrar|corregir|ajust\w*)\b.{0,100}\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(
       tail,
@@ -804,6 +806,26 @@ export function extractPlateFromOdometerSummary(text: string): string | undefine
     if (plate && !isExamplePlate(plate)) return plate;
   }
   return undefined;
+}
+
+/** Patente confirmada en "Perfecto, tomo OST 225. ¿Cuál es el nuevo horómetro?" */
+export function extractPlateFromPerfectoTomo(text: string): string | undefined {
+  const matches = [...(text || "").matchAll(/perfecto,\s*tomo\s+([A-Za-z0-9 ]{4,14})/gi)];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(matches[i][1].replace(/\.\s*$/, ""));
+    if (plate && isPlausibleVehiclePlate(plate) && !isExamplePlate(plate)) return plate;
+  }
+  return undefined;
+}
+
+/** El bot avisó que la marca/patente buscada no está en la flota. */
+export function threadHasFailedUnitSearch(threadText: string): boolean {
+  const tail = threadText.slice(-3500).toLowerCase();
+  return (
+    /no encontr[eé] ninguna unidad/.test(tail) ||
+    /no hay ninguna unidad en la flota/.test(tail) ||
+    /ese prefijo no est[aá] en tu flota/.test(tail)
+  );
 }
 
 /**

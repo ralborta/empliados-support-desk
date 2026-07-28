@@ -44,6 +44,7 @@ const SUITES = [
   "verify-odometer-bare-km.mjs",
   "verify-odometer-horometer-fecha.mjs",
   "verify-odometer-ost225-confirm.mjs",
+  "verify-odometer-nissan-stuck.mjs",
   "verify-horometro-unit-name-context.mjs",
   "verify-odometer-ajuste-horometro.mjs",
   "verify-delivery-critical-fixes.mjs",

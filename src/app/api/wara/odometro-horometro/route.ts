@@ -14,6 +14,7 @@ import {
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
   extractPlateFromOdometerSummary,
+  extractPlateFromPerfectoTomo,
   formatPlateWithSpaces,
   resolveOdometerContextPlate,
   hasPendingOdometerConfirmation,
@@ -420,12 +421,13 @@ export async function POST(req: NextRequest) {
     await clearPendingAction(prisma, rawPhone);
   }
   const fromText = parseFromText(rawText);
-  const threadText = treatAsBlankFlowStart ? "" : preliminaryThreadText;
-  const activeOdoFlow = threadHasActiveOdometerFlow(threadText);
+  const threadText = treatAsBlankFlowStart || supersedesPendingConfirm ? "" : preliminaryThreadText;
+  const flowThreadText = threadText || preliminaryThreadText;
+  const activeOdoFlow = threadHasActiveOdometerFlow(flowThreadText);
   const horometerFlowActive =
     horometerOnlyIntent ||
-    threadAwaitingHorometerPlate(threadText) ||
-    (mentionsHorometroIntent(threadText) && !hasPendingOdometerConfirmation(threadText));
+    threadAwaitingHorometerPlate(flowThreadText) ||
+    (mentionsHorometroIntent(flowThreadText) && !hasPendingOdometerConfirmation(flowThreadText));
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
     looksLikeVehicleBrandOrUnitSearch(rawText) || /\bpatente\s+(?:de|del)\b/i.test(rawText);
@@ -436,6 +438,7 @@ export async function POST(req: NextRequest) {
   const explicitRejection = looksLikeUnitRejection(rawText);
   const skipThreadPlate =
     treatAsBlankFlowStart ||
+    supersedesPendingConfirm ||
     explicitRejection ||
     (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
@@ -463,17 +466,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const threadParsed = parseFromText(threadText);
+  const historialForExtract = treatAsBlankFlowStart || supersedesPendingConfirm ? "" : flowThreadText;
+  const threadParsed = parseFromText(historialForExtract);
   const mergedFields = await resolveOdometerHorometerFields({
     tramite: horometerFlowActive || horometerOnlyIntent ? "horometro" : "odometro",
     mensaje: rawText,
-    historial: treatAsBlankFlowStart ? "" : threadText,
+    historial: historialForExtract,
     horometerFlowActive,
-    treatAsBlankFlowStart,
+    treatAsBlankFlowStart: treatAsBlankFlowStart || supersedesPendingConfirm,
     activeUnitPlate: activeUnitRecordEarly?.plate,
     timezone: "America/Argentina/Buenos_Aires",
     regexMessage: fromText,
-    regexThread: treatAsBlankFlowStart ? {} : threadParsed,
+    regexThread: historialForExtract ? threadParsed : {},
   });
   // detectPlate(threadText) devuelve la PRIMERA patente que aparece en todo el hilo
   // (los últimos 24 mensajes), no la más reciente. Bug real, producción 2026-07-23:
@@ -481,7 +485,7 @@ export async function POST(req: NextRequest) {
   // "tomo AG 562 SP", pero al mandar el km nuevo el registro se intentó contra "OST
   // 223" (una patente mencionada antes en la misma conversación por otro trámite).
   // extractLastPlateFromThread recorre el hilo de más reciente a más antiguo.
-  const lastThreadPlate = extractLastPlateFromThread(threadText);
+  const lastThreadPlate = skipThreadPlate ? null : extractLastPlateFromThread(flowThreadText);
 
   if (plateCorrection && activeOdoFlow && !extractPlateCorrectionHint(rawText) && !fromText.patente) {
     const message =
@@ -511,12 +515,16 @@ export async function POST(req: NextRequest) {
   if (!isFleetUnitSelection && !prefixInMessage && mergedFields.patente) {
     explicitMessagePlate = normalizePlate(explicitMessagePlate || mergedFields.patente);
   }
-  const awaitingOdometerKm = threadAwaitingOdometerKmValue(threadText);
-  const awaitingHorometerKm = threadAwaitingHorometerKmValue(threadText);
+  const awaitingOdometerKm = threadAwaitingOdometerKmValue(flowThreadText);
+  const awaitingHorometerKm = threadAwaitingHorometerKmValue(flowThreadText);
+  const lockedPlateFromTomo =
+    awaitingHorometerKm || awaitingOdometerKm
+      ? extractPlateFromPerfectoTomo(flowThreadText)
+      : undefined;
   const clockTimeOnlyReading = looksLikeClockTimeOnlyReading(rawText);
   const awaitingPlateSelection =
-    (threadAwaitingOdometerPlate(threadText) && !awaitingOdometerKm) ||
-    (threadAwaitingHorometerPlate(threadText) && !awaitingHorometerKm) ||
+    (threadAwaitingOdometerPlate(flowThreadText) && !awaitingOdometerKm) ||
+    (threadAwaitingHorometerPlate(flowThreadText) && !awaitingHorometerKm) ||
     (activeOdoFlow &&
       !hasPendingConfirmInThread &&
       !awaitingOdometerKm &&
@@ -527,17 +535,23 @@ export async function POST(req: NextRequest) {
     !explicitVagueUnitReference &&
     !isFleetUnitSelection;
 
-  let patente = explicitMessagePlate;
+  let patente = lockedPlateFromTomo
+    ? normalizePlate(lockedPlateFromTomo)
+    : explicitMessagePlate;
 
   // Bug real 2026-07-27: "La q empieza con RMX" tomaba OST 223 del hilo/unidad activa
   // porque resolveOdometerContextPlate corría ANTES que la flota. Prefijo/marca/patente
   // en el mensaje actual → SIEMPRE resolvePlateWithWaraFleet (IA + reglas).
-  if (isFleetUnitSelection || (awaitingPlateSelection && rawText.trim())) {
+  if (
+    !lockedPlateFromTomo &&
+    (isFleetUnitSelection || (awaitingPlateSelection && rawText.trim())) &&
+    !clockTimeOnlyReading
+  ) {
     const fleetPlate = await resolvePlateWithWaraFleet(
       prisma,
       rawPhone,
       rawText,
-      threadText,
+      flowThreadText,
       null,
       { preferAi: true, odometerContext: true },
     );
@@ -565,7 +579,7 @@ export async function POST(req: NextRequest) {
   if (!patente && !skipThreadPlate && !isFleetUnitSelection && !freshOdometerIntentWithoutUnit) {
     patente = normalizePlate(
       resolveOdometerContextPlate({
-        threadText,
+        threadText: flowThreadText,
         lastThreadPlate,
         activeUnitPlate: activeUnitRecord?.plate,
         explicitVagueUnitReference,
@@ -581,7 +595,7 @@ export async function POST(req: NextRequest) {
   ) {
     patente = normalizePlate(
       resolveOdometerContextPlate({
-        threadText,
+        threadText: flowThreadText,
         lastThreadPlate,
         activeUnitPlate: activeUnitRecord?.plate,
         explicitVagueUnitReference: true,
@@ -595,7 +609,7 @@ export async function POST(req: NextRequest) {
       prisma,
       rawPhone,
       rawText,
-      threadText
+      flowThreadText
     );
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
@@ -608,7 +622,7 @@ export async function POST(req: NextRequest) {
       patente = activeUnitRecord.plate;
     }
   } else if (skipThreadPlate && !patente && activeOdoFlow && !isFleetUnitSelection && !clockTimeOnlyReading) {
-    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, rawText, threadText);
+    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, rawText, flowThreadText);
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
     } else if (fleetPlate.reason === "clarification") {
@@ -663,8 +677,8 @@ export async function POST(req: NextRequest) {
   })
     ? rawOdometro
     : undefined;
-  const combinedText = [threadText, rawText].filter(Boolean).join("\n");
-  const clockScanText = [rawText, threadText.slice(-800)].filter(Boolean).join("\n");
+  const combinedText = [flowThreadText, rawText].filter(Boolean).join("\n");
+  const clockScanText = [rawText, flowThreadText.slice(-800)].filter(Boolean).join("\n");
   let horometro = stripHorometroConfusedWithClockTime(
     rawText,
     resolveHorometroForWara({
@@ -709,7 +723,7 @@ export async function POST(req: NextRequest) {
     looksLikeOdometerConfirmationRejection(rawText) &&
     (pendingOdoConfirm ||
       activeOdoFlow ||
-      threadHasActiveOdometerFlow(threadText) ||
+      threadHasActiveOdometerFlow(flowThreadText) ||
       (horometerFlowActive && (patente || typeof horometro === "number" || typeof odometro === "number")))
   ) {
     await clearPendingAction(prisma, rawPhone);
@@ -746,8 +760,8 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS },
       );
     }
-    const hintText = [rawText, threadText].filter(Boolean).join("\n");
-    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, hintText, threadText);
+    const hintText = [rawText, flowThreadText].filter(Boolean).join("\n");
+    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, hintText, flowThreadText);
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
     } else if (fleetPlate.reason === "clarification") {
@@ -784,7 +798,7 @@ export async function POST(req: NextRequest) {
       horometerFlowActive ||
       horometerOnlyIntent ||
       /\bhor[oó]metro\b/i.test(rawText) ||
-      (!/\bod[oó]metro\b/i.test(rawText) && /\bhor[oó]metro\b/i.test(threadText));
+      (!/\bod[oó]metro\b/i.test(rawText) && /\bhor[oó]metro\b/i.test(flowThreadText));
     const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
     const earlyFechaNaive = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
     const earlyFechaDisplay = earlyFechaNaive
@@ -866,7 +880,7 @@ export async function POST(req: NextRequest) {
     parsed.data.date ??
     fechaFromMessage ??
     mergedFields.fechaNaive ??
-    parseFechaFromText(threadText, customerTz);
+    parseFechaFromText(flowThreadText, customerTz);
   let fecha = fechaWara(fechaExplicita, customerTz);
   let fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
 
@@ -916,7 +930,7 @@ export async function POST(req: NextRequest) {
         fechaDisplay = formatFechaDisplay(fecha);
       }
     } else if (effectivePendingOdoConfirm) {
-      const summaryPlate = extractPlateFromOdometerSummary(threadText);
+      const summaryPlate = extractPlateFromOdometerSummary(flowThreadText);
       if (summaryPlate) patente = normalizePlate(summaryPlate);
     }
   }
