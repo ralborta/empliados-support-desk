@@ -347,12 +347,24 @@ export async function processScheduledAdvisorReleases(): Promise<number> {
  * `rebalanceAmongActiveAdvisors` barría CUALQUIER ticket abierto sin asignar (p. ej.
  * una consulta de GPS ya resuelta por el bot) sin mirar de qué se trataba, así que
  * terminaba igual en la bandeja del asesor.
+ *
+ * Solo se aplica a tickets que NUNCA tuvieron un asesor (sin evento ASSIGNED previo).
+ * Si un admin des-asignó el ticket a mano desde el panel (existe ese botón, "Sin
+ * asignar"), eso deja un evento ASSIGNED en el historial → lo tratamos siempre como
+ * elegible para volver a la cola, sin adivinar por qué lo liberó.
  */
 export async function isUnassignedWhatsappTicketBotResolved(
   ticketId: string,
   channel: TicketChannel,
 ): Promise<boolean> {
   if (channel !== "WHATSAPP") return false;
+
+  const everAssigned = await prisma.ticketEvent.findFirst({
+    where: { ticketId, type: "ASSIGNED" },
+    select: { id: true },
+  });
+  if (everAssigned) return false;
+
   const lastInbound = await prisma.ticketMessage.findFirst({
     where: { ticketId, direction: "INBOUND" },
     orderBy: { createdAt: "desc" },

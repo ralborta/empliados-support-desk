@@ -45,6 +45,7 @@ async function purgeTestCustomer() {
   const ticketIds = tickets.map((t) => t.id);
   if (ticketIds.length) {
     await prisma.ticketMessage.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { id: { in: ticketIds } } });
   }
   await prisma.customer.deleteMany({ where: { phone: TEST_PHONE } });
@@ -132,6 +133,21 @@ async function main() {
     assert(
       (await isUnassignedWhatsappTicketBotResolved(ticket.id, "WEB")) === false,
       "canal WEB → nunca se excluye por este filtro (sigue como antes)",
+    );
+
+    console.log("\n— Admin des-asignó a mano (botón \"Sin asignar\") → siempre vuelve a la cola —");
+    ticket = await makeTicket("WHATSAPP");
+    await setLastInbound(ticket.id, "Necesito consultar por reporte de una de mis unidades.\nEs la AB 000 MW");
+    await prisma.ticketEvent.create({
+      data: {
+        ticketId: ticket.id,
+        type: "ASSIGNED",
+        payload: { assignedToUserId: null, previousAssignedToUserId: "fake-agent-id", source: "admin_manual" },
+      },
+    });
+    assert(
+      (await isUnassignedWhatsappTicketBotResolved(ticket.id, "WHATSAPP")) === false,
+      "ticket ya tocado por un humano (evento ASSIGNED previo) → no se excluye aunque el último mensaje parezca bot-only",
     );
   } finally {
     await purgeTestCustomer();
