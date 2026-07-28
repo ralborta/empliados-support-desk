@@ -293,6 +293,38 @@ function normalizeToken(value: string): string {
     .replace(/\s+/g, "");
 }
 
+/** Palabras sueltas (sin acentos, sin unir) del patente+unidad, para matchear por PALABRA COMPLETA. */
+function haystackWordsForUnit(unit: WaraUnidadEstado): string[] {
+  const raw = `${unit.patente ?? ""} ${unit.unidad ?? ""}`;
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/**
+ * Bug real, producción 2026-07-28: normalizeToken pegaba TODAS las palabras del
+ * patente+unidad en un solo string sin espacios (ej. "Mascotas GP30" → "mascotasgp30"),
+ * y el match era "substring en cualquier lado". Un relleno conversacional corto como
+ * "mas" (de "más", sin tilde) termina siendo substring literal de "Mascotas" — el
+ * bot resolvía esa unidad al azar para mensajes como "mas lista"/"mas unidades" que
+ * no tenían NADA que ver con ella. Ahora se exige coincidencia de PALABRA completa
+ * (o, para términos de 4+ letras, que una de las dos sea prefijo de la otra — para
+ * seguir tolerando variantes truncadas de marca real, ej. "camion" vs "camioneta").
+ * Términos de 3 letras (el mínimo permitido) NUNCA matchean por prefijo — son
+ * demasiado cortos y coinciden por pura casualidad con cualquier palabra larga.
+ */
+function termMatchesWord(term: string, word: string): boolean {
+  if (!term || !word) return false;
+  if (term === word) return true;
+  if (term.length >= 4 && word.length >= 4 && (word.startsWith(term) || term.startsWith(word))) {
+    return true;
+  }
+  return false;
+}
+
 function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
@@ -469,7 +501,7 @@ function looksLikeUnitListRequest(rawText: string): boolean {
   if (detectPlate(rawText)) return false;
   // Nota: "norm" ya viene sin acentos (NFD + strip de diacríticos), así que alcanza con
   // matchear "mas" (sin tilde) para cubrir "más"/"mas" indistintamente.
-  return /\b(listado|lista de unidad|lista de unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma|mas unidades|otras unidades|mas opciones|ver mas unidades|dame mas unidades|mostrame mas unidades|mas camiones)\b/.test(
+  return /\b(listado|lista de unidad|lista de unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma|mas unidades|otras unidades|mas opciones|ver mas unidades|dame mas unidades|mostrame mas unidades|mas camiones|mas lista|resto de la lista|el resto de la lista|toda la lista)\b/.test(
     norm
   );
 }
@@ -622,17 +654,23 @@ function filterUnitsBySearchTerms(units: WaraUnidadEstado[], terms: string[]): W
   // "saveiro" sí matcheaba una unidad real. Se descartan primero los términos que no
   // aparecen en NINGUNA unidad de la flota (ruido conversacional) y se exige AND solo
   // sobre los términos que sí son "conocidos" por el catálogo real.
-  const haystacks = units.map((unit) => normalizeToken(`${unit.patente ?? ""} ${unit.unidad ?? ""}`));
+  //
+  // El match contra el catálogo es por PALABRA COMPLETA (ver termMatchesWord), no por
+  // substring de un string con todos los espacios pegados — eso causaba falsos
+  // positivos (ver comentario en termMatchesWord, bug real 2026-07-28: "mas" de "más"
+  // matcheaba "Mascotas" por casualidad).
+  const unitsWithWords = units.map((unit) => ({ unit, words: haystackWordsForUnit(unit) }));
   const knownTerms = terms.filter((term) => {
     const norm = normalizeToken(term);
     if (!norm || norm.length < 3) return false;
-    return haystacks.some((h) => h.includes(norm));
+    return unitsWithWords.some(({ words }) => words.some((w) => termMatchesWord(norm, w)));
   });
   if (!knownTerms.length) return [];
-  return units.filter((unit) => {
-    const haystack = normalizeToken(`${unit.patente ?? ""} ${unit.unidad ?? ""}`);
-    return knownTerms.every((term) => haystack.includes(normalizeToken(term)));
-  });
+  return unitsWithWords
+    .filter(({ words }) =>
+      knownTerms.every((term) => words.some((w) => termMatchesWord(normalizeToken(term), w))),
+    )
+    .map(({ unit }) => unit);
 }
 
 function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnidadEstado[] {

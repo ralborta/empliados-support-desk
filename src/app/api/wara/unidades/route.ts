@@ -290,7 +290,18 @@ function extractUnitQueryFromText(rawText: string | undefined | null): UnitQuery
     if (looksLikeBackofficeInternoCode(value)) {
       return { kind: "interno_backoffice", value };
     }
-    return { kind: "nombre", value };
+    // Bug real, misma clase que "mas lista" (2026-07-28): sin exigir que el valor
+    // capturado tenga forma de código real (con dígito), una frase tan natural como
+    // "cuál es el interno de la Nissan" capturaba "de" (falla el patrón "interno es X"
+    // porque no hay "es"/":"/"-" antes de "la nissan", así que agarra la primera
+    // palabra suelta) y filterUnitsByNombre lo trataba como término de búsqueda,
+    // matcheando por substring cualquier unidad cuyo nombre contuviera "de". Los
+    // códigos de interno reales SIEMPRE tienen al menos un dígito (ver
+    // looksLikeBackofficeInternoCode / M?\d{3}-\d{2,3}); sin dígito, no es un
+    // identificador real — no vale la pena buscarlo como "nombre".
+    if (/\d/.test(value)) {
+      return { kind: "nombre", value };
+    }
   }
 
   const nombreMatch = text.match(/\b(M?\d{3}-\d{2,3})\b/i);

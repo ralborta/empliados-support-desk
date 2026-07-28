@@ -50,6 +50,7 @@ const SUITES = [
   "verify-certificate-completed-not-stuck.mjs",
   "verify-company-reset-phrases.mjs",
   "verify-more-units-request-routing.mjs",
+  "verify-fleet-term-word-boundary.mjs",
   "verify-odometer-confirm-amendment.mjs",
   "verify-horometro-unit-name-context.mjs",
   "verify-odometer-ajuste-horometro.mjs",
