@@ -17,12 +17,14 @@ import {
   looksLikeBriefConfirmation,
   looksLikeExplicitCertificateResendRequest,
   looksLikeExplicitOdometerUpdateRequest,
+  looksLikeHorometerOnlyIntent,
   looksLikeOdometerProblemReport,
   looksLikePostAdvisorCaseThread,
   looksLikePostAdvisorCaseSupplement,
   looksLikeCertificateUnitReply,
   threadAwaitingOdometerPlate,
   threadHasActiveOdometerFlow,
+  threadHasOdometerUnitClarificationPending,
 } from "@/lib/wara";
 import {
   looksLikeConversationAcknowledgement,
@@ -379,6 +381,12 @@ const TURN_RULES: TurnRule[] = [
       ) {
         return null;
       }
+      if (looksLikeExplicitOdometerUpdateRequest(text) || looksLikeHorometerOnlyIntent(text)) {
+        return "odometro";
+      }
+      if (threadHasOdometerUnitClarificationPending(threadText)) {
+        return "odometro";
+      }
       if (threadHasActiveOdometerFlow(threadText)) return "odometro";
       return "unidades";
     },
@@ -390,7 +398,13 @@ const TURN_RULES: TurnRule[] = [
       if (looksLikeNonOdometerOperationalIntent(text)) return null;
       if (certificateFlowState(threadText) !== "none") return null;
       if (hasPendingUnitConsultPlateRequest(threadText)) return null;
-      if (threadHasRecentFleetUnitSearchRequest(threadText) && isUnitSelectionMessage(text, threadText)) {
+      if (
+        threadHasRecentFleetUnitSearchRequest(threadText) &&
+        isUnitSelectionMessage(text, threadText) &&
+        !looksLikeExplicitOdometerUpdateRequest(text) &&
+        !looksLikeHorometerOnlyIntent(text) &&
+        !threadHasActiveOdometerFlow(threadText)
+      ) {
         return null;
       }
       if (/\b(encontrar|buscar|listado de mis unidades|listado de unidades)\b/.test(norm(text))) {

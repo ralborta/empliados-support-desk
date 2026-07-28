@@ -171,15 +171,13 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
   const correctionHint = extractPlateCorrectionHint(rawText);
   if (correctionHint) {
     const compact = correctionHint.replace(/\s+/g, "").toUpperCase();
-    // Bug real, producción 2026-07-23: "dame el certificado de la unidad mencionada"
-    // hacía matchear el patrón "de la <palabra>" de extractPlateCorrectionHint y
-    // devolvía "UNIDAD" (6 letras, sin dígitos) como si fuera un prefijo de patente
-    // válido — el bot respondía "no hay ninguna unidad que empiece con UNIDAD" en vez
-    // de resolver por contexto la unidad ya mencionada en el hilo (AG 562 SP). Un
-    // prefijo real de flota es corto y con forma de patente/prefijo (2-3 letras +
-    // hasta 4 dígitos), nunca una palabra genérica completa como "unidad"/"patente"/
-    // "vehiculo"/"mencionada". Se exige esa forma en vez de solo "<=6 caracteres".
-    if (!isPlausibleVehiclePlate(compact) && /^[A-Z]{2,3}\d{0,4}$/.test(compact)) return compact;
+    if (
+      !NON_PLATE_PREFIX_WORDS.has(compact.toLowerCase()) &&
+      !isPlausibleVehiclePlate(compact) &&
+      /^[A-Z]{2,3}\d{0,4}$/.test(compact)
+    ) {
+      return compact;
+    }
   }
 
   if (isBarePlatePrefixHint(rawText)) {
@@ -210,8 +208,11 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
     if (!NON_PLATE_PREFIX_WORDS.has(hint.toLowerCase()) && !isPlausibleVehiclePlate(hint)) return hint;
   }
 
-  const paraPatente = norm.match(/\bpatente\b\s+([a-z0-9]{2,6})\b/i);
-  if (paraPatente?.[1]) return paraPatente[1].replace(/\s+/g, "").toUpperCase();
+  const paraPatente = norm.match(/\bpatente\b(?:\s+(?:con|de|del))?\s+([a-z0-9]{2,6})\b/i);
+  if (paraPatente?.[1]) {
+    const hint = paraPatente[1].replace(/\s+/g, "").toUpperCase();
+    if (!NON_PLATE_PREFIX_WORDS.has(hint.toLowerCase())) return hint;
+  }
 
   return null;
 }
@@ -253,11 +254,12 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
 
   const patterns = [
     /\bpatente\s+(?:de|del)\s+(?:la\s+|el\s+|los\s+|las\s+)?([a-z]{3,20})\b/i,
+    /\b(?:patente|matricula)\b\s+(?:con|de|del)\s+([a-z0-9]{2,9})\b/i,
     /\b(?:de la|para la)\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,12}\bpara\b.{0,12}\bla\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,16}\bla\b\s+([a-z0-9]{2,12})\b/i,
     /\bno\b.{0,12}\bpara\b.{0,20}\bpatente\b\s+([a-z0-9]{2,9})\b/i,
-    /\b(?:patente|matricula)\b\s+(?!de\b|del\b)([a-z0-9]{2,9})\b/i,
+    /\b(?:patente|matricula)\b\s+(?!de\b|del\b|con\b|por\b)([a-z0-9]{2,9})\b/i,
     /\bla\b\s+([a-z]{2,3}\d{3,4}[a-z]{0,2})\b/i,
   ];
   for (const re of patterns) {
@@ -441,15 +443,55 @@ export function threadHasRecentUnitStatusConsultIntent(threadText: string): bool
   });
 }
 
+/** Tras pedir horómetro/odómetro, el bot pidió aclarar la unidad (varias coincidencias). */
+export function threadHasOdometerUnitClarificationPending(threadText: string): boolean {
+  if (isOdometerFlowSuperseded(threadText)) return false;
+  const tail = threadText.slice(-3500).toLowerCase();
+  if (!/encontr[eé] varias unidades|patente exacta|empiezan con/i.test(tail)) return false;
+  return (
+    /\b(cambiar|cambio de|actualizar|registrar|corregir|ajust\w*)\b.{0,100}\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(
+      tail,
+    ) ||
+    /\b(od[oó]metro|hor[oó]metro)\b.{0,100}\b(cambiar|actualizar|patente|matr[ií]cula)\b/.test(tail)
+  );
+}
+
 /** Trámite de odómetro activo en el hilo (pide patente/km o confirmación pendiente). */
 export function threadHasActiveOdometerFlow(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
-  return threadAwaitingOdometerPlate(threadText) || hasPendingOdometerConfirmation(threadText);
+  return (
+    threadAwaitingOdometerPlate(threadText) ||
+    threadAwaitingHorometerPlate(threadText) ||
+    threadAwaitingHorometerKmValue(threadText) ||
+    threadHasOdometerUnitClarificationPending(threadText) ||
+    hasPendingOdometerConfirmation(threadText)
+  );
+}
+
+function threadTailSinceFleetUnitSearch(text: string): string {
+  const tail = text.slice(-2200);
+  const norm = tail
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  let cutAt = -1;
+  const idxAyuda = norm.lastIndexOf("ayudame a encontrar mi unidad");
+  if (idxAyuda >= 0) cutAt = Math.max(cutAt, idxAyuda + "ayudame a encontrar mi unidad".length);
+  for (const match of norm.matchAll(/\b(encontrar|buscar)\b.{0,80}\b(unidad|matricula|patente)\b/g)) {
+    cutAt = Math.max(cutAt, (match.index ?? 0) + match[0].length);
+  }
+  for (const match of norm.matchAll(/\bno encuentro\b.{0,40}\b(unidad|patente|matricula)\b/g)) {
+    cutAt = Math.max(cutAt, (match.index ?? 0) + match[0].length);
+  }
+  if (cutAt < 0) return text;
+  const offset = text.length - tail.length;
+  return text.slice(offset + cutAt);
 }
 
 /** El hilo reciente está pidiendo patente para un trámite de odómetro. */
 export function threadAwaitingOdometerPlate(threadText: string): boolean {
-  const tail = threadText.slice(-2500).toLowerCase();
+  const scoped = threadTailSinceFleetUnitSearch(threadText);
+  const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
   // Si el bot acaba de pedir patente/km para odómetro, el trámite sigue activo aunque
@@ -501,7 +543,8 @@ export function threadAwaitingHorometerKmValue(threadText: string): boolean {
 
 /** El hilo reciente pide patente o valor para un trámite de horómetro (no odómetro). */
 export function threadAwaitingHorometerPlate(threadText: string): boolean {
-  const tail = threadText.slice(-2500).toLowerCase();
+  const scoped = threadTailSinceFleetUnitSearch(threadText);
+  const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
   return (
     /para registrar el cambio de hor[oó]metro necesito la patente/i.test(tail) ||

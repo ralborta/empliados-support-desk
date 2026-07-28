@@ -9,6 +9,8 @@
 import {
   threadAwaitingOdometerPlate,
   threadHasActiveOdometerFlow,
+  threadHasOdometerUnitClarificationPending,
+  extractPlatePrefixFromMessage,
 } from "../src/lib/wara.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 
@@ -67,6 +69,28 @@ console.log("\n— 'De la misma unidad' tras reintentar el trámite —");
 assert(
   classifyTurnExecutor("De la misma unidad", threadSecondAttempt) === "odometro",
   "classifyTurnExecutor('De la misma unidad') → odometro",
+);
+
+console.log("\n— Horómetro + 'patente con LWK' tras listado de flota (bug 2026-07-27 noche) —");
+assert(
+  extractPlatePrefixFromMessage("quiero cambiar horometro a la patente con LWK") === "LWK",
+  "prefijo LWK, no CON",
+);
+
+const horoFleetThread = [
+  "Cliente: lista de flota",
+  "Atilio: Tenés 73 unidades registradas en WARA. Decime la patente, el nombre de la unidad o la marca.",
+  "Cliente: quiero cambiar horometro a la patente con LWK",
+  'Atilio: Encontré varias unidades para "CON" (Alejandro Picón, contador de pasajeros). Decime la patente exacta.',
+].join("\n");
+
+assert(
+  threadHasOdometerUnitClarificationPending(horoFleetThread),
+  "aclara unidad tras pedido de horómetro → trámite sigue activo",
+);
+assert(
+  classifyTurnExecutor("la q comienza con LWK", horoFleetThread) === "odometro",
+  "prefijo LWK tras horómetro → odometro (no GPS)",
 );
 
 if (failed > 0) {

@@ -56,6 +56,12 @@ assert(
   "patente completa en el mensaje sí se acepta como directPlate",
 );
 
+console.log("\n— 'patente con LWK' no toma 'con' como prefijo —");
+assert(
+  extractPlatePrefixFromMessage("quiero cambiar horometro a la patente con LWK") === "LWK",
+  'prefijo LWK en "patente con LWK"',
+);
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);

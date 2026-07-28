@@ -16,6 +16,8 @@ import {
   looksLikeOdometerPendingDataAmendment,
   normalizePlate,
   threadAwaitingOdometerPlate,
+  threadAwaitingHorometerPlate,
+  threadHasOdometerUnitClarificationPending,
   detectLoosePlate,
   extractPlatePrefixFromMessage,
 } from "@/lib/wara";
@@ -482,6 +484,7 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   if (/\b(cambiar|corregir|modificar).{0,24}(patente|matricula)\b/.test(t)) return true;
   if (/\bpatente\s+(?:de|del)\b/.test(t)) return true;
   if (looksLikeVehicleBrandOrUnitSearch(raw)) return true;
+  if (extractPlatePrefixFromMessage(raw) || isBarePlatePrefixHint(raw)) return true;
   if (/^\d{4,7}$/.test(raw.replace(/\./g, "").replace(/\s+/g, ""))) return true;
   const plate = normalizePlate(raw.replace(/[\s\-_.]+/g, ""));
   return !!(plate && /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(plate));
@@ -493,7 +496,12 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  if (threadAwaitingOdometerPlate(threadText) || hasPendingOdometerConfirmation(threadText)) {
+  if (
+    threadAwaitingOdometerPlate(threadText) ||
+    threadAwaitingHorometerPlate(threadText) ||
+    threadHasOdometerUnitClarificationPending(threadText) ||
+    hasPendingOdometerConfirmation(threadText)
+  ) {
     if (looksLikePlateCorrectionRequest(text)) return true;
     if (looksLikeNonOdometerOperationalIntent(text)) return false;
     return looksLikeOdometerContinuationMessage(text);
