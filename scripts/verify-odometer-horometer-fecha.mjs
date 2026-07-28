@@ -22,10 +22,24 @@ function assert(cond, label) {
   }
 }
 
+// No hardcodear la fecha "de hoy": corriendo cerca de medianoche (AR) el test quedaba
+// desfasado un día apenas cambiaba el reloj. Se calcula igual que odometroFecha.ts.
+function todayInTz(timezone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const pick = (t) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${pick("year")}-${pick("month")}-${pick("day")}`;
+}
+const today = todayInTz(tz);
+
 console.log("— 'a las 16:55 de hoy' → fecha hoy, no horómetro=16 —");
 const fechaHoy = parseFechaFromText("Ahora quiero cambiar el horometro a las 16:55 de hoy", tz) ?? "";
 assert(fechaHoy.includes("T16:55"), "parsea 16:55 del mensaje");
-assert(fechaHoy.startsWith("2026-07-27"), `fecha es hoy (obtuvo ${fechaHoy.slice(0, 10)})`);
+assert(fechaHoy.startsWith(today), `fecha es hoy (obtuvo ${fechaHoy.slice(0, 10)})`);
 
 const merged = mergeOdometerFieldExtractions(
   {
@@ -39,7 +53,7 @@ const merged = mergeOdometerFieldExtractions(
   { message: { horometro: 16 }, thread: {} },
   { horometro_horas: 16, fecha_lectura: "2023-10-21T16:55:00", confidence: 0.9 },
 );
-assert(merged.fechaNaive?.startsWith("2026-07-27"), "fecha del mensaje gana sobre hilo 2023");
+assert(merged.fechaNaive?.startsWith(today), "fecha del mensaje gana sobre hilo 2023");
 assert(
   merged.horometro === undefined,
   "16:55 del mensaje no se confunde con horómetro 16 h",
@@ -51,7 +65,7 @@ assert(
   "detecta corrección de fecha",
 );
 const amendFecha = parseFechaFromText("La fecha es la de hoy", tz) ?? "";
-assert(amendFecha.startsWith("2026-07-27"), "corrección resuelve hoy");
+assert(amendFecha.startsWith(today), "corrección resuelve hoy");
 
 console.log("\n— '27/07/2026 16 hrs' sigue en odómetro con confirm pendiente —");
 const pendingThread =
@@ -84,7 +98,7 @@ assert(mergedClock.fechaNaive?.includes("T16:45"), `fecha con 16:45 (obtuve: ${m
 console.log("\n— Solo '16:45' (sin 'de hoy') → fecha hoy, no horómetro —");
 const soloHora = parseFechaFromText("16:45", tz) ?? "";
 assert(soloHora.includes("T16:45"), "16:45 solo → hora 16:45");
-assert(soloHora.startsWith("2026-07-27"), "16:45 solo → hoy");
+assert(soloHora.startsWith(today), "16:45 solo → hoy");
 
 console.log("\n— Tras 'Tomé la fecha…', el hilo sigue pidiendo horas de motor —");
 const threadTomoFecha =

@@ -48,17 +48,32 @@ assert(
   "hora con Hs antes de fecha",
 );
 
+// No hardcodear la fecha "de hoy": el test corría a la medianoche (AR) y quedaba
+// desfasado un día apenas cambiaba el reloj. Se calcula igual que odometroFecha.ts
+// (Intl.DateTimeFormat en la zona del cliente) en vez de un string fijo.
+const tz = "America/Argentina/Buenos_Aires";
+function todayInTz(timezone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const pick = (t) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${pick("year")}-${pick("month")}-${pick("day")}`;
+}
+const today = todayInTz(tz);
+
 console.log("— '16:45 de hoy' (hora de lectura, no horómetro decimal) —");
-const deHoy = parseFechaFromText("16:45 de hoy", "America/Argentina/Buenos_Aires");
+const deHoy = parseFechaFromText("16:45 de hoy", tz);
 assert(deHoy?.includes("T16:45"), `16:45 de hoy → hora 16:45 (obtuve: ${deHoy})`);
-assert(deHoy?.startsWith("2026-07-27"), `16:45 de hoy → fecha hoy (obtuve: ${deHoy?.slice(0, 10)})`);
+assert(deHoy?.startsWith(today), `16:45 de hoy → fecha hoy (obtuve: ${deHoy?.slice(0, 10)})`);
 
 console.log("— Solo hora, sin fecha → hoy a esa hora —");
-const tz = "America/Argentina/Buenos_Aires";
 for (const sample of ["16:45", "a las 16:45", "Hora: 16:45", "16:45 hs"]) {
   const parsedBare = parseFechaFromText(sample, tz);
   assert(parsedBare?.includes("T16:45"), `"${sample}" → 16:45 (obtuve: ${parsedBare})`);
-  assert(parsedBare?.startsWith("2026-07-27"), `"${sample}" → fecha hoy`);
+  assert(parsedBare?.startsWith(today), `"${sample}" → fecha hoy`);
 }
 assert(parseFechaFromText("168", tz) === undefined, "168 solo no es fecha");
 assert(parseFechaFromText("168 horas", tz) === undefined, "168 horas no es hora del reloj");
