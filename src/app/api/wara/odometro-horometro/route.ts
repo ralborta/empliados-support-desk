@@ -424,6 +424,32 @@ export async function POST(req: NextRequest) {
   const threadText = treatAsBlankFlowStart || supersedesPendingConfirm ? "" : preliminaryThreadText;
   const flowThreadText = threadText || preliminaryThreadText;
   const activeOdoFlow = threadHasActiveOdometerFlow(flowThreadText);
+
+  if (
+    hasPendingConfirmInThread &&
+    !supersedesPendingConfirm &&
+    looksLikeOdometerConfirmationRejection(rawText)
+  ) {
+    await clearPendingAction(prisma, rawPhone);
+    const message =
+      "Entendido, no registro ese cambio. ¿Qué necesitás? Podés pedirme otro trámite (odómetro, horómetro, certificado, estado de unidad, etc.).";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_odometro_response",
+      stage: "flow_cancelled_early",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        topicChange_s: "true",
+        cancelled_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   const horometerFlowActive =
     horometerOnlyIntent ||
     threadAwaitingHorometerPlate(flowThreadText) ||
@@ -875,12 +901,37 @@ export async function POST(req: NextRequest) {
   // calcula la fecha ACÁ (antes del resumen) y se muestra siempre que el cliente haya
   // dado una explícita (no la de "ahora", para no confundir con un dato que no pidió).
   const fechaFromMessage = parseFechaFromText(rawText, customerTz);
+  const clientExplicitFechaThisTurn =
+    !!fechaFromMessage ||
+    !!parsed.data.fecha ||
+    !!parsed.data.date ||
+    looksLikeOdometerPendingDataAmendment(rawText) ||
+    /\b(fecha|hora|ayer|hoy|anteayer|\d{1,2}\/\d{1,2}\/\d{2,4})\b/i.test(rawText);
+  const odometerScopedThread = (() => {
+    const lines = flowThreadText.split(/\n/).filter(Boolean);
+    let start = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (
+        looksLikeOdometerIntentStart(lines[i] ?? "") ||
+        /\bperfecto,?\s+tomo\b/i.test(lines[i] ?? "")
+      ) {
+        start = i;
+        break;
+      }
+    }
+    return lines.slice(start).join("\n");
+  })();
+  const fechaFromScopedThread = parseFechaFromText(odometerScopedThread, customerTz);
   let fechaExplicita =
     parsed.data.fecha ??
     parsed.data.date ??
     fechaFromMessage ??
-    mergedFields.fechaNaive ??
-    parseFechaFromText(flowThreadText, customerTz);
+    (amendsPendingOdoConfirm
+      ? undefined
+      : clientExplicitFechaThisTurn
+        ? mergedFields.fechaNaive
+        : undefined) ??
+    (amendsPendingOdoConfirm ? undefined : fechaFromScopedThread);
   let fecha = fechaWara(fechaExplicita, customerTz);
   let fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
 

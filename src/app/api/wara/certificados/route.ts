@@ -7,7 +7,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
-import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadTextSinceCompanySelection } from "@/lib/wara";
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
   findFleetUnitByPlate,
@@ -127,7 +127,7 @@ function extractPlateFromCertificateSummary(text: string): string | null {
 }
 
 function isGenericCertificateRequest(text: string): boolean {
-  return /\b(certificado|cobertura|monitoreo|constancia)\b/i.test(text) && !detectPlate(text);
+  return looksLikeCertificateKeyword(text) && !detectPlate(text);
 }
 
 function looksLikeCertificateUnitSelection(text: string, threadText = ""): boolean {

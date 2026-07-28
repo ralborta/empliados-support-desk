@@ -13,16 +13,21 @@ import {
 import { resolveTurnExecutor } from "@/lib/whatsappTurnClassifierAI";
 import {
   buildUnexpectedTurnFallbackMessage,
+  looksLikeChangeCompanyRequest,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  resetCustomerCompanyMenu,
 } from "@/lib/waraApi";
+import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
   isBarePlatePrefixHint,
   looksLikeBriefConfirmation,
   detectLoosePlate,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
+  looksLikeCertificateKeyword,
+  certificateFlowState,
 } from "@/lib/wara";
 import {
   buildFleetUnitNotFoundMessage,
@@ -94,14 +99,7 @@ function executorSkippedSilently(data: JsonRecord): boolean {
 }
 
 function looksLikeCertificateRequest(text: string): boolean {
-  const n = String(text ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  return (
-    /\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(n) ||
-    /\bemitir\b.{0,40}\b(certificado|certficado)\b/.test(n)
-  );
+  return looksLikeCertificateKeyword(text);
 }
 
 function inferRecoveryExecutor(
@@ -110,6 +108,12 @@ function inferRecoveryExecutor(
   threadText: string,
 ): TurnExecutorId | null {
   if (looksLikeCertificateRequest(selectionText)) return "certificados";
+  if (
+    certificateFlowState(threadText) === "awaiting_unit" &&
+    looksLikeFleetUnitSearchInput(selectionText)
+  ) {
+    return "certificados";
+  }
   if (
     failedExecutor === "odometro" &&
     threadHasActiveOdometerFlow(threadText) &&
@@ -177,6 +181,15 @@ export async function runTurnExecutorPhase(params: {
   apiKey: string;
 }): Promise<{ message: string; executor: TurnExecutorId; ok: boolean }> {
   const { rawPhone, selectionText, apiKey } = params;
+
+  if (
+    looksLikeChangeCompanyRequest(selectionText) ||
+    (await looksLikeChangeCompanyRequestHybrid(selectionText))
+  ) {
+    const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
+    return { message: reset.message, executor: "unidades", ok: true };
+  }
+
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
 
   let executor: TurnExecutorId;

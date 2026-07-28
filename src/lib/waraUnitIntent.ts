@@ -18,6 +18,7 @@ import {
   threadAwaitingOdometerPlate,
   threadHasFailedUnitSearch,
   threadTextSinceCompanySelection,
+  hasPendingOdometerConfirmation,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -25,6 +26,7 @@ import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
   looksLikeLiveUnitConsultIntent,
+  looksLikeOdometerConfirmationRejection,
   looksLikePlateCorrectionRequest,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
@@ -159,6 +161,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
 export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   const text = rawText.trim();
   if (!text) return false;
+  if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
   return (
@@ -1365,6 +1368,15 @@ export async function resolveUnitQuery(params: {
    */
   aiHistorial?: string;
 }): Promise<UnitQueryResolution> {
+  if (looksLikeOdometerConfirmationRejection(params.rawText)) {
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: [],
+      source: "rules",
+    };
+  }
+
   const historialForAi = params.aiHistorial ?? params.threadText;
   const prefixHint = prefixHintFromMessage(params.rawText);
   const brandOrLiveConsult =
@@ -1557,6 +1569,13 @@ export async function resolvePlateWithWaraFleet(
       : null;
   if (normalizedDirect) {
     return { ok: true, plate: normalizedDirect, source: "direct" };
+  }
+
+  if (
+    looksLikeOdometerConfirmationRejection(rawText) &&
+    hasPendingOdometerConfirmation(threadText)
+  ) {
+    return { ok: false, reason: "not_found" };
   }
 
   // Arranque de trámite sin unidad ("quiero cambiar el odómetro") → no buscar flota aún.

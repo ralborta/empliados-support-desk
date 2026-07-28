@@ -611,6 +611,47 @@ export function looksLikeExplicitCertificateResendRequest(value: string | undefi
   );
 }
 
+/** Colapsa letras repetidas para tolerar typos de chat ("ceerrtificado" → "certificado"). */
+export function collapseRepeatedLetters(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/(.)\1+/g, "$1");
+}
+
+/** Certificado de cobertura/monitoreo, incluyendo typos frecuentes en WhatsApp. */
+export function looksLikeCertificateKeyword(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const n = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(certificado|certficado|cobertura|monitoreo|constancia|sertificado)\b/.test(n)) return true;
+  const collapsed = collapseRepeatedLetters(raw);
+  return /\b(certificado|certficado|cobertura|monitoreo|constancia|sertificado)\b/.test(collapsed);
+}
+
+/** Bot pidió la unidad para un certificado (incluye mis-rutas a unidades). */
+export function threadHasCertificateUnitPrompt(threadText: string): boolean {
+  if (!threadText.trim()) return false;
+  const lines = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tail = lines.slice(-12).join("\n").toLowerCase();
+  if (/para el certificado de cobertura necesito la unidad/.test(tail)) return true;
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) {
+    const line = lines[i].toLowerCase();
+    if (/cu[aá]l unidad\?\s*pasame la matr[ií]cula/.test(line)) {
+      const prior = lines.slice(Math.max(0, i - 8), i).join("\n");
+      if (looksLikeCertificateKeyword(prior)) return true;
+    }
+  }
+  return false;
+}
+
 /** Cliente inicia trámite de odómetro/horómetro sin dar patente todavía. */
 export function looksLikeOdometerIntentStart(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
@@ -651,6 +692,10 @@ export function looksLikeOdometerPendingDataAmendment(text: string | undefined |
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (/\b(aun no te dije|todavia no|no te dije|me falta|faltaria|falta el|falta la)\b/.test(t)) return true;
+  if (/\b(estan mal|esta mal|est[aá]n mal|incorrecta|incorrecto)\b/.test(t) && /\b(fecha|hora|dia)\b/.test(t)) {
+    return true;
+  }
+  if (/\b(ayer|hoy|anteayer)\b/.test(t) && /\b(\d{1,2}:\d{2}|a las|hora)\b/.test(t)) return true;
   if (/\b(la fecha es|fecha es la|es la de hoy|es hoy|fecha correcta|la hora es|hora correcta)\b/.test(t)) {
     return true;
   }
@@ -1055,7 +1100,7 @@ export function certificateFlowState(threadText: string): CertificateFlowState {
   ) {
     return "awaiting_confirm";
   }
-  if (/para el certificado de cobertura necesito la unidad/.test(tail)) {
+  if (threadHasCertificateUnitPrompt(threadText)) {
     return "awaiting_unit";
   }
   return "none";

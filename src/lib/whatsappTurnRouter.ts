@@ -16,6 +16,7 @@ import {
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
   looksLikeExplicitCertificateResendRequest,
+  looksLikeCertificateKeyword,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
   looksLikeOdometerProblemReport,
@@ -74,6 +75,7 @@ function norm(text: string): string {
 function looksLikeCertificateIntent(text: string, threadText: string): boolean {
   const nText = norm(text);
   if (looksLikeExplicitCertificateResendRequest(text)) return true;
+  if (looksLikeCertificateKeyword(text)) return true;
   if (
     looksLikeNonOdometerOperationalIntent(text) &&
     /\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(nText)
@@ -351,16 +353,18 @@ const TURN_RULES: TurnRule[] = [
       looksLikePostAdvisorCaseSupplement(text, threadText) ? "odoo_ticket" : null,
   },
   {
-    id: "gps_or_live_unit_consult",
-    reason: "GPS/ignición/reporte en vivo — prioridad sobre guías y mantenimiento arrastrado del hilo.",
-    decide: ({ text }) =>
-      looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? "unidades" : null,
-  },
-  {
     id: "certificate_unit_context_selection",
     reason: "Respuesta de unidad tras 'necesito la unidad' del flujo de certificado.",
     decide: ({ text, threadText }) =>
       isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText) ? "certificados" : null,
+  },
+  {
+    id: "gps_or_live_unit_consult",
+    reason: "GPS/ignición/reporte en vivo — prioridad sobre guías y mantenimiento arrastrado del hilo.",
+    decide: ({ text, threadText }) => {
+      if (isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText)) return null;
+      return looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? "unidades" : null;
+    },
   },
   {
     id: "unit_consult_plate_selection",

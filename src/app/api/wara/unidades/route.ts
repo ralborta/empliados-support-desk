@@ -10,10 +10,11 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, looksLikeUnitRejection, normalizePlate, threadHasActiveOdometerFlow, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadHasActiveOdometerFlow, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
+  looksLikeChangeCompanyRequest,
   looksLikeFlowControlCommand,
   looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
@@ -726,7 +727,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (looksLikeFlowControlCommand(rawText.trim())) {
+  if (looksLikeFlowControlCommand(rawText.trim()) || looksLikeChangeCompanyRequest(rawText.trim())) {
     return NextResponse.json(
       {
         ok: true,
@@ -734,6 +735,23 @@ export async function POST(req: NextRequest) {
         summaryText: "",
         message: "",
         skipResponse_s: "true",
+        action: "none" as const,
+        unidadesCount: 0,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  if (looksLikeCertificateKeyword(rawText.trim())) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText: "",
+        message: "",
+        skipResponse_s: "true",
+        delegatedTo: "certificados",
+        delegatedTo_s: "certificados",
         action: "none" as const,
         unidadesCount: 0,
       },

@@ -15,6 +15,7 @@ import {
   looksLikeHorometerOnlyIntent,
   looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerPendingDataAmendment,
+  looksLikeCertificateKeyword,
   normalizePlate,
   threadAwaitingOdometerPlate,
   threadAwaitingHorometerPlate,
@@ -204,7 +205,7 @@ export function looksLikeNonOdometerOperationalIntent(text: string | undefined |
   if (!n) return false;
   if (looksLikeOdometerIntentStart(text)) return false;
   if (looksLikeOperationalMaintenanceIntent(text ?? "")) return true;
-  if (/\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(n)) return true;
+  if (looksLikeCertificateKeyword(text)) return true;
   if (/\b(reporte|ultimo reporte|sin reporte|offline|listado|mis unidades)\b/.test(n)) return true;
   if (/\b(mantenimiento|asesor|ticket|reclamo)\b/.test(n) && !/\b(od[oó]metro|hor[oó]metro)\b/.test(n)) {
     return true;
@@ -296,6 +297,11 @@ export function looksLikeChangeCompanyRequest(text: string | undefined | null): 
     return false;
   }
   if (/^reiniciar(\s+de)?\s+empresa$/.test(t)) return true;
+  // Imperativo / typos: "reinicia empresa", "reiciar empresa", "reinici la empresa"
+  const tNorm = t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/\b(reinici\w*|reici\w*|reset)\b/.test(tNorm) && /\bempresa\b/.test(tNorm)) {
+    return true;
+  }
   if (/\b(cambiar|cambio|cambiá|cambiarme|otra|elegir|seleccionar|reiniciar)\b.*\bempresa\b/.test(t)) {
     return true;
   }

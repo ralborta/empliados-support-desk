@@ -16,6 +16,7 @@ import {
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
+import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
   buildCompanyMenuPayload,
   formatCompanyConfirmMessage,
@@ -360,7 +361,8 @@ export async function customerRegisteredContextResponse(
   if (
     selectionText &&
     (looksLikeChangeCompanyRequest(selectionText) ||
-      looksLikeImplicitCompanyChangeAffirmation(selectionText, earlyThreadForCompany))
+      looksLikeImplicitCompanyChangeAffirmation(selectionText, earlyThreadForCompany) ||
+      (await looksLikeChangeCompanyRequestHybrid(selectionText)))
   ) {
     const reset = await resetCustomerCompanyMenu(prisma, trimmed);
     const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
