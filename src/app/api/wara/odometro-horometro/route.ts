@@ -179,6 +179,32 @@ function parseFromText(rawText: string): {
   };
 }
 
+/**
+ * De los prompts EXACTOS que el propio bot manda pidiendo el valor/patente de odómetro u
+ * horómetro, ¿cuál aparece más tarde (más reciente) en el tail del hilo? Ver uso y bug
+ * real, producción 2026-07-29, en horometerFlowActive más abajo — desempata cuando ambas
+ * preguntas (una vieja, una nueva tras una corrección) conviven en el mismo tail.
+ */
+function lastAwaitingFieldPromptInTail(threadText: string): "odometro" | "horometro" | null {
+  const tail = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const horoIdx = Math.max(
+    tail.lastIndexOf("para registrar el cambio de horometro necesito la patente"),
+    tail.lastIndexOf("cual es el nuevo horometro en horas"),
+    tail.lastIndexOf("cuantas horas de motor"),
+  );
+  const odoIdx = Math.max(
+    tail.lastIndexOf("para registrar el cambio de odometro necesito la patente"),
+    tail.lastIndexOf("cual es el nuevo odometro en km"),
+    tail.lastIndexOf("cual es el nuevo valor de odometro"),
+  );
+  if (horoIdx < 0 && odoIdx < 0) return null;
+  return horoIdx > odoIdx ? "horometro" : "odometro";
+}
+
 /** True si el hilo pide explícitamente actualizar horómetro (no confundir con "hora de lectura"). */
 function mentionsHorometroIntent(text: string): boolean {
   const t = text
@@ -471,11 +497,25 @@ export async function POST(req: NextRequest) {
   // cualquier señal del hilo.
   const rawExplicitlyMentionsOdometroOnly =
     /\bod[oó]metro\b/i.test(rawText) && !/\bhor[oó]metro\b/i.test(rawText);
+  // Desempate por recencia: threadAwaitingHorometerPlate/KmValue y sus equivalentes de
+  // odómetro solo miran SI el prompt exacto del bot aparece en el tail (~2500 caracteres),
+  // no CUÁL de los dos es el más reciente. Bug real, producción 2026-07-29: tras el fix
+  // anterior, "no perdon quierocambiar odometro" SÍ logró que el bot preguntara "¿Cuál es
+  // el nuevo odómetro en km?" — pero esa pregunta NUEVA convivía en el mismo tail con la
+  // pregunta VIEJA de horómetro (de un intercambio previo, ya corregido, a pocos mensajes
+  // de distancia). Al llegar la respuesta numérica "125852" (sin mencionar el campo),
+  // threadAwaitingHorometerKmValue seguía dando true por esa pregunta vieja — el trámite
+  // volvía a tratarse como horómetro pese a que la pregunta ACTIVA (la última) era de
+  // odómetro. Si ambas señales están presentes, gana la que aparece más tarde en el texto.
+  const horometerAwaitingInThread =
+    threadAwaitingHorometerPlate(threadText) || threadAwaitingHorometerKmValue(threadText);
+  const odometerAwaitingInThread =
+    threadAwaitingOdometerPlate(threadText) || threadAwaitingOdometerKmValue(threadText);
   const horometerFlowActive = rawExplicitlyMentionsOdometroOnly
     ? false
     : horometerOnlyIntent ||
-      threadAwaitingHorometerPlate(threadText) ||
-      threadAwaitingHorometerKmValue(threadText);
+      (horometerAwaitingInThread &&
+        !(odometerAwaitingInThread && lastAwaitingFieldPromptInTail(threadText) === "odometro"));
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
     looksLikeVehicleBrandOrUnitSearch(rawText) || /\bpatente\s+(?:de|del)\b/i.test(rawText);

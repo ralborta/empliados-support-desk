@@ -26,6 +26,8 @@ import {
   looksLikeHorometerOnlyIntent,
   threadAwaitingHorometerPlate,
   threadAwaitingHorometerKmValue,
+  threadAwaitingOdometerPlate,
+  threadAwaitingOdometerKmValue,
 } from "../src/lib/wara.ts";
 
 let passed = 0;
@@ -35,15 +37,42 @@ function check(label, cond) {
   console.log(`  ✓ ${label}`);
 }
 
-// Reimplementación exacta del fix en odometro-horometro/route.ts.
+// Reimplementación exacta del fix en odometro-horometro/route.ts (incluye el desempate
+// por recencia de lastAwaitingFieldPromptInTail, ver comentario ahí sobre el bug real de
+// producción 2026-07-29 donde una pregunta VIEJA de horómetro y una NUEVA de odómetro
+// convivían en el mismo tail de ~2500 caracteres).
+function lastAwaitingFieldPromptInTail(threadText) {
+  const tail = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const horoIdx = Math.max(
+    tail.lastIndexOf("para registrar el cambio de horometro necesito la patente"),
+    tail.lastIndexOf("cual es el nuevo horometro en horas"),
+    tail.lastIndexOf("cuantas horas de motor"),
+  );
+  const odoIdx = Math.max(
+    tail.lastIndexOf("para registrar el cambio de odometro necesito la patente"),
+    tail.lastIndexOf("cual es el nuevo odometro en km"),
+    tail.lastIndexOf("cual es el nuevo valor de odometro"),
+  );
+  if (horoIdx < 0 && odoIdx < 0) return null;
+  return horoIdx > odoIdx ? "horometro" : "odometro";
+}
+
 function computeHorometerFlowActive(rawText, threadText) {
   const rawExplicitlyMentionsOdometroOnly =
     /\bod[oó]metro\b/i.test(rawText) && !/\bhor[oó]metro\b/i.test(rawText);
   if (rawExplicitlyMentionsOdometroOnly) return false;
+  const horometerAwaitingInThread =
+    threadAwaitingHorometerPlate(threadText) || threadAwaitingHorometerKmValue(threadText);
+  const odometerAwaitingInThread =
+    threadAwaitingOdometerPlate(threadText) || threadAwaitingOdometerKmValue(threadText);
   return (
     looksLikeHorometerOnlyIntent(rawText) ||
-    threadAwaitingHorometerPlate(threadText) ||
-    threadAwaitingHorometerKmValue(threadText)
+    (horometerAwaitingInThread &&
+      !(odometerAwaitingInThread && lastAwaitingFieldPromptInTail(threadText) === "odometro"))
   );
 }
 
@@ -106,6 +135,28 @@ check(
 check(
   '"quiero cambiar un horometro" (arranque explícito de horómetro) sigue funcionando',
   computeHorometerFlowActive("quiero cambiar un horometro", ""),
+);
+
+console.log(
+  "\n▶ Bug real #3: pregunta VIEJA de horómetro y pregunta NUEVA de odómetro conviven en el mismo tail (~2500 chars) tras una corrección — gana la más reciente",
+);
+const staleHorometroThenFreshOdometro = [
+  "Quiero cambiar un odometro",
+  "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es?",
+  "La patente comienza con Ad",
+  "Encontré 68 unidades que empiezan con AD. Decime cuál querés consultar (patente exacta).",
+  "La AD427Mc",
+  "Perfecto, tomo AD 427 MC. ¿Cuál es el nuevo horómetro en horas?", // pregunta vieja (bug ya corregido en otro turno)
+  "no perdon quierocambiar odometro",
+  "Perfecto, tomo AD 427 MC. ¿Cuál es el nuevo odómetro en km?", // pregunta nueva y correcta, MÁS RECIENTE
+].join("\n");
+check(
+  '"125852" (valor puro) con AMBAS preguntas en el tail → gana la más reciente (odómetro)',
+  !computeHorometerFlowActive("125852", staleHorometroThenFreshOdometro),
+);
+check(
+  "lastAwaitingFieldPromptInTail detecta 'odometro' como la más reciente en ese mismo tail",
+  lastAwaitingFieldPromptInTail(staleHorometroThenFreshOdometro) === "odometro",
 );
 
 console.log("\n▶ Sanity: un trámite de odómetro real y activo (sin ninguna mención de horómetro) sigue pidiendo km");
