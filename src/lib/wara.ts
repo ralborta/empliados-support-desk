@@ -972,6 +972,11 @@ export function looksLikeGenericCorrectionIntent(text: string | undefined | null
   if (/\bcorregirlo|corregirla\b/.test(t)) return true;
   if (/\b(hay|tiene|tuvo)\b.{0,12}\b(un\s+)?error\b/.test(t)) return true;
   if (/\bquiero\s+corregir\b/.test(t) && !/\b(patente|matricula)\b/.test(t)) return true;
+  // Bug real, producción 2026-07-29: "No me equivoqué" / "me equivoqué" (avisando que el dato
+  // propuesto está mal, sin dar todavía el valor correcto) no matcheaba ningún patrón de
+  // arriba y caía en el recordatorio genérico de CONFIRMO sin que el bot "entendiera" el
+  // aviso de error.
+  if (/\bme\s+(equivoqu|equivoco|confund[ií])/.test(t)) return true;
   return false;
 }
 

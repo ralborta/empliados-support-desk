@@ -139,6 +139,27 @@ function parseBareHorometerHours(rawText: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * Bug real, producción 2026-07-29: con la confirmación YA mostrada ("Voy a registrar: ...
+ * Odómetro: 133567 km ... respondé CONFIRMO"), si el cliente contesta directamente con el
+ * valor corregido sin repetir "odómetro"/"horómetro" (ej. "186550"), no había NINGÚN
+ * disparador que lo reconociera como corrección — el bot repetía el recordatorio genérico
+ * de CONFIRMO ignorando el número, y el dato corregido se perdía por completo. Mientras hay
+ * una confirmación pendiente, un número suelto (con o sin "km"/"hs" al lado) SIEMPRE es el
+ * valor corregido: no hay ningún otro dato que el bot esté esperando en ese momento.
+ */
+function parseBareNumericPendingAmendment(rawText: string): number | undefined {
+  const t = rawText
+    .trim()
+    .replace(/\./g, "")
+    .replace(/,/g, ".")
+    .replace(/\s+/g, " ");
+  const m = t.match(/^(\d{1,8}(?:\.\d{1,2})?)\s*(?:km\.?|kms?\.?|hs?\.?|horas?)?$/i);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function parseNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const n = Number(value.replace(/\./g, "").replace(",", "."));
@@ -778,8 +799,12 @@ export async function POST(req: NextRequest) {
   const pendingOdoConfirm = supersedesPendingConfirm
     ? false
     : hasPendingOdometerConfirmation(threadText) && hasLiveOdometerPendingAction;
+  const bareNumericAmendmentValue = pendingOdoConfirm
+    ? parseBareNumericPendingAmendment(rawText)
+    : undefined;
   const amendsPendingOdoConfirm =
-    pendingOdoConfirm && looksLikeOdometerPendingDataAmendment(rawText);
+    pendingOdoConfirm &&
+    (looksLikeOdometerPendingDataAmendment(rawText) || bareNumericAmendmentValue !== undefined);
   const effectivePendingOdoConfirm = pendingOdoConfirm && !amendsPendingOdoConfirm;
   const explicitKmInMessage = messageExplicitlyStatesKm(rawText);
   const allowThreadKm =
@@ -794,6 +819,7 @@ export async function POST(req: NextRequest) {
   const rawOdometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,
+    !horometerFlowActive && !horometerOnlyIntent ? bareNumericAmendmentValue : undefined,
     mergedFields.odometro,
     bareKmInMessage,
     fromText.odometro,
@@ -806,7 +832,7 @@ export async function POST(req: NextRequest) {
           : undefined,
   );
   let odometro = isPlausibleOdometerReading(rawOdometro, rawText, {
-    pendingConfirm: effectivePendingOdoConfirm,
+    pendingConfirm: pendingOdoConfirm,
     explicitKmInMessage,
     awaitingKmValue: awaitingOdometerKm,
   })
@@ -819,6 +845,7 @@ export async function POST(req: NextRequest) {
     resolveHorometroForWara({
       explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
       parsedHorometro: firstFiniteNumber(
+        (horometerFlowActive || horometerOnlyIntent) ? bareNumericAmendmentValue : undefined,
         mergedFields.horometro,
         bareHorometerInMessage,
         fromText.horometro,
