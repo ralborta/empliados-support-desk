@@ -48,6 +48,7 @@ import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } fr
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
+import { composeOdometerDialogueReply } from "@/lib/odometerDialogueAI";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
   looksLikeConversationAcknowledgement,
@@ -890,9 +891,15 @@ export async function POST(req: NextRequest) {
 
   if (!patente) {
     if (treatAsBlankFlowStart) {
-      const message = horometerOnlyIntent
+      const fallbackTemplate = horometerOnlyIntent
         ? "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)"
         : "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
+      const message = await composeOdometerDialogueReply({
+        situation: "missing_plate",
+        history: flowThreadText,
+        lastCustomerMessage: rawText,
+        fallbackTemplate,
+      });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_odometro_response",
         stage: "missing_plate",
@@ -956,13 +963,23 @@ export async function POST(req: NextRequest) {
     const earlyFechaDisplay = earlyFechaNaive
       ? formatFechaDisplay(fechaWara(earlyFechaNaive, "America/Argentina/Buenos_Aires"))
       : null;
-    const message = patente
+    const fallbackTemplate = patente
       ? wantsHorometro
         ? earlyFechaDisplay
           ? `Tomé la fecha ${earlyFechaDisplay}. ¿Cuántas horas de motor tiene ${plateDisplay} ahora?`
           : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo horómetro en horas?`
         : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo odómetro en km?`
       : "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?";
+    const message = patente
+      ? await composeOdometerDialogueReply({
+          situation: "missing_value",
+          history: flowThreadText,
+          lastCustomerMessage: rawText,
+          requiredTokens: [plateDisplay, ...(earlyFechaDisplay ? [earlyFechaDisplay] : [])],
+          fieldHint: wantsHorometro ? "horometro" : "odometro",
+          fallbackTemplate,
+        })
+      : fallbackTemplate;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_odometro_response",
       stage: earlyFechaDisplay ? "horometro_awaiting_hours" : "missing_value",
@@ -1143,8 +1160,15 @@ export async function POST(req: NextRequest) {
       typeof horometro !== "number" &&
       looksLikeGenericCorrectionIntent(rawText)
     ) {
-      const message =
+      const fallbackTemplate =
         "Decime qué dato querés corregir: la patente correcta, el odómetro (en km) o el horómetro (en hs), con el valor correcto, y actualizo el registro antes de pedirte el CONFIRMO.";
+      const message = await composeOdometerDialogueReply({
+        situation: "correction_prompt",
+        history: flowThreadText,
+        lastCustomerMessage: rawText,
+        requireConfirmoWord: true,
+        fallbackTemplate,
+      });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_odometro_response",
         stage: "correction_intent_no_value",
@@ -1198,9 +1222,25 @@ export async function POST(req: NextRequest) {
     });
     // Nota: a diferencia de otros returns de este archivo, este bloque NO llamaba a
     // appendOutboundBotMessage antes de este cambio (BuilderBot envía `message` directo al
-    // cliente por su cuenta en este paso) — se mantiene igual, solo se humaniza el texto.
-    const humanizedConfirmMessage = await humanizeBotReply(confirmMessage, {
-      context: "Resumen de confirmación de cambio de odómetro/horómetro, pidiendo CONFIRMO",
+    // cliente por su cuenta en este paso) — se mantiene igual, solo se compone el texto.
+    const confirmRequiredTokens = [
+      ...(plateDisplay ? [plateDisplay] : []),
+      ...(typeof odometro === "number" && !horometerFlowActive && !horometerOnlyIntent
+        ? [String(odometro)]
+        : []),
+      ...(typeof horometro === "number" && (horometerFlowActive || horometerOnlyIntent)
+        ? [String(horometro)]
+        : []),
+      ...(fechaDisplay ? [fechaDisplay] : []),
+    ];
+    const humanizedConfirmMessage = await composeOdometerDialogueReply({
+      situation: "confirmation_summary",
+      history: flowThreadText,
+      lastCustomerMessage: rawText,
+      requiredTokens: confirmRequiredTokens,
+      requireConfirmoWord: true,
+      fieldHint: horometerFlowActive || horometerOnlyIntent ? "horometro" : "odometro",
+      fallbackTemplate: confirmMessage,
     });
     return NextResponse.json(
       {
