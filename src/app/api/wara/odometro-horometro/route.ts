@@ -451,10 +451,31 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const horometerFlowActive =
-    horometerOnlyIntent ||
-    threadAwaitingHorometerPlate(flowThreadText) ||
-    (mentionsHorometroIntent(flowThreadText) && !hasPendingOdometerConfirmation(flowThreadText));
+  // Bug real, producción 2026-07-29: "quiero cambiar un odómetro" terminaba pidiendo
+  // horómetro. Causa: `mentionsHorometroIntent(flowThreadText)` es un chequeo SIN acotar
+  // (¿aparece "horómetro" en cualquier parte de los últimos 48 mensajes del ticket?), y
+  // `flowThreadText` además reincorpora el hilo COMPLETO sin recortar apenas `threadText`
+  // queda en "" por un arranque en blanco (fallback `threadText || preliminaryThreadText`
+  // de más arriba). Una mención de "horómetro" de un trámite viejo YA resuelto, minutos u
+  // horas antes en la misma conversación, contaminaba un pedido nuevo de odómetro sin
+  // relación. Reemplazado por threadAwaitingHorometerPlate/KmValue (ya usadas en el resto
+  // del archivo): estas SÍ están acotadas a los últimos ~2500 caracteres y solo matchean
+  // el prompt EXACTO que el propio bot mandó pidiendo horómetro — no cualquier mención
+  // vieja de la palabra.
+  //
+  // Además, si el cliente corregía explícitamente ("No, odómetro") DESPUÉS de que el bot
+  // ya preguntó por horómetro, esa corrección se ignoraba: el hilo (con la propia
+  // pregunta del bot mencionando "horómetro") pesaba más que lo que el cliente acababa de
+  // escribir, y el bot repetía la misma pregunta en loop sin dejarlo corregir. Ahora una
+  // mención EXPLÍCITA del campo en el mensaje actual (rawText) tiene prioridad sobre
+  // cualquier señal del hilo.
+  const rawExplicitlyMentionsOdometroOnly =
+    /\bod[oó]metro\b/i.test(rawText) && !/\bhor[oó]metro\b/i.test(rawText);
+  const horometerFlowActive = rawExplicitlyMentionsOdometroOnly
+    ? false
+    : horometerOnlyIntent ||
+      threadAwaitingHorometerPlate(threadText) ||
+      threadAwaitingHorometerKmValue(threadText);
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
     looksLikeVehicleBrandOrUnitSearch(rawText) || /\bpatente\s+(?:de|del)\b/i.test(rawText);
@@ -849,11 +870,11 @@ export async function POST(req: NextRequest) {
     if (patente) {
       await setActiveUnit(prisma, rawPhone, patente, { source: "odometro" });
     }
-    const wantsHorometro =
-      horometerFlowActive ||
-      horometerOnlyIntent ||
-      /\bhor[oó]metro\b/i.test(rawText) ||
-      (!/\bod[oó]metro\b/i.test(rawText) && /\bhor[oó]metro\b/i.test(flowThreadText));
+    // horometerFlowActive ya contempla horometerOnlyIntent, el estado del hilo (acotado
+    // y con prioridad a una mención explícita del campo en el mensaje actual) — no se
+    // repite acá el chequeo suelto sobre flowThreadText (esa era la fuente del bug real
+    // de producción 2026-07-29 documentado más arriba).
+    const wantsHorometro = horometerFlowActive;
     const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
     const earlyFechaNaive = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
     const earlyFechaDisplay = earlyFechaNaive
