@@ -438,7 +438,10 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
   // Ahora se ancla al ÚLTIMO bloque "voy a registrar:" y se verifica que no haya
   // sido reabierto después por un nuevo "perfecto, tomo" / "cuál es el nuevo
   // odómetro/horómetro" / "necesito la patente".
-  const lastConfirmIdx = tail.lastIndexOf("voy a registrar:");
+  const lastConfirmIdx = Math.max(
+    tail.lastIndexOf("voy a registrar:"),
+    tail.lastIndexOf("voy a registrar los siguientes datos"),
+  );
   if (lastConfirmIdx < 0) return false;
   const afterLastConfirm = tail.slice(lastConfirmIdx);
   const reopenedAfterConfirm =
@@ -448,7 +451,7 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
   if (reopenedAfterConfirm) return false;
   return (
     /od[oó]metro|hor[oó]metro/.test(afterLastConfirm) &&
-    /respond[eé]\s+confirmo/.test(afterLastConfirm)
+    (/respond[eé]\s+confirmo/.test(afterLastConfirm) || /\bconfirmo\b/.test(afterLastConfirm))
   );
 }
 
@@ -1560,30 +1563,48 @@ export function looksLikePostAdvisorCaseSupplement(
 
 /** Aceptación breve tipo CONFIRMO / sí / dale / ok. */
 export function looksLikeBriefConfirmation(text: string | undefined | null): boolean {
-  const t = String(text ?? "")
-    .trim()
-    .toLowerCase()
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
     .replace(/[^a-z]/g, "");
   if (!t) return false;
   if (t.startsWith("conf")) return true;
-  return new Set([
-    "si",
-    "sii",
-    "sip",
-    "dale",
-    "dalesi",
-    "sidale",
-    "ok",
-    "oka",
-    "okey",
-    "okay",
-    "listo",
-    "correcto",
-    "deacuerdo",
-    "perfecto",
-  ]).has(t);
+  if (
+    new Set([
+      "si",
+      "sii",
+      "sip",
+      "dale",
+      "dalesi",
+      "sidale",
+      "ok",
+      "oka",
+      "okey",
+      "okay",
+      "listo",
+      "correcto",
+      "deacuerdo",
+      "perfecto",
+    ]).has(t)
+  ) {
+    return true;
+  }
+  const norm = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(no\s+es\s+correcto|no\s+confirmo|incorrecto|no\s+est[aá]\s+bien)\b/.test(norm)) {
+    return false;
+  }
+  // Afirmaciones naturales en confirmación de trámite (no exigen la palabra CONFIRMO).
+  return (
+    /\b(esa\s+(esta\s+)?(bien|es|correcta)|si\s+esa|est[aá]\s+bien|es\s+correcto|as[ií]\s+es|dale\s+esa|esa\s+misma)\b/.test(
+      norm,
+    ) || /\b(de\s+acuerdo|correcto\s+eso|esta\s+bien)\b/.test(norm)
+  );
 }
 
 export function looksLikeCertificateUnitReply(text: string, threadText = ""): boolean {

@@ -42,7 +42,7 @@ TU TRABAJO EN CADA TURNO:
 REGLAS ABSOLUTAS:
 - Nunca inventes patentes, km, horas, fechas, estados técnicos ni números de caso/ticket.
 - Si la herramienta devolvió backend_message con datos, esos números y patentes deben aparecer EXACTAMENTE igual en tu respuesta.
-- Si hay trámite pendiente de confirmación (pending_action), y el cliente dice CONFIRMO o corrige un dato, usá la herramienta del trámite activo.
+- Si hay trámite pendiente de confirmación (pending_action), y el cliente dice CONFIRMO, Confirmo, sí, dale, esa está bien, si esa, está bien o similar, SIEMPRE llamá la herramienta del trámite activo — nunca vuelvas a pedir patente ni repitas el resumen sin ejecutar.
 - Si falta un dato (patente, km, etc.), preguntá UNA cosa concreta, mostrando que entendiste lo anterior — no repitas el guion de formulario.
 - Si el cliente pide listado de flota para elegir unidad durante un trámite, eso sigue siendo parte del mismo trámite.
 - No prometas tiempos de resolución. No des asesoramiento comercial/facturación.
@@ -225,6 +225,21 @@ export async function runAtilioAgentTurn(
         if (toolResult.skip_response) {
           return {
             message: "",
+            executor: toolResult.executor,
+            ok: toolResult.ok,
+            usedAgent: true,
+          };
+        }
+
+        // Registro exitoso o mensaje operativo del backend: no parafrasear (evita perder CONFIRMO/registro).
+        if (
+          toolResult.backend_message &&
+          (/listo,\s*registr[eé]/i.test(toolResult.backend_message) ||
+            /para registrar el cambio respond[eé] confirmo/i.test(toolResult.backend_message) ||
+            toolResult.flow_complete)
+        ) {
+          return {
+            message: toolResult.backend_message,
             executor: toolResult.executor,
             ok: toolResult.ok,
             usedAgent: true,

@@ -40,6 +40,7 @@ import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction } from "@/lib/pendingAction";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
+import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -192,6 +193,33 @@ export async function runTurnExecutorPhase(params: {
   }
 
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
+  const pendingAction = await getPendingAction(prisma, rawPhone);
+
+  // Confirmación de trámite: el backend registra con los datos guardados — no dejar que
+  // el agente reinterprete "Confirmo" / "esa está bien" ni dependa del marcador exacto
+  // "voy a registrar:" en el hilo (el agente parafrasea el resumen).
+  const pendingConfirmExecutor = resolvePendingConfirmationExecutor(
+    threadCtx.classificationThread,
+    selectionText,
+  );
+  const pendingTramiteType =
+    pendingAction?.type === "odometro" ||
+    pendingAction?.type === "certificados" ||
+    pendingAction?.type === "mantenimiento"
+      ? pendingAction.type
+      : null;
+  if (
+    looksLikeBriefConfirmation(selectionText) &&
+    (pendingConfirmExecutor || (pendingTramiteType && pendingAction?.payload))
+  ) {
+    const executor = pendingConfirmExecutor ?? pendingTramiteType!;
+    const execResult = await invokeExecutor(executor, rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor, ok: execOk };
+    }
+  }
 
   const agentResult = await runAtilioAgentTurn({
     rawPhone,
@@ -208,7 +236,6 @@ export async function runTurnExecutorPhase(params: {
   }
 
   let executor: TurnExecutorId;
-  const pendingAction = await getPendingAction(prisma, rawPhone);
   if (
     pendingAction?.type === "certificados" &&
     pendingAction.payload?.stage === "awaiting_unit" &&

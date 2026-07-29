@@ -26,6 +26,7 @@ import {
   looksLikeOdometerIntentStart,
   looksLikeOdometerPendingDataAmendment,
   looksLikeGenericCorrectionIntent,
+  looksLikeBriefConfirmation,
   looksLikeHorometerOnlyIntent,
   looksLikeUnitRejection,
   normalizePlate,
@@ -266,6 +267,7 @@ function resolveHorometroForWara(opts: {
  */
 function isConfirmed(value: string | undefined): boolean {
   if (looksLikeConversationAcknowledgement(value)) return false;
+  if (looksLikeBriefConfirmation(value)) return true;
   if (!value?.trim()) return false;
   const t = value
     .trim()
@@ -458,7 +460,8 @@ export async function POST(req: NextRequest) {
   const dbPendingOdoAction = await getPendingAction(prisma, rawPhone);
   const hasLiveOdometerPendingAction = dbPendingOdoAction?.type === "odometro";
   const hasPendingConfirmInThread =
-    hasPendingOdometerConfirmation(preliminaryThreadText) && hasLiveOdometerPendingAction;
+    hasLiveOdometerPendingAction &&
+    (hasPendingOdometerConfirmation(preliminaryThreadText) || !!dbPendingOdoAction?.payload);
   const supersedesPendingConfirm = clientSupersedesOdometerConfirmation(rawText, preliminaryThreadText);
   const hasUnitHintInCurrentMessage =
     looksLikeFleetUnitSearchInput(rawText) || looksLikeUnitNameInMessage(rawText);
@@ -798,7 +801,8 @@ export async function POST(req: NextRequest) {
   // pendiente real aunque el texto del hilo todavía diga "respondé CONFIRMO".
   const pendingOdoConfirm = supersedesPendingConfirm
     ? false
-    : hasPendingOdometerConfirmation(threadText) && hasLiveOdometerPendingAction;
+    : hasLiveOdometerPendingAction &&
+      (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload);
   const bareNumericAmendmentValue = pendingOdoConfirm
     ? parseBareNumericPendingAmendment(rawText)
     : undefined;
