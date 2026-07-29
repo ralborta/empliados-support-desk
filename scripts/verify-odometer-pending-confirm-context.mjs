@@ -162,6 +162,28 @@ assert(
   "ampliar fecha/hora NO supersede confirmación pendiente",
 );
 
+console.log("\n— Bug 2026-07-29: pendingAction stale en DB sin marcador en hilo —");
+assert(
+  clientSupersedesOdometerConfirmation("Quiero cambiar el odometro", "", {
+    liveOdometerPending: true,
+  }),
+  "reinicio explícito supersede aunque el hilo no tenga 'Voy a registrar'",
+);
+assert(
+  clientSupersedesOdometerConfirmation("La q comienza con ost", "", {
+    liveOdometerPending: true,
+  }),
+  "prefijo OST supersede confirmación solo en DB",
+);
+assert(
+  clientSupersedesOdometerConfirmation("No es esa", "", { liveOdometerPending: true }),
+  "'No es esa' supersede confirmación solo en DB (corrección de unidad)",
+);
+assert(
+  looksLikeFreshOdometerRestartRequest("Quiero cambiar el odometro") === true,
+  "fresh restart detecta 'Quiero cambiar el odometro'",
+);
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);

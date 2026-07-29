@@ -28,6 +28,7 @@ import {
   looksLikeGenericCorrectionIntent,
   looksLikeBriefConfirmation,
   looksLikeHorometerOnlyIntent,
+  looksLikeFreshOdometerRestartRequest,
   looksLikeUnitRejection,
   normalizePlate,
   resolveWaraPatenteForApi,
@@ -459,13 +460,28 @@ export async function POST(req: NextRequest) {
   // abandonado, sin arriesgar los casos donde sí sigue vigente y reciente.
   const dbPendingOdoAction = await getPendingAction(prisma, rawPhone);
   const hasLiveOdometerPendingAction = dbPendingOdoAction?.type === "odometro";
+  // Marcador en el hilo bloquea arranque en blanco. El payload en DB solo sirve para
+  // procesar CONFIRMO cuando el agente parafraseó el resumen — no debe resucitar un
+  // trámite abandonado si el cliente pide uno nuevo (bug producción 2026-07-29).
+  const hasThreadPendingConfirm = hasPendingOdometerConfirmation(preliminaryThreadText);
   const hasPendingConfirmInThread =
-    hasLiveOdometerPendingAction &&
-    (hasPendingOdometerConfirmation(preliminaryThreadText) || !!dbPendingOdoAction?.payload);
-  const supersedesPendingConfirm = clientSupersedesOdometerConfirmation(rawText, preliminaryThreadText);
+    hasLiveOdometerPendingAction && hasThreadPendingConfirm;
   const hasUnitHintInCurrentMessage =
     looksLikeFleetUnitSearchInput(rawText) || looksLikeUnitNameInMessage(rawText);
   const isOdometerReminder = looksLikeOdometerFlowReminder(rawText);
+  const supersedesPendingConfirm = clientSupersedesOdometerConfirmation(
+    rawText,
+    preliminaryThreadText,
+    {
+      liveOdometerPending:
+        hasLiveOdometerPendingAction && !!dbPendingOdoAction?.payload,
+    },
+  );
+  const freshOdometerRestart =
+    odometerFlowStart &&
+    !explicitVagueUnitReference &&
+    !hasUnitHintInCurrentMessage &&
+    looksLikeFreshOdometerRestartRequest(rawText);
   // Bug real, producción 2026-07-29: el propio prompt del BOT ("Para registrar el cambio
   // de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB
   // 006 EX...)") matcheaba looksLikeFleetUnitSearchInput por la patente de EJEMPLO ("AB
@@ -498,6 +514,7 @@ export async function POST(req: NextRequest) {
     !isOdometerReminder &&
     (horometerOnlyIntent ||
       supersedesPendingConfirm ||
+      freshOdometerRestart ||
       priorFlowExplicitlySuperseded ||
       (!hasPendingConfirmInThread && !threadHasPriorOdometerUnitRequest));
   if (treatAsBlankFlowStart || supersedesPendingConfirm) {
@@ -505,6 +522,18 @@ export async function POST(req: NextRequest) {
   }
   const fromText = parseFromText(rawText);
   const threadText = treatAsBlankFlowStart || supersedesPendingConfirm ? "" : preliminaryThreadText;
+  const prefixInMessageEarly = extractPlatePrefixFromMessage(rawText);
+  const explicitRejectionEarly = looksLikeUnitRejection(rawText);
+  const plateCorrectionEarly = looksLikePlateCorrectionRequest(rawText);
+  const correctingUnitDuringPendingConfirm =
+    !treatAsBlankFlowStart &&
+    !supersedesPendingConfirm &&
+    hasLiveOdometerPendingAction &&
+    (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload) &&
+    (prefixInMessageEarly || explicitRejectionEarly || plateCorrectionEarly);
+  if (correctingUnitDuringPendingConfirm) {
+    await clearPendingAction(prisma, rawPhone);
+  }
   const flowThreadText = threadText || preliminaryThreadText;
   const activeOdoFlow = threadHasActiveOdometerFlow(flowThreadText);
 
@@ -583,6 +612,7 @@ export async function POST(req: NextRequest) {
   const skipThreadPlate =
     treatAsBlankFlowStart ||
     supersedesPendingConfirm ||
+    correctingUnitDuringPendingConfirm ||
     explicitRejection ||
     (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
@@ -700,7 +730,9 @@ export async function POST(req: NextRequest) {
   // en el mensaje actual → SIEMPRE resolvePlateWithWaraFleet (IA + reglas).
   if (
     !lockedPlateFromTomo &&
-    (isFleetUnitSelection || (awaitingPlateSelection && rawText.trim())) &&
+    (isFleetUnitSelection ||
+      correctingUnitDuringPendingConfirm ||
+      (awaitingPlateSelection && rawText.trim())) &&
     !clockTimeOnlyReading
   ) {
     const fleetPlate = await resolvePlateWithWaraFleet(
@@ -739,7 +771,8 @@ export async function POST(req: NextRequest) {
         lastThreadPlate,
         activeUnitPlate: activeUnitRecord?.plate,
         explicitVagueUnitReference,
-        hasPendingOdometerConfirm: hasPendingConfirmInThread,
+        hasPendingOdometerConfirm:
+          hasPendingConfirmInThread && !correctingUnitDuringPendingConfirm,
       }) ?? "",
     );
   } else if (
@@ -755,7 +788,8 @@ export async function POST(req: NextRequest) {
         lastThreadPlate,
         activeUnitPlate: activeUnitRecord?.plate,
         explicitVagueUnitReference: true,
-        hasPendingOdometerConfirm: hasPendingConfirmInThread,
+        hasPendingOdometerConfirm:
+          hasPendingConfirmInThread && !correctingUnitDuringPendingConfirm,
       }) ?? "",
     );
   }
@@ -799,10 +833,11 @@ export async function POST(req: NextRequest) {
   // Mismo gate por TTL que hasPendingConfirmInThread más arriba (ver comentario ahí):
   // sin un pendingAction "odometro" vigente en la base, no se trata como confirmación
   // pendiente real aunque el texto del hilo todavía diga "respondé CONFIRMO".
-  const pendingOdoConfirm = supersedesPendingConfirm
-    ? false
-    : hasLiveOdometerPendingAction &&
-      (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload);
+  const pendingOdoConfirm =
+    supersedesPendingConfirm || correctingUnitDuringPendingConfirm
+      ? false
+      : hasLiveOdometerPendingAction &&
+        (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload);
   const bareNumericAmendmentValue = pendingOdoConfirm
     ? parseBareNumericPendingAmendment(rawText)
     : undefined;

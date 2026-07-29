@@ -15,6 +15,7 @@ import {
   looksLikeHorometerOnlyIntent,
   looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerPendingDataAmendment,
+  looksLikeUnitRejection,
   looksLikeGenericCorrectionIntent,
   looksLikeCertificateKeyword,
   looksLikeMaintenanceKeyword,
@@ -190,12 +191,16 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
 export function clientSupersedesOdometerConfirmation(
   rawText: string | undefined | null,
   threadText: string,
+  opts?: { liveOdometerPending?: boolean },
 ): boolean {
-  if (!hasPendingOdometerConfirmation(threadText)) return false;
+  const hasPending =
+    hasPendingOdometerConfirmation(threadText) || opts?.liveOdometerPending === true;
+  if (!hasPending) return false;
   const raw = String(rawText ?? "").trim();
   if (!raw || looksLikeBriefConfirmation(raw)) return false;
   if (looksLikeOdometerPendingDataAmendment(raw)) return false;
   if (looksLikeOdometerConfirmationRejection(raw)) return true;
+  if (looksLikeUnitRejection(raw)) return true;
   if (extractPlatePrefixFromMessage(raw)) return true;
   if (detectLoosePlate(raw)) return true;
   if (looksLikePlateCorrectionRequest(raw)) return true;
