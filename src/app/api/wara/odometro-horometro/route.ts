@@ -424,7 +424,18 @@ export async function POST(req: NextRequest) {
   // bot terminaba pidiendo la patente de cero, como si el cliente no hubiese dicho
   // nada todavía.
   const preliminaryThreadText = await recentThreadText(rawPhone);
-  const hasPendingConfirmInThread = hasPendingOdometerConfirmation(preliminaryThreadText);
+  // Pedido explícito, 2026-07-29: que el trámite se "reinicie solo" con el tiempo, en vez
+  // de depender únicamente de detectar frases de cierre/cambio de tema en el hilo (que
+  // siempre pueden quedar cortas ante una frase nueva no prevista, como pasó hoy).
+  // getPendingAction ya tiene un TTL de 45 minutos (pendingAction.ts) — se usa acá como
+  // gate adicional: si ya no hay un pendingAction vigente de tipo "odometro" en la base
+  // (venció o nunca se guardó), no importa qué diga el texto viejo del hilo: NO se trata
+  // como confirmación pendiente real. Esto expira automáticamente cualquier trámite
+  // abandonado, sin arriesgar los casos donde sí sigue vigente y reciente.
+  const dbPendingOdoAction = await getPendingAction(prisma, rawPhone);
+  const hasLiveOdometerPendingAction = dbPendingOdoAction?.type === "odometro";
+  const hasPendingConfirmInThread =
+    hasPendingOdometerConfirmation(preliminaryThreadText) && hasLiveOdometerPendingAction;
   const supersedesPendingConfirm = clientSupersedesOdometerConfirmation(rawText, preliminaryThreadText);
   const hasUnitHintInCurrentMessage =
     looksLikeFleetUnitSearchInput(rawText) || looksLikeUnitNameInMessage(rawText);
@@ -759,9 +770,12 @@ export async function POST(req: NextRequest) {
   // (el mensaje actual menciona "cambio de odometro"), así que el km/hs ya
   // propuestos en la confirmación pendiente (ej. 600 km) se descartaban igual,
   // aunque ya no se vaciara el hilo.
+  // Mismo gate por TTL que hasPendingConfirmInThread más arriba (ver comentario ahí):
+  // sin un pendingAction "odometro" vigente en la base, no se trata como confirmación
+  // pendiente real aunque el texto del hilo todavía diga "respondé CONFIRMO".
   const pendingOdoConfirm = supersedesPendingConfirm
     ? false
-    : hasPendingOdometerConfirmation(threadText);
+    : hasPendingOdometerConfirmation(threadText) && hasLiveOdometerPendingAction;
   const amendsPendingOdoConfirm =
     pendingOdoConfirm && looksLikeOdometerPendingDataAmendment(rawText);
   const effectivePendingOdoConfirm = pendingOdoConfirm && !amendsPendingOdoConfirm;
@@ -827,8 +841,10 @@ export async function POST(req: NextRequest) {
   // este turno no la vuelve a mencionar (ver uso en fechaExplicita más abajo).
   let pendingPayloadFecha: string | undefined;
   if (amendsPendingOdoConfirm) {
-    const pending = await getPendingAction(prisma, rawPhone);
-    const payload = pending?.payload;
+    // amendsPendingOdoConfirm ⇒ pendingOdoConfirm ⇒ hasLiveOdometerPendingAction, así que
+    // dbPendingOdoAction (ya obtenido más arriba) es el mismo registro vigente — se evita
+    // una segunda consulta redundante a la base.
+    const payload = dbPendingOdoAction?.payload;
     if (payload) {
       if (!patente && payload.patente) patente = normalizePlate(String(payload.patente));
       if (typeof horometro !== "number" && typeof payload.horometro === "number") {
