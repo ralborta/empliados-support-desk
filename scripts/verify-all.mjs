@@ -69,6 +69,8 @@ const SUITES = [
   "verify-odometer-horometro-topic-confusion.mjs",
   "verify-odometer-stale-confirm-after-close.mjs",
   "verify-odometer-pending-confirm-ttl-gate.mjs",
+  "verify-platform-access-routing.mjs",
+  "verify-no-proactive-case-number.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-conversation-closing.mjs",
   "verify-customer-conversation-reset.mjs",

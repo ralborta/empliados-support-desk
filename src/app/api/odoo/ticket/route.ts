@@ -414,7 +414,7 @@ export async function POST(req: NextRequest) {
   if (looksLikePostAdvisorCaseSupplement(rawText, scopedThread)) {
     const existingRef = await findRecentOdooRef(rawPhone);
     if (existingRef) {
-      const message = `Perfecto, anoté este detalle en el caso ${existingRef}. Un asesor lo va a revisar con esa información.`;
+      const message = `Perfecto, anoté este detalle en tu caso. Un asesor lo va a revisar con esa información.`;
       await appendOutboundBotMessage(rawPhone, message, {
         source: "odoo_ticket",
         stage: "advisor_case_supplement",
@@ -455,7 +455,7 @@ export async function POST(req: NextRequest) {
   if (advisorRequest) {
     const existingAdvisorRef = await findRecentOdooRef(rawPhone, plate || undefined);
     if (existingAdvisorRef) {
-      const message = `Ya tenés el caso ${existingAdvisorRef} en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
+      const message = `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
       await appendOutboundBotMessage(rawPhone, message, {
         source: "odoo_ticket",
         stage: "advisor_existing_case",
@@ -540,7 +540,7 @@ export async function POST(req: NextRequest) {
       ? await findRecentOdooRef(rawPhone, plate || undefined)
       : null;
   if (existingRef && ticketRegistrationAttempt) {
-    const message = `Ya existe un caso abierto (N° ${existingRef}) para este reclamo. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+    const message = `Ya existe un caso abierto para este reclamo. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",
       stage: "deduplicated",
@@ -614,8 +614,8 @@ export async function POST(req: NextRequest) {
       if (ensured.odooRef) {
         const ref = ensured.odooRef;
         const message = ensured.created
-          ? `Listo, generé el caso N° ${ref} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
-          : `Ya tenés el caso ${ref} en revisión. Un asesor de Atención al cliente te va a contactar por este medio.`;
+          ? `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
+          : `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio.`;
 
         if (advisorRequest) {
           try {
@@ -659,7 +659,7 @@ export async function POST(req: NextRequest) {
     });
 
     const ref = result.ref ?? String(result.ticketId);
-    const message = `Listo, generé el caso N° ${ref} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+    const message = `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
 
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",

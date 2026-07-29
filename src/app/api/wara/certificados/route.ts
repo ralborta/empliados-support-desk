@@ -1198,7 +1198,7 @@ export async function POST(req: NextRequest) {
     });
     const userReason = sanitizeWaraDetailForUser(waraDetail);
     const message = escalation.odooRef
-      ? `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason} Generé el caso N° ${escalation.odooRef} y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
+      ? `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason} Generé un caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
       : `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason} Dejé el caso registrado para que un asesor de Atención al cliente lo revise y te contacte por este medio.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",

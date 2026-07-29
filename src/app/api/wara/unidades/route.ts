@@ -464,7 +464,7 @@ async function createMissingReportTicket(params: {
       ref: existing.ticket.code,
       reused: true,
       odooRef: null,
-      message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
+      message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto para que Atención al cliente lo revise.`,
     };
   }
 
@@ -548,13 +548,11 @@ async function createMissingReportTicket(params: {
   const unitLabel = params.unit.patente || params.unit.unidad;
   let message: string;
   if (odooRef) {
-    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé el caso N° ${odooRef} para Atención al cliente.${
-      localReused ? ` También quedó en la conversación ${localTicket.code}.` : ""
-    } Te avisamos por este medio cualquier novedad.`;
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé un caso para Atención al cliente. Te avisamos por este medio cualquier novedad.`;
   } else if (localReused) {
-    message = `La unidad ${unitLabel} presenta ${issueLabel}. Registré la consulta en el caso abierto (${localTicket.code}) con el mismo asesor.`;
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Registré la consulta en el caso abierto con el mismo asesor.`;
   } else {
-    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé un caso para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
   }
 
   return {
@@ -588,7 +586,7 @@ async function createNoEquipmentTicket(params: {
       ref: existing.ticket.code,
       reused: true,
       odooRef: null,
-      message: `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto (${existing.ticket.code}) para que Atención al cliente lo revise.`,
+      message: `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto para que Atención al cliente lo revise.`,
     };
   }
 
@@ -663,13 +661,11 @@ async function createNoEquipmentTicket(params: {
 
   let message: string;
   if (odooRef) {
-    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${odooRef} para Atención al cliente.${
-      localReused ? ` También quedó en la conversación ${localTicket.code}.` : ""
-    } Te avisamos por este medio cualquier novedad.`;
+    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé un caso para Atención al cliente. Te avisamos por este medio cualquier novedad.`;
   } else if (localReused) {
-    message = `La unidad ${label} no tiene equipo instalado. Registré la consulta en el caso abierto (${localTicket.code}) con el mismo asesor.`;
+    message = `La unidad ${label} no tiene equipo instalado. Registré la consulta en el caso abierto con el mismo asesor.`;
   } else {
-    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé el caso N° ${ref} para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
+    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé un caso para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
   }
 
   return {

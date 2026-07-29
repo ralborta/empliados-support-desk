@@ -47,14 +47,15 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
   }
 
   if (action === "ticket" && ticketIssueDetail) {
-    let ticketPart = "";
-    if (odooRef) {
-      ticketPart = ` Generé el caso N° ${odooRef} para Atención al cliente.`;
-    } else if (ticketRef) {
-      ticketPart = ticketReused
-        ? ` Registré la consulta en el caso abierto (${ticketRef}).`
-        : ` Generé el caso N° ${ticketRef} para que Atención al cliente lo revise.`;
-    }
+    // Pedido explícito, 2026-07-29: no informar proactivamente el número de caso/ticket
+    // en la respuesta al cliente — solo si lo pide explícitamente (ver
+    // customerTicketInquiry.ts / looksLikeOpenCaseStatusInquiry).
+    const ticketPart =
+      odooRef || ticketRef
+        ? ticketReused
+          ? " Ya hay un caso abierto y Atención al cliente lo va a revisar."
+          : " Generé un caso para que Atención al cliente lo revise."
+        : "";
     return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${ticketPart}`;
   }
 
@@ -78,8 +79,10 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
               role: "system",
               content:
                 "Redactás respuestas de WhatsApp para mesa de ayuda Wara GPS. " +
-                "Mantené los hechos (estado general, ignición, ticket, acción) sin tiempos técnicos crudos ni segundos. " +
-                "No menciones intervalos de reporte del GPS. No inventes datos. Español rioplatense, 2-4 oraciones, sin emojis.",
+                "Mantené los hechos (estado general, ignición, si se generó caso o no, acción) sin tiempos técnicos crudos ni segundos. " +
+                "No menciones intervalos de reporte del GPS. No inventes datos. " +
+                "NUNCA mencionés el número de caso/ticket en la respuesta, aunque lo veas en los datos — el cliente no lo pidió. " +
+                "Español rioplatense, 2-4 oraciones, sin emojis.",
             },
             {
               role: "user",
@@ -87,9 +90,8 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
                 plantilla_base: template,
                 hechos_obligatorios: facts,
                 accion: input.action,
-                ticket: input.odooRef ?? input.ticketRef ?? null,
-                ticket_odoo: input.odooRef ?? null,
-                ticket_reutilizado: input.ticketReused ?? false,
+                se_genero_caso: !!(input.odooRef ?? input.ticketRef),
+                caso_reutilizado: input.ticketReused ?? false,
                 detalle_ticket: input.ticketIssueDetail ?? null,
               }),
             },

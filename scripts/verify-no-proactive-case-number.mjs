@@ -1,0 +1,64 @@
+#!/usr/bin/env node
+/**
+ * Regresión — Pedido explícito, 2026-07-29: el bot NO debe informar proactivamente el
+ * número de caso/ticket en sus respuestas (ni al crearlo ni al reutilizar uno existente).
+ * El número de caso solo debe aparecer si el cliente lo pide explícitamente
+ * (looksLikeOpenCaseStatusInquiry -> buildOpenCaseStatusReply).
+ *
+ * Este test es una barrera de "no regresión de texto": escanea los archivos que generan
+ * mensajes de creación/reutilización de caso y falla si alguno vuelve a interpolar el
+ * número/código del ticket en un template de mensaje al cliente.
+ */
+import assert from "node:assert";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, "..");
+
+let passed = 0;
+function check(label, cond) {
+  assert.ok(cond, label);
+  passed++;
+  console.log(`  ✓ ${label}`);
+}
+
+const filesToScan = [
+  "src/app/api/odoo/ticket/route.ts",
+  "src/app/api/wara/unidades/route.ts",
+  "src/app/api/wara/certificados/route.ts",
+  "src/lib/waraGpsSummary.ts",
+];
+
+// Patrones que indican que el número/código del caso se está interpolando directo en un
+// mensaje al cliente (no en el payload de respuesta JSON, que sí puede llevar `ref`/`code`
+// para uso interno de BuilderBot/analytics).
+const forbiddenPatterns = [
+  /caso\s+N[°º]\s*\$\{/i,
+  /el caso\s+\$\{/i,
+  /caso abierto\s*\(\$\{/i,
+  /en revisión\.\s*\$\{ref/i,
+  /`[^`]*caso[^`]*\$\{[a-zA-Z.]*(ref|code|odooRef)[a-zA-Z.]*\}[^`]*`/i,
+];
+
+console.log("▶ Ningún template de mensaje al cliente interpola el número de caso");
+for (const relPath of filesToScan) {
+  const fullPath = path.join(root, relPath);
+  const content = fs.readFileSync(fullPath, "utf8");
+  for (const pattern of forbiddenPatterns) {
+    check(`${relPath} no matchea ${pattern}`, !pattern.test(content));
+  }
+}
+
+console.log("\n▶ El path de pedido explícito (buildOpenCaseStatusReply) sigue mostrando el código");
+const ticketInquiryContent = fs.readFileSync(
+  path.join(root, "src/lib/customerTicketInquiry.ts"),
+  "utf8",
+);
+check(
+  "buildOpenCaseStatusReply sigue interpolando openTicket.code cuando el cliente pregunta explícitamente",
+  /tenés el caso \*\$\{openTicket\.code\}\*/.test(ticketInquiryContent),
+);
+
+console.log(`\n✅ ${passed} checks pasaron.`);

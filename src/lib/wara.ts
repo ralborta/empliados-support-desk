@@ -1645,7 +1645,19 @@ export function detectIncidentType(text: string): WaraIncidentType {
   // responder la guía de Opciones/Perfiles).
   if (
     /(acceso|login|usuario|contraseñ|plataforma)/.test(lower) &&
-    /(no puedo|no me deja|no anda|no funciona|bloquead|olvid|error|problema|no entra|no ingresa)/.test(lower)
+    // Bug real, producción 2026-07-29: "no me está funcionando la plataforma" NO
+    // matcheaba porque el patrón exigía la frase literal "no funciona" pegada — con un
+    // pronombre en el medio ("no ME ESTÁ funcionando") ya no matcheaba, y el mensaje caía
+    // en el executor de unidades (reporte de GPS de la última unidad activa) en vez de
+    // derivarse a un asesor. Pedido explícito: este caso (funcionamiento/acceso a la
+    // plataforma) debe ser SIEMPRE un disparador de derivación a asesor. Ahora "no" y el
+    // verbo pueden tener palabras en el medio (pronombres, "está/esta"), y se agrega la
+    // frase "imposibilidad de ingresar/acceder/entrar" (tal cual la usa el equipo).
+    (/\bno\b.{0,15}\b(puedo|podemos|pueden|logro|logramos|deja\w*|anda\w*|funcion\w*|entra\w*|ingresa\w*|carga\w*|conecta\w*)\b/.test(
+      lower,
+    ) ||
+      /\bimposibilidad\s+de\b.{0,20}\b(ingresar|acceder|entrar|conectar\w*)\b/.test(lower) ||
+      /\b(bloquead\w*|olvid\w*|error|problema)\b/.test(lower))
   ) {
     return "ACCESS_PLATFORM";
   }
