@@ -67,6 +67,7 @@ const SUITES = [
   "verify-company-status-question.mjs",
   "verify-generic-capability-topic-switch.mjs",
   "verify-odometer-horometro-topic-confusion.mjs",
+  "verify-odometer-stale-confirm-after-close.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-conversation-closing.mjs",
   "verify-customer-conversation-reset.mjs",

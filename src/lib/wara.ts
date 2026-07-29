@@ -141,7 +141,16 @@ export function detectAllPlates(text: string): string[] {
 
 /** Mensaje corto que parece ser solo una patente (ej. "Lwk7902"). */
 export function looksLikePlateOnlyMessage(text: string): boolean {
-  const compact = (text ?? "").trim().replace(/[\s\-_.]+/g, "");
+  const raw = (text ?? "").trim();
+  // Bug real, producción 2026-07-29: "No es 152344" (corrigiendo un valor durante una
+  // confirmación pendiente de odómetro) compactaba a "NOES152344" — 4 letras + dígitos,
+  // forma indistinguible de una patente vieja mal separada (ej. "NOES 15234" no existe,
+  // pero el shape "letras+números" es el mismo). Ninguna patente real trae la palabra
+  // "no" como token independiente seguido de un verbo — frases de negación/corrección
+  // ("no es", "no era", "no son", "no fue/fueron") nunca son un intento de patente suelta,
+  // así que se descartan ANTES de compactar espacios.
+  if (/\bno\b,?\s+(?:es|era|son|eran|fue|fueron)\b/i.test(raw)) return false;
+  const compact = raw.replace(/[\s\-_.]+/g, "");
   if (!compact || compact.length < 5 || compact.length > 12) return false;
   if (!/^[A-Za-z0-9-]+$/.test(compact)) return false;
   if (!/\d/.test(compact)) return false;
@@ -932,6 +941,13 @@ export function looksLikeOdometerPendingDataAmendment(text: string | undefined |
   // "corrijo el odómetro a 12000") quedaba atrapado repitiendo el recordatorio de
   // CONFIRMO en vez de reabrir el trámite con el valor nuevo.
   if (/\b(od[oó]metro|hor[oó]metro)\b/.test(t) && /\d/.test(raw)) return true;
+  // Bug real, producción 2026-07-29: "No es 152344" (rechazando el valor propuesto en el
+  // resumen pendiente y dando el correcto) no mencionaba "odómetro"/"horómetro" ni
+  // ninguno de los ganchos de arriba, así que caía en el recordatorio genérico de
+  // CONFIRMO en vez de reabrir el trámite con el valor nuevo (152344). La IA de
+  // resolveOdometerHorometerFields ya interpreta bien este caso con el contexto del
+  // tramite activo — el problema era que nunca llegaba a ejecutarse.
+  if (/\bno\b,?\s+(?:es|era|son|eran|fue|fueron)\b.{0,6}\d/.test(t)) return true;
   return false;
 }
 

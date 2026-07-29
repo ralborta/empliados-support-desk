@@ -554,6 +554,12 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   // dentro de odometro-horometro/route.ts nunca llegaba a correr.
   if (looksLikeGenericCorrectionIntent(raw)) return true;
   const t = normCompanyToken(raw);
+  // Bug real, producción 2026-07-29: "No es 152344" corrigiendo el odómetro propuesto en
+  // el resumen pendiente matcheaba looksLikeFleetUnitSearchInput (compactaba a
+  // "NOES152344", forma letras+dígitos) y el router lo mandaba al executor de unidades
+  // en vez de odómetro — el bot respondía "no hay ninguna unidad con patente que empiece
+  // con NOES152344" en lugar de tomar el valor corregido.
+  if (/\bno\b,?\s+(?:es|era|son|eran|fue|fueron)\b.{0,6}\d/.test(t)) return true;
   if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) return true;
   if (/\b(fecha|ayer|hoy)\b/.test(t)) return true;
   if (/\b(la fecha es|fecha es la|es la de hoy)\b/.test(t)) return true;

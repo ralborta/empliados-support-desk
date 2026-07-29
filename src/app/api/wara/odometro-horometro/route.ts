@@ -429,13 +429,31 @@ export async function POST(req: NextRequest) {
   const hasUnitHintInCurrentMessage =
     looksLikeFleetUnitSearchInput(rawText) || looksLikeUnitNameInMessage(rawText);
   const isOdometerReminder = looksLikeOdometerFlowReminder(rawText);
+  // Bug real, producción 2026-07-29: el propio prompt del BOT ("Para registrar el cambio
+  // de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB
+  // 006 EX...)") matcheaba looksLikeFleetUnitSearchInput por la patente de EJEMPLO ("AB
+  // 006 EX") — este chequeo se calculaba sobre TODAS las líneas del hilo (bot + cliente),
+  // así que "threadHasPriorOdometerUnitRequest" daba true por texto del propio bot, no del
+  // cliente. Con eso, un pedido nuevo tras cerrar la conversación ("Ok" → "De nada,
+  // ¿necesitás algo más?" → nuevo "quiero cambiar...odómetro") NO se trataba como arranque
+  // en blanco, y el hilo VIEJO completo (con la patente/km de un trámite ya abandonado)
+  // volvía a colarse en el resumen de confirmación. Se excluyen las líneas que son
+  // literalmente el prompt del bot pidiendo la patente.
   const threadHasPriorOdometerUnitRequest = preliminaryThreadText
     .split("\n")
+    .filter((line) => !/^para registrar el cambio de (od[oó]metro|hor[oó]metro)/i.test(line.trim()))
     .some(
       (line) =>
         looksLikeExplicitOdometerUpdateRequest(line) &&
         (looksLikeFleetUnitSearchInput(line) || looksLikeUnitNameInMessage(line)),
     );
+  // Bug real, producción 2026-07-29 (mismo caso): aunque no hubiera confirmación pendiente
+  // (hasPendingConfirmInThread=false), el trámite podía seguir sin tratarse como blanco si
+  // threadHasPriorOdometerUnitRequest daba (falsamente) true. isOdometerFlowSuperseded ya
+  // detecta explícitamente que la conversación siguió a otra cosa (cambio de tema, cierre
+  // con "de nada", etc.) — si eso pasó, un pedido nuevo de odómetro/horómetro SIEMPRE debe
+  // arrancar en blanco, sin importar qué diga el resto del hilo viejo.
+  const priorFlowExplicitlySuperseded = isOdometerFlowSuperseded(preliminaryThreadText);
   const treatAsBlankFlowStart =
     odometerFlowStart &&
     !explicitVagueUnitReference &&
@@ -443,6 +461,7 @@ export async function POST(req: NextRequest) {
     !isOdometerReminder &&
     (horometerOnlyIntent ||
       supersedesPendingConfirm ||
+      priorFlowExplicitlySuperseded ||
       (!hasPendingConfirmInThread && !threadHasPriorOdometerUnitRequest));
   if (treatAsBlankFlowStart || supersedesPendingConfirm) {
     await clearPendingAction(prisma, rawPhone);
