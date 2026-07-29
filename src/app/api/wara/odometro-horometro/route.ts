@@ -47,6 +47,7 @@ import {
 import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { humanizeBotReply } from "@/lib/botReplyHumanizer";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
   looksLikeConversationAcknowledgement,
@@ -1188,9 +1189,18 @@ export async function POST(req: NextRequest) {
     const confirmMessage =
       `Voy a registrar:\n• Patente: ${plateDisplay}\n${odoLine}${fechaLine}\n\n` +
       `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`;
+    // El resumen que se guarda en pendingAction (payload/summary) es siempre la plantilla
+    // determinística — la humanización es solo cosmética para lo que ve el cliente, y no
+    // debe afectar cómo se interpreta una confirmación/corrección posterior.
     await setPendingAction(prisma, rawPhone, "odometro", {
       summary: confirmMessage,
       payload: { patente, odometro, horometro, fecha: fechaExplicita ?? undefined },
+    });
+    // Nota: a diferencia de otros returns de este archivo, este bloque NO llamaba a
+    // appendOutboundBotMessage antes de este cambio (BuilderBot envía `message` directo al
+    // cliente por su cuenta en este paso) — se mantiene igual, solo se humaniza el texto.
+    const humanizedConfirmMessage = await humanizeBotReply(confirmMessage, {
+      context: "Resumen de confirmación de cambio de odómetro/horómetro, pidiendo CONFIRMO",
     });
     return NextResponse.json(
       {
@@ -1199,7 +1209,7 @@ export async function POST(req: NextRequest) {
         flowComplete_s: "true",
         confirmationRequired: true,
         confirmationRequired_s: "true",
-        message: confirmMessage,
+        message: humanizedConfirmMessage,
         patente,
         odometro,
         horometro,
@@ -1254,6 +1264,14 @@ export async function POST(req: NextRequest) {
         `Si la unidad es de otra de tus empresas, escribí "cambiar empresa" y la registro ahí.`;
     }
   }
+  // Se humaniza DESPUÉS de armar responseMessage (con todos los datos ya resueltos) y ANTES
+  // de guardarlo/devolverlo, para que el texto persistido en el hilo y el que recibe el
+  // cliente sean siempre el mismo (evita el bug histórico de mismatch texto guardado vs. enviado).
+  responseMessage = await humanizeBotReply(responseMessage, {
+    context: result.ok
+      ? "Confirmación de cambio de odómetro/horómetro registrado con éxito"
+      : "Aviso de error al registrar el cambio de odómetro/horómetro",
+  });
   await appendOutboundBotMessage(rawPhone, responseMessage, {
     source: "wara_odometro_response",
     ok: result.ok,

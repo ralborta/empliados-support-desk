@@ -71,6 +71,7 @@ const SUITES = [
   "verify-odometer-pending-confirm-ttl-gate.mjs",
   "verify-platform-access-routing.mjs",
   "verify-no-proactive-case-number.mjs",
+  "verify-bot-reply-humanizer.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-conversation-closing.mjs",
   "verify-customer-conversation-reset.mjs",
