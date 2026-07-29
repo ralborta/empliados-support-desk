@@ -508,10 +508,29 @@ function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean
   return new Set(["si", "dale"]).has(t);
 }
 
+/**
+ * "Gracias" mezclado con un pedido operativo nuevo — no es ack puro.
+ * Bug real, producción 2026-07-29: "Gracias ahora puedo cambiar el horometro?" matcheaba
+ * looksLikeConversationAcknowledgement por "gracias" y el bot respondía "De nada, ¿Necesitás
+ * algo más?" en loop en vez de arrancar el trámite de horómetro.
+ */
+function looksLikeAcknowledgementWithOperationalFollowUp(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  return (
+    looksLikeExplicitOdometerUpdateRequest(raw) ||
+    looksLikeHorometerOnlyIntent(raw) ||
+    looksLikeCertificateKeyword(raw) ||
+    looksLikeMaintenanceKeyword(raw) ||
+    looksLikeGenericCorrectionIntent(raw)
+  );
+}
+
 /** Agradecimiento o cierre breve — no es confirmación operativa ni continuación de trámite. */
 export function looksLikeConversationAcknowledgement(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 140) return false;
+  if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
   const t = normCompanyToken(raw);
   if (
     /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias)\b/.test(

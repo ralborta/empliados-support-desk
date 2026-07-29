@@ -72,6 +72,21 @@ for (const text of operational) {
   assert(!looksLikeConversationClosing(text), `looksLikeConversationClosing("${text}") === false`);
 }
 
+console.log(
+  "\n— Bug 2026-07-29: agradecimiento + pedido operativo no es ack puro (no loop de cierre) —",
+);
+const thanksWithNewTramite = [
+  "Gracias ahora puedo cambiar el horometro?",
+  "Gracias, quiero cambiar el odometro",
+  "Ok gracias, necesito un certificado de cobertura",
+];
+for (const text of thanksWithNewTramite) {
+  assert(
+    !looksLikeConversationAcknowledgement(text),
+    `looksLikeConversationAcknowledgement("${text}") === false (sigue con trámite nuevo)`,
+  );
+}
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);
