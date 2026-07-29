@@ -39,6 +39,7 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction } from "@/lib/pendingAction";
 import { prisma } from "@/lib/db";
+import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -191,6 +192,20 @@ export async function runTurnExecutorPhase(params: {
   }
 
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
+
+  const agentResult = await runAtilioAgentTurn({
+    rawPhone,
+    selectionText,
+    apiKey,
+    threadCtx,
+  });
+  if (agentResult?.usedAgent) {
+    return {
+      message: agentResult.message,
+      executor: agentResult.executor,
+      ok: agentResult.ok,
+    };
+  }
 
   let executor: TurnExecutorId;
   const pendingAction = await getPendingAction(prisma, rawPhone);

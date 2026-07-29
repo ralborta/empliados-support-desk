@@ -480,8 +480,33 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
   if (/listo,\s*registr[eé]|registr[eé] el cambio para la unidad/i.test(afterMarkerBlock)) {
     return false;
   }
+  const stillPickingUnitForOdo = isStillPickingUnitForOdoBlock(afterMarkerBlock);
   const after = threadText.slice(cutIdx + 80).toLowerCase();
   if (!after.trim()) return false;
+  // Pedir listado de flota para elegir la unidad durante un trámite de odómetro NO es
+  // cambio de tema (bug producción 2026-07-29: "Pásame el listado?" → bot "Tenés 414
+  // unidades" marcaba el trámite como abandonado y "Ah es la RMX" caía a GPS/estado).
+  const fleetListToPickUnit = /\b(listado|p[aá]same (el )?listado|p[aá]same la lista|lista de (mis )?unidades)\b/.test(
+    after,
+  );
+  if (stillPickingUnitForOdo) {
+    return (
+      /(modulo opciones|entra a opciones|ingresa a opciones|agenda de contactos|agregar contacto|sum[aá]s un nuevo contacto|mis atajos|modulo unidades|modulo de unidades)/.test(
+        after,
+      ) ||
+      /\b(certificado|cobertura|monitoreo|constancia)\b/.test(after) ||
+      (/patente de la unidad/.test(after) && /preventivo o correctivo/.test(after)) ||
+      /\bmantenimiento (preventivo|correctivo)\b/.test(after) ||
+      (/\b(consultar|quiero consultar).{0,80}\b(reporte|unidades|gps|ignicion)\b/.test(after) &&
+        !fleetListToPickUnit) ||
+      /\b(no reporta|no me reporta|sin reporte|estado de reporte|reporte de mis unidades)\b/.test(
+        after,
+      ) ||
+      /\bde nada\b/.test(after) ||
+      (/1\.\s*(entra|ingresa|abri)/.test(after) &&
+        /(agenda|opciones|contacto|unidades|grupo)/.test(after))
+    );
+  }
   return (
     /(modulo opciones|entra a opciones|ingresa a opciones|agenda de contactos|agregar contacto|sum[aá]s un nuevo contacto|mis atajos|modulo unidades|modulo de unidades)/.test(
       after,
@@ -499,8 +524,8 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     (/patente de la unidad/.test(after) && /preventivo o correctivo/.test(after)) ||
     /\bmantenimiento (preventivo|correctivo)\b/.test(after) ||
     /\b(consultar|quiero consultar).{0,80}\b(reporte|unidades|gps|ignicion)\b/.test(after) ||
-    /\bunidades registradas\b/.test(after) ||
-    /ten[eé]s\s+\d+\s+unidades/.test(after) ||
+    (/\bunidades registradas\b/.test(after) && !fleetListToPickUnit) ||
+    (/ten[eé]s\s+\d+\s+unidades/.test(after) && !fleetListToPickUnit) ||
     // Bug real, producción 2026-07-23: tras "Voy a registrar: ...", el propio bot
     // reaccionó a un mensaje del cliente sin patente re-preguntando "Para registrar
     // el cambio de odómetro NECESITO la patente de la unidad..." — esa respuesta del
@@ -536,11 +561,23 @@ function lastOdometerFlowMarkerIndex(threadText: string): number {
   return markers.length ? Math.max(...markers) : -1;
 }
 
+/** Bloque del hilo desde el marcador de odómetro: todavía eligiendo unidad (sin pedir km todavía). */
+function isStillPickingUnitForOdoBlock(block: string): boolean {
+  const blockLower = block.toLowerCase();
+  return (
+    (/para registrar el cambio de od[oó]metro necesito la patente/.test(blockLower) ||
+      /para registrar el cambio de hor[oó]metro necesito la patente/.test(blockLower)) &&
+    !/cu[aá]l es el nuevo od[oó]metro/.test(blockLower) &&
+    !/cu[aá]l es el nuevo hor[oó]metro/.test(blockLower)
+  );
+}
+
 /** Trámite de odómetro pausado por búsqueda/GPS/consulta de unidad DESPUÉS del último marcador. */
 function odometerFlowPausedByLaterTramite(threadText: string): boolean {
   const markerIdx = lastOdometerFlowMarkerIndex(threadText);
   if (markerIdx < 0) return false;
   const after = threadText.slice(markerIdx);
+  const stillPickingUnit = isStillPickingUnitForOdoBlock(after);
   if (/\bayudame a encontrar mi unidad\b/i.test(after)) return true;
   if (/\bno encuentro\b.{0,40}\b(unidad|patente|matricula|matr[ií]cula)\b/i.test(after)) return true;
   const lower = threadText.toLowerCase();
@@ -557,13 +594,20 @@ function odometerFlowPausedByLaterTramite(threadText: string): boolean {
   ].filter((i) => i >= 0);
   if (unitConsultMarkers.length && Math.max(...unitConsultMarkers) > markerIdx) return true;
   const afterTail = after.slice(80).toLowerCase();
-  if (/\b(consultar|quiero consultar).{0,80}\b(reporte|unidades|gps|ignicion)\b/.test(afterTail)) {
+  const fleetListToPickUnit = /\b(listado|p[aá]same (el )?listado|p[aá]same la lista|lista de (mis )?unidades)\b/.test(
+    afterTail,
+  );
+  if (
+    /\b(consultar|quiero consultar).{0,80}\b(reporte|unidades|gps|ignicion)\b/.test(afterTail) &&
+    !(stillPickingUnit && fleetListToPickUnit)
+  ) {
     return true;
   }
   if (
     /\b(no reporta|no me reporta|sin reporte|estado de reporte|listado de mis unidades)\b/.test(
       afterTail,
-    )
+    ) &&
+    !(stillPickingUnit || fleetListToPickUnit)
   ) {
     return true;
   }
@@ -578,6 +622,7 @@ export function threadHasRecentUnitStatusConsultIntent(threadText: string): bool
     .filter(Boolean)
     .slice(-12);
   return tail.some((line) => {
+    if (/^atilio:/i.test(line)) return false;
     const t = line
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -600,10 +645,10 @@ export function threadHasOdometerUnitClarificationPending(threadText: string): b
     return false;
   }
   return (
-    /\b(cambiar|cambio de|actualizar|registrar|corregir|ajust\w*)\b.{0,100}\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(
+    /\b(cambiar|cambio de|actualizar|registrar|corregir|modificar|ajust\w*)\b.{0,100}\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(
       tail,
     ) ||
-    /\b(od[oó]metro|hor[oó]metro)\b.{0,100}\b(cambiar|actualizar|patente|matr[ií]cula)\b/.test(tail)
+    /\b(od[oó]metro|hor[oó]metro)\b.{0,100}\b(cambiar|actualizar|modificar|patente|matr[ií]cula)\b/.test(tail)
   );
 }
 
@@ -891,7 +936,12 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
       .toLowerCase(),
   );
   return (
-    /\b(actualizar|cambiar|cambio de|corregir|ajust\w*|registrar|realizar)\b/.test(t) &&
+    // Bug real, producción 2026-07-29: "Ahora quiero MODIFICAR el odometro" no arrancaba
+    // el trámite de odómetro porque "modificar" no estaba en la lista de verbos — el
+    // mensaje caía al fallback operativo genérico (executor "unidades"), que respondía
+    // con GPS/estado en vez de pedir la unidad para el odómetro. El bot "perdía el hilo"
+    // desde el primer mensaje, sin que hiciera falta ningún tema previo en el historial.
+    /\b(actualizar|cambiar|cambio de|corregir|modificar|ajust\w*|registrar|realizar)\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
   );
 }
