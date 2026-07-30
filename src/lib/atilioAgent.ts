@@ -30,7 +30,7 @@ import {
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
-import { shouldRouteTurnToOdometerExecutor, shouldRouteTurnToFleetListExecutor } from "@/lib/waraUnitIntent";
+import { shouldRouteTurnToOdometerExecutor, shouldRouteTurnToFleetListExecutor, shouldRouteTurnToUnidadesExecutor } from "@/lib/waraUnitIntent";
 import { looksLikePossibleFleetListRequest } from "@/lib/fleetListIntentAI";
 
 export { isAtilioAgentEnabled, composeAgentReplyFromDialogueState, type ComposeDialogueInput } from "@/lib/atilioDialogueCompose";
@@ -57,6 +57,7 @@ AMBIGÜEDAD (razonar, no formulario):
 - Preguntá en natural, una sola cosa: "¿Querés que te pase el listado de tus unidades, o buscás una patente en particular?" / "Perdón, ¿me pediste la lista de la flota?"
 - Si suena a listado aunque no lo digan literal → consultar_unidades igual; el backend devuelve hechos.
 - Si suena a una unidad concreta → consultar_unidades con ese dato; si falta, preguntá qué unidad sin repetir el mismo párrafo del turno anterior.
+- Marca, prefijo o patente incompleta ("la Nissan", "empieza con AG", "OST") → SIEMPRE consultar_unidades: el backend busca similares en la flota y lista opciones. NUNCA pidas "patente completa" sin haber buscado antes.
 
 EN CADA TURNO:
 1. Leé el mensaje actual: ¿qué necesita el cliente en concreto (explícito o implícito)?
@@ -183,6 +184,15 @@ function shouldRequireToolCall(params: {
   const { session, threadText, selectionText } = params;
 
   if (looksLikeOdometerInfoRequest(selectionText)) {
+    return true;
+  }
+
+  if (
+    shouldRouteTurnToUnidadesExecutor({
+      selectionText,
+      threadText,
+    })
+  ) {
     return true;
   }
 

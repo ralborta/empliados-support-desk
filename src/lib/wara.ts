@@ -1441,7 +1441,10 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
   if (certificateFlowState(threadText) !== "none") return false;
   if (hasPendingMaintenancePlateRequest(threadText)) return false;
 
-  const lower = threadText.toLowerCase();
+  const lower = threadText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
   const unitConsultMarkers = [
     lower.lastIndexOf("para revisar el gps"),
     lower.lastIndexOf("cuál es la matrícula o el nombre"),
@@ -1453,6 +1456,16 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("entendido, no era esa"),
     lower.lastIndexOf("decime la matrícula exacta"),
     lower.lastIndexOf("decime la matricula exacta"),
+    lower.lastIndexOf("patente de la unidad que quer"),
+    lower.lastIndexOf("patente de la unidad que quier"),
+    lower.lastIndexOf("indiques la patente"),
+    lower.lastIndexOf("indicá la patente"),
+    lower.lastIndexOf("indica la patente"),
+    lower.lastIndexOf("patente completa de la"),
+    lower.lastIndexOf("ultima posicion de la"),
+    lower.lastIndexOf("última posición de la"),
+    lower.lastIndexOf("ultima posición de la"),
+    lower.lastIndexOf("última posicion de la"),
   ].filter((i) => i >= 0);
   if (!unitConsultMarkers.length) return false;
 
@@ -1471,13 +1484,16 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
   const lastOdo = odoMarkers.length ? Math.max(...odoMarkers) : -1;
   if (lastOdo >= 0 && lastOdo > lastUnitAsk) return false;
 
-  const tail = threadText.slice(lastUnitAsk, lastUnitAsk + 800).toLowerCase();
+  const tail = lower.slice(lastUnitAsk, lastUnitAsk + 800);
   return (
     /para revisar el gps.*necesito la unidad/.test(tail) ||
-    /(?:entendido, no era esa|cu[aá]l es la otra unidad)/.test(tail) ||
-    /(?:cu[aá]l es la matr[ií]cula|decime la matr[ií]cula|matr[ií]cula exacta|indic[aá]me la matr[ií]cula|pas[aá]me la patente|marca\/nombre \(ej\.)/.test(
+    /(?:entendido, no era esa|cual es la otra unidad)/.test(tail) ||
+    /(?:cual es la matricula|decime la matricula|matricula exacta|indic\w*me la matricula|pas\w*me la patente|marca\/nombre \(ej\.)/.test(
       tail,
-    )
+    ) ||
+    /(?:indic\w*|decime|pas\w*me|necesito que me).{0,40}patente/.test(tail) ||
+    /(?:ultima)\s+posicion/.test(tail) ||
+    /patente de la unidad que quer/.test(tail)
   );
 }
 

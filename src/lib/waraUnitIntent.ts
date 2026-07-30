@@ -26,6 +26,7 @@ import {
   threadOdometerRegistrationCompleted,
   threadTextSinceCompanySelection,
   hasPendingOdometerConfirmation,
+  hasPendingUnitConsultPlateRequest,
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
 } from "@/lib/wara";
@@ -40,6 +41,7 @@ import {
   looksLikePlateCorrectionRequest,
   looksLikeSubstantiveCustomerMessage,
   looksLikeVehicleBrandOrUnitSearch,
+  threadHasRecentLiveUnitConsultIntent,
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
@@ -1575,10 +1577,10 @@ function isDecisiveRulesResolution(
       return resolution.candidatePlates.length > 0;
     }
     if (resolution.clarificationQuestion && !resolution.candidatePlates.length) {
-      if (
-        looksLikeVehicleBrandOrUnitSearch(rawText) ||
-        looksLikeLiveUnitConsultIntent(rawText)
-      ) {
+      if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
+        return true;
+      }
+      if (looksLikeLiveUnitConsultIntent(rawText)) {
         return false;
       }
       return true;
@@ -1887,6 +1889,25 @@ export async function resolvePlateWithWaraFleet(
   }
 
   return { ok: false, reason: "not_found" };
+}
+
+/** Marca/prefijo/nombre/patente parcial → executor unidades (búsqueda en flota), no agente. */
+export function shouldRouteTurnToUnidadesExecutor(params: {
+  selectionText: string;
+  threadText: string;
+}): boolean {
+  const { selectionText, threadText } = params;
+  if (!looksLikeFleetUnitSearchInput(selectionText)) return false;
+  if (looksLikeUnitListRequest(selectionText)) return false;
+  if (hasPendingUnitConsultPlateRequest(threadText)) return true;
+  if (threadHasRecentLiveUnitConsultIntent(threadText)) return true;
+  if (
+    looksLikeLiveUnitConsultIntent(selectionText) ||
+    looksLikeGpsOrUnitStatusQuestion(selectionText)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**

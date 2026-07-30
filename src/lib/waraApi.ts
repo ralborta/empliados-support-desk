@@ -862,7 +862,7 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
       t,
     );
   const questionCue =
-    /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta|funciona|bien|mal|ver|consultar|mostrar)\b/.test(
+    /\b(como|donde|que|cual|cuando|saber|verificar|revisar|chequear|esta|funciona|bien|mal|ver|consultar|mostrar|indic\w*|ultim\w*|coordenadas|ubicacion)\b/.test(
       t,
     ) || String(text ?? "").includes("?");
   return gpsUnitCue && questionCue;
@@ -880,8 +880,8 @@ export function looksLikeLiveUnitConsultIntent(text: string | undefined | null):
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|certificado|cobertura)\b/.test(t)) return false;
   if (
-    /\b(quiero|necesito|dame|decime|pasame|ver|consultar|mostrar|estado)\b/.test(t) &&
-    /\b(ignicio|ignicion|reporte|gps|ubicacion|posicion|unidad|flota)\b/.test(t)
+    /\b(quiero|necesito|dame|decime|pasame|indic\w*|ver|consultar|mostrar|estado)\b/.test(t) &&
+    /\b(ignicio|ignicion|reporte|gps|ubicacion|posicion|unidad|flota|coordenadas)\b/.test(t)
   ) {
     return true;
   }

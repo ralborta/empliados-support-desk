@@ -43,6 +43,7 @@ import {
   isMaintenancePlateSelectionMessage,
   shouldRouteTurnToFleetListExecutor,
   shouldRouteTurnToOdometerExecutor,
+  shouldRouteTurnToUnidadesExecutor,
   buildFleetUnitNotFoundMessage,
   looksLikeFleetUnitSearchInput,
   looksLikeUnitNameInMessage,
@@ -360,6 +361,35 @@ export async function runTurnExecutorPhase(params: {
     }
     const execMessage = messageFromPayload(execResult);
     if (execMessage) {
+      return { message: execMessage, executor: "unidades", ok: execOk };
+    }
+  }
+
+  // Marca/prefijo/nombre/patente parcial → buscar en flota y listar similares (no pedir patente completa al agente).
+  if (
+    shouldRouteTurnToUnidadesExecutor({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+    })
+  ) {
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (agentComposeRequested(execResult)) {
+      const dialogueState = parseExecutorDialogueState(execResult);
+      if (dialogueState) {
+        const composed = await composeAgentReplyFromDialogueState({
+          threadText: threadCtx.classificationThread,
+          customerMessage: selectionText,
+          dialogueState,
+          fallbackTemplate: messageFromPayload(execResult),
+        });
+        if (composed) {
+          return { message: composed, executor: "unidades", ok: execOk };
+        }
+      }
+    }
+    const execMessage = messageFromPayload(execResult);
+    if (execMessage || !executorSkippedSilently(execResult)) {
       return { message: execMessage, executor: "unidades", ok: execOk };
     }
   }
