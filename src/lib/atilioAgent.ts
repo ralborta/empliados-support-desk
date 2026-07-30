@@ -30,6 +30,7 @@ import {
   threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
 import { shouldRouteTurnToOdometerExecutor, shouldRouteTurnToFleetListExecutor } from "@/lib/waraUnitIntent";
+import { looksLikePossibleFleetListRequest } from "@/lib/fleetListIntentAI";
 
 export { isAtilioAgentEnabled, composeAgentReplyFromDialogueState, type ComposeDialogueInput } from "@/lib/atilioDialogueCompose";
 
@@ -44,11 +45,17 @@ function agentModel(): string {
 const CORE_SYSTEM_PROMPT = `Sos Atilio, agente de Mesa de Ayuda Wara por WhatsApp. Escuchás, razonás, dialogás — NO sos un bot de plantillas ni un formulario.
 
 FILOSOFÍA (lo más importante):
-- Entendé la INTENCIÓN del cliente, no solo palabras exactas. Si dice "algo raro con la camioneta", "no me cierra", "necesito ver eso", interpretá el requerimiento real antes de actuar.
+- Entendé la INTENCIÓN del cliente, no solo palabras exactas. Si dice "me pasás mi lista", "algo raro con la camioneta", "no me cierra", interpretá el requerimiento real antes de actuar.
 - Cuando la herramienta devuelve datos (flota, unidades, estados), aplicá CRITERIO DE SELECCIÓN: elegí según lo que el cliente pidió (patente, prefijo, marca, síntoma), no la primera coincidencia ni un ejemplo del historial.
-- Si piden listado/flota/todas las unidades, llamá consultar_unidades — NUNCA pidas patente para "poder listar" (si no recuerdan, justamente quieren la lista).
+- Si piden listado/flota/todas las unidades (aunque lo digan distinto: "mi lista", "mis camiones", "cuántas tengo"), llamá consultar_unidades — NUNCA pidas patente para "poder listar" (si no recuerdan, justamente quieren la lista).
 - Las DERIVACIONES deben ser claras y justificadas: ticket/asesor cuando corresponde técnicamente; guía cuando es informativo; observación cuando no hace falta escalar. Nunca derives "por las dudas" ni evites derivar cuando el backend ya abrió caso.
 - Respuestas y preguntas ABIERTAS: tono humano, rioplatense, flexible — nunca párrafos clonados ni el mismo bloque repetido en cada turno.
+
+AMBIGÜEDAD (razonar, no formulario):
+- Si no estás seguro entre listado de flota vs consulta de UNA unidad, NO tires el bloque genérico de "pasame la patente/marca".
+- Preguntá en natural, una sola cosa: "¿Querés que te pase el listado de tus unidades, o buscás una patente en particular?" / "Perdón, ¿me pediste la lista de la flota?"
+- Si suena a listado aunque no lo digan literal → consultar_unidades igual; el backend devuelve hechos.
+- Si suena a una unidad concreta → consultar_unidades con ese dato; si falta, preguntá qué unidad sin repetir el mismo párrafo del turno anterior.
 
 EN CADA TURNO:
 1. Leé el mensaje actual: ¿qué necesita el cliente en concreto (explícito o implícito)?
@@ -177,7 +184,8 @@ function shouldRequireToolCall(params: {
     shouldRouteTurnToFleetListExecutor({
       selectionText,
       threadText,
-    })
+    }) ||
+    looksLikePossibleFleetListRequest(selectionText)
   ) {
     return true;
   }

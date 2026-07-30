@@ -24,6 +24,7 @@ import {
   threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
+import { shouldRouteTurnToFleetListExecutorHybrid } from "@/lib/fleetListIntentAI";
 import {
   isBarePlatePrefixHint,
   looksLikeBriefConfirmation,
@@ -271,7 +272,7 @@ export async function runTurnExecutorPhase(params: {
 
   // Listado de flota → executor unidades directo (NUNCA pedir patente para listar).
   if (
-    shouldRouteTurnToFleetListExecutor({
+    await shouldRouteTurnToFleetListExecutorHybrid({
       selectionText,
       threadText: threadCtx.classificationThread,
     })

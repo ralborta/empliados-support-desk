@@ -47,7 +47,7 @@ export const ATILIO_AGENT_TOOLS = [
     function: {
       name: "consultar_unidades",
       description:
-        "Consultar flota, listado, estado GPS/ignición en vivo, o buscar unidad por patente/marca/prefijo. El backend resuelve contra la API con criterio (prefijo, nombre, patente); si hay ambigüedad devuelve hechos para que elijas o preguntes. Si el cliente describe un problema vago, primero escuchá — NO asumas GPS. NO usar para cambiar odómetro/horómetro.",
+        "Consultar flota, listado, estado GPS/ignición en vivo, o buscar unidad por patente/marca/prefijo. Usala cuando la intención sea listado/flota/cuántas unidades (aunque lo digan distinto). Si la intención no está clara, el backend resuelve; vos redactás o preguntás en natural — NUNCA pidas patente solo para 'poder listar'.",
       parameters: { type: "object", properties: {} },
     },
   },
