@@ -37,6 +37,7 @@ import {
   looksLikeFlowControlCommand,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeConversationalUnitConcern,
   looksLikeOdometerConfirmationRejection,
   looksLikePlateCorrectionRequest,
   looksLikeSubstantiveCustomerMessage,
@@ -1899,6 +1900,14 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   const { selectionText, threadText } = params;
   if (!looksLikeFleetUnitSearchInput(selectionText)) return false;
   if (looksLikeUnitListRequest(selectionText)) return false;
+  if (
+    detectLoosePlate(selectionText) &&
+    (looksLikeConversationalUnitConcern(selectionText) ||
+      looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+      looksLikeLiveUnitConsultIntent(selectionText))
+  ) {
+    return true;
+  }
   if (hasPendingUnitConsultPlateRequest(threadText)) return true;
   if (threadHasRecentLiveUnitConsultIntent(threadText)) return true;
   if (

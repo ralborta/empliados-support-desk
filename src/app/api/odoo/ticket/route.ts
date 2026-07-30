@@ -8,7 +8,7 @@ import {
   getOdooConfigStatus,
   OdooError,
 } from "@/lib/odooApi";
-import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, isPlausibleVehiclePlate, looksLikePostAdvisorCaseSupplement, normalizePlate, threadTextSinceCompanySelection, waraIncidentLabels } from "@/lib/wara";
+import { detectIncidentType, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, isPlausibleVehiclePlate, looksLikePostAdvisorCaseSupplement, looksLikeStructuredOdometerUpdateRequest, normalizePlate, threadTextSinceCompanySelection, waraIncidentLabels } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import {
@@ -372,6 +372,18 @@ export async function POST(req: NextRequest) {
   }
 
   const rawText = (data.rawText ?? "").trim();
+  if (looksLikeStructuredOdometerUpdateRequest(rawText)) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        skipResponse_s: "true",
+        message: "",
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
   if (looksLikeGreeting(rawText) || looksLikeAtilioHelpRequest(rawText)) {
     return NextResponse.json(
       {
@@ -539,7 +551,7 @@ export async function POST(req: NextRequest) {
     : ticketRegistrationAttempt
       ? await findRecentOdooRef(rawPhone, plate || undefined)
       : null;
-  if (existingRef && ticketRegistrationAttempt) {
+  if (existingRef && ticketRegistrationAttempt && !looksLikeStructuredOdometerUpdateRequest(rawText)) {
     const message = `Ya existe un caso abierto para este reclamo. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",

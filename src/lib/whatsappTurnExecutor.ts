@@ -38,6 +38,7 @@ import {
   looksLikeExplicitOdometerUpdateRequest,
   isOdometerFlowSuperseded,
   looksLikeOdometerInfoRequest,
+  looksLikeStructuredOdometerUpdateRequest,
 } from "@/lib/wara";
 import {
   isMaintenancePlateSelectionMessage,
@@ -284,6 +285,16 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return { message: execMessage, executor: "unidades", ok: execOk };
+    }
+  }
+
+  // Plantilla operativa de odómetro (interno M300-xxx + km + fecha) — trámite siempre, aunque haya caso abierto.
+  if (looksLikeStructuredOdometerUpdateRequest(selectionText)) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
     }
   }
 

@@ -18,6 +18,7 @@ import {
   looksLikeExplicitCertificateResendRequest,
   looksLikeCertificateKeyword,
   looksLikeExplicitOdometerUpdateRequest,
+  looksLikeStructuredOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
   looksLikeOdometerInfoRequest,
   looksLikeOdometerProblemReport,
@@ -416,6 +417,11 @@ const TURN_RULES: TurnRule[] = [
     decide: ({ text }) => (looksLikeOdometerInfoRequest(text) ? "info_guides" : null),
   },
   {
+    id: "structured_odometer_update",
+    reason: "Plantilla operativa de cambio de odómetro (interno + km + fecha) — trámite, no ticket ni bloqueo por caso abierto.",
+    decide: ({ text }) => (looksLikeStructuredOdometerUpdateRequest(text) ? "odometro" : null),
+  },
+  {
     id: "odometer_operational",
     reason: "Odómetro operativo — antes que guías informativas (el hilo no debe secuestrar con mantenimiento).",
     decide: ({ text, threadText }) => {
@@ -545,6 +551,9 @@ const TURN_RULES: TurnRule[] = [
     reason: "Patente/prefijo suelto, incidente detectado, o intención operativa genérica → consulta de unidad.",
     decide: ({ text, threadText }) => {
       const incident = detectIncidentType(text);
+      if (incident === "ODOMETER_CHANGE" && !looksLikeGpsOrUnitStatusQuestion(text)) {
+        return "odometro";
+      }
       const match =
         detectLoosePlate(text) || isBarePlatePrefixHint(text) || incident !== "OTHER" || looksLikeOperationalIntent(text);
       if (!match) return null;
@@ -580,6 +589,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "explicit_reclamo_or_ticket_request",
   "technical_support_request",
   "odometer_problem_report",
+  "structured_odometer_update",
   "post_advisor_case_supplement",
   "gps_or_live_unit_consult",
   "certificate_unit_context_selection",

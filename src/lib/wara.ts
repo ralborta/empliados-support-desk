@@ -1157,6 +1157,7 @@ export function looksLikeOdometerInfoRequest(text: string | undefined | null): b
 export function looksLikeOdometerProblemReport(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  if (looksLikeStructuredOdometerUpdateRequest(raw)) return false;
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -1197,10 +1198,35 @@ export function looksLikeOdometerHelpRequest(text: string | undefined | null): b
   );
 }
 
+/** Plantilla operativa diaria: interno/nombre + km + fecha/hora — cambio de odómetro, no ticket. */
+export function looksLikeStructuredOdometerUpdateRequest(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const hasUnitName = /\binterno\s*:\s*M?\d{3}-\d{2,3}\b/i.test(raw) || /\bM?\d{3}-\d{2,3}\b/i.test(raw);
+  const hasKmField =
+    /\bkm\s*actual\s*:\s*[\d.,]+/i.test(raw) ||
+    /\b(?:odometro|odómetro|kilometraje)\s*:\s*[\d.,]+/i.test(raw);
+  const hasKmInline = /\b[\d]{1,3}(?:\.[\d]{3})+\s*km\b/i.test(raw) || /\b\d{4,7}\s*km\b/i.test(raw);
+  const hasDateOrTime = /\bfecha\s*:\s*\d/i.test(raw) || /\bhora\s*:\s*\d/i.test(raw);
+
+  if (hasUnitName && (hasKmField || hasKmInline) && (hasDateOrTime || hasKmField)) return true;
+  if (/\bmando\s+interno\b/i.test(raw) && /\bkm\b/i.test(raw) && (hasUnitName || hasKmField || hasDateOrTime)) {
+    return true;
+  }
+  if (hasUnitName && hasKmField) return true;
+  return false;
+}
+
 /** Mensaje actual pide trámite de actualización de odómetro (no guía ni otro módulo). */
 export function looksLikeExplicitOdometerUpdateRequest(text: string | undefined | null): boolean {
   if (looksLikeOdometerProblemReport(text)) return false;
   if (looksLikeOdometerInfoRequest(text)) return false;
+  if (looksLikeStructuredOdometerUpdateRequest(text)) return true;
   return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }
 

@@ -27,6 +27,7 @@ import {
 import {
   isOdometerFlowSuperseded,
   looksLikeOdometerInfoRequest,
+  looksLikeStructuredOdometerUpdateRequest,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
@@ -58,6 +59,7 @@ AMBIGÜEDAD (razonar, no formulario):
 - Si suena a listado aunque no lo digan literal → consultar_unidades igual; el backend devuelve hechos.
 - Si suena a una unidad concreta → consultar_unidades con ese dato; si falta, preguntá qué unidad sin repetir el mismo párrafo del turno anterior.
 - Marca, prefijo o patente incompleta ("la Nissan", "empieza con AG", "OST") → SIEMPRE consultar_unidades: el backend busca similares en la flota y lista opciones. NUNCA pidas "patente completa" sin haber buscado antes.
+- Plantilla de cambio de odómetro (Interno M300-xxx, Km actual, Fecha/Hora, "mando interno con km desfasados") → registrar_odometro_horometro SIEMPRE — NO derivar_asesor_ticket ni bloquear por caso abierto previo.
 
 EN CADA TURNO:
 1. Leé el mensaje actual: ¿qué necesita el cliente en concreto (explícito o implícito)?
@@ -184,6 +186,10 @@ function shouldRequireToolCall(params: {
   const { session, threadText, selectionText } = params;
 
   if (looksLikeOdometerInfoRequest(selectionText)) {
+    return true;
+  }
+
+  if (looksLikeStructuredOdometerUpdateRequest(selectionText)) {
     return true;
   }
 
