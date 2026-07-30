@@ -15,6 +15,8 @@ import {
   extractPlateCorrectionHint,
   extractPlateFromOdometerSummary,
   extractPlateFromPerfectoTomo,
+  extractOdometroFromOdometerSummary,
+  extractHorometroFromOdometerSummary,
   formatPlateWithSpaces,
   resolveOdometerContextPlate,
   hasPendingOdometerConfirmation,
@@ -162,6 +164,20 @@ function parseBareNumericPendingAmendment(rawText: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** "me equivoqué es 17", "perdón es 186550 km" durante confirmación pendiente. */
+function parseInlineNumericCorrection(rawText: string): number | undefined {
+  const t = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const m = t.match(
+    /\b(?:es|era|son|eran|fue|fueron)\s+(\d{1,8}(?:[.,]\d{1,2})?)\s*(?:km\.?|kms?\.?|hs?\.?|horas?)?\b/,
+  );
+  if (!m) return undefined;
+  const n = Number(m[1].replace(",", "."));
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function parseNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const n = Number(value.replace(/\./g, "").replace(",", "."));
@@ -267,8 +283,8 @@ function resolveHorometroForWara(opts: {
  * (sí, dale, ok, listo, correcto, etc.). No exige mayúsculas ni la palabra exacta.
  */
 function isConfirmed(value: string | undefined): boolean {
-  if (looksLikeConversationAcknowledgement(value)) return false;
   if (looksLikeBriefConfirmation(value)) return true;
+  if (looksLikeConversationAcknowledgement(value)) return false;
   if (!value?.trim()) return false;
   const t = value
     .trim()
@@ -839,7 +855,7 @@ export async function POST(req: NextRequest) {
       : hasLiveOdometerPendingAction &&
         (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload);
   const bareNumericAmendmentValue = pendingOdoConfirm
-    ? parseBareNumericPendingAmendment(rawText)
+    ? (parseBareNumericPendingAmendment(rawText) ?? parseInlineNumericCorrection(rawText))
     : undefined;
   const amendsPendingOdoConfirm =
     pendingOdoConfirm &&
@@ -1176,12 +1192,18 @@ export async function POST(req: NextRequest) {
   if (confirmed) {
     const pendingConfirm = await getPendingAction(prisma, rawPhone);
     const payload = pendingConfirm?.type === "odometro" ? pendingConfirm.payload : undefined;
+    const summaryOdometro = extractOdometroFromOdometerSummary(flowThreadText);
+    const summaryHorometro = extractHorometroFromOdometerSummary(flowThreadText);
     if (payload) {
       if (payload.patente) patente = normalizePlate(String(payload.patente));
-      if (typeof payload.horometro === "number" && Number.isFinite(payload.horometro)) {
+      if (typeof summaryHorometro === "number" && Number.isFinite(summaryHorometro)) {
+        horometro = summaryHorometro;
+      } else if (typeof payload.horometro === "number" && Number.isFinite(payload.horometro)) {
         horometro = payload.horometro as number;
       }
-      if (typeof payload.odometro === "number" && Number.isFinite(payload.odometro)) {
+      if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
+        odometro = summaryOdometro;
+      } else if (typeof payload.odometro === "number" && Number.isFinite(payload.odometro)) {
         odometro = payload.odometro as number;
       }
       if (typeof payload.fecha === "string" && payload.fecha.trim()) {
@@ -1192,6 +1214,12 @@ export async function POST(req: NextRequest) {
     } else if (effectivePendingOdoConfirm) {
       const summaryPlate = extractPlateFromOdometerSummary(flowThreadText);
       if (summaryPlate) patente = normalizePlate(summaryPlate);
+      if (typeof summaryHorometro === "number" && Number.isFinite(summaryHorometro)) {
+        horometro = summaryHorometro;
+      }
+      if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
+        odometro = summaryOdometro;
+      }
     }
   }
 

@@ -1001,6 +1001,14 @@ export function looksLikeOdometerPendingDataAmendment(text: string | undefined |
   // resolveOdometerHorometerFields ya interpreta bien este caso con el contexto del
   // tramite activo — el problema era que nunca llegaba a ejecutarse.
   if (/\bno\b,?\s+(?:es|era|son|eran|fue|fueron)\b.{0,6}\d/.test(t)) return true;
+  // Bug real, producción 2026-07-29: "Perdón me equivoqué es 17" corrigiendo el horómetro
+  // propuesto no matcheaba ningún patrón — el resumen nuevo mostraba 17 pero al
+  // confirmar se registraba el valor viejo del pendingAction (15).
+  if (/\bme\s+(equivoqu|equivoco|confund[ií])/.test(t) && /\d/.test(raw)) return true;
+  if (/\b(?:perdon|disculp\w*|error)\b/.test(t) && /\b(?:es|era)\b.{0,8}\d/.test(t)) return true;
+  if (/\b(?:es|era|son|eran|fue|fueron)\b\s+\d{1,8}(?:[.,]\d{1,2})?\s*(?:km|hs|horas)?\b/.test(t)) {
+    return true;
+  }
   return false;
 }
 
@@ -1204,6 +1212,34 @@ export function extractPlateFromOdometerSummary(text: string): string | undefine
   for (let i = matches.length - 1; i >= 0; i--) {
     const plate = normalizePlate(matches[i][1]);
     if (plate && !isExamplePlate(plate)) return plate;
+  }
+  return undefined;
+}
+
+function parseSummaryReading(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const n = Number(String(raw).replace(/\./g, "").replace(/\s+/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Odómetro del último bloque "Voy a registrar:" (resumen más reciente del hilo). */
+export function extractOdometroFromOdometerSummary(text: string): number | undefined {
+  const tail = text.slice(Math.max(0, text.lastIndexOf("voy a registrar")));
+  const matches = [...tail.matchAll(/od[oó]metro[^\n:]*[:\-]\s*([\d.\s,]+)\s*(?:km)?/gi)];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const n = parseSummaryReading(matches[i][1]);
+    if (typeof n === "number") return n;
+  }
+  return undefined;
+}
+
+/** Horómetro del último bloque "Voy a registrar:" (resumen más reciente del hilo). */
+export function extractHorometroFromOdometerSummary(text: string): number | undefined {
+  const tail = text.slice(Math.max(0, text.lastIndexOf("voy a registrar")));
+  const matches = [...tail.matchAll(/hor[oó]metro[^\n:]*[:\-]\s*([\d.\s,]+)\s*(?:h|hs|horas)?/gi)];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const n = parseSummaryReading(matches[i][1]);
+    if (typeof n === "number") return n;
   }
   return undefined;
 }

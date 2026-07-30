@@ -13,8 +13,11 @@ import {
   formatPlateWithSpaces,
   hasPendingMaintenancePlateRequest,
   isBarePlatePrefixHint,
+  looksLikeBriefConfirmation,
   threadTextSinceCompanySelection,
 } from "@/lib/wara";
+import { getPendingAction } from "@/lib/pendingAction";
+import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
@@ -659,6 +662,15 @@ export async function customerRegisteredContextResponse(
         ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
         : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
     }
+  } else if (
+    selectionText &&
+    looksLikeBriefConfirmation(selectionText) &&
+    (resolvePendingConfirmationExecutor(scopedThreadText || fullThreadText, selectionText) ||
+      (await getPendingAction(prisma, trimmed))?.payload)
+  ) {
+    // "Perfecto", "listo", "dale" con confirmación pendiente → ejecutor operativo, no cierre social.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (
     selectionText &&
     lastTicket &&

@@ -22,6 +22,7 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
 } from "../src/lib/waraApi.ts";
+import { looksLikeBriefConfirmation, looksLikeOdometerPendingDataAmendment, extractHorometroFromOdometerSummary } from "../src/lib/wara.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -86,6 +87,29 @@ for (const text of thanksWithNewTramite) {
     `looksLikeConversationAcknowledgement("${text}") === false (sigue con trámite nuevo)`,
   );
 }
+
+console.log("\n— Bug 2026-07-29: 'Perfecto' confirma trámite, no es cierre social —");
+assert(looksLikeBriefConfirmation("Perfecto") === true, "Perfecto es confirmación breve");
+assert(
+  looksLikeConversationAcknowledgement("Perfecto") === true,
+  "Perfecto sigue siendo ack social cuando NO hay trámite (comportamiento previo)",
+);
+const confirmThread = [
+  "Voy a registrar:",
+  "• Patente: MYQ 693",
+  "• Odómetro: 167446 km",
+  "Si está correcto, respondé CONFIRMO para registrarlo en Wara.",
+].join("\n");
+assert(
+  extractHorometroFromOdometerSummary(
+    "Voy a registrar:\n• Patente: MYQ 693\n• Horómetro: 15 h\nVoy a registrar:\n• Patente: MYQ 693\n• Horómetro: 17 h",
+  ) === 17,
+  "extractHorometroFromOdometerSummary toma el último resumen (17, no 15)",
+);
+assert(
+  looksLikeOdometerPendingDataAmendment("Perdón me equivoqué es 17") === true,
+  "me equivoqué es 17 es enmienda de confirmación pendiente",
+);
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
