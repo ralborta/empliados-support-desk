@@ -429,11 +429,33 @@ export function threadOdometerRegistrationCompleted(threadText: string): boolean
   return true;
 }
 
+function normalizedOdometerTail(threadText: string): string {
+  return threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+/** Confirmación parafraseada por el agente IA (sin plantilla "Voy a registrar:"). */
+export function threadHasAgentStyleOdometerConfirmPending(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
+  const tail = normalizedOdometerTail(threadText);
+  return (
+    (/\bconfirm[aá]s?\s+que\s+estos\s+datos\b/.test(tail) ||
+      /\bdatos\s+son\s+correctos\s+para\s+proceder\b/.test(tail)) &&
+    /\b(od[oó]metro|hor[oó]metro)\b/.test(tail) &&
+    /\d{4,}/.test(tail)
+  );
+}
+
 /** Resumen de odómetro pendiente de confirmación (ChatPDF o backend). */
 export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
+  if (threadHasAgentStyleOdometerConfirmPending(threadText)) return true;
   // Bug real, producción 2026-07-28: tras confirmar patente incorrecta ("Voy a
   // registrar: Patente LWK 7902...respondé CONFIRMO"), el cliente corrigió la unidad
   // ("no para la unidad HEJ") y el bot volvió a preguntar el valor ("Perfecto, tomo
@@ -692,12 +714,16 @@ export function threadAwaitingOdometerConfirmDetails(threadText: string): boolea
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   return (
+    threadHasAgentStyleOdometerConfirmPending(threadText) ||
     /\b(confirm[aá]r|confirmes|confirmame|confirmar)\b.{0,100}\b(od[oó]metro|kilometraje|valor)\b/.test(
       tail,
     ) ||
-    /\b(nuevo valor del od[oó]metro es|el od[oó]metro es)\b.{0,50}\d/.test(tail) ||
+    /\b(nuevo valor del od[oó]metro es|el od[oó]metro es|el nuevo valor es|nuevo valor es)\b.{0,50}\d/.test(
+      tail,
+    ) ||
     /\b(fecha y hora de la lectura|ten[eé]s una fecha y hora)\b/.test(tail) ||
-    /\basumimos que es hoy\b/.test(tail)
+    /\basumimos que es hoy\b/.test(tail) ||
+    /\bpara registrar el cambio de od[oó]metro\b.{0,220}\bconfirm[aá]s?\b/.test(tail)
   );
 }
 
@@ -1268,7 +1294,7 @@ export function extractLastPlateFromThread(text: string): string | null {
 export function extractPlateFromOdometerSummary(text: string): string | undefined {
   const matches = [
     ...(text || "").matchAll(
-      /patente[^\n:]*[:\-]\s*([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})/gi,
+      /(?:patente|unidad con patente)\s*[:\-]?\s*([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})/gi,
     ),
   ];
   for (let i = matches.length - 1; i >= 0; i--) {
@@ -1286,11 +1312,29 @@ function parseSummaryReading(raw: string | undefined): number | undefined {
 
 /** Odómetro del último bloque "Voy a registrar:" (resumen más reciente del hilo). */
 export function extractOdometroFromOdometerSummary(text: string): number | undefined {
-  const tail = text.slice(Math.max(0, text.lastIndexOf("voy a registrar")));
+  const voyIdx = text.toLowerCase().lastIndexOf("voy a registrar");
+  const tail = voyIdx >= 0 ? text.slice(voyIdx) : text.slice(-2500);
   const matches = [...tail.matchAll(/od[oó]metro[^\n:]*[:\-]\s*([\d.\s,]+)\s*(?:km)?/gi)];
   for (let i = matches.length - 1; i >= 0; i--) {
     const n = parseSummaryReading(matches[i][1]);
     if (typeof n === "number") return n;
+  }
+  return extractOdometroFromOdometerContext(text);
+}
+
+/** Km parafraseados por el agente ("el nuevo valor es 123690 km"). */
+export function extractOdometroFromOdometerContext(text: string): number | undefined {
+  const tail = text.slice(-2500);
+  const patterns = [
+    /(?:nuevo valor(?: del od[oó]metro)?|el od[oó]metro es|valor del od[oó]metro es|el nuevo valor es)\s*(?:de\s+)?([\d.\s,]+)\s*(?:km)?/gi,
+    /(\d[\d.\s,]{2,})\s*km\b/gi,
+  ];
+  for (const re of patterns) {
+    const matches = [...tail.matchAll(re)];
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const n = parseSummaryReading(matches[i][1]);
+      if (typeof n === "number" && n >= 100) return n;
+    }
   }
   return undefined;
 }
@@ -1659,11 +1703,21 @@ export function looksLikePostAdvisorCaseSupplement(
   return false;
 }
 
+function stripLeadingAffirmationPrefix(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^ahora\s+(si|sí)\s*,?\s*/i, "")
+    .replace(/^(bueno|ok|dale)\s+,?\s*/i, "")
+    .trim();
+}
+
 /** Aceptación breve tipo CONFIRMO / sí / dale / ok. */
 export function looksLikeBriefConfirmation(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
-  const t = raw
+  const stripped = stripLeadingAffirmationPrefix(raw);
+  const t = stripped
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -1686,11 +1740,15 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
       "correcto",
       "deacuerdo",
       "perfecto",
+      "ahorasi",
+      "ahorasiperfecto",
+      "sperfecto",
+      "siperfecto",
     ]).has(t)
   ) {
     return true;
   }
-  const norm = raw
+  const norm = stripped
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
@@ -1717,7 +1775,10 @@ export function looksLikePendingTramiteAffirmation(text: string | undefined | nu
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  if (!/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|de acuerdo)\b/.test(norm)) {
+  if (
+    !/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|de acuerdo)\b/.test(norm) &&
+    !/^ahora\s+(si|sí)\b/.test(norm)
+  ) {
     return false;
   }
   if (/\b(quiero|necesito|puedo|podemos|vamos a|ahora puedo|tambien|tambi[eé]n)\b/.test(norm)) {

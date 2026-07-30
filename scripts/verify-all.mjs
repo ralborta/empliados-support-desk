@@ -73,6 +73,7 @@ const SUITES = [
   "verify-unit-status-confirm-context.mjs",
   "verify-odometer-si-fecha-confirm.mjs",
   "verify-calendar-context-fechas.mjs",
+  "verify-odometer-agent-confirm.mjs",
   "verify-platform-access-routing.mjs",
   "verify-no-proactive-case-number.mjs",
   "verify-bot-reply-humanizer.mjs",

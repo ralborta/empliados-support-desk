@@ -8,7 +8,7 @@ import {
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
 import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
-import { looksLikeRelativeDateClarificationQuestion, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
+import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
 import { getPendingAction } from "@/lib/pendingAction";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
@@ -721,11 +721,16 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       responseMessage = buildCompanyStatusReply(activeCompany, contacts.length, waraContactsText);
     }
-  } else if (selectionText && looksLikeRelativeDateClarificationQuestion(selectionText)) {
-    // "¿Qué fecha era ayer?" — respuesta determinista con calendario real (AR), sin
-    // dejar que el agente IA alucine fechas de entrenamiento (bug real, 2026-07-29).
+  } else if (
+    selectionText &&
+    (looksLikeRelativeDateClarificationQuestion(selectionText) ||
+      looksLikeRelativeDateChallenge(selectionText))
+  ) {
+    // Preguntas/desafíos sobre hoy/ayer — respuesta determinista (AR), sin alucinar fechas.
     nextFlow = "reply";
-    const dateReply = resolveRelativeDateClarificationReply(selectionText);
+    const dateReply =
+      resolveRelativeDateClarificationReply(selectionText) ??
+      resolveRelativeDateChallengeReply(selectionText);
     if (dateReply && !responseMessage) {
       const pending = await getPendingAction(prisma, trimmed);
       const inOdometerFlow =

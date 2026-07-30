@@ -10,8 +10,10 @@
 import assert from "node:assert";
 import {
   getCalendarContext,
+  looksLikeRelativeDateChallenge,
   looksLikeRelativeDateClarificationQuestion,
   parseFechaFromText,
+  resolveRelativeDateChallengeReply,
   resolveRelativeDateClarificationReply,
 } from "../src/lib/odometroFecha.ts";
 
@@ -84,5 +86,18 @@ check("reply ayer incluye año correcto", replyAyer?.includes(String(yesterday.y
 
 const replyHoy = resolveRelativeDateClarificationReply("que fecha es hoy", TZ);
 check("reply hoy incluye todayDisplay", replyHoy?.includes(ctx.todayDisplay.split("/")[0]) === true);
+
+console.log("\n— Desafío de fecha (sin IA) —");
+check(
+  'detecta "estas seguro que esa era la fecha??"',
+  looksLikeRelativeDateChallenge("estas seguro que esa era la fecha??") === true,
+);
+check(
+  'detecta "No esa no era la fecha de ayer confirmalo"',
+  looksLikeRelativeDateChallenge("No esa no era la fecha de ayer confirmalo") === true,
+);
+const challengeReply = resolveRelativeDateChallengeReply("estas seguro que esa era la fecha??", TZ);
+check("challenge reply ayer correcto", challengeReply?.includes(String(yesterday.year)) === true);
+check("challenge reply NO 2023", !/\b2023\b/.test(challengeReply ?? ""));
 
 console.log(`\n✅ ${passed} checks pasaron.`);

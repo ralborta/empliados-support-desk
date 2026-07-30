@@ -330,3 +330,41 @@ export function resolveRelativeDateClarificationReply(
   }
   return null;
 }
+
+/** "¿Estás seguro que esa era la fecha?" / "no esa no era ayer confirmalo" */
+export function looksLikeRelativeDateChallenge(text: string | undefined | null): boolean {
+  const n = (text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!n || n.length > 160) return false;
+  return (
+    /\b(seguro|segura|est[aá]s?\s+seguro)\b.{0,50}\b(fecha|dia|d[ií]a|ayer)\b/.test(n) ||
+    /\b(no|esa no|esa no era)\b.{0,45}\b(fecha|ayer|dia|d[ií]a)\b/.test(n) ||
+    /\b(fecha|ayer)\b.{0,40}\b(confirmalo|confirm[aá]|verifica|verificar|revisa)\b/.test(n) ||
+    /\bconfirmalo\b.{0,25}\b(fecha|ayer)\b/.test(n)
+  );
+}
+
+export function resolveRelativeDateChallengeReply(
+  text: string | undefined | null,
+  timezone?: string,
+): string | null {
+  if (!looksLikeRelativeDateChallenge(text)) return null;
+  const ctx = getCalendarContext(timezone);
+  const n = (text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\banteayer\b/.test(n)) {
+    return `Anteayer fue ${ctx.anteayerDisplayLong} (${ctx.anteayerDisplay}).`;
+  }
+  if (/\bayer\b/.test(n) || /\bconfirmalo\b/.test(n) || /\b(fecha|dia|d[ií]a)\b/.test(n)) {
+    return `Ayer fue ${ctx.yesterdayDisplayLong} (${ctx.yesterdayDisplay}).`;
+  }
+  if (/\bhoy\b/.test(n)) {
+    return `Hoy es ${ctx.todayDisplayLong} (${ctx.todayDisplay}).`;
+  }
+  return `Ayer fue ${ctx.yesterdayDisplayLong} (${ctx.yesterdayDisplay}).`;
+}

@@ -1222,13 +1222,24 @@ export async function POST(req: NextRequest) {
         fechaDisplay = formatFechaDisplay(fecha);
       }
     } else if (effectivePendingOdoConfirm) {
-      const summaryPlate = extractPlateFromOdometerSummary(flowThreadText);
+      const summaryPlate =
+        extractPlateFromOdometerSummary(flowThreadText) ??
+        extractLastPlateFromThread(flowThreadText);
       if (summaryPlate) patente = normalizePlate(summaryPlate);
       if (typeof summaryHorometro === "number" && Number.isFinite(summaryHorometro)) {
         horometro = summaryHorometro;
       }
-      if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
+      const contextOdometro = extractOdometroFromOdometerSummary(flowThreadText);
+      if (typeof contextOdometro === "number" && Number.isFinite(contextOdometro)) {
+        odometro = contextOdometro;
+      } else if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
         odometro = summaryOdometro;
+      }
+      const scopedFecha = parseFechaFromText(odometerScopedThread, customerTz);
+      if (scopedFecha) {
+        fechaExplicita = scopedFecha;
+        fecha = fechaWara(fechaExplicita, customerTz);
+        fechaDisplay = formatFechaDisplay(fecha);
       }
     }
     if (clientExplicitFechaThisTurn && fechaFromMessage) {

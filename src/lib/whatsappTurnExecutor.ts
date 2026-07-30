@@ -222,6 +222,22 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Confirmación en flujo de odómetro activo: ir directo al executor (no agente IA),
+  // aunque el resumen haya sido parafraseado sin "Voy a registrar:" ni pendingAction en DB.
+  if (
+    (looksLikePendingTramiteAffirmation(selectionText) ||
+      looksLikeBriefConfirmation(selectionText)) &&
+    threadHasActiveOdometerFlow(threadCtx.classificationThread) &&
+    !threadOdometerRegistrationCompleted(threadCtx.classificationThread)
+  ) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
   const agentResult = await runAtilioAgentTurn({
     rawPhone,
     selectionText,

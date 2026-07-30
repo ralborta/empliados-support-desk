@@ -519,11 +519,17 @@ export function extractExplicitCompanyMention(
 
 function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean {
   if (looksLikeConversationAcknowledgement(text)) return false;
-  const t = normCompanyToken(text ?? "").replace(/[^a-z]/g, "");
+  const stripped = String(text ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^ahora\s+(si|sí)\s*,?\s*/i, "")
+    .toLowerCase();
+  const t = stripped.replace(/[^a-z]/g, "");
   if (!t) return false;
   if (t.startsWith("conf")) return true;
   if (/\b(gracias|chau|chao|nosvemos|denada)\b/.test(t)) return false;
-  return new Set(["si", "dale"]).has(t);
+  return new Set(["si", "dale", "perfecto", "listo", "ok", "confirmo"]).has(t);
 }
 
 /**
