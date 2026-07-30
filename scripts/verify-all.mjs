@@ -88,6 +88,7 @@ const SUITES = [
   "verify-certificate-prefix-clarification-continuity.mjs",
   "verify-maintenance-vague-unit-reference.mjs",
   "verify-maintenance-typo-keyword.mjs",
+  "verify-maintenance-ost-prefix.mjs",
   "simulate-maintenance-plate-flow.mjs",
   "snapshot-turn-classification.mjs",
 ];

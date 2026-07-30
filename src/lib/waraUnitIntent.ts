@@ -65,8 +65,8 @@ export function buildFleetUnitNotFoundMessage(opts: {
 
   if (prefix) {
     return (
-      `No hay ninguna unidad en la flota de ${company} con patente que empiece con ${prefix}. ` +
-      `Ese prefijo no está en tu flota. Pasame la matrícula completa (ej. NKL 952) o escribí «listado de mis unidades».`
+      `No encontré ninguna unidad en ${company} con patente que empiece con ${prefix}. ` +
+      `¿Podés pasarme la matrícula completa (ej. OST 223)? También podés escribir «listado de mis unidades».`
     );
   }
 
@@ -158,13 +158,15 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   );
 }
 
-/** Respuesta de patente/prefijo tras pedido de mantenimiento (no un trámite nuevo). */
+/** Respuesta de patente/prefijo/marca tras pedido de mantenimiento (no un trámite nuevo). */
 export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   const text = rawText.trim();
   if (!text) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
+  if (extractPlatePrefixFromMessage(text) || isBarePlatePrefixHint(text)) return true;
+  if (looksLikeVehicleBrandOrUnitSearch(text)) return true;
   // Bug real, producción 2026-07-28: tras "necesito la patente de la unidad" el
   // cliente respondió "para la misma unidad" (referencia vaga a la última unidad
   // resuelta en el hilo, ej. HEJ) — no es patente/prefijo/nombre explícito, y supera
@@ -1231,7 +1233,7 @@ function resolveWithRules(
         intent: "need_clarification",
         searchTerms: [],
         candidatePlates,
-        clarificationQuestion: `Encontré ${prefixMatches.length} unidades que empiezan con ${prefixHint} (${labels}). Decime cuál querés consultar (patente exacta).`,
+        clarificationQuestion: `Encontré ${prefixMatches.length} unidades que empiezan con ${prefixHint} (${labels}). ¿Cuál querés? Decime la patente completa.`,
         source: "rules",
       };
     }

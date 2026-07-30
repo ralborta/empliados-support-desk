@@ -6,7 +6,18 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectPlate, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, looksLikeBriefConfirmation, normalizePlate } from "@/lib/wara";
+import {
+  detectLoosePlate,
+  detectPlate,
+  extractPlatePrefixFromMessage,
+  formatPlateWithSpaces,
+  hasPendingMaintenancePlateRequest,
+  hasPendingMantenimientoConfirmation,
+  isBarePlatePrefixHint,
+  isPlausibleVehiclePlate,
+  looksLikeBriefConfirmation,
+  normalizePlate,
+} from "@/lib/wara";
 import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 import { setActiveUnit } from "@/lib/activeUnit";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
@@ -22,6 +33,7 @@ import {
   looksLikeOperationalMaintenanceIntent,
   looksLikeShortAffirmative,
   looksLikeTurnoOrAgendaQuestion,
+  looksLikeVehicleBrandOrUnitSearch,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   resolveWaraSessionByPhone,
@@ -614,6 +626,11 @@ export async function POST(req: NextRequest) {
   }
 
   const plateSelectionReply = isMaintenancePlateSelectionMessage(text);
+  const prefixOrBrandSelection =
+    plateSelectionReply &&
+    (extractPlatePrefixFromMessage(text) ||
+      isBarePlatePrefixHint(text) ||
+      (looksLikeVehicleBrandOrUnitSearch(text) && !detectLoosePlate(text)));
   const maintenanceTramiteStart =
     looksLikeOperationalMaintenanceIntent(text, threadText) &&
     !plateSelectionReply &&
@@ -624,8 +641,8 @@ export async function POST(req: NextRequest) {
   if (maintenanceTramiteStart) {
     const preventivo = /preventiv/i.test(text);
     const message = preventivo
-      ? "Para programar mantenimiento preventivo necesito la patente de la unidad (por ejemplo AD427MC o ABC123). Si querés, agregá también la prioridad."
-      : "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
+      ? "Para programar mantenimiento preventivo necesito la patente de la unidad (podés usar guiones, ej. OST 223). Si solo te acordás de parte, decime con qué letras empieza o la marca. Si querés, agregá también la prioridad."
+      : "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123). Si no la tenés completa, decime la marca o con qué letras empieza, junto con un breve detalle y, si querés, la prioridad.";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
       stage: "needs_plate",
@@ -649,19 +666,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const plateFromMessage = detectLoosePlate(text) ?? detectPlate(text);
   let plate = normalizePlate(
     parsed.data.patente ??
       parsed.data.plate ??
       (confirmed && summary.patente ? summary.patente : undefined) ??
-      (pendingMaintConfirm && confirmed && summary.patente
-        ? summary.patente
-        : undefined) ??
-      detectPlate(text) ??
-      (plateSelectionReply && (pendingMaintConfirm || pendingPlateRequest)
-        ? summary.patente ?? detectPlate(threadText)
-        : undefined) ??
-      undefined
+      (pendingMaintConfirm && confirmed && summary.patente ? summary.patente : undefined) ??
+      (plateFromMessage && isPlausibleVehiclePlate(plateFromMessage) ? plateFromMessage : undefined) ??
+      undefined,
   );
+
+  // Prefijo/marca suelta ("La OST", "la Nissan"): resolver contra flota — nunca
+  // detectPlate(threadText), que tomaba AD427MC del ejemplo del propio bot.
+  if (prefixOrBrandSelection) {
+    plate = null;
+  }
 
   if (!plate) {
     if (looksLikeMaintenanceExplorationRequest(text) || looksLikeMaintenanceInfoRequest(text)) {
@@ -691,7 +710,7 @@ export async function POST(req: NextRequest) {
     if (looksLikeOperationalMaintenanceIntent(text, threadText) && !plateSelection) {
       const preventivo = /preventiv/i.test(text);
       const message = preventivo
-        ? "Para programar mantenimiento preventivo necesito la patente de la unidad (por ejemplo AD427MC o ABC123). Si querés, agregá también la prioridad."
+        ? "Para programar mantenimiento preventivo necesito la patente de la unidad (podés usar guiones, ej. OST 223). Si solo te acordás de parte, decime con qué letras empieza o la marca. Si querés, agregá también la prioridad."
         : "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_mantenimiento_operativo",
@@ -716,7 +735,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (plateSelection) {
+    if (plateSelection || prefixOrBrandSelection) {
       const fleetPlate = await resolvePlateWithWaraFleet(
         prisma,
         rawPhone,
@@ -786,7 +805,7 @@ export async function POST(req: NextRequest) {
     if (looksLikeOperationalMaintenanceIntent(text, threadText)) {
       const preventivo = /preventiv/i.test(text);
       const message = preventivo
-        ? "Para programar mantenimiento preventivo necesito la patente de la unidad (por ejemplo AD427MC o ABC123). Si querés, agregá también la prioridad."
+        ? "Para programar mantenimiento preventivo necesito la patente de la unidad (podés usar guiones, ej. OST 223). Si solo te acordás de parte, decime con qué letras empieza o la marca. Si querés, agregá también la prioridad."
         : "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_mantenimiento_operativo",
@@ -831,7 +850,7 @@ export async function POST(req: NextRequest) {
       );
     }
     const message =
-      "No pude reconocer una patente completa. Enviamela con formato AA123BB o ABC123 junto con el detalle y la prioridad.";
+      "No llegué a identificar la unidad todavía. Pasame la patente completa (ej. OST 223), decime con qué letras empieza, o la marca — también podés escribir «listado de mis unidades».";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
       errorStage: "missing_plate",

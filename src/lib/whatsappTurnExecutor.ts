@@ -25,11 +25,13 @@ import {
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
   detectLoosePlate,
+  hasPendingMaintenancePlateRequest,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
   looksLikeCertificateKeyword,
   certificateFlowState,
 } from "@/lib/wara";
+import { isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 import {
   buildFleetUnitNotFoundMessage,
   looksLikeFleetUnitSearchInput,
@@ -235,6 +237,19 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
+  // Selección de patente/prefijo/marca en mantenimiento pendiente → executor, no agente.
+  if (
+    hasPendingMaintenancePlateRequest(threadCtx.classificationThread) &&
+    isMaintenancePlateSelectionMessage(selectionText)
+  ) {
+    const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor: "mantenimiento", ok: execOk };
     }
   }
 

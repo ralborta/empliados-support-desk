@@ -1251,8 +1251,10 @@ export function lineLooksLikeBotMissingPlatePrompt(line: string): boolean {
   return (
     (/para registrar el cambio de odometro necesito la patente/.test(norm) ||
       (/necesito la patente de la unidad/.test(norm) &&
-        /odometro|horometro|kilometraje/.test(norm))) &&
-    /(ej\.|ejemplo|marca\/nombre)/.test(norm)
+        /odometro|horometro|kilometraje/.test(norm)) ||
+      /para programar mantenimiento preventivo necesito la patente/.test(norm) ||
+      /para registrar el mantenimiento necesito la patente/.test(norm)) &&
+    /(ej\.|ejemplo|marca\/nombre|por ejemplo)/.test(norm)
   );
 }
 
