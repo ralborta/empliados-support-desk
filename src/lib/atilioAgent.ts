@@ -18,6 +18,7 @@ import {
   type AgentToolName,
 } from "@/lib/atilioAgentTools";
 import { listBotPromptModules } from "@/lib/botPromptStore";
+import { formatCalendarContextBlock } from "@/lib/odometroFecha";
 
 export const ATILIO_AGENT_TIMEOUT_MS = 28_000;
 const MAX_TOOL_ROUNDS = 2;
@@ -41,6 +42,7 @@ TU TRABAJO EN CADA TURNO:
 
 REGLAS ABSOLUTAS:
 - Nunca inventes patentes, km, horas, fechas, estados técnicos ni números de caso/ticket.
+- Para "hoy", "ayer" o "anteayer" usá ÚNICAMENTE las fechas del bloque FECHA DE REFERENCIA — nunca adivines ni uses fechas de tu entrenamiento.
 - Si la herramienta devolvió backend_message con datos, esos números y patentes deben aparecer EXACTAMENTE igual en tu respuesta.
 - Si hay trámite pendiente de confirmación (pending_action), y el cliente dice CONFIRMO, Confirmo, sí, dale, esa está bien, si esa, está bien o similar, SIEMPRE llamá la herramienta del trámite activo — nunca vuelvas a pedir patente ni repitas el resumen sin ejecutar.
 - Si el cliente dice que tiene un PROBLEMA con una unidad pero NO especifica cuál (solo marca/nombre), NO tires diagnóstico GPS todavía: preguntá qué ve mal (reporte ahora, recorrido/historial, ignición, etc.).
@@ -151,6 +153,9 @@ export async function runAtilioAgentTurn(
 
   const session = await loadAgentSessionContext(input.rawPhone);
   const userBlock = [
+    "=== FECHA DE REFERENCIA (obligatoria para hoy/ayer/anteayer) ===",
+    formatCalendarContextBlock("America/Argentina/Buenos_Aires"),
+    "",
     "=== CONTEXTO DE SESIÓN ===",
     buildSessionContextBlock({
       customerName: input.customerName ?? session.customerName,

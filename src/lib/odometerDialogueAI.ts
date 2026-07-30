@@ -14,6 +14,7 @@
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
+import { formatCalendarContextBlock } from "@/lib/odometroFecha";
 
 export function isOdometerDialogueAiEnabled(): boolean {
   const raw = process.env.WARA_DIALOGUE_AI_ODOMETRO?.trim().toLowerCase();
@@ -61,6 +62,7 @@ Reglas ABSOLUTAS (no negociables, tu respuesta se descarta si las rompés):
   contener literalmente la palabra "CONFIRMO" en mayúsculas.
 - Nunca inventes un número de caso/ticket.
 - Nunca prometas algo que no esté en los datos que te pasaron.
+- Para "hoy/ayer/anteayer" usá SOLO el bloque fecha_referencia — nunca otra fecha.
 
 Devolvé SOLO el texto final del mensaje de WhatsApp, sin comillas ni explicaciones.`;
 
@@ -95,6 +97,9 @@ export async function composeOdometerDialogueReply(req: OdometerDialogueRequest)
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const userContent = [
+      "fecha_referencia:",
+      formatCalendarContextBlock("America/Argentina/Buenos_Aires"),
+      "",
       `situacion: ${req.situation}`,
       `guia_situacion: ${SITUATION_GUIDANCE[req.situation]}`,
       req.fieldHint

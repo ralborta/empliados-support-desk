@@ -7,7 +7,8 @@ import {
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { looksLikeRelativeDateClarificationQuestion, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
 import { getPendingAction } from "@/lib/pendingAction";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
@@ -719,6 +720,20 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
     if (!responseMessage) {
       responseMessage = buildCompanyStatusReply(activeCompany, contacts.length, waraContactsText);
+    }
+  } else if (selectionText && looksLikeRelativeDateClarificationQuestion(selectionText)) {
+    // "¿Qué fecha era ayer?" — respuesta determinista con calendario real (AR), sin
+    // dejar que el agente IA alucine fechas de entrenamiento (bug real, 2026-07-29).
+    nextFlow = "reply";
+    const dateReply = resolveRelativeDateClarificationReply(selectionText);
+    if (dateReply && !responseMessage) {
+      const pending = await getPendingAction(prisma, trimmed);
+      const inOdometerFlow =
+        pending?.type === "odometro" ||
+        threadHasActiveOdometerFlow(scopedThreadText || fullThreadText);
+      responseMessage = inOdometerFlow
+        ? `${dateReply} Si veníamos con un cambio de odómetro, decime CONFIRMO cuando quieras registrarlo.`
+        : dateReply;
     }
   } else if (explicitCompanyMentionWhilePending) {
     // "la empresa es el cacique, la unidad es la AF061DO": declaración explícita de

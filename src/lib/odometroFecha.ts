@@ -225,3 +225,108 @@ export function formatFechaDisplay(fecha: string | undefined | null): string | n
   const [, y, mo, d, h, mi] = m;
   return `${d}/${mo}/${y} ${h}:${mi}`;
 }
+
+export type CalendarContext = {
+  timezone: string;
+  todayIso: string;
+  todayDisplay: string;
+  todayDisplayLong: string;
+  yesterdayIso: string;
+  yesterdayDisplay: string;
+  yesterdayDisplayLong: string;
+  anteayerIso: string;
+  anteayerDisplay: string;
+  anteayerDisplayLong: string;
+};
+
+function calendarPartsToIso(parts: { year: number; month: number; day: number }): string {
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function formatLongCalendarDate(
+  parts: { year: number; month: number; day: number },
+  timezone: string,
+): string {
+  const iso = calendarPartsToIso(parts);
+  try {
+    return new Intl.DateTimeFormat("es-AR", {
+      timeZone: timezone,
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(new Date(`${iso}T12:00:00`));
+  } catch {
+    return formatFechaDisplay(`${iso}T00:00:00`) ?? iso;
+  }
+}
+
+/** Fechas de referencia para "hoy/ayer/anteayer" en la zona del cliente (no alucinar). */
+export function getCalendarContext(timezone?: string): CalendarContext {
+  const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
+  const today = todayPartsInTz(tz);
+  const yesterday = shiftCalendarDay(today, -1);
+  const anteayer = shiftCalendarDay(today, -2);
+  const todayIso = calendarPartsToIso(today);
+  const yesterdayIso = calendarPartsToIso(yesterday);
+  const anteayerIso = calendarPartsToIso(anteayer);
+  return {
+    timezone: tz,
+    todayIso,
+    todayDisplay: formatFechaDisplay(`${todayIso}T00:00:00`)?.split(" ")[0] ?? todayIso,
+    todayDisplayLong: formatLongCalendarDate(today, tz),
+    yesterdayIso,
+    yesterdayDisplay: formatFechaDisplay(`${yesterdayIso}T00:00:00`)?.split(" ")[0] ?? yesterdayIso,
+    yesterdayDisplayLong: formatLongCalendarDate(yesterday, tz),
+    anteayerIso,
+    anteayerDisplay: formatFechaDisplay(`${anteayerIso}T00:00:00`)?.split(" ")[0] ?? anteayerIso,
+    anteayerDisplayLong: formatLongCalendarDate(anteayer, tz),
+  };
+}
+
+export function formatCalendarContextBlock(timezone?: string): string {
+  const ctx = getCalendarContext(timezone);
+  return [
+    `zona_horaria: ${ctx.timezone}`,
+    `hoy: ${ctx.todayDisplayLong} (${ctx.todayDisplay})`,
+    `ayer: ${ctx.yesterdayDisplayLong} (${ctx.yesterdayDisplay})`,
+    `anteayer: ${ctx.anteayerDisplayLong} (${ctx.anteayerDisplay})`,
+    "Usá SOLO estas fechas para interpretar hoy/ayer/anteayer — nunca inventes otra.",
+  ].join("\n");
+}
+
+/** "¿Qué fecha era ayer?" / "q fecha es hoy" — respuesta determinista, sin IA. */
+export function looksLikeRelativeDateClarificationQuestion(text: string | undefined | null): boolean {
+  const n = (text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!n || n.length > 120) return false;
+  return (
+    /\b(que|q|cual)\s+fecha\b.{0,40}\b(era|es|fue|seria|ser[ií]a)\b.{0,25}\b(ayer|anteayer|hoy)\b/.test(n) ||
+    /\b(ayer|anteayer|hoy)\b.{0,40}\b(que|q|cual)\s+fecha\b/.test(n) ||
+    /\b(que|q|cual)\s+d[ií]a\b.{0,25}\b(era|es|fue)\b.{0,20}\b(ayer|anteayer|hoy)\b/.test(n)
+  );
+}
+
+export function resolveRelativeDateClarificationReply(
+  text: string | undefined | null,
+  timezone?: string,
+): string | null {
+  if (!looksLikeRelativeDateClarificationQuestion(text)) return null;
+  const ctx = getCalendarContext(timezone);
+  const n = (text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\banteayer\b/.test(n)) {
+    return `Anteayer fue ${ctx.anteayerDisplayLong} (${ctx.anteayerDisplay}).`;
+  }
+  if (/\bayer\b/.test(n)) {
+    return `Ayer fue ${ctx.yesterdayDisplayLong} (${ctx.yesterdayDisplay}).`;
+  }
+  if (/\bhoy\b/.test(n)) {
+    return `Hoy es ${ctx.todayDisplayLong} (${ctx.todayDisplay}).`;
+  }
+  return null;
+}
