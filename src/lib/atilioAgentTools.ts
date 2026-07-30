@@ -47,7 +47,7 @@ export const ATILIO_AGENT_TOOLS = [
     function: {
       name: "consultar_unidades",
       description:
-        "Consultar flota, listado, estado GPS/ignición en vivo, o buscar unidad por patente/marca. Si el cliente dice 'tengo un problema con X' sin detallar, la herramienta preguntará qué ve — NO asumas GPS. Para recorridos/historial de ayer usá guia_informativa o derivar si hace falta. NO usar para cambiar odómetro/horómetro.",
+        "Consultar flota, listado, estado GPS/ignición en vivo, o buscar unidad por patente/marca/prefijo. El backend resuelve contra la API con criterio (prefijo, nombre, patente); si hay ambigüedad devuelve hechos para que elijas o preguntes. Si el cliente describe un problema vago, primero escuchá — NO asumas GPS. NO usar para cambiar odómetro/horómetro.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -83,7 +83,7 @@ export const ATILIO_AGENT_TOOLS = [
     function: {
       name: "derivar_asesor_ticket",
       description:
-        "Derivar a asesor humano, abrir reclamo/ticket, soporte técnico, consultar estado de caso, cerrar conversación, o reportar falla/desfase de odómetro (problema técnico, no cambio de km).",
+        "Derivar a asesor humano, abrir reclamo/ticket, consultar/cerrar caso, soporte técnico, o reportar falla/desfase de odómetro (problema técnico, no cambio de km). Usar cuando el requerimiento lo pide explícitamente o cuando los hechos del backend ya generaron caso y hay que confirmarlo — no derivar de más ni evitar derivar cuando corresponde.",
       parameters: { type: "object", properties: {} },
     },
   },
