@@ -27,6 +27,8 @@ for (const msg of [
   "Necesito la lista de las unidades",
   "listado de mis unidades",
   "pasame el listado de unidades",
+  "Me pasas mi lista?",
+  "Pasame mi lista",
 ]) {
   check(`looksLikeUnitListRequest: "${msg.slice(0, 35)}"`, looksLikeUnitListRequest(msg) === true);
 }

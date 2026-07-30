@@ -536,7 +536,7 @@ function looksLikeUnitListRequest(rawText: string): boolean {
   if (detectPlate(rawText)) return false;
   // Nota: "norm" ya viene sin acentos (NFD + strip de diacríticos), así que alcanza con
   // matchear "mas" (sin tilde) para cubrir "más"/"mas" indistintamente.
-  return /\b(listado|lista de flota|lista flota|lista de unidad|lista de unidades|lista de las unidades|necesito la lista|la lista de las unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|p[aá]same la lista de flota|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma|mas unidades|otras unidades|mas opciones|ver mas unidades|dame mas unidades|mostrame mas unidades|mas camiones|mas lista|resto de la lista|el resto de la lista|toda la lista)\b/.test(
+  return /\b(listado|lista de flota|lista flota|lista de unidad|lista de unidades|lista de las unidades|necesito la lista|la lista de las unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|p[aá]same la lista de flota|me pasas la lista|me pasas (?:la|mi|mis|el|tu) list\w*|p[aá]same (?:la|mi|mis|el|tu) list\w*|dame (?:la|mi|mis|el|tu) list\w*|me mostr[aá]s (?:la|mi|mis) list\w*|quiero ver (?:mi|mis|la|tu) (?:lista|listado|flota)|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma|mas unidades|otras unidades|mas opciones|ver mas unidades|dame mas unidades|mostrame mas unidades|mas camiones|mas lista|resto de la lista|el resto de la lista|toda la lista)\b/.test(
     norm
   );
 }
@@ -549,7 +549,7 @@ export function threadHasRecentFleetListIntent(threadText: string): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   return (
-    /\b(listado|lista de flota|lista de unidades|pasame la lista|p[aá]same la lista|mis unidades|todas las unidades|ver toda la flota|necesito la lista)\b/.test(
+    /\b(listado|lista de flota|lista de unidades|pasame la lista|p[aá]same la lista|me pasas (?:la|mi|mis) list\w*|p[aá]same (?:la|mi|mis) list\w*|mis unidades|todas las unidades|ver toda la flota|necesito la lista)\b/.test(
       tail,
     ) || /\bten[eé]s \d+ unidades\b/.test(tail)
   );
@@ -561,9 +561,11 @@ function threadBotWronglyAskedPlateForList(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   return (
     /para poder pasarte la lista.*patente/.test(tail) ||
+    /para poder pasarte la lista de tus unidades/.test(tail) ||
     /lista de unidades.*indiques la patente/.test(tail) ||
     /listado de unidades.*patente completa/.test(tail) ||
-    /listado de mis unidades.*patente/.test(tail)
+    /listado de mis unidades.*patente/.test(tail) ||
+    (/pasame la matricula completa/.test(tail) && /lista de tus unidades/.test(tail))
   );
 }
 
