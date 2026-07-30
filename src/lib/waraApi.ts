@@ -862,18 +862,44 @@ export function threadHasRecentLiveUnitConsultIntent(threadText: string): boolea
   );
 }
 
+/** Reclamo administrativo/comercial — no es consulta de unidad en flota. */
+export function looksLikeNonFleetScopedProblem(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  return /\b(cuenta|factura|facturacion|acceso|login|usuario|clave|contraseña|password|plataforma|cobranza|abono|pago|contrato|comercial|administrativ|sistema wara|app wara)\b/.test(
+    t,
+  );
+}
+
+const VAGUE_UNIT_CONCERN_SIGNAL =
+  /\b(problema|problemas|tengo un drama|algo raro|no me cierra|no me anda|un tema|algo pasa|algo mal|me preocupa|no entiendo|que pasa|q pasa|que onda|q onda|una duda|una consulta|ayuda con|ayudame con|algo con|tengo drama|no me convence|no cuadra)\b/;
+
+const VAGUE_UNIT_ANCHOR =
+  /\b(unidad|vehiculo|auto|camion|camioneta|utilitario|patente|flota|movil|carro|pickup|furgon)\b/;
+
+function hasVagueUnitConcernSignal(text: string, norm: string): boolean {
+  if (VAGUE_UNIT_CONCERN_SIGNAL.test(norm)) return true;
+  const hasAnchor =
+    VAGUE_UNIT_ANCHOR.test(norm) ||
+    looksLikeVehicleBrandOrUnitSearch(text) ||
+    !!detectLoosePlate(text);
+  return hasAnchor && /\b(algo|raro|mal|drama|tema|preocupa|ayuda|duda|consulta)\b/.test(norm);
+}
+
 /**
- * "Tengo un problema con la Nissan" sin decir cuál — NO es consulta GPS concreta todavía.
- * Bug real, producción 2026-07-29: el bot resolvía la marca, tiraba estado GPS "detenida"
- * y cerraba sin escuchar al cliente.
+ * Problema con una unidad sin síntoma concreto — NO es consulta GPS/historial todavía.
+ * Cubre muchas formas: "problema con la Nissan", "algo raro con la Hilux", "qué pasa con
+ * AG562", "tengo un tema con esa unidad", etc. Excluye facturación/cuenta y síntomas GPS
+ * explícitos.
  */
 export function looksLikeVagueUnitProblemReport(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   const t = normCompanyToken(raw);
-  if (!/\b(problema|problemas|tengo un drama|algo raro|no me cierra|no me anda)\b/.test(t)) {
-    return false;
-  }
+  if (looksLikeNonFleetScopedProblem(raw)) return false;
+  if (looksLikeExplicitOdometerUpdateRequest(raw)) return false;
+  if (/\b(mantenimiento|certificado|cobertura)\b/.test(t)) return false;
+  if (!hasVagueUnitConcernSignal(raw, t)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(raw)) return false;
   if (looksLikeRouteHistoryOrMovementIssue(raw)) return false;
   if (looksLikeProblemClarificationPushback(raw)) return false;
@@ -887,31 +913,45 @@ export function looksLikeVagueUnitProblemReport(text: string | undefined | null)
   return true;
 }
 
+const ROUTE_HISTORY_TIME_CUE =
+  /\b(ayer|anteayer|anoche|hoy|hace \d+ dias?|el otro dia|otro dia|semana pasada|la semana|este finde|fin de semana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|fecha|d[ií]a|semana|mes pasado|hace un par de dias)\b/;
+
+const ROUTE_HISTORY_MOVEMENT_CUE =
+  /\b(recorrido|recorridos|movimiento|movimientos|historial|trayecto|trayectos|ruta|rutas|viaje|viajes|paradas|actividad|registros|datos del dia|donde estuvo|recorrio|recorri[oó])\b/;
+
 /** Recorrido/movimiento histórico que no aparece (módulo HISTORIAL), no GPS en vivo. */
 export function looksLikeRouteHistoryOrMovementIssue(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
   if (!t) return false;
-  if (/\b(no reporta|offline|sin se[nñ]al|ignici[oó]n apagada|gps ahora)\b/.test(t)) return false;
+  if (/\b(no reporta|offline|sin se[nñ]al|ignici[oó]n apagada|gps ahora|ahora mismo)\b/.test(t)) {
+    return false;
+  }
   if (
-    /\bno (?:veo|muestra|aparece|figura|logro ver)\b.{0,40}\b(recorrido|movimiento|historial|ruta|trayecto|viaje)\b/.test(
+    /\bno (?:veo|muestra|aparece|figura|logro ver|encuentro|tengo|hay|sale|salen)\b.{0,50}\b(recorrido|movimiento|historial|ruta|trayecto|viaje|paradas|actividad|registros|datos)\b/.test(
       t,
     )
   ) {
     return true;
   }
-  if (
-    /\b(recorrido|historial|trayecto|ruta|movimiento)\b/.test(t) &&
-    /\b(ayer|anteayer|hoy|fecha|d[ií]a|semana|cliente|visita|fue a|iba a)\b/.test(t)
-  ) {
+  if (/\b(mapa|historial)\b/.test(t) && /\b(vacio|vac[ií]o|sin nada|no aparece|no figura|no muestra)\b/.test(t)) {
     return true;
   }
-  if (/\b(ayer|anteayer)\b/.test(t) && /\b(movimiento|recorrido|viaje|cliente|recorri[oó])\b/.test(t)) {
+  if (ROUTE_HISTORY_MOVEMENT_CUE.test(t) && ROUTE_HISTORY_TIME_CUE.test(t)) {
+    return true;
+  }
+  if (ROUTE_HISTORY_TIME_CUE.test(t) && /\b(cliente|visita|fue a|iba a|salio|sal[ií]o|entro|entr[oó])\b/.test(t)) {
+    return true;
+  }
+  if (/\b(ayer|anteayer|anoche)\b/.test(t) && ROUTE_HISTORY_MOVEMENT_CUE.test(t)) {
+    return true;
+  }
+  if (/\b(sin movimiento|sin actividad|no tiene movimiento|no hay movimiento)\b/.test(t) && ROUTE_HISTORY_TIME_CUE.test(t)) {
     return true;
   }
   return false;
 }
 
-/** El cliente reclama que el bot respondió sin escuchar ("ni te dije cuál es mi problema"). */
+/** El cliente reclama que el bot respondió sin escuchar o repitió lo mismo. */
 export function looksLikeProblemClarificationPushback(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
   if (!t) return false;
@@ -919,20 +959,39 @@ export function looksLikeProblemClarificationPushback(text: string | undefined |
     /\b(ni te dije|no te dije|no te ped[ií]|no te pregunt[eé]|me adelantaste|no es eso|no era eso)\b/.test(
       t,
     ) ||
-    /\b(cu[aá]l es mi problema|eso no era|no respondiste)\b/.test(t)
+    /\b(cu[aá]l es mi problema|eso no era|no respondiste|no entendiste|malinterpretaste|eso no responde|no me ayudaste|repetis|repet[ií]s|otra vez lo mismo|ya te dije|no era eso lo que)\b/.test(
+      t,
+    )
+  );
+}
+
+/** Turno de unidad que requiere escuchar antes de diagnosticar GPS o abrir ticket. */
+export function looksLikeConversationalUnitConcern(text: string | undefined | null): boolean {
+  return (
+    looksLikeVagueUnitProblemReport(text) ||
+    looksLikeRouteHistoryOrMovementIssue(text) ||
+    looksLikeProblemClarificationPushback(text)
   );
 }
 
 /** El bot ya explicó estado GPS detenido/ignición en el hilo reciente. */
 export function threadHasRecentGpsStatusSummary(threadText: string): boolean {
   const tail = threadText.slice(-3500).toLowerCase();
-  return (
-    (/est[aá] detenida/.test(tail) || /funcionamiento normal/.test(tail)) &&
-    (/ignici[oó]n/.test(tail) ||
-      /no se generar[aá] un ticket/.test(tail) ||
-      /no genero ticket/.test(tail))
-  );
+  const gpsStatusExplained =
+    /est[aá] detenida/.test(tail) ||
+    /funcionamiento normal/.test(tail) ||
+    /ignici[oó]n est[aá] apagada/.test(tail) ||
+    /no es de esperar que actualice/.test(tail) ||
+    /normal que no actualice/.test(tail);
+  const closedWithoutTicket =
+    /no se generar[aá] un ticket/.test(tail) ||
+    /no genero ticket/.test(tail) ||
+    /por el momento/.test(tail);
+  return gpsStatusExplained && (/ignici[oó]n/.test(tail) || closedWithoutTicket);
 }
+
+const POST_GPS_FOLLOWUP_CUE =
+  /\b(ayer|anteayer|anoche|recorrido|movimiento|cliente|viaje|visita|mapa|figura|historial|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|datos|paradas|actividad|trayecto|registro|salio|sal[ií]o|cliente|visita)\b/;
 
 export type UnitProblemClarificationMode = "vague" | "pushback" | "history";
 
@@ -970,12 +1029,13 @@ export function resolveConversationalUnitTurn(params: {
 }): string | null {
   const { rawText, threadText, unitLabel } = params;
   const norm = normCompanyToken(rawText);
+  const label = unitLabel.trim() || "la unidad";
 
   if (looksLikeProblemClarificationPushback(rawText)) {
-    return buildUnitProblemClarificationReply(unitLabel, "pushback");
+    return buildUnitProblemClarificationReply(label, "pushback");
   }
   if (looksLikeRouteHistoryOrMovementIssue(rawText)) {
-    return buildUnitProblemClarificationReply(unitLabel, "history");
+    return buildUnitProblemClarificationReply(label, "history");
   }
 
   const gpsAlreadyExplained = threadHasRecentGpsStatusSummary(threadText);
@@ -985,17 +1045,14 @@ export function resolveConversationalUnitTurn(params: {
     !looksLikeGpsOrUnitStatusQuestion(rawText) &&
     !looksLikeLiveUnitConsultIntent(rawText)
   ) {
-    if (
-      looksLikeRouteHistoryOrMovementIssue(rawText) ||
-      /\b(ayer|recorrido|movimiento|cliente|viaje|visita)\b/.test(norm)
-    ) {
-      return buildUnitProblemClarificationReply(unitLabel, "history");
+    if (looksLikeRouteHistoryOrMovementIssue(rawText) || POST_GPS_FOLLOWUP_CUE.test(norm)) {
+      return buildUnitProblemClarificationReply(label, "history");
     }
-    return buildUnitProblemClarificationReply(unitLabel, "pushback");
+    return buildUnitProblemClarificationReply(label, "pushback");
   }
 
   if (looksLikeVagueUnitProblemReport(rawText)) {
-    return buildUnitProblemClarificationReply(unitLabel, "vague");
+    return buildUnitProblemClarificationReply(label, "vague");
   }
 
   return null;

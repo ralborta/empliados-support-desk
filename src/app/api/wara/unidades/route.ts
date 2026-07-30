@@ -19,7 +19,10 @@ import {
   looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeConversationalUnitConcern,
   resolveConversationalUnitTurn,
+  threadHasRecentGpsStatusSummary,
+  looksLikeSubstantiveCustomerMessage,
   resolveWaraSessionByPhone,
   threadHasRecentLiveUnitConsultIntent,
   type WaraUnidadEstado,
@@ -902,6 +905,9 @@ export async function POST(req: NextRequest) {
     !parsed.data.plate?.trim()
   ) {
     const liveUnitConsult = looksLikeLiveUnitConsultIntent(rawText);
+    const conversationalConcern = looksLikeConversationalUnitConcern(rawText);
+    const gpsLoopFollowUp =
+      threadHasRecentGpsStatusSummary(threadText) && looksLikeSubstantiveCustomerMessage(rawText);
 
     // "Unidad activa" ANTES de dejar que la IA revise todo el historial del día: si el
     // mensaje pide claramente el estado/GPS de "una unidad" pero no dice cuál
@@ -914,8 +920,10 @@ export async function POST(req: NextRequest) {
     // historial extenso de la conversación. Acotado a liveUnitConsult (pedido de estado
     // real, no saludos ni acuses de recibo) para no repetir la regresión de "hola"
     // heredando una patente vieja que ya se corrigió en extractSearchTerms.
+    // Ampliado 2026-07-29: también aplica si el cliente sigue un hilo conversacional
+    // (problema vago, historial/recorrido, pushback) sin nombrar de nuevo la unidad.
     if (
-      liveUnitConsult &&
+      (liveUnitConsult || conversationalConcern || gpsLoopFollowUp) &&
       shouldUseActiveUnitFallback(rawText) &&
       activeUnitRecord?.plate &&
       filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
@@ -925,7 +933,10 @@ export async function POST(req: NextRequest) {
       const resolutionThread = `${scopedThread}\n${rawText}`.trim();
       const recentLiveConsult = threadHasRecentLiveUnitConsultIntent(resolutionThread);
       const preferAiResolution =
-        looksLikeFleetUnitSearchInput(rawText) || liveUnitConsult || recentLiveConsult;
+        looksLikeFleetUnitSearchInput(rawText) ||
+        liveUnitConsult ||
+        recentLiveConsult ||
+        conversationalConcern;
 
       const aiHistorial = threadTextSinceCompanySelection(await customerOnlyThreadText(prisma, rawPhone));
       const resolved = await resolveUnitQuery({

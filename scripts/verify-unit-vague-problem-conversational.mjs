@@ -1,11 +1,7 @@
 #!/usr/bin/env node
 /**
- * Regresión — Bug real, producción 2026-07-29 (Emmanuel / Nissan AG 562 SP):
- *
- *   "sabes q tengo un problema con la nissan" → el bot tiró GPS "detenida" sin escuchar.
- *   "pero si ni te dije cual es mi problema!" → repitió lo mismo.
- *   "veo q ayer no me muestra movimiento" / "ayer fue a un cliente y no logro ver ese recorrido"
- *   → seguía repitiendo GPS en vivo en vez de hablar de HISTORIAL/recorrido.
+ * Regresión — consultas de unidad conversacionales (producción 2026-07-29+):
+ * el bot debe ESCUCHAR antes de diagnosticar GPS o cerrar sin ticket.
  *
  * Uso: npx tsx scripts/verify-unit-vague-problem-conversational.mjs
  */
@@ -14,6 +10,8 @@ import {
   looksLikeVagueUnitProblemReport,
   looksLikeRouteHistoryOrMovementIssue,
   looksLikeProblemClarificationPushback,
+  looksLikeConversationalUnitConcern,
+  looksLikeNonFleetScopedProblem,
   resolveConversationalUnitTurn,
   threadHasRecentGpsStatusSummary,
 } from "../src/lib/waraApi.ts";
@@ -26,34 +24,65 @@ function check(label, cond) {
   console.log(`  ✓ ${label}`);
 }
 
-console.log("— Intención vaga vs GPS concreto —");
-check(
-  'looksLikeVagueUnitProblemReport("sabes q tengo un problema con la nissan")',
-  looksLikeVagueUnitProblemReport("sabes q tengo un problema con la nissan") === true,
-);
+const label = "AG 562 SP (NISSAN 2404 - AG 562 SP)";
+
+console.log("— Problema vago (muchas formas) —");
+for (const text of [
+  "sabes q tengo un problema con la nissan",
+  "algo raro con la hilux",
+  "tengo un tema con esa unidad",
+  "que pasa con el ford",
+  "no entiendo que pasa con la camioneta",
+  "me preocupa la sprinter",
+]) {
+  check(`vago: "${text.slice(0, 40)}..."`, looksLikeVagueUnitProblemReport(text) === true);
+}
+
+console.log("\n— NO confundir con GPS concreto ni administrativo —");
 check(
   'GPS concreto NO es vago ("no reporta la nissan")',
   looksLikeVagueUnitProblemReport("la nissan no reporta desde ayer") === false,
 );
+check(
+  "problema de cuenta → administrativo, no unidad",
+  looksLikeNonFleetScopedProblem("tengo un problema con mi cuenta") === true &&
+    looksLikeVagueUnitProblemReport("tengo un problema con mi cuenta") === false,
+);
+check(
+  "problema facturación → odoo, no vago unidad",
+  classifyTurnExecutor("tengo un problema de facturacion", "") === "odoo_ticket",
+);
 
-console.log("\n— Historial / recorrido —");
-check(
-  'looksLikeRouteHistoryOrMovementIssue("veo q ayer no me muestra movimiento")',
-  looksLikeRouteHistoryOrMovementIssue("veo q ayer no me muestra movimiento") === true,
-);
-check(
-  'looksLikeRouteHistoryOrMovementIssue("ayer fue a un cliente y no logro ver ese recorrido")',
-  looksLikeRouteHistoryOrMovementIssue("ayer fue a un cliente y no logro ver ese recorrido") === true,
-);
+console.log("\n— Historial / recorrido (distintos contextos) —");
+for (const text of [
+  "veo q ayer no me muestra movimiento",
+  "ayer fue a un cliente y no logro ver ese recorrido",
+  "el lunes no figura el recorrido en el mapa",
+  "semana pasada no hay actividad",
+  "anoche salio y no veo paradas",
+  "no me aparece en el historial lo de ayer",
+]) {
+  check(`historial: "${text.slice(0, 42)}..."`, looksLikeRouteHistoryOrMovementIssue(text) === true);
+}
 
 console.log("\n— Pushback del cliente —");
+for (const text of [
+  "pero si ni te dije cual es mi problema!",
+  "repetis lo mismo no me ayudaste",
+  "no entendiste lo que te pregunte",
+]) {
+  check(`pushback: "${text}"`, looksLikeProblemClarificationPushback(text) === true);
+}
+
+console.log("\n— Umbrella conversacional —");
 check(
-  'looksLikeProblemClarificationPushback("pero si ni te dije cual es mi problema!")',
-  looksLikeProblemClarificationPushback("pero si ni te dije cual es mi problema!") === true,
+  "looksLikeConversationalUnitConcern cubre vago + historial + pushback",
+  looksLikeConversationalUnitConcern("algo raro con la hilux") &&
+    looksLikeConversationalUnitConcern("ayer no veo el recorrido") &&
+    looksLikeConversationalUnitConcern("ni te dije cual es mi problema"),
 );
 
 console.log("\n— Respuesta conversacional (no GPS automático) —");
-const label = "AG 562 SP (NISSAN 2404 - AG 562 SP)";
 check(
   "problema vago → pregunta qué ve",
   resolveConversationalUnitTurn({
@@ -79,18 +108,27 @@ check(
     unitLabel: label,
   })?.includes("HISTORIAL"),
 );
-
-console.log("\n— Router: problema vago con marca va a unidades, no ticket —");
 check(
-  'classifyTurnExecutor("sabes q tengo un problema con la nissan") === "unidades"',
-  classifyTurnExecutor("sabes q tengo un problema con la nissan", "") === "unidades",
+  "follow-up sin unidad en mensaje pero GPS ya explicado → historial",
+  resolveConversationalUnitTurn({
+    rawText: "veo que ayer no me muestra movimiento",
+    threadText:
+      "La unidad AG 562 SP está detenida. La ignición está apagada. No se generará un ticket por el momento.",
+    unitLabel: label,
+  })?.includes("HISTORIAL"),
+);
+
+console.log("\n— Router: concern conversacional va a unidades —");
+check(
+  'classifyTurnExecutor("algo raro con la hilux") === "unidades"',
+  classifyTurnExecutor("algo raro con la hilux", "") === "unidades",
 );
 
 console.log("\n— Detección de GPS ya explicado en hilo —");
 check(
   "threadHasRecentGpsStatusSummary detecta respuesta detenida previa",
   threadHasRecentGpsStatusSummary(
-    "La unidad AG 562 SP está detenida. La ignición está apagada. No se generará un ticket por ahora.",
+    "La unidad AG 562 SP está detenida. La ignición está apagada. No se generará un ticket por el momento.",
   ) === true,
 );
 
