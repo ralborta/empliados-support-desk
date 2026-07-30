@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { formatCustomerOdooCaseRefForWhatsApp } from "@/lib/customerOdooCaseRef";
 import type { WaraUnidadEstado } from "@/lib/waraApi";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import {
@@ -47,15 +48,18 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
   }
 
   if (action === "ticket" && ticketIssueDetail) {
-    // Pedido explícito, 2026-07-29: no informar proactivamente el número de caso/ticket
-    // en la respuesta al cliente — solo si lo pide explícitamente (ver
-    // customerTicketInquiry.ts / looksLikeOpenCaseStatusInquiry).
-    const ticketPart =
-      odooRef || ticketRef
-        ? ticketReused
-          ? " Ya hay un caso abierto y Atención al cliente lo va a revisar."
-          : " Generé un caso para que Atención al cliente lo revise."
-        : "";
+    if (odooRef) {
+      const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
+      const casePart = ticketReused
+        ? ` Ya hay un caso en revisión (*${display}*).`
+        : ` Tu caso es *${display}*. Un asesor de Atención al cliente lo va a revisar.`;
+      return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${casePart}`;
+    }
+    const ticketPart = ticketRef
+      ? ticketReused
+        ? " Ya hay un caso abierto y Atención al cliente lo va a revisar."
+        : " Generé un caso para que Atención al cliente lo revise."
+      : "";
     return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${ticketPart}`;
   }
 
@@ -81,7 +85,8 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
                 "Redactás respuestas de WhatsApp para mesa de ayuda Wara GPS. " +
                 "Mantené los hechos (estado general, ignición, si se generó caso o no, acción) sin tiempos técnicos crudos ni segundos. " +
                 "No menciones intervalos de reporte del GPS. No inventes datos. " +
-                "NUNCA mencionés el número de caso/ticket en la respuesta, aunque lo veas en los datos — el cliente no lo pidió. " +
+                "Si hay numero_caso_odoo en los datos, incluí «Tu caso es #…» con ese número exacto (solo referencia Odoo). " +
+                "Si no hay numero_caso_odoo, no inventes ni menciones números de caso. " +
                 "Español rioplatense, 2-4 oraciones, sin emojis.",
             },
             {
@@ -91,6 +96,9 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
                 hechos_obligatorios: facts,
                 accion: input.action,
                 se_genero_caso: !!(input.odooRef ?? input.ticketRef),
+                numero_caso_odoo: input.odooRef
+                  ? formatCustomerOdooCaseRefForWhatsApp(input.odooRef)
+                  : null,
                 caso_reutilizado: input.ticketReused ?? false,
                 detalle_ticket: input.ticketIssueDetail ?? null,
               }),

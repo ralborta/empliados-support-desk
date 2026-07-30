@@ -19,7 +19,14 @@ import {
   normalizePlate,
 } from "@/lib/wara";
 import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
-import { setActiveUnit } from "@/lib/activeUnit";
+import { setActiveUnit, getActiveUnit, resolvePlateFromConversationContext } from "@/lib/activeUnit";
+import {
+  clearSessionNotebook,
+  getSessionNotebook,
+  isConversationNotebookEnabled,
+  patchSessionNotebook,
+  resolveMaintenanceDetailText,
+} from "@/lib/conversationNotebook";
 import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import {
   looksLikeChangeCompanyRequest,
@@ -45,6 +52,7 @@ import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/tic
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
+import { withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 
 const bodySchema = z
   .object({
@@ -474,6 +482,8 @@ export async function POST(req: NextRequest) {
     /voy a registrar:/i.test(threadText) ? threadText : "",
   );
 
+  const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
+
   const inboundForConfirm = rawInbound || lastInbound;
   let confirmed = isMaintenanceConfirmationAccepted({
     confirmField: confirmation,
@@ -631,12 +641,21 @@ export async function POST(req: NextRequest) {
     (extractPlatePrefixFromMessage(text) ||
       isBarePlatePrefixHint(text) ||
       (looksLikeVehicleBrandOrUnitSearch(text) && !detectLoosePlate(text)));
+
+  const activeUnitRecord = await getActiveUnit(prisma, rawPhone);
+  const contextPlate = resolvePlateFromConversationContext({
+    rawText: text,
+    threadText,
+    activeUnitPlate: sessionNotebook?.unitFocus?.plate ?? activeUnitRecord?.plate,
+  });
+
   const maintenanceTramiteStart =
     looksLikeOperationalMaintenanceIntent(text, threadText) &&
     !plateSelectionReply &&
     !detectPlate(text) &&
     !parsed.data.patente?.trim() &&
-    !parsed.data.plate?.trim();
+    !parsed.data.plate?.trim() &&
+    !contextPlate;
 
   if (maintenanceTramiteStart) {
     const preventivo = /preventiv/i.test(text);
@@ -673,6 +692,7 @@ export async function POST(req: NextRequest) {
       (confirmed && summary.patente ? summary.patente : undefined) ??
       (pendingMaintConfirm && confirmed && summary.patente ? summary.patente : undefined) ??
       (plateFromMessage && isPlausibleVehiclePlate(plateFromMessage) ? plateFromMessage : undefined) ??
+      contextPlate ??
       undefined,
   );
 
@@ -680,6 +700,53 @@ export async function POST(req: NextRequest) {
   // detectPlate(threadText), que tomaba AD427MC del ejemplo del propio bot.
   if (prefixOrBrandSelection) {
     plate = null;
+  }
+
+  if (plate && isConversationNotebookEnabled()) {
+    await patchSessionNotebook(
+      prisma,
+      rawPhone,
+      {
+        intent: "mantenimiento",
+        unitFocus: {
+          plate,
+          updatedAt: new Date().toISOString(),
+        },
+        tramite: {
+          type: "mantenimiento",
+          plate,
+          service,
+          priority,
+        },
+      },
+      { syncActiveUnit: true, activeUnitSource: "mantenimiento" },
+    );
+  }
+
+  text = resolveMaintenanceDetailText({
+    inboundText: pendingMaintConfirm && confirmed ? (summary.detalle || inboundForConfirm) : inboundForConfirm || text,
+    service,
+    plate,
+    summaryDetalle: summary.detalle,
+    notebookDetalle: sessionNotebook?.tramite?.detalle,
+  });
+
+  if (isConversationNotebookEnabled() && plate) {
+    await patchSessionNotebook(
+      prisma,
+      rawPhone,
+      {
+        intent: "mantenimiento",
+        tramite: {
+          type: "mantenimiento",
+          plate,
+          service,
+          detalle: text,
+          priority,
+        },
+      },
+      { syncActiveUnit: false },
+    );
   }
 
   if (!plate) {
@@ -903,6 +970,20 @@ export async function POST(req: NextRequest) {
 
     await setActiveUnit(prisma, rawPhone, plate, { source: "mantenimiento" });
 
+    if (isConversationNotebookEnabled()) {
+      await patchSessionNotebook(
+        prisma,
+        rawPhone,
+        {
+          intent: "mantenimiento",
+          awaiting: "confirm_registro",
+          unitFocus: { plate, updatedAt: new Date().toISOString() },
+          tramite: { type: "mantenimiento", plate, service, detalle: text, priority },
+        },
+        { syncActiveUnit: true, activeUnitSource: "mantenimiento" },
+      );
+    }
+
     const message = `Voy a registrar:\nPatente: ${plate}\nTipo: ${service}\nPrioridad: ${priorityLabel(priority)}\nDetalle: ${text}\n\nSi esta correcto, responde CONFIRMO para registrarlo.`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
@@ -932,6 +1013,9 @@ export async function POST(req: NextRequest) {
     );
   }
   await clearPendingAction(prisma, rawPhone);
+  if (isConversationNotebookEnabled()) {
+    await clearSessionNotebook(prisma, rawPhone);
+  }
   const title = `${service}${plate ? ` · ${plate}` : ""}`;
 
   const { ticket } = await attachToOpenConversation(prisma, {
@@ -993,7 +1077,8 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const responseMessage = `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Un asesor de Atención al cliente la va a revisar. Te avisamos por este medio cualquier novedad.`;
+  const baseResponse = `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Un asesor de Atención al cliente la va a revisar. Te avisamos por este medio cualquier novedad.`;
+  const responseMessage = odooRef ? withOdooCaseAssignedSuffix(baseResponse, odooRef) : baseResponse;
 
   await prisma.ticketMessage.create({
     data: {

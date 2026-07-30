@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { looksLikePlateCorrectionRequest, looksLikeGenericUnitConsultWithoutPlate } from "@/lib/waraApi";
 import { looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
-import { looksLikeUnitRejection } from "@/lib/wara";
+import { looksLikeUnitRejection, extractPlateFromOdometerSummary } from "@/lib/wara";
 
 /**
  * Estado explícito de "unidad activa" — de qué unidad de la flota está hablando la
@@ -72,6 +72,21 @@ export function shouldUseActiveUnitFallback(rawText: string): boolean {
     !looksLikeUnitRejection(rawText) &&
     !looksLikeGenericUnitConsultWithoutPlate(rawText)
   );
+}
+
+/**
+ * Patente de respaldo al cambiar de trámite (ej. odómetro → mantenimiento) cuando el
+ * mensaje nuevo no trae matrícula explícita ("y si quiero hacer un mantenimiento preventivo").
+ */
+export function resolvePlateFromConversationContext(params: {
+  rawText: string;
+  threadText: string;
+  activeUnitPlate?: string | null;
+}): string | null {
+  if (!shouldUseActiveUnitFallback(params.rawText)) return null;
+  const active = params.activeUnitPlate?.replace(/\s+/g, "").toUpperCase().trim();
+  if (active) return active;
+  return extractPlateFromOdometerSummary(params.threadText) ?? null;
 }
 
 export async function setActiveUnit(

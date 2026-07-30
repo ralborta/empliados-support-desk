@@ -45,7 +45,7 @@ import {
   buildNoEquipmentDialogueState,
 } from "@/lib/unitDialogueState";
 import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalation";
-import { findCustomerVisibleOdooCaseRef } from "@/lib/customerOdooCaseRef";
+import { findCustomerVisibleOdooCaseRef, withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
@@ -499,11 +499,12 @@ async function createMissingReportTicket(params: {
       ticketId: existing.ticket.id,
       plate,
     });
+    const base = `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto para que Atención al cliente lo revise.`;
     return {
       ref: odooRef ?? "",
       reused: true,
       odooRef,
-      message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto para que Atención al cliente lo revise.`,
+      message: odooRef ? withOdooCaseAssignedSuffix(base, odooRef) : base,
     };
   }
 
@@ -587,7 +588,8 @@ async function createMissingReportTicket(params: {
   const unitLabel = params.unit.patente || params.unit.unidad;
   let message: string;
   if (odooRef) {
-    message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé un caso para Atención al cliente. Te avisamos por este medio cualquier novedad.`;
+    const base = `La unidad ${unitLabel} presenta ${issueLabel}.`;
+    message = withOdooCaseAssignedSuffix(base, odooRef);
   } else if (localReused) {
     message = `La unidad ${unitLabel} presenta ${issueLabel}. Registré la consulta en el caso abierto con el mismo asesor.`;
   } else {
@@ -626,11 +628,12 @@ async function createNoEquipmentTicket(params: {
       ticketId: existing.ticket.id,
       plate,
     });
+    const base = `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto para que Atención al cliente lo revise.`;
     return {
       ref: odooRef ?? "",
       reused: true,
       odooRef,
-      message: `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto para que Atención al cliente lo revise.`,
+      message: odooRef ? withOdooCaseAssignedSuffix(base, odooRef) : base,
     };
   }
 
@@ -705,7 +708,8 @@ async function createNoEquipmentTicket(params: {
 
   let message: string;
   if (odooRef) {
-    message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé un caso para Atención al cliente. Te avisamos por este medio cualquier novedad.`;
+    const base = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar.`;
+    message = withOdooCaseAssignedSuffix(base, odooRef);
   } else if (localReused) {
     message = `La unidad ${label} no tiene equipo instalado. Registré la consulta en el caso abierto con el mismo asesor.`;
   } else {

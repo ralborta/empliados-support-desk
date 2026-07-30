@@ -98,3 +98,26 @@ export function buildCustomerEscalationWithCaseReply(odooRef: string): string {
   const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
   return `Hola! Tu consulta ha sido escalada a nuestro equipo. Caso *${display}*. Te responderemos pronto.`;
 }
+
+/**
+ * Mensaje al cliente cuando se creó o reutilizó un caso en Odoo Helpdesk.
+ * Solo usar si hay odooRef real — nunca TCK-* local.
+ */
+export function buildCustomerOdooCaseAssignedReply(
+  odooRef: string,
+  opts?: { reused?: boolean },
+): string {
+  const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
+  if (opts?.reused) {
+    return `Ya tenés un caso en revisión (*${display}*). Un asesor de Atención al cliente te va a contactar por este medio.`;
+  }
+  return `Tu caso es *${display}*. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+}
+
+/** Añade "Tu caso es #…" al final de un mensaje operativo cuando hay caso Odoo. */
+export function withOdooCaseAssignedSuffix(message: string, odooRef: string): string {
+  const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
+  const base = message.trim().replace(/\s+$/, "");
+  if (base.toLowerCase().includes(display.toLowerCase())) return base;
+  return `${base} Tu caso es *${display}*.`;
+}

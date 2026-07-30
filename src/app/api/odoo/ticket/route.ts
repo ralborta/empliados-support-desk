@@ -34,7 +34,10 @@ import {
   buildOpenCaseStatusReply,
   looksLikeOpenCaseStatusInquiry,
 } from "@/lib/customerTicketInquiry";
-import { findCustomerVisibleOdooCaseRef } from "@/lib/customerOdooCaseRef";
+import {
+  findCustomerVisibleOdooCaseRef,
+  buildCustomerOdooCaseAssignedReply,
+} from "@/lib/customerOdooCaseRef";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
@@ -587,9 +590,7 @@ export async function POST(req: NextRequest) {
 
       if (ensured.odooRef) {
         const ref = ensured.odooRef;
-        const message = ensured.created
-          ? `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
-          : `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio.`;
+        const message = buildCustomerOdooCaseAssignedReply(ref, { reused: !ensured.created });
 
         if (advisorRequest) {
           try {
@@ -633,7 +634,9 @@ export async function POST(req: NextRequest) {
     });
 
     const ref = result.ref ?? null;
-    const message = `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+    const message = ref
+      ? buildCustomerOdooCaseAssignedReply(ref)
+      : `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
 
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",

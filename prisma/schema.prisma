@@ -94,6 +94,9 @@ model Customer {
   /// una regex reconozca la frase exacta con la que se refiere a ella ("esa unidad", "también", etc.).
   /// Null = sin unidad activa (o vencida, ver ACTIVE_UNIT_TTL_MS en @/lib/activeUnit).
   activeUnit               Json?
+  /// Cuaderno interno de sesión (memoria conversacional). Solo backend; ver @/lib/conversationNotebook.
+  /// Rollback: WARA_CONVERSATION_NOTEBOOK=false — columna ignorada.
+  sessionNotebook          Json?
   tickets                  Ticket[]
   createdAt                DateTime  @default(now())
 }

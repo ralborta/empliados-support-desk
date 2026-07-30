@@ -28,6 +28,7 @@ import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
+import { withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 import { resolvePlateWithWaraFleet, looksLikeVagueUnitReference } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
@@ -1197,9 +1198,12 @@ export async function POST(req: NextRequest) {
       status: result.status,
     });
     const userReason = sanitizeWaraDetailForUser(waraDetail);
-    const message = escalation.odooRef
-      ? `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason} Generé un caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`
+    const baseCertFail = escalation.odooRef
+      ? `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason}`
       : `No pude emitir el certificado de cobertura para ${plateDisplay}: ${userReason} Dejé el caso registrado para que un asesor de Atención al cliente lo revise y te contacte por este medio.`;
+    const message = escalation.odooRef
+      ? withOdooCaseAssignedSuffix(baseCertFail, escalation.odooRef)
+      : baseCertFail;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       errorStage: "certificadocobertura",
