@@ -10,6 +10,7 @@ import {
   isBarePlatePrefixHint,
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
+  looksLikePendingTramiteAffirmation,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerIntentStart,
   looksLikeHorometerOnlyIntent,
@@ -25,6 +26,7 @@ import {
   threadAwaitingOdometerPlate,
   threadAwaitingHorometerPlate,
   threadHasOdometerUnitClarificationPending,
+  threadAwaitingOdometerConfirmDetails,
   threadHasPendingUnitStatusCheckOffer,
   detectLoosePlate,
   extractPlatePrefixFromMessage,
@@ -587,6 +589,7 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   if (looksLikeNonOdometerOperationalIntent(raw)) return false;
   if (looksLikePlateCorrectionRequest(raw)) return true;
   if (looksLikeOdometerConfirmReply(raw)) return true;
+  if (looksLikePendingTramiteAffirmation(raw)) return true;
   // Bug real, producción 2026-07-28: "quiero corregir el/un dato" durante una confirmación
   // pendiente no mencionaba odómetro/horómetro/patente/fecha explícitamente, así que el
   // router (shouldContinueOdometerFlow) no lo reconocía como continuación del trámite y el
@@ -624,6 +627,7 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
     threadHasOdometerUnitClarificationPending(threadText) ||
+    threadAwaitingOdometerConfirmDetails(threadText) ||
     hasPendingOdometerConfirmation(threadText)
   ) {
     if (looksLikePlateCorrectionRequest(text)) return true;

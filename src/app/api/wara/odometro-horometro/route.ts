@@ -29,6 +29,8 @@ import {
   looksLikeOdometerPendingDataAmendment,
   looksLikeGenericCorrectionIntent,
   looksLikeBriefConfirmation,
+  looksLikePendingTramiteAffirmation,
+  threadAwaitingOdometerConfirmDetails,
   looksLikeHorometerOnlyIntent,
   looksLikeFreshOdometerRestartRequest,
   looksLikeUnitRejection,
@@ -284,6 +286,7 @@ function resolveHorometroForWara(opts: {
  */
 function isConfirmed(value: string | undefined): boolean {
   if (looksLikeBriefConfirmation(value)) return true;
+  if (looksLikePendingTramiteAffirmation(value)) return true;
   if (looksLikeConversationAcknowledgement(value)) return false;
   if (!value?.trim()) return false;
   const t = value
@@ -852,13 +855,19 @@ export async function POST(req: NextRequest) {
   const pendingOdoConfirm =
     supersedesPendingConfirm || correctingUnitDuringPendingConfirm
       ? false
-      : hasLiveOdometerPendingAction &&
-        (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload);
+      : (hasLiveOdometerPendingAction &&
+          (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload)) ||
+        threadAwaitingOdometerConfirmDetails(threadText);
+  const confirmWithSupplement =
+    pendingOdoConfirm &&
+    looksLikePendingTramiteAffirmation(rawText) &&
+    looksLikeOdometerPendingDataAmendment(rawText);
   const bareNumericAmendmentValue = pendingOdoConfirm
     ? (parseBareNumericPendingAmendment(rawText) ?? parseInlineNumericCorrection(rawText))
     : undefined;
   const amendsPendingOdoConfirm =
     pendingOdoConfirm &&
+    !confirmWithSupplement &&
     (looksLikeOdometerPendingDataAmendment(rawText) || bareNumericAmendmentValue !== undefined);
   const effectivePendingOdoConfirm = pendingOdoConfirm && !amendsPendingOdoConfirm;
   const explicitKmInMessage = messageExplicitlyStatesKm(rawText);
@@ -1186,6 +1195,7 @@ export async function POST(req: NextRequest) {
       (typeof horometro === "number" && Number.isFinite(horometro)));
   const confirmed =
     isConfirmed(confirmSignal) ||
+    confirmWithSupplement ||
     (effectivePendingOdoConfirm && isConfirmed(rawText)) ||
     (isConfirmed(rawText) && hasCompleteOdoPayload);
 
@@ -1220,6 +1230,11 @@ export async function POST(req: NextRequest) {
       if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
         odometro = summaryOdometro;
       }
+    }
+    if (clientExplicitFechaThisTurn && fechaFromMessage) {
+      fechaExplicita = fechaFromMessage;
+      fecha = fechaWara(fechaExplicita, customerTz);
+      fechaDisplay = formatFechaDisplay(fecha);
     }
   }
 

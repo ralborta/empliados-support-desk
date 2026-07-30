@@ -682,6 +682,25 @@ export function extractPlateFromUnitStatusCheckOffer(threadText: string): string
   return detectPlate(tail);
 }
 
+/** Bot pidió confirmar km/horómetro y/o fecha antes del resumen formal "Voy a registrar". */
+export function threadAwaitingOdometerConfirmDetails(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
+  const tail = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(confirm[aá]r|confirmes|confirmame|confirmar)\b.{0,100}\b(od[oó]metro|kilometraje|valor)\b/.test(
+      tail,
+    ) ||
+    /\b(nuevo valor del od[oó]metro es|el od[oó]metro es)\b.{0,50}\d/.test(tail) ||
+    /\b(fecha y hora de la lectura|ten[eé]s una fecha y hora)\b/.test(tail) ||
+    /\basumimos que es hoy\b/.test(tail)
+  );
+}
+
 /** Tras pedir horómetro/odómetro, el bot pidió aclarar la unidad (varias coincidencias). */
 export function threadHasOdometerUnitClarificationPending(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
@@ -705,6 +724,7 @@ export function threadHasActiveOdometerFlow(threadText: string): boolean {
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
     threadAwaitingHorometerKmValue(threadText) ||
+    threadAwaitingOdometerConfirmDetails(threadText) ||
     threadHasOdometerUnitClarificationPending(threadText) ||
     hasPendingOdometerConfirmation(threadText)
   );
@@ -1683,6 +1703,28 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
       norm,
     ) || /\b(de\s+acuerdo|correcto\s+eso|esta\s+bien)\b/.test(norm)
   );
+}
+
+/**
+ * "Si 19:00 de ayer", "Sí correcto", "Dale esa está bien" — afirmación con dato extra
+ * durante confirmación pendiente. No es confirmación pura ni un trámite nuevo.
+ */
+export function looksLikePendingTramiteAffirmation(text: string | undefined | null): boolean {
+  if (looksLikeBriefConfirmation(text)) return true;
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 140) return false;
+  const norm = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|de acuerdo)\b/.test(norm)) {
+    return false;
+  }
+  if (/\b(quiero|necesito|puedo|podemos|vamos a|ahora puedo|tambien|tambi[eé]n)\b/.test(norm)) {
+    return false;
+  }
+  if (looksLikeFreshOdometerRestartRequest(raw)) return false;
+  return true;
 }
 
 export function looksLikeCertificateUnitReply(text: string, threadText = ""): boolean {

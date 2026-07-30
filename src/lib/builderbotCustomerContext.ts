@@ -7,7 +7,7 @@ import {
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import { getPendingAction } from "@/lib/pendingAction";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
@@ -656,7 +656,7 @@ export async function customerRegisteredContextResponse(
     }
   } else if (
     selectionText &&
-    looksLikeBriefConfirmation(selectionText) &&
+    looksLikePendingTramiteAffirmation(selectionText) &&
     threadHasPendingUnitStatusCheckOffer(scopedThreadText || fullThreadText)
   ) {
     // "Si" confirmando "¿querés que revise el estado de AD 578 WX?" — continuar consulta,
@@ -665,7 +665,7 @@ export async function customerRegisteredContextResponse(
     responseMessage = "";
   } else if (
     selectionText &&
-    looksLikeBriefConfirmation(selectionText) &&
+    looksLikePendingTramiteAffirmation(selectionText) &&
     (resolvePendingConfirmationExecutor(scopedThreadText || fullThreadText, selectionText) ||
       (await getPendingAction(prisma, trimmed))?.payload)
   ) {

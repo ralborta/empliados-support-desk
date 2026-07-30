@@ -2,7 +2,8 @@ import {
   hasPendingCertificateConfirmation,
   hasPendingMantenimientoConfirmation,
   hasPendingOdometerConfirmation,
-  looksLikeBriefConfirmation,
+  looksLikePendingTramiteAffirmation,
+  threadAwaitingOdometerConfirmDetails,
 } from "@/lib/wara";
 import type { TurnExecutorId } from "@/lib/whatsappTurnRouter";
 
@@ -20,9 +21,11 @@ export function resolvePendingConfirmationExecutor(
   threadText: string,
   selectionText: string,
 ): PendingConfirmationExecutor | null {
-  if (!looksLikeBriefConfirmation(selectionText)) return null;
+  if (!looksLikePendingTramiteAffirmation(selectionText)) return null;
   if (hasPendingCertificateConfirmation(threadText)) return "certificados";
-  if (hasPendingOdometerConfirmation(threadText)) return "odometro";
+  if (hasPendingOdometerConfirmation(threadText) || threadAwaitingOdometerConfirmDetails(threadText)) {
+    return "odometro";
+  }
   if (hasPendingMantenimientoConfirmation(threadText)) return "mantenimiento";
   return null;
 }

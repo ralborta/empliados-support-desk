@@ -23,6 +23,7 @@ import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI
 import {
   isBarePlatePrefixHint,
   looksLikeBriefConfirmation,
+  looksLikePendingTramiteAffirmation,
   detectLoosePlate,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
@@ -209,7 +210,7 @@ export async function runTurnExecutorPhase(params: {
       ? pendingAction.type
       : null;
   if (
-    looksLikeBriefConfirmation(selectionText) &&
+    looksLikePendingTramiteAffirmation(selectionText) &&
     (pendingConfirmExecutor || (pendingTramiteType && pendingAction?.payload))
   ) {
     const executor = pendingConfirmExecutor ?? pendingTramiteType!;
