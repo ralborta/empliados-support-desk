@@ -25,6 +25,7 @@ import {
   threadAwaitingOdometerPlate,
   threadAwaitingHorometerPlate,
   threadHasOdometerUnitClarificationPending,
+  threadHasPendingUnitStatusCheckOffer,
   detectLoosePlate,
   extractPlatePrefixFromMessage,
 } from "@/lib/wara";
@@ -211,7 +212,7 @@ export function clientSupersedesOdometerConfirmation(
   return false;
 }
 
-/** "Dale cámbialo" tras pedido de cambiar empresa en el hilo reciente. */
+/** "Dale cámbialo" tras pedido explícito de cambiar empresa en el hilo reciente. */
 export function looksLikeImplicitCompanyChangeAffirmation(
   text: string | undefined | null,
   threadText = "",
@@ -226,12 +227,27 @@ export function looksLikeImplicitCompanyChangeAffirmation(
   if (!/\b(cambialo|cambiala|cambiemos|hacelo|seguimos|dale)\b/.test(t) && t.split(/\s+/).length > 3) {
     return false;
   }
-  const tail = threadText.slice(-2500).toLowerCase();
+  if (threadHasPendingUnitStatusCheckOffer(threadText)) return false;
+
+  const tail = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  // Footnotes informativos del bot — NO son invitación a confirmar cambio de empresa.
+  // Bug real, producción 2026-07-29: tras "no encontré LAADV578WX" el bot decía
+  // "Si es de otra empresa, escribí cambiar empresa" y el cliente respondía "Si"
+  // (confirmando revisar estado) → reseteaba toda la conversación.
+  if (/si (?:la unidad )?es de otra empresa,\s*escrib[ií]/.test(tail)) return false;
+  if (/pertenece a otra empresa,\s*escrib[ií]/.test(tail)) return false;
+
   return (
-    /cambiar empresa/.test(tail) ||
-    /reinici[eé] la empresa/.test(tail) ||
-    /equivocada/.test(tail) ||
-    /otra empresa/.test(tail)
+    /\b(quer[eé]s|quieres|prefieres|deseas|te gustar[ií]a|podemos)\b.{0,40}\b(cambiar|reinici\w*)\b.{0,30}\bempresa\b/.test(
+      tail,
+    ) ||
+    /\b(cambiar|reinici\w*)\s+(?:de\s+)?empresa\b/.test(tail) ||
+    /\bempresa\b.{0,20}\b(equivocada|incorrecta)\b/.test(tail) ||
+    /\b(equivocada|incorrecta)\b.{0,20}\bempresa\b/.test(tail)
   );
 }
 

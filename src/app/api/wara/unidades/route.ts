@@ -10,7 +10,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadHasActiveOdometerFlow, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -713,6 +713,16 @@ export async function POST(req: NextRequest) {
   const rawText = parsed.data.rawText ?? "";
   let explicitPlate =
     parsed.data.patente ?? parsed.data.plate ?? detectLoosePlate(rawText) ?? "";
+  if (
+    !explicitPlate &&
+    looksLikeBriefConfirmation(rawText) &&
+    threadHasPendingUnitStatusCheckOffer(threadText)
+  ) {
+    const offeredPlate = extractPlateFromUnitStatusCheckOffer(threadText);
+    if (offeredPlate) {
+      explicitPlate = formatPlateWithSpaces(offeredPlate) ?? offeredPlate;
+    }
+  }
 
   if (looksLikeCompanySelection(rawText.trim()) && !explicitPlate) {
     return NextResponse.json(

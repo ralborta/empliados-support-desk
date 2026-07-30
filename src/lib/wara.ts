@@ -139,9 +139,16 @@ export function detectAllPlates(text: string): string[] {
   return out;
 }
 
+/** Quita artículo inicial antes de parsear patente ("La AD578WX" → "AD578WX"). */
+export function stripLeadingPlateArticle(text: string | undefined | null): string {
+  return String(text ?? "")
+    .trim()
+    .replace(/^(la|el|los|las|esa|ese|eso)\s+/i, "");
+}
+
 /** Mensaje corto que parece ser solo una patente (ej. "Lwk7902"). */
 export function looksLikePlateOnlyMessage(text: string): boolean {
-  const raw = (text ?? "").trim();
+  const raw = stripLeadingPlateArticle(text);
   // Bug real, producción 2026-07-29: "No es 152344" (corrigiendo un valor durante una
   // confirmación pendiente de odómetro) compactaba a "NOES152344" — 4 letras + dígitos,
   // forma indistinguible de una patente vieja mal separada (ej. "NOES 15234" no existe,
@@ -317,10 +324,11 @@ export function extractPlateSuffixFromMessage(rawText: string | undefined | null
 
 /** Patente en el mensaje actual, incluyendo formatos viejos (LWK7902) y respuestas sueltas. */
 export function detectLoosePlate(text: string): string | null {
-  const fromRegex = detectPlate(text);
+  const stripped = stripLeadingPlateArticle(text);
+  const fromRegex = detectPlate(stripped) ?? detectPlate(text);
   if (fromRegex) return fromRegex;
-  if (looksLikePlateOnlyMessage(text)) {
-    return normalizePlate(text);
+  if (looksLikePlateOnlyMessage(stripped)) {
+    return normalizePlate(stripped.replace(/[\s\-_.]+/g, ""));
   }
   return null;
 }
@@ -638,6 +646,40 @@ export function threadHasRecentUnitStatusConsultIntent(threadText: string): bool
       /\b(reporte|unidades|gps|ignicion|flota)\b/.test(t)
     );
   });
+}
+
+/** El bot ofreció revisar/consultar el estado de una unidad y espera sí/no. */
+export function threadHasPendingUnitStatusCheckOffer(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(quer[eé]s|quieres|te gustar[ií]a|podemos|prefer[ií]s|deseas)\b.{0,60}\b(revisar|revis[eé]|consultar|ver|chequear|mirar)\b.{0,50}\b(estado|reporte|gps|ignici[oó]n|unidad)\b/.test(
+      tail,
+    ) ||
+    /\b(revisar|revis[eé]|consultar|ver|chequear)\b.{0,40}\b(el estado de esa unidad|el estado de la unidad|esa unidad|la unidad|estado)\b/.test(
+      tail,
+    )
+  );
+}
+
+/** Patente que el bot acaba de confirmar al ofrecer revisar estado (ej. 'AD 578 WX'). */
+export function extractPlateFromUnitStatusCheckOffer(threadText: string): string | null {
+  const tail = threadText.slice(-2500);
+  const quoted = tail.match(
+    /['"']([A-Za-z]{2}\s?\d{3}\s?[A-Za-z]{2}|[A-Za-z]{3}\s?\d{3,4})['"']/,
+  );
+  if (quoted?.[1]) {
+    const plate = normalizePlate(quoted[1]);
+    if (plate && isPlausibleVehiclePlate(plate)) return plate;
+  }
+  const plates = detectAllPlates(tail);
+  for (let i = plates.length - 1; i >= 0; i--) {
+    if (isPlausibleVehiclePlate(plates[i])) return plates[i];
+  }
+  return detectPlate(tail);
 }
 
 /** Tras pedir horómetro/odómetro, el bot pidió aclarar la unidad (varias coincidencias). */

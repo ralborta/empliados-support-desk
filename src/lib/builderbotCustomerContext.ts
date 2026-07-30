@@ -7,15 +7,7 @@ import {
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import {
-  detectLoosePlate,
-  extractLastPlateFromThread,
-  formatPlateWithSpaces,
-  hasPendingMaintenancePlateRequest,
-  isBarePlatePrefixHint,
-  looksLikeBriefConfirmation,
-  threadTextSinceCompanySelection,
-} from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import { getPendingAction } from "@/lib/pendingAction";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
@@ -662,6 +654,15 @@ export async function customerRegisteredContextResponse(
         ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
         : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
     }
+  } else if (
+    selectionText &&
+    looksLikeBriefConfirmation(selectionText) &&
+    threadHasPendingUnitStatusCheckOffer(scopedThreadText || fullThreadText)
+  ) {
+    // "Si" confirmando "¿querés que revise el estado de AD 578 WX?" — continuar consulta,
+    // no resetear empresa ni cerrar con "De nada".
+    nextFlow = "router";
+    responseMessage = "";
   } else if (
     selectionText &&
     looksLikeBriefConfirmation(selectionText) &&
