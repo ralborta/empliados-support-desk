@@ -862,6 +862,145 @@ export function threadHasRecentLiveUnitConsultIntent(threadText: string): boolea
   );
 }
 
+/**
+ * "Tengo un problema con la Nissan" sin decir cuál — NO es consulta GPS concreta todavía.
+ * Bug real, producción 2026-07-29: el bot resolvía la marca, tiraba estado GPS "detenida"
+ * y cerraba sin escuchar al cliente.
+ */
+export function looksLikeVagueUnitProblemReport(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = normCompanyToken(raw);
+  if (!/\b(problema|problemas|tengo un drama|algo raro|no me cierra|no me anda)\b/.test(t)) {
+    return false;
+  }
+  if (looksLikeGpsOrUnitStatusQuestion(raw)) return false;
+  if (looksLikeRouteHistoryOrMovementIssue(raw)) return false;
+  if (looksLikeProblemClarificationPushback(raw)) return false;
+  if (
+    /\b(no reporta|offline|sin se[nñ]al|ignici[oó]n|gps|voltaje|ubicaci[oó]n|posici[oó]n|reporte)\b/.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Recorrido/movimiento histórico que no aparece (módulo HISTORIAL), no GPS en vivo. */
+export function looksLikeRouteHistoryOrMovementIssue(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  if (/\b(no reporta|offline|sin se[nñ]al|ignici[oó]n apagada|gps ahora)\b/.test(t)) return false;
+  if (
+    /\bno (?:veo|muestra|aparece|figura|logro ver)\b.{0,40}\b(recorrido|movimiento|historial|ruta|trayecto|viaje)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(recorrido|historial|trayecto|ruta|movimiento)\b/.test(t) &&
+    /\b(ayer|anteayer|hoy|fecha|d[ií]a|semana|cliente|visita|fue a|iba a)\b/.test(t)
+  ) {
+    return true;
+  }
+  if (/\b(ayer|anteayer)\b/.test(t) && /\b(movimiento|recorrido|viaje|cliente|recorri[oó])\b/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/** El cliente reclama que el bot respondió sin escuchar ("ni te dije cuál es mi problema"). */
+export function looksLikeProblemClarificationPushback(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  return (
+    /\b(ni te dije|no te dije|no te ped[ií]|no te pregunt[eé]|me adelantaste|no es eso|no era eso)\b/.test(
+      t,
+    ) ||
+    /\b(cu[aá]l es mi problema|eso no era|no respondiste)\b/.test(t)
+  );
+}
+
+/** El bot ya explicó estado GPS detenido/ignición en el hilo reciente. */
+export function threadHasRecentGpsStatusSummary(threadText: string): boolean {
+  const tail = threadText.slice(-3500).toLowerCase();
+  return (
+    (/est[aá] detenida/.test(tail) || /funcionamiento normal/.test(tail)) &&
+    (/ignici[oó]n/.test(tail) ||
+      /no se generar[aá] un ticket/.test(tail) ||
+      /no genero ticket/.test(tail))
+  );
+}
+
+export type UnitProblemClarificationMode = "vague" | "pushback" | "history";
+
+export function buildUnitProblemClarificationReply(
+  unitLabel: string,
+  mode: UnitProblemClarificationMode,
+): string {
+  if (mode === "pushback") {
+    return (
+      `Tenés razón, me adelanté. Con ${unitLabel}, contame qué problema estás viendo: ` +
+      `¿no reporta ahora, no ves movimiento/recorrido en el historial, ignición, u otra cosa?`
+    );
+  }
+  if (mode === "history") {
+    return (
+      `Entiendo: con ${unitLabel} no estás viendo movimiento o recorrido que esperabas. ` +
+      `Eso se revisa en Wara → módulo Unidades → abrís la unidad → HISTORIAL (elegís fecha y hora en el mapa). ` +
+      `¿Qué día y franja horaria querés revisar? Si preferís, también puedo derivarte con un asesor para que lo miren con vos.`
+    );
+  }
+  return (
+    `Entiendo que hay un tema con ${unitLabel}. Contame qué ves: ` +
+    `¿no reporta ahora, no aparece movimiento/recorrido en el historial, algo con ignición, u otro detalle?`
+  );
+}
+
+/**
+ * Antes de diagnosticar GPS en vivo: escuchar al cliente si el problema es vago,
+ * es de historial/recorrido, o ya rechazó la respuesta anterior.
+ */
+export function resolveConversationalUnitTurn(params: {
+  rawText: string;
+  threadText: string;
+  unitLabel: string;
+}): string | null {
+  const { rawText, threadText, unitLabel } = params;
+  const norm = normCompanyToken(rawText);
+
+  if (looksLikeProblemClarificationPushback(rawText)) {
+    return buildUnitProblemClarificationReply(unitLabel, "pushback");
+  }
+  if (looksLikeRouteHistoryOrMovementIssue(rawText)) {
+    return buildUnitProblemClarificationReply(unitLabel, "history");
+  }
+
+  const gpsAlreadyExplained = threadHasRecentGpsStatusSummary(threadText);
+  if (
+    gpsAlreadyExplained &&
+    looksLikeSubstantiveCustomerMessage(rawText) &&
+    !looksLikeGpsOrUnitStatusQuestion(rawText) &&
+    !looksLikeLiveUnitConsultIntent(rawText)
+  ) {
+    if (
+      looksLikeRouteHistoryOrMovementIssue(rawText) ||
+      /\b(ayer|recorrido|movimiento|cliente|viaje|visita)\b/.test(norm)
+    ) {
+      return buildUnitProblemClarificationReply(unitLabel, "history");
+    }
+    return buildUnitProblemClarificationReply(unitLabel, "pushback");
+  }
+
+  if (looksLikeVagueUnitProblemReport(rawText)) {
+    return buildUnitProblemClarificationReply(unitLabel, "vague");
+  }
+
+  return null;
+}
+
 export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {
   const text = (raw ?? "").trim();
   if (text.length < 4) return false;

@@ -42,7 +42,7 @@ export const ATILIO_AGENT_TOOLS = [
     function: {
       name: "consultar_unidades",
       description:
-        "Consultar flota, listado de unidades, estado GPS, ignición, último reporte, ubicación o buscar una unidad por patente/marca/nombre. Usar cuando el cliente pregunta por reporte, offline, estado, o quiere ver su flota — NO cuando quiere CAMBIAR odómetro/horómetro.",
+        "Consultar flota, listado, estado GPS/ignición en vivo, o buscar unidad por patente/marca. Si el cliente dice 'tengo un problema con X' sin detallar, la herramienta preguntará qué ve — NO asumas GPS. Para recorridos/historial de ayer usá guia_informativa o derivar si hace falta. NO usar para cambiar odómetro/horómetro.",
       parameters: { type: "object", properties: {} },
     },
   },

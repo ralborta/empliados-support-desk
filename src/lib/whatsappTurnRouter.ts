@@ -47,6 +47,8 @@ import {
   looksLikePlatformInfoGuideInThread,
   looksLikeUnidadesInfoRequest,
   looksLikeVehicleBrandOrUnitSearch,
+  looksLikeVagueUnitProblemReport,
+  looksLikeRouteHistoryOrMovementIssue,
   looksLikeInfoGuideModulePick,
   looksLikeTechnicalSupportRequest,
   threadHasGenericPlatformMenuOffer,
@@ -550,7 +552,12 @@ const TURN_RULES: TurnRule[] = [
   {
     id: "keyword_ticket_fallback",
     reason: "Última red: palabra clave de reclamo/ticket/caso/problema/falla/avería suelta.",
-    decide: ({ text }) => (/\b(reclamo|ticket|caso|problema|falla|aver[ií]a)\b/i.test(text) ? "odoo_ticket" : null),
+    decide: ({ text }) => {
+      if (looksLikeVagueUnitProblemReport(text) || looksLikeRouteHistoryOrMovementIssue(text)) {
+        return null;
+      }
+      return /\b(reclamo|ticket|caso|problema|falla|aver[ií]a)\b/i.test(text) ? "odoo_ticket" : null;
+    },
   },
 ];
 

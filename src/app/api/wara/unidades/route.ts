@@ -19,6 +19,7 @@ import {
   looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  resolveConversationalUnitTurn,
   resolveWaraSessionByPhone,
   threadHasRecentLiveUnitConsultIntent,
   type WaraUnidadEstado,
@@ -1104,7 +1105,14 @@ export async function POST(req: NextRequest) {
         source: "estado",
       });
     }
-    if (unitHasNoInstalledEquipment(unit)) {
+    const conversationalReply = resolveConversationalUnitTurn({
+      rawText,
+      threadText,
+      unitLabel: formatUnitLabel(unit),
+    });
+    if (conversationalReply) {
+      summaryText = conversationalReply;
+    } else if (unitHasNoInstalledEquipment(unit)) {
       action = "ticket";
       const created = await createNoEquipmentTicket({
         rawPhone,
