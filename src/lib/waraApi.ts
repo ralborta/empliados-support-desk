@@ -12,6 +12,7 @@ import {
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
   looksLikeExplicitOdometerUpdateRequest,
+  looksLikeOdometerInfoRequest,
   looksLikeOdometerIntentStart,
   looksLikeHorometerOnlyIntent,
   looksLikeFreshOdometerRestartRequest,
@@ -257,6 +258,7 @@ export function looksLikeImplicitCompanyChangeAffirmation(
 export function looksLikeNonOdometerOperationalIntent(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
   if (!n) return false;
+  if (looksLikeOdometerInfoRequest(text)) return true;
   if (looksLikeOdometerIntentStart(text)) return false;
   if (looksLikeOperationalMaintenanceIntent(text ?? "")) return true;
   if (looksLikeCertificateKeyword(text)) return true;

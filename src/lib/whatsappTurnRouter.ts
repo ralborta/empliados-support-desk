@@ -19,6 +19,7 @@ import {
   looksLikeCertificateKeyword,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
+  looksLikeOdometerInfoRequest,
   looksLikeOdometerProblemReport,
   looksLikePostAdvisorCaseThread,
   looksLikePostAdvisorCaseSupplement,
@@ -185,6 +186,11 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
     reason: "Consulta GPS/unidad en vivo tiene prioridad sobre cualquier guía.",
     decide: ({ text }) =>
       looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? false : undefined,
+  },
+  {
+    id: "odometer_info_allow",
+    reason: "Pregunta informativa sobre odómetro/horómetro — explicar, no registrar.",
+    decide: ({ text }) => (looksLikeOdometerInfoRequest(text) ? true : undefined),
   },
   {
     id: "odometer_problem_or_update_block",
@@ -403,6 +409,11 @@ const TURN_RULES: TurnRule[] = [
       if (threadHasActiveOdometerFlow(threadText)) return "odometro";
       return "unidades";
     },
+  },
+  {
+    id: "odometer_info_guide",
+    reason: "Pregunta informativa sobre odómetro — guía, no trámite operativo.",
+    decide: ({ text }) => (looksLikeOdometerInfoRequest(text) ? "info_guides" : null),
   },
   {
     id: "odometer_operational",

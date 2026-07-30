@@ -5,6 +5,7 @@ import {
   looksLikeTurnoOrAgendaQuestion,
   looksLikeUnidadesInfoRequest,
 } from "@/lib/waraApi";
+import { looksLikeOdometerInfoRequest } from "@/lib/wara";
 import { answerFromKnowledgeBase } from "@/lib/knowledgeBaseAI";
 
 export type InfoGuideKind = "opciones" | "unidades" | "mantenimiento";
@@ -39,6 +40,26 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     return "mantenimiento";
   }
   return null;
+}
+
+function odometerInfoReply(rawText: string): string {
+  const t = norm(rawText);
+  if (/\b(hor[oó]metro|horas)\b/.test(t) && !/\b(od[oó]metro|kilometraje)\b/.test(t)) {
+    return [
+      "El cambio de horómetro en Wara sirve para actualizar las horas de motor de una unidad cuando el valor del GPS no coincide con el real (por ejemplo, después de un service o un cambio de equipo).",
+      "",
+      "Así los planes de mantenimiento por horas y los reportes quedan alineados con la realidad de la unidad.",
+      "",
+      "Si querés registrarlo por acá, decime la patente y el horómetro nuevo.",
+    ].join("\n");
+  }
+  return [
+    "El cambio de odómetro en Wara sirve para registrar el kilometraje real de una unidad cuando el valor que muestra el GPS no coincide (por ejemplo, después de cambiar el odómetro físico, un service o una corrección).",
+    "",
+    "No es un mantenimiento en sí: es una actualización del dato para que alertas, planes preventivos y reportes usen el km correcto.",
+    "",
+    "Si querés hacer el registro por WhatsApp, decime la patente y el odómetro nuevo en km.",
+  ].join("\n");
 }
 
 function norm(text: string): string {
@@ -232,7 +253,8 @@ export function buildInfoGuideReply(
 ): string {
   const detected = kind ?? detectInfoGuideKind(rawText);
   let message: string;
-  if (detected === "opciones") message = opcionesReply(rawText);
+  if (looksLikeOdometerInfoRequest(rawText)) message = odometerInfoReply(rawText);
+  else if (detected === "opciones") message = opcionesReply(rawText);
   else if (detected === "unidades") message = unidadesReply(rawText);
   else if (detected === "mantenimiento") message = mantenimientoReply(rawText);
   else

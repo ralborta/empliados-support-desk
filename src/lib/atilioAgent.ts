@@ -26,6 +26,7 @@ import {
 } from "@/lib/waraApi";
 import {
   isOdometerFlowSuperseded,
+  looksLikeOdometerInfoRequest,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
@@ -75,7 +76,8 @@ REGLAS ABSOLUTAS:
 - Trámite pendiente + confirmación → herramienta del trámite.
 - Problema vago → preguntá qué ve antes de diagnosticar (sin asumir GPS).
 - NO respondas sin herramienta si hay unidad activa, trámite pendiente o consulta reciente en curso.
-- Si el hilo tiene trámite de ODÓMETRO/HORÓMETRO activo, usá registrar_odometro_horometro — NUNCA consultar_unidades salvo que pida explícitamente estado GPS o cambie de tema.`;
+- Si el hilo tiene trámite de ODÓMETRO/HORÓMETRO activo, usá registrar_odometro_horometro — NUNCA consultar_unidades salvo que pida explícitamente estado GPS o cambie de tema.
+- Preguntas INFORMATIVAS sobre odómetro/horómetro ("¿para qué sirve?", "¿qué es?", "me explicás") → guia_informativa — NO registrar_odometro_horometro ni pedir km.`;
 
 const BUSINESS_MODULE_KEYS = [
   "odometer",
@@ -179,6 +181,10 @@ function shouldRequireToolCall(params: {
   selectionText: string;
 }): boolean {
   const { session, threadText, selectionText } = params;
+
+  if (looksLikeOdometerInfoRequest(selectionText)) {
+    return true;
+  }
 
   if (
     shouldRouteTurnToFleetListExecutor({

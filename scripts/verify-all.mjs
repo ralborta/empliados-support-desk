@@ -75,6 +75,7 @@ const SUITES = [
   "verify-fleet-list-agent-bypass.mjs",
   "verify-fleet-list-intent-ai.mjs",
   "verify-odometer-after-certificate-context.mjs",
+  "verify-odometer-info-vs-operational.mjs",
   "verify-odometer-ok-confirm-after-fleet-list.mjs",
   "verify-unit-status-confirm-context.mjs",
   "verify-odometer-si-fecha-confirm.mjs",

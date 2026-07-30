@@ -37,6 +37,7 @@ import {
   certificateFlowState,
   looksLikeExplicitOdometerUpdateRequest,
   isOdometerFlowSuperseded,
+  looksLikeOdometerInfoRequest,
 } from "@/lib/wara";
 import {
   isMaintenancePlateSelectionMessage,
@@ -282,6 +283,16 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return { message: execMessage, executor: "unidades", ok: execOk };
+    }
+  }
+
+  // Pregunta informativa sobre odómetro — guía, no arrancar trámite con activeUnit.
+  if (looksLikeOdometerInfoRequest(selectionText)) {
+    const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor: "info_guides", ok: execOk };
     }
   }
 

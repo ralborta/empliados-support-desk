@@ -1022,6 +1022,7 @@ export function threadHasCertificateUnitPrompt(threadText: string): boolean {
 export function looksLikeOdometerIntentStart(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  if (looksLikeOdometerInfoRequest(raw)) return false;
   if (detectLoosePlate(raw) || detectPlate(raw)) return false;
   const t = insertMissingSpaceAfterOdometerKeywords(
     raw
@@ -1132,6 +1133,26 @@ export function looksLikeGenericCorrectionIntent(text: string | undefined | null
   return false;
 }
 
+/** Pregunta informativa sobre odómetro/horómetro — NO trámite operativo de registro. */
+export function looksLikeOdometerInfoRequest(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
+  if (/\b(quiero|necesito|hagamos|podemos|vamos a|deseo|confirmo|confirma)\s+(cambiar|modificar|registrar|actualizar)\b/.test(t)) {
+    return false;
+  }
+  return (
+    /\b(para que sirve|para q sirve|para que es|para q es|que es|que son|que significa|como funciona|como se hace|como se usa|me explicas|explicame|explic[aá]me|contame|decime|pod[eé]s explicar|me ayudas a entender|quiero entender|quiero saber|informacion|informaci[oó]n|diferencia entre|para que se usa)\b/.test(
+      t,
+    ) ||
+    (/\b(para que|para q|que es|como)\b/.test(t) && /\b(sirve|funciona|significa)\b/.test(t))
+  );
+}
+
 /** Reporte de falla/desfase del odómetro — no es trámite de actualizar km. */
 export function looksLikeOdometerProblemReport(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
@@ -1179,6 +1200,7 @@ export function looksLikeOdometerHelpRequest(text: string | undefined | null): b
 /** Mensaje actual pide trámite de actualización de odómetro (no guía ni otro módulo). */
 export function looksLikeExplicitOdometerUpdateRequest(text: string | undefined | null): boolean {
   if (looksLikeOdometerProblemReport(text)) return false;
+  if (looksLikeOdometerInfoRequest(text)) return false;
   return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }
 
