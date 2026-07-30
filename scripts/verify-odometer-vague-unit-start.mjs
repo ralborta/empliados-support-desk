@@ -60,6 +60,9 @@ const vagueReferences = [
   "Es la unidad por la que te consulte por reporte",
   "la que estamos hablando",
   "de la que hablamos antes",
+  "De esta patente",
+  "Esta misma",
+  "La misma patente",
 ];
 for (const text of vagueReferences) {
   assert(

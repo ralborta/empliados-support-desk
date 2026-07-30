@@ -811,6 +811,17 @@ export async function POST(req: NextRequest) {
           hasPendingConfirmInThread && !correctingUnitDuringPendingConfirm,
       }) ?? "",
     );
+  } else if (
+    !patente &&
+    freshOdometerIntentWithoutUnit &&
+    shouldUseActiveUnitFallback(rawText) &&
+    activeUnitRecord?.plate
+  ) {
+    // Bug real, producción 2026-07-30: "Podemos cambiar el odómetro?" tras certificado o
+    // consulta GPS tenía activeUnit (AD 626 UG) pero freshOdometerIntentWithoutUnit
+    // bloqueaba resolveOdometerContextPlate y odometerFlowStart bloqueaba el fallback
+    // de activeUnit — pedía patente de cero pese a la unidad recién usada.
+    patente = normalizePlate(activeUnitRecord.plate);
   }
 
   if (!patente && !odometerFlowStart && !isFleetUnitSelection && !clockTimeOnlyReading) {
@@ -981,7 +992,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (!patente) {
-    if (treatAsBlankFlowStart) {
+    if (
+      shouldUseActiveUnitFallback(rawText) &&
+      activeUnitRecord?.plate
+    ) {
+      patente = normalizePlate(activeUnitRecord.plate);
+    } else if (treatAsBlankFlowStart) {
       const fallbackTemplate = horometerOnlyIntent
         ? "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)"
         : "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";

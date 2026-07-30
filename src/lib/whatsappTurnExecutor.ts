@@ -34,6 +34,8 @@ import {
   threadOdometerRegistrationCompleted,
   looksLikeCertificateKeyword,
   certificateFlowState,
+  looksLikeExplicitOdometerUpdateRequest,
+  isOdometerFlowSuperseded,
 } from "@/lib/wara";
 import {
   isMaintenancePlateSelectionMessage,
@@ -47,7 +49,7 @@ import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction } from "@/lib/pendingAction";
-import { getActiveUnit } from "@/lib/activeUnit";
+import { getActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
@@ -282,6 +284,25 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  const activeUnit = await getActiveUnit(prisma, rawPhone);
+
+  // Arranque odómetro con unidad activa reciente (certificado/consulta GPS) → executor directo.
+  if (
+    activeUnit?.plate &&
+    shouldUseActiveUnitFallback(selectionText) &&
+    looksLikeExplicitOdometerUpdateRequest(selectionText) &&
+    !threadOdometerRegistrationCompleted(threadCtx.classificationThread) &&
+    !isOdometerFlowSuperseded(threadCtx.classificationThread) &&
+    !threadHasActiveOdometerFlow(threadCtx.classificationThread)
+  ) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
   // Odómetro/horómetro activo: patente parcial, prefijo o km → executor, NO consulta GPS ni agente.
   if (
     shouldRouteTurnToOdometerExecutor({
@@ -299,7 +320,6 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Follow-up conversacional sobre unidad activa → executor con hechos, antes del agente.
-  const activeUnit = await getActiveUnit(prisma, rawPhone);
   const threadForFollowUp = threadCtx.classificationThread;
   if (
     activeUnit?.plate &&

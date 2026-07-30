@@ -73,6 +73,7 @@ const SUITES = [
   "verify-agent-dialogue-reasoning.mjs",
   "verify-odometer-agent-context.mjs",
   "verify-fleet-list-agent-bypass.mjs",
+  "verify-odometer-after-certificate-context.mjs",
   "verify-unit-status-confirm-context.mjs",
   "verify-odometer-si-fecha-confirm.mjs",
   "verify-calendar-context-fechas.mjs",

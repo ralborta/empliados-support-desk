@@ -654,9 +654,18 @@ export function looksLikeVagueUnitReference(rawText: string): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (
-    /\b(esa|ese|la misma|el mismo|la anterior|el anterior|la del hilo|la que dije|la que mencione|la que mencion[eé])\b/.test(
+    /\b(esa|ese|la misma|el mismo|esta misma|este mismo|la anterior|el anterior|la del hilo|la que dije|la que mencione|la que mencion[eé])\b/.test(
       norm,
     )
+  ) {
+    return true;
+  }
+  // Bug real, producción 2026-07-30: tras certificado/consulta GPS, "De esta patente" /
+  // "Esta misma" al pedir cambio de odómetro no matcheaban referencia vaga — el agente
+  // volvía a pedir matrícula en vez de reusar activeUnit.
+  if (
+    /\b(de esta|de esa|esta|esa)\s+(patente|matricula|unidad)\b/.test(norm) ||
+    /\b(la misma|esta misma)\s+(patente|matricula|unidad)\b/.test(norm)
   ) {
     return true;
   }
@@ -1908,6 +1917,18 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   if (
     (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) &&
     looksLikeSubstantiveCustomerMessage(selectionText)
+  ) {
+    return true;
+  }
+  // Referencia vaga mientras el bot pidió patente para odómetro (p. ej. "De esta patente"
+  // tras certificado) — no dejar que el agente pida matrícula otra vez.
+  const tail = threadText.slice(-2500).toLowerCase();
+  if (
+    looksLikeVagueUnitReference(selectionText) &&
+    /para registrar el cambio de od[oó]metro necesito la patente|para registrar el cambio de hor[oó]metro necesito la patente/.test(
+      tail,
+    ) &&
+    !threadOdometerRegistrationCompleted(threadText)
   ) {
     return true;
   }
