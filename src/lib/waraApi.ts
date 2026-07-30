@@ -255,11 +255,28 @@ export function looksLikeImplicitCompanyChangeAffirmation(
 }
 
 /** Trámite operativo distinto de odómetro (certificado, reporte, etc.). */
+/** Datos o referencia de unidad dentro de un trámite de odómetro ya iniciado. */
+export function looksLikeOdometerOperationalSupplement(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const n = normCompanyToken(raw);
+  if (/\bkilometraje\b/.test(n) && /\d/.test(raw)) return true;
+  if (/\bkm\s*actual\b/.test(n) && /\d/.test(raw)) return true;
+  if (/\b(misma|mismo)\b.{0,40}\b(certificado|certficado)\b/.test(n)) return true;
+  if (/\bque me (?:diste|pasaste|mandaste) el certificado\b/.test(n)) return true;
+  if (/\b(la misma|esta misma)\b.{0,24}\b(unidad|patente|matricula)\b/.test(n)) return true;
+  if (/\b(unidad|patente)\b.{0,20}\b(del certificado|de el certificado|del certficado)\b/.test(n)) {
+    return true;
+  }
+  return false;
+}
+
 export function looksLikeNonOdometerOperationalIntent(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
   if (!n) return false;
   if (looksLikeOdometerInfoRequest(text)) return true;
   if (looksLikeOdometerIntentStart(text)) return false;
+  if (looksLikeOdometerOperationalSupplement(text)) return false;
   if (looksLikeOperationalMaintenanceIntent(text ?? "")) return true;
   if (looksLikeCertificateKeyword(text)) return true;
   if (/\b(reporte|ultimo reporte|sin reporte|offline|listado|mis unidades)\b/.test(n)) return true;
@@ -594,6 +611,7 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (looksLikeConversationAcknowledgement(raw)) return false;
+  if (looksLikeOdometerOperationalSupplement(raw)) return true;
   if (looksLikeNonOdometerOperationalIntent(raw)) return false;
   if (looksLikePlateCorrectionRequest(raw)) return true;
   if (looksLikeOdometerConfirmReply(raw)) return true;
@@ -649,6 +667,7 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (odometerFlowAwaitingInput) {
     if (looksLikePlateCorrectionRequest(text)) return true;
+    if (looksLikeOdometerOperationalSupplement(text)) return true;
     if (looksLikeNonOdometerOperationalIntent(text)) return false;
     return looksLikeOdometerContinuationMessage(text);
   }

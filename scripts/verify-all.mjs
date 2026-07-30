@@ -78,6 +78,7 @@ const SUITES = [
   "verify-odometer-info-vs-operational.mjs",
   "verify-unit-search-brand-after-plate-ask.mjs",
   "verify-structured-odometer-template.mjs",
+  "verify-odometer-certificado-unit-reference.mjs",
   "verify-odometer-ok-confirm-after-fleet-list.mjs",
   "verify-unit-status-confirm-context.mjs",
   "verify-odometer-si-fecha-confirm.mjs",

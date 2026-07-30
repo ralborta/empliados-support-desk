@@ -668,6 +668,13 @@ export function looksLikeVagueUnitReference(rawText: string): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (
+    /\b(misma|mismo)\b.{0,40}\b(certificado|certficado)\b/.test(norm) ||
+    /\bque me (?:diste|pasaste|mandaste) el certificado\b/.test(norm) ||
+    /\b(unidad|patente)\b.{0,20}\b(del certificado|de el certificado)\b/.test(norm)
+  ) {
+    return true;
+  }
+  if (
     /\b(esa|ese|la misma|el mismo|esta misma|este mismo|la anterior|el anterior|la del hilo|la que dije|la que mencione|la que mencion[eé])\b/.test(
       norm,
     )
