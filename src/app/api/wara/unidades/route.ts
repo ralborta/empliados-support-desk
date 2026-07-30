@@ -20,13 +20,29 @@ import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeConversationalUnitConcern,
+  looksLikeProblemClarificationPushback,
+  looksLikeRouteHistoryOrMovementIssue,
+  looksLikeUnitConsultFollowUp,
+  looksLikeVagueUnitProblemReport,
   resolveConversationalUnitTurn,
   threadHasRecentGpsStatusSummary,
+  threadHasRecentNoEquipmentExplanation,
+  threadHasRecentUnitCaseOpened,
   looksLikeSubstantiveCustomerMessage,
   resolveWaraSessionByPhone,
   threadHasRecentLiveUnitConsultIntent,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
+import { isAtilioAgentEnabled } from "@/lib/atilioDialogueCompose";
+import {
+  buildExecutorDialoguePayload,
+  type ExecutorDialogueState,
+} from "@/lib/executorDialogueState";
+import {
+  buildGpsAssessmentDialogueState,
+  buildListenProblemDialogueState,
+  buildNoEquipmentDialogueState,
+} from "@/lib/unitDialogueState";
 import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalation";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
@@ -397,6 +413,17 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
     where: { id: targetTicket.id },
     data: { lastMessageAt: new Date(), status: statusAfterOutboundMessage(targetTicket.status) },
   });
+}
+
+function agentComposePayload(state: ExecutorDialogueState | null): Record<string, unknown> {
+  if (!state || !isAtilioAgentEnabled()) return {};
+  return { ...buildExecutorDialoguePayload(state), agent_compose_s: "true" };
+}
+
+function listenProblemMode(rawText: string): "vague" | "pushback" | "history" {
+  if (looksLikeProblemClarificationPushback(rawText)) return "pushback";
+  if (looksLikeRouteHistoryOrMovementIssue(rawText)) return "history";
+  return "vague";
 }
 
 async function findRecentOpenTicketByPlate(
@@ -1087,6 +1114,7 @@ export async function POST(req: NextRequest) {
   };
   let action: "none" | "observation" | "ticket" = "none";
   let ticketRef = "";
+  let dialogueState: ExecutorDialogueState | null = null;
   const plateDisplay = wantedPlate ? formatPlateWithSpaces(wantedPlate) ?? wantedPlate : "";
   const maintenanceContext = hasPendingMaintenancePlateRequest(threadText);
   let summaryText = !result.ok
@@ -1133,22 +1161,62 @@ export async function POST(req: NextRequest) {
     });
     if (conversationalReply) {
       summaryText = conversationalReply;
+      if (isAtilioAgentEnabled()) {
+        dialogueState = buildListenProblemDialogueState({
+          unit,
+          rawText,
+          mode: listenProblemMode(rawText),
+        });
+      }
     } else if (unitHasNoInstalledEquipment(unit)) {
       action = "ticket";
-      const created = await createNoEquipmentTicket({
-        rawPhone,
-        unit,
-        companyName: pickOdooCompanyName(session.companyName, result.cliente),
-        contactName: session.contactName ?? "",
-      });
+      const followUpOnly =
+        (threadHasRecentNoEquipmentExplanation(threadText) ||
+          threadHasRecentUnitCaseOpened(threadText)) &&
+        looksLikeUnitConsultFollowUp(rawText);
+      const created = followUpOnly
+        ? await (async () => {
+            const plate = normalizeLoosePlate(unit.patente || unit.unidad || "");
+            const existing = await findRecentNoEquipmentTicket(rawPhone, plate);
+            if (existing?.ticket) {
+              return {
+                ref: existing.ticket.code,
+                reused: true,
+                odooRef: null,
+                message: `La unidad ${formatUnitLabel(unit)} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto para que Atención al cliente lo revise.`,
+              };
+            }
+            return createNoEquipmentTicket({
+              rawPhone,
+              unit,
+              companyName: pickOdooCompanyName(session.companyName, result.cliente),
+              contactName: session.contactName ?? "",
+            });
+          })()
+        : await createNoEquipmentTicket({
+            rawPhone,
+            unit,
+            companyName: pickOdooCompanyName(session.companyName, result.cliente),
+            contactName: session.contactName ?? "",
+          });
       ticketRef = created.ref;
       summaryText = created.message;
+      if (isAtilioAgentEnabled()) {
+        dialogueState = buildNoEquipmentDialogueState({
+          unit,
+          rawText,
+          casoAbierto: created.reused || !!created.ref,
+          ticketRef: created.ref || undefined,
+          ticketReused: created.reused,
+        });
+      }
     } else {
       const assessment = assessUnitReporting(unit);
       if (assessment) {
         const elapsedText = minutesAgo(assessment.reportElapsed);
         const label = formatUnitLabel(unit);
         let ticketIssueDetail: string | undefined;
+        let ticketReused = false;
         if (assessment.status === "ok" || assessment.status === "coherent_pause") {
           action = "observation";
           summaryText = await buildGpsClientSummary({
@@ -1175,6 +1243,7 @@ export async function POST(req: NextRequest) {
             ticketTitleSuffix: "Falla de ignición",
           });
           ticketRef = created.ref;
+          ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
             unitLabel: label,
             unit,
@@ -1199,6 +1268,7 @@ export async function POST(req: NextRequest) {
             ticketTitleSuffix: "Pérdida de señal satelital",
           });
           ticketRef = created.ref;
+          ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
             unitLabel: label,
             unit,
@@ -1222,6 +1292,7 @@ export async function POST(req: NextRequest) {
             ticketTitleSuffix: "Falta de reporte",
           });
           ticketRef = created.ref;
+          ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
             unitLabel: label,
             unit,
@@ -1230,6 +1301,17 @@ export async function POST(req: NextRequest) {
             ticketRef: created.ref,
             odooRef: created.odooRef ?? undefined,
             ticketReused: created.reused,
+            ticketIssueDetail,
+          });
+        }
+        if (isAtilioAgentEnabled()) {
+          dialogueState = buildGpsAssessmentDialogueState({
+            unit,
+            rawText,
+            assessment,
+            action,
+            ticketRef: ticketRef || undefined,
+            ticketReused,
             ticketIssueDetail,
           });
         }
@@ -1246,14 +1328,18 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  await appendOutboundBotMessage(rawPhone, summaryText, {
-    source: "wara_unidades_response",
-    ok: result.ok,
-    unidadesCount: filtered.length,
-    companyName: pickOdooCompanyName(session.companyName, result.cliente),
-    action,
-    ticketRef,
-  });
+  const composePayload = agentComposePayload(dialogueState);
+
+  if (!composePayload.agent_compose_s && summaryText.trim()) {
+    await appendOutboundBotMessage(rawPhone, summaryText, {
+      source: "wara_unidades_response",
+      ok: result.ok,
+      unidadesCount: filtered.length,
+      companyName: pickOdooCompanyName(session.companyName, result.cliente),
+      action,
+      ticketRef,
+    });
+  }
 
   return NextResponse.json(
     {
@@ -1266,6 +1352,7 @@ export async function POST(req: NextRequest) {
       message: summaryText,
       action,
       ticketRef,
+      ...composePayload,
     },
     { status: BB_STATUS }
   );

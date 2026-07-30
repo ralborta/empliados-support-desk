@@ -17,7 +17,11 @@ import {
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeUnitConsultFollowUp,
+  looksLikeSubstantiveCustomerMessage,
   resetCustomerCompanyMenu,
+  threadHasRecentNoEquipmentExplanation,
+  threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
@@ -31,8 +35,9 @@ import {
   looksLikeCertificateKeyword,
   certificateFlowState,
 } from "@/lib/wara";
-import { isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 import {
+  isMaintenancePlateSelectionMessage,
+  shouldRouteTurnToOdometerExecutor,
   buildFleetUnitNotFoundMessage,
   looksLikeFleetUnitSearchInput,
   looksLikeUnitNameInMessage,
@@ -41,9 +46,17 @@ import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction } from "@/lib/pendingAction";
+import { getActiveUnit } from "@/lib/activeUnit";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
+import {
+  agentComposeRequested,
+  parseExecutorDialogueState,
+} from "@/lib/executorDialogueState";
+import {
+  composeAgentReplyFromDialogueState,
+} from "@/lib/atilioDialogueCompose";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -250,6 +263,56 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return { message: execMessage, executor: "mantenimiento", ok: execOk };
+    }
+  }
+
+  // Odómetro/horómetro activo: patente parcial, prefijo o km → executor, NO consulta GPS ni agente.
+  if (
+    shouldRouteTurnToOdometerExecutor({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+      pendingActionType: pendingAction?.type ?? null,
+    })
+  ) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
+  // Follow-up conversacional sobre unidad activa → executor con hechos, antes del agente.
+  const activeUnit = await getActiveUnit(prisma, rawPhone);
+  const threadForFollowUp = threadCtx.classificationThread;
+  if (
+    activeUnit?.plate &&
+    !threadHasActiveOdometerFlow(threadForFollowUp) &&
+    pendingAction?.type !== "odometro" &&
+    (looksLikeUnitConsultFollowUp(selectionText) ||
+      ((threadHasRecentNoEquipmentExplanation(threadForFollowUp) ||
+        threadHasRecentUnitCaseOpened(threadForFollowUp)) &&
+        looksLikeSubstantiveCustomerMessage(selectionText)))
+  ) {
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (agentComposeRequested(execResult)) {
+      const dialogueState = parseExecutorDialogueState(execResult);
+      if (dialogueState) {
+        const composed = await composeAgentReplyFromDialogueState({
+          threadText: threadForFollowUp,
+          customerMessage: selectionText,
+          dialogueState,
+          fallbackTemplate: messageFromPayload(execResult),
+        });
+        if (composed) {
+          return { message: composed, executor: "unidades", ok: execOk };
+        }
+      }
+    }
+    const execMessage = messageFromPayload(execResult);
+    if (execMessage) {
+      return { message: execMessage, executor: "unidades", ok: execOk };
     }
   }
 

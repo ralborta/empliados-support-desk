@@ -1084,6 +1084,50 @@ export function resolveConversationalUnitTurn(params: {
   return null;
 }
 
+/** Follow-up conversacional sobre una unidad ya en contexto (no cambio de tema). */
+export function looksLikeUnitConsultFollowUp(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t || t.length < 3) return false;
+  if (looksLikeChangeCompanyRequest(text)) return false;
+  if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeExplicitOdometerUpdateRequest(text)) return false;
+  if (looksLikeCertificateKeyword(text)) return false;
+  if (/\b(mantenimiento|certificado|cobertura|odometro|odómetro|horometro|horómetro)\b/.test(t)) {
+    return false;
+  }
+  return (
+    /\b(hace cuanto|hace cuánto|desde cuando|desde cuándo|cuanto tiempo|cuánto tiempo|cuanto hace|cuánto hace)\b/.test(
+      t,
+    ) ||
+    /\b(verdad|cierto|no funciona|ya no|entonces|de acuerdo|entendido|claro)\b/.test(t) ||
+    /\b(no registra|no reporta|sin reporte|offline)\b/.test(t) ||
+    looksLikeProblemClarificationPushback(text) ||
+    (looksLikeBriefConfirmation(text) && t.length >= 6)
+  );
+}
+
+/** El bot ya informó que generó o reutilizó un caso por consulta de unidad. */
+export function threadHasRecentUnitCaseOpened(threadText: string): boolean {
+  const tail = threadText.slice(-4000).toLowerCase();
+  return (
+    /gener[eé] un caso/.test(tail) ||
+    /caso abierto/.test(tail) ||
+    /registr[eé] la consulta en el caso/.test(tail) ||
+    (/no tiene equipo/.test(tail) && /gener[eé]|caso|avisamos/.test(tail))
+  );
+}
+
+/** Diagnóstico reciente de unidad sin equipo GPS en el hilo. */
+export function threadHasRecentNoEquipmentExplanation(threadText: string): boolean {
+  const tail = threadText.slice(-4000).toLowerCase();
+  return (
+    /no tiene equipo gps/.test(tail) ||
+    /no tiene equipo instalado/.test(tail) ||
+    /sin telemetr[ií]a/.test(tail) ||
+    (/no hay reportes/.test(tail) && /equipo/.test(tail))
+  );
+}
+
 export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {
   const text = (raw ?? "").trim();
   if (text.length < 4) return false;

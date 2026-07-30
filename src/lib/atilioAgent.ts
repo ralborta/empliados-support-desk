@@ -1,9 +1,8 @@
 /**
- * Agente conversacional Atilio — interpreta el hilo completo, elige la acción correcta
- * vía tools (ejecutores backend existentes) y redacta la respuesta de forma natural.
+ * Agente conversacional Atilio — interpreta el hilo, ejecuta tools y RAZONA la respuesta.
+ * El backend devuelve hechos (dialogue_state); el agente redacta en diálogo natural.
  *
  * Activar: WARA_AGENT_MODE=true (+ OPENAI_API_KEY).
- * Fallback automático al router de reglas si falla o no hay API key.
  */
 import OpenAI from "openai";
 import { prisma } from "@/lib/db";
@@ -19,42 +18,49 @@ import {
 } from "@/lib/atilioAgentTools";
 import { listBotPromptModules } from "@/lib/botPromptStore";
 import { formatCalendarContextBlock } from "@/lib/odometroFecha";
+import { isAtilioAgentEnabled } from "@/lib/atilioDialogueCompose";
+import {
+  looksLikeSubstantiveCustomerMessage,
+  looksLikeUnitConsultFollowUp,
+  threadHasRecentUnitCaseOpened,
+} from "@/lib/waraApi";
+import {
+  isOdometerFlowSuperseded,
+  threadHasActiveOdometerFlow,
+  threadOdometerRegistrationCompleted,
+} from "@/lib/wara";
+import { shouldRouteTurnToOdometerExecutor } from "@/lib/waraUnitIntent";
+
+export { isAtilioAgentEnabled, composeAgentReplyFromDialogueState, type ComposeDialogueInput } from "@/lib/atilioDialogueCompose";
 
 export const ATILIO_AGENT_TIMEOUT_MS = 28_000;
-const MAX_TOOL_ROUNDS = 2;
 
-export function isAtilioAgentEnabled(): boolean {
-  const raw = process.env.WARA_AGENT_MODE?.trim().toLowerCase();
-  return raw === "true" || raw === "1" || raw === "yes";
-}
+const MAX_TOOL_ROUNDS = 2;
 
 function agentModel(): string {
   return process.env.WARA_AGENT_MODEL?.trim() || "gpt-4o-mini";
 }
 
-const CORE_SYSTEM_PROMPT = `Sos Atilio, agente de Mesa de Ayuda Wara por WhatsApp. Sos una persona real del equipo de soporte: cercano, claro, breve, sin emojis, español rioplatense.
+const CORE_SYSTEM_PROMPT = `Sos Atilio, agente de Mesa de Ayuda Wara por WhatsApp. Escuchás, razonás, dialogás — NO sos un bot de plantillas.
 
-TU TRABAJO EN CADA TURNO:
-1. Leé TODO el historial y el mensaje actual. Entendé en qué trámite están (odómetro, consulta GPS, certificado, mantenimiento, guía, asesor).
-2. Si el cliente está en medio de un trámite, SEGUÍ ese trámite — no cambies de tema ni tires estado GPS si pidió odómetro, ni viceversa.
-3. Si necesitás ejecutar una acción operativa (consultar unidad, registrar odómetro, certificado, mantenimiento, ticket, guía), llamá la herramienta correspondiente UNA vez por turno.
-4. Con el resultado de la herramienta, redactá la respuesta final para WhatsApp: natural, conversacional, como escribiría un agente humano — NO copies el texto del backend palabra por palabra si suena robótico, pero SÍ preservá todos los datos exactos (patentes, km, horas, fechas, nombres de unidad).
+EN CADA TURNO:
+1. Leé el mensaje actual: ¿qué pregunta concreta hizo el cliente?
+2. Si hay acción operativa, SIEMPRE llamá la herramienta — NUNCA inventes diagnósticos sin herramienta.
+3. Redactá natural: primero la respuesta a su pregunta, después contexto mínimo.
+
+DIÁLOGO (crítico):
+- No repitas el mismo párrafo en turnos seguidos.
+- No ignores "hace cuánto", "verdad?", "y entonces?".
+- No uses tono de formulario ("Voy a registrar:", "necesito la patente (ej...)" ).
+- Unidad: decila corto ("MYQ 693"), no el bloque nombre+largo siempre.
 
 REGLAS ABSOLUTAS:
-- Nunca inventes patentes, km, horas, fechas, estados técnicos ni números de caso/ticket.
-- Para "hoy", "ayer" o "anteayer" usá ÚNICAMENTE las fechas del bloque FECHA DE REFERENCIA — nunca adivines ni uses fechas de tu entrenamiento.
-- Si la herramienta devolvió backend_message con datos, esos números y patentes deben aparecer EXACTAMENTE igual en tu respuesta.
-- Si hay trámite pendiente de confirmación (pending_action), y el cliente dice CONFIRMO, Confirmo, sí, dale, esa está bien, si esa, está bien o similar, SIEMPRE llamá la herramienta del trámite activo — nunca vuelvas a pedir patente ni repitas el resumen sin ejecutar.
-- Si el cliente dice que tiene un PROBLEMA con una unidad pero NO especifica cuál (solo marca/nombre), NO tires diagnóstico GPS todavía: preguntá qué ve mal (reporte ahora, recorrido/historial, ignición, etc.).
-- Lo mismo si dice "algo raro", "un tema", "qué pasa con...", "no entiendo" o corrige que te adelantaste — escuchá primero, diagnosticá después.
-- Si pregunta por recorrido/movimiento de ayer, anoche, el lunes, semana pasada o historial en el mapa, explicá el módulo HISTORIAL de Wara y pedí fecha/franja — no repitas "está detenida" del GPS en vivo.
-- Si el cliente te corrige ("ni te dije cuál es mi problema", "repetís lo mismo"), reconocelo con naturalidad y preguntá de nuevo qué necesita.
-- Si falta un dato (patente, km, etc.), preguntá UNA cosa concreta, mostrando que entendiste lo anterior — no repitas el guion de formulario.
-- Si el cliente pide listado de flota para elegir unidad durante un trámite, eso sigue siendo parte del mismo trámite.
-- No prometas tiempos de resolución. No des asesoramiento comercial/facturación.
-- 1-5 oraciones salvo que haga falta un resumen de confirmación con datos.
-
-Podés responder sin herramienta solo para aclaraciones muy breves cuando aún no hay acción que ejecutar; en cuanto haya acción operativa, usá la herramienta.`;
+- Nunca inventes patentes, km, fechas, estados ni tickets.
+- Usá FECHA DE REFERENCIA para hoy/ayer/anteayer.
+- Trámite pendiente + confirmación → herramienta del trámite.
+- Problema vago → preguntá qué ve antes de diagnosticar.
+- NO respondas sin herramienta si hay unidad activa, trámite pendiente o consulta reciente en curso.
+- Si el hilo tiene trámite de ODÓMETRO/HORÓMETRO activo (pide patente, km u confirmación), usá registrar_odometro_horometro — NUNCA consultar_unidades salvo que el cliente pida explícitamente estado GPS o cambie de tema.`;
 
 const BUSINESS_MODULE_KEYS = [
   "odometer",
@@ -107,6 +113,7 @@ function buildSessionContextBlock(opts: {
   companyName?: string | null;
   pendingAction: PendingActionRecord | null;
   activeUnit: { plate: string; label?: string } | null;
+  threadText?: string;
 }): string {
   const lines: string[] = [];
   if (opts.customerName?.trim()) lines.push(`cliente_nombre: ${opts.customerName.trim()}`);
@@ -122,6 +129,17 @@ function buildSessionContextBlock(opts: {
     if (opts.pendingAction.payload && Object.keys(opts.pendingAction.payload).length) {
       lines.push(`datos_pendientes: ${JSON.stringify(opts.pendingAction.payload)}`);
     }
+  }
+  const threadText = opts.threadText?.trim() ?? "";
+  if (
+    threadText &&
+    !threadOdometerRegistrationCompleted(threadText) &&
+    !isOdometerFlowSuperseded(threadText) &&
+    threadHasActiveOdometerFlow(threadText)
+  ) {
+    lines.push(
+      "tramite_activo_hilo: odometro/horometro — el cliente está eligiendo unidad o cargando km; NO diagnosticar GPS.",
+    );
   }
   return lines.length ? lines.join("\n") : "sin contexto de sesión adicional";
 }
@@ -140,6 +158,48 @@ async function loadAgentSessionContext(rawPhone: string) {
   };
 }
 
+function shouldRequireToolCall(params: {
+  session: Awaited<ReturnType<typeof loadAgentSessionContext>>;
+  threadText: string;
+  selectionText: string;
+}): boolean {
+  const { session, threadText, selectionText } = params;
+
+  if (
+    shouldRouteTurnToOdometerExecutor({
+      selectionText,
+      threadText,
+      pendingActionType: session.pendingAction?.type ?? null,
+    })
+  ) {
+    return true;
+  }
+
+  if (session.pendingAction) return true;
+
+  const odometerFlowActive =
+    !threadOdometerRegistrationCompleted(threadText) &&
+    !isOdometerFlowSuperseded(threadText) &&
+    threadHasActiveOdometerFlow(threadText);
+  if (odometerFlowActive) return false;
+
+  if (session.activeUnit?.plate) {
+    if (looksLikeUnitConsultFollowUp(selectionText)) return true;
+    if (looksLikeSubstantiveCustomerMessage(selectionText)) return true;
+  }
+  if (threadHasRecentUnitCaseOpened(threadText) && looksLikeSubstantiveCustomerMessage(selectionText)) {
+    return true;
+  }
+  return false;
+}
+
+function shouldPassthroughBackendMessage(msg: string): boolean {
+  return (
+    /listo,\s*registr[eé]/i.test(msg) ||
+    /para registrar el cambio respond[eé] confirmo/i.test(msg)
+  );
+}
+
 function parseToolName(name: string): AgentToolName | null {
   const allowed = new Set(ATILIO_AGENT_TOOLS.map((t) => t.function.name));
   return allowed.has(name) ? (name as AgentToolName) : null;
@@ -152,6 +212,14 @@ export async function runAtilioAgentTurn(
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
 
   const session = await loadAgentSessionContext(input.rawPhone);
+  const threadText =
+    input.threadCtx.scopedThread.trim() || input.threadCtx.classificationThread.trim() || "";
+  const requireTool = shouldRequireToolCall({
+    session,
+    threadText,
+    selectionText: input.selectionText,
+  });
+
   const userBlock = [
     "=== FECHA DE REFERENCIA (obligatoria para hoy/ayer/anteayer) ===",
     formatCalendarContextBlock("America/Argentina/Buenos_Aires"),
@@ -162,14 +230,18 @@ export async function runAtilioAgentTurn(
       companyName: input.companyName ?? session.companyName,
       pendingAction: session.pendingAction,
       activeUnit: session.activeUnit,
+      threadText,
     }),
+    requireTool ? "requiere_herramienta: true (hay unidad activa o trámite — NO respondas sin tool)" : "",
     "",
     "=== HISTORIAL RECIENTE (más abajo = más reciente) ===",
-    input.threadCtx.scopedThread.trim() || input.threadCtx.classificationThread.trim() || "(sin historial previo)",
+    threadText || "(sin historial previo)",
     "",
     "=== MENSAJE ACTUAL DEL CLIENTE ===",
     input.selectionText.trim(),
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const controller = new AbortController();
@@ -195,7 +267,7 @@ export async function runAtilioAgentTurn(
           model: agentModel(),
           messages,
           tools: ATILIO_AGENT_TOOLS as OpenAI.Chat.Completions.ChatCompletionTool[],
-          tool_choice: round === 0 ? "auto" : "auto",
+          tool_choice: round === 0 && requireTool ? "required" : "auto",
           temperature: 0.55,
         },
         { signal: controller.signal },
@@ -205,6 +277,7 @@ export async function runAtilioAgentTurn(
       if (!choice) return null;
 
       if (!choice.tool_calls?.length) {
+        if (requireTool && round === 0) continue;
         const text = choice.content?.trim();
         if (!text) return null;
         return {
@@ -227,6 +300,7 @@ export async function runAtilioAgentTurn(
           rawPhone: input.rawPhone,
           customerMessage: input.selectionText,
           apiKey: input.apiKey,
+          threadText,
         });
         lastExecutor = toolResult.executor;
         lastOk = toolResult.ok;
@@ -240,13 +314,16 @@ export async function runAtilioAgentTurn(
           };
         }
 
-        // Registro exitoso o mensaje operativo del backend: no parafrasear (evita perder CONFIRMO/registro).
-        if (
-          toolResult.backend_message &&
-          (/listo,\s*registr[eé]/i.test(toolResult.backend_message) ||
-            /para registrar el cambio respond[eé] confirmo/i.test(toolResult.backend_message) ||
-            toolResult.flow_complete)
-        ) {
+        if (toolResult.composed_message) {
+          return {
+            message: toolResult.composed_message,
+            executor: toolResult.executor,
+            ok: toolResult.ok,
+            usedAgent: true,
+          };
+        }
+
+        if (toolResult.backend_message && shouldPassthroughBackendMessage(toolResult.backend_message)) {
           return {
             message: toolResult.backend_message,
             executor: toolResult.executor,
@@ -261,9 +338,10 @@ export async function runAtilioAgentTurn(
           content: JSON.stringify({
             ok: toolResult.ok,
             executor: toolResult.executor,
+            dialogue_state: toolResult.dialogue_state ?? null,
             backend_message: toolResult.backend_message,
-            flow_complete: toolResult.flow_complete,
-            hint: "Redactá la respuesta final para el cliente usando estos datos. Preservá patentes y números exactos del backend_message.",
+            hint:
+              "Redactá la respuesta final: respondé primero la pregunta del cliente, no repitas el hilo, no copies la plantilla del backend.",
           }),
         });
       }
@@ -273,7 +351,7 @@ export async function runAtilioAgentTurn(
       {
         model: agentModel(),
         messages,
-        temperature: 0.45,
+        temperature: 0.5,
       },
       { signal: controller.signal },
     );

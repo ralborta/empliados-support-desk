@@ -11,13 +11,19 @@ import {
   formatPlateWithSpaces,
   isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
+  isOdometerFlowSuperseded,
   looksLikeOdometerIntentStart,
   looksLikeOdometerHelpRequest,
   looksLikeOdometerFlowReminder,
   normalizePlate,
+  threadAwaitingHorometerKmValue,
   threadAwaitingHorometerPlate,
+  threadAwaitingOdometerKmValue,
   threadAwaitingOdometerPlate,
+  threadHasActiveOdometerFlow,
   threadHasFailedUnitSearch,
+  threadHasOdometerUnitClarificationPending,
+  threadOdometerRegistrationCompleted,
   threadTextSinceCompanySelection,
   hasPendingOdometerConfirmation,
 } from "@/lib/wara";
@@ -26,9 +32,11 @@ import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
+  looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeOdometerConfirmationRejection,
   looksLikePlateCorrectionRequest,
+  looksLikeSubstantiveCustomerMessage,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
@@ -176,6 +184,22 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   return (
     text.length <= 16 &&
     !/\b(mantenimiento|preventiv\w*|correctiv\w*|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
+      text,
+    )
+  );
+}
+
+/** Patente/prefijo/marca/referencia vaga mientras el hilo pide unidad para odómetro/horómetro. */
+export function isOdometerPlateSelectionMessage(rawText: string): boolean {
+  const text = rawText.trim();
+  if (!text) return false;
+  if (looksLikeOdometerConfirmationRejection(text)) return false;
+  if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeFleetUnitSearchInput(text)) return true;
+  if (looksLikeVagueUnitReference(text)) return true;
+  return (
+    text.length <= 20 &&
+    !/\b(certificado|cobertura|mantenimiento|preventiv\w*|gps|reporte|ignici[oó]n|consultar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
       text,
     )
   );
@@ -1776,6 +1800,51 @@ export async function resolvePlateWithWaraFleet(
   }
 
   return { ok: false, reason: "not_found" };
+}
+
+/**
+ * Turno que debe ir al executor de odómetro (no agente/consulta GPS) porque el trámite sigue activo.
+ */
+export function shouldRouteTurnToOdometerExecutor(params: {
+  selectionText: string;
+  threadText: string;
+  pendingActionType?: string | null;
+}): boolean {
+  const { selectionText, threadText, pendingActionType } = params;
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
+
+  const flowActive =
+    pendingActionType === "odometro" ||
+    threadHasActiveOdometerFlow(threadText) ||
+    threadAwaitingOdometerKmValue(threadText) ||
+    threadAwaitingHorometerKmValue(threadText) ||
+    hasPendingOdometerConfirmation(threadText);
+
+  if (!flowActive) return false;
+  if (looksLikeFlowControlCommand(selectionText)) return false;
+  if (looksLikeGpsOrUnitStatusQuestion(selectionText) || looksLikeLiveUnitConsultIntent(selectionText)) {
+    return false;
+  }
+
+  if (threadAwaitingOdometerKmValue(threadText) || threadAwaitingHorometerKmValue(threadText)) {
+    return true;
+  }
+  if (pendingActionType === "odometro") return true;
+  if (isOdometerPlateSelectionMessage(selectionText)) return true;
+  if (
+    threadHasOdometerUnitClarificationPending(threadText) &&
+    looksLikeSubstantiveCustomerMessage(selectionText)
+  ) {
+    return true;
+  }
+  if (
+    (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) &&
+    looksLikeSubstantiveCustomerMessage(selectionText)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export {

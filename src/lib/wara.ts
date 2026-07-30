@@ -731,14 +731,17 @@ export function threadAwaitingOdometerConfirmDetails(threadText: string): boolea
 export function threadHasOdometerUnitClarificationPending(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-3500).toLowerCase();
-  if (!/encontr[eé] varias unidades|patente exacta|empiezan con|no encontr[eé] ninguna unidad/i.test(tail)) {
-    return false;
-  }
+  const unitPickCue =
+    /encontr[eé] varias unidades|patente exacta|empiezan con|no encontr[eé] ninguna unidad|decime la patente completa|cu[aá]l quer[eé]s|pasame la patente exacta/i.test(
+      tail,
+    );
+  if (!unitPickCue) return false;
   return (
-    /\b(cambiar|cambio de|actualizar|registrar|corregir|modificar|ajust\w*)\b.{0,100}\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(
+    /\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(tail) ||
+    /nuevo od[oó]metro|nuevo hor[oó]metro|registrar el cambio|voy a registrar|perfecto, tomo .+ cu[aá]l es el nuevo/i.test(
       tail,
     ) ||
-    /\b(od[oó]metro|hor[oó]metro)\b.{0,100}\b(cambiar|actualizar|modificar|patente|matr[ií]cula)\b/.test(tail)
+    /para registrar el cambio de od[oó]metro|para registrar el cambio de hor[oó]metro/i.test(tail)
   );
 }
 

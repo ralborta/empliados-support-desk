@@ -9,6 +9,11 @@ import {
   TURN_EXECUTOR_PATH,
   type TurnExecutorId,
 } from "@/lib/whatsappTurnRouter";
+import {
+  agentComposeRequested,
+  parseExecutorDialogueState,
+} from "@/lib/executorDialogueState";
+import { composeAgentReplyFromDialogueState } from "@/lib/atilioDialogueCompose";
 
 const EXECUTOR_HANDLERS: Record<TurnExecutorId, (req: NextRequest) => Promise<Response>> = {
   unidades: unidadesPost,
@@ -121,6 +126,8 @@ export type AgentToolResult = {
   ok: boolean;
   executor: TurnExecutorId;
   backend_message: string;
+  composed_message?: string;
+  dialogue_state?: import("@/lib/executorDialogueState").ExecutorDialogueState | null;
   flow_complete: boolean;
   skip_response: boolean;
   raw: Record<string, unknown>;
@@ -131,6 +138,7 @@ export async function executeAtilioAgentTool(params: {
   rawPhone: string;
   customerMessage: string;
   apiKey: string;
+  threadText?: string;
 }): Promise<AgentToolResult> {
   const executor = TOOL_TO_EXECUTOR[params.toolName];
   const raw = await invokeExecutorInternal(
@@ -143,11 +151,24 @@ export async function executeAtilioAgentTool(params: {
   const ok = raw.ok !== false && raw.ok_s !== "false";
   const skipResponse = String(raw.skipResponse_s ?? "") === "true" && !backendMessage;
   const flowComplete = String(raw.flowComplete_s ?? "") === "true";
+  const dialogueState = parseExecutorDialogueState(raw);
+  let composedMessage: string | undefined;
+
+  if (agentComposeRequested(raw) && dialogueState) {
+    composedMessage = await composeAgentReplyFromDialogueState({
+      threadText: params.threadText ?? "",
+      customerMessage: params.customerMessage,
+      dialogueState,
+      fallbackTemplate: backendMessage,
+    });
+  }
 
   return {
     ok,
     executor,
     backend_message: backendMessage,
+    composed_message: composedMessage,
+    dialogue_state: dialogueState,
     flow_complete: flowComplete,
     skip_response: skipResponse,
     raw,
