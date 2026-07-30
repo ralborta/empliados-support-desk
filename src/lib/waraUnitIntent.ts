@@ -26,6 +26,8 @@ import {
   threadOdometerRegistrationCompleted,
   threadTextSinceCompanySelection,
   hasPendingOdometerConfirmation,
+  looksLikeBriefConfirmation,
+  looksLikePendingTramiteAffirmation,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -568,6 +570,13 @@ function threadBotWronglyAskedPlateForList(threadText: string): boolean {
 /** Confirmación o reintento mientras el cliente quiere ver la flota entera. */
 export function looksLikeFleetListContinuation(rawText: string, threadText = ""): boolean {
   if (looksLikeUnitListRequest(rawText)) return true;
+  // Bug real, producción 2026-07-30: "Ok" confirmando odómetro no es pedido de más flota.
+  if (
+    hasPendingOdometerConfirmation(threadText) &&
+    (looksLikeBriefConfirmation(rawText) || looksLikePendingTramiteAffirmation(rawText))
+  ) {
+    return false;
+  }
   const norm = rawText
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

@@ -868,7 +868,8 @@ export async function POST(req: NextRequest) {
       ? false
       : (hasLiveOdometerPendingAction &&
           (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload)) ||
-        threadAwaitingOdometerConfirmDetails(threadText);
+        threadAwaitingOdometerConfirmDetails(threadText) ||
+        (hasPendingOdometerConfirmation(threadText) && !isOdometerFlowSuperseded(threadText));
   const confirmWithSupplement =
     pendingOdoConfirm &&
     looksLikePendingTramiteAffirmation(rawText) &&
@@ -1237,7 +1238,7 @@ export async function POST(req: NextRequest) {
         fecha = fechaWara(fechaExplicita, customerTz);
         fechaDisplay = formatFechaDisplay(fecha);
       }
-    } else if (effectivePendingOdoConfirm) {
+    } else if (effectivePendingOdoConfirm || hasPendingOdometerConfirmation(flowThreadText)) {
       const summaryPlate =
         extractPlateFromOdometerSummary(flowThreadText) ??
         extractLastPlateFromThread(flowThreadText);

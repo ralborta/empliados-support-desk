@@ -625,17 +625,27 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
 
 /** ¿Seguir en flujo de odómetro o el cliente cambió de tema? */
 export function shouldContinueOdometerFlow(text: string, threadText: string): boolean {
-  if (looksLikeConversationAcknowledgement(text)) return false;
-  if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
-  if (looksLikeAtilioHelpRequest(text)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  if (
+  const odometerFlowAwaitingInput =
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
     threadHasOdometerUnitClarificationPending(threadText) ||
     threadAwaitingOdometerConfirmDetails(threadText) ||
-    hasPendingOdometerConfirmation(threadText)
+    hasPendingOdometerConfirmation(threadText);
+  // Bug real, producción 2026-07-30: "Ok" tras "Voy a registrar... CONFIRMO" matcheaba
+  // looksLikeConversationAcknowledgement ANTES de mirar la confirmación pendiente —
+  // shouldContinueOdometerFlow devolvía false, odometro respondía skipResponse en
+  // silencio y "Ok" caía al listado de flota (threadHasRecentFleetListIntent + "ok").
+  if (
+    odometerFlowAwaitingInput &&
+    (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text))
   ) {
+    return true;
+  }
+  if (looksLikeConversationAcknowledgement(text)) return false;
+  if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
+  if (looksLikeAtilioHelpRequest(text)) return false;
+  if (odometerFlowAwaitingInput) {
     if (looksLikePlateCorrectionRequest(text)) return true;
     if (looksLikeNonOdometerOperationalIntent(text)) return false;
     return looksLikeOdometerContinuationMessage(text);
