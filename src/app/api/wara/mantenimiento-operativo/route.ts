@@ -993,9 +993,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const responseMessage = odooRef
-    ? `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Caso Odoo ${odooRef}.`
-    : `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Caso ${ticket.code}.`;
+  const responseMessage = `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Un asesor de Atención al cliente la va a revisar. Te avisamos por este medio cualquier novedad.`;
 
   await prisma.ticketMessage.create({
     data: {

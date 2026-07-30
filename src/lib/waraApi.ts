@@ -30,6 +30,7 @@ import {
   threadAwaitingOdometerConfirmDetails,
   threadHasPendingUnitStatusCheckOffer,
   detectLoosePlate,
+  detectPlate,
   extractPlatePrefixFromMessage,
 } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
@@ -907,6 +908,73 @@ export function looksLikeLiveUnitConsultIntent(text: string | undefined | null):
   return false;
 }
 
+/**
+ * Consulta GPS/reporte de unidad SIN patente/marca concreta ("consultar el reporte de una
+ * unidad", "en realidad quiero consultar…"). No debe reusar activeUnit ni patente del hilo.
+ */
+export function looksLikeGenericUnitConsultWithoutPlate(text: string | undefined | null): boolean {
+  const raw = text ?? "";
+  if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  if (looksLikeVehicleBrandOrUnitSearch(raw)) return false;
+  const norm = normCompanyToken(raw);
+  if (!norm || norm.length > 220) return false;
+  if (looksLikeTicketCreationInfoQuestion(raw)) return false;
+
+  const pivotCue = /\b(en\s+realidad|ahora\s+quiero|me\s+gustar[ií]a|prefiero)\b/.test(norm);
+  const genericUnitCue =
+    /\b(una|alguna|otra)\s+unidad\b/.test(norm) ||
+    /\bconsult\w*\s+(el\s+)?reporte\s+(de\s+)?(una\s+)?unidad\b/.test(norm) ||
+    /\b(estado|reporte|gps|ignici[oó]n)\s+(de\s+)?(una\s+)?unidad\b/.test(norm);
+
+  if (genericUnitCue && (looksLikeLiveUnitConsultIntent(raw) || pivotCue)) return true;
+
+  if (
+    /\b(quiero|necesito)\s+(consultar|ver|saber|revisar)\b/.test(norm) &&
+    /\b(reporte|estado|gps|ignici[oó]n)\b/.test(norm) &&
+    /\bunidad\b/.test(norm)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Pregunta informativa: ¿cuándo / qué casos generan ticket o derivan a soporte técnico?
+ * No es abrir un caso ni consultar el estado de uno abierto.
+ */
+export function looksLikeTicketCreationInfoQuestion(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm || norm.length > 200) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+  if (looksLikeExplicitReclamoOrTicketRequest(text)) return false;
+  if (/\b(caso|ticket|reclamo)\s+(abierto|activo|pendiente|en curso)\b/.test(norm)) return false;
+  if (/\b(cual|cu[aá]l)\s+es\s+(mi|el)\s+(caso|ticket|numero|n[uú]mero)\b/.test(norm)) return false;
+
+  return (
+    /\b(que|cuales|qu[eé])\s+(casos?|situaciones?|motivos?|problemas?)\b.{0,48}\b(deriv\w*|gener\w*|abre\w*|crea\w*)\w*\b.{0,48}\b(ticket|caso|reclamo)\b/.test(
+      norm,
+    ) ||
+    /\b(que|cuales|qu[eé])\s+(casos?|situaciones?)\s+pueden\s+derivar\b/.test(norm) ||
+    /\b(cu[aá]ndo|en que casos?)\s+(se\s+)?(genera|abre|crea|deriva)\w*\b.{0,32}\b(ticket|caso|reclamo)\b/.test(
+      norm,
+    ) ||
+    (/\bticket\s+t[eé]cnic\w*\b/.test(norm) &&
+      /\b(que|cuales|qu[eé]|cu[aá]ndo|c[oó]mo|casos?)\b/.test(norm))
+  );
+}
+
+export function buildTicketCreationInfoReply(): string {
+  return [
+    "Por GPS y telemetría, suele generarse un caso cuando una unidad lleva mucho tiempo sin reportar, cuando hay pérdida de señal con reporte reciente, o cuando la ignición no acompaña al resto de los datos.",
+    "",
+    "Si la unidad está detenida con ignición apagada y todo alineado, normalmente no hace falta ticket.",
+    "",
+    "Para otros temas (acceso, facturación, fallas que no se resuelven por acá), escribí \"hablar con un asesor\".",
+    "",
+    "Si querés revisar una patente en particular, decime la matrícula y la consulto.",
+  ].join("\n");
+}
+
 /** Cliente preguntó por GPS/ignición/reporte en las últimas líneas del hilo. */
 export function threadHasRecentLiveUnitConsultIntent(threadText: string): boolean {
   const tail = threadText
@@ -1121,6 +1189,7 @@ export function looksLikeUnitConsultFollowUp(text: string | undefined | null): b
   if (!t || t.length < 3) return false;
   if (looksLikeChangeCompanyRequest(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeGenericCapabilityOrTopicSwitchRequest(text)) return false;
   if (looksLikeExplicitOdometerUpdateRequest(text)) return false;
   if (looksLikeCertificateKeyword(text)) return false;
   if (/\b(mantenimiento|certificado|cobertura|odometro|odómetro|horometro|horómetro)\b/.test(t)) {
@@ -1497,7 +1566,17 @@ export function looksLikeExplicitCapabilityQuestion(text: string | undefined | n
     return true;
   }
   if (/\b(quiero|tengo|necesito)\b.*\botr\w*\s+consultas?\b/.test(norm)) return true;
-  if (/^otra\s+consulta[.,!?\s]*$/.test(norm)) return true;
+  // Bug real, producción 2026-07-30: "otras consultas." (plural suelto) no matcheaba
+  // /^otra\s+consulta$/ — caía al agente/unidad activa y repetía el GPS de AE 483 VE.
+  if (/^otras?\s+consultas?[.,!?\s]*$/.test(norm)) return true;
+  // "Quiero saber otro tipo de gestión/trámite" — cambio de tema sin trámite concreto aún.
+  if (/\b(quiero|necesito|tengo)\s+(saber|hacer|consultar)\s+otr[oa]?\s+tipo\s+de\s+(gesti[oó]n|tramite|consulta)/.test(norm)) {
+    return true;
+  }
+  if (/\botr[oa]?\s+tipo\s+de\s+(gesti[oó]n|tramite|consulta)\b/.test(norm)) return true;
+  // "Pero jamás te informé lo que necesito" — el cliente avisa que NO pidió lo anterior.
+  if (/\b(jamas|nunca)\b.{0,48}\b(inform\w*|dij\w*|ped\w*)\b/.test(norm)) return true;
+  if (/\bno\s+(te\s+)?(inform\w*|dij\w*|ped\w*)\b.{0,32}\blo\s+que\s+necesito\b/.test(norm)) return true;
   return false;
 }
 

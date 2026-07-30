@@ -52,6 +52,7 @@ import {
   looksLikeConversationalUnitConcern,
   looksLikeInfoGuideModulePick,
   looksLikeTechnicalSupportRequest,
+  looksLikeTicketCreationInfoQuestion,
   threadHasGenericPlatformMenuOffer,
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
@@ -187,6 +188,11 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
     reason: "Consulta GPS/unidad en vivo tiene prioridad sobre cualquier guía.",
     decide: ({ text }) =>
       looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? false : undefined,
+  },
+  {
+    id: "ticket_creation_info_allow",
+    reason: "Pregunta informativa sobre cuándo se genera un ticket/caso técnico.",
+    decide: ({ text }) => (looksLikeTicketCreationInfoQuestion(text) ? true : undefined),
   },
   {
     id: "odometer_info_allow",
@@ -341,6 +347,11 @@ const TURN_RULES: TurnRule[] = [
     id: "open_case_status_inquiry",
     reason: "Cliente consulta el estado de un caso abierto.",
     decide: ({ text }) => (looksLikeOpenCaseStatusInquiry(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "ticket_creation_info",
+    reason: "Pregunta informativa sobre cuándo deriva un ticket técnico.",
+    decide: ({ text }) => (looksLikeTicketCreationInfoQuestion(text) ? "info_guides" : null),
   },
   {
     id: "human_advisor_request",

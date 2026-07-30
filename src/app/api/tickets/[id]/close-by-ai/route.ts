@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { summarizeConversation, generateResolution } from "@/lib/openai";
+import { reactivateAtilioAfterTicketClosed } from "@/lib/atilioBotPause";
 
 /**
  * POST /api/tickets/[id]/close-by-ai
@@ -90,6 +91,14 @@ export async function POST(
       });
 
       console.log(`[CloseByAI] ✅ Ticket ${ticket.code} cerrado por IA. ${ticket.messages.length} mensajes borrados.`);
+    });
+
+    await reactivateAtilioAfterTicketClosed({
+      customerId: ticket.customerId,
+      ticketId: id,
+      previousStatus: ticket.status,
+      newStatus: "RESOLVED",
+      reason: "close-by-ai",
     });
 
     return NextResponse.json({

@@ -2,8 +2,10 @@ import {
   looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceInfoRequest,
   looksLikeOpcionesInfoRequest,
+  looksLikeTicketCreationInfoQuestion,
   looksLikeTurnoOrAgendaQuestion,
   looksLikeUnidadesInfoRequest,
+  buildTicketCreationInfoReply,
 } from "@/lib/waraApi";
 import { looksLikeOdometerInfoRequest } from "@/lib/wara";
 import { answerFromKnowledgeBase } from "@/lib/knowledgeBaseAI";
@@ -253,7 +255,8 @@ export function buildInfoGuideReply(
 ): string {
   const detected = kind ?? detectInfoGuideKind(rawText);
   let message: string;
-  if (looksLikeOdometerInfoRequest(rawText)) message = odometerInfoReply(rawText);
+  if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
+  else if (looksLikeOdometerInfoRequest(rawText)) message = odometerInfoReply(rawText);
   else if (detected === "opciones") message = opcionesReply(rawText);
   else if (detected === "unidades") message = unidadesReply(rawText);
   else if (detected === "mantenimiento") message = mantenimientoReply(rawText);

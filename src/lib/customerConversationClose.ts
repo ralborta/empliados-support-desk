@@ -4,6 +4,7 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { shouldInboundSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { reactivateAtilioAfterTicketClosed } from "@/lib/atilioBotPause";
 
 function normCloseText(text: string): string {
   return text
@@ -271,6 +272,17 @@ export async function handleCustomerConversationCloseRequest(params: {
       },
     },
   });
+
+  await reactivateAtilioAfterTicketClosed(
+    {
+      customerId: customer.id,
+      ticketId: openTicket.id,
+      previousStatus: openTicket.status,
+      newStatus: "RESOLVED",
+      reason: "customer-requested-close",
+    },
+    db,
+  );
 
   const replyMessage = CUSTOMER_CLOSE_SUCCESS_MESSAGE;
 

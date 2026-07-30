@@ -34,6 +34,7 @@ import {
   buildOpenCaseStatusReply,
   looksLikeOpenCaseStatusInquiry,
 } from "@/lib/customerTicketInquiry";
+import { findCustomerVisibleOdooCaseRef } from "@/lib/customerOdooCaseRef";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
@@ -181,49 +182,10 @@ async function recentThreadText(rawPhone: string): Promise<string> {
 async function findRecentOdooRef(rawPhone: string, plate?: string): Promise<string | null> {
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (!customer) return null;
-  const msgs = await prisma.ticketMessage.findMany({
-    where: {
-      direction: "OUTBOUND",
-      from: "BOT",
-      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-      ticket: { customerId: customer.id },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-    select: { text: true, rawPayload: true },
+  return findCustomerVisibleOdooCaseRef(prisma, {
+    customerId: customer.id,
+    plate,
   });
-  const want = (plate ?? "").replace(/\s+/g, "").toUpperCase();
-  for (const m of msgs) {
-    const payload = m.rawPayload as Record<string, unknown> | null;
-    if (payload?.source !== "odoo_ticket" && payload?.source !== "wara_unidades_auto_ticket") continue;
-    const msgPlate = String(payload.plate ?? "")
-      .replace(/\s+/g, "")
-      .toUpperCase();
-    if (want && msgPlate && msgPlate !== want) continue;
-    const ref = String(payload.ref ?? "");
-    if (ref && /^\d+$/.test(ref)) return ref;
-    const match = m.text?.match(/caso N[°º]\s*(\d+)/i);
-    if (match) return match[1];
-  }
-  for (const m of msgs) {
-    const tck = m.text?.match(/TCK-\d{4}-\d{4}-\d+/i);
-    if (tck) {
-      if (!want) return tck[0];
-      const threadPlate = extractLastPlateFromThreadCompat(m.text ?? "");
-      if (!threadPlate || threadPlate === want) return tck[0];
-    }
-  }
-  const openTicket = await prisma.ticket.findFirst({
-    where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
-    orderBy: { lastMessageAt: "desc" },
-    select: { code: true, title: true },
-  });
-  if (openTicket?.code) {
-    if (!want) return openTicket.code;
-    const titlePlate = normalizePlateForTitle(detectPlate(openTicket.title ?? "") ?? "");
-    if (!titlePlate || titlePlate === want) return openTicket.code;
-  }
-  return null;
 }
 
 function extractLastPlateFromThreadCompat(text: string): string | null {
@@ -670,7 +632,7 @@ export async function POST(req: NextRequest) {
       stageId: toNumberId(data.stageId),
     });
 
-    const ref = result.ref ?? String(result.ticketId);
+    const ref = result.ref ?? null;
     const message = `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
 
     await appendOutboundBotMessage(rawPhone, message, {

@@ -1,9 +1,48 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { resolveOdooPartnerCompanyName } from "@/config/odooPartnerAliases";
 import { createHelpdeskTicket, getOdooConfig } from "@/lib/odooApi";
+import { isTestWhitelistEnabled } from "@/lib/waraApi";
 
 type JsonPayload = Record<string, unknown>;
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+function envFlagTruthy(name: string): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "si";
+}
+
+function envFlagFalsy(name: string): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  return raw === "0" || raw === "false" || raw === "no" || raw === "off";
+}
+
+/**
+ * ¿Puede Atilio crear tickets en Odoo Helpdesk (disparan mails al cliente)?
+ *
+ * Bug crítico, producción 2026-07-30: en staging/pruebas con WARA_TEST_ALLOWED_PHONES
+ * y teléfonos reales (ej. El Cacique / 5492612478856), cada consulta GPS generaba un
+ * caso Odoo real — el cliente recibía encuestas de satisfacción y avisos de cierre.
+ *
+ * Regla: con lista blanca de prueba activa, Odoo queda OFF salvo
+ * WARA_ODOO_TICKETS_ENABLED=true explícito. Producción sin whitelist sigue igual.
+ */
+export function isOdooTicketEscalationEnabled(): boolean {
+  if (envFlagFalsy("WARA_ODOO_TICKETS_ENABLED")) return false;
+  if (isTestWhitelistEnabled()) {
+    return envFlagTruthy("WARA_ODOO_TICKETS_ENABLED");
+  }
+  return true;
+}
+
+export function odooTicketEscalationBlockReason(): string | null {
+  if (envFlagFalsy("WARA_ODOO_TICKETS_ENABLED")) {
+    return "WARA_ODOO_TICKETS_ENABLED=false";
+  }
+  if (isTestWhitelistEnabled() && !envFlagTruthy("WARA_ODOO_TICKETS_ENABLED")) {
+    return "WARA_TEST_ALLOWED_PHONES activo (modo prueba; Odoo bloqueado para no mailar clientes reales)";
+  }
+  return null;
+}
 
 function payloadField(payload: unknown, key: string): string | null {
   if (!payload || typeof payload !== "object") return null;
@@ -70,6 +109,14 @@ export async function ensureWaraOdooTicket(
 
   const odooCfg = getOdooConfig();
   if (!odooCfg) return { odooRef: null, created: false };
+
+  const blockReason = odooTicketEscalationBlockReason();
+  if (blockReason) {
+    console.warn(
+      `[${params.logContext ?? "waraOdoo"}] Odoo bloqueado (${blockReason}); no se crea caso «${params.subject.slice(0, 80)}»`,
+    );
+    return { odooRef: null, created: false };
+  }
 
   try {
     const odoo = await createHelpdeskTicket(odooCfg, {

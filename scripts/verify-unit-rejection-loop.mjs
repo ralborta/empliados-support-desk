@@ -20,7 +20,7 @@
  *
  * Uso: npx tsx scripts/verify-unit-rejection-loop.mjs
  */
-import { looksLikeUnitRejection } from "../src/lib/wara.ts";
+import { looksLikeUnitRejection, looksLikeBareNegativeResponse, isBarePlatePrefixHint } from "../src/lib/wara.ts";
 import { shouldUseActiveUnitFallback } from "../src/lib/activeUnit.ts";
 
 let failed = 0;
@@ -56,6 +56,11 @@ const rejectionPhrases = [
   "Quiero consultar por otras unidades",
   "quiero ver otras patentes",
   "tengo otros vehiculos también",
+  // Bug real, producción 2026-07-30: "no" suelto tras "¿te referís a AE 483 VE?" no es
+  // prefijo de patente — es rechazo de la unidad propuesta.
+  "no",
+  "No, no me refiero a esa matricula",
+  "no me refiero a esa patente",
 ];
 for (const text of rejectionPhrases) {
   assert(looksLikeUnitRejection(text), `looksLikeUnitRejection("${text}") === true`);
@@ -64,6 +69,13 @@ for (const text of rejectionPhrases) {
     `shouldUseActiveUnitFallback("${text}") === false (no reusar la unidad activa recién rechazada)`,
   );
 }
+
+console.log("\n— Bug real 2026-07-30: 'no' NO es prefijo de patente —");
+assert(!isBarePlatePrefixHint("no"), 'isBarePlatePrefixHint("no") === false');
+assert(!isBarePlatePrefixHint("No"), 'isBarePlatePrefixHint("No") === false');
+assert(looksLikeBareNegativeResponse("no"), 'looksLikeBareNegativeResponse("no") === true');
+assert(looksLikeBareNegativeResponse("no no"), 'looksLikeBareNegativeResponse("no no") === true');
+assert(isBarePlatePrefixHint("NKL"), "sanity: NKL sigue siendo prefijo válido");
 
 console.log("\n— Sanity: mensajes normales (sin rechazo) no activan esto —");
 const nonRejection = [

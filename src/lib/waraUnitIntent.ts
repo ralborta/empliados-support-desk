@@ -838,13 +838,26 @@ export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string):
   return units.filter((u) => unitNameCodesFromField(u.unidad || "").some((code) => code === norm));
 }
 
-function extractUnitNameFromText(rawText: string): string | null {
+/** Código interno Wara en el mensaje (ej. "Unidad: M600-020", "interno M300-083"). */
+export function extractExplicitUnitNameFromText(rawText: string): string | null {
   const text = String(rawText ?? "").trim();
   if (!text) return null;
-  const labeled = text.match(/\bunidad\s+(?:es\s+)?(M?\d{3}-\d{2,3})\b/i);
+  const labeled = text.match(/\bunidad\s*(?:es\s*)?[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (labeled?.[1]) return labeled[1];
+  const interno = text.match(/\binterno\s*[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
+  if (interno?.[1]) return interno[1];
   const bare = text.match(/\b(M?\d{3}-\d{2,3})\b/i);
   return bare?.[1] ?? null;
+}
+
+/** Cliente nombró un código de unidad distinto — no heredar patente del certificado/hilo. */
+export function shouldClearOdometerPlateFromThread(rawText: string): boolean {
+  const unitName = extractExplicitUnitNameFromText(rawText);
+  return !!unitName && !detectLoosePlate(rawText);
+}
+
+function extractUnitNameFromText(rawText: string): string | null {
+  return extractExplicitUnitNameFromText(rawText);
 }
 
 function resolveByUnitName(

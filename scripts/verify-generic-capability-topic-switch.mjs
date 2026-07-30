@@ -24,6 +24,7 @@ import {
   looksLikeExplicitCapabilityQuestion,
   looksLikeBareAtilioMention,
   looksLikeAtilioHelpRequest,
+  looksLikeUnitConsultFollowUp,
 } from "../src/lib/waraApi.ts";
 
 let passed = 0;
@@ -40,6 +41,18 @@ check(
 );
 check('"Atilio" (solo el nombre)', looksLikeGenericCapabilityOrTopicSwitchRequest("Atilio"));
 check('"Quiero hacerte otras consultas"', looksLikeGenericCapabilityOrTopicSwitchRequest("Quiero hacerte otras consultas"));
+
+console.log("\n▶ Bug real, producción 2026-07-30 — AE 483 VE / otra consulta");
+for (const msg of [
+  "otras consultas.",
+  "otras consultas",
+  "Quiero saber otro tipo de gestion",
+  "Quiero saber otro tipo de gestión",
+  "Pero jamas te informe lo que necesito.",
+]) {
+  check(`"${msg}"`, looksLikeGenericCapabilityOrTopicSwitchRequest(msg));
+  check(`"${msg}" NO es follow-up GPS`, !looksLikeUnitConsultFollowUp(msg));
+}
 
 console.log("\n▶ Variantes razonables");
 for (const msg of [

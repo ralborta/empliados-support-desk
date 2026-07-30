@@ -25,6 +25,12 @@ import {
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
 import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
+import {
+  buildCaseRegisteredWithoutOdooRefReply,
+  buildCustomerEscalationWithCaseReply,
+  buildCustomerExplicitCaseNumberReply,
+  findCustomerVisibleOdooCaseRef,
+} from "@/lib/customerOdooCaseRef";
 import { buildWebhookMessageId, hasStableWebhookMessageId } from "@/lib/webhookMessageId";
 import {
   findPlatformPresavedOutboundDuplicate,
@@ -446,10 +452,24 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     if (shouldEscalate && solicitaAgente) {
       // La respuesta la envía /api/odoo/ticket para evitar duplicados con BBC.
     } else if (shouldEscalate) {
-      autoReplyMessage = `Hola! Tu consulta ha sido escalada a nuestro equipo. Ticket: *${ticket.code}*. Te responderemos pronto.`;
+      const odooRef = await findCustomerVisibleOdooCaseRef(prisma, {
+        customerId: customer.id,
+        ticketId: ticket.id,
+        plate: plate ?? undefined,
+      });
+      autoReplyMessage = odooRef
+        ? buildCustomerEscalationWithCaseReply(odooRef)
+        : "Hola! Tu consulta ha sido escalada a nuestro equipo. Te responderemos pronto.";
       autoReplyKind = "escalation";
     } else if (pideNumeroTicket) {
-      autoReplyMessage = `Tu número de caso (ticket) es *${ticket.code}*.`;
+      const odooRef = await findCustomerVisibleOdooCaseRef(prisma, {
+        customerId: customer.id,
+        ticketId: ticket.id,
+        plate: plate ?? undefined,
+      });
+      autoReplyMessage = odooRef
+        ? buildCustomerExplicitCaseNumberReply(odooRef)
+        : buildCaseRegisteredWithoutOdooRefReply();
       autoReplyKind = "ticket_on_request";
     }
   }
@@ -495,9 +515,9 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     textForFarewell &&
     isDespedidaWara(textForFarewell)
   ) {
-    await sendTicketCodeAtFarewellWara({
+    await sendOdooCaseRefAtFarewellWara({
       ticketId: ticket.id,
-      ticketCode: ticket.code,
+      customerId: customer.id,
       customerPhone,
       peerText: textForFarewell,
       rawExtra: { atClienteDespedida: true },
@@ -819,9 +839,9 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     normalizeWhatsAppPhone(String(customer.phone || customerPhone)) ||
     String(customerPhone);
   if (messageText && isDespedidaWara(messageText) && shouldInboundSendWhatsAppToCustomer()) {
-    await sendTicketCodeAtFarewellWara({
+    await sendOdooCaseRefAtFarewellWara({
       ticketId: targetTicket.id,
-      ticketCode: targetTicket.code,
+      customerId: customer.id,
       customerPhone: phoneOut,
       peerText: String(messageText || ""),
       rawExtra: { atDespedidaOutgoing: true },
@@ -937,26 +957,32 @@ async function recentOutboundDedicatedFarewellCaseCode(
   return !!found;
 }
 
-const firstFarewellTicketCodeMessageWara = (code: string) =>
-  `Tu número de caso es *${code}*. Guardalo para cualquier consulta con Mesa de Ayuda.`;
+const firstFarewellCaseRefMessageWara = (displayRef: string) =>
+  buildCustomerExplicitCaseNumberReply(displayRef.replace(/^#/, ""));
 
-const reminderTicketCodeMessageWara = (code: string) =>
-  `Recordatorio: tu número de caso es *${code}*. Guardalo para cualquier consulta.`;
+const reminderCaseRefMessageWara = (displayRef: string) => {
+  const display = displayRef.startsWith("#") ? displayRef : `#${displayRef}`;
+  return `Recordatorio: tu número de caso es *${display}*. Guardalo para cualquier consulta.`;
+};
 
-async function sendTicketCodeAtFarewellWara(opts: {
+async function sendOdooCaseRefAtFarewellWara(opts: {
   ticketId: string;
-  ticketCode: string;
+  customerId: string;
   customerPhone: string;
   peerText: string;
   rawExtra: Record<string, unknown>;
   botPaused?: boolean;
 }): Promise<void> {
-  const { ticketId, ticketCode, customerPhone, peerText, rawExtra, botPaused } = opts;
+  const { ticketId, customerId, customerPhone, peerText, rawExtra, botPaused } = opts;
   if (botPaused || !shouldInboundSendWhatsAppToCustomer()) return;
 
+  const odooRef = await findCustomerVisibleOdooCaseRef(prisma, { customerId, ticketId });
+  if (!odooRef) return;
+
+  const displayRef = `#${odooRef}`;
   const yaHayMensajeCierre = await outboundAlreadySentDedicatedFarewellCaseCode(ticketId);
   if (!yaHayMensajeCierre) {
-    const msg = firstFarewellTicketCodeMessageWara(ticketCode);
+    const msg = firstFarewellCaseRefMessageWara(displayRef);
     try {
       await sendWhatsAppMessage({ number: customerPhone, message: msg });
       await prisma.ticketMessage.create({
@@ -973,7 +999,7 @@ async function sendTicketCodeAtFarewellWara(opts: {
           },
         },
       });
-      console.log(`✅ Código de caso (mensaje dedicado de cierre) enviado (${ticketCode})`);
+      console.log(`✅ Número de caso Odoo (cierre) enviado (${displayRef})`);
     } catch (err) {
       console.error("❌ Error al enviar número de caso al cierre:", err);
     }
@@ -986,7 +1012,7 @@ async function sendTicketCodeAtFarewellWara(opts: {
     isDespedidaWara(peerText) &&
     !(await recentOutboundDedicatedFarewellCaseCode(ticketId, 6))
   ) {
-    const reminder = reminderTicketCodeMessageWara(ticketCode);
+    const reminder = reminderCaseRefMessageWara(displayRef);
     try {
       await sendWhatsAppMessage({ number: customerPhone, message: reminder });
       await prisma.ticketMessage.create({
@@ -999,12 +1025,13 @@ async function sendTicketCodeAtFarewellWara(opts: {
             autoReply: true,
             autoReplyKind: "farewell_ticket_reminder",
             recordatorioCodigo: true,
+            odooRef,
             ...rawExtra,
             timestamp: new Date().toISOString(),
           },
         },
       });
-      console.log(`✅ Recordatorio de número de caso enviado (${ticketCode})`);
+      console.log(`✅ Recordatorio de número de caso Odoo enviado (${displayRef})`);
     } catch (err) {
       console.error("❌ Error al enviar recordatorio de código:", err);
     }

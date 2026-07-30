@@ -10,7 +10,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isPlausibleVehiclePlate, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -19,6 +19,7 @@ import {
   looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeGenericUnitConsultWithoutPlate,
   looksLikeConversationalUnitConcern,
   looksLikeProblemClarificationPushback,
   looksLikeRouteHistoryOrMovementIssue,
@@ -44,6 +45,7 @@ import {
   buildNoEquipmentDialogueState,
 } from "@/lib/unitDialogueState";
 import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalation";
+import { findCustomerVisibleOdooCaseRef } from "@/lib/customerOdooCaseRef";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
@@ -492,10 +494,15 @@ async function createMissingReportTicket(params: {
   }
 
   if (existing.ticket) {
+    const odooRef = await findCustomerVisibleOdooCaseRef(prisma, {
+      customerId: existing.customer.id,
+      ticketId: existing.ticket.id,
+      plate,
+    });
     return {
-      ref: existing.ticket.code,
+      ref: odooRef ?? "",
       reused: true,
-      odooRef: null,
+      odooRef,
       message: `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto para que Atención al cliente lo revise.`,
     };
   }
@@ -568,7 +575,7 @@ async function createMissingReportTicket(params: {
     });
   }
 
-  const ref = odooRef ?? localTicket.code;
+  const ref = odooRef ?? "";
   const localReused = !created;
 
   try {
@@ -614,10 +621,15 @@ async function createNoEquipmentTicket(params: {
   }
 
   if (existing.ticket) {
+    const odooRef = await findCustomerVisibleOdooCaseRef(prisma, {
+      customerId: existing.customer.id,
+      ticketId: existing.ticket.id,
+      plate,
+    });
     return {
-      ref: existing.ticket.code,
+      ref: odooRef ?? "",
       reused: true,
-      odooRef: null,
+      odooRef,
       message: `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto para que Atención al cliente lo revise.`,
     };
   }
@@ -682,7 +694,7 @@ async function createNoEquipmentTicket(params: {
     });
   }
 
-  const ref = odooRef ?? localTicket.code;
+  const ref = odooRef ?? "";
   const localReused = !created;
 
   try {
@@ -842,21 +854,57 @@ export async function POST(req: NextRequest) {
   // exitoso del bot sobre la unidad que se está rechazando) volvían a devolver la MISMA
   // unidad recién rechazada — loop infinito ante cualquier mensaje sin marca nueva.
   const explicitRejection = looksLikeUnitRejection(rawText);
+  if (explicitRejection) {
+    await clearActiveUnit(prisma, rawPhone);
+    const message =
+      "Entendido, no era esa. ¿Cuál es la patente o unidad correcta? Pasame la matrícula completa (ej. AE 483 VE) o la marca/nombre (ej. Nissan).";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_unidades_rejection_or_clarify",
+      rawText,
+    });
+    return NextResponse.json(
+      { ok: true, summaryText: message, action: "none" as const, unidadesCount: 0 },
+      { status: BB_STATUS },
+    );
+  }
+  if (
+    threadBotRecentlyAskedPlateReference(threadText) &&
+    isBarePlatePrefixHint(rawText) &&
+    !looksLikeBriefConfirmation(rawText)
+  ) {
+    await clearActiveUnit(prisma, rawPhone);
+    const message = buildAmbiguousPlateOrNegationClarificationReply();
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_unidades_rejection_or_clarify",
+      rawText,
+    });
+    return NextResponse.json(
+      { ok: true, summaryText: message, action: "none" as const, unidadesCount: 0 },
+      { status: BB_STATUS },
+    );
+  }
   // "Unidad activa" (@/lib/activeUnit): respaldo explícito en DB para cuando ni el
   // texto del hilo ni el mensaje actual traen ninguna patente reconocible, pero la
   // conversación sigue siendo sobre la última unidad resuelta (bug real, producción
   // 2026-07-23: "¿me podés decir qué unidad estamos consultando?" no matchea ningún
   // patrón de "referencia vaga" existente y sin esto volvía a pedir la patente).
-  // NUNCA se usa si el cliente pide explícitamente OTRA unidad distinta o rechaza la actual.
-  const activeUnitRecord = !looksLikeAnotherUnitRequest(rawText) && !explicitRejection
-    ? await getActiveUnit(prisma, rawPhone)
-    : null;
-  const threadPlateEarly = explicitRejection
-    ? null
-    : extractLastPlateFromThreadCompat(scopedThreadEarly) ??
-      detectPlate(scopedThreadEarly) ??
-      activeUnitRecord?.plate ??
-      null;
+  // NUNCA se usa si el cliente pide explícitamente OTRA unidad distinta, rechaza la
+  // actual, o pide consultar "una unidad" sin patente (bug OST 225, 2026-07-30).
+  const genericUnitConsultWithoutPlate = looksLikeGenericUnitConsultWithoutPlate(rawText);
+  if (genericUnitConsultWithoutPlate) {
+    await clearActiveUnit(prisma, rawPhone);
+  }
+  const activeUnitRecord =
+    !looksLikeAnotherUnitRequest(rawText) && !explicitRejection && !genericUnitConsultWithoutPlate
+      ? await getActiveUnit(prisma, rawPhone)
+      : null;
+  const threadPlateEarly =
+    explicitRejection || genericUnitConsultWithoutPlate
+      ? null
+      : extractLastPlateFromThreadCompat(scopedThreadEarly) ??
+        detectPlate(scopedThreadEarly) ??
+        activeUnitRecord?.plate ??
+        null;
 
   if (
     !explicitPlate &&
@@ -865,6 +913,7 @@ export async function POST(req: NextRequest) {
     (explicitRejection ||
       looksLikeAnotherUnitRequest(rawText) ||
       mentionsMissingReportWithoutPlate(rawText) ||
+      genericUnitConsultWithoutPlate ||
       (looksLikeLiveUnitConsultIntent(rawText) && !looksLikeFleetUnitSearchInput(rawText)))
   ) {
     if (explicitRejection) {
@@ -1066,6 +1115,7 @@ export async function POST(req: NextRequest) {
     !forceListFleet &&
     !explicitPlate &&
     !unitQuery &&
+    !genericUnitConsultWithoutPlate &&
     !looksLikeGreeting(rawText.trim()) &&
     !looksLikeInternoMetaQuestion(rawText) &&
     !looksLikeUnitListRequest(rawText) &&
@@ -1182,10 +1232,15 @@ export async function POST(req: NextRequest) {
             const plate = normalizeLoosePlate(unit.patente || unit.unidad || "");
             const existing = await findRecentNoEquipmentTicket(rawPhone, plate);
             if (existing?.ticket) {
+              const odooRef = await findCustomerVisibleOdooCaseRef(prisma, {
+                customerId: existing.customer.id,
+                ticketId: existing.ticket.id,
+                plate,
+              });
               return {
-                ref: existing.ticket.code,
+                ref: odooRef ?? "",
                 reused: true,
-                odooRef: null,
+                odooRef,
                 message: `La unidad ${formatUnitLabel(unit)} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto para que Atención al cliente lo revise.`,
               };
             }

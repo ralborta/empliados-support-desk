@@ -174,12 +174,51 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
 }
 
 /** Prefijo suelto de patente (NKL, HEJ, AG) sin ser patente completa. */
+export function looksLikeBareNegativeResponse(rawText: string | undefined | null): boolean {
+  const norm = (rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[!?.¡¿]+/g, "")
+    .trim();
+  if (!norm || norm.length > 24) return false;
+  // "no", "no.", "no no", "nop", "nope" — negación breve, NO prefijo de patente.
+  // Bug real, producción 2026-07-30: "no" tras "¿te referís a AE 483 VE?" buscaba
+  // unidades que empiezan con "NO".
+  if (/^(no|nop|nope|nel|nah)(?:[\s,]+no)?$/.test(norm)) return true;
+  return false;
+}
+
+/** El bot acaba de pedir confirmar si el cliente se refiere a una patente concreta. */
+export function threadBotRecentlyAskedPlateReference(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /(?:refer[ií]s|referis|confirmar\s+si).*?(?:patente|matricula)/.test(tail) ||
+    /(?:patente|matricula|matr[ií]cula).*refer/i.test(tail) ||
+    /pod[eé]s\s+confirmar\s+si\s+te\s+refer/i.test(tail)
+  );
+}
+
+export function buildAmbiguousPlateOrNegationClarificationReply(): string {
+  return (
+    "Entendido. ¿Querés decir que NO es esa patente, o me estás pasando parte de la matrícula? " +
+    "Pasame la patente completa (ej. AE 483 VE) o la marca/nombre de la unidad."
+  );
+}
+
 export function isBarePlatePrefixHint(text: string | undefined | null): boolean {
   if (looksLikeBriefConfirmation(text)) return false;
+  if (looksLikeBareNegativeResponse(text)) return false;
   const stripped = String(text ?? "")
     .trim()
     .replace(/^(la|el|esa|ese)\s+/i, "");
   const compact = stripped.replace(/[\s\-_.]+/g, "").toUpperCase();
+  if (NON_PLATE_PREFIX_WORDS.has(compact.toLowerCase())) return false;
   if (!/^[A-Z]{2,3}\d{0,4}$/.test(compact)) return false;
   return !isPlausibleVehiclePlate(compact);
 }
@@ -208,6 +247,11 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "en",
   "para",
   "a",
+  "no",
+  "nop",
+  "nope",
+  "nel",
+  "nah",
 ]);
 
 // Tolerantes a la letra de más/de menos más común en "empieza"/"comienza"
@@ -1065,6 +1109,9 @@ export function looksLikeOdometerPendingDataAmendment(text: string | undefined |
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+  // Bug real, producción 2026-07-30: "Unidad: M600-020" tras confirmación con patente
+  // del certificado (AF 061 DV) debe reabrir el trámite con la unidad nueva.
+  if (/\bunidad\b/i.test(t) && /\b(?:M?\d{3}-\d{2,3})\b/i.test(raw)) return true;
   if (/\b(aun no te dije|todavia no|no te dije|me falta|faltaria|falta el|falta la)\b/.test(t)) return true;
   if (/\b(estan mal|esta mal|est[aá]n mal|incorrecta|incorrecto)\b/.test(t) && /\b(fecha|hora|dia)\b/.test(t)) {
     return true;
@@ -1561,6 +1608,9 @@ export function looksLikeUnitRejection(rawText: string | undefined | null): bool
     /\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm) ||
     /\bno\s+es\s+(la|el)\s+(correcta|correcto)\b/.test(norm) ||
     /\b(es|era)\s+otra\b/.test(norm) ||
+    /\bno\s+(me\s+)?refier\w*\b/.test(norm) ||
+    /\bno\s*,?\s+no\s+(me\s+)?refier\w*\b/.test(norm) ||
+    looksLikeBareNegativeResponse(rawText) ||
     // Bug real, producción 2026-07-23: "No de otra" (forma coloquial de "no, es de otra
     // unidad") no matcheaba ninguna variante de arriba y el respaldo de unidad activa
     // volvía a repetir la misma unidad recién rechazada.

@@ -20,6 +20,7 @@ import { listBotPromptModules } from "@/lib/botPromptStore";
 import { formatCalendarContextBlock } from "@/lib/odometroFecha";
 import { isAtilioAgentEnabled } from "@/lib/atilioDialogueCompose";
 import {
+  looksLikeGenericCapabilityOrTopicSwitchRequest,
   looksLikeSubstantiveCustomerMessage,
   looksLikeUnitConsultFollowUp,
   threadHasRecentUnitCaseOpened,
@@ -187,6 +188,10 @@ function shouldRequireToolCall(params: {
 
   if (looksLikeOdometerInfoRequest(selectionText)) {
     return true;
+  }
+
+  if (looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText)) {
+    return false;
   }
 
   if (looksLikeStructuredOdometerUpdateRequest(selectionText)) {

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
-import { looksLikePlateCorrectionRequest } from "@/lib/waraApi";
+import { looksLikePlateCorrectionRequest, looksLikeGenericUnitConsultWithoutPlate } from "@/lib/waraApi";
 import { looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
 import { looksLikeUnitRejection } from "@/lib/wara";
 
@@ -69,7 +69,8 @@ export function shouldUseActiveUnitFallback(rawText: string): boolean {
   return (
     !looksLikeFleetUnitSearchInput(rawText) &&
     !looksLikePlateCorrectionRequest(rawText) &&
-    !looksLikeUnitRejection(rawText)
+    !looksLikeUnitRejection(rawText) &&
+    !looksLikeGenericUnitConsultWithoutPlate(rawText)
   );
 }
 

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { adminAssignTicket, assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+import { reactivateAtilioAfterTicketClosed } from "@/lib/atilioBotPause";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
@@ -62,7 +63,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   const hasOtherUpdates = Object.values(rest).some((v) => v !== undefined);
-  const ticket = hasOtherUpdates
+  let ticket = hasOtherUpdates
     ? await prisma.ticket.update({
         where: { id },
         data: rest,
@@ -72,6 +73,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         where: { id },
         include: { customer: true, assignedTo: true },
       });
+
+  if (rest.status && currentTicket.status !== rest.status && ticket) {
+    await reactivateAtilioAfterTicketClosed({
+      customerId: ticket.customerId,
+      ticketId: id,
+      previousStatus: currentTicket.status,
+      newStatus: rest.status,
+      reason: "panel:patch-status",
+    });
+    ticket = await prisma.ticket.findUnique({
+      where: { id },
+      include: { customer: true, assignedTo: true },
+    });
+  }
 
   return NextResponse.json({ ticket });
 }

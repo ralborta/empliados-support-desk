@@ -12,6 +12,10 @@ import {
   obtenerEmpresaPorNumero,
 } from "@/lib/waraApi";
 import { pruebasContactAliasesSummary } from "@/config/pruebasContactAliases";
+import {
+  isOdooTicketEscalationEnabled,
+  odooTicketEscalationBlockReason,
+} from "@/lib/waraOdooEscalation";
 
 /**
  * Diagnóstico TEMPORAL para entender por qué un número resuelve o no en Wara.
@@ -82,6 +86,9 @@ export async function GET(req: NextRequest) {
     },
     contactAliasesEnabled: isTestContactAliasesEnabled(),
     whitelistEnabled: isTestWhitelistEnabled(),
+    odooTicketsEnabled: isOdooTicketEscalationEnabled(),
+    odooTicketsBlockReason: odooTicketEscalationBlockReason(),
+    odooTicketsEnabledEnv: envFlag("WARA_ODOO_TICKETS_ENABLED"),
     apiBaseUrlSet: !!process.env.WARA_API_BASE_URL?.trim(),
     apiBaseUrl:
       process.env.WARA_API_BASE_URL?.trim() ||

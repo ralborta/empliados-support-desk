@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
+import { reactivateAtilioAfterTicketClosed } from "@/lib/atilioBotPause";
 
 const bodySchema = z.object({
   action: z.enum([
@@ -130,6 +131,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     data: patch,
     include: { customer: true },
   });
+
+  if (patch.status && ticket.status !== patch.status) {
+    await reactivateAtilioAfterTicketClosed({
+      customerId: ticket.customerId,
+      ticketId: id,
+      previousStatus: ticket.status,
+      newStatus: patch.status,
+      reason: `quick-action:${action}`,
+    });
+  }
 
   await prisma.ticketMessage.create({
     data: {

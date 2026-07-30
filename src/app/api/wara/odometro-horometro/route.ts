@@ -10,6 +10,7 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
 import {
+  detectLoosePlate,
   detectPlate,
   extractLastPlateFromThread,
   extractPlateCorrectionHint,
@@ -45,10 +46,12 @@ import {
   extractPlatePrefixFromMessage,
 } from "@/lib/wara";
 import {
+  extractExplicitUnitNameFromText,
   looksLikeFleetUnitSearchInput,
   looksLikeUnitNameInMessage,
   looksLikeVagueUnitReference,
   resolvePlateWithWaraFleet,
+  shouldClearOdometerPlateFromThread,
 } from "@/lib/waraUnitIntent";
 import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
@@ -544,12 +547,18 @@ export async function POST(req: NextRequest) {
   const prefixInMessageEarly = extractPlatePrefixFromMessage(rawText);
   const explicitRejectionEarly = looksLikeUnitRejection(rawText);
   const plateCorrectionEarly = looksLikePlateCorrectionRequest(rawText);
+  const explicitUnitNameInMessage = extractExplicitUnitNameFromText(rawText);
+  const explicitPlateInCurrentMessage = detectLoosePlate(rawText);
   const correctingUnitDuringPendingConfirm =
     !treatAsBlankFlowStart &&
     !supersedesPendingConfirm &&
     hasLiveOdometerPendingAction &&
     (hasPendingOdometerConfirmation(threadText) || !!dbPendingOdoAction?.payload) &&
-    (prefixInMessageEarly || explicitRejectionEarly || plateCorrectionEarly);
+    (prefixInMessageEarly ||
+      explicitRejectionEarly ||
+      plateCorrectionEarly ||
+      shouldClearOdometerPlateFromThread(rawText) ||
+      (!!explicitPlateInCurrentMessage && !looksLikeVagueUnitReference(rawText)));
   if (correctingUnitDuringPendingConfirm) {
     await clearPendingAction(prisma, rawPhone);
   }
@@ -715,17 +724,33 @@ export async function POST(req: NextRequest) {
   const prefixInMessage = extractPlatePrefixFromMessage(rawText);
   const plateInMessage = normalizePlate(fromText.patente ?? detectPlate(rawText) ?? "");
   let explicitMessagePlate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? plateInMessage ?? "");
+  // Bug real, producción 2026-07-30: "Unidad: M600-020" + km no debe heredar AF 061 DV
+  // del certificado/hilo/IA — la unidad nombrada explícitamente manda.
+  if (shouldClearOdometerPlateFromThread(rawText)) {
+    explicitMessagePlate = explicitPlateInCurrentMessage
+      ? normalizePlate(explicitPlateInCurrentMessage)
+      : "";
+  }
   // Bug 2026-07-27: mergedFields/IA inferían OST223 del hilo y resolvePlateWithWaraFleet
   // los tomaba como directPlate — saltaba búsqueda por prefijo MYQ/RMX.
-  if (!isFleetUnitSelection && !prefixInMessage && mergedFields.patente) {
+  if (
+    !isFleetUnitSelection &&
+    !prefixInMessage &&
+    !shouldClearOdometerPlateFromThread(rawText) &&
+    mergedFields.patente
+  ) {
     explicitMessagePlate = normalizePlate(explicitMessagePlate || mergedFields.patente);
   }
   const awaitingOdometerKm = threadAwaitingOdometerKmValue(flowThreadText);
   const awaitingHorometerKm = threadAwaitingHorometerKmValue(flowThreadText);
-  const lockedPlateFromTomo =
+  const lockedPlateFromTomoRaw =
     awaitingHorometerKm || awaitingOdometerKm
       ? extractPlateFromPerfectoTomo(flowThreadText)
       : undefined;
+  const lockedPlateFromTomo =
+    lockedPlateFromTomoRaw && shouldClearOdometerPlateFromThread(rawText)
+      ? undefined
+      : lockedPlateFromTomoRaw;
   const clockTimeOnlyReading = looksLikeClockTimeOnlyReading(rawText);
   const awaitingPlateSelection =
     (threadAwaitingOdometerPlate(flowThreadText) && !awaitingOdometerKm) ||
@@ -760,7 +785,10 @@ export async function POST(req: NextRequest) {
       rawText,
       flowThreadText,
       null,
-      { preferAi: true, odometerContext: true },
+      {
+        preferAi: !explicitUnitNameInMessage,
+        odometerContext: true,
+      },
     );
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
@@ -951,7 +979,14 @@ export async function POST(req: NextRequest) {
     // una segunda consulta redundante a la base.
     const payload = dbPendingOdoAction?.payload;
     if (payload) {
-      if (!patente && payload.patente) patente = normalizePlate(String(payload.patente));
+      if (
+        !patente &&
+        payload.patente &&
+        !shouldClearOdometerPlateFromThread(rawText) &&
+        !explicitPlateInCurrentMessage
+      ) {
+        patente = normalizePlate(String(payload.patente));
+      }
       if (typeof horometro !== "number" && typeof payload.horometro === "number") {
         horometro = payload.horometro as number;
       }
@@ -1017,8 +1052,21 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS },
       );
     }
-    const hintText = [rawText, flowThreadText].filter(Boolean).join("\n");
-    const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, hintText, flowThreadText);
+    const hintText =
+      shouldClearOdometerPlateFromThread(rawText) || explicitPlateInCurrentMessage
+        ? rawText
+        : [rawText, flowThreadText].filter(Boolean).join("\n");
+    const fleetPlate = await resolvePlateWithWaraFleet(
+      prisma,
+      rawPhone,
+      hintText,
+      shouldClearOdometerPlateFromThread(rawText) ? rawText : flowThreadText,
+      null,
+      {
+        preferAi: !explicitUnitNameInMessage,
+        odometerContext: true,
+      },
+    );
     if (fleetPlate.ok) {
       patente = fleetPlate.plate;
     } else if (fleetPlate.reason === "clarification") {

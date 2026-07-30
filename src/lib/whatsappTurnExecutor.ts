@@ -13,10 +13,16 @@ import {
 import { resolveTurnExecutor } from "@/lib/whatsappTurnClassifierAI";
 import {
   buildUnexpectedTurnFallbackMessage,
+  buildAtilioHelpCapabilitiesReply,
+  buildTicketCreationInfoReply,
+  looksLikeBareAtilioMention,
   looksLikeChangeCompanyRequest,
   looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeGenericCapabilityOrTopicSwitchRequest,
+  looksLikeGenericUnitConsultWithoutPlate,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeTicketCreationInfoQuestion,
   looksLikeUnitConsultFollowUp,
   looksLikeSubstantiveCustomerMessage,
   resetCustomerCompanyMenu,
@@ -39,6 +45,8 @@ import {
   isOdometerFlowSuperseded,
   looksLikeOdometerInfoRequest,
   looksLikeStructuredOdometerUpdateRequest,
+  looksLikeUnitRejection,
+  looksLikeBareNegativeResponse,
 } from "@/lib/wara";
 import {
   isMaintenancePlateSelectionMessage,
@@ -53,7 +61,8 @@ import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction } from "@/lib/pendingAction";
-import { getActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
+import { getActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
+import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
@@ -215,6 +224,37 @@ export async function runTurnExecutorPhase(params: {
     return { message: reset.message, executor: "unidades", ok: true };
   }
 
+  // Cambio de tema / otra consulta — no repetir unidad activa ni GPS previo (bug AE 483 VE).
+  if (looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText)) {
+    await clearActiveUnit(prisma, rawPhone);
+    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+    const firstName = customer?.name?.trim().split(/\s+/)[0];
+    const message = looksLikeBareAtilioMention(selectionText)
+      ? firstName
+        ? `Hola ${firstName}, ¿en qué te puedo ayudar?`
+        : "Hola, ¿en qué te puedo ayudar?"
+      : buildAtilioHelpCapabilitiesReply(firstName);
+    return { message, executor: "info_guides", ok: true };
+  }
+
+  if (looksLikeTicketCreationInfoQuestion(selectionText)) {
+    await clearActiveUnit(prisma, rawPhone);
+    return {
+      message: buildTicketCreationInfoReply(),
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  if (looksLikeUnitRejection(selectionText) || looksLikeBareNegativeResponse(selectionText)) {
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "unidades", ok: execOk };
+    }
+  }
+
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
   const pendingAction = await getPendingAction(prisma, rawPhone);
 
@@ -349,6 +389,7 @@ export async function runTurnExecutorPhase(params: {
     activeUnit?.plate &&
     !threadHasActiveOdometerFlow(threadForFollowUp) &&
     pendingAction?.type !== "odometro" &&
+    !looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText) &&
     (looksLikeUnitConsultFollowUp(selectionText) ||
       ((threadHasRecentNoEquipmentExplanation(threadForFollowUp) ||
         threadHasRecentUnitCaseOpened(threadForFollowUp)) &&
@@ -465,7 +506,9 @@ export async function runTurnExecutorPhase(params: {
       finalMessage = buildFleetUnitNotFoundMessage({ rawText: selectionText });
     } else if (
       executor === "unidades" &&
-      (looksLikeLiveUnitConsultIntent(selectionText) || looksLikeGpsOrUnitStatusQuestion(selectionText))
+      (looksLikeLiveUnitConsultIntent(selectionText) ||
+        looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+        looksLikeGenericUnitConsultWithoutPlate(selectionText))
     ) {
       finalMessage =
         "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan).";

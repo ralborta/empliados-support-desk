@@ -3,11 +3,8 @@
  * Regresión — Pedido explícito, 2026-07-29: el bot NO debe informar proactivamente el
  * número de caso/ticket en sus respuestas (ni al crearlo ni al reutilizar uno existente).
  * El número de caso solo debe aparecer si el cliente lo pide explícitamente
- * (looksLikeOpenCaseStatusInquiry -> buildOpenCaseStatusReply).
- *
- * Este test es una barrera de "no regresión de texto": escanea los archivos que generan
- * mensajes de creación/reutilización de caso y falla si alguno vuelve a interpolar el
- * número/código del ticket en un template de mensaje al cliente.
+ * (looksLikeOpenCaseStatusInquiry -> buildOpenCaseStatusReply, messageAsksForTicketCode, etc.)
+ * y en ese caso solo la referencia Odoo (#36248), nunca TCK-* local.
  */
 import assert from "node:assert";
 import fs from "node:fs";
@@ -28,6 +25,7 @@ const filesToScan = [
   "src/app/api/odoo/ticket/route.ts",
   "src/app/api/wara/unidades/route.ts",
   "src/app/api/wara/certificados/route.ts",
+  "src/app/api/wara/mantenimiento-operativo/route.ts",
   "src/lib/waraGpsSummary.ts",
 ];
 
@@ -39,6 +37,9 @@ const forbiddenPatterns = [
   /el caso\s+\$\{/i,
   /caso abierto\s*\(\$\{/i,
   /en revisión\.\s*\$\{ref/i,
+  /Caso Odoo\s*\$\{/i,
+  /Caso\s+\$\{ticket\.code\}/i,
+  /Ticket:\s*\*\$\{ticket\.code\}/i,
   /`[^`]*caso[^`]*\$\{[a-zA-Z.]*(ref|code|odooRef)[a-zA-Z.]*\}[^`]*`/i,
 ];
 
@@ -51,14 +52,18 @@ for (const relPath of filesToScan) {
   }
 }
 
-console.log("\n▶ El path de pedido explícito (buildOpenCaseStatusReply) sigue mostrando el código");
+console.log("\n▶ El path de pedido explícito usa referencia Odoo, no openTicket.code");
 const ticketInquiryContent = fs.readFileSync(
   path.join(root, "src/lib/customerTicketInquiry.ts"),
   "utf8",
 );
 check(
-  "buildOpenCaseStatusReply sigue interpolando openTicket.code cuando el cliente pregunta explícitamente",
-  /tenés el caso \*\$\{openTicket\.code\}\*/.test(ticketInquiryContent),
+  "buildOpenCaseStatusReply no usa openTicket.code",
+  !/openTicket\.code/.test(ticketInquiryContent),
+);
+check(
+  "buildOpenCaseStatusReply usa formatCustomerOdooCaseRefForWhatsApp",
+  /formatCustomerOdooCaseRefForWhatsApp/.test(ticketInquiryContent),
 );
 
 console.log(`\n✅ ${passed} checks pasaron.`);

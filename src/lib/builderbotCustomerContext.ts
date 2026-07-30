@@ -10,6 +10,7 @@ import {
 import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
 import { getPendingAction } from "@/lib/pendingAction";
+import { clearActiveUnit } from "@/lib/activeUnit";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
@@ -32,8 +33,10 @@ import {
   extractExplicitCompanyMention,
   looksLikeRepeatGreetingInSession,
   buildAtilioHelpCapabilitiesReply,
+  buildTicketCreationInfoReply,
   looksLikeAtilioHelpRequest,
   looksLikeSubstantiveCustomerMessage,
+  looksLikeTicketCreationInfoQuestion,
   resetCustomerCompanyMenu,
   resolveCustomerByWaraPhone,
   resolveCustomerForTurnContext,
@@ -567,11 +570,20 @@ export async function customerRegisteredContextResponse(
       stage: "atilio_bare_name_mention",
     });
     nextFlow = "reply";
+  } else if (selectionText && looksLikeTicketCreationInfoQuestion(selectionText)) {
+    await clearActiveUnit(prisma, trimmed);
+    responseMessage = buildTicketCreationInfoReply();
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "ticket_creation_info",
+    });
+    nextFlow = "reply";
   } else if (
     selectionText &&
     (looksLikeAtilioHelpRequest(selectionText) ||
       looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText))
   ) {
+    await clearActiveUnit(prisma, trimmed);
     const firstName = customer?.name?.trim().split(/\s+/)[0];
     responseMessage = buildAtilioHelpCapabilitiesReply(firstName);
     await persistCustomerBotReply(trimmed, responseMessage, {
@@ -580,6 +592,7 @@ export async function customerRegisteredContextResponse(
     });
     nextFlow = "reply";
   } else if (selectionText && looksLikeFlowControlCommand(selectionText)) {
+    await clearActiveUnit(prisma, trimmed);
     nextFlow = "reply";
     const firstName = customer?.name?.trim().split(/\s+/)[0];
     responseMessage = firstName

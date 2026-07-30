@@ -1,6 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
+import {
+  buildCaseRegisteredWithoutOdooRefReply,
+  findCustomerVisibleOdooCaseRef,
+  formatCustomerOdooCaseRefForWhatsApp,
+} from "@/lib/customerOdooCaseRef";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 
@@ -133,11 +138,19 @@ export async function buildOpenCaseStatusReply(
       status: { in: OPEN_TICKET_THREAD_STATUSES },
     },
     orderBy: { lastMessageAt: "desc" },
-    select: { code: true },
+    select: { id: true },
   });
 
   if (openTicket) {
-    return `Sí, tenés el caso *${openTicket.code}* abierto. Puedo seguir ayudándote por este chat con consultas sobre ese tema o cosas nuevas. Si querés cerrarlo, escribí "cerrar caso" o "resolver conversación".`;
+    const odooRef = await findCustomerVisibleOdooCaseRef(client, {
+      customerId: customer.id,
+      ticketId: openTicket.id,
+    });
+    if (odooRef) {
+      const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
+      return `Sí, tenés el caso *${display}* abierto. Puedo seguir ayudándote por este chat con consultas sobre ese tema o cosas nuevas. Si querés cerrarlo, escribí "cerrar caso" o "resolver conversación".`;
+    }
+    return "Sí, tenés un caso abierto en Atención al cliente. Puedo seguir ayudándote por este chat. Si querés cerrarlo, escribí \"cerrar caso\" o \"resolver conversación\".";
   }
 
   const lastClosed = await client.ticket.findFirst({
@@ -146,11 +159,19 @@ export async function buildOpenCaseStatusReply(
       status: { in: ["RESOLVED", "CLOSED"] },
     },
     orderBy: { updatedAt: "desc" },
-    select: { code: true },
+    select: { id: true },
   });
 
   if (lastClosed) {
-    return `No tenés casos abiertos. El último (*${lastClosed.code}*) ya está cerrado. ¿En qué te puedo ayudar?`;
+    const odooRef = await findCustomerVisibleOdooCaseRef(client, {
+      customerId: customer.id,
+      ticketId: lastClosed.id,
+    });
+    if (odooRef) {
+      const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
+      return `No tenés casos abiertos. El último (*${display}*) ya está cerrado. ¿En qué te puedo ayudar?`;
+    }
+    return "No tenés casos abiertos. ¿En qué te puedo ayudar?";
   }
 
   return "No tenés casos registrados con este número. Contame en qué te puedo ayudar.";
