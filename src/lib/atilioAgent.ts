@@ -29,7 +29,7 @@ import {
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
-import { shouldRouteTurnToOdometerExecutor } from "@/lib/waraUnitIntent";
+import { shouldRouteTurnToOdometerExecutor, shouldRouteTurnToFleetListExecutor } from "@/lib/waraUnitIntent";
 
 export { isAtilioAgentEnabled, composeAgentReplyFromDialogueState, type ComposeDialogueInput } from "@/lib/atilioDialogueCompose";
 
@@ -46,7 +46,7 @@ const CORE_SYSTEM_PROMPT = `Sos Atilio, agente de Mesa de Ayuda Wara por WhatsAp
 FILOSOFÍA (lo más importante):
 - Entendé la INTENCIÓN del cliente, no solo palabras exactas. Si dice "algo raro con la camioneta", "no me cierra", "necesito ver eso", interpretá el requerimiento real antes de actuar.
 - Cuando la herramienta devuelve datos (flota, unidades, estados), aplicá CRITERIO DE SELECCIÓN: elegí según lo que el cliente pidió (patente, prefijo, marca, síntoma), no la primera coincidencia ni un ejemplo del historial.
-- Si hay varias opciones razonables, preguntá en forma conversacional cuál es — sin listas rígidas tipo formulario; ofrecé 2-3 opciones concretas si ayuda.
+- Si piden listado/flota/todas las unidades, llamá consultar_unidades — NUNCA pidas patente para "poder listar" (si no recuerdan, justamente quieren la lista).
 - Las DERIVACIONES deben ser claras y justificadas: ticket/asesor cuando corresponde técnicamente; guía cuando es informativo; observación cuando no hace falta escalar. Nunca derives "por las dudas" ni evites derivar cuando el backend ya abrió caso.
 - Respuestas y preguntas ABIERTAS: tono humano, rioplatense, flexible — nunca párrafos clonados ni el mismo bloque repetido en cada turno.
 
@@ -172,6 +172,15 @@ function shouldRequireToolCall(params: {
   selectionText: string;
 }): boolean {
   const { session, threadText, selectionText } = params;
+
+  if (
+    shouldRouteTurnToFleetListExecutor({
+      selectionText,
+      threadText,
+    })
+  ) {
+    return true;
+  }
 
   if (
     shouldRouteTurnToOdometerExecutor({

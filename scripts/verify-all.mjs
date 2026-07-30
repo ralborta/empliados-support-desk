@@ -72,6 +72,7 @@ const SUITES = [
   "verify-unit-vague-problem-conversational.mjs",
   "verify-agent-dialogue-reasoning.mjs",
   "verify-odometer-agent-context.mjs",
+  "verify-fleet-list-agent-bypass.mjs",
   "verify-unit-status-confirm-context.mjs",
   "verify-odometer-si-fecha-confirm.mjs",
   "verify-calendar-context-fechas.mjs",

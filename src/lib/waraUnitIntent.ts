@@ -534,9 +534,76 @@ function looksLikeUnitListRequest(rawText: string): boolean {
   if (detectPlate(rawText)) return false;
   // Nota: "norm" ya viene sin acentos (NFD + strip de diacríticos), así que alcanza con
   // matchear "mas" (sin tilde) para cubrir "más"/"mas" indistintamente.
-  return /\b(listado|lista de unidad|lista de unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma|mas unidades|otras unidades|mas opciones|ver mas unidades|dame mas unidades|mostrame mas unidades|mas camiones|mas lista|resto de la lista|el resto de la lista|toda la lista)\b/.test(
+  return /\b(listado|lista de flota|lista flota|lista de unidad|lista de unidades|lista de las unidades|necesito la lista|la lista de las unidades|lista\s+(?:mi|mis)\s+unidades|list[aá]\s+(?:mi|mis)\s+unidades|listame|list[aá]me|pasame la lista|p[aá]same la lista|p[aá]same la lista de flota|me pasas la lista|dame la lista|ver lista|mis unidades|todas las unidades|todas mis unidades|reporte de mis unidades|reporte de las unidades|flota|cuantas unidades|cu[aá]ntas unidades|ver unidades|mis camiones|que unidades|qu[eé] unidades|unidades que cuento|cuantas tengo|cu[aá]ntas tengo|cuento en wara|cuento en la plataforma|mas unidades|otras unidades|mas opciones|ver mas unidades|dame mas unidades|mostrame mas unidades|mas camiones|mas lista|resto de la lista|el resto de la lista|toda la lista)\b/.test(
     norm
   );
+}
+
+/** El cliente pidió listado/flota en el hilo reciente (incluye reintentos tras respuesta mala del bot). */
+export function threadHasRecentFleetListIntent(threadText: string): boolean {
+  const tail = threadText
+    .slice(-3500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /\b(listado|lista de flota|lista de unidades|pasame la lista|p[aá]same la lista|mis unidades|todas las unidades|ver toda la flota|necesito la lista)\b/.test(
+      tail,
+    ) || /\bten[eé]s \d+ unidades\b/.test(tail)
+  );
+}
+
+/** El agente/bot pidió patente para "dar la lista" — lógica invertida, hay que corregir con listado real. */
+function threadBotWronglyAskedPlateForList(threadText: string): boolean {
+  if (!threadHasRecentFleetListIntent(threadText)) return false;
+  const tail = threadText.slice(-2500).toLowerCase();
+  return (
+    /para poder pasarte la lista.*patente/.test(tail) ||
+    /lista de unidades.*indiques la patente/.test(tail) ||
+    /listado de unidades.*patente completa/.test(tail) ||
+    /listado de mis unidades.*patente/.test(tail)
+  );
+}
+
+/** Confirmación o reintento mientras el cliente quiere ver la flota entera. */
+export function looksLikeFleetListContinuation(rawText: string, threadText = ""): boolean {
+  if (looksLikeUnitListRequest(rawText)) return true;
+  const norm = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return false;
+  if (detectLoosePlate(rawText) || extractPlatePrefixFromMessage(rawText)) return false;
+  if (!threadHasRecentFleetListIntent(threadText) && !threadBotWronglyAskedPlateForList(threadText)) {
+    return false;
+  }
+  if (
+    /^(todo|todas|si|sí|dale|bueno|ok|listado|el listado|ninguna|no se|no s[eé]|no tengo idea|no la se|no las conozco|no recuerdo|mostrame todo|ver todas)$/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
+  if (/\b(todas las unidades|listado de mis unidades|pasame el listado|ver toda la flota|la lista completa)\b/.test(norm)) {
+    return true;
+  }
+  if (threadBotWronglyAskedPlateForList(threadText) && norm.length <= 24 && !looksLikeGpsOrUnitStatusQuestion(rawText)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Listado de flota → executor unidades directo (nunca pedir patente para "poder listar").
+ */
+export function shouldRouteTurnToFleetListExecutor(params: {
+  selectionText: string;
+  threadText: string;
+}): boolean {
+  if (looksLikeUnitListRequest(params.selectionText)) return true;
+  if (looksLikeFleetListContinuation(params.selectionText, params.threadText)) return true;
+  return false;
 }
 
 /** Cliente pidió ayuda para encontrar una unidad en el hilo reciente (respuesta de patente/nombre). */

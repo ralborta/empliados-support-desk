@@ -37,6 +37,7 @@ import {
 } from "@/lib/wara";
 import {
   isMaintenancePlateSelectionMessage,
+  shouldRouteTurnToFleetListExecutor,
   shouldRouteTurnToOdometerExecutor,
   buildFleetUnitNotFoundMessage,
   looksLikeFleetUnitSearchInput,
@@ -263,6 +264,21 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return { message: execMessage, executor: "mantenimiento", ok: execOk };
+    }
+  }
+
+  // Listado de flota → executor unidades directo (NUNCA pedir patente para listar).
+  if (
+    shouldRouteTurnToFleetListExecutor({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+    })
+  ) {
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor: "unidades", ok: execOk };
     }
   }
 

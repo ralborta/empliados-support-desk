@@ -55,6 +55,7 @@ import {
   filterUnitsBySearchTerms,
   filterUnitsByUnitName,
   looksLikeFleetUnitSearchInput,
+  looksLikeFleetListContinuation,
   looksLikeUnitListRequest,
   resolveUnitQuery,
 } from "@/lib/waraUnitIntent";
@@ -930,7 +931,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  let forceListFleet = looksLikeUnitListRequest(rawText);
+  let forceListFleet =
+    looksLikeUnitListRequest(rawText) ||
+    looksLikeFleetListContinuation(rawText, threadText);
   let unitQuery = extractUnitQueryFromText(rawText);
 
   if (
