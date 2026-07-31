@@ -434,6 +434,53 @@ async function appendOutboundBotMessage(rawPhone: string, text: string, payload:
   });
 }
 
+/** Resuelve patente contra flota (marca, prefijo, nombre, patente parcial) antes de pedir km/hs o confirmar. */
+async function resolvePatenteFromFleetForMeterTramite(params: {
+  rawPhone: string;
+  rawText: string;
+  flowThreadText: string;
+  explicitUnitNameInMessage?: string | null;
+}): Promise<
+  | { kind: "resolved"; patente: string }
+  | { kind: "clarification"; response: NextResponse }
+  | { kind: "not_found" }
+> {
+  const hintText = [params.rawText, params.flowThreadText].filter(Boolean).join("\n");
+  const fleetPlate = await resolvePlateWithWaraFleet(
+    prisma,
+    params.rawPhone,
+    hintText,
+    params.flowThreadText,
+    null,
+    {
+      preferAi: !params.explicitUnitNameInMessage,
+      odometerContext: true,
+    },
+  );
+  if (fleetPlate.ok && fleetPlate.plate) {
+    return { kind: "resolved", patente: normalizePlate(fleetPlate.plate) };
+  }
+  if (fleetPlate.reason === "clarification") {
+    await appendOutboundBotMessage(params.rawPhone, fleetPlate.message, {
+      source: "wara_odometro_response",
+      stage: "unit_clarification",
+    });
+    return {
+      kind: "clarification",
+      response: NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          error: "Varias unidades",
+          message: fleetPlate.message,
+        },
+        { status: BB_STATUS },
+      ),
+    };
+  }
+  return { kind: "not_found" };
+}
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
@@ -1115,6 +1162,20 @@ export async function POST(req: NextRequest) {
       );
     }
   }
+  if (
+    !patente &&
+    ((typeof horometro === "number" && Number.isFinite(horometro)) ||
+      (typeof odometro === "number" && Number.isFinite(odometro)))
+  ) {
+    const fleetResolved = await resolvePatenteFromFleetForMeterTramite({
+      rawPhone,
+      rawText,
+      flowThreadText,
+      explicitUnitNameInMessage,
+    });
+    if (fleetResolved.kind === "clarification") return fleetResolved.response;
+    if (fleetResolved.kind === "resolved") patente = fleetResolved.patente;
+  }
   if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
     // Bug real, producción 2026-07-28: la "unidad activa" (usada como respaldo por
     // OTROS trámites cuando no hay patente explícita) solo se actualizaba al completar
@@ -1125,6 +1186,36 @@ export async function POST(req: NextRequest) {
     // también, apenas se confirma la patente, no solo al final.
     const wantsHorometro = horometerFlowActive;
     const meterType = resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent });
+    if (!patente) {
+      const fleetResolved = await resolvePatenteFromFleetForMeterTramite({
+        rawPhone,
+        rawText,
+        flowThreadText,
+        explicitUnitNameInMessage,
+      });
+      if (fleetResolved.kind === "clarification") return fleetResolved.response;
+      if (fleetResolved.kind === "resolved") patente = fleetResolved.patente;
+    }
+    if (!patente) {
+      const fallbackTemplate = horometerOnlyIntent
+        ? "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)"
+        : "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
+      const message = await composeOdometerDialogueReply({
+        situation: "missing_plate",
+        history: flowThreadText,
+        lastCustomerMessage: rawText,
+        fieldHint: wantsHorometro ? "horometro" : "odometro",
+        fallbackTemplate,
+      });
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "missing_plate",
+      });
+      return NextResponse.json(
+        { ok: false, ok_s: "false", error: "Patente requerida", message },
+        { status: BB_STATUS },
+      );
+    }
     if (patente) {
       await setActiveUnit(prisma, rawPhone, patente, { source: "odometro" });
       if (isConversationNotebookEnabled()) {
@@ -1434,6 +1525,39 @@ export async function POST(req: NextRequest) {
           flowComplete_s: "true",
           message: remindMessage,
         },
+        { status: BB_STATUS },
+      );
+    }
+    if (
+      !patente &&
+      ((typeof horometro === "number" && Number.isFinite(horometro)) ||
+        (typeof odometro === "number" && Number.isFinite(odometro)))
+    ) {
+      const fleetResolved = await resolvePatenteFromFleetForMeterTramite({
+        rawPhone,
+        rawText,
+        flowThreadText,
+        explicitUnitNameInMessage,
+      });
+      if (fleetResolved.kind === "clarification") return fleetResolved.response;
+      if (fleetResolved.kind === "resolved") patente = fleetResolved.patente;
+    }
+    if (!patente) {
+      const fallbackTemplate =
+        "Para registrar el cambio necesito identificar la unidad. Decime la patente (ej. AG 562 SP), un prefijo (ej. AG), la marca o el nombre interno, o escribí «listado de mis unidades».";
+      const message = await composeOdometerDialogueReply({
+        situation: "missing_plate",
+        history: flowThreadText,
+        lastCustomerMessage: rawText,
+        fieldHint: horometerFlowActive || horometerOnlyIntent ? "horometro" : "odometro",
+        fallbackTemplate,
+      });
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "missing_plate_before_confirm",
+      });
+      return NextResponse.json(
+        { ok: false, ok_s: "false", error: "Patente requerida", message },
         { status: BB_STATUS },
       );
     }

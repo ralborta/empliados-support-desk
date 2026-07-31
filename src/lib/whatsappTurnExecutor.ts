@@ -39,6 +39,8 @@ import {
   detectLoosePlate,
   hasPendingMaintenancePlateRequest,
   threadHasActiveOdometerFlow,
+  threadAwaitingHorometerKmValue,
+  threadAwaitingOdometerKmValue,
   threadOdometerRegistrationCompleted,
   looksLikeCertificateKeyword,
   certificateFlowState,
@@ -53,6 +55,7 @@ import {
 } from "@/lib/wara";
 import {
   isMaintenancePlateSelectionMessage,
+  isOdometerPlateSelectionMessage,
   shouldRouteTurnToFleetListExecutor,
   shouldRouteTurnToOdometerExecutor,
   shouldRouteTurnToUnidadesExecutor,
@@ -362,6 +365,22 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Arranque explícito odómetro/horómetro — antes de unidades/agente (también con marca en el mensaje).
+  if (
+    (looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+      looksLikeHorometerOnlyIntent(selectionText)) &&
+    !threadOdometerRegistrationCompleted(threadCtx.classificationThread) &&
+    !isOdometerFlowSuperseded(threadCtx.classificationThread) &&
+    !threadHasActiveOdometerFlow(threadCtx.classificationThread)
+  ) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
   // Pregunta informativa sobre odómetro — guía, no arrancar trámite con activeUnit.
   if (looksLikeOdometerInfoRequest(selectionText)) {
     const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey);
@@ -467,6 +486,22 @@ export async function runTurnExecutorPhase(params: {
     const execMessage = messageFromPayload(execResult);
     if (execMessage || !executorSkippedSilently(execResult)) {
       return { message: execMessage, executor: "unidades", ok: execOk };
+    }
+  }
+
+  // Prefijo/marca/patente parcial en trámite odómetro/horómetro activo → executor (no agente).
+  if (
+    isOdometerPlateSelectionMessage(selectionText) &&
+    (pendingAction?.type === "odometro" ||
+      threadHasActiveOdometerFlow(threadCtx.classificationThread) ||
+      threadAwaitingHorometerKmValue(threadCtx.classificationThread) ||
+      threadAwaitingOdometerKmValue(threadCtx.classificationThread))
+  ) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
     }
   }
 

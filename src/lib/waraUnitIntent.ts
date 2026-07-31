@@ -28,6 +28,8 @@ import {
   hasPendingOdometerConfirmation,
   hasPendingUnitConsultPlateRequest,
   looksLikeBriefConfirmation,
+  looksLikeExplicitOdometerUpdateRequest,
+  looksLikeHorometerOnlyIntent,
   looksLikePendingTramiteAffirmation,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -39,6 +41,7 @@ import {
   looksLikeLiveUnitConsultIntent,
   looksLikeConversationalUnitConcern,
   looksLikeOdometerConfirmationRejection,
+  looksLikePatenteUnknownReply,
   looksLikePlateCorrectionRequest,
   looksLikeSubstantiveCustomerMessage,
   looksLikeVehicleBrandOrUnitSearch,
@@ -202,6 +205,7 @@ export function isOdometerPlateSelectionMessage(rawText: string): boolean {
   if (looksLikeFlowControlCommand(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
   if (looksLikeVagueUnitReference(text)) return true;
+  if (looksLikePatenteUnknownReply(text)) return true;
   return (
     text.length <= 20 &&
     !/\b(certificado|cobertura|mantenimiento|preventiv\w*|gps|reporte|ignici[oó]n|consultar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
@@ -1918,6 +1922,12 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   threadText: string;
 }): boolean {
   const { selectionText, threadText } = params;
+  if (
+    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+    looksLikeHorometerOnlyIntent(selectionText)
+  ) {
+    return false;
+  }
   if (!looksLikeFleetUnitSearchInput(selectionText)) return false;
   if (looksLikeUnitListRequest(selectionText)) return false;
   if (

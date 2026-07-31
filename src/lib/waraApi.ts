@@ -677,9 +677,24 @@ export function looksLikeOdometerContinuationMessage(text: string | undefined | 
   if (/\bpatente\s+(?:de|del)\b/.test(t)) return true;
   if (looksLikeVehicleBrandOrUnitSearch(raw)) return true;
   if (extractPlatePrefixFromMessage(raw) || isBarePlatePrefixHint(raw)) return true;
+  if (looksLikePatenteUnknownReply(raw)) return true;
   if (/^\d{4,7}$/.test(raw.replace(/\./g, "").replace(/\s+/g, ""))) return true;
   const plate = normalizePlate(raw.replace(/[\s\-_.]+/g, ""));
   return !!(plate && /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(plate));
+}
+
+/** Cliente no recuerda la patente — hay que buscar por marca/nombre/prefijo en flota. */
+export function looksLikePatenteUnknownReply(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  return (
+    /\bno\s+(?:lo\s+)?se\b/.test(t) ||
+    /\bno\s+recuerdo\b/.test(t) ||
+    /\bno\s+me\s+acuerdo\b/.test(t) ||
+    /\bno\s+tengo\s+idea\b/.test(t) ||
+    /\bno\s+se\s+cual\b/.test(t) ||
+    /\bno\s+s[eé]\s+la\s+patente\b/.test(t)
+  );
 }
 
 /** ¿Seguir en flujo de odómetro o el cliente cambió de tema? */
@@ -706,6 +721,7 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (odometerFlowAwaitingInput) {
     if (looksLikePlateCorrectionRequest(text)) return true;
+    if (looksLikePatenteUnknownReply(text)) return true;
     if (looksLikeOdometerOperationalSupplement(text)) return true;
     if (looksLikeNonOdometerOperationalIntent(text)) return false;
     return looksLikeOdometerContinuationMessage(text);
@@ -1193,6 +1209,11 @@ export function resolveConversationalUnitTurn(params: {
   const { rawText, threadText, unitLabel } = params;
   const norm = normCompanyToken(rawText);
   const label = unitLabel.trim() || "la unidad";
+
+  // Trámite odómetro/horómetro — no escuchar como consulta GPS ni repetir pushback.
+  if (looksLikeExplicitOdometerUpdateRequest(rawText) || looksLikeHorometerOnlyIntent(rawText)) {
+    return null;
+  }
 
   if (looksLikeProblemClarificationPushback(rawText)) {
     return buildUnitProblemClarificationReply(label, "pushback");

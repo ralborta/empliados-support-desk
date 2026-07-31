@@ -16,6 +16,7 @@ import {
   threadHasRecentGpsStatusSummary,
 } from "../src/lib/waraApi.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
+import { shouldRouteTurnToUnidadesExecutor } from "../src/lib/waraUnitIntent.ts";
 
 let passed = 0;
 function check(label, cond) {
@@ -116,6 +117,29 @@ check(
       "La unidad AG 562 SP está detenida. La ignición está apagada. No se generará un ticket por el momento.",
     unitLabel: label,
   })?.includes("HISTORIAL"),
+);
+
+console.log("\n— Horómetro tras GPS: NO loop conversacional —");
+const gpsThread =
+  "Cliente: Quiero cambiar el horometro de la Nissan\nBot: La unidad AG 562 SP (NISSAN 2404) está detenida y con la ignición apagada, por eso no está actualizando su ubicación. No se generó un ticket por este estado.";
+check(
+  "horómetro explícito tras GPS → null (va a trámite odómetro)",
+  resolveConversationalUnitTurn({
+    rawText: "quiero cambiar el horometro",
+    threadText: gpsThread,
+    unitLabel: label,
+  }) === null,
+);
+check(
+  'classifyTurnExecutor("Quiero cambiar el horometro de la Nissan") === "odometro" tras GPS',
+  classifyTurnExecutor("Quiero cambiar el horometro de la Nissan", gpsThread) === "odometro",
+);
+check(
+  "horómetro + Nissan tras GPS → NO shouldRouteTurnToUnidadesExecutor",
+  shouldRouteTurnToUnidadesExecutor({
+    selectionText: "Quiero cambiar el horometro de la Nissan",
+    threadText: gpsThread,
+  }) === false,
 );
 
 console.log("\n— Router: concern conversacional va a unidades —");

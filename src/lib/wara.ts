@@ -888,7 +888,8 @@ export function threadAwaitingHorometerPlate(threadText: string): boolean {
   return (
     /para registrar el cambio de hor[oó]metro necesito la patente/i.test(tail) ||
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
-    /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail)
+    /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail) ||
+    /confirm[aá]s?\s+(?:la\s+)?patente/i.test(tail)
   );
 }
 
