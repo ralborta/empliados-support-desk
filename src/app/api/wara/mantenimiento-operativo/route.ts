@@ -19,9 +19,13 @@ import {
   normalizePlate,
   looksLikeHorometerOnlyIntent,
   looksLikeExplicitOdometerUpdateRequest,
-  looksLikeVagueUnitReference,
 } from "@/lib/wara";
-import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
+import {
+  resolvePlateWithWaraFleet,
+  isMaintenancePlateSelectionMessage,
+  looksLikeFleetUnitSearchInput,
+  looksLikeVagueUnitReference,
+} from "@/lib/waraUnitIntent";
 import { setActiveUnit, getActiveUnit, resolvePlateFromConversationContext } from "@/lib/activeUnit";
 import {
   clearSessionNotebook,
