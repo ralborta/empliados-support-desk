@@ -19,8 +19,9 @@ import {
   normalizePlate,
   looksLikeHorometerOnlyIntent,
   looksLikeExplicitOdometerUpdateRequest,
+  looksLikeVagueUnitReference,
 } from "@/lib/wara";
-import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
+import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
 import { setActiveUnit, getActiveUnit, resolvePlateFromConversationContext } from "@/lib/activeUnit";
 import {
   clearSessionNotebook,
@@ -714,6 +715,9 @@ export async function POST(req: NextRequest) {
   const maintenanceTramiteStart =
     looksLikeOperationalMaintenanceIntent(text, threadText) &&
     !plateSelectionReply &&
+    !looksLikeFleetUnitSearchInput(text) &&
+    !looksLikeVagueUnitReference(text) &&
+    !extractPlatePrefixFromMessage(text) &&
     !detectPlate(text) &&
     !parsed.data.patente?.trim() &&
     !parsed.data.plate?.trim() &&
@@ -899,6 +903,7 @@ export async function POST(req: NextRequest) {
       }
       if (fleetPlate.ok) {
         plate = fleetPlate.plate;
+        await setActiveUnit(prisma, rawPhone, plate, { source: "mantenimiento" });
       }
     }
   }

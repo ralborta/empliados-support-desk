@@ -1961,6 +1961,14 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
 
+  // Arranque explícito (p. ej. tras consulta GPS/mantenimiento) → executor aunque no haya flujo activo previo.
+  if (
+    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+    looksLikeHorometerOnlyIntent(selectionText)
+  ) {
+    return true;
+  }
+
   const flowActive =
     pendingActionType === "odometro" ||
     threadHasActiveOdometerFlow(threadText) ||

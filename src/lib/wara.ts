@@ -1716,7 +1716,22 @@ function normThreadText(text: string): string {
     .toLowerCase();
 }
 
+/** Valor numérico solo (km u horas) durante trámite de odómetro/horómetro. */
+export function looksLikeBareMeterValue(text: string | undefined | null): boolean {
+  const t = String(text ?? "").trim();
+  return /^\d{1,7}$/.test(t);
+}
+
+/** El bot acaba de pedir km u horas (patente ya confirmada). */
+export function threadHasActiveMeterValueRequest(threadText: string): boolean {
+  return threadAwaitingHorometerKmValue(threadText) || threadAwaitingOdometerKmValue(threadText);
+}
+
 export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
+  // Odómetro/horómetro en curso manda sobre un resumen viejo de mantenimiento en el hilo.
+  if (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText)) {
+    return false;
+  }
   const tail = normThreadText(threadText.slice(-4000));
   const summaryStart = tail.lastIndexOf("voy a registrar:");
   if (summaryStart === -1) return false;

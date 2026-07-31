@@ -26,6 +26,7 @@ import {
   looksLikeUnitConsultFollowUp,
   looksLikeSubstantiveCustomerMessage,
   looksLikeMaintenanceConfirmationRejection,
+  looksLikeOperationalMaintenanceIntent,
   resetCustomerCompanyMenu,
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
@@ -48,7 +49,9 @@ import {
   looksLikeHorometerOnlyIntent,
   hasPendingMantenimientoConfirmation,
   isOdometerFlowSuperseded,
+  looksLikeBareMeterValue,
   looksLikeOdometerInfoRequest,
+  threadHasActiveMeterValueRequest,
   looksLikeStructuredOdometerUpdateRequest,
   looksLikeUnitRejection,
   looksLikeBareNegativeResponse,
@@ -275,6 +278,35 @@ export async function runTurnExecutorPhase(params: {
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
   const pendingAction = await getPendingAction(prisma, rawPhone);
 
+  // Valor numérico (km/hs) con patente ya confirmada → odómetro, antes que confirmaciones stale.
+  if (
+    looksLikeBareMeterValue(selectionText) &&
+    threadHasActiveMeterValueRequest(threadCtx.classificationThread)
+  ) {
+    if (pendingAction?.type === "mantenimiento") {
+      await clearPendingAction(prisma, rawPhone);
+    }
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
+  // Mantenimiento operativo (incl. marca/prefijo en el mismo mensaje) → executor con búsqueda en flota, no agente.
+  if (
+    looksLikeOperationalMaintenanceIntent(selectionText, threadCtx.classificationThread) &&
+    !hasPendingMantenimientoConfirmation(threadCtx.classificationThread)
+  ) {
+    const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "mantenimiento", ok: execOk };
+    }
+  }
+
   if (
     hasPendingMantenimientoConfirmation(threadCtx.classificationThread) &&
     looksLikeMaintenanceConfirmationRejection(selectionText)
@@ -370,9 +402,11 @@ export async function runTurnExecutorPhase(params: {
     (looksLikeExplicitOdometerUpdateRequest(selectionText) ||
       looksLikeHorometerOnlyIntent(selectionText)) &&
     !threadOdometerRegistrationCompleted(threadCtx.classificationThread) &&
-    !isOdometerFlowSuperseded(threadCtx.classificationThread) &&
-    !threadHasActiveOdometerFlow(threadCtx.classificationThread)
+    !isOdometerFlowSuperseded(threadCtx.classificationThread)
   ) {
+    if (pendingAction?.type === "mantenimiento") {
+      await clearPendingAction(prisma, rawPhone);
+    }
     const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
