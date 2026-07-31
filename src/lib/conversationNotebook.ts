@@ -10,7 +10,7 @@ import { looksLikeBriefConfirmation } from "@/lib/wara";
  * Rollback: WARA_CONVERSATION_NOTEBOOK=false (default) → no se lee ni escribe; el flujo
  * legacy (activeUnit + pendingAction + regex sobre hilo) sigue igual.
  *
- * Piloto inicial: mantenimiento-operativo.
+ * Trámites: mantenimiento, odómetro/horómetro, certificado, consulta GPS/unidades.
  */
 
 export function isConversationNotebookEnabled(): boolean {
@@ -19,13 +19,20 @@ export function isConversationNotebookEnabled(): boolean {
   return raw === "1" || raw === "true" || raw === "yes" || raw === "si";
 }
 
-export type NotebookTramiteType = "mantenimiento" | "odometro" | "certificado" | "consulta";
+export type NotebookTramiteType =
+  | "mantenimiento"
+  | "odometro"
+  | "horometro"
+  | "certificado"
+  | "consulta";
 
 export type NotebookAwaiting =
   | "confirm_registro"
   | "confirm_offer"
   | "plate"
   | "detalle"
+  | "odometro_value"
+  | "horometro_value"
   | null;
 
 export type SessionNotebook = {
@@ -43,6 +50,9 @@ export type SessionNotebook = {
     detalle?: string;
     priority?: string;
     plate?: string;
+    odometro?: number;
+    horometro?: number;
+    fecha?: string;
   };
   awaiting?: NotebookAwaiting;
   suspended?: {
@@ -177,6 +187,40 @@ export async function clearSessionNotebook(prisma: PrismaClient, phone: string):
 /** Reemplaza unidad en foco cuando hay patente explícita nueva. */
 export function shouldReplaceUnitFocus(explicitPlate: string | null | undefined): boolean {
   return !!explicitPlate?.trim();
+}
+
+/** Patente de contexto: cuaderno (más reciente) → unidad activa legacy. */
+export function resolveContextUnitPlate(params: {
+  sessionNotebook?: SessionNotebook | null;
+  activeUnitPlate?: string | null;
+}): string | null {
+  const fromNotebook = params.sessionNotebook?.unitFocus?.plate
+    ?.replace(/\s+/g, "")
+    .toUpperCase()
+    .trim();
+  if (fromNotebook) return fromNotebook;
+  const active = params.activeUnitPlate?.replace(/\s+/g, "").toUpperCase().trim();
+  return active || null;
+}
+
+/** Trámite de medidor en curso (odómetro vs horómetro). */
+export function resolveMeterNotebookType(params: {
+  horometerFlowActive: boolean;
+  horometerOnlyIntent?: boolean;
+}): "odometro" | "horometro" {
+  return params.horometerFlowActive || params.horometerOnlyIntent ? "horometro" : "odometro";
+}
+
+/** El cuaderno indica que el cliente está en flujo de horómetro (horas, no km). */
+export function notebookIndicatesHorometerFlow(
+  sessionNotebook: SessionNotebook | null | undefined,
+): boolean {
+  if (!sessionNotebook) return false;
+  return (
+    sessionNotebook.intent === "horometro" ||
+    sessionNotebook.tramite?.type === "horometro" ||
+    sessionNotebook.awaiting === "horometro_value"
+  );
 }
 
 /**

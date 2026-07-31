@@ -7,6 +7,7 @@ import {
   formatPlateWithSpaces,
   hasPendingOdometerConfirmation,
   hasPendingMaintenancePlateRequest,
+  hasPendingMantenimientoConfirmation,
   isBarePlatePrefixHint,
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
@@ -186,6 +187,43 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
       t,
     ) || /\bno\b.{0,20}\b(correcto|confirmo)\b/.test(t)
   );
+}
+
+/** Rechazo o cancelación durante confirmación pendiente de mantenimiento. */
+export function looksLikeMaintenanceConfirmationRejection(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  if (looksLikeBriefConfirmation(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/^(no|nop|nope)[\s!.?]*$/.test(t)) return true;
+  return (
+    /\b(no es|no esta|incorrecto|cancelar|cancelalo|olvidalo|no quiero|negativo|no esto|esto no)\b/.test(
+      t,
+    ) ||
+    /\bno\b.{0,24}\b(esto|correcto|confirmo|esa|es esa|quiero eso)\b/.test(t) ||
+    /\b(otra cosa|otro tramite|otra gesti[oó]n)\b/.test(t)
+  );
+}
+
+/**
+ * El cliente cambió de trámite o canceló mientras hay mantenimiento pendiente de CONFIRMO.
+ * Bug producción 2026-07-30: "No esto no" volvía a pedir CONFIRMO; horómetro caía en mantenimiento.
+ */
+export function clientSupersedesMaintenanceConfirmation(
+  rawText: string | undefined | null,
+  threadText: string,
+): boolean {
+  if (!hasPendingMantenimientoConfirmation(threadText)) return false;
+  const raw = String(rawText ?? "").trim();
+  if (!raw || looksLikeBriefConfirmation(raw)) return false;
+  if (looksLikeMaintenanceConfirmationRejection(raw)) return true;
+  if (looksLikeExplicitOdometerUpdateRequest(raw) || looksLikeHorometerOnlyIntent(raw)) return true;
+  if (looksLikeCertificateKeyword(raw)) return true;
+  if (looksLikeGpsOrUnitStatusQuestion(raw)) return true;
+  return false;
 }
 
 /**

@@ -31,6 +31,13 @@ import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 import { resolvePlateWithWaraFleet, looksLikeVagueUnitReference } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
+import {
+  clearSessionNotebook,
+  getSessionNotebook,
+  isConversationNotebookEnabled,
+  patchSessionNotebook,
+  resolveContextUnitPlate,
+} from "@/lib/conversationNotebook";
 import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
 
 const bodySchema = z
@@ -638,6 +645,7 @@ export async function POST(req: NextRequest) {
   }
 
   const threadText = await recentThreadText(rawPhone);
+  const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
   const certState = certificateFlowState(threadText);
 
   if (
@@ -676,13 +684,17 @@ export async function POST(req: NextRequest) {
   // la resolución de más abajo (que ya sabe usar esa unidad activa como respaldo) haga
   // su trabajo.
   const activeUnitRecord = await getActiveUnit(prisma, rawPhone);
+  const contextUnitPlate = resolveContextUnitPlate({
+    sessionNotebook,
+    activeUnitPlate: activeUnitRecord?.plate,
+  });
   const genericNewRequest =
     isGenericCertificateRequest(text) &&
     !normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) &&
     !detectPlate(text) &&
     !looksLikeCertificateUnitSelection(text, threadText) &&
     !looksLikeVagueUnitReference(text) &&
-    !activeUnitRecord?.plate;
+    !contextUnitPlate;
   let pendingConfirm =
     !genericNewRequest && certState === "awaiting_confirm";
   const awaitingUnit = certState === "awaiting_unit";
@@ -710,6 +722,9 @@ export async function POST(req: NextRequest) {
   }
 
   if (pendingConfirm && isCertificateCancellation(text)) {
+    if (isConversationNotebookEnabled()) {
+      await clearSessionNotebook(prisma, rawPhone);
+    }
     const message = "Entendido, no genero el certificado. ¿En qué más te puedo ayudar?";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
@@ -778,6 +793,14 @@ export async function POST(req: NextRequest) {
       source: "wara_certificados",
       stage: "ask_unit",
     });
+    if (isConversationNotebookEnabled()) {
+      await patchSessionNotebook(
+        prisma,
+        rawPhone,
+        { intent: "certificado", awaiting: "plate", tramite: { type: "certificado" } },
+        { syncActiveUnit: false },
+      );
+    }
     await setPendingAction(prisma, rawPhone, "certificados", {
       summary: message,
       payload: { stage: "awaiting_unit" },
@@ -902,8 +925,8 @@ export async function POST(req: NextRequest) {
       // real, producción 2026-07-23: "Ok quiero obtener el certificado también" (sin
       // "esa unidad" ni ninguna otra frase de referencia vaga reconocida) volvía a
       // pedir la patente segundos después de resolver la unidad en la consulta de GPS.
-      if (shouldUseActiveUnitFallback(text) && activeUnitRecord?.plate) {
-        plate = activeUnitRecord.plate;
+      if (shouldUseActiveUnitFallback(text) && contextUnitPlate) {
+        plate = contextUnitPlate;
       }
       if (!plate && fleetPlate.reason === "clarification") {
         const message = anchorToCertificateUnitFlow(fleetPlate.message);
@@ -932,7 +955,7 @@ export async function POST(req: NextRequest) {
       normalizePlate(parsed.data.patente ?? parsed.data.plate ?? undefined) ??
       detectPlate(text) ??
       extractPlateFromCertificateSummary(threadText) ??
-      activeUnitRecord?.plate ??
+      contextUnitPlate ??
       (await findLatestGeneratedCertificatePlate(rawPhone)) ??
       "";
   }
@@ -963,6 +986,18 @@ export async function POST(req: NextRequest) {
   }
 
   await setActiveUnit(prisma, rawPhone, plate, { source: "certificado" });
+  if (isConversationNotebookEnabled()) {
+    await patchSessionNotebook(
+      prisma,
+      rawPhone,
+      {
+        intent: "certificado",
+        unitFocus: { plate, updatedAt: new Date().toISOString() },
+        tramite: { type: "certificado", plate },
+      },
+      { syncActiveUnit: true, activeUnitSource: "certificado" },
+    );
+  }
 
   const company = resolution.selectedCompanyName || resolution.customer.companyName || "tu empresa";
   const plateDisplay = formatPlateWithSpaces(plate) ?? plate;
@@ -1072,6 +1107,19 @@ export async function POST(req: NextRequest) {
       summary: message,
       payload: { plate, companyName: company },
     });
+    if (isConversationNotebookEnabled()) {
+      await patchSessionNotebook(
+        prisma,
+        rawPhone,
+        {
+          intent: "certificado",
+          awaiting: "confirm_registro",
+          unitFocus: { plate, updatedAt: new Date().toISOString() },
+          tramite: { type: "certificado", plate },
+        },
+        { syncActiveUnit: true, activeUnitSource: "certificado" },
+      );
+    }
     return NextResponse.json(
       {
         ok: true,
@@ -1233,6 +1281,10 @@ export async function POST(req: NextRequest) {
   const responseMessage = certUrl
     ? `Perfecto, generé el certificado de cobertura para ${company}, patente ${plateDisplay}.\n${certUrl}`
     : `Perfecto, generé el certificado de cobertura para ${company}, patente ${plateDisplay}. ${result.message ?? "La solicitud fue procesada por Wara."}`;
+
+  if (isConversationNotebookEnabled()) {
+    await clearSessionNotebook(prisma, rawPhone);
+  }
 
   await appendOutboundBotMessage(rawPhone, responseMessage, {
     source: "wara_certificados",

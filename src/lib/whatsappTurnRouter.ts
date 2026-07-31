@@ -374,6 +374,21 @@ const TURN_RULES: TurnRule[] = [
     decide: ({ text }) => (looksLikeOdometerProblemReport(text) ? "odoo_ticket" : null),
   },
   {
+    id: "explicit_odometer_horometer_start",
+    reason: "Arranque explícito odómetro/horómetro — prioridad sobre mantenimiento e IA.",
+    decide: ({ text, threadText }) => {
+      if (looksLikeNonOdometerOperationalIntent(text)) return null;
+      if (
+        looksLikeExplicitOdometerUpdateRequest(text) ||
+        looksLikeHorometerOnlyIntent(text)
+      ) {
+        if (looksLikeOperationalMaintenanceIntent(text, threadText)) return null;
+        return "odometro";
+      }
+      return null;
+    },
+  },
+  {
     id: "post_advisor_case_supplement",
     reason: "Detalle adicional sobre caso ya derivado a asesor — no reabrir GPS/unidades.",
     decide: ({ text, threadText }) =>
@@ -511,6 +526,9 @@ const TURN_RULES: TurnRule[] = [
         looksLikeSubstantiveCustomerMessage(text) &&
         !looksLikeBriefConfirmation(text);
       if (!guarded) return null;
+      if (looksLikeExplicitOdometerUpdateRequest(text) || looksLikeHorometerOnlyIntent(text)) {
+        return "odometro";
+      }
       if (looksLikeGpsOrUnitStatusQuestion(text) || detectIncidentType(text) !== "OTHER") {
         return "unidades";
       }
@@ -600,6 +618,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "explicit_reclamo_or_ticket_request",
   "technical_support_request",
   "odometer_problem_report",
+  "explicit_odometer_horometer_start",
   "structured_odometer_update",
   "post_advisor_case_supplement",
   "gps_or_live_unit_consult",

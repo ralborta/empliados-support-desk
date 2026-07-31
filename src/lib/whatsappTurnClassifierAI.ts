@@ -22,7 +22,12 @@ import {
   looksLikeHumanAdvisorRequest,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeTechnicalSupportRequest,
+  looksLikeOperationalMaintenanceIntent,
 } from "@/lib/waraApi";
+import {
+  looksLikeExplicitOdometerUpdateRequest,
+  looksLikeHorometerOnlyIntent,
+} from "@/lib/wara";
 
 const TURN_AI_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_CONFIDENCE = 0.78;
@@ -178,6 +183,17 @@ export async function resolveTurnExecutor(
     looksLikeTechnicalSupportRequest(text);
   if (inOdometerFlow && !hardOdooIntent && !certificadoPivot) {
     return { executor: "odometro", source: "safety_guard", ruleId: "active_odometer_flow" };
+  }
+
+  if (
+    (looksLikeExplicitOdometerUpdateRequest(text) || looksLikeHorometerOnlyIntent(text)) &&
+    !looksLikeOperationalMaintenanceIntent(text, threadText)
+  ) {
+    return {
+      executor: "odometro",
+      source: "safety_guard",
+      ruleId: "explicit_odometer_horometer_start",
+    };
   }
 
   if (isTurnAiClassifyEnabled()) {

@@ -102,6 +102,8 @@ const SUITES = [
   "verify-knowledge-base.mjs",
   "verify-certificate-prefix-clarification-continuity.mjs",
   "verify-conversation-notebook-maintenance.mjs",
+  "verify-conversation-notebook-tramites.mjs",
+  "verify-maintenance-confirmation-rejection.mjs",
   "verify-maintenance-inherits-odometer-plate.mjs",
   "verify-maintenance-vague-unit-reference.mjs",
   "verify-maintenance-typo-keyword.mjs",

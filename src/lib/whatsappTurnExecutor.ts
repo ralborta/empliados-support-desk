@@ -25,6 +25,7 @@ import {
   looksLikeTicketCreationInfoQuestion,
   looksLikeUnitConsultFollowUp,
   looksLikeSubstantiveCustomerMessage,
+  looksLikeMaintenanceConfirmationRejection,
   resetCustomerCompanyMenu,
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
@@ -42,6 +43,8 @@ import {
   looksLikeCertificateKeyword,
   certificateFlowState,
   looksLikeExplicitOdometerUpdateRequest,
+  looksLikeHorometerOnlyIntent,
+  hasPendingMantenimientoConfirmation,
   isOdometerFlowSuperseded,
   looksLikeOdometerInfoRequest,
   looksLikeStructuredOdometerUpdateRequest,
@@ -60,7 +63,7 @@ import {
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
-import { getPendingAction } from "@/lib/pendingAction";
+import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { prisma } from "@/lib/db";
@@ -140,7 +143,18 @@ function inferRecoveryExecutor(
   selectionText: string,
   failedExecutor: TurnExecutorId,
   threadText: string,
+  execResult?: JsonRecord,
 ): TurnExecutorId | null {
+  const delegated = String(execResult?.delegatedTo_s ?? execResult?.delegatedTo ?? "").trim();
+  if (delegated === "odometro") return "odometro";
+  if (delegated === "certificados") return "certificados";
+  if (
+    failedExecutor === "mantenimiento" &&
+    (looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+      looksLikeHorometerOnlyIntent(selectionText))
+  ) {
+    return "odometro";
+  }
   if (looksLikeCertificateRequest(selectionText)) return "certificados";
   if (
     certificateFlowState(threadText) === "awaiting_unit" &&
@@ -257,6 +271,16 @@ export async function runTurnExecutorPhase(params: {
 
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
   const pendingAction = await getPendingAction(prisma, rawPhone);
+
+  if (
+    hasPendingMantenimientoConfirmation(threadCtx.classificationThread) &&
+    looksLikeMaintenanceConfirmationRejection(selectionText)
+  ) {
+    await clearPendingAction(prisma, rawPhone);
+    const message =
+      "Entendido, no registro ese mantenimiento. ¿En qué más te puedo ayudar? Podés pedirme odómetro, horómetro, certificado o consultar el estado de una unidad.";
+    return { message, executor: "info_guides", ok: true };
+  }
 
   // Confirmación de trámite: el backend registra con los datos guardados — no dejar que
   // el agente reinterprete "Confirmo" / "esa está bien" ni dependa del marcador exacto
@@ -469,8 +493,12 @@ export async function runTurnExecutorPhase(params: {
   ) {
     executor = "certificados";
   } else if (looksLikeBriefConfirmation(selectionText)) {
+    const pendingConfirm = resolvePendingConfirmationExecutor(
+      threadCtx.classificationThread,
+      selectionText,
+    );
     const resolved = await resolveTurnExecutor(selectionText, threadCtx.classificationThread);
-    executor = pendingAction?.type ?? resolved.executor;
+    executor = pendingConfirm ?? pendingAction?.type ?? resolved.executor;
   } else {
     const resolved = await resolveTurnExecutor(selectionText, threadCtx.classificationThread);
     executor = resolved.executor;
@@ -483,6 +511,7 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       executor,
       threadCtx.classificationThread,
+      execResult,
     );
     if (recovery && recovery !== executor) {
       const retryResult = await invokeExecutor(recovery, rawPhone, selectionText, apiKey);

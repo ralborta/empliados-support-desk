@@ -17,6 +17,8 @@ import {
   isPlausibleVehiclePlate,
   looksLikeBriefConfirmation,
   normalizePlate,
+  looksLikeHorometerOnlyIntent,
+  looksLikeExplicitOdometerUpdateRequest,
 } from "@/lib/wara";
 import { resolvePlateWithWaraFleet, isMaintenancePlateSelectionMessage } from "@/lib/waraUnitIntent";
 import { setActiveUnit, getActiveUnit, resolvePlateFromConversationContext } from "@/lib/activeUnit";
@@ -45,6 +47,7 @@ import {
   resolveCustomerByWaraPhone,
   resolveWaraSessionByPhone,
   shouldSkipStrayMaintenanceRequest,
+  looksLikeMaintenanceConfirmationRejection,
   validatePlateInFleetForPhone,
 } from "@/lib/waraApi";
 import { recentLastInboundTextForPhone } from "@/lib/conversationThread";
@@ -493,6 +496,51 @@ export async function POST(req: NextRequest) {
   });
   if (!confirmed && pendingMaintConfirm && looksLikeBriefConfirmation(inboundForConfirm)) {
     confirmed = true;
+  }
+
+  if (pendingMaintConfirm && looksLikeMaintenanceConfirmationRejection(inboundForConfirm || rawInbound)) {
+    await clearPendingAction(prisma, rawPhone);
+    if (isConversationNotebookEnabled()) {
+      await clearSessionNotebook(prisma, rawPhone);
+    }
+    const message =
+      "Entendido, no registro ese mantenimiento. ¿En qué más te puedo ayudar? Podés pedirme odómetro, horómetro, certificado o consultar el estado de una unidad.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "confirmation_rejected",
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        cancelled: true,
+        cancelled_s: "true",
+        topicChange_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  const inboundEarly = rawInbound || lastInbound || confirmation?.trim() || "";
+  if (
+    (looksLikeExplicitOdometerUpdateRequest(inboundEarly) || looksLikeHorometerOnlyIntent(inboundEarly)) &&
+    !looksLikeOperationalMaintenanceIntent(inboundEarly, threadText)
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message: "",
+        skipResponse_s: "true",
+        flowComplete_s: "true",
+        delegatedTo: "odometro",
+        delegatedTo_s: "odometro",
+      },
+      { status: BB_STATUS },
+    );
   }
 
   let text: string;

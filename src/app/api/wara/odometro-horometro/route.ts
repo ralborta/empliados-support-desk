@@ -60,6 +60,15 @@ import { humanizeBotReply } from "@/lib/botReplyHumanizer";
 import { composeOdometerDialogueReply } from "@/lib/odometerDialogueAI";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
+  clearSessionNotebook,
+  getSessionNotebook,
+  isConversationNotebookEnabled,
+  notebookIndicatesHorometerFlow,
+  patchSessionNotebook,
+  resolveContextUnitPlate,
+  resolveMeterNotebookType,
+} from "@/lib/conversationNotebook";
+import {
   looksLikeConversationAcknowledgement,
   looksLikeNonOdometerOperationalIntent,
   looksLikeOpcionesInfoRequest,
@@ -624,9 +633,13 @@ export async function POST(req: NextRequest) {
     threadAwaitingHorometerPlate(threadText) || threadAwaitingHorometerKmValue(threadText);
   const odometerAwaitingInThread =
     threadAwaitingOdometerPlate(threadText) || threadAwaitingOdometerKmValue(threadText);
-  const horometerFlowActive = rawExplicitlyMentionsOdometroOnly
+  const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
+  const notebookHorometerFlow =
+    isConversationNotebookEnabled() && notebookIndicatesHorometerFlow(sessionNotebook);
+  let horometerFlowActive = rawExplicitlyMentionsOdometroOnly
     ? false
     : horometerOnlyIntent ||
+      notebookHorometerFlow ||
       (horometerAwaitingInThread &&
         !(odometerAwaitingInThread && lastAwaitingFieldPromptInTail(threadText) === "odometro"));
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
@@ -645,6 +658,10 @@ export async function POST(req: NextRequest) {
     (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
   const activeUnitRecordEarly = skipThreadPlate ? null : await getActiveUnit(prisma, rawPhone);
+  const contextUnitPlate = resolveContextUnitPlate({
+    sessionNotebook,
+    activeUnitPlate: activeUnitRecordEarly?.plate,
+  });
 
   if (
     !odometerFlowStart &&
@@ -688,7 +705,7 @@ export async function POST(req: NextRequest) {
     historial: historialForExtract,
     horometerFlowActive,
     treatAsBlankFlowStart: treatAsBlankFlowStart || supersedesPendingConfirm,
-    activeUnitPlate: activeUnitRecordEarly?.plate,
+    activeUnitPlate: contextUnitPlate,
     timezone: "America/Argentina/Buenos_Aires",
     regexMessage: fromText,
     regexThread: historialForExtract ? threadParsed : {},
@@ -816,7 +833,7 @@ export async function POST(req: NextRequest) {
       resolveOdometerContextPlate({
         threadText: flowThreadText,
         lastThreadPlate,
-        activeUnitPlate: activeUnitRecord?.plate,
+        activeUnitPlate: contextUnitPlate,
         explicitVagueUnitReference,
         hasPendingOdometerConfirm:
           hasPendingConfirmInThread && !correctingUnitDuringPendingConfirm,
@@ -833,7 +850,7 @@ export async function POST(req: NextRequest) {
       resolveOdometerContextPlate({
         threadText: flowThreadText,
         lastThreadPlate,
-        activeUnitPlate: activeUnitRecord?.plate,
+        activeUnitPlate: contextUnitPlate,
         explicitVagueUnitReference: true,
         hasPendingOdometerConfirm:
           hasPendingConfirmInThread && !correctingUnitDuringPendingConfirm,
@@ -843,13 +860,13 @@ export async function POST(req: NextRequest) {
     !patente &&
     freshOdometerIntentWithoutUnit &&
     shouldUseActiveUnitFallback(rawText) &&
-    activeUnitRecord?.plate
+    contextUnitPlate
   ) {
     // Bug real, producción 2026-07-30: "Podemos cambiar el odómetro?" tras certificado o
     // consulta GPS tenía activeUnit (AD 626 UG) pero freshOdometerIntentWithoutUnit
     // bloqueaba resolveOdometerContextPlate y odometerFlowStart bloqueaba el fallback
     // de activeUnit — pedía patente de cero pese a la unidad recién usada.
-    patente = normalizePlate(activeUnitRecord.plate);
+    patente = normalizePlate(contextUnitPlate);
   }
 
   if (!patente && !odometerFlowStart && !isFleetUnitSelection && !clockTimeOnlyReading) {
@@ -866,8 +883,8 @@ export async function POST(req: NextRequest) {
         { ok: false, error: "Varias unidades", message: fleetPlate.message },
         { status: BB_STATUS }
       );
-    } else if (shouldUseActiveUnitFallback(rawText) && activeUnitRecord?.plate) {
-      patente = activeUnitRecord.plate;
+    } else if (shouldUseActiveUnitFallback(rawText) && contextUnitPlate) {
+      patente = contextUnitPlate;
     }
   } else if (skipThreadPlate && !patente && activeOdoFlow && !isFleetUnitSelection && !clockTimeOnlyReading) {
     const fleetPlate = await resolvePlateWithWaraFleet(prisma, rawPhone, rawText, flowThreadText);
@@ -1030,9 +1047,9 @@ export async function POST(req: NextRequest) {
   if (!patente) {
     if (
       shouldUseActiveUnitFallback(rawText) &&
-      activeUnitRecord?.plate
+      contextUnitPlate
     ) {
-      patente = normalizePlate(activeUnitRecord.plate);
+      patente = normalizePlate(contextUnitPlate);
     } else if (treatAsBlankFlowStart) {
       const fallbackTemplate = horometerOnlyIntent
         ? "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)"
@@ -1083,8 +1100,8 @@ export async function POST(req: NextRequest) {
         },
         { status: BB_STATUS },
       );
-    } else if (shouldUseActiveUnitFallback(hintText) && activeUnitRecord?.plate) {
-      patente = activeUnitRecord.plate;
+    } else if (shouldUseActiveUnitFallback(hintText) && contextUnitPlate) {
+      patente = contextUnitPlate;
     } else {
       const message =
         `No identifiqué la unidad en tu flota. Decime la patente (con guiones si querés), una marca/nombre (ej. Nissan) o escribí "listado de mis unidades".`;
@@ -1106,14 +1123,28 @@ export async function POST(req: NextRequest) {
     // OTRO trámite (ej. una consulta de GPS de varios minutos antes) — y ese valor
     // desactualizado terminaba filtrándose en un resumen posterior. Se actualiza acá
     // también, apenas se confirma la patente, no solo al final.
+    const wantsHorometro = horometerFlowActive;
+    const meterType = resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent });
     if (patente) {
       await setActiveUnit(prisma, rawPhone, patente, { source: "odometro" });
+      if (isConversationNotebookEnabled()) {
+        await patchSessionNotebook(
+          prisma,
+          rawPhone,
+          {
+            intent: meterType,
+            unitFocus: { plate: patente, updatedAt: new Date().toISOString() },
+            tramite: { type: meterType, plate: patente },
+            awaiting: wantsHorometro ? "horometro_value" : "odometro_value",
+          },
+          { syncActiveUnit: true, activeUnitSource: "odometro" },
+        );
+      }
     }
     // horometerFlowActive ya contempla horometerOnlyIntent, el estado del hilo (acotado
     // y con prioridad a una mención explícita del campo en el mensaje actual) — no se
     // repite acá el chequeo suelto sobre flowThreadText (esa era la fuente del bug real
     // de producción 2026-07-29 documentado más arriba).
-    const wantsHorometro = horometerFlowActive;
     const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
     const earlyFechaNaive = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
     const earlyFechaDisplay = earlyFechaNaive
@@ -1189,6 +1220,24 @@ export async function POST(req: NextRequest) {
   }
 
   await setActiveUnit(prisma, rawPhone, patente, { source: "odometro" });
+  if (isConversationNotebookEnabled()) {
+    const meterType = resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent });
+    await patchSessionNotebook(
+      prisma,
+      rawPhone,
+      {
+        intent: meterType,
+        unitFocus: { plate: patente, updatedAt: new Date().toISOString() },
+        tramite: {
+          type: meterType,
+          plate: patente,
+          ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
+          ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
+        },
+      },
+      { syncActiveUnit: true, activeUnitSource: "odometro" },
+    );
+  }
 
   const customerTz =
     session.lookup?.customerTimezone || session.lookup?.userTimezone || "America/Argentina/Buenos_Aires";
@@ -1317,6 +1366,9 @@ export async function POST(req: NextRequest) {
   if (!confirmed) {
     if (effectivePendingOdoConfirm && looksLikeOdometerConfirmationRejection(rawText)) {
       await clearPendingAction(prisma, rawPhone);
+      if (isConversationNotebookEnabled()) {
+        await clearSessionNotebook(prisma, rawPhone);
+      }
       const message =
         "Entendido, no registro ese cambio. ¿Qué necesitás? Podés pedirme otro trámite (odómetro, horómetro, certificado, estado de unidad, etc.).";
       await appendOutboundBotMessage(rawPhone, message, {
@@ -1405,6 +1457,27 @@ export async function POST(req: NextRequest) {
       summary: confirmMessage,
       payload: { patente, odometro, horometro, fecha: fechaExplicita ?? undefined },
     });
+    if (isConversationNotebookEnabled() && patente) {
+      const meterType = resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent });
+      const plateNorm = normalizePlate(patente) ?? patente.replace(/\s+/g, "").toUpperCase();
+      await patchSessionNotebook(
+        prisma,
+        rawPhone,
+        {
+          intent: meterType,
+          awaiting: "confirm_registro",
+          unitFocus: { plate: plateNorm, updatedAt: new Date().toISOString() },
+          tramite: {
+            type: meterType,
+            plate: plateNorm,
+            ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
+            ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
+            ...(fechaExplicita ? { fecha: fechaExplicita } : {}),
+          },
+        },
+        { syncActiveUnit: true, activeUnitSource: "odometro" },
+      );
+    }
     // Nota: a diferencia de otros returns de este archivo, este bloque NO llamaba a
     // appendOutboundBotMessage antes de este cambio (BuilderBot envía `message` directo al
     // cliente por su cuenta en este paso) — se mantiene igual, solo se compone el texto.
@@ -1444,6 +1517,9 @@ export async function POST(req: NextRequest) {
   }
 
   await clearPendingAction(prisma, rawPhone);
+  if (isConversationNotebookEnabled()) {
+    await clearSessionNotebook(prisma, rawPhone);
+  }
   if (!fecha) {
     return NextResponse.json(
       { ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." },

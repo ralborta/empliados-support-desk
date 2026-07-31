@@ -62,6 +62,13 @@ import {
   resolveUnitQuery,
 } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
+import {
+  clearSessionNotebook,
+  getSessionNotebook,
+  isConversationNotebookEnabled,
+  patchSessionNotebook,
+  resolveContextUnitPlate,
+} from "@/lib/conversationNotebook";
 
 const bodySchema = z
   .object({
@@ -858,8 +865,12 @@ export async function POST(req: NextRequest) {
   // exitoso del bot sobre la unidad que se está rechazando) volvían a devolver la MISMA
   // unidad recién rechazada — loop infinito ante cualquier mensaje sin marca nueva.
   const explicitRejection = looksLikeUnitRejection(rawText);
+  const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
   if (explicitRejection) {
     await clearActiveUnit(prisma, rawPhone);
+    if (isConversationNotebookEnabled()) {
+      await clearSessionNotebook(prisma, rawPhone);
+    }
     const message =
       "Entendido, no era esa. ¿Cuál es la patente o unidad correcta? Pasame la matrícula completa (ej. AE 483 VE) o la marca/nombre (ej. Nissan).";
     await appendOutboundBotMessage(rawPhone, message, {
@@ -902,12 +913,16 @@ export async function POST(req: NextRequest) {
     !looksLikeAnotherUnitRequest(rawText) && !explicitRejection && !genericUnitConsultWithoutPlate
       ? await getActiveUnit(prisma, rawPhone)
       : null;
+  const contextUnitPlate = resolveContextUnitPlate({
+    sessionNotebook,
+    activeUnitPlate: activeUnitRecord?.plate,
+  });
   const threadPlateEarly =
     explicitRejection || genericUnitConsultWithoutPlate
       ? null
       : extractLastPlateFromThreadCompat(scopedThreadEarly) ??
         detectPlate(scopedThreadEarly) ??
-        activeUnitRecord?.plate ??
+        contextUnitPlate ??
         null;
 
   if (
@@ -1210,6 +1225,22 @@ export async function POST(req: NextRequest) {
         label: formatUnitLabel(unit),
         source: "estado",
       });
+      if (isConversationNotebookEnabled()) {
+        await patchSessionNotebook(
+          prisma,
+          rawPhone,
+          {
+            intent: "consulta",
+            unitFocus: {
+              plate: resolvedPlateForActiveUnit,
+              label: formatUnitLabel(unit),
+              updatedAt: new Date().toISOString(),
+            },
+            tramite: { type: "consulta", plate: resolvedPlateForActiveUnit },
+          },
+          { syncActiveUnit: true, activeUnitSource: "estado" },
+        );
+      }
     }
     const conversationalReply = resolveConversationalUnitTurn({
       rawText,
