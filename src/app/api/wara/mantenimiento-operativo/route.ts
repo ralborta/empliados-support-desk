@@ -29,7 +29,7 @@ import {
   patchSessionNotebook,
   resolveMaintenanceDetailText,
 } from "@/lib/conversationNotebook";
-import { clearPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceCapabilityQuestion,
@@ -474,12 +474,14 @@ export async function POST(req: NextRequest) {
   const rawInbound = parsed.data.rawText?.trim() ?? "";
   const threadText = await recentThreadText(rawPhone);
   const lastInbound = await recentLastInboundTextForPhone(rawPhone);
+  const dbPendingMaint = await getPendingAction(prisma, rawPhone);
+  const hasLiveMaintPendingAction = dbPendingMaint?.type === "mantenimiento";
   const pendingMaintConfirm =
     hasPendingMantenimientoConfirmation(threadText) ||
-    (/voy a registrar:/i.test(threadText) &&
-      /tipo:/i.test(threadText) &&
-      /responde\s+confirmo/i.test(threadText) &&
-      !/mantenimiento registrado|listo,\s*registr/i.test(threadText.slice(-800)));
+    (hasLiveMaintPendingAction &&
+      !!dbPendingMaint.payload &&
+      /voy a registrar:/i.test(String(dbPendingMaint.summary ?? threadText)) &&
+      /tipo:/i.test(String(dbPendingMaint.summary ?? threadText)));
   const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
   const summary = parseMantenimientoSummary(
     /voy a registrar:/i.test(threadText) ? threadText : "",
@@ -626,19 +628,31 @@ export async function POST(req: NextRequest) {
   }
 
   const threadService = inferServiceFromThread(threadText);
+  const maintPayload =
+    hasLiveMaintPendingAction && dbPendingMaint.payload
+      ? (dbPendingMaint.payload as {
+          plate?: string;
+          service?: string;
+          priority?: Priority;
+        })
+      : undefined;
   const service =
     pendingMaintConfirm && confirmed && summary.servicio
       ? summary.servicio
-      : summary.servicio ||
-        threadService ||
-        inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text} ${threadText}`);
+      : pendingMaintConfirm && confirmed && maintPayload?.service
+        ? maintPayload.service
+        : summary.servicio ||
+          threadService ||
+          inferService(`${parsed.data.servicio ?? parsed.data.service ?? ""} ${text} ${threadText}`);
   const priority =
     pendingMaintConfirm && confirmed && summary.prioridad
       ? summary.prioridad
-      : parsed.data.prioridad ??
-        parsed.data.priority ??
-        summary.prioridad ??
-        inferPriority(pendingMaintConfirm && confirmed ? (summary.detalle ?? text) : text);
+      : pendingMaintConfirm && confirmed && maintPayload?.priority
+        ? maintPayload.priority
+        : parsed.data.prioridad ??
+          parsed.data.priority ??
+          summary.prioridad ??
+          inferPriority(pendingMaintConfirm && confirmed ? (summary.detalle ?? text) : text);
 
   if (isMaintenanceHowToRequest(text)) {
     const message = maintenanceHowToMessage(text);
@@ -739,6 +753,7 @@ export async function POST(req: NextRequest) {
       parsed.data.plate ??
       (confirmed && summary.patente ? summary.patente : undefined) ??
       (pendingMaintConfirm && confirmed && summary.patente ? summary.patente : undefined) ??
+      (pendingMaintConfirm && confirmed && maintPayload?.plate ? maintPayload.plate : undefined) ??
       (plateFromMessage && isPlausibleVehiclePlate(plateFromMessage) ? plateFromMessage : undefined) ??
       contextPlate ??
       undefined,

@@ -1718,14 +1718,21 @@ function normThreadText(text: string): string {
 
 export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
   const tail = normThreadText(threadText.slice(-4000));
-  if (/deje registrada|registro registrado|mantenimiento registrado|listo,\s*registr/.test(tail.slice(-800))) {
-    return false;
-  }
   const summaryStart = tail.lastIndexOf("voy a registrar:");
   if (summaryStart === -1) return false;
   const block = tail.slice(summaryStart, summaryStart + 1200);
   if (/odometro|horometro|kilometraje/.test(block)) return false;
-  return /tipo:/.test(block) && /responde\s+confirmo/.test(block);
+  if (!/tipo:/.test(block) || !/responde\s+confirmo/.test(block)) return false;
+  // Bug real, producción 2026-07-30: tras completar horómetro ("Listo, registré el cambio…")
+  // y arrancar mantenimiento en la misma sesión, el chequeo global en los últimos 800
+  // caracteres del hilo veía el cierre del horómetro y devolvía false — "Confirmó" volvía
+  // a mostrar el resumen en loop. Solo anular si el mantenimiento quedó registrado
+  // DESPUÉS de este resumen pendiente.
+  const afterSummary = tail.slice(summaryStart + 30);
+  if (/deje registrada|mantenimiento registrado|registro registrado/.test(afterSummary)) {
+    return false;
+  }
+  return true;
 }
 
 /**

@@ -105,6 +105,7 @@ const SUITES = [
   "verify-conversation-notebook-tramites.mjs",
   "verify-maintenance-confirmation-rejection.mjs",
   "verify-maintenance-inherits-odometer-plate.mjs",
+  "verify-maintenance-after-horometer.mjs",
   "verify-maintenance-vague-unit-reference.mjs",
   "verify-maintenance-typo-keyword.mjs",
   "verify-maintenance-ost-prefix.mjs",
