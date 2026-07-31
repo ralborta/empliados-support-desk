@@ -1085,8 +1085,23 @@ export async function POST(req: NextRequest) {
     );
   }
   await clearPendingAction(prisma, rawPhone);
+  if (plate) {
+    await setActiveUnit(prisma, rawPhone, plate, { source: "mantenimiento" });
+  }
   if (isConversationNotebookEnabled()) {
-    await clearSessionNotebook(prisma, rawPhone);
+    await patchSessionNotebook(
+      prisma,
+      rawPhone,
+      {
+        intent: null,
+        awaiting: null,
+        unitFocus: plate
+          ? { plate, updatedAt: new Date().toISOString() }
+          : undefined,
+        tramite: undefined,
+      },
+      { syncActiveUnit: true, activeUnitSource: "mantenimiento" },
+    );
   }
   const title = `${service}${plate ? ` · ${plate}` : ""}`;
 

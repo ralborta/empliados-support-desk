@@ -3,7 +3,12 @@ import type { PrismaClient } from "@prisma/client";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { looksLikePlateCorrectionRequest, looksLikeGenericUnitConsultWithoutPlate } from "@/lib/waraApi";
 import { looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
-import { looksLikeUnitRejection, extractPlateFromOdometerSummary } from "@/lib/wara";
+import {
+  looksLikeUnitRejection,
+  extractPlateFromOdometerSummary,
+  extractPlateFromMaintenanceSuccess,
+  extractLastPlateFromThread,
+} from "@/lib/wara";
 
 /**
  * Estado explícito de "unidad activa" — de qué unidad de la flota está hablando la
@@ -86,7 +91,12 @@ export function resolvePlateFromConversationContext(params: {
   if (!shouldUseActiveUnitFallback(params.rawText)) return null;
   const active = params.activeUnitPlate?.replace(/\s+/g, "").toUpperCase().trim();
   if (active) return active;
-  return extractPlateFromOdometerSummary(params.threadText) ?? null;
+  return (
+    extractPlateFromMaintenanceSuccess(params.threadText) ??
+    extractPlateFromOdometerSummary(params.threadText) ??
+    extractLastPlateFromThread(params.threadText) ??
+    null
+  );
 }
 
 export async function setActiveUnit(

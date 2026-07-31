@@ -1392,6 +1392,19 @@ export function extractLastPlateFromThread(text: string): string | null {
  * Patente del resumen confirmado de odómetro/horómetro ("Patente: AD 427 MC").
  * Toma la última ocurrencia del hilo (resumen más reciente).
  */
+/** Patente del cierre exitoso de mantenimiento ("deje registrada... patente AG562SP"). */
+export function extractPlateFromMaintenanceSuccess(text: string): string | undefined {
+  const tail = (text || "").slice(-4000);
+  const matches = [
+    ...tail.matchAll(/deje registrada[^.\n]{0,160}patente\s+([A-Za-z0-9 ]{5,12})/gi),
+  ];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const plate = normalizePlate(matches[i][1]);
+    if (plate && isPlausibleVehiclePlate(plate)) return plate;
+  }
+  return undefined;
+}
+
 export function extractPlateFromOdometerSummary(text: string): string | undefined {
   const matches = [
     ...(text || "").matchAll(
@@ -1483,16 +1496,17 @@ export function resolveOdometerContextPlate(params: {
   hasPendingOdometerConfirm: boolean;
 }): string {
   const summary = extractPlateFromOdometerSummary(params.threadText);
+  const maintSuccess = extractPlateFromMaintenanceSuccess(params.threadText);
   const last = params.lastThreadPlate ?? undefined;
   const active = params.activeUnitPlate?.trim() || undefined;
 
   if (params.hasPendingOdometerConfirm) {
-    return summary ?? last ?? active ?? "";
+    return summary ?? maintSuccess ?? last ?? active ?? "";
   }
   if (params.explicitVagueUnitReference) {
-    return last ?? active ?? summary ?? "";
+    return last ?? active ?? summary ?? maintSuccess ?? "";
   }
-  return summary ?? last ?? active ?? "";
+  return summary ?? maintSuccess ?? last ?? active ?? "";
 }
 
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */

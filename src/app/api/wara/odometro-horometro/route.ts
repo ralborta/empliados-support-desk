@@ -705,7 +705,16 @@ export async function POST(req: NextRequest) {
     explicitRejection ||
     (activeOdoFlow && (plateCorrection || unitHintInMessage));
 
-  const activeUnitRecordEarly = skipThreadPlate ? null : await getActiveUnit(prisma, rawPhone);
+  // Arranque en blanco vacía inferencia de patente DESDE el hilo, pero no la unidad activa
+  // en DB (p. ej. tras mantenimiento recién registrado para AG562SP).
+  const skipActiveUnitFallback =
+    correctingUnitDuringPendingConfirm ||
+    explicitRejection ||
+    (activeOdoFlow && (plateCorrection || unitHintInMessage));
+
+  const activeUnitRecordEarly = skipActiveUnitFallback
+    ? null
+    : await getActiveUnit(prisma, rawPhone);
   const contextUnitPlate = resolveContextUnitPlate({
     sessionNotebook,
     activeUnitPlate: activeUnitRecordEarly?.plate,

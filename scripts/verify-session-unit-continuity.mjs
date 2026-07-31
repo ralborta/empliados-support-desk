@@ -25,6 +25,14 @@ const { classifyTurnExecutor } = await import("../src/lib/whatsappTurnRouter.ts"
 const { shouldRouteTurnToOdometerExecutor } = await import("../src/lib/waraUnitIntent.ts");
 const { looksLikeOperationalMaintenanceIntent } = await import("../src/lib/waraApi.ts");
 const { isMaintenancePlateSelectionMessage } = await import("../src/lib/waraUnitIntent.ts");
+const {
+  extractPlateFromMaintenanceSuccess,
+  resolveOdometerContextPlate,
+} = await import("../src/lib/wara.ts");
+const {
+  resolvePlateFromConversationContext,
+  shouldUseActiveUnitFallback,
+} = await import("../src/lib/activeUnit.ts");
 
 console.log("▶ Mantenimiento con marca en el mismo mensaje");
 const maintNissan = "Quiero agendar un mantenimiento para la Nissan";
@@ -74,6 +82,67 @@ check(
     threadText: threadGps,
     pendingActionType: null,
   }),
+);
+
+console.log("\n▶ Mantenimiento registrado → odómetro recuerda patente");
+const threadAfterMaint = [
+  "Perfecto, deje registrada tu solicitud de correctivo para WARA, patente AG562SP.",
+].join("\n");
+check(
+  "extrae patente del cierre de mantenimiento",
+  extractPlateFromMaintenanceSuccess(threadAfterMaint) === "AG562SP",
+);
+check(
+  "resolveOdometerContextPlate usa cierre de mantenimiento",
+  resolveOdometerContextPlate({
+    threadText: threadAfterMaint,
+    lastThreadPlate: null,
+    activeUnitPlate: null,
+    explicitVagueUnitReference: false,
+    hasPendingOdometerConfirm: false,
+  }) === "AG562SP",
+);
+check(
+  "pivot a odometro reusa activeUnit",
+  resolvePlateFromConversationContext({
+    rawText: "ahora podemos cambiar el odometro?",
+    threadText: threadAfterMaint,
+    activeUnitPlate: "AG562SP",
+  }) === "AG562SP",
+);
+check(
+  "arranque odometro califica fallback activeUnit",
+  shouldUseActiveUnitFallback("ahora podemos cambiar el odometro?"),
+);
+
+console.log("\n▶ Odómetro → horómetro recuerda patente");
+const threadAfterOdo = [
+  "Listo, registré el cambio para la unidad AG562SP. Odómetro nuevo: 5500 km.",
+].join("\n");
+check(
+  "pivot horometro reusa activeUnit",
+  resolvePlateFromConversationContext({
+    rawText: "ahora quiero cambiar el horometro",
+    threadText: threadAfterOdo,
+    activeUnitPlate: "AG562SP",
+  }) === "AG562SP",
+);
+
+console.log("\n▶ Horómetro → mantenimiento recuerda patente");
+const threadAfterHoro = [
+  "Listo, registré el cambio para la unidad AG562SP. Horómetro nuevo: 43 h.",
+].join("\n");
+check(
+  "pivot mantenimiento reusa activeUnit",
+  resolvePlateFromConversationContext({
+    rawText: "y si quiero hacer un mantenimiento correctivo",
+    threadText: threadAfterHoro,
+    activeUnitPlate: "AG562SP",
+  }) === "AG562SP",
+);
+check(
+  "consulta estado genérica NO usa activeUnit",
+  !shouldUseActiveUnitFallback("quiero consultar el reporte de una unidad"),
 );
 
 console.log(`\n✅ ${passed} checks pasaron.`);
