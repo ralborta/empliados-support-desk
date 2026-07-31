@@ -457,10 +457,11 @@ async function resolvePatenteFromFleetForMeterTramite(params: {
       odometerContext: true,
     },
   );
-  if (fleetPlate.ok && fleetPlate.plate) {
-    return { kind: "resolved", patente: normalizePlate(fleetPlate.plate) };
+  if (fleetPlate.ok) {
+    const patente = normalizePlate(fleetPlate.plate);
+    if (patente) return { kind: "resolved", patente };
   }
-  if (fleetPlate.reason === "clarification") {
+  if (!fleetPlate.ok && fleetPlate.reason === "clarification") {
     await appendOutboundBotMessage(params.rawPhone, fleetPlate.message, {
       source: "wara_odometro_response",
       stage: "unit_clarification",
