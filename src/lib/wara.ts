@@ -1546,6 +1546,10 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("decime la matricula exacta"),
     lower.lastIndexOf("patente de la unidad que quer"),
     lower.lastIndexOf("patente de la unidad que quier"),
+    lower.lastIndexOf("pasar la patente de la unidad"),
+    lower.lastIndexOf("me podrias pasar la patente"),
+    lower.lastIndexOf("me podrías pasar la patente"),
+    lower.lastIndexOf("problema con la"),
     lower.lastIndexOf("indiques la patente"),
     lower.lastIndexOf("indicá la patente"),
     lower.lastIndexOf("indica la patente"),
@@ -1579,7 +1583,7 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     /(?:cual es la matricula|decime la matricula|matricula exacta|indic\w*me la matricula|pas\w*me la patente|marca\/nombre \(ej\.)/.test(
       tail,
     ) ||
-    /(?:indic\w*|decime|pas\w*me|necesito que me).{0,40}patente/.test(tail) ||
+    /(?:indic\w*|decime|pas\w*me|pasar|necesito que me).{0,40}patente/.test(tail) ||
     /(?:ultima)\s+posicion/.test(tail) ||
     /patente de la unidad que quer/.test(tail)
   );

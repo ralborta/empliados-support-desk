@@ -576,6 +576,20 @@ function threadBotWronglyAskedPlateForList(threadText: string): boolean {
   );
 }
 
+/** El bot ofreció enviar el listado de unidades (p. ej. agente: "¿Te gustaría que te pase el listado?"). */
+export function threadBotOfferedUnitList(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2800)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /gustar[ií]a que te pase el listado/.test(tail) ||
+    /(te pase|pasarte|mostrarte).{0,48}(listado|lista de tus unidades|lista de unidades)/.test(tail) ||
+    /(listado|lista).{0,48}(tus unidades|identificar la)/.test(tail)
+  );
+}
+
 /** Confirmación o reintento mientras el cliente quiere ver la flota entera. */
 export function looksLikeFleetListContinuation(rawText: string, threadText = ""): boolean {
   if (looksLikeUnitListRequest(rawText)) return true;
@@ -593,11 +607,15 @@ export function looksLikeFleetListContinuation(rawText: string, threadText = "")
     .trim();
   if (!norm) return false;
   if (detectLoosePlate(rawText) || extractPlatePrefixFromMessage(rawText)) return false;
-  if (!threadHasRecentFleetListIntent(threadText) && !threadBotWronglyAskedPlateForList(threadText)) {
+  if (
+    !threadHasRecentFleetListIntent(threadText) &&
+    !threadBotWronglyAskedPlateForList(threadText) &&
+    !threadBotOfferedUnitList(threadText)
+  ) {
     return false;
   }
   if (
-    /^(todo|todas|si|sí|dale|bueno|ok|listado|el listado|ninguna|no se|no s[eé]|no tengo idea|no la se|no las conozco|no recuerdo|mostrame todo|ver todas)$/.test(
+    /^(todo|todas|si|sí|dale|bueno|ok|listado|el listado|ninguna|no se|no s[eé]|no tengo idea|no la se|no las conozco|no recuerdo|mostrame todo|ver todas)([\s,.!]*(por favor|porfa|gracias|de una|genial|si|sí))*$/.test(
       norm,
     )
   ) {
@@ -1944,6 +1962,10 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
     looksLikeLiveUnitConsultIntent(selectionText) ||
     looksLikeGpsOrUnitStatusQuestion(selectionText)
   ) {
+    return true;
+  }
+  // Marca, nombre interno o código de unidad en el mensaje → buscar en flota (no agente pidiendo patente).
+  if (looksLikeVehicleBrandOrUnitSearch(selectionText) || looksLikeUnitNameInMessage(selectionText)) {
     return true;
   }
   return false;

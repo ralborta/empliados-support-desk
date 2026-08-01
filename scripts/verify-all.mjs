@@ -77,6 +77,7 @@ const SUITES = [
   "verify-odometer-after-certificate-context.mjs",
   "verify-odometer-info-vs-operational.mjs",
   "verify-unit-search-brand-after-plate-ask.mjs",
+  "verify-nissan-problem-list-offer.mjs",
   "verify-structured-odometer-template.mjs",
   "verify-odometer-certificado-unit-reference.mjs",
   "verify-odometer-explicit-unit-over-cert-context.mjs",
