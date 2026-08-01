@@ -545,6 +545,49 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
  * El cliente siguió con otra cosa (guía Opciones/Unidades, etc.) después de un odómetro a medias.
  * El hilo conserva contexto pero el trámite queda abandonado.
  */
+function lastClientLineBeforeDeNada(tail: string): string {
+  const idx = tail.toLowerCase().lastIndexOf("de nada");
+  if (idx < 0) return "";
+  const before = tail.slice(0, idx);
+  const lines = before.split("\n").map((l) => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^atilio:/i.test(lines[i])) continue;
+    return lines[i].replace(/^cliente:\s*/i, "").trim();
+  }
+  return "";
+}
+
+function deNadaAbandonsOdometerFlow(threadText: string, cutIdx: number): boolean {
+  const tail = threadText.slice(cutIdx);
+  const lower = tail.toLowerCase();
+  if (!/\bde nada\b/.test(lower)) return false;
+  const lastConfirmIdx = Math.max(
+    lower.lastIndexOf("voy a registrar:"),
+    lower.lastIndexOf("voy a registrar los siguientes datos"),
+  );
+  if (lastConfirmIdx < 0) return true;
+  const afterConfirm = lower.slice(lastConfirmIdx);
+  if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(afterConfirm)) return true;
+  const reopenedAfterConfirm =
+    /perfecto, tomo /.test(afterConfirm.slice(16)) ||
+    /cu[aá]l es el nuevo (od[oó]metro|hor[oó]metro)/.test(afterConfirm.slice(16)) ||
+    /necesito la patente/.test(afterConfirm.slice(16));
+  if (reopenedAfterConfirm) return true;
+  // Bug real, producción 2026-07-31: tras "Gracias" sin confirmar, el bot respondía
+  // "De nada, ¿Necesitás algo más?" y `\bde nada\b` marcaba el trámite como abandonado —
+  // "confirmo" y reenvío de km/fecha quedaban en silencio.
+  if (/respond[eé]\s+confirmo/.test(afterConfirm) || /\bconfirmo para registrarlo\b/.test(afterConfirm)) {
+    const lastClient = lastClientLineBeforeDeNada(tail)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (/\b(gracias|agradezco|muchas gracias)\b/.test(lastClient)) return false;
+    if (/^(ok|si|s[ií]|dale|listo|perfecto|genial|bueno)[\s!.]*$/.test(lastClient)) return true;
+    return false;
+  }
+  return true;
+}
+
 export function isOdometerFlowSuperseded(threadText: string): boolean {
   if (!threadText.trim()) return false;
   const lower = threadText.toLowerCase();
@@ -591,7 +634,7 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
       /\b(no reporta|no me reporta|sin reporte|estado de reporte|reporte de mis unidades)\b/.test(
         after,
       ) ||
-      /\bde nada\b/.test(after) ||
+      deNadaAbandonsOdometerFlow(threadText, cutIdx) ||
       (/1\.\s*(entra|ingresa|abri)/.test(after) &&
         /(agenda|opciones|contacto|unidades|grupo)/.test(after))
     );
@@ -625,7 +668,7 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     // pedido distinto.
     (/\b(necesito|quiero|pedir|solicitar)\b/.test(after) &&
       !/\b(od[oó]metro|hor[oó]metro|kilometraje|patente|matr[ií]cula)\b/.test(after)) ||
-    /\bde nada\b/.test(after) ||
+    deNadaAbandonsOdometerFlow(threadText, cutIdx) ||
     (/1\.\s*(entra|ingresa|abri)/.test(after) &&
       /(agenda|opciones|contacto|unidades|grupo)/.test(after))
   );

@@ -11,7 +11,7 @@ import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateW
 import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
 import { getPendingAction } from "@/lib/pendingAction";
 import { clearActiveUnit } from "@/lib/activeUnit";
-import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
+import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation, buildPendingConfirmationPoliteAckReply } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
@@ -703,6 +703,21 @@ export async function customerRegisteredContextResponse(
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "post_resolved_farewell",
+    });
+  } else if (
+    selectionText &&
+    looksLikeConversationAcknowledgement(selectionText) &&
+    hasAnyPendingConfirmation(scopedThreadText || fullThreadText)
+  ) {
+    nextFlow = "reply";
+    const firstName = customer?.name?.trim().split(/\s+/)[0];
+    responseMessage = buildPendingConfirmationPoliteAckReply(
+      scopedThreadText || fullThreadText,
+      firstName,
+    );
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "pending_confirm_polite_ack",
     });
   } else if (selectionText && looksLikeConversationAcknowledgement(selectionText)) {
     nextFlow = "reply";

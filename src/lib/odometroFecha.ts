@@ -76,11 +76,29 @@ function parseHoraLecturaNearDate(
  * el cliente). */
 export function parseFechaFromText(text: string, timezone?: string): string | undefined {
   const raw = text || "";
+  const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
   const matches = [
-    ...raw.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[\sT,]+(\d{1,2}):(\d{2}))?/g),
+    ...raw.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})\b(?:[\sT,]+(\d{1,2}):(\d{2}))?/g),
   ];
+  // Typo común en celular: "14/07/202" (año truncado) — inferir año actual si encaja el prefijo.
+  const typoYearMatches = [
+    ...raw.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(20\d)\b(?!\d)/g),
+  ];
+  if (matches.length === 0 && typoYearMatches.length > 0) {
+    const currentYear = todayPartsInTz(tz).year;
+    const m = typoYearMatches[typoYearMatches.length - 1];
+    const prefix = m[3];
+    if (String(currentYear).startsWith(prefix)) {
+      const dd = m[1].padStart(2, "0");
+      const mm = m[2].padStart(2, "0");
+      const dateIdx = m.index ?? 0;
+      const horaMatch = parseHoraLecturaNearDate(raw, dateIdx, m[0].length);
+      const hh = (horaMatch?.hh ?? "00").padStart(2, "0");
+      const min = (horaMatch?.min ?? "00").padStart(2, "0");
+      return `${currentYear}-${mm}-${dd}T${hh}:${min}:00`;
+    }
+  }
   if (matches.length === 0) {
-    const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
     const norm = raw
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -141,6 +159,7 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
   const mm = m[2].padStart(2, "0");
   let year = Number(m[3]);
   if (year < 100) year += 2000;
+  if (year < 1900 || year > 2100) return undefined;
   let hh = m[4];
   let min = m[5];
   if (hh == null || min == null) {

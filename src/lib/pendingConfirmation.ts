@@ -43,3 +43,30 @@ export function hasAnyPendingConfirmation(threadText: string): boolean {
     hasPendingMantenimientoConfirmation(threadText)
   );
 }
+
+/** Agradecimiento breve mientras hay un CONFIRMO pendiente — no cerrar el trámite. */
+export function buildPendingConfirmationPoliteAckReply(
+  threadText: string,
+  firstName?: string | null,
+): string {
+  const greet = firstName?.trim() ? `${firstName.trim()}, ` : "";
+  if (hasPendingOdometerConfirmation(threadText)) {
+    return (
+      `${greet}de nada. Todavía tengo pendiente el registro del resumen anterior. ` +
+      `¿Querés confirmarlo respondiendo CONFIRMO, corregir algún dato, o preferís hacer otra gestión?`
+    );
+  }
+  if (hasPendingCertificateConfirmation(threadText)) {
+    return (
+      `${greet}de nada. Sigo con el certificado pendiente de confirmación — ` +
+      `respondé CONFIRMO si está bien, o decime qué corregir.`
+    );
+  }
+  if (hasPendingMantenimientoConfirmation(threadText)) {
+    return (
+      `${greet}de nada. El mantenimiento del resumen sigue pendiente — ` +
+      `respondé CONFIRMO para registrarlo o decime si querés cambiar algo.`
+    );
+  }
+  return `${greet}de nada. ¿Necesitás algo más?`;
+}

@@ -716,6 +716,14 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   ) {
     return true;
   }
+  // "Gracias" sin confirmar — seguir en flujo y recordar CONFIRMO (no skip silencioso).
+  if (
+    odometerFlowAwaitingInput &&
+    looksLikeConversationAcknowledgement(text) &&
+    hasPendingOdometerConfirmation(threadText)
+  ) {
+    return true;
+  }
   if (looksLikeConversationAcknowledgement(text)) return false;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
