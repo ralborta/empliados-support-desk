@@ -922,17 +922,37 @@ export function looksLikeMaintenanceCapabilityQuestion(
   return maintInText || threadHasMaintGuide;
 }
 
+/** Síntoma o pregunta directa sobre si la unidad reporta / está online (bug AC 574 RC, 2026-07-31). */
+export function looksLikeUnitReportingStatusCue(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t || t.length > 220) return false;
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*)\b/.test(t)) return false;
+  if (/\b(no\s+)?(?:esta\s+)?reportando\b/.test(t)) return true;
+  if (/\b(reporta\s+bien|esta\s+reportando)\b/.test(t)) return true;
+  if (/\b(la|lo)\s+veo\b/.test(t) && /\b(detenida|detenido|parada|parado|reportando|reporta)\b/.test(t)) {
+    return true;
+  }
+  if (
+    /\b(detenida|detenido|parada|parado)\b/.test(t) &&
+    /\b(reporta|reportando|gps|ignicion|senal|offline)\b/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Mensaje del cliente con contenido (no ack vacío) — evitar ignorar turnos útiles. */
 /** Consulta operativa sobre GPS, ignición, reporte o estado de unidad (no mantenimiento). */
 export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan de mantenimiento)\b/.test(t)) return false;
+  if (looksLikeUnitReportingStatusCue(text)) return true;
   if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|dejo de reportar|offline|sin señal|sin senal)\b/.test(t)) {
     return true;
   }
   const gpsUnitCue =
-    /\b(gps|ignicio|ignicion|reporte|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
+    /\b(gps|ignicio|ignicion|reporte|reportando|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
       t,
     );
   const questionCue =
@@ -1260,8 +1280,26 @@ export function looksLikeUnitConsultFollowUp(text: string | undefined | null): b
     ) ||
     /\b(verdad|cierto|no funciona|ya no|entonces|de acuerdo|entendido|claro)\b/.test(t) ||
     /\b(no registra|no reporta|sin reporte|offline)\b/.test(t) ||
+    looksLikeUnitReportingStatusCue(text) ||
     looksLikeProblemClarificationPushback(text) ||
     (looksLikeBriefConfirmation(text) && t.length >= 6)
+  );
+}
+
+/** El agente pidió describir el síntoma o confirmar la unidad — el follow-up va al executor. */
+export function threadHasRecentUnitProblemListenPrompt(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /contame que problema/.test(tail) ||
+    /que problema estas viendo/.test(tail) ||
+    /que situacion estas viendo/.test(tail) ||
+    /necesito que me digas la matricula exacta/.test(tail) ||
+    /patente completa de la unidad/.test(tail) ||
+    /matricula exacta/.test(tail)
   );
 }
 

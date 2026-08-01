@@ -42,6 +42,9 @@ export function detectUnitConsultQuestion(rawText: string): string | undefined {
   if (/\b(no registra|no reporta|sin reporte|offline|sin se[nñ]al)\b/.test(t)) {
     return "sintoma_no_reporta";
   }
+  if (/\b(?:esta\s+)?reportando\b/.test(t) && (t.includes("?") || /\b(si|esta|está)\b/.test(t))) {
+    return "consulta_reportando";
+  }
   return undefined;
 }
 

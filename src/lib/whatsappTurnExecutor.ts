@@ -24,7 +24,9 @@ import {
   looksLikeLiveUnitConsultIntent,
   looksLikeTicketCreationInfoQuestion,
   looksLikeUnitConsultFollowUp,
+  looksLikeUnitReportingStatusCue,
   looksLikeSubstantiveCustomerMessage,
+  threadHasRecentUnitProblemListenPrompt,
   looksLikeMaintenanceConfirmationRejection,
   looksLikeOperationalMaintenanceIntent,
   resetCustomerCompanyMenu,
@@ -468,6 +470,9 @@ export async function runTurnExecutorPhase(params: {
     pendingAction?.type !== "odometro" &&
     !looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText) &&
     (looksLikeUnitConsultFollowUp(selectionText) ||
+      looksLikeUnitReportingStatusCue(selectionText) ||
+      (threadHasRecentUnitProblemListenPrompt(threadForFollowUp) &&
+        looksLikeSubstantiveCustomerMessage(selectionText)) ||
       ((threadHasRecentNoEquipmentExplanation(threadForFollowUp) ||
         threadHasRecentUnitCaseOpened(threadForFollowUp)) &&
         looksLikeSubstantiveCustomerMessage(selectionText)))

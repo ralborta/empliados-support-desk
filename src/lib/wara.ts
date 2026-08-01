@@ -252,6 +252,8 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "nope",
   "nel",
   "nah",
+  // Bug real, producción 2026-07-31: "La veo detenida" → prefijo VEO (verbo "veo", no patente).
+  "veo",
 ]);
 
 // Tolerantes a la letra de más/de menos más común en "empieza"/"comienza"
@@ -319,6 +321,16 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
   );
   if (explicit?.[1] && !NON_PLATE_PREFIX_WORDS.has(explicit[1].toLowerCase())) {
     return explicit[1].replace(/\s+/g, "").toUpperCase();
+  }
+
+  // "La veo detenida" / "no está reportando" — descripción operativa, no prefijo de patente.
+  if (
+    /\b(la|lo)\s+veo\b/.test(norm) ||
+    /\b(no\s+)?(?:esta\s+)?reportando\b/.test(norm) ||
+    (/\b(detenida|detenido|parada|parado)\b/.test(norm) &&
+      /\b(reporta|reportando|gps|ignicion|senal)\b/.test(norm))
+  ) {
+    return null;
   }
 
   const laPrefix = norm.match(/\b(?:la|el|esa|ese)\s+([a-z]{2,3}\d{0,3})\b/);
@@ -704,7 +716,10 @@ export function threadHasRecentUnitStatusConsultIntent(threadText: string): bool
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
-    if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|offline|sin señal|sin senal)\b/.test(t)) {
+    if (
+      /\b(no reporta|no me reporta|sin reporte|falta de reporte|offline|sin señal|sin senal)\b/.test(t) ||
+      /\b(no\s+)?(?:esta\s+)?reportando\b/.test(t)
+    ) {
       return true;
     }
     return (
@@ -1554,6 +1569,9 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("indicá la patente"),
     lower.lastIndexOf("indica la patente"),
     lower.lastIndexOf("patente completa de la"),
+    lower.lastIndexOf("contame que problema"),
+    lower.lastIndexOf("que problema estas viendo"),
+    lower.lastIndexOf("que situacion estas viendo"),
     lower.lastIndexOf("ultima posicion de la"),
     lower.lastIndexOf("última posición de la"),
     lower.lastIndexOf("ultima posición de la"),

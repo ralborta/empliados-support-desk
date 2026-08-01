@@ -44,8 +44,10 @@ import {
   looksLikePatenteUnknownReply,
   looksLikePlateCorrectionRequest,
   looksLikeSubstantiveCustomerMessage,
+  looksLikeUnitReportingStatusCue,
   looksLikeVehicleBrandOrUnitSearch,
   threadHasRecentLiveUnitConsultIntent,
+  threadHasRecentUnitProblemListenPrompt,
   resolveWaraSessionByPhone,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
@@ -1946,6 +1948,34 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   ) {
     return false;
   }
+
+  // GPS/reporte en vivo — siempre al executor (no exige patente/marca en el mensaje).
+  if (
+    looksLikeLiveUnitConsultIntent(selectionText) ||
+    looksLikeGpsOrUnitStatusQuestion(selectionText)
+  ) {
+    return true;
+  }
+
+  // Tras pedir síntoma o con unidad en hilo: referencia vaga o patente explícita.
+  if (
+    threadHasRecentUnitProblemListenPrompt(threadText) &&
+    (looksLikeVagueUnitReference(selectionText) ||
+      looksLikeUnitReportingStatusCue(selectionText) ||
+      !!detectLoosePlate(selectionText))
+  ) {
+    return true;
+  }
+
+  if (
+    looksLikeVagueUnitReference(selectionText) &&
+    (extractLastPlateFromThread(threadText) ||
+      threadHasRecentLiveUnitConsultIntent(threadText) ||
+      /\bcertificado\b/i.test(threadText))
+  ) {
+    return true;
+  }
+
   if (!looksLikeFleetUnitSearchInput(selectionText)) return false;
   if (looksLikeUnitListRequest(selectionText)) return false;
   if (
@@ -1958,12 +1988,6 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   }
   if (hasPendingUnitConsultPlateRequest(threadText)) return true;
   if (threadHasRecentLiveUnitConsultIntent(threadText)) return true;
-  if (
-    looksLikeLiveUnitConsultIntent(selectionText) ||
-    looksLikeGpsOrUnitStatusQuestion(selectionText)
-  ) {
-    return true;
-  }
   // Marca, nombre interno o código de unidad en el mensaje → buscar en flota (no agente pidiendo patente).
   if (looksLikeVehicleBrandOrUnitSearch(selectionText) || looksLikeUnitNameInMessage(selectionText)) {
     return true;
