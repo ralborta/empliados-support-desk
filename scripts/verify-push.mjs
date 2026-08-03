@@ -27,6 +27,7 @@ const PUSH_SUITES = [
   "verify-certificate-flow-superseded.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-nissan-problem-list-offer.mjs",
+  "verify-brand-mention-in-question.mjs",
   "verify-platform-access-routing.mjs",
   "verify-odoo-partner-name-match.mjs",
   "verify-conversation-closing.mjs",

@@ -288,6 +288,11 @@ function mentionsMissingReportWithoutPlate(rawText: string | undefined | null): 
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (detectPlate(rawText ?? "")) return false;
+  // Bug real, producción 2026-08-03: "Quiero saber el reporte de la Nissan" ya trae
+  // la unidad en el mensaje, pero looksLikeLiveUnitConsultIntent devolvía true y este
+  // helper cortaba antes de resolveUnitQuery — pedía patente otra vez. Recién al repetir
+  // "Nissan" solo (sin live-consult genérico) avanzaba.
+  if (looksLikeFleetUnitSearchInput(rawText ?? "")) return false;
   if (looksLikeLiveUnitConsultIntent(rawText)) return true;
   return /\b(sin reporte|no reporta|no actualiza|offline|no reporta bien|reportando|reporta bien|esta ok|est[aá] bien|gps|marcando|ignicio|ignicion|senal|señal)\b/.test(
     norm,

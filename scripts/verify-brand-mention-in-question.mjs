@@ -15,6 +15,10 @@
  * resolveUnitQuery) terminaba pidiendo la unidad desde cero, ignorando la marca ya
  * mencionada.
  *
+ * Bug real 2026-08-03 (misma familia): aunque la marca ya se detectaba, el gate
+ * mentionsMissingReportWithoutPlate en unidades/route.ts cortaba antes de buscar
+ * en flota cuando el mensaje también calificaba como consulta GPS genérica.
+ *
  * Uso: npx tsx scripts/verify-brand-mention-in-question.mjs
  */
 import { looksLikeVehicleBrandOrUnitSearch } from "../src/lib/waraApi.ts";
@@ -33,6 +37,7 @@ function assert(cond, label) {
 console.log("— La marca mencionada en una pregunta natural (no solo en una respuesta corta) se detecta —");
 const naturalQuestions = [
   "Ok quiero saber si Nissan está marcando posición?",
+  "Quiero saber el reporte de la Nissan",
   "quiero saber si la Nissan esta marcando posicion",
   "hola, me podes decir si la Nissan esta reportando bien?",
   "necesito saber el estado de la Toyota por favor",
@@ -61,6 +66,17 @@ const resolved = await resolveUnitQuery({
 assert(
   resolved.intent === "consult_status" && resolved.plate === "AG562SP",
   `resuelve AG562SP en el primer mensaje (obtuvo intent=${resolved.intent} plate=${resolved.plate ?? "-"})`,
+);
+
+const resolvedReporte = await resolveUnitQuery({
+  rawText: "Quiero saber el reporte de la Nissan",
+  threadText: "Bot: Perfecto, sigo con WARA. ¿En qué te puedo ayudar?",
+  units: fleet,
+  preferAi: true,
+});
+assert(
+  resolvedReporte.intent === "consult_status" && resolvedReporte.plate === "AG562SP",
+  `reporte de la Nissan resuelve en el primer mensaje (obtuvo intent=${resolvedReporte.intent} plate=${resolvedReporte.plate ?? "-"})`,
 );
 
 if (failed > 0) {
