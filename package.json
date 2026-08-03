@@ -9,8 +9,9 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
-    "test": "npx tsx scripts/verify-all.mjs",
-    "test:db": "npx tsx scripts/verify-pending-action-state.mjs",
+    "test": "tsx scripts/verify-all.mjs",
+    "test:push": "tsx scripts/verify-push.mjs",
+    "test:db": "tsx scripts/verify-pending-action-state.mjs",
     "sync-builderbot-maestro": "node scripts/sync-builderbot-maestro.mjs",
     "sync-builderbot-inicio-turn": "node scripts/sync-builderbot-inicio-turn.mjs",
     "prepare": "husky"
@@ -43,6 +44,7 @@
     "husky": "^9.1.7",
     "prisma": "^6.19.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.5",
     "typescript": "^5"
   }
 }
