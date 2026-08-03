@@ -843,6 +843,17 @@ function normalizeUnitNameToken(value: string): string {
   return value.replace(/[\s-]+/g, "").toLowerCase();
 }
 
+function unitNameCodesMatch(queryNorm: string, unitCode: string): boolean {
+  if (queryNorm === unitCode) return true;
+  // Cliente omitió la M (300-092 → M300-092). Solo aplica si el código en Wara
+  // es el nombre canónico Mxxx-yyy, no un substring suelto en otro label
+  // (ej. "Tanda 600-170 backup" no debe matchear consulta por M600-170).
+  if (!/^m\d/.test(queryNorm) && unitCode === `m${queryNorm}` && /^m\d/.test(unitCode)) {
+    return true;
+  }
+  return false;
+}
+
 /** Códigos M600-170 / 300-092 presentes como token en el campo unidad de Wara. */
 function unitNameCodesFromField(unidad: string): string[] {
   const tokens = new Set<string>();
@@ -859,7 +870,9 @@ function unitNameCodesFromField(unidad: string): string[] {
 export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
   const norm = normalizeUnitNameToken(query);
   if (!norm) return [];
-  return units.filter((u) => unitNameCodesFromField(u.unidad || "").some((code) => code === norm));
+  return units.filter((u) =>
+    unitNameCodesFromField(u.unidad || "").some((code) => unitNameCodesMatch(norm, code)),
+  );
 }
 
 /** Código interno Wara en el mensaje (ej. "Unidad: M600-020", "interno M300-083"). */

@@ -1666,7 +1666,36 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
  * patente vieja del hilo) y forzar a pedir la unidad de nuevo — nunca repetir la
  * rechazada.
  */
+/**
+ * El cliente amplía el tema a más unidades offline — no rechaza la unidad recién consultada.
+ * Bug real, producción 2026-08-03: "Tengo otras unidades mas sin reporte" matcheaba
+ * looksLikeUnitRejection ("otras unidades") y el bot respondía "Entendido, no era esa".
+ */
+export function looksLikeAdditionalUnitsMissingReportRequest(
+  rawText: string | undefined | null,
+): boolean {
+  const norm = (rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return false;
+  if (
+    !/\b(otra|otras|otro|otros)\s+unidad\w*\b/.test(norm) ||
+    !/\b(sin reporte|sin reportar|no reporta|no reportan|offline)\b/.test(norm)
+  ) {
+    return false;
+  }
+  return (
+    !/\bno\s+(es|era|son|eran)\s+(esa|ese|esta|este)\b/.test(norm) &&
+    !/\b(esa|ese|esta|este)\s+no\s+(es|era)\b/.test(norm) &&
+    !/\bno\s+era\s+esa\b/.test(norm) &&
+    !/\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm)
+  );
+}
+
 export function looksLikeUnitRejection(rawText: string | undefined | null): boolean {
+  if (looksLikeAdditionalUnitsMissingReportRequest(rawText)) return false;
   const norm = (rawText ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

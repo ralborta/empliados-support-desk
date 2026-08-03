@@ -20,7 +20,7 @@
  *
  * Uso: npx tsx scripts/verify-unit-rejection-loop.mjs
  */
-import { looksLikeUnitRejection, looksLikeBareNegativeResponse, isBarePlatePrefixHint } from "../src/lib/wara.ts";
+import { looksLikeUnitRejection, looksLikeBareNegativeResponse, isBarePlatePrefixHint, looksLikeAdditionalUnitsMissingReportRequest } from "../src/lib/wara.ts";
 import { shouldUseActiveUnitFallback } from "../src/lib/activeUnit.ts";
 
 let failed = 0;
@@ -76,6 +76,20 @@ assert(!isBarePlatePrefixHint("No"), 'isBarePlatePrefixHint("No") === false');
 assert(looksLikeBareNegativeResponse("no"), 'looksLikeBareNegativeResponse("no") === true');
 assert(looksLikeBareNegativeResponse("no no"), 'looksLikeBareNegativeResponse("no no") === true');
 assert(isBarePlatePrefixHint("NKL"), "sanity: NKL sigue siendo prefijo válido");
+
+console.log("\n— Bug real 2026-08-03: ampliar tema a más unidades sin reporte NO es rechazo —");
+const additionalMissingReport = [
+  "Tengo otras unidades mas sin reporte",
+  "tengo otras unidades sin reportar",
+  "otras unidades no reportan",
+];
+for (const text of additionalMissingReport) {
+  assert(
+    looksLikeAdditionalUnitsMissingReportRequest(text),
+    `looksLikeAdditionalUnitsMissingReportRequest("${text}") === true`,
+  );
+  assert(!looksLikeUnitRejection(text), `looksLikeUnitRejection("${text}") === false`);
+}
 
 console.log("\n— Sanity: mensajes normales (sin rechazo) no activan esto —");
 const nonRejection = [

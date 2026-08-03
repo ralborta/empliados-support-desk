@@ -10,7 +10,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -865,7 +865,24 @@ export async function POST(req: NextRequest) {
   // exitoso del bot sobre la unidad que se está rechazando) volvían a devolver la MISMA
   // unidad recién rechazada — loop infinito ante cualquier mensaje sin marca nueva.
   const explicitRejection = looksLikeUnitRejection(rawText);
+  const additionalMissingReport = looksLikeAdditionalUnitsMissingReportRequest(rawText);
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
+  if (additionalMissingReport) {
+    await clearActiveUnit(prisma, rawPhone);
+    if (isConversationNotebookEnabled()) {
+      await clearSessionNotebook(prisma, rawPhone);
+    }
+    const message =
+      "Entendido. Pasame la patente o el nombre de la otra unidad sin reporte (ej. M300-093 o NKL 961) y la consulto en Wara.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_unidades_additional_missing_report",
+      rawText,
+    });
+    return NextResponse.json(
+      { ok: true, summaryText: message, action: "none" as const, unidadesCount: 0 },
+      { status: BB_STATUS },
+    );
+  }
   if (explicitRejection) {
     await clearActiveUnit(prisma, rawPhone);
     if (isConversationNotebookEnabled()) {
