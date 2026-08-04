@@ -20,7 +20,7 @@
  *
  * Uso: npx tsx scripts/verify-unit-rejection-loop.mjs
  */
-import { looksLikeUnitRejection, looksLikeBareNegativeResponse, isBarePlatePrefixHint, looksLikeAdditionalUnitsMissingReportRequest } from "../src/lib/wara.ts";
+import { looksLikeUnitRejection, looksLikeBareNegativeResponse, isBarePlatePrefixHint, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest } from "../src/lib/wara.ts";
 import { shouldUseActiveUnitFallback } from "../src/lib/activeUnit.ts";
 
 let failed = 0;
@@ -53,9 +53,7 @@ const rejectionPhrases = [
   // unidades" (plural) no matcheaba "otra unidad" (singular) — el bot repitió
   // literalmente el mismo reporte de GPS ya mostrado, como si el cliente hubiese
   // preguntado por el estado de esa misma unidad otra vez.
-  "Quiero consultar por otras unidades",
-  "quiero ver otras patentes",
-  "tengo otros vehiculos también",
+  // (2026-08-03: ahora es pivot amigable vía looksLikeAnotherUnitConsultRequest, no rechazo.)
   // Bug real, producción 2026-07-30: "no" suelto tras "¿te referís a AE 483 VE?" no es
   // prefijo de patente — es rechazo de la unidad propuesta.
   "no",
@@ -87,6 +85,21 @@ for (const text of additionalMissingReport) {
   assert(
     looksLikeAdditionalUnitsMissingReportRequest(text),
     `looksLikeAdditionalUnitsMissingReportRequest("${text}") === true`,
+  );
+  assert(!looksLikeUnitRejection(text), `looksLikeUnitRejection("${text}") === false`);
+}
+
+console.log("\n— Bug real 2026-08-03: pivot a otra unidad NO es rechazo —");
+const anotherUnitPivot = [
+  "Quiero consultar por otra unidad",
+  "Quiero consultar por otras unidades",
+  "quiero ver otras patentes",
+  "tengo otros vehiculos también",
+];
+for (const text of anotherUnitPivot) {
+  assert(
+    looksLikeAnotherUnitConsultRequest(text),
+    `looksLikeAnotherUnitConsultRequest("${text}") === true`,
   );
   assert(!looksLikeUnitRejection(text), `looksLikeUnitRejection("${text}") === false`);
 }

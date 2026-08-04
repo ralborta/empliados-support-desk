@@ -1177,7 +1177,8 @@ export function looksLikeConversationalUnitConcern(text: string | undefined | nu
   return (
     looksLikeVagueUnitProblemReport(text) ||
     looksLikeRouteHistoryOrMovementIssue(text) ||
-    looksLikeProblemClarificationPushback(text)
+    looksLikeProblemClarificationPushback(text) ||
+    looksLikeGpsOrUnitStatusQuestion(text)
   );
 }
 

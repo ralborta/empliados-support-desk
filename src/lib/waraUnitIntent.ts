@@ -2019,6 +2019,14 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   const { selectionText, threadText, pendingActionType } = params;
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
+  // Bug real 2026-08-03: patente tras "otra unidad sin reporte" no es odómetro.
+  if (
+    hasPendingUnitConsultPlateRequest(threadText) &&
+    !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
+    !looksLikeHorometerOnlyIntent(selectionText)
+  ) {
+    return false;
+  }
 
   // Arranque explícito (p. ej. tras consulta GPS/mantenimiento) → executor aunque no haya flujo activo previo.
   if (

@@ -884,6 +884,7 @@ function threadTailSinceFleetUnitSearch(text: string): string {
 /** El hilo reciente está pidiendo patente para un trámite de odómetro. */
 export function threadAwaitingOdometerPlate(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (hasPendingUnitConsultPlateRequest(threadText)) return false;
   const scoped = threadTailSinceFleetUnitSearch(threadText);
   const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
@@ -900,7 +901,8 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
     /nuevo od[oó]metro en km/i.test(tail) ||
     /(?:entendido|correcta)\.{0,3}\s*(?:cu[aá]l es|decime|pas[aá]me).{0,80}(?:patente|matr[ií]cula|marca|nombre)/i.test(
       tail,
-    ) ||
+    ) &&
+    /(?:od[oó]metro|hor[oó]metro|kilometraje|registrar el cambio)/i.test(tail) ||
     (/(?:cu[aá]l es|indic[aá]me|pas[aá]me|decime|necesito).{0,100}(?:patente|matr[ií]cula)/i.test(tail) &&
       /od[oó]metro|hor[oó]metro|kilometraje/i.test(tail) &&
       /(?:atilio|registrar el cambio|nuevo od[oó]metro)/i.test(tail));
@@ -1619,6 +1621,13 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("última posición de la"),
     lower.lastIndexOf("ultima posición de la"),
     lower.lastIndexOf("última posicion de la"),
+    // Bug real 2026-08-03: pedido de otra unidad sin reporte ("Pasame la patente...
+    // sin reporte") no matcheaba ningún marcador y threadAwaitingOdometerPlate lo
+    // confundía con trámite de odómetro — "Perfecto, tomo AC 607 XB. ¿Cuál es el nuevo odómetro?"
+    lower.lastIndexOf("otra unidad sin reporte"),
+    lower.lastIndexOf("nombre de la otra unidad"),
+    lower.lastIndexOf("pasame la patente o el nombre"),
+    lower.lastIndexOf("la consulto en wara"),
   ].filter((i) => i >= 0);
   if (!unitConsultMarkers.length) return false;
 
@@ -1646,7 +1655,11 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     ) ||
     /(?:indic\w*|decime|pas\w*me|pasar|necesito que me).{0,40}patente/.test(tail) ||
     /(?:ultima)\s+posicion/.test(tail) ||
-    /patente de la unidad que quer/.test(tail)
+    /patente de la unidad que quer/.test(tail) ||
+    /otra unidad sin reporte/.test(tail) ||
+    /nombre de la otra unidad/.test(tail) ||
+    /consulto en wara/.test(tail) ||
+    /pasame la patente o el nombre/.test(tail)
   );
 }
 
@@ -1671,6 +1684,39 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
  * Bug real, producción 2026-08-03: "Tengo otras unidades mas sin reporte" matcheaba
  * looksLikeUnitRejection ("otras unidades") y el bot respondía "Entendido, no era esa".
  */
+/**
+ * El cliente quiere consultar otra unidad distinta — no rechaza la anterior como incorrecta.
+ * Bug real, producción 2026-08-03: "Quiero consultar por otra unidad" matcheaba
+ * looksLikeUnitRejection y el bot respondía "Entendido, no era esa" en vez de pedir la otra.
+ */
+export function looksLikeAnotherUnitConsultRequest(
+  rawText: string | undefined | null,
+): boolean {
+  if (looksLikeAdditionalUnitsMissingReportRequest(rawText)) return false;
+  const norm = (rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return false;
+  if (/\bno\s+(es|era|son|eran)\s+(esa|ese|esta|este)\b/.test(norm)) return false;
+  if (/\b(esa|ese|esta|este)\s+no\s+(es|era)\b/.test(norm)) return false;
+  if (/\bno\s+era\s+esa\b/.test(norm)) return false;
+  if (/\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm)) return false;
+  if (/\b(es|era)\s+otra\b/.test(norm) && !/\b(consult\w*|quiero|ver|revis\w*)\b/.test(norm)) {
+    return false;
+  }
+  return (
+    /\b(consult\w*|revis\w*|cheque\w*|mir\w*|ver)\w*\b.{0,30}\b(otra|otras|otro|otros)\s+(unidad\w*|patente\w*|vehicul\w*|camionet\w*)\b/.test(
+      norm,
+    ) ||
+    (/\b(quiero|necesito|pasame|dame)\b/.test(norm) &&
+      /\b(otra|otras|otro|otros)\s+(unidad\w*|patente\w*|vehicul\w*|camionet\w*)\b/.test(norm)) ||
+    (/\b(tengo|tambien|también)\b/.test(norm) &&
+      /\b(otra|otras|otro|otros)\s+(unidad\w*|vehicul\w*|movile?s?|camionet\w*)\b/.test(norm))
+  );
+}
+
 export function looksLikeAdditionalUnitsMissingReportRequest(
   rawText: string | undefined | null,
 ): boolean {
@@ -1696,6 +1742,7 @@ export function looksLikeAdditionalUnitsMissingReportRequest(
 
 export function looksLikeUnitRejection(rawText: string | undefined | null): boolean {
   if (looksLikeAdditionalUnitsMissingReportRequest(rawText)) return false;
+  if (looksLikeAnotherUnitConsultRequest(rawText)) return false;
   const norm = (rawText ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -2125,7 +2172,7 @@ export function resolveWaraPatenteForApi(
 export function detectIncidentType(text: string): WaraIncidentType {
   const lower = text.toLowerCase();
   if (
-    /\b(no reporta|no me reporta|no le reporta|dejo de reportar|sin reporte|falta de reporte|offline|sin señal|sin senal|no actualiza|última señal|ultima señal|no registra ubicaci[oó]n)\b/.test(
+    /\b(no reporta|no me reporta|no le reporta|dejo de reportar|sin reporte|sin reportar|falta de reporte|offline|sin señal|sin senal|no actualiza|última señal|ultima señal|no registra ubicaci[oó]n)\b/.test(
       lower,
     )
   ) {

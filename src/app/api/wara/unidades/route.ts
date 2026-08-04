@@ -10,7 +10,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -61,7 +61,7 @@ import {
   looksLikeUnitListRequest,
   resolveUnitQuery,
 } from "@/lib/waraUnitIntent";
-import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
+import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback, extractActiveUnitNameCode, type ActiveUnitRecord } from "@/lib/activeUnit";
 import {
   clearSessionNotebook,
   getSessionNotebook,
@@ -133,6 +133,18 @@ function formatUnitLabel(unit: WaraUnidadEstado): string {
     return `${plate} (nombre ${nombre})`;
   }
   return plate || nombre || "la unidad";
+}
+
+/** Misma patente en varias unidades (ej. M600-018 y M600-026) — acotar por nombre activo. */
+function narrowUnitsByActiveUnitName(
+  units: WaraUnidadEstado[],
+  activeUnit: ActiveUnitRecord | null,
+): WaraUnidadEstado[] {
+  if (units.length <= 1 || !activeUnit) return units;
+  const nameCode = extractActiveUnitNameCode(activeUnit);
+  if (!nameCode) return units;
+  const narrowed = filterUnitsByUnitName(units, nameCode);
+  return narrowed.length === 1 ? narrowed : units;
 }
 
 function summarizeUnit(unit: WaraUnidadEstado): string {
@@ -871,6 +883,7 @@ export async function POST(req: NextRequest) {
   // unidad recién rechazada — loop infinito ante cualquier mensaje sin marca nueva.
   const explicitRejection = looksLikeUnitRejection(rawText);
   const additionalMissingReport = looksLikeAdditionalUnitsMissingReportRequest(rawText);
+  const anotherUnitConsult = looksLikeAnotherUnitConsultRequest(rawText);
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
   if (additionalMissingReport) {
     await clearActiveUnit(prisma, rawPhone);
@@ -881,6 +894,22 @@ export async function POST(req: NextRequest) {
       "Entendido. Pasame la patente o el nombre de la otra unidad sin reporte (ej. M300-093 o NKL 961) y la consulto en Wara.";
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_unidades_additional_missing_report",
+      rawText,
+    });
+    return NextResponse.json(
+      { ok: true, summaryText: message, action: "none" as const, unidadesCount: 0 },
+      { status: BB_STATUS },
+    );
+  }
+  if (anotherUnitConsult) {
+    await clearActiveUnit(prisma, rawPhone);
+    if (isConversationNotebookEnabled()) {
+      await clearSessionNotebook(prisma, rawPhone);
+    }
+    const message =
+      "Entendido. Pasame la patente o el nombre de la otra unidad (ej. M300-093 o NKL 961) y la consulto en Wara.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_unidades_another_unit_consult",
       rawText,
     });
     return NextResponse.json(
@@ -1185,6 +1214,7 @@ export async function POST(req: NextRequest) {
   } else {
     filtered = filterUnits(result.unidades, wantedPlate);
   }
+  filtered = narrowUnitsByActiveUnitName(filtered, activeUnitRecord);
   if (result.ok && wantedPlate && filtered.length === 0 && requestedPlates.length > 0) {
     const full = await consultarEstadoUnidades(session.sessionToken, []);
     if (full.ok && full.unidades.length > 0) {
@@ -1245,6 +1275,7 @@ export async function POST(req: NextRequest) {
     if (resolvedPlateForActiveUnit) {
       await setActiveUnit(prisma, rawPhone, resolvedPlateForActiveUnit, {
         label: formatUnitLabel(unit),
+        unitName: unit.unidad?.trim() || undefined,
         source: "estado",
       });
       if (isConversationNotebookEnabled()) {

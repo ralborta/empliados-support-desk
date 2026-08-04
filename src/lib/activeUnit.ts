@@ -5,6 +5,7 @@ import { looksLikePlateCorrectionRequest, looksLikeGenericUnitConsultWithoutPlat
 import { looksLikeFleetUnitSearchInput } from "@/lib/waraUnitIntent";
 import {
   looksLikeUnitRejection,
+  looksLikeAnotherUnitConsultRequest,
   extractPlateFromOdometerSummary,
   extractPlateFromMaintenanceSuccess,
   extractLastPlateFromThread,
@@ -42,6 +43,8 @@ export type ActiveUnitSource = "estado" | "certificado" | "odometro" | "mantenim
 export type ActiveUnitRecord = {
   /** Patente normalizada, sin espacios, mayúsculas (ej. "AG562SP"). */
   plate: string;
+  /** Nombre de unidad en Wara (ej. "M600-026") cuando la patente no es única en flota. */
+  unitName?: string;
   /** Etiqueta legible para mostrar en respuestas (ej. "AG 562 SP (NISSAN 2404)"). */
   label?: string;
   /** Trámite en el que se resolvió por última vez esta unidad. */
@@ -75,6 +78,7 @@ export function shouldUseActiveUnitFallback(rawText: string): boolean {
     !looksLikeFleetUnitSearchInput(rawText) &&
     !looksLikePlateCorrectionRequest(rawText) &&
     !looksLikeUnitRejection(rawText) &&
+    !looksLikeAnotherUnitConsultRequest(rawText) &&
     !looksLikeGenericUnitConsultWithoutPlate(rawText)
   );
 }
@@ -99,11 +103,19 @@ export function resolvePlateFromConversationContext(params: {
   );
 }
 
+/** Código de unidad (M600-026) guardado en activeUnit o extraído del label. */
+export function extractActiveUnitNameCode(record: Pick<ActiveUnitRecord, "label" | "unitName">): string | null {
+  const direct = record.unitName?.trim();
+  if (direct) return direct;
+  const fromLabel = record.label?.match(/\(nombre\s+([^)]+)\)/i)?.[1]?.trim();
+  return fromLabel || null;
+}
+
 export async function setActiveUnit(
   prisma: PrismaClient,
   phone: string,
   plate: string,
-  opts?: { label?: string; source?: ActiveUnitSource },
+  opts?: { label?: string; unitName?: string; source?: ActiveUnitSource },
 ): Promise<void> {
   const normalizedPlate = plate.replace(/\s+/g, "").toUpperCase();
   if (!normalizedPlate) return;
@@ -111,6 +123,7 @@ export async function setActiveUnit(
   if (!normalized) return;
   const record: ActiveUnitRecord = {
     plate: normalizedPlate,
+    unitName: opts?.unitName?.trim() || undefined,
     label: opts?.label,
     source: opts?.source ?? "estado",
     resolvedAt: new Date().toISOString(),

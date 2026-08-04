@@ -15,6 +15,8 @@ const PUSH_SUITES = [
   "verify-unit-name-m600170.mjs",
   "verify-unit-name-without-m-prefix.mjs",
   "verify-unit-rejection-loop.mjs",
+  "verify-another-unit-consult-pivot.mjs",
+  "verify-shared-plate-disambiguation.mjs",
   "verify-active-unit-memory.mjs",
   "verify-context-continuity-safety.mjs",
   "verify-ac574-reporting-thread.mjs",
