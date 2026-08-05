@@ -48,6 +48,27 @@ assert(
   "hora con Hs antes de fecha",
 );
 
+console.log("— Hora bare con 'hs' (sin etiqueta Hora:/a las) — bug real 2026-08-05 —");
+
+const emiTemplate = "AG 562 SP\n99000 Km\n10:10 hs\n05/08/26";
+const parsedEmi = parseFechaFromText(emiTemplate);
+assert(
+  parsedEmi === "2026-08-05T10:10:00",
+  `plantilla "10:10 hs" + fecha (obtuve: ${parsedEmi})`,
+);
+assert(
+  parseFechaFromText("AG 562 SP\n99000 Km\nHora: 10:10 hs\n05/08/26") === "2026-08-05T10:10:00",
+  "misma plantilla con etiqueta Hora: sigue OK",
+);
+assert(
+  parseFechaFromText("99000 Km\n10:10\n05/08/26") === "2026-08-05T10:10:00",
+  "HH:MM bare cerca de la fecha también se toma",
+);
+assert(
+  parseFechaFromText("99000 Km\n05/08/26") === "2026-08-05T00:00:00",
+  "solo fecha sin hora sigue en 00:00 (no inventa)",
+);
+
 // No hardcodear la fecha "de hoy": el test corría a la medianoche (AR) y quedaba
 // desfasado un día apenas cambiaba el reloj. Se calcula igual que odometroFecha.ts
 // (Intl.DateTimeFormat en la zona del cliente) en vez de un string fijo.

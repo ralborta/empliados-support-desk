@@ -42,7 +42,17 @@ function pruebasAliasesEnabledByEnv(): boolean {
   return v === "1" || v === "true" || v === "yes" || v === "si";
 }
 
+function isWaraProductionApiConfigured(): boolean {
+  const base = (
+    process.env.WARA_API_BASE_URL?.trim() ||
+    process.env.WARA_MAINTENANCE_API_BASE_URL?.trim() ||
+    ""
+  ).replace(/\/+$/, "");
+  return /apps\.visionblo\.com/i.test(base);
+}
+
 export function isPruebasContactAliasesActive(): boolean {
+  if (isWaraProductionApiConfigured()) return false;
   return pruebasAliasesEnabledByEnv() && PRUEBAS_CONTACT_ALIASES.length > 0;
 }
 

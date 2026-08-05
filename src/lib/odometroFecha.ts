@@ -43,9 +43,17 @@ function daysSinceLastWeekday(targetDow: number, timezone: string): number {
   return (todayDow - targetDow + 7) % 7;
 }
 
-/** Hora de lectura explícita ("Hora: 16:16", "a las 14:00 Hs") — no confundir con horómetro en horas. */
-const HORA_LECTURA_RE =
-  /\b(?:a\s+las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/gi;
+/**
+ * Hora de lectura cerca de una fecha numérica.
+ * Acepta: "Hora: 16:16", "a las 14:00 Hs", y también "10:10 hs" / "10:10" en línea
+ * separada (bug real, producción 2026-08-05: plantilla
+ * "AG 562 SP / 99000 Km / 10:10 hs / 05/08/26" → quedaba 00:00 porque solo
+ * matcheaba si decía "Hora:" o "a las").
+ */
+const HORA_LECTURA_LABELED_RE =
+  /\b(?:a\s+las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*(?:h\s*s|hs))?\b/gi;
+const HORA_LECTURA_BARE_HS_RE = /\b(\d{1,2}):(\d{2})\s*(?:h\s*s|hs)\b/gi;
+const HORA_LECTURA_BARE_RE = /\b(\d{1,2}):(\d{2})\b/g;
 
 function parseHoraLecturaNearDate(
   raw: string,
@@ -57,15 +65,36 @@ function parseHoraLecturaNearDate(
   const nearby = raw.slice(windowStart, windowEnd);
   const dateCenter = dateIdx + dateLen / 2;
 
-  let best: { hh: string; min: string; dist: number } | null = null;
-  for (const match of nearby.matchAll(HORA_LECTURA_RE)) {
-    const idx = (match.index ?? 0) + windowStart;
-    const dist = Math.abs(idx - dateCenter);
-    const hh = match[1];
-    const min = match[2];
-    if (!best || dist < best.dist) best = { hh, min, dist };
-  }
-  return best ? { hh: best.hh, min: best.min } : null;
+  let bestHh = "";
+  let bestMin = "";
+  let bestDist = Number.POSITIVE_INFINITY;
+  let bestRank = Number.POSITIVE_INFINITY;
+  let found = false;
+
+  const consider = (re: RegExp, rank: number) => {
+    re.lastIndex = 0;
+    for (const match of nearby.matchAll(re)) {
+      const hhNum = Number(match[1]);
+      const minNum = Number(match[2]);
+      if (hhNum > 23 || minNum > 59) continue;
+      const idx = (match.index ?? 0) + windowStart;
+      const dist = Math.abs(idx - dateCenter);
+      if (rank < bestRank || (rank === bestRank && dist < bestDist)) {
+        bestHh = match[1];
+        bestMin = match[2];
+        bestDist = dist;
+        bestRank = rank;
+        found = true;
+      }
+    }
+  };
+
+  // Preferir etiqueta ("Hora:" / "a las"), luego "10:10 hs", luego HH:MM bare.
+  consider(HORA_LECTURA_LABELED_RE, 0);
+  consider(HORA_LECTURA_BARE_HS_RE, 1);
+  consider(HORA_LECTURA_BARE_RE, 2);
+
+  return found ? { hh: bestHh, min: bestMin } : null;
 }
 
 /** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada.

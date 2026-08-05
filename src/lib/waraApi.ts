@@ -94,6 +94,7 @@ export type WaraCustomerResolution = {
  * Vacío o no seteado => modo abierto (producción real).
  */
 function testPhoneWhitelist(): Set<string> {
+  if (/apps\.visionblo\.com/i.test(waraApiBaseUrl())) return new Set();
   const raw = process.env.WARA_TEST_ALLOWED_PHONES?.trim() || "";
   if (!raw) return new Set();
   return new Set(
@@ -1814,6 +1815,7 @@ export function isPhoneAllowedForTesting(rawPhone: string): boolean {
  * Pensado para que un dev pueda escribir desde su WhatsApp personal y probar el flujo del cliente.
  */
 function impersonationMap(): Map<string, string> {
+  if (/apps\.visionblo\.com/i.test(waraApiBaseUrl())) return new Map();
   const raw = process.env.WARA_TEST_IMPERSONATE_MAP?.trim() || "";
   const map = new Map<string, string>();
   if (!raw) return map;
@@ -1853,6 +1855,9 @@ function applyTestContactAliases(
   lookup: WaraEmpresaLookupResult,
   rawPhone: string
 ): WaraEmpresaLookupResult {
+  // Nunca inyectar empresas de staging (WARA / El Cacique) contra Wara producción.
+  if (!/staging\.visionblo\.com/i.test(waraApiBaseUrl())) return lookup;
+
   const aliases = resolvePruebasContactAliases(rawPhone);
   if (!aliases?.length) return lookup;
 
@@ -2398,6 +2403,7 @@ export async function probeWaraContactSession(contactId: number): Promise<{
 
 /** Modo prueba: si Wara no abre sesión para la empresa elegida, usar otra del mismo teléfono. */
 function isPruebasFallbackEnabled(): boolean {
+  if (!/staging\.visionblo\.com/i.test(waraApiBaseUrl())) return false;
   const v = process.env.WARA_PRUEBAS_FALLBACK_EL_CACIQUE?.trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "si";
 }

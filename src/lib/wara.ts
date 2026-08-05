@@ -1488,7 +1488,8 @@ function parseSummaryReading(raw: string | undefined): number | undefined {
 export function extractOdometroFromOdometerSummary(text: string): number | undefined {
   const voyIdx = text.toLowerCase().lastIndexOf("voy a registrar");
   const tail = voyIdx >= 0 ? text.slice(voyIdx) : text.slice(-2500);
-  const matches = [...tail.matchAll(/od[oó]metro[^\n:]*[:\-]\s*([\d.\s,]+)\s*(?:km)?/gi)];
+  // Sin \s: evita "26\n99000" → 2699000 (bug 2026-08-05).
+  const matches = [...tail.matchAll(/od[oó]metro[^\n:]*[:\-]\s*([\d.,]+)\s*(?:km)?/gi)];
   for (let i = matches.length - 1; i >= 0; i--) {
     const n = parseSummaryReading(matches[i][1]);
     if (typeof n === "number") return n;
@@ -1499,9 +1500,11 @@ export function extractOdometroFromOdometerSummary(text: string): number | undef
 /** Km parafraseados por el agente ("el nuevo valor es 123690 km"). */
 export function extractOdometroFromOdometerContext(text: string): number | undefined {
   const tail = text.slice(-2500);
+  // Sin espacios en el run numérico: "05/08/26\n99000 km" no debe virar 2699000
+  // (bug real, producción 2026-08-05).
   const patterns = [
-    /(?:nuevo valor(?: del od[oó]metro)?|el od[oó]metro es|valor del od[oó]metro es|el nuevo valor es)\s*(?:de\s+)?([\d.\s,]+)\s*(?:km)?/gi,
-    /(\d[\d.\s,]{2,})\s*km\b/gi,
+    /(?:nuevo valor(?: del od[oó]metro)?|el od[oó]metro es|valor del od[oó]metro es|el nuevo valor es)\s*(?:de\s+)?([\d.,]+)\s*(?:km)?/gi,
+    /(\d[\d.,]{2,})\s*km\b/gi,
   ];
   for (const re of patterns) {
     const matches = [...tail.matchAll(re)];

@@ -210,11 +210,13 @@ function parseFromText(rawText: string): {
     : text;
   const kmCandidates: string[] = [];
   const horoCandidates: string[] = [];
-  const kmRegex = /(?:od[oó]metro|kilometraje|kil[oó]metros?|km)[^\d]{0,20}(\d[\d.\s,]*\d|\d)/gi;
-  const kmTrailRegex = /(\d[\d.\s,]*\d|\d)\s*(?:km|kil[oó]metros?)\b/gi;
+  // Sin \s en el run de dígitos: bug real 2026-08-05 — "05/08/26\n99000 km" capturaba
+  // "26\n99000" → 2699000 (año corto de la fecha pegado al km). Miles con punto/coma OK.
+  const kmRegex = /(?:od[oó]metro|kilometraje|kil[oó]metros?|km)[^\d]{0,20}(\d[\d.,]*\d|\d)/gi;
+  const kmTrailRegex = /(\d[\d.,]*\d|\d)\s*(?:km|kil[oó]metros?)\b/gi;
   // "Hora: 09:30" (hora de lectura) NO es horómetro; solo horómetro explícito o "horas" en plural.
-  const horoRegex = /(?:hor[oó]metro|\bhoras\b)[^\d]{0,20}(\d[\d.\s,]*\d|\d)/gi;
-  const horoTrailRegex = /(\d[\d.\s,]*\d|\d)\s*(?:hs|\bhoras\b)\b/gi;
+  const horoRegex = /(?:hor[oó]metro|\bhoras\b)[^\d]{0,20}(\d[\d.,]*\d|\d)/gi;
+  const horoTrailRegex = /(\d[\d.,]*\d|\d)\s*(?:hs|\bhoras\b)\b/gi;
   for (const m of cleaned.matchAll(kmRegex)) if (m[1]) kmCandidates.push(m[1]);
   for (const m of cleaned.matchAll(kmTrailRegex)) if (m[1]) kmCandidates.push(m[1]);
   for (const m of cleaned.matchAll(horoRegex)) if (m[1]) horoCandidates.push(m[1]);
@@ -556,9 +558,12 @@ export async function POST(req: NextRequest) {
         hasLiveOdometerPendingAction && !!dbPendingOdoAction?.payload,
     },
   );
+  // Bug real, producción 2026-08-05: "quiero hacer otro ajuste de odómetro en la misma
+  // unidad" DEBE reiniciar el valor (pedir km nuevo) aunque conserve la patente por
+  // referencia vaga. Antes `!explicitVagueUnitReference` bloqueaba el arranque en blanco
+  // y reusaba el km viejo del hilo (además corruptible a 2699000 por concat fecha+km).
   const freshOdometerRestart =
     odometerFlowStart &&
-    !explicitVagueUnitReference &&
     !hasUnitHintInCurrentMessage &&
     looksLikeFreshOdometerRestartRequest(rawText);
   // Bug real, producción 2026-07-29: el propio prompt del BOT ("Para registrar el cambio
@@ -588,14 +593,15 @@ export async function POST(req: NextRequest) {
   const priorFlowExplicitlySuperseded = isOdometerFlowSuperseded(preliminaryThreadText);
   const treatAsBlankFlowStart =
     odometerFlowStart &&
-    !explicitVagueUnitReference &&
     !hasUnitHintInCurrentMessage &&
     !isOdometerReminder &&
     (horometerOnlyIntent ||
       supersedesPendingConfirm ||
       freshOdometerRestart ||
       priorFlowExplicitlySuperseded ||
-      (!hasPendingConfirmInThread && !threadHasPriorOdometerUnitRequest));
+      (!explicitVagueUnitReference &&
+        !hasPendingConfirmInThread &&
+        !threadHasPriorOdometerUnitRequest));
   if (treatAsBlankFlowStart || supersedesPendingConfirm) {
     await clearPendingAction(prisma, rawPhone);
   }
@@ -915,15 +921,33 @@ export async function POST(req: NextRequest) {
     );
   } else if (
     !patente &&
-    freshOdometerIntentWithoutUnit &&
-    shouldUseActiveUnitFallback(rawText) &&
+    ((freshOdometerIntentWithoutUnit && shouldUseActiveUnitFallback(rawText)) ||
+      (treatAsBlankFlowStart &&
+        explicitVagueUnitReference &&
+        shouldUseActiveUnitFallback(rawText))) &&
     contextUnitPlate
   ) {
     // Bug real, producción 2026-07-30: "Podemos cambiar el odómetro?" tras certificado o
     // consulta GPS tenía activeUnit (AD 626 UG) pero freshOdometerIntentWithoutUnit
     // bloqueaba resolveOdometerContextPlate y odometerFlowStart bloqueaba el fallback
     // de activeUnit — pedía patente de cero pese a la unidad recién usada.
+    // Bug 2026-08-05: "otro ajuste ... misma unidad" ahora es blank (limpia km) pero
+    // debe conservar la patente vía activeUnit / referencia vaga.
     patente = normalizePlate(contextUnitPlate);
+  } else if (
+    !patente &&
+    treatAsBlankFlowStart &&
+    explicitVagueUnitReference
+  ) {
+    patente = normalizePlate(
+      resolveOdometerContextPlate({
+        threadText: preliminaryThreadText,
+        lastThreadPlate,
+        activeUnitPlate: contextUnitPlate,
+        explicitVagueUnitReference: true,
+        hasPendingOdometerConfirm: false,
+      }) ?? "",
+    );
   }
 
   if (!patente && !odometerFlowStart && !isFleetUnitSelection && !clockTimeOnlyReading) {
