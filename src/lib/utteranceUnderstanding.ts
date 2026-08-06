@@ -27,11 +27,27 @@ export type UtteranceReferent =
   | "other"
   | "unclear";
 
+/** Cómo el cliente identifica la unidad (razonado por IA, no por regex de frases). */
+export type UnitRefKind =
+  | "full_plate"
+  | "prefix"
+  | "suffix"
+  | "brand"
+  | "unit_name"
+  | "none";
+
+export type UnitRef = {
+  kind: UnitRefKind;
+  /** Valor usable: patente/prefijo/sufijo compacto, marca o nombre. null si kind=none. */
+  value: string | null;
+};
+
 export type UtteranceUnderstanding = {
   referent: UtteranceReferent;
   confidence: number;
   clarifyQuestion: string | null;
   reason?: string;
+  unitRef?: UnitRef;
 };
 
 export function isUtteranceUnderstandingEnabled(): boolean {
@@ -41,32 +57,41 @@ export function isUtteranceUnderstandingEnabled(): boolean {
 }
 
 const SYSTEM_PROMPT = `Sos el intérprete de intención de Atilio (Mesa de Ayuda Wara por WhatsApp).
-Tu trabajo: entender a qué se refiere el mensaje_nuevo dado el historial (sobre todo la última pregunta del bot).
+Tu trabajo: RAZONAR a qué se refiere el mensaje_nuevo dado el historial (sobre todo la última pregunta del bot) y EXTRAER la referencia a unidad si la hay.
 NO inventes patentes, km ni trámites. Si dudás, pedí aclaración.
-Tolerá errores de escritura / typos / abreviaturas: interpretá la intención igual.
-El cliente puede mandar datos EN DESORDEN o incompletos (km sin patente, pregunta de ticket en medio de otra cosa, etc.): mirá el hilo y clasificá la intención real del mensaje_nuevo, no el orden ideal del trámite.
+Tolerá errores de escritura / typos / abreviaturas / desorden: interpretá la intención real, no el texto literal.
 
 Devolvé SOLO JSON válido:
-{"referent":"vehicle_unit|admin_number|menu_option|confirmation|odometer_data|new_request|other|unclear","confidence":0.0-1.0,"clarify_question":string|null,"reason":"breve"}
+{"referent":"vehicle_unit|admin_number|menu_option|confirmation|odometer_data|new_request|other|unclear","confidence":0.0-1.0,"clarify_question":string|null,"unit_ref":{"kind":"full_plate|prefix|suffix|brand|unit_name|none","value":string|null},"reason":"breve"}
 
 Significado de referent:
-- vehicle_unit — el cliente indica o busca una UNIDAD (patente, prefijo de matrícula, marca, nombre, "la que empieza con…").
-- admin_number — habla de un NÚMERO administrativo: NRO/N°/número de caso, interno, ticket, teléfono, código — NO es prefijo de patente.
-- menu_option — elige opción de menú (empresa 1/2, sí/no de lista).
-- confirmation — confirma o rechaza un resumen (CONFIRMO, dale, ok, no, tks/gracias como cierre).
-- odometer_data — aporta km/hs/fecha para un trámite de odómetro/horómetro ya en curso (aunque lo mande "antes de tiempo").
-- new_request — pide un trámite o tema nuevo (odómetro, GPS, certificado, mantenimiento, ayuda…).
-- other — otra cosa entendible (saludo, gracias, chitchat).
-- unclear — no se entiende con seguridad a qué se refiere.
+- vehicle_unit — indica o busca una UNIDAD (patente, fragmento de matrícula, marca, nombre interno).
+- admin_number — número administrativo (caso/ticket/interno/teléfono), NO matrícula.
+- menu_option — opción de menú (empresa 1/2, sí/no de lista).
+- confirmation — confirma o rechaza (CONFIRMO, dale, ok, no, gracias como cierre).
+- odometer_data — km/hs/fecha para odómetro/horómetro en curso.
+- new_request — trámite o tema nuevo.
+- other — saludo/chitchat entendible.
+- unclear — no se entiende con seguridad.
 
-Reglas:
-- Si el mensaje trae una matrícula/patente reconocible (ej. AF061DO, AD 427 MC) junto a un pedido de reporte/GPS/estado → vehicle_unit con alta confianza. NO lo trates como número de caso.
-- "NRO", "N°", "nro 12", "numero 45" suelen ser admin_number, SALVO que el hilo pida explícitamente patente/prefijo Y el cliente diga "empieza con NRO" / "patente NRO…".
-- Un token de 2-3 letras (OST, AG, NKL) SOLO es vehicle_unit si el contexto es buscar/elegir unidad o el cliente lo marca como matrícula/prefijo.
-- Si habla de unidad/patente (aunque esté mal escrito) pero NO trae la matrícula concreta → pedí la chapa en clarify_question.
-- Si confidence < 0.75 → preferí unclear y preguntá.
-- clarify_question: español rioplatense, corto, conversacional, sin emojis. null si no hace falta aclarar.
-- Ejemplos: "¿A qué te referís con NRO: un número de caso/interno, o parte de una patente?" / "No te seguí: ¿me estás pasando una matrícula o un número de otra cosa?"`;
+unit_ref (OBLIGATORIO razonarlo siempre):
+- full_plate — matrícula completa usable (value: letras+dígitos compactos, ej. "AD427MC").
+- prefix — el cliente apunta al COMIENZO de la patente (empieza/arranca/inicia/la que va con…), aunque el verbo o la frase estén mal escritos. value: solo las 2–3 letras/dígitos del prefijo (ej. "AD", "OST"), NUNCA la frase tipográfica completa.
+- suffix — apunta al FINAL de la patente (termina/finaliza en…). value: sufijo corto.
+- brand — marca de vehículo (Nissan, Saveiro…). value: marca normalizada.
+- unit_name — nombre/código interno (M300-112, 300-112). value: ese código.
+- none — no hay referencia a unidad en el mensaje_nuevo.
+
+Principios (generales):
+- Si el cliente pide estado/GPS/reporte Y en el mismo mensaje indica cómo identificar la unidad (empieza/termina con…, marca, nombre, patente) → vehicle_unit + unit_ref concreto. NUNCA pidas de nuevo la patente: ya dio el dato.
+- Si el hilo pide patente/prefijo/unidad y el mensaje parece un intento de identificarla → vehicle_unit + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
+- Si el hilo YA tiene una unidad activa/confirmada (el bot dijo "Con la unidad X…" o "contame qué problema") y el cliente pide estado/reporte/GPS sin repetir la patente ("Quiero el estado", "el reporte", "¿cómo está?") → vehicle_unit, unit_ref.none, clarify_question null. NUNCA pidas la matrícula de nuevo: usá la del hilo.
+- Matrícula reconocible (formato AR) → full_plate, no admin_number.
+- "NRO"/"N°"/"numero" sueltos → admin_number y unit_ref.none, SALVO que el cliente los marque explícitamente como parte de patente/prefijo.
+- Token de 2–3 letras solo es prefix/full_plate si el contexto es buscar/elegir unidad.
+- Si vehicle_unit pero sin dato usable → unit_ref.kind=none y pedí la chapa en clarify_question.
+- confidence < 0.75 → preferí unclear.
+- clarify_question: español rioplatense, corto, sin emojis. null si no hace falta.`;
 
 const FALLBACK_CLARIFY =
   "No te seguí del todo. ¿Me estás pasando una patente o parte de ella, o un número de otra cosa (caso, interno, opción)?";
@@ -85,6 +110,31 @@ export function shouldInterpretAmbiguousUtterance(
   return true;
 }
 
+function parseUnitRef(raw: unknown): UnitRef | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as { kind?: string; value?: string | null };
+  const kind = String(o.kind ?? "none").trim() as UnitRefKind;
+  const valid: UnitRefKind[] = [
+    "full_plate",
+    "prefix",
+    "suffix",
+    "brand",
+    "unit_name",
+    "none",
+  ];
+  if (!valid.includes(kind)) return { kind: "none", value: null };
+  if (kind === "none") return { kind: "none", value: null };
+  const valueRaw = typeof o.value === "string" ? o.value.trim() : "";
+  if (!valueRaw) return { kind: "none", value: null };
+  // Prefijo/sufijo/patente: compactar; marca/nombre: conservar espacios simples.
+  const value =
+    kind === "brand" || kind === "unit_name"
+      ? valueRaw.replace(/\s+/g, " ").slice(0, 40)
+      : valueRaw.replace(/[\s\-_.]+/g, "").toUpperCase().slice(0, 12);
+  if (!value) return { kind: "none", value: null };
+  return { kind, value };
+}
+
 function parseUnderstanding(raw: string): UtteranceUnderstanding | null {
   try {
     const parsed = JSON.parse(raw) as {
@@ -92,6 +142,7 @@ function parseUnderstanding(raw: string): UtteranceUnderstanding | null {
       confidence?: number;
       clarify_question?: string | null;
       reason?: string;
+      unit_ref?: unknown;
     };
     const referent = String(parsed.referent ?? "").trim() as UtteranceReferent;
     const valid: UtteranceReferent[] = [
@@ -116,6 +167,7 @@ function parseUnderstanding(raw: string): UtteranceUnderstanding | null {
       confidence: Math.max(0, Math.min(1, confidence)),
       clarifyQuestion: clarify,
       reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+      unitRef: parseUnitRef(parsed.unit_ref),
     };
   } catch {
     return null;
@@ -150,7 +202,7 @@ export async function understandUserUtterance(
               { role: "user", content: user },
             ],
             temperature: 0.1,
-            max_tokens: 160,
+            max_tokens: 220,
             response_format: { type: "json_object" },
           },
           { signal },
@@ -249,4 +301,47 @@ export function shouldProceedAsVehicleUnit(
   if (!understanding) return true; // sin IA → reglas como siempre
   if (understanding.confidence < MIN_CONFIDENCE) return false;
   return understanding.referent === "vehicle_unit";
+}
+
+/**
+ * Hint de búsqueda en flota razonado por IA (no regex de frases).
+ * Las reglas operativas ejecutan con este valor; no hace falta matchear el typo.
+ */
+export function unitSearchHintFromUnderstanding(
+  understanding: UtteranceUnderstanding | null,
+): { platePrefix?: string; plate?: string; brand?: string; unitName?: string } | null {
+  if (!understanding || understanding.confidence < MIN_CONFIDENCE) return null;
+  const ref = understanding.unitRef;
+  if (!ref || ref.kind === "none" || !ref.value) return null;
+  if (understanding.referent !== "vehicle_unit" && understanding.referent !== "unclear") {
+    // Si la IA extrajo unit_ref con confianza pero clasificó otro referent, igual usamos el hint
+    // solo cuando el kind es claramente de unidad.
+  }
+  switch (ref.kind) {
+    case "prefix":
+      if (/^[A-Z0-9]{2,4}$/.test(ref.value)) return { platePrefix: ref.value };
+      return null;
+    case "full_plate":
+      if (ref.value.length >= 5) return { plate: ref.value };
+      if (/^[A-Z0-9]{2,4}$/.test(ref.value)) return { platePrefix: ref.value };
+      return null;
+    case "brand":
+      return { brand: ref.value };
+    case "unit_name":
+      return { unitName: ref.value };
+    case "suffix":
+      // Sufijo se resuelve en reglas vía texto; no forzamos prefix.
+      return null;
+    default:
+      return null;
+  }
+}
+
+/** IA razonó una referencia usable a unidad → ir a flota (ejecutar), no aclarar ni chitchat. */
+export function shouldForceUnidadesFromUnderstanding(
+  understanding: UtteranceUnderstanding | null,
+): boolean {
+  if (!understanding || understanding.confidence < MIN_CONFIDENCE) return false;
+  if (understanding.referent !== "vehicle_unit") return false;
+  return unitSearchHintFromUnderstanding(understanding) != null;
 }

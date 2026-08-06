@@ -14,9 +14,12 @@ import { resolveTurnExecutor } from "@/lib/whatsappTurnClassifierAI";
 import {
   clarificationFromUnderstanding,
   shouldAnswerOpenCaseFromUnderstanding,
+  shouldForceUnidadesFromUnderstanding,
   shouldInterpretAmbiguousUtterance,
   shouldProceedAsVehicleUnit,
   understandUserUtterance,
+  unitSearchHintFromUnderstanding,
+  type UtteranceUnderstanding,
 } from "@/lib/utteranceUnderstanding";
 import {
   buildUnexpectedTurnFallbackMessage,
@@ -46,6 +49,7 @@ import {
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
   detectLoosePlate,
+  extractPlatePrefixFromMessage,
   hasPendingMaintenancePlateRequest,
   isPlausibleVehiclePlate,
   normalizePlate,
@@ -114,12 +118,18 @@ function looksLikePendingCertificateUnitReply(text: string): boolean {
   );
 }
 
-function executorBody(rawPhone: string, body: string): JsonRecord {
+function executorBody(
+  rawPhone: string,
+  body: string,
+  extras?: { platePrefix?: string; plate?: string },
+): JsonRecord {
   return {
     from: rawPhone,
     phone: rawPhone,
     body,
     rawText: body,
+    ...(extras?.platePrefix ? { platePrefix: extras.platePrefix } : {}),
+    ...(extras?.plate ? { patente: extras.plate, plate: extras.plate } : {}),
   };
 }
 
@@ -128,6 +138,7 @@ async function invokeExecutor(
   rawPhone: string,
   body: string,
   apiKey: string,
+  extras?: { platePrefix?: string; plate?: string },
 ): Promise<JsonRecord> {
   const handler = EXECUTOR_HANDLERS[executor];
   const req = new NextRequest(`http://internal${TURN_EXECUTOR_PATH[executor]}`, {
@@ -136,7 +147,7 @@ async function invokeExecutor(
       "Content-Type": "application/json",
       "x-api-key": apiKey,
     },
-    body: JSON.stringify(executorBody(rawPhone, body)),
+    body: JSON.stringify(executorBody(rawPhone, body, extras)),
   });
   const res = await handler(req);
   return (await res.json().catch(() => ({}))) as JsonRecord;
@@ -334,6 +345,8 @@ export async function runTurnExecutorPhase(params: {
   // ——— IA primero (casi todo el diálogo) ———
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
+  let lastUnderstanding: UtteranceUnderstanding | null = null;
+  let aiUnitExtras: { platePrefix?: string; plate?: string } | undefined;
   const activeUnitForNl = await getActiveUnit(prisma, rawPhone);
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
@@ -343,25 +356,44 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadCtx.classificationThread,
     );
+    lastUnderstanding = understanding;
+    const aiHint = unitSearchHintFromUnderstanding(understanding);
     const plateInMsg = detectLoosePlate(selectionText);
-    const hasUsablePlate =
+    const regexPlateOk =
       !!plateInMsg && isPlausibleVehiclePlate(normalizePlate(plateInMsg));
+    const regexPrefix = extractPlatePrefixFromMessage(selectionText);
+    // Reglas determinísticas primero; IA solo completa lo que el texto no pudo extraer.
+    const hasUsablePlate = regexPlateOk || !!aiHint?.plate;
+    const prefixHint = regexPrefix ?? aiHint?.platePrefix ?? null;
+    const hasUsablePrefix = !!prefixHint;
+    aiUnitExtras = {
+      ...(prefixHint ? { platePrefix: prefixHint } : {}),
+      ...(!regexPlateOk && aiHint?.plate ? { plate: aiHint.plate } : {}),
+    };
+    if (!aiUnitExtras.platePrefix && !aiUnitExtras.plate) {
+      aiUnitExtras = undefined;
+    }
 
-    // Si el mensaje ya trae una patente usable, no preguntar "¿matrícula o caso?"
-    // (regresión: "no me reporta la AF061DO" → unclear).
+    // Si el mensaje (o la IA) ya trae patente/prefijo usable, no preguntar — ejecutar flota.
     const clarify = clarificationFromUnderstanding(understanding, selectionText);
-    if (clarify && !hasUsablePlate && !activeUnitForNl?.plate && !threadAwaitingUnitProblem) {
+    if (
+      clarify &&
+      !hasUsablePlate &&
+      !hasUsablePrefix &&
+      !activeUnitForNl?.plate &&
+      !threadAwaitingUnitProblem
+    ) {
       console.info(
         `[utteranceUnderstanding] aclarar phone=${rawPhone.slice(0, 4)}… referent=${understanding?.referent} conf=${understanding?.confidence}`,
       );
       return { message: clarify, executor: "info_guides", ok: true };
     }
-    // Pedir matrícula SOLO si no hay unidad en contexto ni el bot acaba de pedir el síntoma.
-    // Bug real 2026-08-06: con AG 316 DX activa + "No veo posición" → pedía patente de nuevo.
+    // Pedir matrícula SOLO si no hay unidad/prefijo en contexto ni el bot acaba de pedir el síntoma.
     if (
       understanding &&
       shouldProceedAsVehicleUnit(understanding) &&
       !hasUsablePlate &&
+      !hasUsablePrefix &&
       !isBarePlatePrefixHint(selectionText) &&
       !looksLikeFleetUnitSearchInput(selectionText) &&
       !activeUnitForNl?.plate &&
@@ -402,22 +434,52 @@ export async function runTurnExecutorPhase(params: {
         looksLikeUnitConsultFollowUp(selectionText) ||
         looksLikeUnitReportingStatusCue(selectionText) ||
         looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+        looksLikeLiveUnitConsultIntent(selectionText) ||
         looksLikeSubstantiveCustomerMessage(selectionText));
-    if (hasUsablePlate || keepActiveUnitThread) {
+    // Con unidad activa, NUNCA saltear flota por un referent IA raro ("new_request" en
+    // "Quiero el estado"): el hilo ya tiene la patente.
+    if (
+      hasUsablePlate ||
+      hasUsablePrefix ||
+      keepActiveUnitThread ||
+      shouldForceUnidadesFromUnderstanding(understanding)
+    ) {
       skipSchematicUnitRoute = false;
       if (hasUsablePlate) {
         console.info(
-          `[utteranceUnderstanding] patente-en-mensaje phone=${rawPhone.slice(0, 4)}… plate=${plateInMsg} (prioriza flota)`,
+          `[utteranceUnderstanding] patente-en-mensaje phone=${rawPhone.slice(0, 4)}… plate=${aiHint?.plate ?? plateInMsg} (prioriza flota)`,
+        );
+      } else if (hasUsablePrefix) {
+        console.info(
+          `[utteranceUnderstanding] prefijo-razonado phone=${rawPhone.slice(0, 4)}… prefix=${prefixHint} source=${aiHint?.platePrefix ? "ai" : "rules"} (prioriza flota)`,
+        );
+      } else if (shouldForceUnidadesFromUnderstanding(understanding)) {
+        console.info(
+          `[utteranceUnderstanding] unidad-forzada-ia phone=${rawPhone.slice(0, 4)}… unit_ref=${understanding?.unitRef?.kind}:${understanding?.unitRef?.value}`,
         );
       } else {
         console.info(
           `[utteranceUnderstanding] hilo-unidad-activa phone=${rawPhone.slice(0, 4)}… plate=${activeUnitForNl?.plate}`,
         );
       }
-    } else if (understanding && !shouldProceedAsVehicleUnit(understanding)) {
+    } else if (
+      understanding &&
+      !shouldProceedAsVehicleUnit(understanding) &&
+      !activeUnitForNl?.plate
+    ) {
       skipSchematicUnitRoute = true;
       console.info(
         `[utteranceUnderstanding] no-unidad phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent} conf=${understanding.confidence}`,
+      );
+    } else if (
+      understanding &&
+      !shouldProceedAsVehicleUnit(understanding) &&
+      activeUnitForNl?.plate
+    ) {
+      // Hay unidad activa: no saltear flota aunque la IA diga otro referent.
+      skipSchematicUnitRoute = false;
+      console.info(
+        `[utteranceUnderstanding] hilo-unidad-activa-vs-referent phone=${rawPhone.slice(0, 4)}… plate=${activeUnitForNl.plate} referent=${understanding.referent}`,
       );
     }
   }
@@ -567,7 +629,13 @@ export async function runTurnExecutorPhase(params: {
         threadHasRecentUnitCaseOpened(threadForFollowUp)) &&
         looksLikeSubstantiveCustomerMessage(selectionText)))
   ) {
-    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execResult = await invokeExecutor(
+      "unidades",
+      rawPhone,
+      selectionText,
+      apiKey,
+      aiUnitExtras,
+    );
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (agentComposeRequested(execResult)) {
       const dialogueState = parseExecutorDialogueState(execResult);
@@ -590,14 +658,22 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Marca/prefijo/nombre/patente parcial → buscar en flota y listar similares (no pedir patente completa al agente).
+  // Incluye unit_ref razonada por IA aunque el texto no matchee regex.
   if (
     !skipSchematicUnitRoute &&
-    shouldRouteTurnToUnidadesExecutor({
+    (shouldRouteTurnToUnidadesExecutor({
       selectionText,
       threadText: threadCtx.classificationThread,
-    })
+    }) ||
+      shouldForceUnidadesFromUnderstanding(lastUnderstanding))
   ) {
-    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execResult = await invokeExecutor(
+      "unidades",
+      rawPhone,
+      selectionText,
+      apiKey,
+      aiUnitExtras,
+    );
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (agentComposeRequested(execResult)) {
       const dialogueState = parseExecutorDialogueState(execResult);

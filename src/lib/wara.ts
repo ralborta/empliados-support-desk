@@ -351,6 +351,59 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
     if (!NON_PLATE_PREFIX_WORDS.has(hint.toLowerCase())) return hint;
   }
 
+  // Typo / LN general: verbo ≈ comienza/empieza (aunque mal escrito) + prefijo 2-3 letras.
+  // Bug real 2026-08-06: "coiemza ad", "cvomienza con ad" no matcheaban el regex acotado
+  // y el bot preguntaba si el texto crudo era la patente en vez de buscar prefijo AD.
+  const fuzzyPrefix = extractPlatePrefixAfterFuzzyStartsVerb(norm);
+  if (fuzzyPrefix) return fuzzyPrefix;
+
+  return null;
+}
+
+const STARTS_WITH_VERBS = [
+  "comienza",
+  "comienzan",
+  "empieza",
+  "empiezan",
+  "arranca",
+  "arrancan",
+  "inicia",
+  "inician",
+] as const;
+
+/** Token que parece "comienza/empieza/…" aunque esté mal tipeado. */
+function tokenLooksLikeStartsWithVerb(token: string): boolean {
+  const t = token.replace(/[^a-z]/g, "");
+  if (t.length < 5 || t.length > 12) return false;
+  for (const verb of STARTS_WITH_VERBS) {
+    const maxDist = verb.length <= 6 ? 2 : 3;
+    if (levenshteinDistance(t, verb) <= maxDist) return true;
+  }
+  // Forma blanda: com…za / emp…za / co…ienza (cubre coiemza, cvomienza, etc.)
+  if (/^c[ov]?o?m?\w{0,4}n?za$/.test(t) && t.includes("z")) return true;
+  if (/^emp\w{0,4}za$/.test(t)) return true;
+  return false;
+}
+
+/**
+ * Prefijo tras verbo fuzzy de "empieza/comienza" (con o sin "con").
+ * General: no lista de frases; cualquier typo cercano + letras de patente.
+ */
+function extractPlatePrefixAfterFuzzyStartsVerb(norm: string): string | null {
+  const tokens = norm.split(/[^a-z0-9]+/).filter(Boolean);
+  for (let i = 0; i < tokens.length; i++) {
+    if (!tokenLooksLikeStartsWithVerb(tokens[i]!)) continue;
+    let j = i + 1;
+    // "con" / typos frecuentes ("cn", "c") — conector, no prefijo.
+    while (j < tokens.length && /^(?:con|cn|c)$/.test(tokens[j]!)) j++;
+    const cand = tokens[j];
+    if (!cand) continue;
+    if (!/^[a-z]{2,3}\d{0,3}$/.test(cand)) continue;
+    if (NON_PLATE_PREFIX_WORDS.has(cand)) continue;
+    const hint = cand.toUpperCase();
+    if (isPlausibleVehiclePlate(hint)) continue;
+    return hint;
+  }
   return null;
 }
 
@@ -1631,6 +1684,14 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("nombre de la otra unidad"),
     lower.lastIndexOf("pasame la patente o el nombre"),
     lower.lastIndexOf("la consulto en wara"),
+    // Pedido LN vía info_guides / utterance ("¿Me podés dar la patente o el prefijo…?")
+    lower.lastIndexOf("patente o el prefijo"),
+    lower.lastIndexOf("patente o prefijo"),
+    lower.lastIndexOf("me podes dar la patente"),
+    lower.lastIndexOf("me podés dar la patente"),
+    lower.lastIndexOf("pasame la patente"),
+    lower.lastIndexOf("pasame la matricula"),
+    lower.lastIndexOf("pasame la matrícula"),
   ].filter((i) => i >= 0);
   if (!unitConsultMarkers.length) return false;
 
@@ -1662,7 +1723,9 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     /otra unidad sin reporte/.test(tail) ||
     /nombre de la otra unidad/.test(tail) ||
     /consulto en wara/.test(tail) ||
-    /pasame la patente o el nombre/.test(tail)
+    /pasame la patente o el nombre/.test(tail) ||
+    /patente o (?:el )?prefijo/.test(tail) ||
+    /(?:me )?pode[s]?\s+dar la patente/.test(tail)
   );
 }
 

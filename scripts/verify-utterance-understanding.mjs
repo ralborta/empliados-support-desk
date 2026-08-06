@@ -6,8 +6,10 @@
 import {
   clarificationFromUnderstanding,
   shouldAnswerOpenCaseFromUnderstanding,
+  shouldForceUnidadesFromUnderstanding,
   shouldInterpretAmbiguousUtterance,
   shouldProceedAsVehicleUnit,
+  unitSearchHintFromUnderstanding,
 } from "../src/lib/utteranceUnderstanding.ts";
 
 let failed = 0;
@@ -100,6 +102,44 @@ assert(
   "admin_number no flota",
 );
 assert(shouldProceedAsVehicleUnit(null), "sin IA → reglas");
+
+console.log("\n— unit_ref razonada (IA → reglas ejecutan) —");
+assert(
+  unitSearchHintFromUnderstanding({
+    referent: "vehicle_unit",
+    confidence: 0.92,
+    clarifyQuestion: null,
+    unitRef: { kind: "prefix", value: "AD" },
+  })?.platePrefix === "AD",
+  "unit_ref prefix → platePrefix AD",
+);
+assert(
+  shouldForceUnidadesFromUnderstanding({
+    referent: "vehicle_unit",
+    confidence: 0.9,
+    clarifyQuestion: null,
+    unitRef: { kind: "prefix", value: "OST" },
+  }),
+  "prefix razonado → fuerza unidades",
+);
+assert(
+  !shouldForceUnidadesFromUnderstanding({
+    referent: "vehicle_unit",
+    confidence: 0.9,
+    clarifyQuestion: null,
+    unitRef: { kind: "none", value: null },
+  }),
+  "vehicle_unit sin dato → no fuerza",
+);
+assert(
+  unitSearchHintFromUnderstanding({
+    referent: "vehicle_unit",
+    confidence: 0.95,
+    clarifyQuestion: null,
+    unitRef: { kind: "full_plate", value: "AD427MC" },
+  })?.plate === "AD427MC",
+  "full_plate → plate",
+);
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

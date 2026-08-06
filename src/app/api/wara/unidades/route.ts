@@ -10,7 +10,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, extractPlatePrefixFromMessage, extractPlateSuffixFromMessage, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -77,6 +77,8 @@ const bodySchema = z
     patente: z.string().min(2).optional(),
     plate: z.string().min(2).optional(),
     rawText: z.string().optional(),
+    /** Prefijo de patente ya razonado (utterance LN). Evita depender del typo del cliente. */
+    platePrefix: z.string().min(2).max(6).optional(),
     unidad: z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]).optional(),
     unidades: z.array(z.union([z.number(), z.string()])).optional(),
     patentes: z.array(z.string()).optional(),
@@ -980,6 +982,10 @@ export async function POST(req: NextRequest) {
     !explicitPlate &&
     !unitQueryInMessage &&
     !threadPlateEarly &&
+    !parsed.data.platePrefix?.trim() &&
+    !extractPlatePrefixFromMessage(rawText) &&
+    !extractPlateSuffixFromMessage(rawText) &&
+    !looksLikeFleetUnitSearchInput(rawText) &&
     (explicitRejection ||
       looksLikeAnotherUnitRequest(rawText) ||
       mentionsMissingReportWithoutPlate(rawText) ||
@@ -1082,6 +1088,7 @@ export async function POST(req: NextRequest) {
     // Ampliado 2026-07-29: también aplica si el cliente sigue un hilo conversacional
     // (problema vago, historial/recorrido, pushback) sin nombrar de nuevo la unidad.
     if (
+      !parsed.data.platePrefix?.trim() &&
       (liveUnitConsult || conversationalConcern || gpsLoopFollowUp) &&
       shouldUseActiveUnitFallback(rawText) &&
       activeUnitRecord?.plate &&
@@ -1104,6 +1111,7 @@ export async function POST(req: NextRequest) {
         units: result.unidades,
         preferAi: preferAiResolution,
         aiHistorial,
+        prefixHint: parsed.data.platePrefix ?? null,
       });
 
       // Diagnóstico liviano: cuando la resolución no encuentra nada, dejar rastro de

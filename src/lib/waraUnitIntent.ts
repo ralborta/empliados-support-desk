@@ -944,6 +944,16 @@ function extractPlatePrefixHint(rawText: string): string | null {
   return extractPlatePrefixFromMessage(rawText);
 }
 
+/** Normaliza un prefijo ya razonado (IA / caller) a 2–4 chars alfanuméricos. */
+function normalizePrefixHint(raw: string | null | undefined): string | null {
+  const compact = String(raw ?? "")
+    .trim()
+    .replace(/[\s\-_.]+/g, "")
+    .toUpperCase();
+  if (!/^[A-Z0-9]{2,4}$/.test(compact)) return null;
+  return compact;
+}
+
 function shouldReuseThreadPlateForResolution(rawText: string): boolean {
   if (looksLikePlateCorrectionRequest(rawText)) return false;
   if (detectLoosePlate(rawText)) return false;
@@ -1664,6 +1674,11 @@ export async function resolveUnitQuery(params: {
   certificateContext?: boolean;
   odometerContext?: boolean;
   /**
+   * Prefijo ya razonado (p.ej. por utteranceUnderstanding). Si viene, las reglas
+   * ejecutan la búsqueda en flota aunque el texto crudo no matchee regex.
+   */
+  prefixHint?: string | null;
+  /**
    * Historial "solo cliente" para el prompt de la IA (ver `buildCustomerOnlyText`).
    * Si no se pasa, se usa `threadText` tal cual (compatibilidad con callers que no
    * tienen acceso a la base, p.ej. tests). Las reglas determinísticas SIEMPRE usan
@@ -1684,7 +1699,49 @@ export async function resolveUnitQuery(params: {
   if (clarificationPick) return clarificationPick;
 
   const historialForAi = params.aiHistorial ?? params.threadText;
-  const prefixHint = prefixHintFromMessage(params.rawText);
+  const overridePrefix = normalizePrefixHint(params.prefixHint);
+  const prefixHint = overridePrefix ?? prefixHintFromMessage(params.rawText);
+
+  // Prefijo razonado (IA u override) → ejecutar búsqueda en flota YA, sin depender del typo.
+  if (overridePrefix) {
+    const prefixMatches = filterUnitsByPlatePrefix(params.units, overridePrefix);
+    const candidatePlates = prefixMatches
+      .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+      .filter(Boolean);
+    if (prefixMatches.length === 1) {
+      return {
+        intent: "consult_status",
+        plate: candidatePlates[0],
+        searchTerms: [],
+        candidatePlates,
+        source: "rules",
+      };
+    }
+    if (prefixMatches.length > 1) {
+      const labels = prefixMatches
+        .slice(0, 8)
+        .map((u) => (u.patente || u.unidad || "").trim())
+        .join(", ");
+      return {
+        intent: "need_clarification",
+        searchTerms: [],
+        candidatePlates,
+        clarificationQuestion: `Encontré ${prefixMatches.length} unidades que empiezan con ${overridePrefix} (${labels}). ¿Cuál querés? Decime la patente completa.`,
+        source: "rules",
+      };
+    }
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: [],
+      clarificationQuestion: buildFleetUnitNotFoundMessage({
+        rawText: params.rawText,
+        prefix: overridePrefix,
+      }),
+      source: "rules",
+    };
+  }
+
   const brandOrLiveConsult =
     looksLikeVehicleBrandOrUnitSearch(params.rawText) ||
     looksLikeLiveUnitConsultIntent(params.rawText);
@@ -1970,6 +2027,19 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
     return true;
   }
 
+  // Señal concreta de unidad (prefijo tipográfico, patente, marca, nombre) → flota.
+  // No exigir marcador de "pedí la patente": el pedido puede venir de info_guides / LN
+  // ("¿patente o prefijo?") y el cliente responde "coiemza ad" / "comienza con AD".
+  if (
+    !!extractPlatePrefixFromMessage(selectionText) ||
+    isBarePlatePrefixHint(selectionText) ||
+    !!detectLoosePlate(selectionText) ||
+    looksLikeVehicleBrandOrUnitSearch(selectionText) ||
+    looksLikeUnitNameInMessage(selectionText)
+  ) {
+    return true;
+  }
+
   // Tras pedir síntoma o con unidad en hilo: referencia vaga o patente explícita.
   if (
     threadHasRecentUnitProblemListenPrompt(threadText) &&
@@ -1991,20 +2061,8 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
 
   if (!looksLikeFleetUnitSearchInput(selectionText)) return false;
   if (looksLikeUnitListRequest(selectionText)) return false;
-  if (
-    detectLoosePlate(selectionText) &&
-    (looksLikeConversationalUnitConcern(selectionText) ||
-      looksLikeGpsOrUnitStatusQuestion(selectionText) ||
-      looksLikeLiveUnitConsultIntent(selectionText))
-  ) {
-    return true;
-  }
   if (hasPendingUnitConsultPlateRequest(threadText)) return true;
   if (threadHasRecentLiveUnitConsultIntent(threadText)) return true;
-  // Marca, nombre interno o código de unidad en el mensaje → buscar en flota (no agente pidiendo patente).
-  if (looksLikeVehicleBrandOrUnitSearch(selectionText) || looksLikeUnitNameInMessage(selectionText)) {
-    return true;
-  }
   return false;
 }
 

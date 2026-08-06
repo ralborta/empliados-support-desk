@@ -254,7 +254,11 @@ function shouldRequireToolCall(params: {
 function shouldPassthroughBackendMessage(msg: string): boolean {
   return (
     /listo,\s*registr[eé]/i.test(msg) ||
-    /para registrar el cambio respond[eé] confirmo/i.test(msg)
+    /para registrar el cambio respond[eé] confirmo/i.test(msg) ||
+    // Listados/aclaraciones de flota: no reescribir (el agente inventaba "mensaje incompleto"
+    // ante typos de prefijo aunque el backend ya había listado las patentes).
+    /encontr[eé]\s+\d+\s+unidades/i.test(msg) ||
+    /unidades que (?:empiezan|comienzan) con/i.test(msg)
   );
 }
 

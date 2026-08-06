@@ -33,6 +33,7 @@ import {
   detectLoosePlate,
   detectPlate,
   extractPlatePrefixFromMessage,
+  extractPlateSuffixFromMessage,
 } from "@/lib/wara";
 import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 import { clearActiveUnit } from "@/lib/activeUnit";
@@ -962,6 +963,14 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
   if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|dejo de reportar|offline|sin señal|sin senal)\b/.test(t)) {
     return true;
   }
+  // "Quiero el estado" / "dame el estado" / "el estado" — pedido explícito de status
+  // (bug real 2026-08-06: tras NKL961 el bot pedía de nuevo la matrícula).
+  if (
+    /^(quiero|necesito|dame|pasame|decime|ver|consultar|mostrar)?\s*(el\s+)?estado\b/.test(t) ||
+    /\b(quiero|necesito|dame|pasame|decime)\s+(el\s+)?estado\b/.test(t)
+  ) {
+    return true;
+  }
   const gpsUnitCue =
     /\b(gps|ignicio|ignicion|reporte|reportando|offline|ubicacion|posicion|senal|voltaje|marcado|instalado|dispositivo|equipo|seguimiento)\b/.test(
       t,
@@ -994,13 +1003,16 @@ export function looksLikeLiveUnitConsultIntent(text: string | undefined | null):
 }
 
 /**
- * Consulta GPS/reporte de unidad SIN patente/marca concreta ("consultar el reporte de una
- * unidad", "en realidad quiero consultar…"). No debe reusar activeUnit ni patente del hilo.
+ * Consulta GPS/reporte de unidad SIN dato concreto de unidad.
+ * Si el mensaje ya trae prefijo/sufijo/patente/marca, NO es "sin unidad": hay que resolver.
  */
 export function looksLikeGenericUnitConsultWithoutPlate(text: string | undefined | null): boolean {
   const raw = text ?? "";
   if (detectLoosePlate(raw) || detectPlate(raw)) return false;
   if (looksLikeVehicleBrandOrUnitSearch(raw)) return false;
+  // Prefijo/sufijo ya dichos ("la q empieza con AD", "termina en TL") = hay unidad a buscar.
+  if (extractPlatePrefixFromMessage(raw) || extractPlateSuffixFromMessage(raw)) return false;
+  if (isBarePlatePrefixHint(raw)) return false;
   const norm = normCompanyToken(raw);
   if (!norm || norm.length > 220) return false;
   if (looksLikeTicketCreationInfoQuestion(raw)) return false;
@@ -1292,6 +1304,7 @@ export function looksLikeUnitConsultFollowUp(text: string | undefined | null): b
     ) ||
     /\b(verdad|cierto|no funciona|ya no|entonces|de acuerdo|entendido|claro)\b/.test(t) ||
     /\b(no registra|no reporta|sin reporte|offline)\b/.test(t) ||
+    /\b(el\s+)?estado\b/.test(t) ||
     looksLikeUnitReportingStatusCue(text) ||
     looksLikeProblemClarificationPushback(text) ||
     (looksLikeBriefConfirmation(text) && t.length >= 6)

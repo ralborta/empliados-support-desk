@@ -10,7 +10,11 @@
  * preguntar cuál.
  */
 import { extractPlatePrefixFromMessage } from "../src/lib/wara.ts";
-import { looksLikeFleetUnitSearchInput, resolveUnitQuery } from "../src/lib/waraUnitIntent.ts";
+import {
+  looksLikeFleetUnitSearchInput,
+  resolveUnitQuery,
+  shouldRouteTurnToUnidadesExecutor,
+} from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -46,6 +50,44 @@ assert(
 );
 assert(extractPlatePrefixFromMessage("la que comenza con MYQ") === "MYQ", "typo 'comenza' se detecta igual");
 assert(extractPlatePrefixFromMessage("la que cominza con RMX") === "RMX", "typo 'cominza' se detecta igual");
+
+// Bug real 2026-08-06: typos fuertes del verbo ("coiemza", "cvomienza") + prefijo.
+// Solución general (Levenshtein / forma blanda), no whitelist de frases.
+assert(extractPlatePrefixFromMessage("coiemza ad") === "AD", "typo fuerte 'coiemza ad' → AD");
+assert(extractPlatePrefixFromMessage("cvomienza con ad") === "AD", "typo fuerte 'cvomienza con ad' → AD");
+assert(looksLikeFleetUnitSearchInput("coiemza ad"), "'coiemza ad' es búsqueda de flota");
+assert(looksLikeFleetUnitSearchInput("cvomienza con ad"), "'cvomienza con ad' es búsqueda de flota");
+assert(looksLikeFleetUnitSearchInput("la q comienza con ad"), "'la q comienza con ad' sigue OK");
+
+// Prefijo usable → siempre executor unidades (aunque no haya marcador de “pedí patente”).
+assert(
+  shouldRouteTurnToUnidadesExecutor({ selectionText: "coiemza ad", threadText: "" }),
+  "coiemza ad (sin hilo) → shouldRouteTurnToUnidadesExecutor",
+);
+assert(
+  shouldRouteTurnToUnidadesExecutor({ selectionText: "cvomienza con ad", threadText: "" }),
+  "cvomienza con ad → shouldRouteTurnToUnidadesExecutor",
+);
+
+// Prefijo YA razonado (simula unit_ref de IA) aunque el texto crudo no diga nada usable.
+{
+  const fleetAi = [
+    { movil_id: 1, patente: "AD427MC", unidad: "1" },
+    { movil_id: 2, patente: "AD626UJ", unidad: "2" },
+    { movil_id: 3, patente: "XX111AA", unidad: "3" },
+  ];
+  const uqAi = await resolveUnitQuery({
+    rawText: "xyzqwerty tipografico sin sentido",
+    threadText: "",
+    units: fleetAi,
+    preferAi: false,
+    prefixHint: "AD",
+  });
+  assert(
+    uqAi.intent === "need_clarification" && (uqAi.candidatePlates ?? []).length === 2,
+    `prefixHint override IA → lista AD (intent=${uqAi.intent}, n=${(uqAi.candidatePlates ?? []).length})`,
+  );
+}
 
 const fleet = [
   { movil_id: 1, patente: "OST223", unidad: "900-041viejo" },
