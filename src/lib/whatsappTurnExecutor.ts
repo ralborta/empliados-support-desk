@@ -45,6 +45,8 @@ import {
   looksLikePendingTramiteAffirmation,
   detectLoosePlate,
   hasPendingMaintenancePlateRequest,
+  isPlausibleVehiclePlate,
+  normalizePlate,
   threadHasActiveOdometerFlow,
   threadAwaitingHorometerKmValue,
   threadAwaitingOdometerKmValue,
@@ -335,8 +337,14 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadCtx.classificationThread,
     );
+    const plateInMsg = detectLoosePlate(selectionText);
+    const hasUsablePlate =
+      !!plateInMsg && isPlausibleVehiclePlate(normalizePlate(plateInMsg));
+
+    // Si el mensaje ya trae una patente usable, no preguntar "¿matrícula o caso?"
+    // (regresión: "no me reporta la AF061DO" → unclear).
     const clarify = clarificationFromUnderstanding(understanding, selectionText);
-    if (clarify) {
+    if (clarify && !hasUsablePlate) {
       console.info(
         `[utteranceUnderstanding] aclarar phone=${rawPhone.slice(0, 4)}… referent=${understanding?.referent} conf=${understanding?.confidence}`,
       );
@@ -345,7 +353,7 @@ export async function runTurnExecutorPhase(params: {
     if (
       understanding &&
       shouldProceedAsVehicleUnit(understanding) &&
-      !detectLoosePlate(selectionText) &&
+      !hasUsablePlate &&
       !isBarePlatePrefixHint(selectionText) &&
       !looksLikeFleetUnitSearchInput(selectionText)
     ) {
@@ -361,6 +369,7 @@ export async function runTurnExecutorPhase(params: {
       };
     }
     if (
+      !hasUsablePlate &&
       shouldAnswerOpenCaseFromUnderstanding(
         understanding,
         selectionText,
@@ -376,7 +385,12 @@ export async function runTurnExecutorPhase(params: {
         ok: true,
       };
     }
-    if (understanding && !shouldProceedAsVehicleUnit(understanding)) {
+    if (hasUsablePlate) {
+      skipSchematicUnitRoute = false;
+      console.info(
+        `[utteranceUnderstanding] patente-en-mensaje phone=${rawPhone.slice(0, 4)}… plate=${plateInMsg} (prioriza flota)`,
+      );
+    } else if (understanding && !shouldProceedAsVehicleUnit(understanding)) {
       skipSchematicUnitRoute = true;
       console.info(
         `[utteranceUnderstanding] no-unidad phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent} conf=${understanding.confidence}`,

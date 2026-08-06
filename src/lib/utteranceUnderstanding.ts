@@ -60,6 +60,7 @@ Significado de referent:
 - unclear — no se entiende con seguridad a qué se refiere.
 
 Reglas:
+- Si el mensaje trae una matrícula/patente reconocible (ej. AF061DO, AD 427 MC) junto a un pedido de reporte/GPS/estado → vehicle_unit con alta confianza. NO lo trates como número de caso.
 - "NRO", "N°", "nro 12", "numero 45" suelen ser admin_number, SALVO que el hilo pida explícitamente patente/prefijo Y el cliente diga "empieza con NRO" / "patente NRO…".
 - Un token de 2-3 letras (OST, AG, NKL) SOLO es vehicle_unit si el contexto es buscar/elegir unidad o el cliente lo marca como matrícula/prefijo.
 - Si habla de unidad/patente (aunque esté mal escrito) pero NO trae la matrícula concreta → pedí la chapa en clarify_question.
