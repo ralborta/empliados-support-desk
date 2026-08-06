@@ -669,7 +669,15 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     lower.lastIndexOf("cual es el nuevo horometro"),
     lower.lastIndexOf("nuevo odómetro en km"),
     lower.lastIndexOf("nuevo odometro en km"),
+    lower.lastIndexOf("pasame el nuevo odómetro en km"),
+    lower.lastIndexOf("pasame el nuevo odometro en km"),
+    lower.lastIndexOf("pasame el nuevo horómetro en horas"),
+    lower.lastIndexOf("pasame el nuevo horometro en horas"),
     lower.lastIndexOf("perfecto, tomo "),
+    lower.lastIndexOf("necesito la fecha y hora"),
+    lower.lastIndexOf("fecha y hora de la lectura"),
+    lower.lastIndexOf("si fue recién, respondé"),
+    lower.lastIndexOf("si fue recien, responde"),
   ].filter((i) => i >= 0);
   if (markers.length === 0) return false;
   const cutIdx = Math.max(...markers);
@@ -732,8 +740,14 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     // cuando en realidad seguía activo. Si "necesito/quiero/pedir/solicitar" aparece
     // junto con contexto de odómetro/patente, es el propio trámite continuando, no un
     // pedido distinto.
+    //
+    // Bug real 2026-08-06: "necesito la fecha y hora de la lectura" / "Tomé … (10500 km)"
+    // también disparaba este false positive → el cliente mandaba "Hora: 14:14 fecha …"
+    // y el turno caía a unidades (typing eterno / sin respuesta).
     (/\b(necesito|quiero|pedir|solicitar)\b/.test(after) &&
-      !/\b(od[oó]metro|hor[oó]metro|kilometraje|patente|matr[ií]cula)\b/.test(after)) ||
+      !/\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|patente|matr[ií]cula|fecha|hora|lectura)\b/.test(
+        after,
+      )) ||
     deNadaAbandonsOdometerFlow(threadText, cutIdx) ||
     (/1\.\s*(entra|ingresa|abri)/.test(after) &&
       /(agenda|opciones|contacto|unidades|grupo)/.test(after))
@@ -754,7 +768,15 @@ function lastOdometerFlowMarkerIndex(threadText: string): number {
     lower.lastIndexOf("cual es el nuevo horometro"),
     lower.lastIndexOf("nuevo odómetro en km"),
     lower.lastIndexOf("nuevo odometro en km"),
+    lower.lastIndexOf("pasame el nuevo odómetro en km"),
+    lower.lastIndexOf("pasame el nuevo odometro en km"),
+    lower.lastIndexOf("pasame el nuevo horómetro en horas"),
+    lower.lastIndexOf("pasame el nuevo horometro en horas"),
     lower.lastIndexOf("perfecto, tomo "),
+    lower.lastIndexOf("necesito la fecha y hora"),
+    lower.lastIndexOf("fecha y hora de la lectura"),
+    lower.lastIndexOf("si fue recién, respondé"),
+    lower.lastIndexOf("si fue recien, responde"),
   ].filter((i) => i >= 0);
   return markers.length ? Math.max(...markers) : -1;
 }
@@ -766,7 +788,9 @@ function isStillPickingUnitForOdoBlock(block: string): boolean {
     (/para registrar el cambio de od[oó]metro necesito la patente/.test(blockLower) ||
       /para registrar el cambio de hor[oó]metro necesito la patente/.test(blockLower)) &&
     !/cu[aá]l es el nuevo od[oó]metro/.test(blockLower) &&
-    !/cu[aá]l es el nuevo hor[oó]metro/.test(blockLower)
+    !/cu[aá]l es el nuevo hor[oó]metro/.test(blockLower) &&
+    !/pasame el nuevo od[oó]metro/.test(blockLower) &&
+    !/pasame el nuevo hor[oó]metro/.test(blockLower)
   );
 }
 
@@ -964,11 +988,15 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   // lista de mi flota" + cambio de odómetro + "La Ad 626 UG" caía a estado GPS).
   const botAwaitingOdometerData =
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
+    /perfecto, tomo .+ pasame el nuevo hor[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
     /nuevo hor[oó]metro en horas/i.test(tail) ||
+    /pasame el nuevo hor[oó]metro en horas/i.test(tail) ||
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
+    /perfecto, tomo .+ pasame el nuevo od[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
     /nuevo od[oó]metro en km/i.test(tail) ||
+    /pasame el nuevo od[oó]metro en km/i.test(tail) ||
     /(?:entendido|correcta)\.{0,3}\s*(?:cu[aá]l es|decime|pas[aá]me).{0,80}(?:patente|matr[ií]cula|marca|nombre)/i.test(
       tail,
     ) &&
@@ -987,24 +1015,32 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
 /** El bot pidió el nuevo odómetro en km (patente ya confirmada). */
 export function threadAwaitingOdometerKmValue(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
-  if (isOdometerFlowSuperseded(threadText)) return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
+    /perfecto, tomo .+ pasame el nuevo od[oó]metro/i.test(tail) ||
+    /cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
-    /nuevo od[oó]metro en km/i.test(tail)
+    /nuevo od[oó]metro en km/i.test(tail) ||
+    /pasame el nuevo od[oó]metro en km/i.test(tail) ||
+    /od[oó]metro en km,?\s*la fecha y la hora/i.test(tail)
   );
 }
 
 /** El bot pidió el nuevo horómetro en horas (patente ya confirmada). */
 export function threadAwaitingHorometerKmValue(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
+    /perfecto, tomo .+ pasame el nuevo hor[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail) ||
+    /pasame el nuevo hor[oó]metro en horas/i.test(tail) ||
+    /hor[oó]metro en horas,?\s*la fecha y la hora/i.test(tail) ||
     /tom[eé] la fecha.+?cu[aá]ntas horas de motor/i.test(tail)
   );
 }

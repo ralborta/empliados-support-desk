@@ -35,7 +35,7 @@ const SITUATION_GUIDANCE: Record<OdometerDialogueSituation, string> = {
   missing_plate:
     "Necesitás que el cliente te diga qué unidad es (patente, nombre interno o marca). Pedíselo de forma clara, tomando en cuenta lo que ya dijo (no repitas literalmente su mensaje, pero mostrale que lo leíste).",
   missing_value:
-    "Ya sabés qué unidad es. Necesitás el valor nuevo (odómetro en km u horómetro en horas, según corresponda). Pedíselo, confirmando primero la unidad que tomaste.",
+    "Ya sabés qué unidad es. Pedí JUNTOS el valor nuevo (odómetro en km u horómetro en horas) Y la fecha y hora de la lectura, con un ejemplo concreto. Si la lectura fue recién, que manden el valor y la palabra ahora. No digas CONFIRMO todavía.",
   missing_fecha_hora:
     "Ya tenés unidad y valor (km u horas). FALTA la fecha y hora de la lectura — son obligatorias. Pedilas con un ejemplo concreto (ej. 05/08/26 a las 14:30). Si la lectura fue recién, que responda la palabra ahora. NO digas CONFIRMO todavía ni asumas «hoy» en silencio.",
   confirmation_summary:

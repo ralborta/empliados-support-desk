@@ -2284,7 +2284,9 @@ export function shouldRouteTurnToOdometerExecutor(params: {
 }): boolean {
   const { selectionText, threadText, pendingActionType } = params;
   if (threadOdometerRegistrationCompleted(threadText)) return false;
-  if (isOdometerFlowSuperseded(threadText)) return false;
+  // Con pending de odómetro el trámite sigue vivo aunque el hilo dispare un falso
+  // "superseded" (bug 2026-08-06: pedido de fecha/hora con "necesito").
+  if (isOdometerFlowSuperseded(threadText) && pendingActionType !== "odometro") return false;
   // Bug real 2026-08-03: patente tras "otra unidad sin reporte" no es odómetro.
   if (
     hasPendingUnitConsultPlateRequest(threadText) &&

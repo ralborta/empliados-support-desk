@@ -1345,13 +1345,15 @@ export async function POST(req: NextRequest) {
     const earlyFechaDisplay = earlyFechaNaive
       ? formatFechaDisplay(fechaWara(earlyFechaNaive, "America/Argentina/Buenos_Aires"))
       : null;
+    // Pedido Emma/Wara 2026-08-06: al tomar la unidad, pedir km + fecha + hora juntos
+    // (no solo el kilometraje y después la fecha en otro paso).
     const fallbackTemplate = patente
       ? wantsHorometro
         ? earlyFechaDisplay
           ? `Tomé la fecha ${earlyFechaDisplay}. ¿Cuántas horas de motor tiene ${plateDisplay} ahora?`
-          : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo horómetro en horas?`
-        : `Perfecto, tomo ${plateDisplay}. ¿Cuál es el nuevo odómetro en km?`
-      : "¿Cuál es el nuevo valor de odómetro (en km) o de horómetro (en horas)?";
+          : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo horómetro en horas, la fecha y la hora de la lectura (ej. 350 hs — 05/08/26 a las 14:30). Si fue recién: las horas y la palabra «ahora».`
+        : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo odómetro en km, la fecha y la hora de la lectura (ej. 10500 km — 05/08/26 a las 14:30). Si fue recién: el km y la palabra «ahora».`
+      : "Pasame el nuevo valor de odómetro (km) o horómetro (horas), con la fecha y la hora de la lectura.";
     const message = patente
       ? await composeOdometerDialogueReply({
           situation: "missing_value",
@@ -1362,9 +1364,18 @@ export async function POST(req: NextRequest) {
           fallbackTemplate,
         })
       : fallbackTemplate;
+    await setPendingAction(prisma, rawPhone, "odometro", {
+      summary: message,
+      payload: {
+        patente,
+        odometro: typeof odometro === "number" ? odometro : undefined,
+        horometro: typeof horometro === "number" ? horometro : undefined,
+        fecha: earlyFechaNaive ?? undefined,
+      },
+    });
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_odometro_response",
-      stage: earlyFechaDisplay ? "horometro_awaiting_hours" : "missing_value",
+      stage: earlyFechaDisplay ? "horometro_awaiting_hours" : "missing_value_fecha_hora",
     });
     return NextResponse.json({ ok: false, error: "Falta odómetro u horómetro", message }, { status: BB_STATUS });
   }
