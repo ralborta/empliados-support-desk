@@ -36,6 +36,11 @@ import {
 } from "@/lib/waraApi";
 import { isAtilioAgentEnabled } from "@/lib/atilioDialogueCompose";
 import {
+  buildCaseResolutionEtaReply,
+  looksLikeCaseResolutionEtaInquiry,
+} from "@/lib/customerTicketInquiry";
+import { bbcShouldSendExecutorMessage } from "@/lib/waraInboundAudit";
+import {
   buildExecutorDialoguePayload,
   type ExecutorDialogueState,
 } from "@/lib/executorDialogueState";
@@ -527,12 +532,14 @@ async function createMissingReportTicket(params: {
       ticketId: existing.ticket.id,
       plate,
     });
-    const base = `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}. Ya existe un caso abierto para que Atención al cliente lo revise.`;
+    const base = `La unidad ${params.unit.patente || params.unit.unidad} presenta ${issueLabel}.`;
     return {
       ref: odooRef ?? "",
       reused: true,
       odooRef,
-      message: odooRef ? withOdooCaseAssignedSuffix(base, odooRef) : base,
+      message: odooRef
+        ? withOdooCaseAssignedSuffix(base, odooRef, { reused: true })
+        : `${base} Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando.`,
     };
   }
 
@@ -581,7 +588,7 @@ async function createMissingReportTicket(params: {
     .filter(Boolean)
     .join("\n");
 
-  const { odooRef } = await ensureWaraOdooTicket(prisma, {
+  const { odooRef, created: odooCreated } = await ensureWaraOdooTicket(prisma, {
     ticketId: localTicket.id,
     dedupeKey,
     subject: title,
@@ -605,7 +612,9 @@ async function createMissingReportTicket(params: {
   }
 
   const ref = odooRef ?? "";
-  const localReused = !created;
+  // Bug real 2026-08-06: "reused" debe ser del caso Odoo (¿ya existía?), no del hilo local.
+  // Si el chat se reusa pero Odoo se crea ahora, hay que decir "Generé el caso #…".
+  const caseReused = !!odooRef && !odooCreated;
 
   try {
     await autoAssignNewTicket(localTicket.id);
@@ -617,16 +626,16 @@ async function createMissingReportTicket(params: {
   let message: string;
   if (odooRef) {
     const base = `La unidad ${unitLabel} presenta ${issueLabel}.`;
-    message = withOdooCaseAssignedSuffix(base, odooRef);
-  } else if (localReused) {
-    message = `La unidad ${unitLabel} presenta ${issueLabel}. Registré la consulta en el caso abierto con el mismo asesor.`;
+    message = withOdooCaseAssignedSuffix(base, odooRef, { reused: caseReused });
+  } else if (!created) {
+    message = `La unidad ${unitLabel} presenta ${issueLabel}. Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando.`;
   } else {
     message = `La unidad ${unitLabel} presenta ${issueLabel}. Generé un caso para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
   }
 
   return {
     ref,
-    reused: localReused,
+    reused: caseReused || (!odooRef && !created),
     odooRef,
     message,
   };
@@ -656,12 +665,14 @@ async function createNoEquipmentTicket(params: {
       ticketId: existing.ticket.id,
       plate,
     });
-    const base = `La unidad ${label} no tiene equipo instalado y no genera telemetría. Ya existe un caso abierto para que Atención al cliente lo revise.`;
+    const base = `La unidad ${label} no tiene equipo instalado y no genera telemetría.`;
     return {
       ref: odooRef ?? "",
       reused: true,
       odooRef,
-      message: odooRef ? withOdooCaseAssignedSuffix(base, odooRef) : base,
+      message: odooRef
+        ? withOdooCaseAssignedSuffix(base, odooRef, { reused: true })
+        : `${base} Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando.`,
     };
   }
 
@@ -691,7 +702,7 @@ async function createNoEquipmentTicket(params: {
     aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Atilio.`,
   });
 
-  const { odooRef } = await ensureWaraOdooTicket(prisma, {
+  const { odooRef, created: odooCreated } = await ensureWaraOdooTicket(prisma, {
     ticketId: localTicket.id,
     dedupeKey,
     subject: title,
@@ -726,7 +737,7 @@ async function createNoEquipmentTicket(params: {
   }
 
   const ref = odooRef ?? "";
-  const localReused = !created;
+  const caseReused = !!odooRef && !odooCreated;
 
   try {
     await autoAssignNewTicket(localTicket.id);
@@ -737,16 +748,16 @@ async function createNoEquipmentTicket(params: {
   let message: string;
   if (odooRef) {
     const base = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar.`;
-    message = withOdooCaseAssignedSuffix(base, odooRef);
-  } else if (localReused) {
-    message = `La unidad ${label} no tiene equipo instalado. Registré la consulta en el caso abierto con el mismo asesor.`;
+    message = withOdooCaseAssignedSuffix(base, odooRef, { reused: caseReused });
+  } else if (!created) {
+    message = `La unidad ${label} no tiene equipo instalado. Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando.`;
   } else {
     message = `La unidad ${label} está registrada en Wara pero no tiene equipo GPS instalado, por eso no hay reportes ni posición para mostrar. Generé un caso para que Atención al cliente lo revise. Te avisamos por este medio cualquier novedad.`;
   }
 
   return {
     ref,
-    reused: localReused,
+    reused: caseReused || (!odooRef && !created),
     odooRef,
     message,
   };
@@ -783,6 +794,30 @@ export async function POST(req: NextRequest) {
   }
   const threadText = await recentThreadText(rawPhone);
   const rawText = parsed.data.rawText ?? "";
+
+  // Bug real 2026-08-06: "cuando me das respuesta del resultado del analisis?"
+  // no debe re-diagnosticar GPS; va a Expectativa de Atención al cliente.
+  if (looksLikeCaseResolutionEtaInquiry(rawText)) {
+    const summaryText = await buildCaseResolutionEtaReply(rawPhone);
+    await appendOutboundBotMessage(rawPhone, summaryText, {
+      source: "wara_unidades",
+      stage: "case_resolution_eta_inquiry",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText,
+        message: summaryText,
+        skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
+        action: "none" as const,
+        unidadesCount: 0,
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   let explicitPlate =
     parsed.data.patente ?? parsed.data.plate ?? detectLoosePlate(rawText) ?? "";
   if (

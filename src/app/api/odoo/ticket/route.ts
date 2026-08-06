@@ -31,7 +31,9 @@ import {
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
 import {
+  buildCaseResolutionEtaReply,
   buildOpenCaseStatusReply,
+  looksLikeCaseResolutionEtaInquiry,
   looksLikeOpenCaseStatusInquiry,
 } from "@/lib/customerTicketInquiry";
 import {
@@ -310,6 +312,24 @@ export async function POST(req: NextRequest) {
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",
       stage: "open_case_status_inquiry",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message,
+        skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  if (looksLikeCaseResolutionEtaInquiry(data.rawText)) {
+    const message = await buildCaseResolutionEtaReply(rawPhone);
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "odoo_ticket",
+      stage: "case_resolution_eta_inquiry",
     });
     return NextResponse.json(
       {

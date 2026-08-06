@@ -158,7 +158,9 @@ async function customerOnlyThreadText(prisma: PrismaClient, rawPhone: string): P
 
 /** Nombre interno de unidad Wara (ej. M600-026, 300-092) — no es una patente. */
 export function looksLikeUnitNameInMessage(rawText: string | undefined | null): boolean {
-  const norm = String(rawText ?? "").trim();
+  const norm = String(rawText ?? "")
+    .trim()
+    .replace(/[\u2010-\u2015\u2212]/g, "-");
   if (!norm) return false;
   return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm);
 }
@@ -403,6 +405,10 @@ function resolveBrandOrNameInFleet(
   units: WaraUnidadEstado[],
   nameHint?: string | null,
 ): UnitQueryResolution | null {
+  // Código interno no se tokeniza ("300"+"097") — eso inventaba matches basura.
+  if (looksLikeUnitNameInMessage(rawText) || (nameHint && looksLikeUnitNameInMessage(nameHint))) {
+    return null;
+  }
   const freeLabel = nameHint?.trim() || extractFreeTextUnitSearchCandidate(rawText);
   const canSearch =
     !!freeLabel ||
@@ -951,15 +957,25 @@ function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnida
 }
 
 function normalizeUnitNameToken(value: string): string {
-  return value.replace(/[\s-]+/g, "").toLowerCase();
+  return value
+    .replace(/[\u2010-\u2015\u2212]/g, "-") // guiones tipográficos → ASCII
+    .replace(/[\s-]+/g, "")
+    .toLowerCase();
 }
 
+/**
+ * Códigos internos Wara: M300-097, 300-097.
+ * Bug real 2026-08-06: "unidad 300-097" no puede perderse ante marca/IA
+ * que invente patentes ajenas (AA251VD, AC093JO, …).
+ *
+ * Importante: "M600-170" NO debe matchear un label tipo "Tanda 600-170 backup"
+ * (solo el código canónico con M, o el mismo token exacto).
+ */
 function unitNameCodesMatch(queryNorm: string, unitCode: string): boolean {
+  if (!queryNorm || !unitCode) return false;
   if (queryNorm === unitCode) return true;
-  // Cliente omitió la M (300-092 → M300-092). Solo aplica si el código en Wara
-  // es el nombre canónico Mxxx-yyy, no un substring suelto en otro label
-  // (ej. "Tanda 600-170 backup" no debe matchear consulta por M600-170).
-  if (!/^m\d/.test(queryNorm) && unitCode === `m${queryNorm}` && /^m\d/.test(unitCode)) {
+  // Cliente omitió la M (300-097 → M300-097). Solo si el código en Wara trae la M.
+  if (!/^m\d/.test(queryNorm) && /^m\d/.test(unitCode) && unitCode === `m${queryNorm}`) {
     return true;
   }
   return false;
@@ -968,9 +984,10 @@ function unitNameCodesMatch(queryNorm: string, unitCode: string): boolean {
 /** Códigos M600-170 / 300-092 presentes como token en el campo unidad de Wara. */
 function unitNameCodesFromField(unidad: string): string[] {
   const tokens = new Set<string>();
-  const normalized = normalizeUnitNameToken(unidad);
+  const field = String(unidad ?? "").replace(/[\u2010-\u2015\u2212]/g, "-");
+  const normalized = normalizeUnitNameToken(field);
   if (normalized) tokens.add(normalized);
-  for (const match of unidad.matchAll(/\b(M?\d{3}-\d{2,3})\b/gi)) {
+  for (const match of field.matchAll(/\b(M?\d{3}-\d{2,3})\b/gi)) {
     const code = normalizeUnitNameToken(match[1]);
     if (code) tokens.add(code);
   }
@@ -981,14 +998,22 @@ function unitNameCodesFromField(unidad: string): string[] {
 export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
   const norm = normalizeUnitNameToken(query);
   if (!norm) return [];
-  return units.filter((u) =>
-    unitNameCodesFromField(u.unidad || "").some((code) => unitNameCodesMatch(norm, code)),
-  );
+  return units.filter((u) => {
+    const field = String(u.unidad || "").replace(/[\u2010-\u2015\u2212]/g, "-");
+    const full = normalizeUnitNameToken(field);
+    // Campo unidad ES exactamente el código (con o sin M), no un label largo con el número adentro.
+    if (full && (full === norm || (!/^m\d/.test(norm) && full === `m${norm}`) || (/^m\d/.test(norm) && full === norm.slice(1)))) {
+      return true;
+    }
+    return unitNameCodesFromField(field).some((code) => unitNameCodesMatch(norm, code));
+  });
 }
 
 /** Código interno Wara en el mensaje (ej. "Unidad: M600-020", "interno M300-083"). */
 export function extractExplicitUnitNameFromText(rawText: string): string | null {
-  const text = String(rawText ?? "").trim();
+  const text = String(rawText ?? "")
+    .trim()
+    .replace(/[\u2010-\u2015\u2212]/g, "-");
   if (!text) return null;
   const labeled = text.match(/\bunidad\s*(?:es\s*)?[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (labeled?.[1]) return labeled[1];
@@ -1823,8 +1848,58 @@ export async function resolveUnitQuery(params: {
   const overridePrefix = normalizePrefixHint(params.prefixHint);
   const prefixHint = overridePrefix ?? prefixHintFromMessage(params.rawText);
 
+  // Código interno (300-097 / M300-097) ANTES que marca/nameHint/IA.
+  // Bug real 2026-08-06: "Tengo la unidad 300-097 sin reporte" → nameResEarly/IA
+  // devolvía 3 patentes ajenas (AA251VD, AC093JO, AB042BD) en vez de la unidad.
+  if (looksLikeUnitNameInMessage(params.rawText)) {
+    const unitNameEarly = resolveByUnitName(params.rawText, params.units);
+    if (unitNameEarly) return unitNameEarly;
+  }
+  // nameHint que es código interno (no apellido/marca) → misma resolución exacta.
+  if (params.nameHint && looksLikeUnitNameInMessage(params.nameHint)) {
+    const byHint = filterUnitsByUnitName(params.units, params.nameHint.trim());
+    if (byHint.length === 1) {
+      const plate = normalizeLoosePlate(byHint[0].patente || byHint[0].unidad || "");
+      if (plate) {
+        return {
+          intent: "consult_status",
+          plate,
+          searchTerms: [],
+          candidatePlates: [plate],
+          source: "rules",
+        };
+      }
+    }
+    if (byHint.length > 1) {
+      const labels = byHint
+        .slice(0, 5)
+        .map((u) => (u.patente || u.unidad || "").trim())
+        .join(", ");
+      return {
+        intent: "need_clarification",
+        searchTerms: [],
+        candidatePlates: byHint
+          .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+          .filter(Boolean),
+        clarificationQuestion: `Encontré ${byHint.length} unidades con nombre parecido a ${params.nameHint} (${labels}). Decime la matrícula exacta.`,
+        source: "rules",
+      };
+    }
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: [],
+      clarificationQuestion: buildFleetUnitNotFoundMessage({
+        rawText: params.rawText,
+        searchedText: params.nameHint.trim(),
+      }),
+      source: "rules",
+    };
+  }
+
   // Prefijo razonado (IA u override) → ejecutar búsqueda en flota YA, sin depender del typo.
-  if (overridePrefix) {
+  // No pisar un código interno ya presente en el mensaje.
+  if (overridePrefix && !looksLikeUnitNameInMessage(params.rawText)) {
     const prefixMatches = filterUnitsByPlatePrefix(params.units, overridePrefix);
     const candidatePlates = prefixMatches
       .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))

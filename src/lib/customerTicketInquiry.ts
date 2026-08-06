@@ -123,6 +123,92 @@ export function looksLikeOpenCaseStatusInquiry(text: string | undefined | null):
   );
 }
 
+/**
+ * Cliente pregunta cuándo / en cuánto le dan resultado del análisis, novedades o demora.
+ * Bug real 2026-08-06: "cuando me das respuesta del resultado del analisis?" — Atilio
+ * respondía como si él mismo analizara y avisara, sin aclarar que el especialista
+ * de Atención al cliente es quien contacta con los tiempos.
+ */
+export function looksLikeCaseResolutionEtaInquiry(text: string | undefined | null): boolean {
+  const t = normInquiryText(text ?? "");
+  if (!t || t.length > 180) return false;
+  if (looksLikeCustomerConversationCloseRequest(text)) return false;
+  if (looksLikeOpenCaseStatusInquiry(text)) return false;
+
+  const asksWhen =
+    /\b(cuando|cu[aá]ndo|en cuanto|en cu[aá]nto|cuanto tarda|cu[aá]nto tarda|cuanto demora|cu[aá]nto demora|para cuando|para cu[aá]ndo|en que momento|en qu[eé] momento)\b/.test(
+      t,
+    ) ||
+    /\b(me (dan|das|avisan|avisas|responden|contestan)|van a (dar|avisar|responder|contestar))\b/.test(t);
+
+  const asksResult =
+    /\b(resultado|analisis|an[aá]lisis|novedad(es)?|resolucion|resoluci[oó]n|respuesta|avance|demora|tiempo(s)?|plazo|eta)\b/.test(
+      t,
+    ) ||
+    /\b(del caso|del reclamo|del ticket|de la revision|de la revisi[oó]n)\b/.test(t);
+
+  if (asksWhen && asksResult) return true;
+
+  // Variantes cortas naturales sin "cuando" explícito.
+  if (
+    /\b(hay|tienen|tenes|ten[eé]s)\s+(alguna\s+)?(novedad|respuesta|avance)\b/.test(t) ||
+    /\b(alguna\s+)?(novedad|respuesta)\s+(del|de\s+el)\s+(caso|analisis|an[aá]lisis|reclamo)\b/.test(t) ||
+    /\bme\s+(podes|pod[eé]s|pueden)\s+(decir|avisar)\s+(cuando|cu[aá]ndo|algo)\b/.test(t)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Respuesta a pedidos de tiempos/resultado: no inventa SLA; deriva la expectativa
+ * al especialista de Atención al cliente (WhatsApp).
+ */
+export async function buildCaseResolutionEtaReply(
+  rawPhone: string,
+  client: PrismaClient = prisma,
+): Promise<string> {
+  const customer = await findCustomerByWhatsAppNumber(client, rawPhone);
+  if (!customer) {
+    return (
+      "El seguimiento del análisis lo hace Atención al cliente. " +
+      "En breve un especialista te escribe por este chat con los tiempos y el avance. " +
+      "Si tu número no quedó bien identificado, volvé a escribirme."
+    );
+  }
+
+  const openTicket = await client.ticket.findFirst({
+    where: {
+      customerId: customer.id,
+      status: { in: OPEN_TICKET_THREAD_STATUSES },
+    },
+    orderBy: { lastMessageAt: "desc" },
+    select: { id: true },
+  });
+
+  if (!openTicket) {
+    return (
+      "Ahora mismo no veo un caso abierto con este número para darte tiempos. " +
+      "Si ya abriste uno, pasame el número de caso o contame de nuevo el tema y lo revisamos."
+    );
+  }
+
+  const odooRef = await findCustomerVisibleOdooCaseRef(client, {
+    customerId: customer.id,
+    ticketId: openTicket.id,
+  });
+  const caseBit = odooRef
+    ? `El caso *${formatCustomerOdooCaseRefForWhatsApp(odooRef)}* ya está en Atención al cliente. `
+    : "Tu consulta ya quedó en Atención al cliente. ";
+
+  return (
+    caseBit +
+    "En breve un especialista te va a contactar por este mismo chat con los tiempos y el avance concreto. " +
+    "Desde acá no manejo esas demoras exactas; ellos te las confirman."
+  );
+}
+
 export async function buildOpenCaseStatusReply(
   rawPhone: string,
   client: PrismaClient = prisma,

@@ -80,6 +80,7 @@ import {
   looksLikeFleetUnitSearchInput,
   looksLikeUnitNameInMessage,
   extractFreeTextUnitSearchCandidate,
+  extractExplicitUnitNameFromText,
 } from "@/lib/waraUnitIntent";
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
@@ -364,9 +365,12 @@ export async function runTurnExecutorPhase(params: {
     const regexPlateOk =
       !!plateInMsg && isPlausibleVehiclePlate(normalizePlate(plateInMsg));
     const regexPrefix = extractPlatePrefixFromMessage(selectionText);
+    const explicitUnitCode = extractExplicitUnitNameFromText(selectionText);
+    // Código interno (300-097) gana sobre marca/nombre libre de la IA — bug real 2026-08-06.
     const freeName =
-      aiHint?.brand ||
+      explicitUnitCode ||
       aiHint?.unitName ||
+      aiHint?.brand ||
       extractFreeTextUnitSearchCandidate(selectionText) ||
       null;
     // Reglas determinísticas primero; IA solo completa lo que el texto no pudo extraer.

@@ -114,10 +114,42 @@ export function buildCustomerOdooCaseAssignedReply(
   return `Tu caso es *${display}*. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
 }
 
-/** Añade "Tu caso es #…" al final de un mensaje operativo cuando hay caso Odoo. */
-export function withOdooCaseAssignedSuffix(message: string, odooRef: string): string {
+/**
+ * Añade la referencia Odoo al mensaje operativo.
+ * Distingue NUEVO vs YA EXISTÍA — bug real 2026-08-06: el cliente no sabía si
+ * Atilio acababa de generar el caso o si reutilizaba uno abierto.
+ */
+export function withOdooCaseAssignedSuffix(
+  message: string,
+  odooRef: string,
+  opts?: { reused?: boolean },
+): string {
   const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
   const base = message.trim().replace(/\s+$/, "");
-  if (base.toLowerCase().includes(display.toLowerCase())) return base;
-  return `${base} Tu caso es *${display}*.`;
+  if (base.toLowerCase().includes(display.toLowerCase().replace(/^#/, "")) || base.includes(display)) {
+    return base;
+  }
+  if (opts?.reused) {
+    return `${base} Ese caso ya estaba abierto (*${display}*); no generé uno nuevo.`;
+  }
+  return `${base} Generé el caso *${display}* en Atención al cliente.`;
+}
+
+/** Si la IA/plantilla omitió el #Odoo, lo reinyecta con wording claro. */
+export function ensureOdooCaseRefInClientMessage(
+  message: string,
+  odooRef: string | null | undefined,
+  opts?: { reused?: boolean },
+): string {
+  const ref = normalizeCustomerOdooCaseRef(odooRef);
+  if (!ref) return message.trim();
+  const display = formatCustomerOdooCaseRefForWhatsApp(ref);
+  const text = message.trim();
+  if (!text) {
+    return opts?.reused
+      ? buildCustomerOdooCaseAssignedReply(ref, { reused: true })
+      : buildCustomerOdooCaseAssignedReply(ref, { reused: false });
+  }
+  if (text.includes(display) || text.includes(ref)) return text;
+  return withOdooCaseAssignedSuffix(text, ref, opts);
 }

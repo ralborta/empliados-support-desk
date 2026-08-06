@@ -24,7 +24,7 @@ import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
-import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
+import { looksLikeCaseResolutionEtaInquiry, looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
 import {
   buildCaseRegisteredWithoutOdooRefReply,
   buildCustomerEscalationWithCaseReply,
@@ -1058,6 +1058,7 @@ function looksLikeWaraBotTraffic(text: string): boolean {
   if (/\batilio\b/i.test(text)) return true;
   if (looksLikeCustomerConversationCloseRequest(text)) return true;
   if (looksLikeOpenCaseStatusInquiry(text)) return true;
+  if (looksLikeCaseResolutionEtaInquiry(text)) return true;
   return false;
 }
 

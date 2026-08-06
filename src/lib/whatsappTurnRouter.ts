@@ -1,5 +1,5 @@
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
-import { looksLikeOpenCaseStatusInquiry } from "@/lib/customerTicketInquiry";
+import { looksLikeOpenCaseStatusInquiry, looksLikeCaseResolutionEtaInquiry } from "@/lib/customerTicketInquiry";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import {
   certificateFlowState,
@@ -347,6 +347,11 @@ const TURN_RULES: TurnRule[] = [
     id: "open_case_status_inquiry",
     reason: "Cliente consulta el estado de un caso abierto.",
     decide: ({ text }) => (looksLikeOpenCaseStatusInquiry(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "case_resolution_eta_inquiry",
+    reason: "Cliente pregunta cuándo / demora del análisis o novedades del caso.",
+    decide: ({ text }) => (looksLikeCaseResolutionEtaInquiry(text) ? "odoo_ticket" : null),
   },
   {
     id: "ticket_creation_info",

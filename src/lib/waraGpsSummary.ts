@@ -1,5 +1,8 @@
 import OpenAI from "openai";
-import { formatCustomerOdooCaseRefForWhatsApp } from "@/lib/customerOdooCaseRef";
+import {
+  ensureOdooCaseRefInClientMessage,
+  formatCustomerOdooCaseRefForWhatsApp,
+} from "@/lib/customerOdooCaseRef";
 import type { WaraUnidadEstado } from "@/lib/waraApi";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import {
@@ -17,6 +20,7 @@ export type GpsSummaryInput = {
   action: "none" | "observation" | "ticket";
   ticketRef?: string;
   odooRef?: string;
+  /** True solo si el caso Odoo ya existía (no si apenas se creó). */
   ticketReused?: boolean;
   ticketIssueDetail?: string;
 };
@@ -51,14 +55,14 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
     if (odooRef) {
       const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
       const casePart = ticketReused
-        ? ` Ya hay un caso en revisión (*${display}*).`
-        : ` Tu caso es *${display}*. Un asesor de Atención al cliente lo va a revisar.`;
+        ? ` Ese caso ya estaba abierto (*${display}*); no generé uno nuevo. Un asesor de Atención al cliente lo sigue revisando.`
+        : ` Generé el caso *${display}* en Atención al cliente. Un asesor lo va a revisar.`;
       return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${casePart}`;
     }
     const ticketPart = ticketRef
       ? ticketReused
-        ? " Ya hay un caso abierto y Atención al cliente lo va a revisar."
-        : " Generé un caso para que Atención al cliente lo revise."
+        ? " Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando."
+        : " Generé un caso para que Atención al cliente lo revise (todavía no tengo el número para pasarte)."
       : "";
     return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${ticketPart}`;
   }
@@ -68,10 +72,16 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {
   const template = buildTemplateSummary(input);
-  if (!process.env.OPENAI_API_KEY?.trim()) return template;
+  const finalize = (text: string) =>
+    ensureOdooCaseRefInClientMessage(text, input.odooRef, { reused: input.ticketReused });
+
+  if (!process.env.OPENAI_API_KEY?.trim()) return finalize(template);
 
   const facts = buildGpsFacts(input.unit, input.assessment);
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const odooDisplay = input.odooRef
+    ? formatCustomerOdooCaseRefForWhatsApp(input.odooRef)
+    : null;
 
   try {
     const response = await withOpenAiTimeout((signal) =>
@@ -85,7 +95,10 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
                 "Redactás respuestas de WhatsApp para mesa de ayuda Wara GPS. " +
                 "Mantené los hechos (estado general, ignición, si se generó caso o no, acción) sin tiempos técnicos crudos ni segundos. " +
                 "No menciones intervalos de reporte del GPS. No inventes datos. " +
-                "Si hay numero_caso_odoo en los datos, incluí «Tu caso es #…» con ese número exacto (solo referencia Odoo). " +
+                "Si hay numero_caso_odoo, OBLIGATORIO incluirlo exacto (ej. *#36248*). " +
+                "Si caso_reutilizado=true: dejá claro que el caso YA ESTABA abierto y NO generaste uno nuevo. " +
+                "Si caso_reutilizado=false y hay numero_caso_odoo: dejá claro que GENERASTE ese caso ahora. " +
+                "Nunca digas solo «hay un caso abierto» sin aclarar si es nuevo o previo, ni omitas el número si existe. " +
                 "Si no hay numero_caso_odoo, no inventes ni menciones números de caso. " +
                 "Español rioplatense, 2-4 oraciones, sin emojis.",
             },
@@ -96,9 +109,7 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
                 hechos_obligatorios: facts,
                 accion: input.action,
                 se_genero_caso: !!(input.odooRef ?? input.ticketRef),
-                numero_caso_odoo: input.odooRef
-                  ? formatCustomerOdooCaseRefForWhatsApp(input.odooRef)
-                  : null,
+                numero_caso_odoo: odooDisplay,
                 caso_reutilizado: input.ticketReused ?? false,
                 detalle_ticket: input.ticketIssueDetail ?? null,
               }),
@@ -110,13 +121,18 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
         { signal },
       ),
     );
-    if (!response) return template;
+    if (!response) return finalize(template);
 
     const text = response.choices[0]?.message?.content?.trim();
-    return text && text.length >= 40 ? text : template;
+    if (!text || text.length < 40) return finalize(template);
+    // Si la IA omitió el #Odoo, preferimos plantilla (ya lo trae) + reinyección.
+    if (odooDisplay && !text.includes(odooDisplay.replace(/^#/, "")) && !text.includes(odooDisplay)) {
+      return finalize(template);
+    }
+    return finalize(text);
   } catch (error) {
     console.warn("[waraGpsSummary] IA falló, uso plantilla:", error instanceof Error ? error.message : error);
-    return template;
+    return finalize(template);
   }
 }
 

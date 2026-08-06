@@ -33,6 +33,15 @@ export function detectUnitConsultQuestion(rawText: string): string | undefined {
     return "hace_cuanto_no_reporta";
   }
   if (
+    (/\b(cuando|cu[aá]ndo|en cuanto|en cu[aá]nto|cuanto tarda|cu[aá]nto tarda|para cuando|para cu[aá]ndo)\b/.test(t) &&
+      /\b(resultado|analisis|an[aá]lisis|novedad|respuesta|avance|resolucion|resoluci[oó]n|demora|tiempo)\b/.test(
+        t,
+      )) ||
+    /\b(hay|tienen|tenes|ten[eé]s)\s+(alguna\s+)?(novedad|respuesta|avance)\b/.test(t)
+  ) {
+    return "eta_analisis_caso";
+  }
+  if (
     /\b(verdad|cierto|no funciona|ya no funciona|ya no anda|de acuerdo)\b/.test(t) ||
     /\b(ok|ah ok|claro|bien|entendido)\b.*\b(verdad|cierto|entonces)\b/.test(t) ||
     /\bentonces\b/.test(t)
@@ -147,9 +156,19 @@ export function buildGpsAssessmentDialogueState(params: {
     );
   }
 
+  if (pregunta === "eta_analisis_caso") {
+    hechos.push(
+      "El cliente pregunta por tiempos/resultado del análisis: responder que Atención al cliente / un especialista lo contacta por este chat con los tiempos y el avance; no inventar plazos; Atilio no es quien cierra el análisis.",
+    );
+  }
+
   const prohibido: string[] = [];
   if (params.ticketRef || params.ticketReused) {
     prohibido.push("ofrecer abrir otro ticket");
+  }
+  if (pregunta === "eta_analisis_caso") {
+    prohibido.push("prometer que Atilio avisará el resultado del análisis");
+    prohibido.push("inventar plazos o horas exactas de resolución");
   }
 
   return {

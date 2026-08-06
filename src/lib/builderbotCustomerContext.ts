@@ -47,7 +47,9 @@ import {
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
 import {
+  buildCaseResolutionEtaReply,
   buildOpenCaseStatusReply,
+  looksLikeCaseResolutionEtaInquiry,
   looksLikeOpenCaseStatusInquiry,
   persistCustomerBotReply,
 } from "@/lib/customerTicketInquiry";
@@ -551,6 +553,13 @@ export async function customerRegisteredContextResponse(
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "open_case_status_inquiry",
+    });
+    nextFlow = "reply";
+  } else if (selectionText && looksLikeCaseResolutionEtaInquiry(selectionText)) {
+    responseMessage = await buildCaseResolutionEtaReply(trimmed);
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "case_resolution_eta_inquiry",
     });
     nextFlow = "reply";
   } else if (
