@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   fechaLecturaTieneHora,
+  formatFechaDisplay,
+  getCalendarContext,
   looksLikeAhoraComoFechaLectura,
   mergeFechaConHoraSuelt,
   parseFechaFromText,
@@ -142,4 +144,24 @@ assert.equal(
   "pedido conjunto sigue en espera de valor",
 );
 
-console.log("OK — km+fecha+hora obligatorias e insistencia; parse Hora:/fecha; sin hang");
+// Relativas: hoy/ayer/lunes → fecha concreta DD/MM/AAAA (nunca solo la palabra).
+const ctx = getCalendarContext(tz);
+const hoy = parseFechaFromText("hoy a las 14:30", tz);
+assert.ok(hoy?.startsWith(ctx.todayIso), "hoy → día de hoy");
+assert.equal(formatFechaDisplay(hoy), `${ctx.todayDisplay} 14:30`);
+const ayer = parseFechaFromText("ayer a las 19:00", tz);
+assert.ok(ayer?.startsWith(ctx.yesterdayIso), "ayer → día de ayer");
+assert.equal(formatFechaDisplay(ayer), `${ctx.yesterdayDisplay} 19:00`);
+const lunes = parseFechaFromText("el lunes a las 11:00", tz);
+assert.ok(lunes && fechaLecturaTieneHora(lunes, "el lunes a las 11:00"), "lunes+hora OK");
+assert.match(formatFechaDisplay(lunes) ?? "", /^\d{2}\/\d{2}\/\d{4} 11:00$/);
+const martes = parseFechaFromText("martes 16:45", tz);
+assert.ok(martes && fechaLecturaTieneHora(martes, "martes 16:45"), "martes+hora OK");
+assert.match(formatFechaDisplay(martes) ?? "", /^\d{2}\/\d{2}\/\d{4} 16:45$/);
+assert.equal(
+  fechaLecturaTieneHora(parseFechaFromText("ayer", tz), "ayer"),
+  false,
+  "ayer sin hora → insiste pidiendo hora",
+);
+
+console.log("OK — km+fecha+hora obligatorias; hoy/ayer/lunes con fecha concreta; sin hang");

@@ -1716,8 +1716,12 @@ export async function POST(req: NextRequest) {
             : "";
       const onlyDateNoTime =
         !!fechaExplicita && !fechaLecturaTieneHora(fechaExplicita, fechaHoraSourceText);
+      // OJO: si dijo "ayer"/"lunes", mostrar DD/MM/AAAA concreto (sin 00:00 engañoso).
+      const fechaDiaDisplay = fechaDisplay?.includes(" ")
+        ? fechaDisplay.split(" ")[0]
+        : fechaDisplay;
       const fallbackTemplate = onlyDateNoTime
-        ? `Tomé la fecha ${fechaDisplay} para ${plateDisp}${valueHint}. Falta la hora de la lectura (obligatoria): pasame la hora (ej. 14:30). Sin hora no registro. Si fue recién, respondé «ahora».`
+        ? `Tomé el día ${fechaDiaDisplay} para ${plateDisp}${valueHint}. Falta la hora de la lectura (obligatoria): pasame la hora (ej. 14:30). Sin hora no registro. Si fue recién, respondé «ahora».`
         : `Tomé ${plateDisp}${valueHint}. Fecha y hora de la lectura son obligatorias: pasamelas (ej. 05/08/26 a las 14:30). Sin esos datos no puedo registrar el cambio. Si fue recién, respondé «ahora».`;
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",

@@ -415,12 +415,30 @@ export function getCalendarContext(timezone?: string): CalendarContext {
 
 export function formatCalendarContextBlock(timezone?: string): string {
   const ctx = getCalendarContext(timezone);
+  const weekdayLines: string[] = [];
+  const names = [
+    "domingo",
+    "lunes",
+    "martes",
+    "miercoles",
+    "jueves",
+    "viernes",
+    "sabado",
+  ] as const;
+  for (const name of names) {
+    const delta = -daysSinceLastWeekday(WEEKDAY_NAMES[name], ctx.timezone);
+    const parts = shiftCalendarDay(todayPartsInTz(ctx.timezone), delta);
+    const iso = calendarPartsToIso(parts);
+    const display = formatFechaDisplay(`${iso}T00:00:00`)?.split(" ")[0] ?? iso;
+    weekdayLines.push(`${name} (última vez): ${formatLongCalendarDate(parts, ctx.timezone)} (${display})`);
+  }
   return [
     `zona_horaria: ${ctx.timezone}`,
     `hoy: ${ctx.todayDisplayLong} (${ctx.todayDisplay})`,
     `ayer: ${ctx.yesterdayDisplayLong} (${ctx.yesterdayDisplay})`,
     `anteayer: ${ctx.anteayerDisplayLong} (${ctx.anteayerDisplay})`,
-    "Usá SOLO estas fechas para interpretar hoy/ayer/anteayer — nunca inventes otra.",
+    ...weekdayLines,
+    "Si el cliente dice hoy/ayer/anteayer/lunes/martes/etc., resolvé a ESTAS fechas y SIEMPRE mostrá el DD/MM/AAAA concreto en la respuesta — nunca dejes solo la palabra relativa.",
   ].join("\n");
 }
 

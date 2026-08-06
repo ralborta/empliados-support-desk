@@ -37,9 +37,9 @@ const SITUATION_GUIDANCE: Record<OdometerDialogueSituation, string> = {
   missing_value:
     "Ya sabés qué unidad es. Pedí JUNTOS el valor nuevo (odómetro en km u horómetro en horas) Y la fecha y hora de la lectura — las tres cosas son obligatorias. Ejemplo concreto. Si fue recién: el valor y la palabra ahora. Dejá claro que sin fecha y hora no podés registrar. No digas CONFIRMO todavía.",
   missing_fecha_hora:
-    "Ya tenés unidad y valor (km u horas). FALTAN fecha Y hora de la lectura: son OBLIGATORIAS (pedido Wara). INSISTÍ: pedilas de nuevo con ejemplo (ej. 05/08/26 a las 14:30). Decí explícitamente que sin esos datos no registrás el cambio. Si fue recién, que responda «ahora». NO digas CONFIRMO, NO asumas «hoy» ni inventes hora.",
+    "Ya tenés unidad y valor (km u horas). FALTAN fecha Y hora de la lectura: son OBLIGATORIAS (pedido Wara). INSISTÍ: pedilas de nuevo con ejemplo (ej. 05/08/26 a las 14:30). Decí explícitamente que sin esos datos no registrás el cambio. Si fue recién, que responda «ahora». Si el cliente dijo hoy/ayer/lunes/martes SIN hora, tomá ese día, mostrá el DD/MM/AAAA concreto y pedí solo la hora. NO digas CONFIRMO, NO asumas «hoy» en silencio ni inventes hora.",
   confirmation_summary:
-    "Ya tenés TODOS los datos obligatorios: patente, valor Y fecha+hora de lectura. Presentaselos con claridad (incluida la fecha/hora), y pedile EXPLÍCITAMENTE que responda la palabra CONFIRMO. Sin fecha+hora visibles en el resumen, NO pidas CONFIRMO.",
+    "Ya tenés TODOS los datos obligatorios: patente, valor Y fecha+hora de lectura. Presentaselos con claridad. La fecha DEBE ir en formato concreto DD/MM/AAAA HH:MM (nunca solo «ayer» o «el lunes»). Pedile EXPLÍCITAMENTE que responda la palabra CONFIRMO. Sin fecha+hora numéricas visibles, NO pidas CONFIRMO.",
   correction_prompt:
     "El cliente está pidiendo corregir algo del trámite pero no especificó qué dato ni el valor nuevo. Preguntale con calidez qué dato quiere corregir (patente, odómetro o horómetro) y el valor correcto, dejando claro que después de eso le vas a volver a pedir CONFIRMO.",
   success:
@@ -65,7 +65,7 @@ Reglas ABSOLUTAS (no negociables, tu respuesta se descarta si las rompés):
   contener literalmente la palabra "CONFIRMO" en mayúsculas.
 - Nunca inventes un número de caso/ticket.
 - Nunca prometas algo que no esté en los datos que te pasaron.
-- Para "hoy/ayer/anteayer" usá SOLO el bloque fecha_referencia — nunca otra fecha.
+- Para "hoy/ayer/anteayer/lunes/martes/…" usá SOLO el bloque fecha_referencia — nunca otra fecha — y SIEMPRE escribí el DD/MM/AAAA concreto en el mensaje (no dejes solo la palabra relativa).
 
 Devolvé SOLO el texto final del mensaje de WhatsApp, sin comillas ni explicaciones.`;
 
