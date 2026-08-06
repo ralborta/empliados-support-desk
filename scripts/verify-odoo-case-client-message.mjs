@@ -81,8 +81,34 @@ const dropped = ensureOdooCaseRefInClientMessage(
 assert(dropped.includes("36248"), "reinyecta # si la IA lo omitió");
 assert(/Generé el caso/i.test(dropped), "reinyección aclara que es nuevo");
 
+const droppedReused = ensureOdooCaseRefInClientMessage(
+  "La unidad AH 881 XF (M600-060) no está reportando. Ya tenemos el caso abierto y se está revisando.",
+  "36806",
+  { reused: true },
+);
+assert(droppedReused.includes("36806"), "reinyecta # en caso reutilizado (bug M600-060)");
+assert(/ya estaba abierto/i.test(droppedReused), "reinyección reutilizado aclara que ya existía");
+
 const assigned = buildCustomerOdooCaseAssignedReply("36248", { reused: false });
 assert(assigned.includes("#36248"), "reply explícito con #");
+
+// Hechos del dialogue_state deben traer el # (el agente no puede inventarlo ni omitirlo).
+const { buildGpsAssessmentDialogueState } = await import("../src/lib/unitDialogueState.ts");
+const dialogue = buildGpsAssessmentDialogueState({
+  unit,
+  rawText: "interno 600-060 no reporta",
+  assessment,
+  action: "ticket",
+  ticketRef: "36806",
+  ticketReused: true,
+  odooRef: "36806",
+  ticketIssueDetail: "falta de reporte: el GPS no envía datos hace 2 horas",
+});
+const hechosBlob = dialogue.hechos.join(" ");
+assert(hechosBlob.includes("36806"), "hechos incluyen número Odoo");
+assert(dialogue.caso_odoo === "36806", "caso_odoo en dialogue_state");
+assert(dialogue.caso_reutilizado === true, "caso_reutilizado=true");
+assert(!/ya existe un caso abierto; se actualizó/i.test(hechosBlob), "no omitir # en hechos reutilizados");
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

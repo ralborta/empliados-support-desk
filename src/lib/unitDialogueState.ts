@@ -2,6 +2,51 @@ import type { WaraUnidadEstado } from "@/lib/waraApi";
 import type { ExecutorDialogueState } from "@/lib/executorDialogueState";
 import { formatPlateWithSpaces } from "@/lib/wara";
 import { formatMinutesAgo, ignitionLabel, type GpsAssessment } from "@/lib/waraGpsAssessment";
+import {
+  formatCustomerOdooCaseRefForWhatsApp,
+  normalizeCustomerOdooCaseRef,
+} from "@/lib/customerOdooCaseRef";
+
+function caseHechosFromOdooRef(params: {
+  odooRef?: string | null;
+  ticketRef?: string | null;
+  ticketReused?: boolean;
+}): { hechos: string[]; caso_odoo?: string; caso_reutilizado?: boolean; caso_abierto: boolean } {
+  const ref =
+    normalizeCustomerOdooCaseRef(params.odooRef) ??
+    normalizeCustomerOdooCaseRef(params.ticketRef);
+  if (!ref) {
+    if (params.ticketReused || params.ticketRef) {
+      return {
+        hechos: [
+          "Ya hay un caso en Atención al cliente para esta unidad (todavía sin número Odoo para mostrar).",
+        ],
+        caso_abierto: true,
+        caso_reutilizado: !!params.ticketReused,
+      };
+    }
+    return { hechos: [], caso_abierto: false };
+  }
+  const display = formatCustomerOdooCaseRefForWhatsApp(ref);
+  if (params.ticketReused) {
+    return {
+      hechos: [
+        `El caso *${display}* YA ESTABA abierto; no se generó uno nuevo. OBLIGATORIO mencionar *${display}* en la respuesta.`,
+      ],
+      caso_odoo: ref,
+      caso_reutilizado: true,
+      caso_abierto: true,
+    };
+  }
+  return {
+    hechos: [
+      `Se GENERÓ el caso *${display}* en Atención al cliente. OBLIGATORIO mencionar *${display}* en la respuesta.`,
+    ],
+    caso_odoo: ref,
+    caso_reutilizado: false,
+    caso_abierto: true,
+  };
+}
 
 function normText(raw: string): string {
   return raw
@@ -87,6 +132,7 @@ export function buildNoEquipmentDialogueState(params: {
   casoAbierto: boolean;
   ticketRef?: string;
   ticketReused?: boolean;
+  odooRef?: string | null;
 }): ExecutorDialogueState {
   const corta = formatUnitShortLabel(params.unit);
   const pregunta = detectUnitConsultQuestion(params.rawText);
@@ -94,14 +140,19 @@ export function buildNoEquipmentDialogueState(params: {
     `${corta} figura en la flota pero no tiene equipo GPS instalado.`,
     "Sin equipo no hay telemetría: no podemos saber cuándo dejó de reportar ni mostrar posición.",
   ];
-  if (params.casoAbierto || params.ticketReused) {
-    hechos.push("Ya hay un caso abierto para que Atención al Cliente lo revise.");
-  } else if (params.ticketRef) {
-    hechos.push(`Se generó un caso nuevo para revisión (${params.ticketRef}).`);
-  }
+  const caseBits = caseHechosFromOdooRef({
+    odooRef: params.odooRef,
+    ticketRef: params.ticketRef,
+    ticketReused: params.ticketReused,
+  });
+  hechos.push(...caseBits.hechos);
   const prohibido = ["sugerir revisar cables o conexiones"];
-  if (params.casoAbierto || params.ticketReused || params.ticketRef) {
+  if (caseBits.caso_abierto || params.casoAbierto) {
     prohibido.push("ofrecer abrir otro ticket o reclamo");
+  }
+  if (caseBits.caso_odoo) {
+    prohibido.push("omitir el número de caso Odoo");
+    prohibido.push("decir solo «caso abierto» sin el #");
   }
   let fase = "sin_equipo";
   if (pregunta === "hace_cuanto_no_reporta") fase = "sin_equipo_hace_cuanto";
@@ -114,7 +165,9 @@ export function buildNoEquipmentDialogueState(params: {
     unidad_nombre: params.unit.unidad?.trim() || undefined,
     hechos,
     pregunta_cliente: pregunta ? params.rawText.trim() : undefined,
-    caso_abierto: params.casoAbierto || params.ticketReused || !!params.ticketRef,
+    caso_abierto: params.casoAbierto || caseBits.caso_abierto,
+    caso_odoo: caseBits.caso_odoo,
+    caso_reutilizado: caseBits.caso_reutilizado,
     prohibido,
   };
 }
@@ -127,6 +180,7 @@ export function buildGpsAssessmentDialogueState(params: {
   ticketRef?: string;
   ticketReused?: boolean;
   ticketIssueDetail?: string;
+  odooRef?: string | null;
 }): ExecutorDialogueState {
   const corta = formatUnitShortLabel(params.unit);
   const pregunta = detectUnitConsultQuestion(params.rawText);
@@ -163,13 +217,12 @@ export function buildGpsAssessmentDialogueState(params: {
     hechos.push(`Falta de reporte GPS: hace ${elapsed} sin datos.`);
   }
 
-  if (params.ticketRef) {
-    hechos.push(
-      params.ticketReused
-        ? "Ya existe un caso abierto; se actualizó la consulta."
-        : `Se generó un caso para revisión (${params.ticketRef}).`,
-    );
-  }
+  const caseBits = caseHechosFromOdooRef({
+    odooRef: params.odooRef,
+    ticketRef: params.ticketRef,
+    ticketReused: params.ticketReused,
+  });
+  hechos.push(...caseBits.hechos);
 
   if (pregunta === "eta_analisis_caso") {
     hechos.push(
@@ -178,8 +231,12 @@ export function buildGpsAssessmentDialogueState(params: {
   }
 
   const prohibido: string[] = [];
-  if (params.ticketRef || params.ticketReused) {
+  if (caseBits.caso_abierto || params.ticketRef || params.ticketReused) {
     prohibido.push("ofrecer abrir otro ticket");
+  }
+  if (caseBits.caso_odoo) {
+    prohibido.push("omitir el número de caso Odoo");
+    prohibido.push("decir solo «caso abierto» sin el #");
   }
   if (pregunta === "eta_analisis_caso") {
     prohibido.push("prometer que Atilio avisará el resultado del análisis");
@@ -193,7 +250,9 @@ export function buildGpsAssessmentDialogueState(params: {
     unidad_nombre: params.unit.unidad?.trim() || undefined,
     hechos,
     pregunta_cliente: pregunta ? params.rawText.trim() : undefined,
-    caso_abierto: !!params.ticketRef || !!params.ticketReused,
+    caso_abierto: caseBits.caso_abierto || !!params.ticketRef || !!params.ticketReused,
+    caso_odoo: caseBits.caso_odoo,
+    caso_reutilizado: caseBits.caso_reutilizado,
     prohibido: prohibido.length ? prohibido : undefined,
   };
 }

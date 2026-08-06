@@ -14,6 +14,10 @@ export type ExecutorDialogueState = {
   /** Pregunta concreta del cliente en este turno (si se detectó). */
   pregunta_cliente?: string;
   caso_abierto?: boolean;
+  /** Número Odoo (solo dígitos). Si está, la respuesta DEBE incluir *#NNNN*. */
+  caso_odoo?: string;
+  /** True si el caso Odoo ya existía (no se creó en este turno). */
+  caso_reutilizado?: boolean;
   /** Cosas que el agente NO debe hacer en la redacción. */
   prohibido?: string[];
 };
@@ -37,6 +41,8 @@ export function parseExecutorDialogueState(
     hechos: o.hechos.map(String),
     pregunta_cliente: o.pregunta_cliente ? String(o.pregunta_cliente) : undefined,
     caso_abierto: o.caso_abierto === true,
+    caso_odoo: o.caso_odoo ? String(o.caso_odoo).replace(/^#/, "") : undefined,
+    caso_reutilizado: o.caso_reutilizado === true,
     prohibido: Array.isArray(o.prohibido) ? o.prohibido.map(String) : undefined,
   };
 }

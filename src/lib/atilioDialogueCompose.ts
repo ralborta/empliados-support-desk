@@ -4,6 +4,7 @@
 import OpenAI from "openai";
 import type { ExecutorDialogueState } from "@/lib/executorDialogueState";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
+import { ensureOdooCaseRefInClientMessage } from "@/lib/customerOdooCaseRef";
 
 export function isAtilioAgentEnabled(): boolean {
   const raw = process.env.WARA_AGENT_MODE?.trim().toLowerCase();
@@ -28,6 +29,9 @@ REGLAS DE REDACCIÓN:
 - Español rioplatense, cercano, 1-4 oraciones, sin emojis.
 - Mencioná la unidad UNA vez con etiqueta corta (ej. "MYQ 693"); no repitas bloques largos.
 - Usá SOLO los hechos del JSON — nunca inventes tiempos, estados ni números de caso.
+- Si hay caso_odoo (ej. "36806"), OBLIGATORIO incluir exactamente *#36806* en la respuesta. Nunca digas solo «caso abierto» sin el número.
+- Si caso_reutilizado=true: aclará que el caso YA ESTABA abierto (no generaste uno nuevo) e incluí el #.
+- Si caso_reutilizado=false y hay caso_odoo: aclará que GENERASTE ese caso e incluí el #.
 - Si caso_abierto=true, NO ofrezcas abrir otro ticket — confirmá que ya quedó registrado.
 - Si preguntan cuándo / demora / resultado del análisis: NO digas que vos vas a avisar el resultado. Dejá claro que Atención al cliente / un especialista les escribe por este chat con los tiempos y el avance; no inventes plazos exactos.
 - Si preguntan "hace cuánto" y no hay telemetría, explicá con empatía por qué no se puede medir.
@@ -49,8 +53,13 @@ export async function composeAgentReplyFromDialogueState(
   input: ComposeDialogueInput,
 ): Promise<string> {
   const fallback = input.fallbackTemplate?.trim();
+  const finalize = (text: string) =>
+    ensureOdooCaseRefInClientMessage(text, input.dialogueState.caso_odoo, {
+      reused: input.dialogueState.caso_reutilizado,
+    });
+
   if (!isAtilioAgentEnabled() || !process.env.OPENAI_API_KEY?.trim()) {
-    return fallback ?? input.dialogueState.hechos.join(" ");
+    return finalize(fallback ?? input.dialogueState.hechos.join(" "));
   }
 
   try {
@@ -84,12 +93,20 @@ export async function composeAgentReplyFromDialogueState(
       OPENAI_DEFAULT_TIMEOUT_MS,
     );
     const text = response?.choices?.[0]?.message?.content?.trim();
-    if (text && text.length >= 12) return text;
+    if (text && text.length >= 12) {
+      const withRef = finalize(text);
+      // Si la IA omitió el # pese a caso_odoo, preferimos plantilla (ya lo trae) + reinyección.
+      const needed = input.dialogueState.caso_odoo;
+      if (needed && fallback && !withRef.includes(needed) && !withRef.includes(`#${needed}`)) {
+        return finalize(fallback);
+      }
+      return withRef;
+    }
   } catch (err) {
     console.warn(
       "[atilioDialogueCompose] compose failed:",
       err instanceof Error ? err.message : err,
     );
   }
-  return fallback ?? input.dialogueState.hechos.join(" ");
+  return finalize(fallback ?? input.dialogueState.hechos.join(" "));
 }
