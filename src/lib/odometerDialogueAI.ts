@@ -25,6 +25,7 @@ export function isOdometerDialogueAiEnabled(): boolean {
 export type OdometerDialogueSituation =
   | "missing_plate"
   | "missing_value"
+  | "missing_fecha_hora"
   | "confirmation_summary"
   | "correction_prompt"
   | "success"
@@ -35,6 +36,8 @@ const SITUATION_GUIDANCE: Record<OdometerDialogueSituation, string> = {
     "Necesitás que el cliente te diga qué unidad es (patente, nombre interno o marca). Pedíselo de forma clara, tomando en cuenta lo que ya dijo (no repitas literalmente su mensaje, pero mostrale que lo leíste).",
   missing_value:
     "Ya sabés qué unidad es. Necesitás el valor nuevo (odómetro en km u horómetro en horas, según corresponda). Pedíselo, confirmando primero la unidad que tomaste.",
+  missing_fecha_hora:
+    "Ya tenés unidad y valor (km u horas). FALTA la fecha y hora de la lectura — son obligatorias. Pedilas con un ejemplo concreto (ej. 05/08/26 a las 14:30). Si la lectura fue recién, que responda la palabra ahora. NO digas CONFIRMO todavía ni asumas «hoy» en silencio.",
   confirmation_summary:
     "Ya tenés todos los datos (patente, valor, y fecha si corresponde). Presentaselos con claridad al cliente para que los revise, y pedile EXPLÍCITAMENTE que responda la palabra CONFIRMO para registrar el cambio. Es un paso de validación, no lo hagas ambiguo.",
   correction_prompt:

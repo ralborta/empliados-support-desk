@@ -1,7 +1,7 @@
 import type { WaraUnidadEstado } from "@/lib/waraApi";
 import type { ExecutorDialogueState } from "@/lib/executorDialogueState";
 import { formatPlateWithSpaces } from "@/lib/wara";
-import { formatMinutesAgo, type GpsAssessment } from "@/lib/waraGpsAssessment";
+import { formatMinutesAgo, ignitionLabel, type GpsAssessment } from "@/lib/waraGpsAssessment";
 
 function normText(raw: string): string {
   return raw
@@ -133,7 +133,22 @@ export function buildGpsAssessmentDialogueState(params: {
   const elapsed = formatMinutesAgo(params.assessment.reportElapsed);
   const hechos: string[] = [`Consulta por ${corta}.`];
 
-  if (params.assessment.status === "ok" || params.assessment.status === "coherent_pause") {
+  if (params.assessment.status === "ok") {
+    hechos.push(`Último reporte hace ${elapsed}.`);
+    const ignLabel = ignitionLabel(params.unit);
+    if (ignLabel === "encendida") {
+      hechos.push("La unidad reporta y posiciona al día; la ignición está encendida (operando con normalidad).");
+    } else if (ignLabel === "apagada") {
+      hechos.push(
+        "La unidad reporta y posiciona al día; la ignición figura apagada pero el paquete telemétrico está actualizado — no es falla de reporte.",
+      );
+    } else {
+      hechos.push("La unidad envía reporte y posición actualizados; funcionamiento normal. No corresponde ticket.");
+    }
+    if (params.action === "observation") {
+      hechos.push("No corresponde abrir ticket por este estado.");
+    }
+  } else if (params.assessment.status === "coherent_pause") {
     hechos.push(`Último reporte hace ${elapsed}.`);
     hechos.push("La unidad está detenida con ignición apagada — es normal que no actualice en vivo.");
     if (params.action === "observation") {

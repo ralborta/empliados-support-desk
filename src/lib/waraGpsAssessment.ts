@@ -45,6 +45,21 @@ export function telemetryElapsedSeconds(value: number | undefined | null): numbe
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/**
+ * Wara a veces manda booleano y a veces "SI"/"NO"/"ON"/"OFF"/1/0.
+ * Bug real 2026-08-06: estado "SI" no era === true → se trataba como apagada/sin dato.
+ */
+export function parseIgnitionEstado(value: unknown): boolean | null {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  if (typeof value === "string") {
+    const t = value.trim().toLowerCase();
+    if (["si", "sí", "yes", "on", "true", "1", "encendida", "activa"].includes(t)) return true;
+    if (["no", "off", "false", "0", "apagada", "inactiva"].includes(t)) return false;
+  }
+  return null;
+}
+
 export function reportElapsedSeconds(unit: WaraUnidadEstado): number | null {
   return telemetryElapsedSeconds(unit.ultimo_reporte?.hace_segundos);
 }
@@ -107,8 +122,9 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
 
   const positionElapsed = telemetryElapsedSeconds(unit.ultima_posicion?.hace_segundos);
   const ignitionElapsed = telemetryElapsedSeconds(unit.ultima_ignicion?.hace_segundos);
-  const ignitionOn = unit.ultima_ignicion?.estado === true;
-  const ignitionOff = unit.ultima_ignicion?.estado === false;
+  const ignitionParsed = parseIgnitionEstado(unit.ultima_ignicion?.estado);
+  const ignitionOn = ignitionParsed === true;
+  const ignitionOff = ignitionParsed === false;
 
   if (!isReportUpdated(reportElapsed)) {
     if (
@@ -206,8 +222,9 @@ export function formatMinutesAgo(seconds: number | undefined | null): string {
 }
 
 export function ignitionLabel(unit: WaraUnidadEstado): string {
-  if (unit.ultima_ignicion?.estado === true) return "encendida";
-  if (unit.ultima_ignicion?.estado === false) return "apagada";
+  const parsed = parseIgnitionEstado(unit.ultima_ignicion?.estado);
+  if (parsed === true) return "encendida";
+  if (parsed === false) return "apagada";
   return "sin dato";
 }
 

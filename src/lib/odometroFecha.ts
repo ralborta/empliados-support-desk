@@ -274,6 +274,88 @@ export function formatFechaDisplay(fecha: string | undefined | null): string | n
   return `${d}/${mo}/${y} ${h}:${mi}`;
 }
 
+/**
+ * El cliente indica explícitamente que la lectura es "ahora" (momento actual).
+ * No confundir con "ahora quiero cambiar el odómetro" (arranque de trámite).
+ * Pedido Emma/Wara 2026-08-06: fecha+hora son obligatorias; «ahora» es la forma
+ * válida de decir "recién leí / registralo con la hora actual".
+ */
+export function looksLikeAhoraComoFechaLectura(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[!?.¡¿]+/g, "")
+    .trim();
+  if (
+    /\b(ahora\s+(quiero|necesito|vamos|hagamos|deseo|cambi|modific|correg|actualiz|registr|realizar|ajustar))\b/.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  if (/^(ahora|recien|en este momento|hoy a esta hora|la hora actual)$/.test(t)) return true;
+  if (/\b(es|fue|registr\w*|tom[aá]\w*|usa|usa la|con)\s+ahora\b/.test(t)) return true;
+  if (/\b(fecha|hora|lectura)\b.{0,24}\bahora\b/.test(t)) return true;
+  if (/\bahora\b.{0,16}\b(misma|actual|de la lectura)\b/.test(t)) return true;
+  return false;
+}
+
+/**
+ * True si hay fecha de lectura CON hora de reloj (no solo día a 00:00 por defecto).
+ * Bug real 2026-08-06 (prueba Emma): el bot registraba solo con km, sin pedir
+ * fecha/hora — Atilio no sabe cuándo se leyó el odómetro.
+ */
+export function fechaLecturaTieneHora(
+  fechaNaive: string | null | undefined,
+  sourceText?: string | null,
+): boolean {
+  if (!fechaNaive) return false;
+  const m = fechaNaive.match(/T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return false;
+  if (m[1] !== "00" || m[2] !== "00") return true;
+  // Medianoche solo cuenta si el cliente la escribió explícitamente.
+  const src = String(sourceText ?? "");
+  return /\b(?:00|0):00\b/.test(src) || /\bmedianoche\b/i.test(src);
+}
+
+/** True si el mensaje es solo (o casi solo) una hora de reloj, sin día. */
+export function looksLikeClockTimeOnlyMessage(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[!?.¡¿]+/g, "")
+    .trim();
+  if (/\b(hoy|ayer|anteayer|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(t)) return false;
+  return (
+    /^(?:(?:hora|horas)\s*:?\s*|a\s+las\s+)?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?$/.test(t) ||
+    /^(?:la\s+)?hora\s+(?:es\s+)?(?:a\s+las\s+)?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?$/.test(t)
+  );
+}
+
+/**
+ * Si el cliente ya dio un día (sin hora) y ahora manda solo "14:30", combinar
+ * en vez de pisar el día con "hoy" (bug al pedir hora aparte).
+ */
+export function mergeFechaConHoraSuelt(
+  fechaBase: string | null | undefined,
+  horaMessage: string,
+  timezone?: string,
+): string | undefined {
+  if (!fechaBase || !looksLikeClockTimeOnlyMessage(horaMessage)) return undefined;
+  if (fechaLecturaTieneHora(fechaBase, horaMessage)) return undefined;
+  const clock = parseFechaFromText(horaMessage, timezone);
+  const timePart = clock?.match(/T(\d{2}:\d{2}:\d{2})$/)?.[1];
+  const dayPart = fechaBase.match(/^(\d{4}-\d{2}-\d{2})T/)?.[1];
+  if (!timePart || !dayPart) return undefined;
+  return `${dayPart}T${timePart}`;
+}
+
 export type CalendarContext = {
   timezone: string;
   todayIso: string;

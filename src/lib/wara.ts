@@ -103,6 +103,19 @@ export function isPlausibleVehiclePlate(value: string | null | undefined): boole
 }
 
 /**
+ * ID numérico suelto (ej. 2408437) que NO es patente ni código M300-097.
+ * Bug real 2026-08-06: el bot trató "unidad 2408437" como unidad resuelta y pidió km.
+ */
+export function looksLikeBareNumericUnitId(value: string | null | undefined): boolean {
+  const compact = normalizePlate(value);
+  if (!compact) return false;
+  if (!/^\d{4,}$/.test(compact)) return false;
+  // Códigos internos con guión ya se normalizan sin guión (300097); esos tienen 5-6 dígitos
+  // pero vienen del patrón M?\d{3}-\d{2,3}. Un ID administrativo suele ser ≥7 dígitos.
+  return compact.length >= 7;
+}
+
+/**
  * Detecta la primera patente REAL en el texto, ignorando las patentes de ejemplo
  * de los prompts. Si solo hay ejemplos, devuelve null.
  */
@@ -877,6 +890,10 @@ export function threadAwaitingOdometerConfirmDetails(threadText: string): boolea
       tail,
     ) ||
     /\b(fecha y hora de la lectura|ten[eé]s una fecha y hora)\b/.test(tail) ||
+    /\b(fecha y hora (?:de (?:la )?lectura|del cambio)|pasame la fecha y hora|necesito la fecha y hora)\b/.test(
+      tail,
+    ) ||
+    /\bsi fue reci[eé]n,?\s*respond[eé]\s*[«"']?ahora/.test(tail) ||
     /\basumimos que es hoy\b/.test(tail) ||
     /\bpara registrar el cambio de od[oó]metro\b.{0,220}\bconfirm[aá]s?\b/.test(tail)
   );
@@ -1194,7 +1211,11 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
     // mensaje caía al fallback operativo genérico (executor "unidades"), que respondía
     // con GPS/estado en vez de pedir la unidad para el odómetro. El bot "perdía el hilo"
     // desde el primer mensaje, sin que hiciera falta ningún tema previo en el historial.
-    /\b(actualizar|cambiar|cambio de|corregir|modificar|ajust\w*|registrar|realizar)\b/.test(t) &&
+    //
+    // Bug real, producción 2026-08-06: "me corregis el odometro del la unidad 2408437"
+    // no matcheaba "\bcorregir\b" (conjugación rioplatense "corregís"/"corregime").
+    // Caía a unidades y el agente pedía km como si 2408437 ya fuera unidad válida.
+    /\b(actualizar|cambiar|cambio de|correg\w*|modificar|ajust\w*|registrar|realizar)\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
   );
 }

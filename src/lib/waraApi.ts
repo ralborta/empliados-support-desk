@@ -2031,7 +2031,8 @@ export type WaraUnidadEstado = {
     hace_segundos?: number;
   } | null;
   ultima_ignicion?: {
-    estado?: boolean;
+    /** Wara puede mandar boolean, "SI"/"NO", 1/0 — normalizar con parseIgnitionEstado. */
+    estado?: boolean | string | number;
     fecha?: string;
     hace_segundos?: number;
   } | null;
