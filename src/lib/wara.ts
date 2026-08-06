@@ -1710,13 +1710,14 @@ export function looksLikeAnotherUnitConsultRequest(
     return false;
   }
   return (
-    /\b(consult\w*|revis\w*|cheque\w*|mir\w*|ver)\w*\b.{0,30}\b(otra|otras|otro|otros)\s+(unidad\w*|patente\w*|vehicul\w*|camionet\w*)\b/.test(
+    /\b(consult\w*|revis\w*|cheque\w*|mir\w*|ver|estado|posicion|ubicacion)\w*\b.{0,40}\b(otra|otras|otro|otros)\s+(unidad\w*|patente\w*|vehicul\w*|camionet\w*)\b/.test(
       norm,
     ) ||
-    (/\b(quiero|necesito|pasame|dame)\b/.test(norm) &&
+    (/\b(quiero|necesito|pasame|pasarme|dame|podes|puedes|podrias|podes)\b/.test(norm) &&
       /\b(otra|otras|otro|otros)\s+(unidad\w*|patente\w*|vehicul\w*|camionet\w*)\b/.test(norm)) ||
     (/\b(tengo|tambien|también)\b/.test(norm) &&
-      /\b(otra|otras|otro|otros)\s+(unidad\w*|vehicul\w*|movile?s?|camionet\w*)\b/.test(norm))
+      /\b(otra|otras|otro|otros)\s+(unidad\w*|vehicul\w*|movile?s?|camionet\w*|patente\w*)\b/.test(norm)) ||
+    /\bel\s+estado\s+de\s+(otra|otro)\s+(unidad\w*|patente\w*)\b/.test(norm)
   );
 }
 

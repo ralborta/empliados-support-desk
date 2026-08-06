@@ -1309,6 +1309,8 @@ export function threadHasRecentUnitProblemListenPrompt(threadText: string): bool
     /contame que problema/.test(tail) ||
     /que problema estas viendo/.test(tail) ||
     /que situacion estas viendo/.test(tail) ||
+    /contame que (problema|situacion)/.test(tail) ||
+    /no reporta ahora.*historial.*ignicion/.test(tail) ||
     /necesito que me digas la matricula exacta/.test(tail) ||
     /patente completa de la unidad/.test(tail) ||
     /matricula exacta/.test(tail)

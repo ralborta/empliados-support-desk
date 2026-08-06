@@ -334,6 +334,10 @@ export async function runTurnExecutorPhase(params: {
   // ——— IA primero (casi todo el diálogo) ———
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
+  const activeUnitForNl = await getActiveUnit(prisma, rawPhone);
+  const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
+    threadCtx.classificationThread,
+  );
   if (shouldInterpretAmbiguousUtterance(selectionText, threadCtx.classificationThread)) {
     const understanding = await understandUserUtterance(
       selectionText,
@@ -346,18 +350,22 @@ export async function runTurnExecutorPhase(params: {
     // Si el mensaje ya trae una patente usable, no preguntar "¿matrícula o caso?"
     // (regresión: "no me reporta la AF061DO" → unclear).
     const clarify = clarificationFromUnderstanding(understanding, selectionText);
-    if (clarify && !hasUsablePlate) {
+    if (clarify && !hasUsablePlate && !activeUnitForNl?.plate && !threadAwaitingUnitProblem) {
       console.info(
         `[utteranceUnderstanding] aclarar phone=${rawPhone.slice(0, 4)}… referent=${understanding?.referent} conf=${understanding?.confidence}`,
       );
       return { message: clarify, executor: "info_guides", ok: true };
     }
+    // Pedir matrícula SOLO si no hay unidad en contexto ni el bot acaba de pedir el síntoma.
+    // Bug real 2026-08-06: con AG 316 DX activa + "No veo posición" → pedía patente de nuevo.
     if (
       understanding &&
       shouldProceedAsVehicleUnit(understanding) &&
       !hasUsablePlate &&
       !isBarePlatePrefixHint(selectionText) &&
-      !looksLikeFleetUnitSearchInput(selectionText)
+      !looksLikeFleetUnitSearchInput(selectionText) &&
+      !activeUnitForNl?.plate &&
+      !threadAwaitingUnitProblem
     ) {
       console.info(
         `[utteranceUnderstanding] unidad-sin-dato phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent}`,
@@ -372,6 +380,7 @@ export async function runTurnExecutorPhase(params: {
     }
     if (
       !hasUsablePlate &&
+      !activeUnitForNl?.plate &&
       shouldAnswerOpenCaseFromUnderstanding(
         understanding,
         selectionText,
@@ -387,11 +396,24 @@ export async function runTurnExecutorPhase(params: {
         ok: true,
       };
     }
-    if (hasUsablePlate) {
+    const keepActiveUnitThread =
+      !!activeUnitForNl?.plate &&
+      (threadAwaitingUnitProblem ||
+        looksLikeUnitConsultFollowUp(selectionText) ||
+        looksLikeUnitReportingStatusCue(selectionText) ||
+        looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+        looksLikeSubstantiveCustomerMessage(selectionText));
+    if (hasUsablePlate || keepActiveUnitThread) {
       skipSchematicUnitRoute = false;
-      console.info(
-        `[utteranceUnderstanding] patente-en-mensaje phone=${rawPhone.slice(0, 4)}… plate=${plateInMsg} (prioriza flota)`,
-      );
+      if (hasUsablePlate) {
+        console.info(
+          `[utteranceUnderstanding] patente-en-mensaje phone=${rawPhone.slice(0, 4)}… plate=${plateInMsg} (prioriza flota)`,
+        );
+      } else {
+        console.info(
+          `[utteranceUnderstanding] hilo-unidad-activa phone=${rawPhone.slice(0, 4)}… plate=${activeUnitForNl?.plate}`,
+        );
+      }
     } else if (understanding && !shouldProceedAsVehicleUnit(understanding)) {
       skipSchematicUnitRoute = true;
       console.info(
@@ -493,7 +515,7 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  const activeUnit = await getActiveUnit(prisma, rawPhone);
+  const activeUnit = activeUnitForNl;
 
   // Arranque odómetro con unidad activa reciente (certificado/consulta GPS) → executor directo.
   if (

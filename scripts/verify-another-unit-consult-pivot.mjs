@@ -27,6 +27,8 @@ const pivotPhrases = [
   "Quiero consultar por otras unidades",
   "quiero ver otras patentes",
   "tengo otros vehiculos también",
+  "Puedes pasarme el estado de otra unidad",
+  "pasame el estado de otra unidad",
 ];
 
 console.log("— Pivot a otra unidad (no es rechazo) —");
