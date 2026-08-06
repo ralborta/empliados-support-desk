@@ -79,6 +79,7 @@ import {
   buildFleetUnitNotFoundMessage,
   looksLikeFleetUnitSearchInput,
   looksLikeUnitNameInMessage,
+  extractFreeTextUnitSearchCandidate,
 } from "@/lib/waraUnitIntent";
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
@@ -121,7 +122,7 @@ function looksLikePendingCertificateUnitReply(text: string): boolean {
 function executorBody(
   rawPhone: string,
   body: string,
-  extras?: { platePrefix?: string; plate?: string },
+  extras?: { platePrefix?: string; plate?: string; unitSearchText?: string },
 ): JsonRecord {
   return {
     from: rawPhone,
@@ -130,6 +131,7 @@ function executorBody(
     rawText: body,
     ...(extras?.platePrefix ? { platePrefix: extras.platePrefix } : {}),
     ...(extras?.plate ? { patente: extras.plate, plate: extras.plate } : {}),
+    ...(extras?.unitSearchText ? { unitSearchText: extras.unitSearchText } : {}),
   };
 }
 
@@ -138,7 +140,7 @@ async function invokeExecutor(
   rawPhone: string,
   body: string,
   apiKey: string,
-  extras?: { platePrefix?: string; plate?: string },
+  extras?: { platePrefix?: string; plate?: string; unitSearchText?: string },
 ): Promise<JsonRecord> {
   const handler = EXECUTOR_HANDLERS[executor];
   const req = new NextRequest(`http://internal${TURN_EXECUTOR_PATH[executor]}`, {
@@ -346,7 +348,7 @@ export async function runTurnExecutorPhase(params: {
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
   let lastUnderstanding: UtteranceUnderstanding | null = null;
-  let aiUnitExtras: { platePrefix?: string; plate?: string } | undefined;
+  let aiUnitExtras: { platePrefix?: string; plate?: string; unitSearchText?: string } | undefined;
   const activeUnitForNl = await getActiveUnit(prisma, rawPhone);
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
@@ -362,24 +364,32 @@ export async function runTurnExecutorPhase(params: {
     const regexPlateOk =
       !!plateInMsg && isPlausibleVehiclePlate(normalizePlate(plateInMsg));
     const regexPrefix = extractPlatePrefixFromMessage(selectionText);
+    const freeName =
+      aiHint?.brand ||
+      aiHint?.unitName ||
+      extractFreeTextUnitSearchCandidate(selectionText) ||
+      null;
     // Reglas determinísticas primero; IA solo completa lo que el texto no pudo extraer.
     const hasUsablePlate = regexPlateOk || !!aiHint?.plate;
     const prefixHint = regexPrefix ?? aiHint?.platePrefix ?? null;
     const hasUsablePrefix = !!prefixHint;
+    const hasUsableName = !!freeName;
     aiUnitExtras = {
       ...(prefixHint ? { platePrefix: prefixHint } : {}),
       ...(!regexPlateOk && aiHint?.plate ? { plate: aiHint.plate } : {}),
+      ...(freeName ? { unitSearchText: freeName } : {}),
     };
-    if (!aiUnitExtras.platePrefix && !aiUnitExtras.plate) {
+    if (!aiUnitExtras.platePrefix && !aiUnitExtras.plate && !aiUnitExtras.unitSearchText) {
       aiUnitExtras = undefined;
     }
 
-    // Si el mensaje (o la IA) ya trae patente/prefijo usable, no preguntar — ejecutar flota.
+    // Si el mensaje (o la IA) ya trae patente/prefijo/nombre usable, no preguntar — ejecutar flota.
     const clarify = clarificationFromUnderstanding(understanding, selectionText);
     if (
       clarify &&
       !hasUsablePlate &&
       !hasUsablePrefix &&
+      !hasUsableName &&
       !activeUnitForNl?.plate &&
       !threadAwaitingUnitProblem
     ) {
@@ -388,12 +398,13 @@ export async function runTurnExecutorPhase(params: {
       );
       return { message: clarify, executor: "info_guides", ok: true };
     }
-    // Pedir matrícula SOLO si no hay unidad/prefijo en contexto ni el bot acaba de pedir el síntoma.
+    // Pedir matrícula SOLO si no hay unidad/prefijo/nombre en contexto.
     if (
       understanding &&
       shouldProceedAsVehicleUnit(understanding) &&
       !hasUsablePlate &&
       !hasUsablePrefix &&
+      !hasUsableName &&
       !isBarePlatePrefixHint(selectionText) &&
       !looksLikeFleetUnitSearchInput(selectionText) &&
       !activeUnitForNl?.plate &&
@@ -441,6 +452,7 @@ export async function runTurnExecutorPhase(params: {
     if (
       hasUsablePlate ||
       hasUsablePrefix ||
+      hasUsableName ||
       keepActiveUnitThread ||
       shouldForceUnidadesFromUnderstanding(understanding)
     ) {
@@ -452,6 +464,10 @@ export async function runTurnExecutorPhase(params: {
       } else if (hasUsablePrefix) {
         console.info(
           `[utteranceUnderstanding] prefijo-razonado phone=${rawPhone.slice(0, 4)}… prefix=${prefixHint} source=${aiHint?.platePrefix ? "ai" : "rules"} (prioriza flota)`,
+        );
+      } else if (hasUsableName) {
+        console.info(
+          `[utteranceUnderstanding] nombre-en-mensaje phone=${rawPhone.slice(0, 4)}… name=${freeName} (prioriza flota)`,
         );
       } else if (shouldForceUnidadesFromUnderstanding(understanding)) {
         console.info(

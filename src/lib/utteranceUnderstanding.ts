@@ -78,12 +78,12 @@ unit_ref (OBLIGATORIO razonarlo siempre):
 - full_plate — matrícula completa usable (value: letras+dígitos compactos, ej. "AD427MC").
 - prefix — el cliente apunta al COMIENZO de la patente (empieza/arranca/inicia/la que va con…), aunque el verbo o la frase estén mal escritos. value: solo las 2–3 letras/dígitos del prefijo (ej. "AD", "OST"), NUNCA la frase tipográfica completa.
 - suffix — apunta al FINAL de la patente (termina/finaliza en…). value: sufijo corto.
-- brand — marca de vehículo (Nissan, Saveiro…). value: marca normalizada.
-- unit_name — nombre/código interno (M300-112, 300-112). value: ese código.
+- brand — marca o etiqueta de flota (Nissan, Altamiranda…). value: texto a buscar.
+- unit_name — nombre/código interno (M300-112, 300-112) o apellido/etiqueta listada. value: ese texto.
 - none — no hay referencia a unidad en el mensaje_nuevo.
 
 Principios (generales):
-- Si el cliente pide estado/GPS/reporte Y en el mismo mensaje indica cómo identificar la unidad (empieza/termina con…, marca, nombre, patente) → vehicle_unit + unit_ref concreto. NUNCA pidas de nuevo la patente: ya dio el dato.
+- Si el cliente pide estado/GPS por nombre o etiqueta que aparece en la flota (persona, chofer, alias listado) → vehicle_unit + unit_ref brand o unit_name. NUNCA pidas la matrícula: buscá por ese texto.
 - Si el hilo pide patente/prefijo/unidad y el mensaje parece un intento de identificarla → vehicle_unit + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
 - Si el hilo YA tiene una unidad activa/confirmada (el bot dijo "Con la unidad X…" o "contame qué problema") y el cliente pide estado/reporte/GPS sin repetir la patente ("Quiero el estado", "el reporte", "¿cómo está?") → vehicle_unit, unit_ref.none, clarify_question null. NUNCA pidas la matrícula de nuevo: usá la del hilo.
 - Matrícula reconocible (formato AR) → full_plate, no admin_number.

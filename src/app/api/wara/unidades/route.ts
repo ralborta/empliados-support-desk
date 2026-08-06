@@ -79,6 +79,8 @@ const bodySchema = z
     rawText: z.string().optional(),
     /** Prefijo de patente ya razonado (utterance LN). Evita depender del typo del cliente. */
     platePrefix: z.string().min(2).max(6).optional(),
+    /** Nombre/marca/etiqueta razonada (Altamiranda, Nissan…). */
+    unitSearchText: z.string().min(2).max(60).optional(),
     unidad: z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]).optional(),
     unidades: z.array(z.union([z.number(), z.string()])).optional(),
     patentes: z.array(z.string()).optional(),
@@ -983,6 +985,7 @@ export async function POST(req: NextRequest) {
     !unitQueryInMessage &&
     !threadPlateEarly &&
     !parsed.data.platePrefix?.trim() &&
+    !parsed.data.unitSearchText?.trim() &&
     !extractPlatePrefixFromMessage(rawText) &&
     !extractPlateSuffixFromMessage(rawText) &&
     !looksLikeFleetUnitSearchInput(rawText) &&
@@ -1112,6 +1115,7 @@ export async function POST(req: NextRequest) {
         preferAi: preferAiResolution,
         aiHistorial,
         prefixHint: parsed.data.platePrefix ?? null,
+        nameHint: parsed.data.unitSearchText ?? null,
       });
 
       // Diagnóstico liviano: cuando la resolución no encuentra nada, dejar rastro de

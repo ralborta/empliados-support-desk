@@ -163,7 +163,7 @@ export function looksLikeUnitNameInMessage(rawText: string | undefined | null): 
   return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm);
 }
 
-/** Entrada que debe resolver contra la flota (patente, prefijo, marca, corrección). */
+/** Entrada que debe resolver contra la flota (patente, prefijo, marca, nombre/etiqueta). */
 export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   return (
     !!detectLoosePlate(rawText) ||
@@ -172,7 +172,8 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
     !!extractPlateCorrectionHint(rawText) ||
     looksLikeVehicleBrandOrUnitSearch(rawText) ||
     looksLikePlateCorrectionRequest(rawText) ||
-    looksLikeUnitNameInMessage(rawText)
+    looksLikeUnitNameInMessage(rawText) ||
+    !!extractFreeTextUnitSearchCandidate(rawText)
   );
 }
 
@@ -366,22 +367,55 @@ function termMatchesWord(term: string, word: string): boolean {
   if (term.length >= 4 && word.length >= 4 && (word.startsWith(term) || term.startsWith(word))) {
     return true;
   }
+  // Nombres de flota con typo leve (Altamirano ↔ Altamiranda).
+  if (term.length >= 6 && word.length >= 6) {
+    const maxDist = Math.abs(term.length - word.length) <= 2 ? 2 : 1;
+    if (levenshteinDistance(term, word) <= maxDist) return true;
+  }
   return false;
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 0; i < a.length; i++) {
+    let prev = i;
+    row[0] = i + 1;
+    for (let j = 0; j < b.length; j++) {
+      const cur = row[j + 1]!;
+      const cost = a[i] === b[j] ? 0 : 1;
+      row[j + 1] = Math.min(cur + 1, row[j]! + 1, prev + cost);
+      prev = cur;
+    }
+  }
+  return row[b.length]!;
 }
 
 function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
 
-/** Búsqueda determinística por marca/nombre en patente + unidad (campo Wara). */
+/** Búsqueda determinística por marca/nombre/etiqueta en patente + unidad (campo Wara). */
 function resolveBrandOrNameInFleet(
   rawText: string,
   units: WaraUnidadEstado[],
+  nameHint?: string | null,
 ): UnitQueryResolution | null {
-  if (!looksLikeVehicleBrandOrUnitSearch(rawText) && !extractPlateCorrectionHint(rawText)) {
-    return null;
+  const freeLabel = nameHint?.trim() || extractFreeTextUnitSearchCandidate(rawText);
+  const canSearch =
+    !!freeLabel ||
+    looksLikeVehicleBrandOrUnitSearch(rawText) ||
+    !!extractPlateCorrectionHint(rawText);
+  if (!canSearch) return null;
+
+  const sourceText = freeLabel || rawText;
+  let terms = tokenizeSearchTerms(sourceText).filter((t) => t.length >= 3);
+  if (!terms.length && freeLabel) {
+    const one = normalizeToken(freeLabel);
+    if (one.length >= 3) terms = [one];
   }
-  const terms = tokenizeSearchTerms(rawText).filter((t) => t.length >= 3);
   if (!terms.length) return null;
   const matches = filterUnitsBySearchTerms(units, terms);
   const candidatePlates = matches
@@ -409,7 +443,7 @@ function resolveBrandOrNameInFleet(
       source: "rules",
     };
   }
-  const label = extractExplicitUnitSearchLabel(rawText) ?? terms.join(" ");
+  const label = freeLabel || extractExplicitUnitSearchLabel(rawText) || terms.join(" ");
   if (label) {
     return {
       intent: "need_clarification",
@@ -658,12 +692,12 @@ export function threadHasRecentFleetUnitSearchRequest(threadText: string): boole
   );
 }
 
-/** Extrae la marca/nombre que el cliente intentó buscar ("es la NISSAN", "la Saveiro"). */
+/** Extrae la marca/nombre que el cliente intentó buscar ("es la NISSAN", "Altamiranda"). */
 export function extractExplicitUnitSearchLabel(rawText: string): string | null {
   let t = String(rawText ?? "").trim();
   if (!t) return null;
   t = t
-    .replace(/^(?:si|sí|ok|dale|bueno)[,.\s!]+/i, "")
+    .replace(/^(?:si|sí|ok|dale|bueno|perdon|perdón)[,.\s!]+/i, "")
     .replace(/^(?:es|son|sería|seria)\s+(?:la|el|una|un)\s+/i, "")
     .replace(/^(?:la|el)\s+/i, "")
     .trim();
@@ -671,7 +705,64 @@ export function extractExplicitUnitSearchLabel(rawText: string): string | null {
   if (detectLoosePlate(t) || looksLikeUnitNameInMessage(t) || looksLikeVehicleBrandOrUnitSearch(t)) {
     return t;
   }
+  const free = extractFreeTextUnitSearchCandidate(rawText);
+  if (free) return free;
   return null;
+}
+
+/**
+ * Nombre/etiqueta de unidad en lenguaje natural (no solo marcas del catálogo cerrado).
+ * Bug real 2026-08-06: "estado de Altamiranda" — el bot había listado ALTAMIRANDA JOSE
+ * y pedía matrícula porque solo buscaba marcas tipo Nissan.
+ */
+export function extractFreeTextUnitSearchCandidate(rawText: string): string | null {
+  const raw = String(rawText ?? "").trim();
+  if (!raw || raw.length > 80) return null;
+  if (detectLoosePlate(raw) || extractPlatePrefixFromMessage(raw)) return null;
+
+  const cleaned = raw
+    .replace(/^(?:perdon|perdón|disculpa|ok|dale|bueno)[,.\s!]+/i, "")
+    .trim();
+
+  const patterns = [
+    /\b(?:estado|reporte|gps|posicion|posici[oó]n|consulta|consultar|ver|saber|pasame|dame|decime)\s+(?:de\s+)?(?:la\s+)?(?:unidad\s+)?([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{2,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{1,}){0,2})\b/i,
+    /\b(?:unidad|patente|matricula|chofer|conductor)\s+([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{2,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{1,}){0,2})\b/i,
+  ];
+  for (const re of patterns) {
+    const m = cleaned.match(re);
+    if (m?.[1]) {
+      const cand = m[1].trim();
+      if (isPlausibleFreeTextUnitLabel(cand)) return cand;
+    }
+  }
+
+  // Respuesta corta: solo el nombre ("Altamiranda", "Altamiranda Jose").
+  if (/^[A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ\s.'-]{2,40}$/.test(cleaned)) {
+    const cand = cleaned.replace(/\s+/g, " ").trim();
+    if (isPlausibleFreeTextUnitLabel(cand) && cand.split(/\s+/).length <= 3) return cand;
+  }
+  return null;
+}
+
+function isPlausibleFreeTextUnitLabel(cand: string): boolean {
+  const norm = cand
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm || norm.length < 3) return false;
+  if (STOPWORDS.has(norm)) return false;
+  if (
+    /^(una|unidad|patente|matricula|estado|reporte|gps|flota|lista|unidades|marca|nombre|chofer)$/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
+  if (detectLoosePlate(cand) || looksLikeUnitNameInMessage(cand)) return false;
+  // Evitar frases enteras ("una unidad que no reporta").
+  if (/\b(que|porque|cuando|donde|como|necesito|quiero)\b/.test(norm)) return false;
+  return true;
 }
 
 function tokenizeSearchTerms(text: string): string[] {
@@ -1679,6 +1770,11 @@ export async function resolveUnitQuery(params: {
    */
   prefixHint?: string | null;
   /**
+   * Nombre/marca/etiqueta ya razonada (IA o texto libre: "Altamiranda").
+   * Busca en patente+unidad sin exigir catálogo cerrado de marcas.
+   */
+  nameHint?: string | null;
+  /**
    * Historial "solo cliente" para el prompt de la IA (ver `buildCustomerOnlyText`).
    * Si no se pasa, se usa `threadText` tal cual (compatibilidad con callers que no
    * tienen acceso a la base, p.ej. tests). Las reglas determinísticas SIEMPRE usan
@@ -1742,8 +1838,25 @@ export async function resolveUnitQuery(params: {
     };
   }
 
+  // Nombre/etiqueta libre (Altamiranda, Nissan, …) antes de pedir patente.
+  const nameResEarly = resolveBrandOrNameInFleet(
+    params.rawText,
+    params.units,
+    params.nameHint,
+  );
+  if (nameResEarly?.intent === "consult_status" && nameResEarly.plate) return nameResEarly;
+  if (
+    nameResEarly?.intent === "need_clarification" &&
+    (nameResEarly.candidatePlates.length > 0 ||
+      !!params.nameHint?.trim() ||
+      !!extractFreeTextUnitSearchCandidate(params.rawText))
+  ) {
+    return nameResEarly;
+  }
+
   const brandOrLiveConsult =
     looksLikeVehicleBrandOrUnitSearch(params.rawText) ||
+    !!extractFreeTextUnitSearchCandidate(params.rawText) ||
     looksLikeLiveUnitConsultIntent(params.rawText);
   const certificateCtx =
     params.certificateContext || hasCertificateFlowAwaitingUnit(params.threadText);
@@ -2027,15 +2140,14 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
     return true;
   }
 
-  // Señal concreta de unidad (prefijo tipográfico, patente, marca, nombre) → flota.
-  // No exigir marcador de "pedí la patente": el pedido puede venir de info_guides / LN
-  // ("¿patente o prefijo?") y el cliente responde "coiemza ad" / "comienza con AD".
+  // Señal concreta de unidad (prefijo, patente, marca, nombre/etiqueta de flota) → flota.
   if (
     !!extractPlatePrefixFromMessage(selectionText) ||
     isBarePlatePrefixHint(selectionText) ||
     !!detectLoosePlate(selectionText) ||
     looksLikeVehicleBrandOrUnitSearch(selectionText) ||
-    looksLikeUnitNameInMessage(selectionText)
+    looksLikeUnitNameInMessage(selectionText) ||
+    !!extractFreeTextUnitSearchCandidate(selectionText)
   ) {
     return true;
   }
