@@ -616,13 +616,15 @@ export function looksLikeConversationAcknowledgement(text: string | undefined | 
   if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
   const t = normCompanyToken(raw);
   if (
-    /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias)\b/.test(
+    /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias|thanks|thank you|ty|thx|tks)\b/.test(
       t,
     )
   ) {
     return true;
   }
-  return /^(ok|listo|perfecto|genial|buenisimo|buenisima|dale gracias)[\s!.,¡¿]*$/.test(t);
+  return /^(ok|listo|perfecto|genial|buenisimo|buenisima|dale gracias|tks|ty|thx|thanks)[\s!.,¡¿]*$/.test(
+    t,
+  );
 }
 
 /**
@@ -1031,7 +1033,7 @@ export function looksLikeTicketCreationInfoQuestion(text: string | undefined | n
   if (looksLikeHumanAdvisorRequest(text)) return false;
   if (looksLikeExplicitReclamoOrTicketRequest(text)) return false;
   if (/\b(caso|ticket|reclamo)\s+(abierto|activo|pendiente|en curso)\b/.test(norm)) return false;
-  if (/\b(cual|cu[aá]l)\s+es\s+(mi|el)\s+(caso|ticket|numero|n[uú]mero)\b/.test(norm)) return false;
+  if (/\b(cual|cu[aá]l)\s+es\s+(mi|el)\s+(caso|ticket|numero|n[uú]mero|nro)\b/.test(norm)) return false;
 
   return (
     /\b(que|cuales|qu[eé])\s+(casos?|situaciones?|motivos?|problemas?)\b.{0,48}\b(deriv\w*|gener\w*|abre\w*|crea\w*)\w*\b.{0,48}\b(ticket|caso|reclamo)\b/.test(

@@ -12,17 +12,20 @@ import {
 } from "@/lib/whatsappTurnRouter";
 import { resolveTurnExecutor } from "@/lib/whatsappTurnClassifierAI";
 import {
+  clarificationFromUnderstanding,
+  shouldAnswerOpenCaseFromUnderstanding,
+  shouldInterpretAmbiguousUtterance,
+  shouldProceedAsVehicleUnit,
+  understandUserUtterance,
+} from "@/lib/utteranceUnderstanding";
+import {
   buildUnexpectedTurnFallbackMessage,
-  buildAtilioHelpCapabilitiesReply,
-  buildTicketCreationInfoReply,
-  looksLikeBareAtilioMention,
   looksLikeChangeCompanyRequest,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
   looksLikeGenericUnitConsultWithoutPlate,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
-  looksLikeTicketCreationInfoQuestion,
   looksLikeUnitConsultFollowUp,
   looksLikeUnitReportingStatusCue,
   looksLikeSubstantiveCustomerMessage,
@@ -33,6 +36,7 @@ import {
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
+import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import { shouldRouteTurnToFleetListExecutorHybrid } from "@/lib/fleetListIntentAI";
 import {
@@ -72,8 +76,7 @@ import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
-import { getActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
-import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { getActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
@@ -246,28 +249,6 @@ export async function runTurnExecutorPhase(params: {
     return { message: reset.message, executor: "unidades", ok: true };
   }
 
-  // Cambio de tema / otra consulta — no repetir unidad activa ni GPS previo (bug AE 483 VE).
-  if (looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText)) {
-    await clearActiveUnit(prisma, rawPhone);
-    const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
-    const firstName = customer?.name?.trim().split(/\s+/)[0];
-    const message = looksLikeBareAtilioMention(selectionText)
-      ? firstName
-        ? `Hola ${firstName}, ¿en qué te puedo ayudar?`
-        : "Hola, ¿en qué te puedo ayudar?"
-      : buildAtilioHelpCapabilitiesReply(firstName);
-    return { message, executor: "info_guides", ok: true };
-  }
-
-  if (looksLikeTicketCreationInfoQuestion(selectionText)) {
-    await clearActiveUnit(prisma, rawPhone);
-    return {
-      message: buildTicketCreationInfoReply(),
-      executor: "info_guides",
-      ok: true,
-    };
-  }
-
   if (looksLikeUnitRejection(selectionText) || looksLikeBareNegativeResponse(selectionText)) {
     const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
@@ -296,19 +277,6 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // Mantenimiento operativo (incl. marca/prefijo en el mismo mensaje) → executor con búsqueda en flota, no agente.
-  if (
-    looksLikeOperationalMaintenanceIntent(selectionText, threadCtx.classificationThread) &&
-    !hasPendingMantenimientoConfirmation(threadCtx.classificationThread)
-  ) {
-    const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
-    const execMessage = messageFromPayload(execResult);
-    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (execMessage || !executorSkippedSilently(execResult)) {
-      return { message: execMessage, executor: "mantenimiento", ok: execOk };
-    }
-  }
-
   if (
     hasPendingMantenimientoConfirmation(threadCtx.classificationThread) &&
     looksLikeMaintenanceConfirmationRejection(selectionText)
@@ -320,8 +288,7 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Confirmación de trámite: el backend registra con los datos guardados — no dejar que
-  // el agente reinterprete "Confirmo" / "esa está bien" ni dependa del marcador exacto
-  // "voy a registrar:" en el hilo (el agente parafrasea el resumen).
+  // la IA reinterprete "Confirmo" / "esa está bien" (seguridad operativa).
   const pendingConfirmExecutor = resolvePendingConfirmationExecutor(
     threadCtx.classificationThread,
     selectionText,
@@ -345,8 +312,7 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // Confirmación en flujo de odómetro activo: ir directo al executor (no agente IA),
-  // aunque el resumen haya sido parafraseado sin "Voy a registrar:" ni pendingAction en DB.
+  // Confirmación en flujo de odómetro activo: ir directo al executor (no reinterpretar).
   if (
     (looksLikePendingTramiteAffirmation(selectionText) ||
       looksLikeBriefConfirmation(selectionText)) &&
@@ -358,6 +324,76 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
+  // ——— IA primero (casi todo el diálogo) ———
+  // Reglas operativas solo ejecutan después, según la intención entendida.
+  let skipSchematicUnitRoute = false;
+  if (shouldInterpretAmbiguousUtterance(selectionText, threadCtx.classificationThread)) {
+    const understanding = await understandUserUtterance(
+      selectionText,
+      threadCtx.classificationThread,
+    );
+    const clarify = clarificationFromUnderstanding(understanding, selectionText);
+    if (clarify) {
+      console.info(
+        `[utteranceUnderstanding] aclarar phone=${rawPhone.slice(0, 4)}… referent=${understanding?.referent} conf=${understanding?.confidence}`,
+      );
+      return { message: clarify, executor: "info_guides", ok: true };
+    }
+    if (
+      understanding &&
+      shouldProceedAsVehicleUnit(understanding) &&
+      !detectLoosePlate(selectionText) &&
+      !isBarePlatePrefixHint(selectionText) &&
+      !looksLikeFleetUnitSearchInput(selectionText)
+    ) {
+      console.info(
+        `[utteranceUnderstanding] unidad-sin-dato phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent}`,
+      );
+      return {
+        message:
+          understanding.clarifyQuestion?.trim() ||
+          "Dale, pasame la matrícula de la unidad (ej. AD427MC).",
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+    if (
+      shouldAnswerOpenCaseFromUnderstanding(
+        understanding,
+        selectionText,
+        threadCtx.classificationThread,
+      )
+    ) {
+      console.info(
+        `[utteranceUnderstanding] caso-abierto phone=${rawPhone.slice(0, 4)}… referent=${understanding?.referent} conf=${understanding?.confidence}`,
+      );
+      return {
+        message: await buildOpenCaseStatusReply(rawPhone),
+        executor: "odoo_ticket",
+        ok: true,
+      };
+    }
+    if (understanding && !shouldProceedAsVehicleUnit(understanding)) {
+      skipSchematicUnitRoute = true;
+      console.info(
+        `[utteranceUnderstanding] no-unidad phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent} conf=${understanding.confidence}`,
+      );
+    }
+  }
+
+  // Mantenimiento operativo (incl. marca/prefijo en el mismo mensaje) → executor con búsqueda en flota.
+  if (
+    looksLikeOperationalMaintenanceIntent(selectionText, threadCtx.classificationThread) &&
+    !hasPendingMantenimientoConfirmation(threadCtx.classificationThread)
+  ) {
+    const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "mantenimiento", ok: execOk };
     }
   }
 
@@ -463,8 +499,10 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Follow-up conversacional sobre unidad activa → executor con hechos, antes del agente.
+  // Si la IA ya dijo que NO es unidad (ej. "nro de ticket"), no forzar flota.
   const threadForFollowUp = threadCtx.classificationThread;
   if (
+    !skipSchematicUnitRoute &&
     activeUnit?.plate &&
     !threadHasActiveOdometerFlow(threadForFollowUp) &&
     pendingAction?.type !== "odometro" &&
@@ -501,6 +539,7 @@ export async function runTurnExecutorPhase(params: {
 
   // Marca/prefijo/nombre/patente parcial → buscar en flota y listar similares (no pedir patente completa al agente).
   if (
+    !skipSchematicUnitRoute &&
     shouldRouteTurnToUnidadesExecutor({
       selectionText,
       threadText: threadCtx.classificationThread,

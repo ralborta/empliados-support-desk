@@ -39,6 +39,7 @@ const PUSH_SUITES = [
   "verify-maintenance-inherits-odometer-plate.mjs",
   "verify-outbound-dedup.mjs",
   "verify-company-continuation-mention.mjs",
+  "verify-utterance-understanding.mjs",
   "snapshot-turn-classification.mjs",
 ];
 

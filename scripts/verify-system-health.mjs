@@ -243,6 +243,10 @@ assert(looksLikeHumanAdvisorRequest("hablar con un asesor"), "detecta hablar con
 assert(!looksLikeHumanAdvisorRequest("como esta la ignicion"), "ignición NO es asesor");
 assert(!looksLikeHumanAdvisorRequest("tengo un caso abierto?"), "caso abierto NO es pedido asesor");
 assert(looksLikeOpenCaseStatusInquiry("tengo un caso abierto?"), "detecta caso abierto");
+assert(
+  !looksLikeOpenCaseStatusInquiry("cual es el nro de ticket que esta generado por esto?"),
+  "frase nro de ticket NO va por regex — la interpreta la capa NL",
+);
 assert(looksLikeCustomerConversationCloseRequest("cerrar caso"), "detecta cerrar caso");
 assert(looksLikeAtilioHelpRequest("me podes ayudar vos?"), "detecta ayuda Atilio");
 assert(!looksLikeAtilioHelpRequest("hablar con un asesor"), "asesor ≠ ayuda Atilio");
