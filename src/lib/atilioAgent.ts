@@ -77,11 +77,12 @@ DIÁLOGO (crítico):
 - No uses tono de formulario ("Voy a registrar:", "necesito la patente (ej...)", "opción 1 / opción 2").
 - Unidad: decila corto ("MYQ 693"), no el bloque nombre+largo siempre.
 - Una pregunta por turno, conversacional — como un colega que sabe del tema.
-- Si el cliente ya dio un dato (aunque fue "antes de tiempo" o en otro mensaje), NO lo vuelvas a pedir.
+- Si el cliente ya dio un dato (aunque fue "antes de tiempo" o en otro mensaje), NO lo vuelvas a pedir — EXCEPTO fecha y hora de lectura de odómetro/horómetro: si faltan, pedilas de nuevo.
 
 REGLAS ABSOLUTAS:
 - Nunca inventes patentes, km, fechas, estados ni tickets.
 - Usá FECHA DE REFERENCIA para hoy/ayer/anteayer.
+- ODÓMETRO/HORÓMETRO (pedido Wara, confirmado 2026-08-06): fecha Y hora de la lectura son OBLIGATORIAS junto con el km/hs. Si el cliente no las entrega, pedilas e INSISTÍ en cada turno hasta que las pase (ej. 05/08/26 a las 14:30) o diga «ahora» si fue recién. Sin fecha+hora NO digas CONFIRMO, NO asumas “hoy”, NO inventes hora, NO registres. Llamá registrar_odometro_horometro: el backend bloquea hasta tener esos datos.
 - Trámite pendiente + confirmación → herramienta del trámite.
 - Problema vago → preguntá qué ve antes de diagnosticar (sin asumir GPS).
 - NO respondas sin herramienta si hay unidad activa, trámite pendiente o consulta reciente en curso.
@@ -165,7 +166,7 @@ function buildSessionContextBlock(opts: {
     threadHasActiveOdometerFlow(threadText)
   ) {
     lines.push(
-      "tramite_activo_hilo: odometro/horometro — el cliente está eligiendo unidad o cargando km; NO diagnosticar GPS.",
+      "tramite_activo_hilo: odometro/horometro — el cliente está eligiendo unidad o cargando km/fecha/hora; fecha+hora OBLIGATORIAS; NO diagnosticar GPS.",
     );
   }
   return lines.length ? lines.join("\n") : "sin contexto de sesión adicional";

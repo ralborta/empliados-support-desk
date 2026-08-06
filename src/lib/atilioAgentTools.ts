@@ -56,7 +56,7 @@ export const ATILIO_AGENT_TOOLS = [
     function: {
       name: "registrar_odometro_horometro",
       description:
-        "Registrar o modificar odómetro (km) u horómetro (horas) de una unidad. Usar cuando el cliente quiere cambiar/actualizar/modificar/corregir odómetro u horómetro, o confirma con CONFIRMO un cambio pendiente de odómetro.",
+        "Registrar o modificar odómetro (km) u horómetro (horas) de una unidad. Requiere patente + valor (km/hs) + fecha Y hora de lectura (obligatorias). Si faltan fecha/hora, el backend las pide e insiste — no inventes ni asumas «ahora». Usar cuando el cliente quiere cambiar/actualizar/modificar/corregir odómetro u horómetro, o confirma con CONFIRMO un cambio pendiente.",
       parameters: { type: "object", properties: {} },
     },
   },

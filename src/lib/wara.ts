@@ -1025,7 +1025,8 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
     /nuevo od[oó]metro en km/i.test(tail) ||
     /pasame el nuevo od[oó]metro en km/i.test(tail) ||
-    /od[oó]metro en km,?\s*la fecha y la hora/i.test(tail)
+    /od[oó]metro en km,?\s*(y )?la fecha y (la )?hora/i.test(tail) ||
+    /fecha y hora de la lectura — son obligatorias/i.test(tail)
   );
 }
 

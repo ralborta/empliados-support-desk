@@ -35,11 +35,11 @@ const SITUATION_GUIDANCE: Record<OdometerDialogueSituation, string> = {
   missing_plate:
     "Necesitás que el cliente te diga qué unidad es (patente, nombre interno o marca). Pedíselo de forma clara, tomando en cuenta lo que ya dijo (no repitas literalmente su mensaje, pero mostrale que lo leíste).",
   missing_value:
-    "Ya sabés qué unidad es. Pedí JUNTOS el valor nuevo (odómetro en km u horómetro en horas) Y la fecha y hora de la lectura, con un ejemplo concreto. Si la lectura fue recién, que manden el valor y la palabra ahora. No digas CONFIRMO todavía.",
+    "Ya sabés qué unidad es. Pedí JUNTOS el valor nuevo (odómetro en km u horómetro en horas) Y la fecha y hora de la lectura — las tres cosas son obligatorias. Ejemplo concreto. Si fue recién: el valor y la palabra ahora. Dejá claro que sin fecha y hora no podés registrar. No digas CONFIRMO todavía.",
   missing_fecha_hora:
-    "Ya tenés unidad y valor (km u horas). FALTA la fecha y hora de la lectura — son obligatorias. Pedilas con un ejemplo concreto (ej. 05/08/26 a las 14:30). Si la lectura fue recién, que responda la palabra ahora. NO digas CONFIRMO todavía ni asumas «hoy» en silencio.",
+    "Ya tenés unidad y valor (km u horas). FALTAN fecha Y hora de la lectura: son OBLIGATORIAS (pedido Wara). INSISTÍ: pedilas de nuevo con ejemplo (ej. 05/08/26 a las 14:30). Decí explícitamente que sin esos datos no registrás el cambio. Si fue recién, que responda «ahora». NO digas CONFIRMO, NO asumas «hoy» ni inventes hora.",
   confirmation_summary:
-    "Ya tenés todos los datos (patente, valor, y fecha si corresponde). Presentaselos con claridad al cliente para que los revise, y pedile EXPLÍCITAMENTE que responda la palabra CONFIRMO para registrar el cambio. Es un paso de validación, no lo hagas ambiguo.",
+    "Ya tenés TODOS los datos obligatorios: patente, valor Y fecha+hora de lectura. Presentaselos con claridad (incluida la fecha/hora), y pedile EXPLÍCITAMENTE que responda la palabra CONFIRMO. Sin fecha+hora visibles en el resumen, NO pidas CONFIRMO.",
   correction_prompt:
     "El cliente está pidiendo corregir algo del trámite pero no especificó qué dato ni el valor nuevo. Preguntale con calidez qué dato quiere corregir (patente, odómetro o horómetro) y el valor correcto, dejando claro que después de eso le vas a volver a pedir CONFIRMO.",
   success:

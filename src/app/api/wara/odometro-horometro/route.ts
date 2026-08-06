@@ -1351,9 +1351,9 @@ export async function POST(req: NextRequest) {
       ? wantsHorometro
         ? earlyFechaDisplay
           ? `Tomé la fecha ${earlyFechaDisplay}. ¿Cuántas horas de motor tiene ${plateDisplay} ahora?`
-          : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo horómetro en horas, la fecha y la hora de la lectura (ej. 350 hs — 05/08/26 a las 14:30). Si fue recién: las horas y la palabra «ahora».`
-        : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo odómetro en km, la fecha y la hora de la lectura (ej. 10500 km — 05/08/26 a las 14:30). Si fue recién: el km y la palabra «ahora».`
-      : "Pasame el nuevo valor de odómetro (km) o horómetro (horas), con la fecha y la hora de la lectura.";
+          : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo horómetro en horas Y la fecha y hora de la lectura — son obligatorias (ej. 350 hs — 05/08/26 a las 14:30). Sin fecha y hora no registro. Si fue recién: las horas y la palabra «ahora».`
+        : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo odómetro en km Y la fecha y hora de la lectura — son obligatorias (ej. 10500 km — 05/08/26 a las 14:30). Sin fecha y hora no registro. Si fue recién: el km y la palabra «ahora».`
+      : "Pasame el valor de odómetro (km) o horómetro (horas) Y la fecha y hora de la lectura — las tres son obligatorias.";
     const message = patente
       ? await composeOdometerDialogueReply({
           situation: "missing_value",
@@ -1618,8 +1618,8 @@ export async function POST(req: NextRequest) {
             ? ` (${horometro} h)`
             : "";
       const fallbackTemplate =
-        `Antes de confirmar necesito la fecha y hora de la lectura de ${plateDisp}${valueHint}. ` +
-        `Pasame ambas (ej. 05/08/26 a las 14:30). Si fue recién, respondé «ahora».`;
+        `Antes de confirmar: fecha y hora de la lectura de ${plateDisp}${valueHint} son obligatorias. ` +
+        `Pasame ambas (ej. 05/08/26 a las 14:30); sin esos datos no registro el cambio. Si fue recién, respondé «ahora».`;
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",
         history: flowThreadText,
@@ -1717,8 +1717,8 @@ export async function POST(req: NextRequest) {
       const onlyDateNoTime =
         !!fechaExplicita && !fechaLecturaTieneHora(fechaExplicita, fechaHoraSourceText);
       const fallbackTemplate = onlyDateNoTime
-        ? `Tomé la fecha ${fechaDisplay} para ${plateDisp}${valueHint}. ¿A qué hora fue la lectura? (ej. 14:30). Si fue recién, respondé «ahora».`
-        : `Tomé ${plateDisp}${valueHint}. Para registrar el cambio necesito la fecha y hora de la lectura (ej. 05/08/26 a las 14:30). Si fue recién, respondé «ahora».`;
+        ? `Tomé la fecha ${fechaDisplay} para ${plateDisp}${valueHint}. Falta la hora de la lectura (obligatoria): pasame la hora (ej. 14:30). Sin hora no registro. Si fue recién, respondé «ahora».`
+        : `Tomé ${plateDisp}${valueHint}. Fecha y hora de la lectura son obligatorias: pasamelas (ej. 05/08/26 a las 14:30). Sin esos datos no puedo registrar el cambio. Si fue recién, respondé «ahora».`;
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",
         history: flowThreadText,
@@ -1810,8 +1810,8 @@ export async function POST(req: NextRequest) {
       `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`;
     if (!fechaDisplay || !hasFechaHoraLectura) {
       const fallbackTemplate =
-        `Antes de confirmar necesito la fecha y hora de la lectura. ` +
-        `Pasame ambas (ej. 05/08/26 a las 14:30). Si fue recién, respondé «ahora».`;
+        `Fecha y hora de la lectura son obligatorias: pasamelas (ej. 05/08/26 a las 14:30). ` +
+        `Sin esos datos no registro el cambio. Si fue recién, respondé «ahora».`;
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",
         history: flowThreadText,

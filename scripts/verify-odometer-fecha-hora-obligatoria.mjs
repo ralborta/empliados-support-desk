@@ -115,8 +115,18 @@ const routeSrc = readFileSync(
 );
 assert.match(
   routeSrc,
-  /Pasame el nuevo od[oó]metro en km, la fecha y la hora de la lectura/,
-  "plantilla pide km+fecha+hora al tomar unidad",
+  /Pasame el nuevo od[oó]metro en km Y la fecha y hora de la lectura — son obligatorias/,
+  "plantilla pide km+fecha+hora obligatorias al tomar unidad",
+);
+assert.match(
+  routeSrc,
+  /Fecha y hora de la lectura son obligatorias/,
+  "mensaje de insistencia si faltan fecha/hora",
+);
+assert.match(
+  routeSrc,
+  /[Ss]in (esos datos|fecha y hora|hora) no (puedo )?(registrar|registro)/,
+  "deja claro que sin fecha/hora no registra",
 );
 assert.doesNotMatch(
   routeSrc,
@@ -125,11 +135,11 @@ assert.doesNotMatch(
 );
 
 const askAllThread =
-  "Perfecto, tomo AG 562 SP. Pasame el nuevo odómetro en km, la fecha y la hora de la lectura (ej. 10500 km — 05/08/26 a las 14:30). Si fue recién: el km y la palabra «ahora».";
+  "Perfecto, tomo AG 562 SP. Pasame el nuevo odómetro en km Y la fecha y hora de la lectura — son obligatorias (ej. 10500 km — 05/08/26 a las 14:30). Sin fecha y hora no registro. Si fue recién: el km y la palabra «ahora».";
 assert.equal(
   threadAwaitingOdometerKmValue(askAllThread),
   true,
   "pedido conjunto sigue en espera de valor",
 );
 
-console.log("OK — km+fecha+hora juntos; parse Hora:/fecha; sin hang por superseded");
+console.log("OK — km+fecha+hora obligatorias e insistencia; parse Hora:/fecha; sin hang");
