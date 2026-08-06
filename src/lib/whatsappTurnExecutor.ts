@@ -32,6 +32,8 @@ import {
   threadHasRecentUnitProblemListenPrompt,
   looksLikeMaintenanceConfirmationRejection,
   looksLikeOperationalMaintenanceIntent,
+  looksLikeOpcionesInfoRequest,
+  looksLikeUnidadesInfoRequest,
   resetCustomerCompanyMenu,
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
@@ -395,6 +397,20 @@ export async function runTurnExecutorPhase(params: {
       console.info(
         `[utteranceUnderstanding] no-unidad phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent} conf=${understanding.confidence}`,
       );
+    }
+  }
+
+  // Guías de plataforma (Agenda, Perfiles, Notificaciones, Unidades…) → manual PDF + IA.
+  // No dejar que el agente general invente botones/pasos fuera de la base de conocimiento.
+  if (
+    looksLikeOpcionesInfoRequest(selectionText) ||
+    looksLikeUnidadesInfoRequest(selectionText)
+  ) {
+    const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor: "info_guides", ok: execOk };
     }
   }
 
