@@ -1519,7 +1519,9 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
   if (looksLikeHumanAdvisorRequest(text)) return true;
   if (looksLikeExplicitReclamoOrTicketRequest(text)) return true;
   return (
-    /\b(soporte tecnico|soporte|atencion al cliente|mesa de ayuda|asistencia tecnica)\b/.test(n) ||
+    /\b(soporte tecnico|soporte|atencion al cliente|mesa de ayuda|mesa de entrada|asistencia tecnica)\b/.test(
+      n,
+    ) ||
     (/\b(quiero|necesito)\b/.test(n) &&
       /\b(soporte|asistencia|ayuda tecnica|atencion)\b/.test(n) &&
       !/\b(modulo|opciones|unidades|mantenimiento|configur)\b/.test(n))
@@ -1580,20 +1582,33 @@ export function looksLikeHumanAdvisorRequest(text: string | undefined | null): b
   const norm = normCompanyToken(text ?? "");
   if (!norm) return false;
   if (/^(asesor|agente|operador|humano|humana|persona)[\s!.,]*$/.test(norm)) return true;
+  // Bug real 2026-08-06: "comunicame a mesa de entrada" / "mesa de entrada"
+  // no matcheaba (solo "mesa de ayuda") y la IA pedía patente en vez de derivar.
+  if (/\bmesa\s+de\s+(entrada|ayuda)\b/.test(norm)) {
+    if (
+      /^(mesa\s+de\s+(entrada|ayuda))\b/.test(norm) ||
+      /\b(comunic|contact|hablar|pasar|pasame|deriv|quiero|necesito|con|a)\b/.test(norm)
+    ) {
+      return true;
+    }
+  }
   if (
     /\b(escalar|derivar)\b/.test(norm) &&
-    /\b(asesor|agente|persona|humano|humana|operador|representante|supervisor|atencion)\b/.test(norm)
+    /\b(asesor|agente|persona|humano|humana|operador|representante|supervisor|atencion|mesa)\b/.test(
+      norm,
+    )
   ) {
     return true;
   }
   const wantsHuman =
     /\b(asesor|agente|persona|humano|humana|operador|representante|supervisor)\b/.test(norm) ||
-    /\b(hablar con|comunicarme|comunicar con|contactar con|pasar con|pasame con|derivar|escalar)\b/.test(
-      norm
+    /\b(hablar con|comunicame|comunicarme|comunicarnos|comunicar(?:me|nos)?(?:\s+(?:con|a))?|contactar(?:me)?(?:\s+con)?|pasar con|pasame con|pasame a|derivar|escalar)\b/.test(
+      norm,
     );
   const intent =
-    /\b(quiero|necesito|pod[eé]s|podes|me gustar[ií]a|dame|pasame|pas[aá]me|solicito|por favor)\b/.test(norm) ||
-    /\b(comunicarme|contactar|hablar)\b/.test(norm);
+    /\b(quiero|necesito|pod[eé]s|podes|me gustar[ií]a|dame|pasame|pas[aá]me|solicito|por favor)\b/.test(
+      norm,
+    ) || /\b(comunicame|comunicarme|comunicar|contactar|hablar)\b/.test(norm);
   return wantsHuman && (intent || /\b(asesor humano|atenci[oó]n humana|agente humano)\b/.test(norm));
 }
 

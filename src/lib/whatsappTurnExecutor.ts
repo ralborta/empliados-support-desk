@@ -25,6 +25,8 @@ import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeChangeCompanyRequest,
   looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeHumanAdvisorRequest,
+  looksLikeTechnicalSupportRequest,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
   looksLikeGenericUnitConsultWithoutPlate,
   looksLikeGpsOrUnitStatusQuestion,
@@ -278,6 +280,21 @@ export async function runTurnExecutorPhase(params: {
 
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
   const pendingAction = await getPendingAction(prisma, rawPhone);
+
+  // Pedido de operador / mesa de entrada-ayuda → Odoo ANTES que utterance IA
+  // (bug real 2026-08-06: "comunicame a mesa de entrada" → pedía patente).
+  if (
+    looksLikeHumanAdvisorRequest(selectionText) ||
+    looksLikeTechnicalSupportRequest(selectionText) ||
+    looksLikeExplicitReclamoOrTicketRequest(selectionText)
+  ) {
+    const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odoo_ticket", ok: execOk };
+    }
+  }
 
   // Valor numérico (km/hs) con patente ya confirmada → odómetro, antes que confirmaciones stale.
   if (

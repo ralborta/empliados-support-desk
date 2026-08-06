@@ -240,6 +240,9 @@ assert(route("gracias", advisorThread) === "unidades", "gracias post-asesor NO r
 
 assert(looksLikeHumanAdvisorRequest("escalar a un operador por favor"), "detecta escalar+operador");
 assert(looksLikeHumanAdvisorRequest("hablar con un asesor"), "detecta hablar con asesor");
+assert(looksLikeHumanAdvisorRequest("comunicame a mesa de entrada"), "detecta mesa de entrada");
+assert(looksLikeHumanAdvisorRequest("mesa de entrada"), "detecta mesa de entrada sola");
+assert(looksLikeHumanAdvisorRequest("comunicame con mesa de ayuda"), "detecta mesa de ayuda");
 assert(!looksLikeHumanAdvisorRequest("como esta la ignicion"), "ignición NO es asesor");
 assert(!looksLikeHumanAdvisorRequest("tengo un caso abierto?"), "caso abierto NO es pedido asesor");
 assert(looksLikeOpenCaseStatusInquiry("tengo un caso abierto?"), "detecta caso abierto");
