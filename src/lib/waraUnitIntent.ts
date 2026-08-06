@@ -719,25 +719,33 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   const raw = String(rawText ?? "").trim();
   if (!raw || raw.length > 80) return null;
   if (detectLoosePlate(raw) || extractPlatePrefixFromMessage(raw)) return null;
+  // Referencias vagas al hilo ("la unidad mencionada") NO son un nombre a buscar.
+  if (looksLikeVagueUnitReference(raw)) return null;
 
   const cleaned = raw
     .replace(/^(?:perdon|perdón|disculpa|ok|dale|bueno)[,.\s!]+/i, "")
     .trim();
 
-  const patterns = [
-    /\b(?:estado|reporte|gps|posicion|posici[oó]n|consulta|consultar|ver|saber|pasame|dame|decime)\s+(?:de\s+)?(?:la\s+)?(?:unidad\s+)?([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{2,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{1,}){0,2})\b/i,
-    /\b(?:unidad|patente|matricula|chofer|conductor)\s+([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{2,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{1,}){0,2})\b/i,
-  ];
-  for (const re of patterns) {
-    const m = cleaned.match(re);
-    if (m?.[1]) {
-      const cand = m[1].trim();
-      if (isPlausibleFreeTextUnitLabel(cand)) return cand;
-    }
+  // Solo "estado/reporte de <Nombre>" (o similar), no "estado de reporte de la unidad…".
+  // El nombre no puede ser un sustantivo genérico del propio pedido (reporte/unidad/…).
+  const statusOfName = cleaned.match(
+    /\b(?:estado|reporte|gps|posicion|posici[oó]n)\s+(?:de\s+)?(?:la\s+)?(?:unidad\s+)?(?!reporte\b|estado\b|gps\b|unidad\b|patente\b|matricula\b|ubicaci[oó]n\b|coordenadas?\b)([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9.'-]{2,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9.'-]{1,}){0,2})\b/i,
+  );
+  if (statusOfName?.[1]) {
+    const cand = statusOfName[1].trim();
+    if (isPlausibleFreeTextUnitLabel(cand)) return cand;
   }
 
-  // Respuesta corta: solo el nombre ("Altamiranda", "Altamiranda Jose").
-  if (/^[A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ\s.'-]{2,40}$/.test(cleaned)) {
+  const namedUnit = cleaned.match(
+    /\b(?:unidad|chofer|conductor)\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9.'-]{2,}(?:\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9.'-]{1,}){0,2})\b/,
+  );
+  if (namedUnit?.[1]) {
+    const cand = namedUnit[1].trim();
+    if (isPlausibleFreeTextUnitLabel(cand)) return cand;
+  }
+
+  // Respuesta corta: solo el nombre propio ("Altamiranda", "Altamiranda Jose").
+  if (/^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúÑñ\s.'-]{2,40}$/.test(cleaned)) {
     const cand = cleaned.replace(/\s+/g, " ").trim();
     if (isPlausibleFreeTextUnitLabel(cand) && cand.split(/\s+/).length <= 3) return cand;
   }
@@ -750,18 +758,30 @@ function isPlausibleFreeTextUnitLabel(cand: string): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-  if (!norm || norm.length < 3) return false;
+  if (!norm || norm.length < 4) return false;
   if (STOPWORDS.has(norm)) return false;
   if (
-    /^(una|unidad|patente|matricula|estado|reporte|gps|flota|lista|unidades|marca|nombre|chofer)$/.test(
+    /^(una|unidad|patente|matricula|estado|reporte|gps|flota|lista|unidades|marca|nombre|chofer|conductor|mencionada|mencionado|anterior|consultando|hablando|hablamos|estamos|estoy|quiero|necesito|saber|decir|pasame|dame|ultima|ultimo|ubicacion|coordenadas|posicion)$/.test(
       norm,
     )
   ) {
     return false;
   }
+  // "reporte de la", "estado de la", etc. — no son etiquetas de flota.
+  const parts = norm.split(/\s+/).filter(Boolean);
+  if (parts.some((p) => STOPWORDS.has(p) || /^(de|la|el|los|las|del|un|una|reporte|estado|gps|unidad|patente|matricula|ultima|ultimo|ubicacion|coordenadas|posicion)$/.test(p))) {
+    return false;
+  }
   if (detectLoosePlate(cand) || looksLikeUnitNameInMessage(cand)) return false;
-  // Evitar frases enteras ("una unidad que no reporta").
-  if (/\b(que|porque|cuando|donde|como|necesito|quiero)\b/.test(norm)) return false;
+  // Evitar frases / verbos conjugados comunes.
+  if (
+    /\b(que|porque|cuando|donde|como|necesito|quiero|estamos|estoy|consultando|hablando|mencionada|mencionado)\b/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
+  if (/(ando|endo|amos|emos|imos)$/.test(norm) && norm.length <= 12) return false;
   return true;
 }
 
@@ -1224,6 +1244,9 @@ function resolveUnitSelectionHint(
   rawText: string,
   units: WaraUnidadEstado[],
 ): UnitQueryResolution | null {
+  // Bug real / regresión 2026-08-06: "coordenadas de la última ubicación de la unidad AI 154 GD"
+  // matcheaba "de la última" como hint de unidad y pisaba la patente explícita del mensaje.
+  if (detectLoosePlate(rawText)) return null;
   const hint = extractPlateCorrectionHint(rawText);
   if (!hint || looksLikePlateCorrectionRequest(rawText)) return null;
   const norm = rawText
@@ -1464,6 +1487,12 @@ function resolveWithRules(
   const correction = resolvePlateCorrection(rawText, units);
   if (correction) return correction;
 
+  // Patente explícita en el mensaje antes que "de la <palabra>" / marca / nombre interno.
+  // Bug real 2026-07-23 + regresión 2026-08-06: "última ubicación … unidad AI 154 GD"
+  // no debe resolverse como búsqueda del literal «ULTIMA».
+  const explicitPlateResolution = resolveExplicitPlateInMessage(rawText, threadText, units);
+  if (explicitPlateResolution) return explicitPlateResolution;
+
   const unitSelection = resolveUnitSelectionHint(rawText, units);
   if (unitSelection) return unitSelection;
 
@@ -1471,10 +1500,6 @@ function resolveWithRules(
     const brandResolution = resolveBrandOrNameInFleet(rawText, units);
     if (brandResolution) return brandResolution;
   }
-
-  // Patente explícita en el mensaje (ej. "matricula AI 329 TL") antes que nombre M600-170.
-  const explicitPlateResolution = resolveExplicitPlateInMessage(rawText, threadText, units);
-  if (explicitPlateResolution) return explicitPlateResolution;
 
   const unitNameResolution = resolveByUnitName(rawText, units);
   if (unitNameResolution) return unitNameResolution;
@@ -1839,11 +1864,11 @@ export async function resolveUnitQuery(params: {
   }
 
   // Nombre/etiqueta libre (Altamiranda, Nissan, …) antes de pedir patente.
-  const nameResEarly = resolveBrandOrNameInFleet(
-    params.rawText,
-    params.units,
-    params.nameHint,
-  );
+  // No anteponer a referencias vagas del hilo ("la unidad mencionada").
+  const nameResEarly =
+    looksLikeVagueUnitReference(params.rawText) || detectLoosePlate(params.rawText)
+      ? null
+      : resolveBrandOrNameInFleet(params.rawText, params.units, params.nameHint);
   if (nameResEarly?.intent === "consult_status" && nameResEarly.plate) return nameResEarly;
   if (
     nameResEarly?.intent === "need_clarification" &&
@@ -1891,15 +1916,6 @@ export async function resolveUnitQuery(params: {
     }
   }
 
-  // Marca/nombre (Nissan, Saveiro, etc.) en CUALQUIER trámite: buscar primero por
-  // texto contra el catálogo real de la flota (API) antes de considerar la IA.
-  // Si hay una coincidencia única o varias reales, resolvemos directo con eso —
-  // la IA nunca debe ser la primera fuente de verdad para una patente.
-  if (looksLikeVehicleBrandOrUnitSearch(params.rawText)) {
-    const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units);
-    if (brandRules) return brandRules;
-  }
-
   // Bug real, producción 2026-07-23: "Me podrías dar las coordenadas de la última
   // ubicación de la unidad AI 154 GD" trae una patente EXPLÍCITA y con formato válido
   // en el propio mensaje, pero como también es una "consulta en vivo" (coordenadas/
@@ -1908,9 +1924,8 @@ export async function resolveUnitQuery(params: {
   // incluye esa patente. El bot terminaba pidiendo "¿Cuál unidad?" genérico como si el
   // cliente no hubiese dicho nada, cuando en realidad dio una patente concreta que las
   // reglas (que sí miran la flota COMPLETA) pueden resolver o rechazar de forma
-  // decisiva. Igual que con marca/nombre arriba: una patente explícita en el mensaje
-  // actual siempre se resuelve primero contra el catálogo real, nunca contra una
-  // muestra parcial pensada para la IA.
+  // decisiva. Una patente explícita en el mensaje actual siempre se resuelve primero
+  // contra el catálogo real (antes que marca/nombre libre).
   const explicitPlateInMessage = detectLoosePlate(params.rawText);
   const numericPlate = resolveNumericUnitSelection(params.rawText, params.threadText);
   if (explicitPlateInMessage || numericPlate) {
@@ -1923,6 +1938,12 @@ export async function resolveUnitQuery(params: {
     ) {
       return plateRules;
     }
+  }
+
+  // Marca/nombre (Nissan, Saveiro, Altamiranda, etc.) contra el catálogo real.
+  if (looksLikeVehicleBrandOrUnitSearch(params.rawText) || !!extractFreeTextUnitSearchCandidate(params.rawText)) {
+    const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units, params.nameHint);
+    if (brandRules) return brandRules;
   }
 
   // Nombre de unidad explícito (M600-170): reglas contra catálogo completo antes que IA.
