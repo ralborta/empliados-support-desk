@@ -269,7 +269,9 @@ function formatDateInTz(target: Date, timezone?: string): string {
   }
 }
 
-/** Fecha/hora en formato Wara ("YYYY-MM-DDTHH:mm:ss"), sin doble conversión de zona horaria. */
+/** Fecha/hora en formato Wara ("YYYY-MM-DDTHH:mm:ss"), sin doble conversión de zona horaria.
+ * Devuelve la hora LOCAL del cliente (America/Argentina/Buenos_Aires por defecto).
+ * Para el POST a Wara usar `fechaLocalNaiveToWaraUtc` — la API espera UTC. */
 export function fechaWara(value: string | undefined, timezone?: string): string {
   const trimmed = value?.trim();
   if (trimmed) {
@@ -294,6 +296,52 @@ export function fechaWara(value: string | undefined, timezone?: string): string 
     return "";
   }
   return formatDateInTz(new Date(), timezone);
+}
+
+/**
+ * Convierte fecha/hora LOCAL (naive, de `fechaWara` / parse) a UTC para la API Wara.
+ * Bug real, producción 2026-08-07: el cliente dijo 09:43 (AR) y se mandó
+ * "2026-08-07T09:43:00" tal cual; Wara lo interpretó como UTC y el historial
+ * mostró ~06:43 (UTC-3). Hay que enviar 12:43 UTC para que en AR se vea 09:43.
+ */
+export function fechaLocalNaiveToWaraUtc(
+  localNaive: string,
+  timezone?: string,
+): string {
+  const trimmed = localNaive?.trim() ?? "";
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return trimmed;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const h = Number(m[4]);
+  const mi = Number(m[5]);
+  const s = Number(m[6] ?? "0");
+  const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
+
+  // Instant UTC cuyo reloj de pared en `tz` coincide con y-mo-d h:mi:s.
+  let utcMs = Date.UTC(y, mo - 1, d, h, mi, s);
+  for (let i = 0; i < 4; i++) {
+    const wall = formatDateInTz(new Date(utcMs), tz);
+    const wm = wall.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/);
+    if (!wm) break;
+    const asIfUtc = Date.UTC(
+      Number(wm[1]),
+      Number(wm[2]) - 1,
+      Number(wm[3]),
+      Number(wm[4]),
+      Number(wm[5]),
+      Number(wm[6]),
+    );
+    const desired = Date.UTC(y, mo - 1, d, h, mi, s);
+    const delta = desired - asIfUtc;
+    if (delta === 0) break;
+    utcMs += delta;
+  }
+
+  const dt = new Date(utcMs);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}`;
 }
 
 /** ¿La fecha/hora (formato Wara, "YYYY-MM-DDTHH:mm:ss") es posterior a AHORA en esa zona

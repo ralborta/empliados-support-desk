@@ -56,7 +56,7 @@ import {
   resolvePlateWithWaraFleet,
   shouldClearOdometerPlateFromThread,
 } from "@/lib/waraUnitIntent";
-import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech } from "@/lib/odometroFecha";
+import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
@@ -1987,7 +1987,8 @@ export async function POST(req: NextRequest) {
 
   const result = await registrarCambioOdometroHorometro(session.sessionToken, {
     patente: patenteParaWara,
-    fecha,
+    // Cliente habla en hora AR; la API Wara espera UTC (bug 2026-08-07: 09:43 → 06:43).
+    fecha: fechaLocalNaiveToWaraUtc(fecha, customerTz),
     ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
     ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
   });

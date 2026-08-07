@@ -14,7 +14,7 @@
  *      ahí que preguntara después "¿se registró como te la pedí?" sin que el bot
  *      pudiera contestarle.
  */
-import { fechaWara, formatFechaDisplay, parseFechaFromText } from "../src/lib/odometroFecha.ts";
+import { fechaWara, formatFechaDisplay, parseFechaFromText, fechaLocalNaiveToWaraUtc } from "../src/lib/odometroFecha.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -140,6 +140,23 @@ const withOffset = fechaWara("2026-07-21T13:35:00Z", "America/Argentina/Buenos_A
 assert(
   withOffset === "2026-07-21T10:35:00",
   `un valor con "Z" explícito sigue convirtiéndose a la zona del cliente (obtuve: ${withOffset})`,
+);
+
+console.log("— API Wara: hora local AR → UTC (bug 2026-08-07: 09:43 → no 06:43) —");
+
+const localLectura = "2026-08-07T09:43:00";
+const utcParaWara = fechaLocalNaiveToWaraUtc(localLectura, "America/Argentina/Buenos_Aires");
+assert(
+  utcParaWara === "2026-08-07T12:43:00",
+  `09:43 AR → 12:43 UTC (obtuve: ${utcParaWara})`,
+);
+assert(
+  formatFechaDisplay(localLectura) === "07/08/2026 09:43",
+  "al cliente se sigue mostrando la hora local 09:43",
+);
+assert(
+  fechaWara(`${utcParaWara}Z`, "America/Argentina/Buenos_Aires") === localLectura,
+  "12:43 UTC mostrado en AR vuelve a 09:43",
 );
 
 console.log("— Sin valor explícito, usa la fecha/hora actual en la zona del cliente —");
