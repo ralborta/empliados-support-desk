@@ -100,7 +100,12 @@ const wrongDefault = resolveOdometerContextPlate({
   explicitVagueUnitReference: false,
   hasPendingOdometerConfirm: false,
 });
-assert(wrongDefault === "AF337EO", "sin referencia vaga, resumen Patente: sigue siendo prioridad (certificado)");
+// Bug 2026-08-07: preferir la unidad MÁS RECIENTE del hilo (AD 507 MB) sobre
+// "Patente:" de un certificado/odómetro anterior (AF 337 EO / AD 555 BH).
+assert(
+  wrongDefault === "AD507MB",
+  `sin referencia vaga, la patente más reciente del hilo manda (obtuvo ${wrongDefault})`,
+);
 const fixed = resolveOdometerContextPlate({
   threadText: threadCertThenReport,
   lastThreadPlate: extractLastPlateFromThread(threadCertThenReport),
