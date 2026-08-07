@@ -1,6 +1,6 @@
 import type { Customer, PrismaClient, Ticket } from "@prisma/client";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
-import { pauseAtilioForCustomer } from "@/lib/atilioBotPause";
+import { reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
 import {
   findOpenConversationTicket,
   mergeDuplicateOpenTicketsForCustomer,
@@ -12,12 +12,19 @@ import { resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 /** Asunto visible en el panel para números que Wara no reconoce. */
 export const UNREGISTERED_PHONE_TICKET_TITLE = "Número no registrado en Wara";
 
+/**
+ * Si el cliente escribe de nuevo tras la derivación: calma, sin repetir el aviso largo
+ * ni pausar Atilio (Atilio sigue respondiendo este mensaje).
+ */
+export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY =
+  "Ya tenemos tu consulta: un asesor de Atención al Cliente de WARA te va a atender lo antes posible por este medio. Gracias por tu paciencia.";
+
 export type UnregisteredPhoneHandoffResult = {
   customer: Customer;
   ticket: Ticket;
   /** Se creó el ticket en este llamado (primera derivación). */
   isNewTicket: boolean;
-  /** Primera vez que avisamos / abrimos caso para este número. */
+  /** Primera vez: mensaje BBC de “no registrado / te derivamos”. Después: mensaje de calma. */
   shouldNotifyCustomer: boolean;
 };
 
@@ -106,13 +113,24 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
         data: { lastMessageAt: new Date() },
       });
     }
-  } else if (isNewTicket) {
+  }
+
+  const priorNotice = await prisma.ticketEvent.findFirst({
+    where: {
+      ticketId: ticket.id,
+      type: "ESCALATED",
+      payload: { path: ["reason"], equals: "unregistered_phone_notice" },
+    },
+    select: { id: true },
+  });
+  const shouldNotifyCustomer = !priorNotice;
+  if (shouldNotifyCustomer) {
     await prisma.ticketEvent.create({
       data: {
         ticketId: ticket.id,
         type: "ESCALATED",
         payload: {
-          reason: "unregistered_phone",
+          reason: "unregistered_phone_notice",
           source,
           phone: customer.phone,
         },
@@ -136,9 +154,12 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     console.error("[unregisteredHandoff] autoAssign:", e);
   }
 
-  await pauseAtilioForCustomer(customer.id, prisma, "unregistered_phone_handoff").catch(
-    (e) => console.error("[unregisteredHandoff] pauseAtilio:", e),
-  );
+  // Regla: número no registrado NO pausa Atilio — debe poder mandar el aviso de calma.
+  await reactivateAtilioForCustomer(
+    customer.id,
+    prisma,
+    "unregistered_phone_handoff_keep_active",
+  ).catch((e) => console.error("[unregisteredHandoff] reactivateAtilio:", e));
 
   const refreshed =
     (await prisma.ticket.findUnique({ where: { id: ticket.id } })) ?? ticket;
@@ -147,6 +168,6 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     customer,
     ticket: refreshed,
     isNewTicket,
-    shouldNotifyCustomer: isNewTicket,
+    shouldNotifyCustomer,
   };
 }

@@ -540,21 +540,27 @@ export async function customerRegisteredContextResponse(
   } else if (!registered) {
     // Número no en Wara → ticket + asesor en el panel (no solo el mensaje BBC).
     try {
-      const { ensureUnregisteredPhoneAdvisorHandoff } = await import(
-        "@/lib/unregisteredPhoneHandoff"
-      );
+      const {
+        ensureUnregisteredPhoneAdvisorHandoff,
+        UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+      } = await import("@/lib/unregisteredPhoneHandoff");
       const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, trimmed, {
         contactName: customer?.name ?? undefined,
         messageText: selectionText || undefined,
         source: "builderbot_context",
       });
       if (handoff.shouldNotifyCustomer) {
+        // BBC flow "derivar" manda el aviso largo de número no registrado.
         nextFlow = "derivar";
         responseMessage = "";
       } else {
-        // Ya hay caso abierto: no repetir el mensaje de "vamos a derivarte".
-        nextFlow = "ignore";
-        responseMessage = "";
+        // Ya derivado: calma (Atilio NO se pausa; no repetir el aviso largo).
+        nextFlow = "reply";
+        responseMessage = UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY;
+        await persistCustomerBotReply(trimmed, responseMessage, {
+          source: "builderbot_context",
+          stage: "unregistered_waiting_advisor",
+        });
       }
     } catch (e) {
       console.error("[builderbotCustomerContext] unregistered handoff:", e);
