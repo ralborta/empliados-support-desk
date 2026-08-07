@@ -811,7 +811,11 @@ export async function POST(req: NextRequest) {
   // skipThreadPlate ya indica que el cliente está señalando explícitamente OTRA
   // unidad (corrección de patente o marca/nombre distinto en el mensaje).
   const activeUnitRecord = activeUnitRecordEarly;
-  const isFleetUnitSelection = looksLikeFleetUnitSearchInput(rawText);
+  // CONFIRMO / sí / dale NO son búsqueda de flota (bug 2026-08-07: «CONFIRMO» → no encontré unidad).
+  const isFleetUnitSelection =
+    looksLikeFleetUnitSearchInput(rawText) &&
+    !isConfirmed(rawText) &&
+    !looksLikeBriefConfirmation(rawText);
   const prefixInMessage = extractPlatePrefixFromMessage(rawText);
   const plateInMessage = normalizePlate(fromText.patente ?? detectPlate(rawText) ?? "");
   let explicitMessagePlate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? plateInMessage ?? "");

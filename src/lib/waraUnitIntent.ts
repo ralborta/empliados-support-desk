@@ -167,15 +167,19 @@ export function looksLikeUnitNameInMessage(rawText: string | undefined | null): 
 
 /** Entrada que debe resolver contra la flota (patente, prefijo, marca, nombre/etiqueta). */
 export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
+  const text = String(rawText ?? "").trim();
+  if (!text) return false;
+  // CONFIRMO / sí / dale nunca son búsqueda de unidad (bug 2026-08-07).
+  if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   return (
-    !!detectLoosePlate(rawText) ||
-    isBarePlatePrefixHint(rawText) ||
-    !!extractPlatePrefixFromMessage(rawText) ||
-    !!extractPlateCorrectionHint(rawText) ||
-    looksLikeVehicleBrandOrUnitSearch(rawText) ||
-    looksLikePlateCorrectionRequest(rawText) ||
-    looksLikeUnitNameInMessage(rawText) ||
-    !!extractFreeTextUnitSearchCandidate(rawText)
+    !!detectLoosePlate(text) ||
+    isBarePlatePrefixHint(text) ||
+    !!extractPlatePrefixFromMessage(text) ||
+    !!extractPlateCorrectionHint(text) ||
+    looksLikeVehicleBrandOrUnitSearch(text) ||
+    looksLikePlateCorrectionRequest(text) ||
+    looksLikeUnitNameInMessage(text) ||
+    !!extractFreeTextUnitSearchCandidate(text)
   );
 }
 
@@ -183,6 +187,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
 export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   const text = rawText.trim();
   if (!text) return false;
+  if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
@@ -206,6 +211,7 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
 export function isOdometerPlateSelectionMessage(rawText: string): boolean {
   const text = rawText.trim();
   if (!text) return false;
+  if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
@@ -724,6 +730,10 @@ export function extractExplicitUnitSearchLabel(rawText: string): string | null {
 export function extractFreeTextUnitSearchCandidate(rawText: string): string | null {
   const raw = String(rawText ?? "").trim();
   if (!raw || raw.length > 80) return null;
+  // Bug real, producción 2026-08-07: "CONFIRMO" (pedido explícito del bot) matcheaba
+  // como nombre propio de unidad → "No encontré ninguna unidad que coincida con «CONFIRMO»"
+  // en vez de registrar el odómetro pendiente.
+  if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return null;
   if (detectLoosePlate(raw) || extractPlatePrefixFromMessage(raw)) return null;
   // Referencias vagas al hilo ("la unidad mencionada") NO son un nombre a buscar.
   if (looksLikeVagueUnitReference(raw)) return null;
@@ -766,6 +776,7 @@ function isPlausibleFreeTextUnitLabel(cand: string): boolean {
     .trim();
   if (!norm || norm.length < 4) return false;
   if (STOPWORDS.has(norm)) return false;
+  if (/^(confirmo|confirmado|confirma|confirmar|confirmacion)$/.test(norm)) return false;
   if (
     /^(una|unidad|patente|matricula|estado|reporte|gps|flota|lista|unidades|marca|nombre|chofer|conductor|mencionada|mencionado|anterior|consultando|hablando|hablamos|estamos|estoy|quiero|necesito|saber|decir|pasame|dame|ultima|ultimo|ubicacion|coordenadas|posicion)$/.test(
       norm,
