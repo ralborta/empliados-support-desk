@@ -2346,6 +2346,13 @@ export function detectIncidentType(text: string): WaraIncidentType {
   if (/(factur|administraci[oó]n|cobro|pago)/.test(lower)) {
     return "ADMIN_DERIVATION";
   }
+  // Hardware / reclamo fuera de telemetría (pantalla táctil, etc.) → soporte humano.
+  if (
+    /\b(pantalla|t[aá]ctil|touch|display|teclado|hardware|garant[ií]a)\b/.test(lower) &&
+    /\b(reclam\w*|falla|mal|rota|roto|no funciona|problema|aver[ií]a|defectu)\b/.test(lower)
+  ) {
+    return "GENERAL_TECH";
+  }
   if (/(gps|dispositivo|seguimiento|telemetr|soporte)/.test(lower)) {
     return "GENERAL_TECH";
   }

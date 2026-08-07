@@ -14,8 +14,10 @@ import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import {
   consultarEstadoUnidades,
   looksLikeAtilioHelpRequest,
+  looksLikeExplicitReclamoOrTicketRequest,
   looksLikeGreeting,
   looksLikeHumanAdvisorRequest,
+  looksLikeOutOfScopeSupportClaim,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
 } from "@/lib/waraApi";
@@ -448,8 +450,14 @@ export async function POST(req: NextRequest) {
   const event = buildEvent(data.event ?? data.evento, data.rawText);
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
   const advisorRequest = looksLikeHumanAdvisorRequest(data.rawText);
+  // Reclamo fuera de alcance Atilio (pantalla táctil, etc.) o pedido explícito de
+  // reclamo/ticket → derivar y asignar SIN exigir patente ni # de caso previo.
+  const handoffToAdvisor =
+    advisorRequest ||
+    looksLikeExplicitReclamoOrTicketRequest(data.rawText) ||
+    looksLikeOutOfScopeSupportClaim(data.rawText);
 
-  if (advisorRequest) {
+  if (handoffToAdvisor) {
     const existingAdvisorRef = await findRecentOdooRef(rawPhone, plate || undefined);
     if (existingAdvisorRef) {
       const message = `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
@@ -470,7 +478,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (!plate && !explicitSubject && !advisorRequest) {
+  if (!plate && !explicitSubject && !handoffToAdvisor) {
     if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
       const waraSession = await resolveWaraSessionByPhone(prisma, rawPhone);
       if (waraSession.sessionToken) {
@@ -531,7 +539,7 @@ export async function POST(req: NextRequest) {
   }
 
   const ticketRegistrationAttempt = !!plateInMessage || !!explicitSubject || !!plate;
-  const existingRef = advisorRequest
+  const existingRef = handoffToAdvisor
     ? null
     : ticketRegistrationAttempt
       ? await findRecentOdooRef(rawPhone, plate || undefined)
@@ -556,8 +564,10 @@ export async function POST(req: NextRequest) {
 
   const subject =
     explicitSubject ||
-    (advisorRequest && !plate
-      ? "Cliente solicita asesor humano"
+    (handoffToAdvisor && !plate
+      ? advisorRequest
+        ? "Cliente solicita asesor humano"
+        : (rawText.slice(0, 120).trim() || event || "Reclamo / soporte")
       : plate
         ? `${plate} - ${event}`
         : event);
@@ -612,7 +622,7 @@ export async function POST(req: NextRequest) {
         const ref = ensured.odooRef;
         const message = buildCustomerOdooCaseAssignedReply(ref, { reused: !ensured.created });
 
-        if (advisorRequest) {
+        if (handoffToAdvisor) {
           try {
             await autoAssignNewTicket(localTicket.id);
           } catch (e) {

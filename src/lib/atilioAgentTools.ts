@@ -83,7 +83,7 @@ export const ATILIO_AGENT_TOOLS = [
     function: {
       name: "derivar_asesor_ticket",
       description:
-        "Derivar a asesor humano, abrir reclamo/ticket, consultar/cerrar caso, soporte técnico, o reportar falla/desfase de odómetro (problema técnico, no cambio de km). Usar cuando el requerimiento lo pide explícitamente o cuando los hechos del backend ya generaron caso y hay que confirmarlo — no derivar de más ni evitar derivar cuando corresponde.",
+        "Derivar a asesor humano y asignar caso: reclamo/ticket, soporte fuera del alcance de Atilio (pantalla táctil, hardware, garantía, facturación), hablar con operador/mesa, o falla técnica que no sea GPS/odómetro/certificado/mantenimiento. Usar de inmediato — NO pedir número de caso previo ni patente si el tema no es de una unidad GPS.",
       parameters: { type: "object", properties: {} },
     },
   },

@@ -26,6 +26,7 @@ import {
   looksLikeChangeCompanyRequest,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeHumanAdvisorRequest,
+  looksLikeOutOfScopeSupportClaim,
   looksLikeTechnicalSupportRequest,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
   looksLikeGenericUnitConsultWithoutPlate,
@@ -286,7 +287,8 @@ export async function runTurnExecutorPhase(params: {
   if (
     looksLikeHumanAdvisorRequest(selectionText) ||
     looksLikeTechnicalSupportRequest(selectionText) ||
-    looksLikeExplicitReclamoOrTicketRequest(selectionText)
+    looksLikeExplicitReclamoOrTicketRequest(selectionText) ||
+    looksLikeOutOfScopeSupportClaim(selectionText)
   ) {
     const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);

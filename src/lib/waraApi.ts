@@ -1518,6 +1518,7 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
   if (!n) return false;
   if (looksLikeHumanAdvisorRequest(text)) return true;
   if (looksLikeExplicitReclamoOrTicketRequest(text)) return true;
+  if (looksLikeOutOfScopeSupportClaim(text)) return true;
   return (
     /\b(soporte tecnico|soporte|atencion al cliente|mesa de ayuda|mesa de entrada|asistencia tecnica)\b/.test(
       n,
@@ -1528,14 +1529,37 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
   );
 }
 
-/** El hilo ya mostró el menú genérico de módulos (riesgo de loop). */
-export function threadHasGenericPlatformMenuOffer(threadText: string): boolean {
-  const tail = threadText
-    .slice(-2500)
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  return /puedo guiarte sobre los modulos opciones, unidades o mantenimiento/.test(tail);
+/**
+ * Soporte fuera del alcance operativo de Atilio (GPS, odómetro, certificado, flota,
+ * mantenimiento programable). Ej.: pantalla táctil, hardware físico, garantía.
+ * Debe derivar a asesor y asignar caso — no preguntar patente ni # de ticket previo.
+ */
+export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "");
+  if (!n || n.length > 280) return false;
+  const hardwareOrPhysical =
+    /\b(pantalla|tactil|touch\s*screen|display|teclado|botonera|cargador|fuente|cable|antena|modem|router|tablet|impresora|hardware|garantia)\b/.test(
+      n,
+    );
+  const brokenOrClaim =
+    /\b(reclamar|reclamo|reclam\w*|falla|fallando|mal|rota|roto|romper|no funciona|funcion\w*\s+mal|problema|averia|danad\w*|defectuos\w*|garantia)\b/.test(
+      n,
+    );
+  // Hardware físico roto → fuera de alcance aunque mencionen "gps" (ej. pantalla del equipo).
+  if (hardwareOrPhysical && brokenOrClaim) return true;
+  // Trámites operativos de Atilio → no es "fuera de alcance".
+  if (
+    /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|reporte|sin reporte|no reporta|flota|patente|matricula|mantenimiento preventiv|mantenimiento correctiv)\b/.test(
+      n,
+    )
+  ) {
+    return false;
+  }
+  // "necesito reclamar X" genérico (X no es trámite Atilio).
+  if (/\b(necesito|quiero|vengo a|tengo que|hay que)\b.{0,40}\breclam\w*\b/.test(n)) {
+    return true;
+  }
+  return false;
 }
 
 /** Cliente pide abrir reclamo/ticket/caso (no consulta GPS ni unidad). */
@@ -1564,6 +1588,12 @@ export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined
   ) {
     return true;
   }
+  // Bug real 2026-08-07: "necesito RECLAMAR una pantalla…" no matcheaba (\breclamo\b)
+  // y caía a unidades / pedía # de caso en vez de derivar y asignar asesor.
+  if (/\b(necesito|quiero|vengo a|tengo que)\b.{0,40}\breclam\w*\b/.test(n)) return true;
+  if (/\breclam\w*\b.{0,50}\b(pantalla|tactil|display|hardware|equipo|garantia|factura|facturacion)\b/.test(n)) {
+    return true;
+  }
   // Bug real, producción 2026-07-23: "necesito abrir un NUEVO caso" no matcheaba (el
   // "\s+(un\s+)?" exige que el sustantivo venga PEGADO al verbo, sin tolerar ningún
   // adjetivo intermedio como "nuevo"/"otro") y el mensaje caía al ejecutor de unidades
@@ -1575,6 +1605,16 @@ export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined
   if (/\b(abrir|crear|generar|levantar)\b.{0,25}\b(ticket|caso|reclamo)\b/.test(n)) return true;
   if (/\b(necesito|quiero)\b.{0,30}\b(ticket|reclamo|caso)\b/.test(n)) return true;
   return false;
+}
+
+/** El hilo ya mostró el menú genérico de módulos (riesgo de loop). */
+export function threadHasGenericPlatformMenuOffer(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2500)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /puedo guiarte sobre los modulos opciones, unidades o mantenimiento/.test(tail);
 }
 
 /** Pide explícitamente hablar con una persona / escalar a humano. */
@@ -1621,6 +1661,7 @@ export function shouldAutoAssignInboundMessage(
   if (!text?.trim()) return false;
   if (looksLikeHumanAdvisorRequest(text)) return true;
   if (looksLikeExplicitReclamoOrTicketRequest(text)) return true;
+  if (looksLikeOutOfScopeSupportClaim(text)) return true;
   return false;
 }
 

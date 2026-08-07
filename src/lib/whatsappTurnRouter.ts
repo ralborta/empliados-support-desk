@@ -37,6 +37,7 @@ import {
   looksLikeHumanAdvisorRequest,
   looksLikeLiveUnitConsultIntent,
   looksLikeMaintenanceCapabilityQuestion,
+  looksLikeOutOfScopeSupportClaim,
   looksLikeSubstantiveCustomerMessage,
   looksLikeMaintenanceGuideContextInThread,
   looksLikeMaintenanceInfoGuideInThread,
@@ -364,6 +365,11 @@ const TURN_RULES: TurnRule[] = [
     decide: ({ text }) => (looksLikeHumanAdvisorRequest(text) ? "odoo_ticket" : null),
   },
   {
+    id: "out_of_scope_support_claim",
+    reason: "Soporte fuera de alcance Atilio (hardware, pantalla, etc.) → asesor.",
+    decide: ({ text }) => (looksLikeOutOfScopeSupportClaim(text) ? "odoo_ticket" : null),
+  },
+  {
     id: "explicit_reclamo_or_ticket_request",
     reason: "Reclamo o ticket explícito.",
     decide: ({ text }) => (looksLikeExplicitReclamoOrTicketRequest(text) ? "odoo_ticket" : null),
@@ -620,6 +626,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "conversation_close_request",
   "open_case_status_inquiry",
   "human_advisor_request",
+  "out_of_scope_support_claim",
   "explicit_reclamo_or_ticket_request",
   "technical_support_request",
   "odometer_problem_report",

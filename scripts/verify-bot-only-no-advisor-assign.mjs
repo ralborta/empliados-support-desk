@@ -110,6 +110,13 @@ assert(
   ),
   "derivación administrativa sí auto-asigna",
 );
+assert(
+  shouldAutoAssignInboundMessage(
+    detectIncidentType("NECESITO RECLAMAR UNA PANTALLA QUE FUNCIONA MAL EL TACTIL"),
+    "NECESITO RECLAMAR UNA PANTALLA QUE FUNCIONA MAL EL TACTIL",
+  ),
+  "reclamo pantalla táctil sí auto-asigna (fuera de alcance Atilio)",
+);
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
