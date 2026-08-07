@@ -132,10 +132,15 @@ export async function handleWhatsAppTurn(params: {
   const contextNextFlow = String(context.nextFlow ?? "derivar");
 
   if (contextNextFlow === "ignore") {
+    const contextRegistered =
+      context.registered === true || String(context.registered_s) === "true";
+    // No bypassear ignore en números no registrados: ya están derivados a asesor;
+    // si no, "Ad198en" u otro mensaje sustantivo reabría el router en loop.
     if (
-      looksLikeSubstantiveCustomerMessage(selectionText) ||
-      isBarePlatePrefixHint(selectionText) ||
-      hasPendingMaintenancePlateRequest(threadCtx.classificationThread)
+      contextRegistered &&
+      (looksLikeSubstantiveCustomerMessage(selectionText) ||
+        isBarePlatePrefixHint(selectionText) ||
+        hasPendingMaintenancePlateRequest(threadCtx.classificationThread))
     ) {
       // Bypass: /turn sigue procesando.
     } else {

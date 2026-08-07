@@ -10,6 +10,47 @@ export function isTerminalTicketStatus(status: string): boolean {
 }
 
 /**
+ * Pausa Atilio para un cliente (botPausedAt + blacklist BBC).
+ * Idempotente: si ya estaba pausado, solo asegura blacklist.
+ */
+export async function pauseAtilioForCustomer(
+  customerId: string,
+  client: PrismaClient = prisma,
+  reason?: string,
+): Promise<boolean> {
+  const customer = await client.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, phone: true, botPausedAt: true },
+  });
+  if (!customer) return false;
+
+  if (!customer.botPausedAt) {
+    await client.customer.update({
+      where: { id: customerId },
+      data: { botPausedAt: new Date() },
+    });
+  }
+
+  if (customer.phone) {
+    await setBuilderBotCloudBlacklist(customer.phone, "add").catch((err: unknown) => {
+      console.error(
+        "[atilio] Error al agregar blacklist Cloud:",
+        err instanceof Error ? err.message : err,
+      );
+    });
+    await setBotBlacklist(customer.phone, "add").catch((err: unknown) => {
+      console.error(
+        "[atilio] Error al agregar blacklist self-hosted:",
+        err instanceof Error ? err.message : err,
+      );
+    });
+  }
+
+  console.log(`[atilio] Pausado para cliente ${customerId}${reason ? ` (${reason})` : ""}`);
+  return true;
+}
+
+/**
  * Reactiva Atilio para un cliente (botPausedAt = null + sacar de blacklist BBC).
  * Idempotente: si ya estaba activo, no hace nada.
  */

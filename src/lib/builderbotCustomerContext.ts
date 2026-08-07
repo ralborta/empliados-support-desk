@@ -534,9 +534,32 @@ export async function customerRegisteredContextResponse(
     !!selectionText &&
     (await shouldIgnoreDuplicateInicioTurn(trimmed, selectionText));
   if (resolution.testBlocked) {
-    nextFlow = "derivar";
+    // Whitelist de prueba: no abrir ticket ni contestar a números fuera de lista.
+    nextFlow = "ignore";
+    responseMessage = "";
   } else if (!registered) {
-    nextFlow = "derivar";
+    // Número no en Wara → ticket + asesor en el panel (no solo el mensaje BBC).
+    try {
+      const { ensureUnregisteredPhoneAdvisorHandoff } = await import(
+        "@/lib/unregisteredPhoneHandoff"
+      );
+      const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, trimmed, {
+        contactName: customer?.name ?? undefined,
+        messageText: selectionText || undefined,
+        source: "builderbot_context",
+      });
+      if (handoff.shouldNotifyCustomer) {
+        nextFlow = "derivar";
+        responseMessage = "";
+      } else {
+        // Ya hay caso abierto: no repetir el mensaje de "vamos a derivarte".
+        nextFlow = "ignore";
+        responseMessage = "";
+      }
+    } catch (e) {
+      console.error("[builderbotCustomerContext] unregistered handoff:", e);
+      nextFlow = "derivar";
+    }
   } else if (
     selectionText &&
     looksLikeCustomerConversationCloseRequest(selectionText)

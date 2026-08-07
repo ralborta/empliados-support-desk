@@ -248,31 +248,52 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     });
   }
 
-  // Wara es la fuente de verdad: Customer local queda como espejo para tickets, historial y pausa del bot.
-  const customer = existingForPanel;
+  // Wara es la fuente de verdad para operar; si el número NO está en Wara, igual abrimos
+  // cliente+ticket local y derivamos a un asesor (antes se descartaba y no entraba al panel).
+  let customer = existingForPanel;
 
   if (!customer) {
     if (customerResolution.testBlocked) {
       console.log(
         `[WhatsApp] ${customerPhone} fuera de WARA_TEST_ALLOWED_PHONES; ignorado (modo whitelist).`
       );
-    } else {
-      console.log(
-        `[WhatsApp] Número no validado por Wara (${customerPhone}); no se crea cliente ni ticket.`
-      );
+      return NextResponse.json({
+        ok: true,
+        message: "Número fuera de la lista de prueba (WARA_TEST_ALLOWED_PHONES); mensaje ignorado",
+        skippedUnknownCustomer: true,
+        testBlocked: true,
+        validationSource: customerResolution.source,
+        waraLookupConfigured: customerResolution.lookup?.configured ?? false,
+        waraLookupError: customerResolution.lookup?.error ?? null,
+        ...builderBotRegistrationFields(false),
+      });
     }
-    return NextResponse.json({
-      ok: true,
-      message: customerResolution.testBlocked
-        ? "Número fuera de la lista de prueba (WARA_TEST_ALLOWED_PHONES); mensaje ignorado"
-        : "Número no validado por Wara; mensaje no asociado a un caso",
-      skippedUnknownCustomer: true,
-      testBlocked: customerResolution.testBlocked ?? false,
-      validationSource: customerResolution.source,
-      waraLookupConfigured: customerResolution.lookup?.configured ?? false,
-      waraLookupError: customerResolution.lookup?.error ?? null,
-      ...builderBotRegistrationFields(false),
-    });
+
+    try {
+      const { ensureUnregisteredPhoneAdvisorHandoff } = await import(
+        "@/lib/unregisteredPhoneHandoff"
+      );
+      const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, customerPhoneRaw, {
+        contactName,
+        source: "whatsapp_inbound",
+      });
+      customer = handoff.customer;
+      console.log(
+        `[WhatsApp] Número no validado por Wara (${customerPhone}) → ticket ${handoff.ticket.code} (asesor)`,
+      );
+    } catch (e) {
+      console.error("[WhatsApp] Falló handoff número no registrado:", e);
+      return NextResponse.json({
+        ok: true,
+        message: "Número no validado por Wara; no se pudo abrir caso para asesor",
+        skippedUnknownCustomer: true,
+        testBlocked: false,
+        validationSource: customerResolution.source,
+        waraLookupConfigured: customerResolution.lookup?.configured ?? false,
+        waraLookupError: customerResolution.lookup?.error ?? null,
+        ...builderBotRegistrationFields(false),
+      });
+    }
   }
 
   if (looksLikeCustomerConversationCloseRequest(actualMessage)) {
