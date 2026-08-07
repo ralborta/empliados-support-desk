@@ -22,23 +22,28 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
   const t = normCloseText(text ?? "");
   if (!t || t.length > 140) return false;
 
+  // Singular o plural: ticket(s), caso(s), etc. Bug 2026-08-07: "CERRAR TICKETS"
+  // no matcheaba (solo "ticket") y caía a búsqueda de flota («no encontré … TICKETS»).
+  const caseWord =
+    "(conversacion(es)?|charlas?|chats?|casos?|tickets?|consultas?|reclamos?)";
+
   if (
-    /^(cerrar|resolver|finalizar|terminar)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta|reclamo)\b/.test(
+    new RegExp(`^(cerrar|resolver|finalizar|terminar)\\s+(la\\s+|el\\s+|los\\s+|las\\s+)?${caseWord}\\b`).test(
       t,
     )
   ) {
     return true;
   }
 
-  if (/^(cerrar|resolver|finalizar)\s+(caso|ticket|consulta|reclamo)\b/.test(t)) {
+  if (new RegExp(`^(cerrar|resolver|finalizar)\\s+${caseWord}\\b`).test(t)) {
     return true;
   }
 
-  if (/\bcerr(a|ame|ar)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta|reclamo)\b/.test(t)) {
+  if (new RegExp(`\\bcerr(a|ame|ar)\\s+(la\\s+|el\\s+|los\\s+|las\\s+)?${caseWord}\\b`).test(t)) {
     return true;
   }
 
-  if (/\b(cerrame|cerráme)\s+(el\s+)?(caso|ticket|consulta|reclamo|conversacion|charla)\b/.test(t)) {
+  if (new RegExp(`\\b(cerrame)\\s+(el\\s+|los\\s+|la\\s+|las\\s+)?${caseWord}\\b`).test(t)) {
     return true;
   }
 
@@ -50,7 +55,7 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
     return true;
   }
 
-  if (/\b(cerrar|resolver)\s+(mi|el|un)\s+(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(t)) {
+  if (new RegExp(`\\b(cerrar|resolver)\\s+(mi|el|un|los|las|mis)\\s+${caseWord}\\b`).test(t)) {
     return true;
   }
 
@@ -63,17 +68,17 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
     // cierre, pero acá SIGUE exigiéndose que además aparezca la palabra de
     // caso/ticket/reclamo/etc. (nunca "problema"), así que agregarlo aquí no reintroduce
     // ese riesgo.
-    /\b(quiero|necesito)\s+.*\b(cerrar|resolver|finalizar|terminar)\b.*\b(caso|ticket|reclamo|consulta|conversacion|charla)\b/.test(
-      t,
-    )
+    new RegExp(
+      `\\b(quiero|necesito)\\s+.*\\b(cerrar|resolver|finalizar|terminar)\\b.*\\b${caseWord}\\b`,
+    ).test(t)
   ) {
     return true;
   }
 
   if (
-    /\b(pasar|poner|dejar|marcar)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta)\s+a\s+(resuelto|resuelta|cerrado|cerrada|finalizado|finalizada)\b/.test(
-      t,
-    )
+    new RegExp(
+      `\\b(pasar|poner|dejar|marcar)\\s+(la\\s+|el\\s+|los\\s+|las\\s+)?${caseWord}\\s+a\\s+(resuelto|resuelta|cerrado|cerrada|finalizado|finalizada)\\b`,
+    ).test(t)
   ) {
     return true;
   }
@@ -83,25 +88,29 @@ export function looksLikeCustomerConversationCloseRequest(text: string | undefin
   }
 
   if (
-    /^(si|sí|dale|ok|bueno|si por favor|sí por favor)[,.\s]+(resolver|cerrar|finalizar)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta)\b/.test(
-      t,
-    )
+    new RegExp(
+      `^(si|sí|dale|ok|bueno|si por favor|sí por favor)[,.\\s]+(resolver|cerrar|finalizar)\\s+(la\\s+|el\\s+|los\\s+|las\\s+)?${caseWord}\\b`,
+    ).test(t)
   ) {
     return true;
   }
 
-  if (/\b(resolver|cerrar|finalizar)\s+(la\s+)?(conversacion|charla|chat)\b/.test(t)) {
-    return true;
-  }
-
-  if (/\b(resolverme|resolv[eé]me|resolveme)\s+(la\s+)?(conversacion|charla|chat|caso|ticket|consulta)\b/.test(t)) {
+  if (new RegExp(`\\b(resolver|cerrar|finalizar)\\s+(la\\s+|el\\s+|los\\s+|las\\s+)?${caseWord}\\b`).test(t)) {
     return true;
   }
 
   if (
-    /\b(no te preocupes|no importa|olvida|olvidalo)\b.{0,50}\b(resolver|cerrar|finalizar)\s+(la\s+)?(conversacion|charla|chat)\b/.test(
-      t,
-    )
+    new RegExp(
+      `\\b(resolverme|resolv[eé]me|resolveme)\\s+(la\\s+|el\\s+|los\\s+|las\\s+)?${caseWord}\\b`,
+    ).test(t)
+  ) {
+    return true;
+  }
+
+  if (
+    new RegExp(
+      `\\b(no te preocupes|no importa|olvida|olvidalo)\\b.{0,50}\\b(resolver|cerrar|finalizar)\\s+(la\\s+|el\\s+|los\\s+|las\\s+)?${caseWord}\\b`,
+    ).test(t)
   ) {
     return true;
   }

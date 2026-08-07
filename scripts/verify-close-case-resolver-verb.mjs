@@ -25,6 +25,10 @@
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationClose.ts";
 import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
+import {
+  extractFreeTextUnitSearchCandidate,
+  looksLikeFleetUnitSearchInput,
+} from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -90,6 +94,18 @@ for (const text of preExistingCloseRequests) {
     looksLikeCustomerConversationCloseRequest(text),
     `looksLikeCustomerConversationCloseRequest("${text}") === true (comportamiento previo intacto)`,
   );
+}
+
+console.log("\n— Bug 2026-08-07: plural CERRAR TICKETS / casos no busca flota —");
+const pluralCloses = ["CERRAR TICKETS", "cerrar tickets", "cerrar casos", "Cerrar los tickets"];
+for (const text of pluralCloses) {
+  assert(
+    looksLikeCustomerConversationCloseRequest(text),
+    `cierre plural: "${text}"`,
+  );
+  assert(classifyTurnExecutor(text, "") === "odoo_ticket", `router → odoo_ticket: "${text}"`);
+  assert(!looksLikeFleetUnitSearchInput(text), `NO flota: "${text}"`);
+  assert(extractFreeTextUnitSearchCandidate(text) === null, `NO free-text unidad: "${text}"`);
 }
 
 console.log(

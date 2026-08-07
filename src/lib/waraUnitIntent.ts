@@ -34,6 +34,7 @@ import {
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
@@ -171,6 +172,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   if (!text) return false;
   // CONFIRMO / sí / dale nunca son búsqueda de unidad (bug 2026-08-07).
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
+  if (looksLikeCustomerConversationCloseRequest(text)) return false;
   return (
     !!detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
@@ -734,6 +736,8 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   // como nombre propio de unidad → "No encontré ninguna unidad que coincida con «CONFIRMO»"
   // en vez de registrar el odómetro pendiente.
   if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return null;
+  // Bug 2026-08-07: "CERRAR TICKETS" se buscaba en flota en vez de cerrar el caso.
+  if (looksLikeCustomerConversationCloseRequest(raw)) return null;
   if (detectLoosePlate(raw) || extractPlatePrefixFromMessage(raw)) return null;
   // Referencias vagas al hilo ("la unidad mencionada") NO son un nombre a buscar.
   if (looksLikeVagueUnitReference(raw)) return null;
@@ -777,6 +781,14 @@ function isPlausibleFreeTextUnitLabel(cand: string): boolean {
   if (!norm || norm.length < 4) return false;
   if (STOPWORDS.has(norm)) return false;
   if (/^(confirmo|confirmado|confirma|confirmar|confirmacion)$/.test(norm)) return false;
+  // Verbos / pedidos de gestión: no son etiquetas de flota.
+  if (
+    /\b(cerrar|resolver|finalizar|terminar|cancelar|reiniciar|listado|tickets?|casos?|reclamos?)\b/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
   if (
     /^(una|unidad|patente|matricula|estado|reporte|gps|flota|lista|unidades|marca|nombre|chofer|conductor|mencionada|mencionado|anterior|consultando|hablando|hablamos|estamos|estoy|quiero|necesito|saber|decir|pasame|dame|ultima|ultimo|ubicacion|coordenadas|posicion)$/.test(
       norm,
