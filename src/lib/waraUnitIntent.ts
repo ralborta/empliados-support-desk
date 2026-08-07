@@ -29,6 +29,7 @@ import {
   hasPendingUnitConsultPlateRequest,
   looksLikeBriefConfirmation,
   looksLikeExplicitOdometerUpdateRequest,
+  looksLikeBareOdometerTopicMention,
   looksLikeHorometerOnlyIntent,
   looksLikePendingTramiteAffirmation,
 } from "@/lib/wara";
@@ -216,12 +217,16 @@ export function isOdometerPlateSelectionMessage(rawText: string): boolean {
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  // "ODOMETRO" solo no es una unidad (bug 2026-08-07).
+  if (looksLikeBareOdometerTopicMention(text) || looksLikeExplicitOdometerUpdateRequest(text)) {
+    return false;
+  }
   if (looksLikeFleetUnitSearchInput(text)) return true;
   if (looksLikeVagueUnitReference(text)) return true;
   if (looksLikePatenteUnknownReply(text)) return true;
   return (
     text.length <= 20 &&
-    !/\b(certificado|cobertura|mantenimiento|preventiv\w*|gps|reporte|ignici[oó]n|consultar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
+    !/\b(certificado|cobertura|mantenimiento|preventiv\w*|gps|reporte|ignici[oó]n|consultar|reiniciar|inicio|menu|volver|cancelar|od[oó]metro|hor[oó]metro|kilometraje)\b/i.test(
       text,
     )
   );
@@ -738,6 +743,7 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return null;
   // Bug 2026-08-07: "CERRAR TICKETS" se buscaba en flota en vez de cerrar el caso.
   if (looksLikeCustomerConversationCloseRequest(raw)) return null;
+  if (looksLikeBareOdometerTopicMention(raw) || looksLikeExplicitOdometerUpdateRequest(raw)) return null;
   if (detectLoosePlate(raw) || extractPlatePrefixFromMessage(raw)) return null;
   // Referencias vagas al hilo ("la unidad mencionada") NO son un nombre a buscar.
   if (looksLikeVagueUnitReference(raw)) return null;

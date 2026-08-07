@@ -1260,6 +1260,28 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
 }
 
 /**
+ * Solo menciona odómetro/horómetro sin decir qué hacer (ej. "ODOMETRO", "el odómetro").
+ * Bug 2026-08-07: tras elegir unidad, "ODOMETRO" se ignoraba / se trataba como síntoma GPS
+ * en vez de preguntar si quiere corregir km u otra cosa.
+ */
+export function looksLikeBareOdometerTopicMention(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 40) return false;
+  if (looksLikeOdometerIntentStart(raw)) return false;
+  if (looksLikeOdometerInfoRequest(raw)) return false;
+  if (looksLikeOdometerProblemReport(raw)) return false;
+  if (looksLikeOdometerHelpRequest(raw)) return false;
+  if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[!?.¡¿]+/g, "")
+    .trim();
+  return /^(el\s+|la\s+|del\s+|sobre\s+(el\s+)?)?(od[oó]metro|hor[oó]metro|kilometraje)s?$/.test(t);
+}
+
+/**
  * Reinicio explícito del trámite de odómetro (no ampliación de datos sobre confirmación pendiente).
  * Bug 2026-07-27: "Quiero hacer un cambio de odometro" con confirmación vieja en el hilo
  * debe reiniciar; "Aun no te dije la hora del cambio" NO debe reiniciar.
@@ -1685,10 +1707,13 @@ export function resolveOdometerContextPlate(params: {
   if (params.hasPendingOdometerConfirm) {
     return summary ?? maintSuccess ?? last ?? active ?? "";
   }
+  // Sin confirmación pendiente: la unidad MÁS RECIENTE del hilo / activa manda sobre un
+  // "Voy a registrar: Patente AD…" viejo (bug 2026-08-07: tras AG 807 PS el cliente dijo
+  // CORREGIR ODOMETRO y el bot tomaba AD 555 BH de un registro anterior).
   if (params.explicitVagueUnitReference) {
     return last ?? active ?? summary ?? maintSuccess ?? "";
   }
-  return summary ?? maintSuccess ?? last ?? active ?? "";
+  return last ?? active ?? summary ?? maintSuccess ?? "";
 }
 
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */

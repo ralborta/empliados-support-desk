@@ -22,6 +22,7 @@ import {
   looksLikeHorometerOnlyIntent,
   looksLikeOdometerInfoRequest,
   looksLikeOdometerProblemReport,
+  looksLikeBareOdometerTopicMention,
   looksLikePostAdvisorCaseThread,
   looksLikePostAdvisorCaseSupplement,
   looksLikeCertificateUnitReply,
@@ -100,6 +101,7 @@ function looksLikeCertificateIntent(text: string, threadText: string): boolean {
 
 function looksLikeOdometerIntent(text: string, threadText: string): boolean {
   if (looksLikeOdometerProblemReport(text)) return false;
+  if (looksLikeBareOdometerTopicMention(text)) return true;
   if (looksLikeExplicitOdometerUpdateRequest(text)) return true;
   if (isOdometerFlowSuperseded(threadText)) return false;
   return shouldContinueOdometerFlow(text, threadText);
@@ -389,6 +391,7 @@ const TURN_RULES: TurnRule[] = [
     reason: "Arranque explícito odómetro/horómetro — prioridad sobre mantenimiento e IA.",
     decide: ({ text, threadText }) => {
       if (looksLikeNonOdometerOperationalIntent(text)) return null;
+      if (looksLikeBareOdometerTopicMention(text)) return "odometro";
       if (
         looksLikeExplicitOdometerUpdateRequest(text) ||
         looksLikeHorometerOnlyIntent(text)

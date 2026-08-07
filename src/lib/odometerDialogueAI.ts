@@ -28,6 +28,7 @@ export type OdometerDialogueSituation =
   | "missing_fecha_hora"
   | "confirmation_summary"
   | "correction_prompt"
+  | "clarify_odometer_intent"
   | "success"
   | "error_not_found";
 
@@ -42,6 +43,8 @@ const SITUATION_GUIDANCE: Record<OdometerDialogueSituation, string> = {
     "Ya tenés TODOS los datos: patente, valor Y fecha+hora de lectura. Presentaselos con claridad. La fecha DEBE ir en formato concreto DD/MM/AAAA HH:MM (nunca solo «ayer» o «el lunes»). Pedile EXPLÍCITAMENTE que responda la palabra CONFIRMO. Sin fecha+hora numéricas visibles, NO pidas CONFIRMO.",
   correction_prompt:
     "El cliente está pidiendo corregir algo del trámite pero no especificó qué dato ni el valor nuevo. Preguntale con calidez qué dato quiere corregir (patente, odómetro o horómetro) y el valor correcto, dejando claro que después de eso le vas a volver a pedir CONFIRMO.",
+  clarify_odometer_intent:
+    "El cliente solo dijo «odómetro» (o similar) sin aclarar la acción. Preguntale qué necesita: corregir/actualizar el kilometraje, o si es otra consulta. Si ya hay una unidad en el hilo, mencionala. NO pidas km ni CONFIRMO todavía.",
   success:
     "El cambio se registró con éxito en Wara. Confirmaselo al cliente de forma clara y cálida, con los datos que se registraron.",
   error_not_found:

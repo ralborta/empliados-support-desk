@@ -30,6 +30,7 @@ import {
   looksLikeOdometerFlowReminder,
   looksLikeOdometerHelpRequest,
   looksLikeOdometerIntentStart,
+  looksLikeBareOdometerTopicMention,
   looksLikeOdometerPendingDataAmendment,
   looksLikeGenericCorrectionIntent,
   looksLikeBriefConfirmation,
@@ -521,6 +522,35 @@ export async function POST(req: NextRequest) {
   const odometerHelpStart = looksLikeOdometerHelpRequest(rawText);
   const horometerOnlyIntent = looksLikeHorometerOnlyIntent(rawText);
   const odometerFlowStart = odometerIntentStart || odometerHelpStart;
+  const bareOdometerTopic = looksLikeBareOdometerTopicMention(rawText);
+
+  // Solo dijo "odómetro" / "ODOMETRO" sin verbo: preguntar qué quiere hacer
+  // (bug 2026-08-07: se ignoraba o se pedía síntoma GPS).
+  if (bareOdometerTopic) {
+    const preliminaryForClarify = await recentThreadText(rawPhone);
+    const unitHint =
+      formatPlateWithSpaces(extractLastPlateFromThread(preliminaryForClarify) ?? "") ||
+      extractLastPlateFromThread(preliminaryForClarify);
+    const fallbackTemplate = unitHint
+      ? `Sobre ${unitHint}: ¿qué necesitás con el odómetro? ¿Corregir o actualizar el kilometraje, o es otra consulta?`
+      : `¿Qué necesitás con el odómetro: corregir o actualizar el kilometraje, o es otra consulta?`;
+    const message = await composeOdometerDialogueReply({
+      situation: "clarify_odometer_intent",
+      history: preliminaryForClarify,
+      lastCustomerMessage: rawText,
+      fieldHint: "odometro",
+      fallbackTemplate,
+    });
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_odometro_response",
+      stage: "clarify_odometer_intent",
+    });
+    return NextResponse.json(
+      { ok: true, ok_s: "true", flowComplete_s: "true", message },
+      { status: BB_STATUS },
+    );
+  }
+
   // Bug real, producción 2026-07-23: "hagamos un cambio de odómetro de ESA unidad"
   // (arranque de trámite CON referencia explícita a una unidad ya resuelta antes, ej.
   // por una consulta de GPS/reporte previa) perdía esa referencia por completo: al ser
