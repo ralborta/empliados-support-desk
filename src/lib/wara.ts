@@ -1,3 +1,5 @@
+import { stripBotPromptExamples } from "@/lib/odometroFecha";
+
 export type WaraIncidentType =
   | "MISSING_REPORT"
   | "ODOMETER_CHANGE"
@@ -1610,7 +1612,8 @@ export function extractOdometroFromOdometerSummary(text: string): number | undef
 
 /** Km parafraseados por el agente ("el nuevo valor es 123690 km"). */
 export function extractOdometroFromOdometerContext(text: string): number | undefined {
-  const tail = text.slice(-2500);
+  // No tomar "ej. 10500 km" del propio pedido del bot (bug 2026-08-07).
+  const tail = stripBotPromptExamples(text).slice(-2500);
   // Sin espacios en el run numérico: "05/08/26\n99000 km" no debe virar 2699000
   // (bug real, producción 2026-08-05).
   const patterns = [

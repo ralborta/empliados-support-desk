@@ -97,6 +97,21 @@ function parseHoraLecturaNearDate(
   return found ? { hh: bestHh, min: bestMin } : null;
 }
 
+/**
+ * Quita ejemplos del propio bot ("ej. 10500 km — 05/08/26…") para no tomarlos
+ * como datos reales del cliente (bug 2026-08-07: audio "hola atilio" → CONFIRMO
+ * con el ejemplo del mensaje anterior).
+ */
+export function stripBotPromptExamples(text: string | undefined | null): string {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return raw;
+  return raw
+    .replace(/\(\s*(?:ej(?:emplo)?\.?|por\s+ejemplo)[^)]*\)/gi, " ")
+    .replace(/\b(?:ej(?:emplo)?\.?|por\s+ejemplo)\s*[:\s][^\n.?!;()]{0,120}/gi, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 /** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada.
  * También reconoce fechas relativas ("ayer", "hoy", "anteayer") combinadas con una hora
  * ("a las 12:00", "hora: 12:00") — bug real, producción 2026-07-23: "kilometro 111111 el
@@ -104,7 +119,7 @@ function parseHoraLecturaNearDate(
  * (se registraba con la fecha/hora ACTUAL del servidor, no "ayer a las 12:00" como pidió
  * el cliente). */
 export function parseFechaFromText(text: string, timezone?: string): string | undefined {
-  const raw = text || "";
+  const raw = stripBotPromptExamples(text || "");
   const tz = timezone?.trim() || "America/Argentina/Buenos_Aires";
   const matches = [
     ...raw.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})\b(?:[\sT,]+(\d{1,2}):(\d{2}))?/g),

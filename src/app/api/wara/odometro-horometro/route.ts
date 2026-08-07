@@ -55,7 +55,7 @@ import {
   resolvePlateWithWaraFleet,
   shouldClearOdometerPlateFromThread,
 } from "@/lib/waraUnitIntent";
-import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt } from "@/lib/odometroFecha";
+import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
@@ -71,7 +71,9 @@ import {
   resolveMeterNotebookType,
 } from "@/lib/conversationNotebook";
 import {
+  looksLikeBareAtilioMention,
   looksLikeConversationAcknowledgement,
+  looksLikeGreeting,
   looksLikeNonOdometerOperationalIntent,
   looksLikeOpcionesInfoRequest,
   looksLikePlateCorrectionRequest,
@@ -205,7 +207,8 @@ function parseFromText(rawText: string): {
   odometro?: number;
   horometro?: number;
 } {
-  const text = rawText || "";
+  // Bug 2026-08-07: no parsear "ej. 10500 km" del mensaje del bot.
+  const text = stripBotPromptExamples(rawText || "");
   const patente = detectPlate(text) ?? undefined;
   const cleaned = patente
     ? text.replace(new RegExp(patente.replace(/(.)/g, "$1\\s?"), "gi"), " ")
@@ -750,7 +753,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const historialForExtract = treatAsBlankFlowStart || supersedesPendingConfirm ? "" : flowThreadText;
+  const historialForExtract =
+    treatAsBlankFlowStart || supersedesPendingConfirm
+      ? ""
+      : stripBotPromptExamples(flowThreadText);
   const threadParsed = parseFromText(historialForExtract);
   // Bug real, producción 2026-07-28: parseFromText() usa detectPlate(), que devuelve la
   // PRIMERA patente de TODO el texto, no la más reciente. Con varias patentes en el hilo
@@ -1011,11 +1017,17 @@ export async function POST(req: NextRequest) {
     (looksLikeOdometerPendingDataAmendment(rawText) || bareNumericAmendmentValue !== undefined);
   const effectivePendingOdoConfirm = pendingOdoConfirm && !amendsPendingOdoConfirm;
   const explicitKmInMessage = messageExplicitlyStatesKm(rawText);
+  // Saludo / "hola Atilio" (p.ej. audio) no aporta km/fecha: no reutilizar ejemplos del hilo.
+  const nonDataCustomerTurn =
+    (looksLikeBareAtilioMention(rawText) || looksLikeGreeting(rawText)) &&
+    !/\d/.test(rawText) &&
+    !looksLikeAhoraComoFechaLectura(rawText);
   const allowThreadKm =
-    explicitKmInMessage ||
-    effectivePendingOdoConfirm ||
-    awaitingOdometerKm ||
-    (!isFleetUnitSelection && !awaitingPlateSelection);
+    !nonDataCustomerTurn &&
+    (explicitKmInMessage ||
+      effectivePendingOdoConfirm ||
+      awaitingOdometerKm ||
+      (!isFleetUnitSelection && !awaitingPlateSelection));
 
   const bareKmInMessage = awaitingOdometerKm ? parseBareOdometerKm(rawText) : undefined;
   const bareHorometerInMessage = awaitingHorometerKm ? parseBareHorometerHours(rawText) : undefined;
@@ -1024,7 +1036,7 @@ export async function POST(req: NextRequest) {
     parsed.data.odometro,
     parsed.data.odometer,
     !horometerFlowActive && !horometerOnlyIntent ? bareNumericAmendmentValue : undefined,
-    mergedFields.odometro,
+    nonDataCustomerTurn ? undefined : mergedFields.odometro,
     bareKmInMessage,
     fromText.odometro,
     horometerFlowActive || horometerOnlyIntent
@@ -1490,17 +1502,19 @@ export async function POST(req: NextRequest) {
     }
     return lines.slice(start).join("\n");
   })();
-  const fechaFromScopedThread = parseFechaFromText(odometerScopedThread, customerTz);
+  const fechaFromScopedThread = nonDataCustomerTurn
+    ? undefined
+    : parseFechaFromText(odometerScopedThread, customerTz);
   let fechaExplicita =
     parsed.data.fecha ??
     parsed.data.date ??
     fechaFromMessage ??
     (amendsPendingOdoConfirm
       ? pendingPayloadFecha
-      : clientExplicitFechaThisTurn
+      : clientExplicitFechaThisTurn && !nonDataCustomerTurn
         ? mergedFields.fechaNaive
         : undefined) ??
-    (amendsPendingOdoConfirm ? undefined : fechaFromScopedThread);
+    (amendsPendingOdoConfirm || nonDataCustomerTurn ? undefined : fechaFromScopedThread);
   // Si ya había día sin hora en pending y ahora mandan solo "14:30", no pisar con "hoy".
   {
     const baseDate =

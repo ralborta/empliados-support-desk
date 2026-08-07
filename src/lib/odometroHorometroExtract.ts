@@ -67,9 +67,10 @@ function regexFechaFromCombined(ctx: OdometerExtractContext): string | undefined
   if (ctx.treatAsBlankFlowStart) {
     return parseFechaFromText(ctx.mensaje, ctx.timezone);
   }
-  const combined = [ctx.historial, ctx.mensaje].filter(Boolean).join("\n");
   const fromMsg = parseFechaFromText(ctx.mensaje, ctx.timezone);
   if (fromMsg) return fromMsg;
+  // parseFechaFromText ya ignora "ej. …" del bot; igual preferimos mensaje > hilo.
+  const combined = [ctx.historial, ctx.mensaje].filter(Boolean).join("\n");
   return parseFechaFromText(combined, ctx.timezone);
 }
 
