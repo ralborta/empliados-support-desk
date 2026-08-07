@@ -17,6 +17,7 @@ import {
   extractPlateFromOdometerSummary,
   extractPlateFromPerfectoTomo,
   extractOdometroFromOdometerSummary,
+  extractOdometroFromOdometerContext,
   extractHorometroFromOdometerSummary,
   formatPlateWithSpaces,
   resolveOdometerContextPlate,
@@ -55,7 +56,7 @@ import {
   resolvePlateWithWaraFleet,
   shouldClearOdometerPlateFromThread,
 } from "@/lib/waraUnitIntent";
-import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples } from "@/lib/odometroFecha";
+import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
@@ -207,8 +208,8 @@ function parseFromText(rawText: string): {
   odometro?: number;
   horometro?: number;
 } {
-  // Bug 2026-08-07: no parsear "ej. 10500 km" del mensaje del bot.
-  const text = stripBotPromptExamples(rawText || "");
+  // Bug 2026-08-07: no parsear "ej. 10500 km" ni "Tomé … (10500 km)" del bot.
+  const text = stripBotOdometerBotSpeech(rawText || "");
   const patente = detectPlate(text) ?? undefined;
   const cleaned = patente
     ? text.replace(new RegExp(patente.replace(/(.)/g, "$1\\s?"), "gi"), " ")
@@ -226,18 +227,20 @@ function parseFromText(rawText: string): {
   for (const m of cleaned.matchAll(kmTrailRegex)) if (m[1]) kmCandidates.push(m[1]);
   for (const m of cleaned.matchAll(horoRegex)) if (m[1]) horoCandidates.push(m[1]);
   for (const m of cleaned.matchAll(horoTrailRegex)) if (m[1]) horoCandidates.push(m[1]);
-  const pickLargest = (values: string[]): number | undefined => {
-    let best: number | undefined;
-    for (const v of values) {
-      const n = parseNumber(v.replace(/\s+/g, ""));
-      if (typeof n === "number" && (best === undefined || n > best)) best = n;
+  // Último candidato (el más reciente en el texto), NO el mayor: si el hilo aún
+  // arrastraba 10500 del bot y el cliente dijo 8900, pickLargest elegía 10500
+  // (bug producción 2026-08-07).
+  const pickLast = (values: string[]): number | undefined => {
+    for (let i = values.length - 1; i >= 0; i--) {
+      const n = parseNumber(values[i].replace(/\s+/g, ""));
+      if (typeof n === "number") return n;
     }
-    return best;
+    return undefined;
   };
   return {
     patente,
-    odometro: pickLargest(kmCandidates),
-    horometro: pickLargest(horoCandidates),
+    odometro: pickLast(kmCandidates),
+    horometro: pickLast(horoCandidates),
   };
 }
 
@@ -756,7 +759,7 @@ export async function POST(req: NextRequest) {
   const historialForExtract =
     treatAsBlankFlowStart || supersedesPendingConfirm
       ? ""
-      : stripBotPromptExamples(flowThreadText);
+      : stripBotOdometerBotSpeech(flowThreadText);
   const threadParsed = parseFromText(historialForExtract);
   // Bug real, producción 2026-07-28: parseFromText() usa detectPlate(), que devuelve la
   // PRIMERA patente de TODO el texto, no la más reciente. Con varias patentes en el hilo
@@ -1022,8 +1025,16 @@ export async function POST(req: NextRequest) {
     (looksLikeBareAtilioMention(rawText) || looksLikeGreeting(rawText)) &&
     !/\d/.test(rawText) &&
     !looksLikeAhoraComoFechaLectura(rawText);
+  // Km explícitos del mensaje actual SIEMPRE ganan sobre hilo/pending/IA (bug 2026-08-07:
+  // "Los kilómetros son 8900" y el bot seguía con 10500 del "Tomé …" anterior).
+  const kmFromCurrentMessage = firstFiniteNumber(
+    extractOdometroFromOdometerContext(rawText),
+    parseFromText(rawText).odometro,
+    awaitingOdometerKm ? parseBareOdometerKm(rawText) : undefined,
+  );
   const allowThreadKm =
     !nonDataCustomerTurn &&
+    !kmFromCurrentMessage &&
     (explicitKmInMessage ||
       effectivePendingOdoConfirm ||
       awaitingOdometerKm ||
@@ -1035,10 +1046,11 @@ export async function POST(req: NextRequest) {
   const rawOdometro = firstFiniteNumber(
     parsed.data.odometro,
     parsed.data.odometer,
+    kmFromCurrentMessage,
     !horometerFlowActive && !horometerOnlyIntent ? bareNumericAmendmentValue : undefined,
-    nonDataCustomerTurn ? undefined : mergedFields.odometro,
     bareKmInMessage,
     fromText.odometro,
+    nonDataCustomerTurn || kmFromCurrentMessage ? undefined : mergedFields.odometro,
     horometerFlowActive || horometerOnlyIntent
       ? undefined
       : treatAsBlankFlowStart
@@ -1054,6 +1066,21 @@ export async function POST(req: NextRequest) {
   })
     ? rawOdometro
     : undefined;
+  // Solo eligió unidad (ej. "Es la saveiro"): no inventar/arrastrar km del bot.
+  if (
+    typeof kmFromCurrentMessage !== "number" &&
+    !explicitKmInMessage &&
+    !bareKmInMessage &&
+    !bareNumericAmendmentValue &&
+    !effectivePendingOdoConfirm &&
+    (looksLikeVehicleBrandOrUnitSearch(rawText) ||
+      looksLikeFleetUnitSearchInput(rawText) ||
+      looksLikeUnitNameInMessage(rawText))
+  ) {
+    odometro = undefined;
+  } else if (typeof kmFromCurrentMessage === "number") {
+    odometro = kmFromCurrentMessage;
+  }
   const combinedText = [flowThreadText, rawText].filter(Boolean).join("\n");
   const clockScanText = [rawText, flowThreadText.slice(-800)].filter(Boolean).join("\n");
   let horometro = stripHorometroConfusedWithClockTime(
@@ -1581,10 +1608,14 @@ export async function POST(req: NextRequest) {
       } else if (typeof payload.horometro === "number" && Number.isFinite(payload.horometro)) {
         horometro = payload.horometro as number;
       }
-      if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
-        odometro = summaryOdometro;
+      // Preferir km del mensaje actual / payload sobre el resumen del bot (puede
+      // arrastrar km fantasma). Bug 2026-08-07: 8900 del cliente vs 10500 del bot.
+      if (typeof kmFromCurrentMessage === "number") {
+        odometro = kmFromCurrentMessage;
       } else if (typeof payload.odometro === "number" && Number.isFinite(payload.odometro)) {
         odometro = payload.odometro as number;
+      } else if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
+        odometro = summaryOdometro;
       }
       if (typeof payload.fecha === "string" && payload.fecha.trim()) {
         fechaExplicita = payload.fecha.trim();
@@ -1599,11 +1630,15 @@ export async function POST(req: NextRequest) {
       if (typeof summaryHorometro === "number" && Number.isFinite(summaryHorometro)) {
         horometro = summaryHorometro;
       }
-      const contextOdometro = extractOdometroFromOdometerSummary(flowThreadText);
-      if (typeof contextOdometro === "number" && Number.isFinite(contextOdometro)) {
-        odometro = contextOdometro;
-      } else if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
-        odometro = summaryOdometro;
+      if (typeof kmFromCurrentMessage === "number") {
+        odometro = kmFromCurrentMessage;
+      } else {
+        const contextOdometro = extractOdometroFromOdometerContext(flowThreadText);
+        if (typeof contextOdometro === "number" && Number.isFinite(contextOdometro)) {
+          odometro = contextOdometro;
+        } else if (typeof summaryOdometro === "number" && Number.isFinite(summaryOdometro)) {
+          odometro = summaryOdometro;
+        }
       }
       const scopedFecha = parseFechaFromText(odometerScopedThread, customerTz);
       if (scopedFecha) {
@@ -1722,12 +1757,21 @@ export async function POST(req: NextRequest) {
     // No mostrar CONFIRMO ni registrar con "ahora" en silencio.
     if (hasCompleteOdoPayload && !hasFechaHoraLectura) {
       const plateDisp = formatPlateWithSpaces(patente) ?? patente ?? "la unidad";
-      const valueHint =
-        typeof odometro === "number"
-          ? ` (${odometro} km)`
-          : typeof horometro === "number"
-            ? ` (${horometro} h)`
-            : "";
+      // Solo mostrar km si vinieron del cliente (no del "Tomé … (10500 km)" del bot).
+      const showKmHint =
+        typeof odometro === "number" &&
+        (typeof kmFromCurrentMessage === "number" ||
+          explicitKmInMessage ||
+          typeof bareKmInMessage === "number" ||
+          typeof bareNumericAmendmentValue === "number" ||
+          (typeof dbPendingOdoAction?.payload?.odometro === "number" &&
+            dbPendingOdoAction.payload.odometro === odometro));
+      const valueHint = showKmHint
+        ? ` (${odometro} km)`
+        : typeof horometro === "number"
+          ? ` (${horometro} h)`
+          : "";
+      const odometroForPending = showKmHint ? odometro : undefined;
       const onlyDateNoTime =
         !!fechaExplicita && !fechaLecturaTieneHora(fechaExplicita, fechaHoraSourceText);
       // OJO: si dijo "ayer"/"lunes", mostrar DD/MM/AAAA concreto (sin 00:00 engañoso).
@@ -1736,7 +1780,9 @@ export async function POST(req: NextRequest) {
         : fechaDisplay;
       const fallbackTemplate = onlyDateNoTime
         ? `Tomé el día ${fechaDiaDisplay} para ${plateDisp}${valueHint}. ¿A qué hora fue la lectura? (ej. 14:30).`
-        : `Tomé ${plateDisp}${valueHint}. Me falta la fecha y hora de la lectura: pasamelas (ej. 05/08/26 a las 14:30).`;
+        : valueHint
+          ? `Tomé ${plateDisp}${valueHint}. Me falta la fecha y hora de la lectura: pasamelas (ej. 05/08/26 a las 14:30).`
+          : `Tomé ${plateDisp}. Pasame el odómetro en km y la fecha y hora de la lectura (ej. 8900 el 05/08/26 a las 14:30).`;
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",
         history: flowThreadText,
@@ -1748,7 +1794,7 @@ export async function POST(req: NextRequest) {
         summary: message,
         payload: {
           patente,
-          odometro,
+          odometro: odometroForPending,
           horometro,
           fecha: fechaExplicita ?? undefined,
         },

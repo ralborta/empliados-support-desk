@@ -112,6 +112,32 @@ export function stripBotPromptExamples(text: string | undefined | null): string 
     .replace(/\n{3,}/g, "\n\n");
 }
 
+/**
+ * Además de ejemplos, quita narración del bot que cita km ya "tomados"
+ * ("Tomé AE 483 VE (10500 km). Me falta la fecha…") para no reutilizarlos
+ * cuando el cliente manda otros datos (bug 2026-08-07: indicó 8900 y el bot
+ * seguía con 10500).
+ */
+export function stripBotOdometerBotSpeech(text: string | undefined | null): string {
+  let t = stripBotPromptExamples(text);
+  if (!t.trim()) return t;
+  // "Tomé AE 483 VE (10500 km)" y variantes humanizadas sin paréntesis.
+  t = t.replace(
+    /\b(?:perfecto,?\s*)?tom[oé]\b[^\n]{0,160}?\(\s*\d[\d.,\s]*\s*(?:km|h|hs|horas?)\s*\)/gi,
+    " ",
+  );
+  t = t.replace(
+    /\b(?:perfecto,?\s*)?tom[oé]\s+[A-Za-z0-9][A-Za-z0-9\s-]{3,16}[^\n]{0,100}?\b\d[\d.,]*\s*(?:km|h|hs|horas?)\b/gi,
+    " ",
+  );
+  t = t.replace(/\bme falta (?:la )?fecha[^\n]*/gi, " ");
+  t = t.replace(/\bpasame el nuevo (?:od[oó]metro|hor[oó]metro)[^\n]*/gi, " ");
+  t = t.replace(/\bpasame (?:el )?od[oó]metro en km y la fecha[^\n]*/gi, " ");
+  t = t.replace(/\bpara registrar el cambio de od[oó]metro necesito la patente[^\n]*/gi, " ");
+  t = t.replace(/[ \t]{2,}/g, " ");
+  return t;
+}
+
 /** Extrae una fecha (dd/mm/aa[aa], opcional hh:mm) del texto; toma la última mencionada.
  * También reconoce fechas relativas ("ayer", "hoy", "anteayer") combinadas con una hora
  * ("a las 12:00", "hora: 12:00") — bug real, producción 2026-07-23: "kilometro 111111 el

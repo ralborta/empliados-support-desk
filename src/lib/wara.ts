@@ -1,4 +1,4 @@
-import { stripBotPromptExamples } from "@/lib/odometroFecha";
+import { stripBotPromptExamples, stripBotOdometerBotSpeech } from "@/lib/odometroFecha";
 
 export type WaraIncidentType =
   | "MISSING_REPORT"
@@ -1600,24 +1600,29 @@ function parseSummaryReading(raw: string | undefined): number | undefined {
 /** Odómetro del último bloque "Voy a registrar:" (resumen más reciente del hilo). */
 export function extractOdometroFromOdometerSummary(text: string): number | undefined {
   const voyIdx = text.toLowerCase().lastIndexOf("voy a registrar");
-  const tail = voyIdx >= 0 ? text.slice(voyIdx) : text.slice(-2500);
+  if (voyIdx < 0) {
+    // Sin resumen de confirmación: no inventar km desde "Tomé … (10500 km)" del bot.
+    return undefined;
+  }
+  const tail = text.slice(voyIdx);
   // Sin \s: evita "26\n99000" → 2699000 (bug 2026-08-05).
   const matches = [...tail.matchAll(/od[oó]metro[^\n:]*[:\-]\s*([\d.,]+)\s*(?:km)?/gi)];
   for (let i = matches.length - 1; i >= 0; i--) {
     const n = parseSummaryReading(matches[i][1]);
     if (typeof n === "number") return n;
   }
-  return extractOdometroFromOdometerContext(text);
+  return undefined;
 }
 
 /** Km parafraseados por el agente ("el nuevo valor es 123690 km"). */
 export function extractOdometroFromOdometerContext(text: string): number | undefined {
-  // No tomar "ej. 10500 km" del propio pedido del bot (bug 2026-08-07).
-  const tail = stripBotPromptExamples(text).slice(-2500);
+  // No tomar ejemplos ni "Tomé … (10500 km)" del bot (bug 2026-08-07).
+  const tail = stripBotOdometerBotSpeech(text).slice(-2500);
   // Sin espacios en el run numérico: "05/08/26\n99000 km" no debe virar 2699000
   // (bug real, producción 2026-08-05).
   const patterns = [
     /(?:nuevo valor(?: del od[oó]metro)?|el od[oó]metro es|valor del od[oó]metro es|el nuevo valor es)\s*(?:de\s+)?([\d.,]+)\s*(?:km)?/gi,
+    /(?:los\s+)?(?:kil[oó]metros?|kilometraje|km)\s*(?:son|es|de|:)?\s*([\d.,]+)/gi,
     /(\d[\d.,]{2,})\s*km\b/gi,
   ];
   for (const re of patterns) {
