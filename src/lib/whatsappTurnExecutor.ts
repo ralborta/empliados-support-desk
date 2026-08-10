@@ -62,6 +62,7 @@ import {
   isPlausibleVehiclePlate,
   normalizePlate,
   threadHasActiveOdometerFlow,
+  threadHasOdometerUnitClarificationPending,
   threadAwaitingHorometerKmValue,
   threadAwaitingOdometerKmValue,
   threadOdometerRegistrationCompleted,
@@ -400,7 +401,16 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  if (looksLikeUnitRejection(selectionText) || looksLikeBareNegativeResponse(selectionText)) {
+  // "No" / rechazo de unidad: solo si el hilo recién pidió aclarar patente/unidad.
+  // El resto de negaciones las razona la IA (pending CONFIRMO ya se manejó arriba).
+  if (
+    (looksLikeUnitRejection(selectionText) || looksLikeBareNegativeResponse(selectionText)) &&
+    (threadHasOdometerUnitClarificationPending(thread) ||
+      threadHasRecentUnitProblemListenPrompt(thread) ||
+      /encontr[eé] varias|cu[aá]l (es|quer[eé]s)|patente exacta|no era esa/i.test(
+        thread.slice(-1200),
+      ))
+  ) {
     const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
@@ -473,10 +483,14 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  // Confirmación en flujo de odómetro activo: ir directo al executor (no reinterpretar).
+  // Confirmación en odómetro solo si hay resumen CONFIRMO / pending real (no "sí" genérico mid-flujo).
   if (
     (looksLikePendingTramiteAffirmation(selectionText) ||
       looksLikeBriefConfirmation(selectionText)) &&
+    (pendingConfirmExecutor ||
+      (pendingTramiteType === "odometro" && pendingAction?.payload) ||
+      resolvePendingConfirmationExecutor(threadCtx.classificationThread, "CONFIRMO") ===
+        "odometro") &&
     threadHasActiveOdometerFlow(threadCtx.classificationThread) &&
     !threadOdometerRegistrationCompleted(threadCtx.classificationThread)
   ) {

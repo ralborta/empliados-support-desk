@@ -1545,9 +1545,17 @@ export function looksLikeFlowControlCommand(text: string | undefined | null): bo
   const norm = normCompanyToken(text ?? "").replace(/[!?.¡¿]+$/g, "").trim();
   if (!norm) return false;
   if (looksLikeChangeCompanyRequest(text)) return false;
-  return /^(reiniciar|reinicio|inicio|menu|volver|cancelar|reset|empezar de nuevo|comenzar de nuevo|arrancar de nuevo)$/.test(
+  // Solo reset explícito — "cancelar/volver" van a la IA (pueden ser cancelar CONFIRMO).
+  return /^(reiniciar|reinicio|reset|empezar de nuevo|comenzar de nuevo|arrancar de nuevo)$/.test(
     norm,
   );
+}
+
+/** Soft reset genérico (inicio/menú) — no aborta pending; deja que el turn decida. */
+export function looksLikeSoftFlowRestart(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "").replace(/[!?.¡¿]+$/g, "").trim();
+  if (!norm) return false;
+  return /^(inicio|menu|volver)$/.test(norm);
 }
 
 /** Saludo repetido en una conversación que ya venía en curso (no primer contacto). */
@@ -1787,21 +1795,18 @@ function hasConcreteOperationalTopic(text: string, norm: string): boolean {
 }
 
 /**
- * Pregunta EXPLÍCITA de capacidades ("qué gestiones puedo hacer con vos", "qué puedo
- * gestionar/pedir/consultar con vos") o aviso de que quiere pasar a otro tema ("quiero
- * hacerte otras consultas", "otra consulta"), sin especificar todavía nada concreto.
- * Amerita la respuesta completa de capacidades (buildAtilioHelpCapabilitiesReply).
+ * Pregunta EXPLÍCITA de menú de capacidades ("qué gestiones puedo hacer", "qué puedo
+ * gestionar/pedir/consultar"). Solo esto merece el panfleto fijo — el resto va a IA.
  */
-export function looksLikeExplicitCapabilityQuestion(text: string | undefined | null): boolean {
+export function looksLikeExplicitCapabilityMenuRequest(
+  text: string | undefined | null,
+): boolean {
   const norm = normCompanyToken(text ?? "");
   if (!norm || norm.length > 160) return false;
   if (looksLikeHumanAdvisorRequest(text)) return false;
   if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
   if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
   if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
-  // Cualquier verbo razonable de pedido ("gestionar", "pedir", "consultar", "solicitar",
-  // "tramitar"), no solo "hacer" — bug real, producción 2026-07-28 (2da vuelta): "decime
-  // que puedo gestionar con vos" no matcheaba porque solo se contemplaba "hacer".
   if (
     /\bque\s+(puedo|podria|podr[ií]a|podes|pod[eé]s)\s+(hacer|pedirte|pedir|consultar|gestionar|solicitar|tramitar|realizar)\b/.test(
       norm,
@@ -1809,6 +1814,21 @@ export function looksLikeExplicitCapabilityQuestion(text: string | undefined | n
   ) {
     return true;
   }
+  return false;
+}
+
+/**
+ * Pregunta EXPLÍCITA de capacidades O aviso de cambio de tema ("otra consulta").
+ * Preferir looksLikeExplicitCapabilityMenuRequest para respuestas enlatadas;
+ * el topic-switch debe ir al turn/IA.
+ */
+export function looksLikeExplicitCapabilityQuestion(text: string | undefined | null): boolean {
+  if (looksLikeExplicitCapabilityMenuRequest(text)) return true;
+  const norm = normCompanyToken(text ?? "");
+  if (!norm || norm.length > 160) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+  if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
+  if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
   if (/\b(quiero|tengo|necesito)\b.*\botr\w*\s+consultas?\b/.test(norm)) return true;
   // Bug real, producción 2026-07-30: "otras consultas." (plural suelto) no matcheaba
   // /^otra\s+consulta$/ — caía al agente/unidad activa y repetía el GPS de AE 483 VE.
@@ -1822,6 +1842,17 @@ export function looksLikeExplicitCapabilityQuestion(text: string | undefined | n
   if (/\b(jamas|nunca)\b.{0,48}\b(inform\w*|dij\w*|ped\w*)\b/.test(norm)) return true;
   if (/\bno\s+(te\s+)?(inform\w*|dij\w*|ped\w*)\b.{0,32}\blo\s+que\s+necesito\b/.test(norm)) return true;
   return false;
+}
+
+/** Solo agradecimiento (gracias) — no "ok/listo/perfecto" que pueden ser confirmaciones. */
+export function looksLikeThanksOnlyAcknowledgement(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 140) return false;
+  if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
+  const t = normCompanyToken(raw);
+  return /^(muchas\s+)?(gracias|agradezco|thanks|thank you|ty|thx|tks)([\s!.,¡¿]*|(\s+(total|mil|de verdad|che))?[\s!.,¡¿]*)$/.test(
+    t,
+  );
 }
 
 /**

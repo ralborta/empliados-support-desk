@@ -27,6 +27,7 @@ import {
   looksLikeConversationClosing,
   looksLikeFlowControlCommand,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
+  looksLikeExplicitCapabilityMenuRequest,
   looksLikeGreeting,
   looksLikeOperationalIntent,
   matchCompanyContinuationMention,
@@ -35,6 +36,7 @@ import {
   buildAtilioHelpCapabilitiesReply,
   buildTicketCreationInfoReply,
   looksLikeAtilioHelpRequest,
+  looksLikeThanksOnlyAcknowledgement,
   looksLikeSubstantiveCustomerMessage,
   looksLikeTicketCreationInfoQuestion,
   resetCustomerCompanyMenu,
@@ -618,14 +620,15 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
   } else if (
     selectionText &&
-    (looksLikeAtilioHelpRequest(selectionText) ||
-      looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText)) &&
-    // Con CONFIRMO pendiente, no cortar con menú de capacidades: el turn/IA decide.
+    looksLikeExplicitCapabilityMenuRequest(selectionText) &&
+    // Con CONFIRMO pendiente, no cortar: el turn/IA decide.
     !(
       hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
       (await getPendingAction(prisma, trimmed))?.payload
     )
   ) {
+    // Solo "qué puedo hacer / qué gestiones…" → menú fijo. El resto (otra consulta,
+    // ayuda genérica, topic-switch) va al turn/IA — menos heurística, más diálogo.
     await clearActiveUnit(prisma, trimmed);
     const firstName = customer?.name?.trim().split(/\s+/)[0];
     responseMessage = buildAtilioHelpCapabilitiesReply(firstName);
@@ -634,17 +637,33 @@ export async function customerRegisteredContextResponse(
       stage: "atilio_help_capabilities",
     });
     nextFlow = "reply";
+  } else if (
+    selectionText &&
+    (looksLikeAtilioHelpRequest(selectionText) ||
+      looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText))
+  ) {
+    // Topic-switch / "otra consulta" / ayuda genérica → IA, no panfleto.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (selectionText && looksLikeFlowControlCommand(selectionText)) {
-    await clearActiveUnit(prisma, trimmed);
-    nextFlow = "reply";
-    const firstName = customer?.name?.trim().split(/\s+/)[0];
-    responseMessage = firstName
-      ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
-      : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
-    await persistCustomerBotReply(trimmed, responseMessage, {
-      source: "builderbot_context",
-      stage: "flow_reset",
-    });
+    const pendingNow =
+      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
+      !!(await getPendingAction(prisma, trimmed))?.payload;
+    if (pendingNow) {
+      nextFlow = "router";
+      responseMessage = "";
+    } else {
+      await clearActiveUnit(prisma, trimmed);
+      nextFlow = "reply";
+      const firstName = customer?.name?.trim().split(/\s+/)[0];
+      responseMessage = firstName
+        ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
+        : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
+      await persistCustomerBotReply(trimmed, responseMessage, {
+        source: "builderbot_context",
+        stage: "flow_reset",
+      });
+    }
   } else if (!selectionText.trim()) {
     // Cuerpo vacío (re-ejecución BBC sin {body}): no repetir saludo; reintentar trámite o ignorar.
     const lastInbound = await recentLastInboundTextForPhone(trimmed);
@@ -669,6 +688,15 @@ export async function customerRegisteredContextResponse(
       }
     }
   } else if (looksLikeGreeting(selectionText)) {
+    const pendingNow =
+      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
+      !!(await getPendingAction(prisma, trimmed))?.payload ||
+      threadHasActiveOdometerFlow(scopedThreadText || fullThreadText);
+    if (pendingNow) {
+      // Saludo mid-trámite → IA (no reiniciar el tono con menú enlatado).
+      nextFlow = "router";
+      responseMessage = "";
+    } else {
     nextFlow = "reply";
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
@@ -699,7 +727,15 @@ export async function customerRegisteredContextResponse(
           : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
       }
     }
+    }
   } else if (selectionText && looksLikeConversationClosing(selectionText)) {
+    const pendingNow =
+      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
+      !!(await getPendingAction(prisma, trimmed))?.payload;
+    if (pendingNow) {
+      nextFlow = "router";
+      responseMessage = "";
+    } else {
     // Despedida real ("adiós", "nada más gracias", "no gracias", "hasta luego"): cerrar
     // la charla con calidez, SIN pregunta de seguimiento (evita el loop de "¿necesitás
     // algo más?" repetido) y SIN caer al router (que reabría el último trámite operativo
@@ -710,6 +746,7 @@ export async function customerRegisteredContextResponse(
       responseMessage = firstName
         ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
         : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
+    }
     }
   } else if (
     selectionText &&
@@ -752,6 +789,7 @@ export async function customerRegisteredContextResponse(
     looksLikeConversationAcknowledgement(selectionText) &&
     hasAnyPendingConfirmation(scopedThreadText || fullThreadText)
   ) {
+    // Con pending: "gracias" → polite reminder; "ok/listo" ya fue al router arriba si es affirmation.
     nextFlow = "reply";
     const firstName = customer?.name?.trim().split(/\s+/)[0];
     responseMessage = buildPendingConfirmationPoliteAckReply(
@@ -762,7 +800,8 @@ export async function customerRegisteredContextResponse(
       source: "builderbot_context",
       stage: "pending_confirm_polite_ack",
     });
-  } else if (selectionText && looksLikeConversationAcknowledgement(selectionText)) {
+  } else if (selectionText && looksLikeThanksOnlyAcknowledgement(selectionText)) {
+    // Solo "gracias" cierra social. "ok/listo/perfecto" van a la IA.
     nextFlow = "reply";
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];

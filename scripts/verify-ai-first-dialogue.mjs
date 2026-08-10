@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+/**
+ * IA-first: menos panfletos heurísticos. Solo menú fijo ante pregunta explícita
+ * de capacidades; "otra consulta" / cancelar / ok mid-flujo van al turn.
+ */
+import assert from "node:assert/strict";
+import {
+  looksLikeExplicitCapabilityMenuRequest,
+  looksLikeExplicitCapabilityQuestion,
+  looksLikeGenericCapabilityOrTopicSwitchRequest,
+  looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
+  looksLikeThanksOnlyAcknowledgement,
+  looksLikeConversationAcknowledgement,
+} from "../src/lib/waraApi.ts";
+
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué gestiones puedo hacer con vos"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué puedo gestionar"), true);
+assert.equal(
+  looksLikeExplicitCapabilityMenuRequest("Quiero hacer otra consulta"),
+  false,
+  "otra consulta NO es menú fijo",
+);
+assert.equal(looksLikeExplicitCapabilityQuestion("Quiero hacer otra consulta"), true);
+assert.equal(looksLikeGenericCapabilityOrTopicSwitchRequest("Quiero hacer otra consulta"), true);
+
+assert.equal(looksLikeFlowControlCommand("reiniciar"), true);
+assert.equal(looksLikeFlowControlCommand("cancelar"), false, "cancelar → IA, no hard reset");
+assert.equal(looksLikeFlowControlCommand("inicio"), false);
+assert.equal(looksLikeSoftFlowRestart("inicio"), true);
+
+assert.equal(looksLikeThanksOnlyAcknowledgement("gracias"), true);
+assert.equal(looksLikeThanksOnlyAcknowledgement("ok"), false);
+assert.equal(looksLikeThanksOnlyAcknowledgement("listo"), false);
+assert.equal(looksLikeConversationAcknowledgement("ok"), true);
+
+console.log("OK verify-ai-first-dialogue");
