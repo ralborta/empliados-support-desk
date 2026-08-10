@@ -6,6 +6,7 @@ import {
 import {
   formatPlateWithSpaces,
   hasPendingOdometerConfirmation,
+  threadHasOdometerConfirmStillPendingCue,
   hasPendingMaintenancePlateRequest,
   hasPendingMantenimientoConfirmation,
   isBarePlatePrefixHint,
@@ -753,6 +754,14 @@ export function looksLikePatenteUnknownReply(text: string | undefined | null): b
 
 /** ¿Seguir en flujo de odómetro o el cliente cambió de tema? */
 export function shouldContinueOdometerFlow(text: string, threadText: string): boolean {
+  // CONFIRMO / sí con pending vivo: nunca cortar el flujo (ni por "superseded" falso).
+  if (
+    (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) &&
+    (hasPendingOdometerConfirmation(threadText) ||
+      threadHasOdometerConfirmStillPendingCue(threadText))
+  ) {
+    return true;
+  }
   if (isOdometerFlowSuperseded(threadText)) return false;
   const odometerFlowAwaitingInput =
     threadAwaitingOdometerPlate(threadText) ||

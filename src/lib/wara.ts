@@ -578,6 +578,9 @@ export function threadHasAgentStyleOdometerConfirmPending(threadText: string): b
 export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
   if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
+  // Recordatorio de pausa (consulta lateral): el CONFIRMO sigue vivo aunque el bot
+  // haya listado capacidades después (bug 2026-08-10: CONFIRMO en silencio).
+  if (threadHasOdometerConfirmStillPendingCue(threadText)) return true;
   if (isOdometerFlowSuperseded(threadText)) return false;
   if (threadHasAgentStyleOdometerConfirmPending(threadText)) return true;
   // Bug real, producción 2026-07-28: tras confirmar patente incorrecta ("Voy a
@@ -607,6 +610,33 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
     /od[oó]metro|hor[oó]metro/.test(afterLastConfirm) &&
     (/respond[eé]\s+confirmo/.test(afterLastConfirm) || /\bconfirmo\b/.test(afterLastConfirm))
   );
+}
+
+/**
+ * El bot recordó explícitamente que el CONFIRMO de odómetro/horómetro sigue pendiente
+ * (p.ej. tras una consulta lateral). Ese cue manda sobre listados de capacidades.
+ */
+export function threadHasOdometerConfirmStillPendingCue(threadText: string): boolean {
+  const tail = threadText.slice(-2800).toLowerCase();
+  if (/listo,\s*registr[eé]|registr[eé] el cambio/.test(tail)) return false;
+  return (
+    /sigue pendiente/.test(tail) &&
+    /\bconfirmo\b/.test(tail) &&
+    /\b(od[oó]metro|hor[oó]metro)\b/.test(tail)
+  );
+}
+
+/** Quita menús de capacidades del bot para no confundirlos con cambio de tema del cliente. */
+function stripBotCapabilityNoiseFromThread(afterLower: string): string {
+  return afterLower
+    .replace(
+      /s[ií],?\s*puedo ayudarte[\s\S]{0,700}?(hablar con un asesor|hablar con una persona)\.?/gi,
+      " ",
+    )
+    .replace(
+      /el cambio de od[oó]metro\/hor[oó]metro sigue pendiente[\s\S]{0,280}?qu[eé] corregir\.?/gi,
+      " ",
+    );
 }
 
 /**
@@ -658,6 +688,10 @@ function deNadaAbandonsOdometerFlow(threadText: string, cutIdx: number): boolean
 
 export function isOdometerFlowSuperseded(threadText: string): boolean {
   if (!threadText.trim()) return false;
+  // Bug 2026-08-10: tras pausa por "otra consulta", el bot listó capacidades
+  // (certificado/odómetro/…) y este detector marcaba el trámite abandonado →
+  // CONFIRMO caía en skip silencioso. Si el bot recordó el pending, no abandonar.
+  if (threadHasOdometerConfirmStillPendingCue(threadText)) return false;
   const lower = threadText.toLowerCase();
   const markers = [
     lower.lastIndexOf("voy a registrar:"),
@@ -689,7 +723,8 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     return false;
   }
   const stillPickingUnitForOdo = isStillPickingUnitForOdoBlock(afterMarkerBlock);
-  const after = threadText.slice(cutIdx + 80).toLowerCase();
+  // Solo mensajes del cliente cuentan como cambio de tema — no el menú de capacidades del bot.
+  const after = stripBotCapabilityNoiseFromThread(threadText.slice(cutIdx + 80).toLowerCase());
   if (!after.trim()) return false;
   // Pedir listado de flota para elegir la unidad durante un trámite de odómetro NO es
   // cambio de tema (bug producción 2026-07-29: "Pásame el listado?" → bot "Tenés 414

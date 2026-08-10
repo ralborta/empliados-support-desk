@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 /**
- * Bug 2026-08-10: con CONFIRMO de odómetro pendiente, "otra consulta" es
- * pedir un dato del mismo tema ANTES de continuar — no borrar el pending.
+ * Bug 2026-08-10: tras pausa ("otra consulta") el bot listó capacidades y
+ * isOdometerFlowSuperseded=true → CONFIRMO caía en silencio.
  */
 import assert from "node:assert/strict";
 import {
+  hasPendingOdometerConfirmation,
+  isOdometerFlowSuperseded,
+  threadHasOdometerConfirmStillPendingCue,
+} from "../src/lib/wara.ts";
+import {
   looksLikeOdometerConfirmationRejection,
   looksLikePendingConfirmDeferForOtherQuery,
+  shouldContinueOdometerFlow,
 } from "../src/lib/waraApi.ts";
 import {
   detectPendingConfirmKind,
@@ -14,44 +20,45 @@ import {
   reasonPendingConfirmationRejection,
   buildPendingConfirmStillWaitingReminder,
 } from "../src/lib/pendingConfirmStance.ts";
+import { resolvePendingConfirmationExecutor } from "../src/lib/pendingConfirmation.ts";
 
 const msg = "Quiero hacer otra consulta, desestima el cambio de odometro";
-const thread = [
-  "Cliente: hagamos un ajuste de odómetro",
-  "Atilio: Perfecto, tomo AA 850 DR. Pasame el nuevo odómetro...",
-  "Cliente: el dia de ayer a las 16:06, el kilometraje es 10001",
+const threadAfterSideQuery = [
   "Atilio: Voy a registrar:",
-  "Patente: AA 850 DR",
+  "Patente: AG 562 SP",
   "Odómetro: 10001 km",
   "Fecha: 09/08/2026 16:06",
-  "",
   "Si está correcto, respondé CONFIRMO para registrarlo en Wara.",
+  "Cliente: estado de AG 562 SP",
+  "Atilio: La unidad AG 562 SP está funcionando normalmente. No se generó ticket.",
+  "Atilio: El cambio de odómetro/horómetro sigue pendiente: cuando quieras, respondé CONFIRMO para registrarlo, o decime qué corregir.",
+  "Cliente: Quiero hacer otra consulta",
+  "Atilio: Emii, sí, puedo ayudarte por este chat con consultas de unidades (reporte, ubicación, flota), certificados de cobertura, odómetro/horómetro y mantenimiento. Contame qué necesitás.",
 ].join("\n");
 
-assert.equal(detectPendingConfirmKind(thread), "odometro");
+assert.equal(threadHasOdometerConfirmStillPendingCue(threadAfterSideQuery), true);
+assert.equal(isOdometerFlowSuperseded(threadAfterSideQuery), false);
+assert.equal(hasPendingOdometerConfirmation(threadAfterSideQuery), true);
+assert.equal(shouldContinueOdometerFlow("confirmo", threadAfterSideQuery), true);
+assert.equal(resolvePendingConfirmationExecutor(threadAfterSideQuery, "confirmo"), "odometro");
+
+assert.equal(detectPendingConfirmKind(threadAfterSideQuery), "odometro");
 assert.equal(looksLikePendingConfirmDeferForOtherQuery(msg), true);
-assert.equal(
-  looksLikeOdometerConfirmationRejection(msg),
-  false,
-  "otra consulta + desestima ≠ cancelar duro",
-);
+assert.equal(looksLikeOdometerConfirmationRejection(msg), false);
 assert.equal(looksLikePendingConfirmPushback(msg, "odometro"), true);
 
 process.env.WARA_PENDING_CONFIRM_IA_ENABLED = "false";
 const stance = await reasonPendingConfirmationRejection({
   selectionText: msg,
-  threadText: thread,
+  threadText: threadAfterSideQuery,
   kind: "odometro",
 });
 assert.equal(stance.action, "pause_for_side_query");
-assert.equal(stance.query, null);
 
-const withQuery =
-  "Antes de confirmar, quiero el estado de la unidad AA 850 DR";
-assert.equal(looksLikePendingConfirmDeferForOtherQuery(withQuery), true);
+const withQuery = "Antes de confirmar, quiero el estado de la unidad AA 850 DR";
 const stance2 = await reasonPendingConfirmationRejection({
   selectionText: withQuery,
-  threadText: thread,
+  threadText: threadAfterSideQuery,
   kind: "odometro",
 });
 assert.equal(stance2.action, "pause_for_side_query");
@@ -60,7 +67,6 @@ assert.ok(stance2.query && /AA\s*850\s*DR|estado/i.test(stance2.query));
 assert.equal(
   looksLikeOdometerConfirmationRejection("desestima el cambio de odometro"),
   true,
-  "desestima solo = cancelar",
 );
 assert.match(buildPendingConfirmStillWaitingReminder("odometro"), /CONFIRMO/);
 

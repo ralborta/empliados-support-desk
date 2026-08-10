@@ -345,7 +345,7 @@ export async function runTurnExecutorPhase(params: {
       return {
         message:
           stance.clarify ||
-          `Dale, el registro queda pendiente. ¿Qué dato necesitás consultar antes de confirmar?\n\n${reminder}`,
+          `Dale, el registro queda pendiente. ¿Qué dato necesitás antes de confirmar?\n\n${reminder}`,
         executor: "info_guides",
         ok: true,
       };
@@ -464,6 +464,13 @@ export async function runTurnExecutorPhase(params: {
     if (execMessage) {
       return { message: execMessage, executor, ok: execOk };
     }
+    // Nunca silencio ante CONFIRMO: si el executor no devolvió texto, igual contestamos.
+    return {
+      message:
+        "Tengo el registro pendiente pero no pude cerrarlo ahora. Respondé CONFIRMO de nuevo o decime qué corregir.",
+      executor,
+      ok: false,
+    };
   }
 
   // Confirmación en flujo de odómetro activo: ir directo al executor (no reinterpretar).

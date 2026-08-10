@@ -766,6 +766,8 @@ export async function POST(req: NextRequest) {
 
   if (
     !odometerFlowStart &&
+    !isConfirmed(rawText) &&
+    !looksLikePendingTramiteAffirmation(rawText) &&
     (looksLikeOpcionesInfoRequest(rawText) ||
       looksLikeUnidadesInfoRequest(rawText) ||
       looksLikeConversationAcknowledgement(rawText) ||

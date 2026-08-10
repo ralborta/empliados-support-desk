@@ -619,7 +619,12 @@ export async function customerRegisteredContextResponse(
   } else if (
     selectionText &&
     (looksLikeAtilioHelpRequest(selectionText) ||
-      looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText))
+      looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText)) &&
+    // Con CONFIRMO pendiente, no cortar con menú de capacidades: el turn/IA decide.
+    !(
+      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
+      (await getPendingAction(prisma, trimmed))?.payload
+    )
   ) {
     await clearActiveUnit(prisma, trimmed);
     const firstName = customer?.name?.trim().split(/\s+/)[0];
