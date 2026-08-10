@@ -4,6 +4,9 @@
  *
  * Bug 2026-08-10: "No" tras resumen de mantenimiento (que en realidad era una
  * consulta de estado) caía a "Entendido, no era esa… ¿cuál es la patente?".
+ *
+ * Bug 2026-08-10 (odo): "quiero otra consulta" con CONFIRMO pendiente suele ser
+ * pedir un dato del mismo tema ANTES de continuar — no borrar el registro.
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -30,12 +33,13 @@ export type PendingConfirmKind = "mantenimiento" | "odometro" | "certificados";
 export type PendingConfirmStanceAction =
   | "cancel_and_resume_query"
   | "cancel_tramite"
+  | "pause_for_side_query"
   | "correct_unit"
   | "unclear";
 
 export type PendingConfirmStance = {
   action: PendingConfirmStanceAction;
-  /** Consulta a reejecutar (estado/GPS) si action = cancel_and_resume_query */
+  /** Consulta a ejecutar (estado/GPS) si action = cancel_and_resume_query | pause_for_side_query */
   query: string | null;
   confidence: number;
   clarify: string | null;
@@ -57,7 +61,7 @@ export function detectPendingConfirmKind(threadText: string): PendingConfirmKind
 
 /** ¿El mensaje parece rechazo / negación / corrección ante un CONFIRMO pendiente? */
 export function looksLikePendingConfirmPushback(text: string, kind: PendingConfirmKind): boolean {
-  // Abrir puerta a la IA: desestima / otra consulta / no registres, etc.
+  // Abrir puerta a la IA: otra consulta / dato antes de confirmar, etc.
   if (looksLikePendingConfirmDeferForOtherQuery(text)) return true;
   if (kind === "mantenimiento" && looksLikeMaintenanceConfirmationRejection(text)) return true;
   if (kind === "odometro" && looksLikeOdometerConfirmationRejection(text)) return true;
@@ -87,28 +91,18 @@ function heuristicStance(
       };
     }
   }
-  // Quiere otra consulta / desestima el registro → cancelar y dejar espacio a la consulta.
+  // Otra consulta / dato adicional del mismo tema → pausar CONFIRMO (no borrarlo).
   if (looksLikePendingConfirmDeferForOtherQuery(selectionText)) {
     const maybeQuery =
       looksLikeGpsOrUnitStatusQuestion(selectionText) || looksLikeLiveUnitConsultIntent(selectionText)
         ? selectionText.trim()
         : null;
-    if (maybeQuery) {
-      return {
-        action: "cancel_and_resume_query",
-        query: maybeQuery,
-        confidence: 0.75,
-        clarify: null,
-        reason: "desestima CONFIRMO y trae consulta concreta",
-        fuente: "heuristica",
-      };
-    }
     return {
-      action: "cancel_tramite",
-      query: null,
-      confidence: 0.8,
+      action: "pause_for_side_query",
+      query: maybeQuery,
+      confidence: 0.85,
       clarify: null,
-      reason: "desestima CONFIRMO para otra consulta",
+      reason: "consulta lateral antes de CONFIRMO",
       fuente: "heuristica",
     };
   }
@@ -151,6 +145,7 @@ function parseStance(raw: string): Omit<PendingConfirmStance, "fuente"> | null {
     const allowed: PendingConfirmStanceAction[] = [
       "cancel_and_resume_query",
       "cancel_tramite",
+      "pause_for_side_query",
       "correct_unit",
       "unclear",
     ];
@@ -201,20 +196,22 @@ Trámite pendiente: ${kind}
 Detalle del resumen (si hay): ${detalle || "(sin detalle)"}
 
 Acciones posibles (elegí UNA):
-- cancel_and_resume_query — Cancelá el CONFIRMO y ejecutá una CONSULTA concreta (estado/GPS/reporte/ubicación de una unidad). Poné en "query" el texto de esa consulta (del mensaje nuevo o del detalle del resumen si aplica).
-- cancel_tramite — El cliente rechaza / desestima / no quiere registrar ahora, o quiere hacer OTRA consulta/gestión pero todavía NO dijo cuál. Cancelá el registro (query=null).
-- correct_unit — El cliente dice que la UNIDAD/patente del resumen está mal y quiere corregirla (no cancela el trámite entero).
+- pause_for_side_query — El cliente quiere un DATO o CONSULTA (a menudo del mismo tema/unidad) ANTES de continuar con el CONFIRMO. NO borres el registro pendiente. Si el mensaje ya trae la consulta concreta, ponela en "query"; si no, query=null.
+- cancel_and_resume_query — El resumen de CONFIRMO NO correspondía (era una consulta disfrazada de trámite) o el cliente ABANDONA el registro y pide una consulta en su lugar. Ahí SÍ se cancela el pendiente. Poné la consulta en "query".
+- cancel_tramite — Rechazo claro: no quiere registrar (cancelá/olvidalo/no confirmo/desestima SIN pedir otra consulta). query=null.
+- correct_unit — La UNIDAD/patente del resumen está mal; quiere corregirla (no cancela el trámite entero).
 - unclear — No se entiende; pedí aclaración breve en "clarify".
 
 REGLAS DURAS:
 - NUNCA elijas confirmar/registrar el trámite.
-- "desestima", "olvidalo", "quiero hacer otra consulta", "después confirmo" → cancel_tramite (salvo que el mismo mensaje ya traiga la consulta concreta → cancel_and_resume_query).
+- "quiero hacer otra consulta", "antes de confirmar", "necesito un dato" → pause_for_side_query (NO cancel_tramite).
+- "desestima/cancelá" + "otra consulta" en el mismo mensaje → pause_for_side_query (quiere pausar para consultar, no abandonar del todo).
 - Si el detalle era claramente "estado/reporte/GPS/ubicación de X" y el cliente dice No/nop/cancelá → preferí cancel_and_resume_query.
 - "No" solo, sin más contexto de otra patente → casi nunca correct_unit; preferí cancel_tramite o cancel_and_resume_query.
 - Español rioplatense en clarify. Sin emojis.
 
 JSON:
-{"action":"cancel_and_resume_query"|"cancel_tramite"|"correct_unit"|"unclear","query":string|null,"clarify":string|null,"confidence":0.0-1.0,"reason":"breve"}`;
+{"action":"pause_for_side_query"|"cancel_and_resume_query"|"cancel_tramite"|"correct_unit"|"unclear","query":string|null,"clarify":string|null,"confidence":0.0-1.0,"reason":"breve"}`;
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -251,7 +248,11 @@ JSON:
     if (!content) return fallback;
     const parsed = parseStance(content);
     if (!parsed || parsed.confidence < 0.55) return fallback;
-    if (parsed.action === "cancel_and_resume_query" && !parsed.query) {
+    if (
+      (parsed.action === "cancel_and_resume_query" || parsed.action === "pause_for_side_query") &&
+      !parsed.query &&
+      parsed.action === "cancel_and_resume_query"
+    ) {
       parsed.query = detalle || selectionText.trim();
     }
     return { ...parsed, fuente: "ia" };
@@ -262,4 +263,15 @@ JSON:
     );
     return fallback;
   }
+}
+
+/** Recordatorio corto: el CONFIRMO sigue vivo tras una consulta lateral. */
+export function buildPendingConfirmStillWaitingReminder(kind: PendingConfirmKind): string {
+  if (kind === "odometro") {
+    return "El cambio de odómetro/horómetro sigue pendiente: cuando quieras, respondé CONFIRMO para registrarlo, o decime qué corregir.";
+  }
+  if (kind === "certificados") {
+    return "El certificado sigue pendiente: cuando quieras, respondé CONFIRMO, o decime qué corregir.";
+  }
+  return "El mantenimiento del resumen sigue pendiente: cuando quieras, respondé CONFIRMO, o decime qué corregir.";
 }

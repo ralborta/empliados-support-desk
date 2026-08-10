@@ -175,10 +175,10 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
 }
 
 /**
- * Con CONFIRMO pendiente: el cliente quiere pausar/desestimar el registro
- * para hacer otra consulta/gestión (con o sin detalle aún).
- * Bug 2026-08-10: "Quiero hacer otra consulta, desestima el cambio de odometro"
- * no entraba a la IA de stance y el CONFIRMO quedaba colgado.
+ * Con CONFIRMO pendiente: el cliente quiere un dato / consulta del mismo tema
+ * (o relacionada) ANTES de continuar — no abandonar el registro.
+ * Bug 2026-08-10: "Quiero hacer otra consulta…" no debe borrar el CONFIRMO;
+ * debe pausar, atender la consulta y dejar el resumen listo para CONFIRMO.
  */
 export function looksLikePendingConfirmDeferForOtherQuery(
   text: string | undefined | null,
@@ -190,7 +190,13 @@ export function looksLikePendingConfirmDeferForOtherQuery(
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  if (/\b(desestim\w*|descart\w*|anul\w*|olvidate|olvidalo)\b/.test(t)) return true;
+  // Rechazo explícito del registro: no es "pausa para consultar".
+  if (
+    /\b(no confirmo|no es correcto|cancelar|cancelalo|olvidalo|negativo)\b/.test(t) ||
+    /\bno\s+(lo\s+)?registres?\b/.test(t)
+  ) {
+    return false;
+  }
   if (/\b(otra|otro)\s+consultas?\b/.test(t)) return true;
   if (
     /\b(quiero|necesito|prefiero|hagamos|vamos\s+a)\b.{0,48}\b(otra|otro)\s+(consulta|gestion|tramite)\b/.test(
@@ -199,8 +205,18 @@ export function looksLikePendingConfirmDeferForOtherQuery(
   ) {
     return true;
   }
-  if (/\bno\s+(lo\s+)?registres?\b/.test(t)) return true;
+  if (/\bantes\s+de\s+(confirmar|seguir|continuar|registrar)\b/.test(t)) return true;
+  if (/\b(dato|datos)\s+(adicional(?:es)?|mas|extra)\b/.test(t)) return true;
+  if (/\bconsultar\b.{0,28}\b(antes|primero)\b/.test(t)) return true;
+  if (/\b(antes|primero)\b.{0,28}\bconsultar\b/.test(t)) return true;
   if (/\b(despues|mas\s+tarde)\s+(confirmo|lo\s+confirmo)\b/.test(t)) return true;
+  // "desestima" solo cuenta como pausa si también pide consulta/dato (mismo mensaje).
+  if (
+    /\b(desestim\w*|descart\w*)\b/.test(t) &&
+    /\b(consulta|gestion|tramite|dato)\b/.test(t)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -209,12 +225,15 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (looksLikeBriefConfirmation(raw)) return false;
-  if (looksLikePendingConfirmDeferForOtherQuery(raw)) return true;
+  // Pausa para consulta lateral ≠ cancelar el registro.
+  if (looksLikePendingConfirmDeferForOtherQuery(raw)) return false;
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (/^0$/.test(raw)) return true;
+  if (/\b(desestim\w*|descart\w*|anul\w*)\b/.test(t)) return true;
+  if (/\bno\s+(lo\s+)?registres?\b/.test(t)) return true;
   return (
     /\b(no es correcto|no confirmo|no quiero|incorrecto|cancelar|cancelalo|olvidalo|otra gesti[oó]n|quiero otra|negativo)\b/.test(
       t,

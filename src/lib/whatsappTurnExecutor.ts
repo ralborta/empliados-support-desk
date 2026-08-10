@@ -39,7 +39,6 @@ import {
   looksLikeOperationalMaintenanceIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
-  looksLikePendingConfirmDeferForOtherQuery,
   resetCustomerCompanyMenu,
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
@@ -48,6 +47,7 @@ import {
   detectPendingConfirmKind,
   looksLikePendingConfirmPushback,
   reasonPendingConfirmationRejection,
+  buildPendingConfirmStillWaitingReminder,
 } from "@/lib/pendingConfirmStance";
 import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
@@ -326,6 +326,31 @@ export async function runTurnExecutorPhase(params: {
       };
     }
 
+    // Consulta/dato del mismo tema ANTES de confirmar: NO borrar el pending.
+    if (stance.action === "pause_for_side_query") {
+      const reminder = buildPendingConfirmStillWaitingReminder(pendingKind);
+      const query = stance.query?.trim();
+      if (query) {
+        const execResult = await invokeExecutor("unidades", rawPhone, query, apiKey);
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        if (execMessage) {
+          return {
+            message: `${execMessage}\n\n${reminder}`,
+            executor: "unidades",
+            ok: execOk,
+          };
+        }
+      }
+      return {
+        message:
+          stance.clarify ||
+          `Dale, el registro queda pendiente. ¿Qué dato necesitás consultar antes de confirmar?\n\n${reminder}`,
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+
     // cancel_tramite | cancel_and_resume_query
     await clearPendingAction(prisma, rawPhone);
 
@@ -346,19 +371,6 @@ export async function runTurnExecutorPhase(params: {
           ok: execOk,
         };
       }
-    }
-
-    // Desestima / quiere otra consulta sin detalle: no reinyectar al executor del trámite.
-    if (
-      stance.action === "cancel_tramite" &&
-      looksLikePendingConfirmDeferForOtherQuery(selectionText)
-    ) {
-      return {
-        message:
-          "Listo, no registro ese trámite. Decime qué consulta querés hacer.",
-        executor: "info_guides",
-        ok: true,
-      };
     }
 
     if (pendingKind === "odometro") {
