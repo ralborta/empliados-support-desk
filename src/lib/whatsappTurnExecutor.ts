@@ -36,7 +36,6 @@ import {
   looksLikeUnitReportingStatusCue,
   looksLikeSubstantiveCustomerMessage,
   threadHasRecentUnitProblemListenPrompt,
-  looksLikeMaintenanceConfirmationRejection,
   looksLikeOperationalMaintenanceIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
@@ -44,6 +43,11 @@ import {
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
+import {
+  detectPendingConfirmKind,
+  looksLikePendingConfirmPushback,
+  reasonPendingConfirmationRejection,
+} from "@/lib/pendingConfirmStance";
 import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import { shouldRouteTurnToFleetListExecutorHybrid } from "@/lib/fleetListIntentAI";
@@ -65,6 +69,7 @@ import {
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
   hasPendingMantenimientoConfirmation,
+  extractPendingMaintenanceDetalle,
   isOdometerFlowSuperseded,
   looksLikeBareMeterValue,
   looksLikeOdometerInfoRequest,
@@ -270,6 +275,105 @@ export async function runTurnExecutorPhase(params: {
     return { message: reset.message, executor: "unidades", ok: true };
   }
 
+  const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
+  const pendingAction = await getPendingAction(prisma, rawPhone);
+  const thread = threadCtx.classificationThread;
+
+  // CONFIRMO pendiente + "No"/rechazo: la IA razona (¿cancelar? ¿era consulta? ¿corregir unidad?).
+  // Nunca asumir "no era esa patente" sin razonar el contexto del resumen.
+  const pendingKind = detectPendingConfirmKind(thread);
+  if (pendingKind && looksLikePendingConfirmPushback(selectionText, pendingKind)) {
+    const stance = await reasonPendingConfirmationRejection({
+      selectionText,
+      threadText: thread,
+      kind: pendingKind,
+    });
+
+    if (stance.action === "unclear") {
+      return {
+        message:
+          stance.clarify ||
+          "No te seguí del todo. ¿Querés cancelar este registro, corregir la unidad, o era otra consulta?",
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+
+    if (stance.action === "correct_unit") {
+      if (pendingKind === "odometro") {
+        const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        if (execMessage || !executorSkippedSilently(execResult)) {
+          return { message: execMessage, executor: "odometro", ok: execOk };
+        }
+      }
+      if (pendingKind === "certificados") {
+        const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        if (execMessage || !executorSkippedSilently(execResult)) {
+          return { message: execMessage, executor: "certificados", ok: execOk };
+        }
+      }
+      return {
+        message:
+          stance.clarify ||
+          "Entendido. ¿Cuál es la patente o unidad correcta? Pasame la matrícula o la marca/nombre.",
+        executor: pendingKind === "mantenimiento" ? "mantenimiento" : "unidades",
+        ok: true,
+      };
+    }
+
+    // cancel_tramite | cancel_and_resume_query
+    await clearPendingAction(prisma, rawPhone);
+
+    if (stance.action === "cancel_and_resume_query") {
+      const query =
+        stance.query?.trim() ||
+        (pendingKind === "mantenimiento"
+          ? extractPendingMaintenanceDetalle(thread)
+          : null) ||
+        selectionText;
+      const execResult = await invokeExecutor("unidades", rawPhone, query, apiKey);
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (execMessage) {
+        return {
+          message: `Listo, no registro ese trámite.\n\n${execMessage}`,
+          executor: "unidades",
+          ok: execOk,
+        };
+      }
+    }
+
+    if (pendingKind === "odometro") {
+      const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (execMessage || !executorSkippedSilently(execResult)) {
+        return { message: execMessage, executor: "odometro", ok: execOk };
+      }
+    }
+    if (pendingKind === "certificados") {
+      const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (execMessage || !executorSkippedSilently(execResult)) {
+        return { message: execMessage, executor: "certificados", ok: execOk };
+      }
+    }
+
+    return {
+      message:
+        pendingKind === "mantenimiento"
+          ? "Entendido, no registro ese mantenimiento. ¿En qué más te puedo ayudar? Podés pedirme odómetro, horómetro, certificado o consultar el estado de una unidad."
+          : "Entendido, cancelé ese paso. ¿En qué más te ayudo?",
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
   if (looksLikeUnitRejection(selectionText) || looksLikeBareNegativeResponse(selectionText)) {
     const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
@@ -278,9 +382,6 @@ export async function runTurnExecutorPhase(params: {
       return { message: execMessage, executor: "unidades", ok: execOk };
     }
   }
-
-  const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
-  const pendingAction = await getPendingAction(prisma, rawPhone);
 
   // Pedido de operador / mesa de entrada-ayuda → Odoo ANTES que utterance IA
   // (bug real 2026-08-06: "comunicame a mesa de entrada" → pedía patente).
@@ -312,16 +413,6 @@ export async function runTurnExecutorPhase(params: {
     if (execMessage || !executorSkippedSilently(execResult)) {
       return { message: execMessage, executor: "odometro", ok: execOk };
     }
-  }
-
-  if (
-    hasPendingMantenimientoConfirmation(threadCtx.classificationThread) &&
-    looksLikeMaintenanceConfirmationRejection(selectionText)
-  ) {
-    await clearPendingAction(prisma, rawPhone);
-    const message =
-      "Entendido, no registro ese mantenimiento. ¿En qué más te puedo ayudar? Podés pedirme odómetro, horómetro, certificado o consultar el estado de una unidad.";
-    return { message, executor: "info_guides", ok: true };
   }
 
   // Confirmación de trámite: el backend registra con los datos guardados — no dejar que

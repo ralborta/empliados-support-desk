@@ -2064,6 +2064,19 @@ export function hasPendingMantenimientoConfirmation(threadText: string): boolean
 }
 
 /**
+ * Detalle del resumen "Voy a registrar:" de mantenimiento (último CONFIRMO pendiente).
+ * Sirve para reencaminar si el cliente dijo "No" y en realidad pedía una consulta.
+ */
+export function extractPendingMaintenanceDetalle(threadText: string): string | null {
+  if (!hasPendingMantenimientoConfirmation(threadText)) return null;
+  const tail = threadText.slice(-4000);
+  const matches = [...tail.matchAll(/Detalle:\s*(.+)/gi)];
+  const last = matches.at(-1)?.[1]?.trim();
+  if (!last) return null;
+  return last.split("\n")[0]?.trim() || null;
+}
+
+/**
  * El cliente cambió de tema (GPS, certificado, saludo, etc.) tras un trámite de mantenimiento.
  * Similar a isOdometerFlowSuperseded: el hilo conserva contexto pero el trámite queda abandonado.
  */

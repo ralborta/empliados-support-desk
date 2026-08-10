@@ -10,7 +10,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, extractPlatePrefixFromMessage, extractPlateSuffixFromMessage, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, extractPlatePrefixFromMessage, extractPlateSuffixFromMessage, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -25,6 +25,7 @@ import {
   looksLikeRouteHistoryOrMovementIssue,
   looksLikeUnitConsultFollowUp,
   looksLikeVagueUnitProblemReport,
+  looksLikeMaintenanceConfirmationRejection,
   resolveConversationalUnitTurn,
   threadHasRecentGpsStatusSummary,
   threadHasRecentNoEquipmentExplanation,
@@ -67,6 +68,7 @@ import {
   resolveUnitQuery,
 } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback, extractActiveUnitNameCode, type ActiveUnitRecord } from "@/lib/activeUnit";
+import { clearPendingAction } from "@/lib/pendingAction";
 import {
   clearSessionNotebook,
   getSessionNotebook,
@@ -1038,6 +1040,31 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(
       { ok: true, summaryText: message, action: "none" as const, unidadesCount: 0 },
+      { status: BB_STATUS },
+    );
+  }
+  // Bug 2026-08-10: "No" con CONFIRMO de mantenimiento pendiente no es rechazo de unidad.
+  // El executor ya lo prioriza; esta red de seguridad evita "no era esa" si llega acá.
+  if (
+    hasPendingMantenimientoConfirmation(threadText) &&
+    looksLikeMaintenanceConfirmationRejection(rawText)
+  ) {
+    await clearPendingAction(prisma, rawPhone).catch(() => {});
+    const message =
+      "Entendido, no registro ese mantenimiento. Si querías consultar el estado de una unidad, decime la patente o el nombre (ej. Nissan) y te lo miro.";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_unidades_maint_confirm_rejection_guard",
+      rawText,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        summaryText: message,
+        action: "none" as const,
+        unidadesCount: 0,
+        cancelled_s: "true",
+        topicChange_s: "true",
+      },
       { status: BB_STATUS },
     );
   }

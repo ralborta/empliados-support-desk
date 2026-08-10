@@ -963,11 +963,16 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
   if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|dejo de reportar|offline|sin señal|sin senal)\b/.test(t)) {
     return true;
   }
-  // "Quiero el estado" / "dame el estado" / "el estado" — pedido explícito de status
-  // (bug real 2026-08-06: tras NKL961 el bot pedía de nuevo la matrícula).
+  // "Quiero el estado" / "dame el estado" / "quiero saber el estado" — pedido explícito
+  // (bug real 2026-08-06: tras NKL961 el bot pedía de nuevo la matrícula;
+  // bug 2026-08-10: "Quiero saber el estado de la Nissan" no matcheaba por el "saber").
   if (
-    /^(quiero|necesito|dame|pasame|decime|ver|consultar|mostrar)?\s*(el\s+)?estado\b/.test(t) ||
-    /\b(quiero|necesito|dame|pasame|decime)\s+(el\s+)?estado\b/.test(t)
+    /^(quiero|necesito|dame|pasame|decime|ver|consultar|mostrar)?\s*(saber\s+|conocer\s+|ver\s+|consultar\s+)?(el\s+)?estado\b/.test(
+      t,
+    ) ||
+    /\b(quiero|necesito|dame|pasame|decime)\b.{0,24}\b(el\s+)?estado\b/.test(t) ||
+    /\ben\s+que\s+estado\b/.test(t) ||
+    /\bestado\s+(de|del|de\s+la|de\s+el)\b/.test(t)
   ) {
     return true;
   }
