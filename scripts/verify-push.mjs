@@ -14,6 +14,7 @@ const PUSH_SUITES = [
   "verify-unit-name-vs-plate.mjs",
   "verify-unit-name-m600170.mjs",
   "verify-unit-name-without-m-prefix.mjs",
+  "verify-unit-vs-plate-clarification.mjs",
   "verify-unit-rejection-loop.mjs",
   "verify-another-unit-consult-pivot.mjs",
   "verify-shared-plate-disambiguation.mjs",

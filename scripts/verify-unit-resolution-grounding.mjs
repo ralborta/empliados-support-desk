@@ -184,12 +184,10 @@ assert(
 
 console.log("— Código de unidad tipo \"300-092\"/\"M300-093\" que NO está en la flota —");
 
-// Bug real, producción 2026-07-23: "300-092" y "M300-093" (formato nombre de unidad,
-// como el propio bot sugiere de ejemplo: "M300-111") SÍ generan términos de búsqueda
-// reales (tokenizeSearchTerms → ["300","092"] / ["m300","093"]), a diferencia de la
-// queja genérica de arriba. Pero como ninguna unidad de la flota coincidía, se
-// respondía con el MISMO "¿Cuál unidad?" genérico que si el cliente no hubiese
-// escrito nada — confuso, porque el cliente sí dio un dato concreto, dos veces.
+// Bug real, producción 2026-07-23 + ajuste 2026-08-10: "300-092"/"M300-093" son
+// códigos ambiguos (unidad vs patente). Si no hay match en flota, NO decir
+// "patente X no está" ni un "¿Cuál unidad?" genérico: preguntar si es nombre
+// de unidad o patente/matrícula, reconociendo el dato que escribió el cliente.
 const codeNotInFleet = await resolveUnitQuery({
   rawText: "300-092",
   threadText: "",
@@ -203,9 +201,10 @@ assert(
   (codeNotInFleet.clarificationQuestion ?? "").toLowerCase().includes("300-092"),
   "código que no está en la flota → el mensaje SÍ reconoce lo que se buscó (no dice '¿Cuál unidad?' genérico)",
 );
+const codeAsk = (codeNotInFleet.clarificationQuestion ?? "").toLowerCase();
 assert(
-  (codeNotInFleet.clarificationQuestion ?? "").toLowerCase().includes("no encontré"),
-  "código que no está en la flota → dice explícitamente que no lo encontró (a diferencia de la queja sin datos)",
+  codeAsk.includes("unidad") && (codeAsk.includes("patente") || codeAsk.includes("matricula")),
+  "código que no está en la flota → pregunta si es unidad o patente (no asume matrícula)",
 );
 
 console.log("— Marca real + relleno conversacional no listado en STOPWORDS —");
