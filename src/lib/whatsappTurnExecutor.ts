@@ -39,6 +39,7 @@ import {
   looksLikeOperationalMaintenanceIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
+  looksLikePendingConfirmDeferForOtherQuery,
   resetCustomerCompanyMenu,
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
@@ -345,6 +346,19 @@ export async function runTurnExecutorPhase(params: {
           ok: execOk,
         };
       }
+    }
+
+    // Desestima / quiere otra consulta sin detalle: no reinyectar al executor del trámite.
+    if (
+      stance.action === "cancel_tramite" &&
+      looksLikePendingConfirmDeferForOtherQuery(selectionText)
+    ) {
+      return {
+        message:
+          "Listo, no registro ese trámite. Decime qué consulta querés hacer.",
+        executor: "info_guides",
+        ok: true,
+      };
     }
 
     if (pendingKind === "odometro") {

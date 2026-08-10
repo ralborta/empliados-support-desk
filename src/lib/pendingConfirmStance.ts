@@ -20,6 +20,7 @@ import {
   looksLikeLiveUnitConsultIntent,
   looksLikeMaintenanceConfirmationRejection,
   looksLikeOdometerConfirmationRejection,
+  looksLikePendingConfirmDeferForOtherQuery,
 } from "@/lib/waraApi";
 
 const TIMEOUT_MS = Math.min(OPENAI_DEFAULT_TIMEOUT_MS, 7_000);
@@ -56,6 +57,8 @@ export function detectPendingConfirmKind(threadText: string): PendingConfirmKind
 
 /** ¿El mensaje parece rechazo / negación / corrección ante un CONFIRMO pendiente? */
 export function looksLikePendingConfirmPushback(text: string, kind: PendingConfirmKind): boolean {
+  // Abrir puerta a la IA: desestima / otra consulta / no registres, etc.
+  if (looksLikePendingConfirmDeferForOtherQuery(text)) return true;
   if (kind === "mantenimiento" && looksLikeMaintenanceConfirmationRejection(text)) return true;
   if (kind === "odometro" && looksLikeOdometerConfirmationRejection(text)) return true;
   if (kind === "certificados" && looksLikeMaintenanceConfirmationRejection(text)) return true;
@@ -83,6 +86,31 @@ function heuristicStance(
         fuente: "heuristica",
       };
     }
+  }
+  // Quiere otra consulta / desestima el registro → cancelar y dejar espacio a la consulta.
+  if (looksLikePendingConfirmDeferForOtherQuery(selectionText)) {
+    const maybeQuery =
+      looksLikeGpsOrUnitStatusQuestion(selectionText) || looksLikeLiveUnitConsultIntent(selectionText)
+        ? selectionText.trim()
+        : null;
+    if (maybeQuery) {
+      return {
+        action: "cancel_and_resume_query",
+        query: maybeQuery,
+        confidence: 0.75,
+        clarify: null,
+        reason: "desestima CONFIRMO y trae consulta concreta",
+        fuente: "heuristica",
+      };
+    }
+    return {
+      action: "cancel_tramite",
+      query: null,
+      confidence: 0.8,
+      clarify: null,
+      reason: "desestima CONFIRMO para otra consulta",
+      fuente: "heuristica",
+    };
   }
   // "No" / "no es esa" corto → cancelar trámite (no insistir con patente).
   if (looksLikeBareNegativeResponse(selectionText) || /^(no|nop|nope)\b/i.test(selectionText.trim())) {
@@ -173,13 +201,14 @@ Trámite pendiente: ${kind}
 Detalle del resumen (si hay): ${detalle || "(sin detalle)"}
 
 Acciones posibles (elegí UNA):
-- cancel_and_resume_query — El resumen de CONFIRMO NO correspondía: el cliente quería una CONSULTA (estado/GPS/reporte de unidad), no registrar un trámite. Cancelá el registro y devolvé en "query" el texto de esa consulta (el detalle del resumen o el mensaje si alcanza).
-- cancel_tramite — El cliente rechaza / no quiere ese registro. Cancelá y listo (query=null).
+- cancel_and_resume_query — Cancelá el CONFIRMO y ejecutá una CONSULTA concreta (estado/GPS/reporte/ubicación de una unidad). Poné en "query" el texto de esa consulta (del mensaje nuevo o del detalle del resumen si aplica).
+- cancel_tramite — El cliente rechaza / desestima / no quiere registrar ahora, o quiere hacer OTRA consulta/gestión pero todavía NO dijo cuál. Cancelá el registro (query=null).
 - correct_unit — El cliente dice que la UNIDAD/patente del resumen está mal y quiere corregirla (no cancela el trámite entero).
 - unclear — No se entiende; pedí aclaración breve en "clarify".
 
 REGLAS DURAS:
 - NUNCA elijas confirmar/registrar el trámite.
+- "desestima", "olvidalo", "quiero hacer otra consulta", "después confirmo" → cancel_tramite (salvo que el mismo mensaje ya traiga la consulta concreta → cancel_and_resume_query).
 - Si el detalle era claramente "estado/reporte/GPS/ubicación de X" y el cliente dice No/nop/cancelá → preferí cancel_and_resume_query.
 - "No" solo, sin más contexto de otra patente → casi nunca correct_unit; preferí cancel_tramite o cancel_and_resume_query.
 - Español rioplatense en clarify. Sin emojis.

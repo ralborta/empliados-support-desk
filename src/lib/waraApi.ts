@@ -174,11 +174,42 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
   return false;
 }
 
+/**
+ * Con CONFIRMO pendiente: el cliente quiere pausar/desestimar el registro
+ * para hacer otra consulta/gestión (con o sin detalle aún).
+ * Bug 2026-08-10: "Quiero hacer otra consulta, desestima el cambio de odometro"
+ * no entraba a la IA de stance y el CONFIRMO quedaba colgado.
+ */
+export function looksLikePendingConfirmDeferForOtherQuery(
+  text: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  if (looksLikeBriefConfirmation(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/\b(desestim\w*|descart\w*|anul\w*|olvidate|olvidalo)\b/.test(t)) return true;
+  if (/\b(otra|otro)\s+consultas?\b/.test(t)) return true;
+  if (
+    /\b(quiero|necesito|prefiero|hagamos|vamos\s+a)\b.{0,48}\b(otra|otro)\s+(consulta|gestion|tramite)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/\bno\s+(lo\s+)?registres?\b/.test(t)) return true;
+  if (/\b(despues|mas\s+tarde)\s+(confirmo|lo\s+confirmo)\b/.test(t)) return true;
+  return false;
+}
+
 /** Rechazo o cancelación durante confirmación pendiente de odómetro/horómetro. */
 export function looksLikeOdometerConfirmationRejection(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (looksLikeBriefConfirmation(raw)) return false;
+  if (looksLikePendingConfirmDeferForOtherQuery(raw)) return true;
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
