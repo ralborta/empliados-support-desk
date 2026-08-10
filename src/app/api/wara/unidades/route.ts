@@ -57,15 +57,23 @@ import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedS
 import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
 import {
   buildFleetUnitNotFoundMessage,
+  buildUnitNameOrPlateClarificationReply,
   customerOnlyThreadText,
+  extractAmbiguousUnitCodeToken,
   extractExplicitUnitSearchLabel,
+  extractTokenFromUnitNameOrPlateClarification,
   filterUnitsByResolvedPlate,
   filterUnitsBySearchTerms,
   filterUnitsByUnitName,
+  looksLikeAmbiguousUnitCodeToken,
+  looksLikeChosePlateReply,
+  looksLikeChoseUnitNameReply,
   looksLikeFleetUnitSearchInput,
   looksLikeFleetListContinuation,
   looksLikeUnitListRequest,
+  looksLikeUnitNameInMessage,
   resolveUnitQuery,
+  threadAskedUnitNameOrPlateClarification,
 } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback, extractActiveUnitNameCode, type ActiveUnitRecord } from "@/lib/activeUnit";
 import { clearPendingAction } from "@/lib/pendingAction";
@@ -258,8 +266,19 @@ function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
     new Set(
       raw
         .map((value) => formatPlateWithSpaces(value) ?? normalizePlate(value) ?? "")
-        .filter((value) => value.length > 0)
-    )
+        .filter((value) => {
+          if (!value) return false;
+          // No pedir a Wara patentes inventadas tipo 600006 (nombre de unidad).
+          if (
+            looksLikeUnitNameInMessage(value) ||
+            looksLikeAmbiguousUnitCodeToken(value) ||
+            !isPlausibleVehiclePlate(value)
+          ) {
+            return false;
+          }
+          return true;
+        }),
+    ),
   );
 }
 
@@ -907,14 +926,47 @@ export async function POST(req: NextRequest) {
 
   let explicitPlate =
     parsed.data.patente ?? parsed.data.plate ?? detectLoosePlate(rawText) ?? "";
+  // Nunca tratar códigos internos (600-006 / 600006) como patente, aunque BBC mande plate=.
+  if (
+    explicitPlate &&
+    (!isPlausibleVehiclePlate(explicitPlate) ||
+      looksLikeUnitNameInMessage(rawText) ||
+      looksLikeAmbiguousUnitCodeToken(rawText) ||
+      looksLikeAmbiguousUnitCodeToken(explicitPlate))
+  ) {
+    explicitPlate = "";
+  }
   if (
     !explicitPlate &&
     looksLikeBriefConfirmation(rawText) &&
     threadHasPendingUnitStatusCheckOffer(threadText)
   ) {
     const offeredPlate = extractPlateFromUnitStatusCheckOffer(threadText);
-    if (offeredPlate) {
+    if (offeredPlate && isPlausibleVehiclePlate(offeredPlate)) {
       explicitPlate = formatPlateWithSpaces(offeredPlate) ?? offeredPlate;
+    }
+  }
+
+  // Tras "¿unidad o patente?": el cliente elige; reescribimos el texto con el token previo.
+  let effectiveRawText = rawText;
+  if (threadAskedUnitNameOrPlateClarification(threadText)) {
+    const priorToken = extractTokenFromUnitNameOrPlateClarification(threadText);
+    if (priorToken && looksLikeChoseUnitNameReply(rawText)) {
+      effectiveRawText = `La unidad es ${priorToken}`;
+    } else if (priorToken && looksLikeChosePlateReply(rawText)) {
+      const message =
+        `Para buscar por *patente* necesito la matrícula completa (ej. AH 755 SM). ` +
+        `«${priorToken}» parece un *nombre de unidad*, no una patente. ` +
+        `Si era el nombre, respondé *unidad*; si no, pasame la matrícula.`;
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_unidades_plate_vs_unit_hint",
+        rawText,
+        priorToken,
+      });
+      return NextResponse.json(
+        { ok: true, summaryText: message, action: "none" as const, unidadesCount: 0 },
+        { status: BB_STATUS },
+      );
     }
   }
 
@@ -1207,22 +1259,30 @@ export async function POST(req: NextRequest) {
   }
 
   let forceListFleet =
-    looksLikeUnitListRequest(rawText) ||
-    looksLikeFleetListContinuation(rawText, threadText);
-  let unitQuery = extractUnitQueryFromText(rawText);
+    looksLikeUnitListRequest(effectiveRawText) ||
+    looksLikeFleetListContinuation(effectiveRawText, threadText);
+  let unitQuery = extractUnitQueryFromText(effectiveRawText);
+
+  // Si BBC mandó plate=600006 (código interno), igual hay que resolver por nombre de unidad.
+  const bbcPlateRaw = (parsed.data.patente ?? parsed.data.plate ?? "").trim();
+  const bbcPlateIsTrusted =
+    !!bbcPlateRaw &&
+    isPlausibleVehiclePlate(bbcPlateRaw) &&
+    !looksLikeUnitNameInMessage(rawText) &&
+    !looksLikeAmbiguousUnitCodeToken(bbcPlateRaw);
 
   if (
     !forceListFleet &&
     result.ok &&
     result.unidades.length > 0 &&
     requestedPlates.length === 0 &&
-    !parsed.data.patente?.trim() &&
-    !parsed.data.plate?.trim()
+    !bbcPlateIsTrusted
   ) {
-    const liveUnitConsult = looksLikeLiveUnitConsultIntent(rawText);
-    const conversationalConcern = looksLikeConversationalUnitConcern(rawText);
+    const liveUnitConsult = looksLikeLiveUnitConsultIntent(effectiveRawText);
+    const conversationalConcern = looksLikeConversationalUnitConcern(effectiveRawText);
     const gpsLoopFollowUp =
-      threadHasRecentGpsStatusSummary(threadText) && looksLikeSubstantiveCustomerMessage(rawText);
+      threadHasRecentGpsStatusSummary(threadText) &&
+      looksLikeSubstantiveCustomerMessage(effectiveRawText);
 
     // "Unidad activa" ANTES de dejar que la IA revise todo el historial del día: si el
     // mensaje pide claramente el estado/GPS de "una unidad" pero no dice cuál
@@ -1240,23 +1300,23 @@ export async function POST(req: NextRequest) {
     if (
       !parsed.data.platePrefix?.trim() &&
       (liveUnitConsult || conversationalConcern || gpsLoopFollowUp) &&
-      shouldUseActiveUnitFallback(rawText) &&
+      shouldUseActiveUnitFallback(effectiveRawText) &&
       activeUnitRecord?.plate &&
       filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
     ) {
       explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
     } else {
-      const resolutionThread = `${scopedThread}\n${rawText}`.trim();
+      const resolutionThread = `${scopedThread}\n${effectiveRawText}`.trim();
       const recentLiveConsult = threadHasRecentLiveUnitConsultIntent(resolutionThread);
       const preferAiResolution =
-        looksLikeFleetUnitSearchInput(rawText) ||
+        looksLikeFleetUnitSearchInput(effectiveRawText) ||
         liveUnitConsult ||
         recentLiveConsult ||
         conversationalConcern;
 
       const aiHistorial = threadTextSinceCompanySelection(await customerOnlyThreadText(prisma, rawPhone));
       const resolved = await resolveUnitQuery({
-        rawText,
+        rawText: effectiveRawText,
         threadText: preferAiResolution ? resolutionThread : scopedThread,
         units: result.unidades,
         preferAi: preferAiResolution,
@@ -1271,7 +1331,7 @@ export async function POST(req: NextRequest) {
       // consultarEstadoUnidades) sin tener que reproducir el caso a ciegas.
       if (resolved.intent === "need_clarification") {
         console.log(
-          `[WaraUnidades] Sin match para "${rawText}" — unidades recibidas de Wara: ${result.unidades.length}, source: ${resolved.source}`,
+          `[WaraUnidades] Sin match para "${effectiveRawText}" — unidades recibidas de Wara: ${result.unidades.length}, source: ${resolved.source}`,
         );
       }
 
@@ -1280,7 +1340,7 @@ export async function POST(req: NextRequest) {
       } else if (
         resolved.intent === "need_clarification" &&
         resolved.candidatePlates.length === 0 &&
-        shouldUseActiveUnitFallback(rawText) &&
+        shouldUseActiveUnitFallback(effectiveRawText) &&
         activeUnitRecord?.plate &&
         filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
       ) {
@@ -1291,16 +1351,21 @@ export async function POST(req: NextRequest) {
         explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
       } else if (resolved.intent === "need_clarification") {
         const companyName = session.companyName || result.cliente || "tu empresa";
+        const ambiguousToken =
+          extractAmbiguousUnitCodeToken(effectiveRawText) ||
+          extractExplicitUnitSearchLabel(effectiveRawText);
         const clarification =
           resolved.clarificationQuestion ??
-          buildFleetUnitNotFoundMessage({
-            companyName,
-            rawText,
-            searchedText: extractExplicitUnitSearchLabel(rawText) ?? undefined,
-          });
+          (ambiguousToken
+            ? buildUnitNameOrPlateClarificationReply(ambiguousToken)
+            : buildFleetUnitNotFoundMessage({
+                companyName,
+                rawText: effectiveRawText,
+                searchedText: extractExplicitUnitSearchLabel(effectiveRawText) ?? undefined,
+              }));
         await appendOutboundBotMessage(rawPhone, clarification, {
           source: "wara_unidades_clarification",
-          rawText,
+          rawText: effectiveRawText,
           resolutionSource: resolved.source,
         });
         return NextResponse.json(
@@ -1311,14 +1376,20 @@ export async function POST(req: NextRequest) {
         const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
         if (plateMatches.length === 0) {
           const companyName = session.companyName || result.cliente || "tu empresa";
-          const notFound = buildFleetUnitNotFoundMessage({
-            companyName,
-            plate: resolved.plate,
-            rawText,
-          });
+          const ambiguousToken = extractAmbiguousUnitCodeToken(effectiveRawText);
+          const notFound =
+            ambiguousToken || looksLikeAmbiguousUnitCodeToken(resolved.plate)
+              ? buildUnitNameOrPlateClarificationReply(
+                  ambiguousToken || String(resolved.plate),
+                )
+              : buildFleetUnitNotFoundMessage({
+                  companyName,
+                  plate: resolved.plate,
+                  rawText: effectiveRawText,
+                });
           await appendOutboundBotMessage(rawPhone, notFound, {
             source: "wara_unidades_not_in_fleet",
-            rawText,
+            rawText: effectiveRawText,
             plate: resolved.plate,
             resolutionSource: resolved.source,
           });
@@ -1627,12 +1698,16 @@ export async function POST(req: NextRequest) {
     summaryText = appendLocationIfRequested(summaryText, unit, rawText);
   }
 
-  if (!summaryText.trim() && looksLikeFleetUnitSearchInput(rawText)) {
-    summaryText = buildFleetUnitNotFoundMessage({
-      companyName: session.companyName || result.cliente || "tu empresa",
-      rawText,
-      plate: wantedPlate || undefined,
-    });
+  if (!summaryText.trim() && looksLikeFleetUnitSearchInput(effectiveRawText)) {
+    const ambiguousToken = extractAmbiguousUnitCodeToken(effectiveRawText);
+    summaryText = ambiguousToken
+      ? buildUnitNameOrPlateClarificationReply(ambiguousToken)
+      : buildFleetUnitNotFoundMessage({
+          companyName: session.companyName || result.cliente || "tu empresa",
+          rawText: effectiveRawText,
+          plate:
+            wantedPlate && isPlausibleVehiclePlate(wantedPlate) ? wantedPlate : undefined,
+        });
   }
 
   const composePayload = agentComposePayload(dialogueState);

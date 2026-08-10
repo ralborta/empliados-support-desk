@@ -167,6 +167,110 @@ export function looksLikeUnitNameInMessage(rawText: string | undefined | null): 
   return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm);
 }
 
+/**
+ * Token ambiguo tipo 600-006 / 600006: parece código de unidad, no matrícula Mercosur.
+ * Bug real 2026-08-10: el bot dijo "La patente 600006 no está en la flota" en vez de
+ * buscar M600-006 o preguntar si es unidad o patente.
+ */
+export function looksLikeAmbiguousUnitCodeToken(rawText: string | undefined | null): boolean {
+  if (looksLikeUnitNameInMessage(rawText)) return true;
+  const compact = String(rawText ?? "")
+    .trim()
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/[\s\-_.]+/g, "")
+    .toUpperCase();
+  if (!compact) return false;
+  if (isPlausibleVehiclePlate(compact)) return false;
+  // Solo dígitos (600006) o M+dígitos (M600006) — forma típica de nombre interno sin guión.
+  return /^(M?\d{5,7})$/.test(compact);
+}
+
+export function extractAmbiguousUnitCodeToken(rawText: string | undefined | null): string | null {
+  const text = String(rawText ?? "")
+    .trim()
+    .replace(/[\u2010-\u2015\u2212]/g, "-");
+  if (!text) return null;
+  const labeled = extractExplicitUnitNameFromText(text);
+  if (labeled) return labeled;
+  const bare = text.match(/^(M?\d{3}-\d{2,3})$/i)?.[1];
+  if (bare) return bare;
+  const digits = text.replace(/[\s\-_.]+/g, "");
+  if (/^(M?\d{5,7})$/i.test(digits) && !isPlausibleVehiclePlate(digits)) {
+    // Reconstruir guión canónico si parece 3+2/3: 600006 → 600-006
+    const m = digits.match(/^M?(\d{3})(\d{2,3})$/i);
+    if (m) return `${m[1]}-${m[2]}`;
+    return digits;
+  }
+  return null;
+}
+
+export function buildUnitNameOrPlateClarificationReply(token: string): string {
+  const display = token.trim() || "ese dato";
+  return (
+    `Recibí «${display}». ¿Eso es el *nombre de la unidad* (ej. M600-006) ` +
+    `o la *patente/matrícula* (ej. AH 755 SM)?\n` +
+    `Respondé *unidad* o *patente*.`
+  );
+}
+
+export function threadAskedUnitNameOrPlateClarification(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2200)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /nombre de la unidad/.test(tail) &&
+    /patente|matricula/.test(tail) &&
+    (/responde?\s*\*?unidad\*?/.test(tail) || /unidad\*?\s*o\s*\*?patente/.test(tail))
+  );
+}
+
+/** Último «token» entre comillas del pedido unidad-vs-patente. */
+export function extractTokenFromUnitNameOrPlateClarification(threadText: string): string | null {
+  const tail = threadText.slice(-2200);
+  const matches = [...tail.matchAll(/[«"]([^»"]{3,16})[»"]/g)];
+  const last = matches.at(-1)?.[1]?.trim();
+  if (last && looksLikeAmbiguousUnitCodeToken(last)) return last;
+  // Fallback: último mensaje del cliente con código
+  const lines = tail.split("\n").map((l) => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (/^(atilio|bot)\b/i.test(line)) continue;
+    const token = extractAmbiguousUnitCodeToken(line.replace(/^(cliente|vos|yo)\s*:\s*/i, ""));
+    if (token) return token;
+  }
+  return null;
+}
+
+export function looksLikeChoseUnitNameReply(rawText: string | undefined | null): boolean {
+  const t = String(rawText ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!t || t.length > 40) return false;
+  return (
+    /^(unidad|nombre|el nombre|la unidad|es (la )?unidad|es (el )?nombre|nombre de (la )?unidad)[\s!.?]*$/.test(
+      t,
+    ) || /\bes\s+(la\s+)?unidad\b/.test(t)
+  );
+}
+
+export function looksLikeChosePlateReply(rawText: string | undefined | null): boolean {
+  const t = String(rawText ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!t || t.length > 40) return false;
+  return (
+    /^(patente|matricula|la patente|la matricula|es (la )?patente|es (la )?matricula)[\s!.?]*$/.test(
+      t,
+    ) || /\bes\s+(la\s+)?(patente|matricula)\b/.test(t)
+  );
+}
+
 /** Entrada que debe resolver contra la flota (patente, prefijo, marca, nombre/etiqueta). */
 export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   const text = String(rawText ?? "").trim();
@@ -1099,7 +1203,8 @@ function resolveByUnitName(
     intent: "need_clarification",
     searchTerms: [],
     candidatePlates: [],
-    clarificationQuestion: buildFleetUnitNotFoundMessage({ rawText, searchedText: unitName }),
+    // Bug 2026-08-10: no decir "patente 600006"; preguntar si es unidad o matrícula.
+    clarificationQuestion: buildUnitNameOrPlateClarificationReply(unitName),
     source: "rules",
   };
 }
