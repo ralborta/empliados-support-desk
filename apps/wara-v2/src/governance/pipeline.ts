@@ -88,7 +88,13 @@ export function transformToCandidate(datasetId: string): {
   const key = createEphemeralDeidKey();
   const deid = msgs.map((m) => deidentifyMessage(key, m));
   // clave efímera no se escribe
-
+  const rawConvs = new Set(msgs.map((m) => m.conversation_id));
+  const deidConvs = new Set(deid.map((m) => m.conversation_id));
+  if (deidConvs.size !== rawConvs.size) {
+    throw new Error(
+      `deid_conversation_id_collision:raw=${rawConvs.size};deid=${deidConvs.size}`,
+    );
+  }
   const findings_post: PrivacyFinding[] = [];
   for (let i = 0; i < deid.length; i++) {
     findings_post.push(

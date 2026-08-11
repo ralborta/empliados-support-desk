@@ -19,8 +19,13 @@ const PATTERNS: Array<{
   re: RegExp;
 }> = [
   { code: "email", severity: "critical", re: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i },
-  { code: "phone", severity: "critical", re: /(?:\+?54)?[\s-]?(?:9)?[\s-]?\d{2,4}[\s-]?\d{6,8}\b/ },
-  { code: "dni", severity: "critical", re: /\b\d{7,8}\b/ },
+  // Exige señal telefónica (+/00/espacios) — evita falsos positivos en hex de seudónimos
+  {
+    code: "phone",
+    severity: "critical",
+    re: /(?:\+|00)(?:54)?[\s-]?(?:9)?[\s-]?\d{2,4}[\s-]?\d{6,8}\b|\b0\d{2,4}[\s-]?\d{6,8}\b/,
+  },
+  { code: "dni", severity: "critical", re: /\b(?:DNI|documento)[\s:.-]*\d{7,8}\b/i },
   { code: "plate_ar", severity: "critical", re: /\b[A-Z]{2}\d{3}[A-Z]{2}\b|\b[A-Z]{3}\d{3}\b/i },
   { code: "vin", severity: "critical", re: /\b[A-HJ-NPR-Z0-9]{17}\b/i },
   { code: "url", severity: "high", re: /https?:\/\/[^\s]+/i },
@@ -31,6 +36,17 @@ const PATTERNS: Array<{
   { code: "password", severity: "critical", re: /password\s*[:=]\s*\S+/i },
   { code: "internal_id", severity: "medium", re: /\b(?:op_|conv_|cust_|turn_)[a-f0-9-]{8,}\b/i },
 ];
+
+/** Campos estructurales / ya seudonimizados: no se escanean como PII. */
+const SKIP_SCAN_KEYS = new Set([
+  "conversation_id",
+  "tenant_id",
+  "message_role",
+  "turn_index",
+  "synthetic",
+  "deid_version",
+  "golden_expected",
+]);
 
 function hashValue(v: string): string {
   return createHash("sha256").update(v, "utf8").digest("hex").slice(0, 16);
@@ -72,6 +88,7 @@ export function scanRecord(
 ): PrivacyFinding[] {
   const findings: PrivacyFinding[] = [];
   for (const [k, v] of Object.entries(record)) {
+    if (SKIP_SCAN_KEYS.has(k)) continue;
     const loc = `${basePath}.${k}`;
     if (typeof v === "string") findings.push(...scanText(v, loc));
     else if (v && typeof v === "object" && !Array.isArray(v)) {

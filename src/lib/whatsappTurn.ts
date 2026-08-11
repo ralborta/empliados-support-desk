@@ -24,6 +24,7 @@ import {
 } from "@/lib/whatsappTurnExecutor";
 import { clearPendingAction } from "@/lib/pendingAction";
 import { prisma } from "@/lib/db";
+import { maybeEnqueueWaraV2ShadowCopy } from "@/lib/waraV2ShadowCanaryHook";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -105,6 +106,16 @@ export async function handleWhatsAppTurn(params: {
       () => undefined,
     );
   }
+
+  // Fase 10A: copia shadow desacoplada (no-op si flags off / kill / sin API V2)
+  if (selectionText) {
+    maybeEnqueueWaraV2ShadowCopy({
+      rawPhone,
+      text: selectionText,
+      hasAttachment: false,
+    });
+  }
+
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
 
   if (!allowPhoneRequest(rawPhone, 20)) {

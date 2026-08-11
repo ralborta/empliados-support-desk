@@ -21,8 +21,8 @@ import {
 import { assertStage9AOnly, assertStage9BAuthorized } from "./authorize.js";
 
 export const ALLOWED_EXTENSIONS = new Set([".jsonl", ".json"]);
-export const MAX_BYTES = 2 * 1024 * 1024;
-export const MAX_RECORDS = 500;
+export const MAX_BYTES = 20 * 1024 * 1024; // 20 MiB (hasta 300 conversaciones)
+export const MAX_RECORDS = 20_000; // mensajes, no conversaciones
 
 export type ImportManifest = {
   manifest_version: 1;

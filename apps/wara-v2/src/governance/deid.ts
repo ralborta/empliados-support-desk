@@ -20,8 +20,8 @@ function token(
   const h = createHmac("sha256", key.ephemeral)
     .update(`${tenantId}|${kind}|${value}`, "utf8")
     .digest("hex");
-  const n = parseInt(h.slice(0, 8), 16) % 10000;
-  return `${kind}_${String(n).padStart(4, "0")}`;
+  // 16 hex (~64 bit) evita colisiones en datasets de cientos de conversaciones
+  return `${kind}_${h.slice(0, 16)}`;
 }
 
 export function pseudonymPerson(key: DeidKey, tenantId: string, name: string): string {
@@ -36,17 +36,9 @@ export function pseudonymUnit(key: DeidKey, tenantId: string, label: string): st
   return token(key, tenantId, "UNIDAD", label.trim().toLowerCase());
 }
 
-/** Patente sintética válida en formato ficticio (no reversible). */
+/** Patente sintética no reversible — formato que no dispara el escáner plate_ar. */
 export function syntheticPlate(key: DeidKey, tenantId: string, plate: string): string {
-  const h = createHmac("sha256", key.ephemeral)
-    .update(`${tenantId}|plate|${plate}`, "utf8")
-    .digest("hex");
-  const letters = "ABCDEFGHJKLMNPRSTUVWXYZ";
-  const a = letters[parseInt(h.slice(0, 2), 16) % letters.length]!;
-  const b = letters[parseInt(h.slice(2, 4), 16) % letters.length]!;
-  const c = letters[parseInt(h.slice(4, 6), 16) % letters.length]!;
-  const nums = String(parseInt(h.slice(6, 9), 16) % 1000).padStart(3, "0");
-  return `${a}${b}${c}${nums}`;
+  return token(key, tenantId, "PLATE", plate.trim().toUpperCase());
 }
 
 /** Teléfonos reservados ficticios +54911xxxxxxxx */
@@ -81,6 +73,7 @@ export type RawMessage = {
   text: string;
   received_at?: string;
   unit_label?: string;
+  golden_expected?: { intent?: string; must_clarify?: boolean };
 };
 
 export type DeidMessage = {
@@ -91,6 +84,8 @@ export type DeidMessage = {
   text: string;
   received_at?: string;
   unit_label?: string;
+  /** Etiqueta humana autorizada (sin PII); se conserva para eval offline. */
+  golden_expected?: { intent?: string; must_clarify?: boolean };
   synthetic: true;
   deid_version: 1;
 };
@@ -137,6 +132,16 @@ export function deidentifyMessage(
       : undefined,
     unit_label: msg.unit_label
       ? pseudonymUnit(key, msg.tenant_id, msg.unit_label)
+      : undefined,
+    golden_expected: msg.golden_expected
+      ? {
+          ...(msg.golden_expected.intent
+            ? { intent: msg.golden_expected.intent }
+            : {}),
+          ...(msg.golden_expected.must_clarify
+            ? { must_clarify: true }
+            : {}),
+        }
       : undefined,
     synthetic: true,
     deid_version: 1,

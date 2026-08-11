@@ -37,17 +37,27 @@ export function loadEvalOnlyFlags(
 }
 
 export type OfflineEvalCase = {
-  golden_expected?: { intent?: string };
+  golden_expected?: { intent?: string; must_clarify?: boolean };
   llm_proposal?: unknown;
   policy_decision?: { blockReasons: string[] };
   hypothetical_transition?: string;
   simulated_reply?: string;
+  intent_match?: boolean | null;
+  clarify_expected?: boolean;
   effects_created: {
     operations: 0;
     attempts: 0;
     outbox: 0;
     deliveries: 0;
   };
+};
+
+export type OfflineEvalSummary = {
+  cases: number;
+  intent_accuracy: number | null;
+  clarify_cases: number;
+  policy_rejects: number;
+  effects: { operations: 0; attempts: 0; outbox: 0; deliveries: 0 };
 };
 
 /**
@@ -57,7 +67,11 @@ export type OfflineEvalCase = {
 export async function evaluateApprovedOffline(
   datasetId: string,
   messages: DeidMessage[],
-): Promise<{ cases: OfflineEvalCase[]; flags: EvalOnlyFlags }> {
+): Promise<{
+  cases: OfflineEvalCase[];
+  flags: EvalOnlyFlags;
+  summary: OfflineEvalSummary;
+}> {
   const flags = loadEvalOnlyFlags({
     EVALUATION_ONLY: "true",
     DELIVERY_ENABLED: "false",
@@ -75,10 +89,17 @@ export async function evaluateApprovedOffline(
 
   const model = new FakeModelAdapter();
   const cases: OfflineEvalCase[] = [];
+  let intentHits = 0;
+  let intentTotal = 0;
+  let clarifyCases = 0;
+  let policyRejects = 0;
   for (const [, turns] of byConv) {
     // segmento mínimo: último turn de usuario
     const lastUser = [...turns].reverse().find((t) => t.message_role === "user");
     if (!lastUser) continue;
+    const golden = (lastUser as DeidMessage & {
+      golden_expected?: { intent?: string; must_clarify?: boolean };
+    }).golden_expected;
     // No cruzar tenants: un solo tenant_id por conversación ya garantizado
     const decision = await model.decide({
       conversation: {
@@ -127,13 +148,30 @@ export async function evaluateApprovedOffline(
       now: new Date(),
     });
     const parsed = parseOrchestratorDecision(decision);
+    const goal = parsed.ok ? parsed.data.proposedGoal : undefined;
+    let intent_match: boolean | null = null;
+    if (golden?.intent) {
+      intentTotal += 1;
+      intent_match = goal === golden.intent;
+      if (intent_match) intentHits += 1;
+    }
+    if (golden?.must_clarify) {
+      clarifyCases += 1;
+      if (goal !== "clarify" && goal !== "none") {
+        // FakeModel puede no aclarar; se registra, no falla el pipeline
+      }
+    }
+    if (!parsed.ok) policyRejects += 1;
     cases.push({
-      llm_proposal: parsed.ok ? { goal: parsed.data.proposedGoal } : { invalid: true },
-      policy_decision: { blockReasons: [] },
+      golden_expected: golden,
+      llm_proposal: parsed.ok ? { goal } : { invalid: true },
+      policy_decision: { blockReasons: parsed.ok ? [] : ["parse_failed"] },
       hypothetical_transition: "none_evaluation_only",
       simulated_reply: parsed.ok
         ? parsed.data.interpretationSummary.slice(0, 200)
         : undefined,
+      intent_match,
+      clarify_expected: Boolean(golden?.must_clarify),
       effects_created: {
         operations: 0,
         attempts: 0,
@@ -143,5 +181,15 @@ export async function evaluateApprovedOffline(
     });
   }
   void flags;
-  return { cases, flags };
+  return {
+    cases,
+    flags,
+    summary: {
+      cases: cases.length,
+      intent_accuracy: intentTotal ? intentHits / intentTotal : null,
+      clarify_cases: clarifyCases,
+      policy_rejects: policyRejects,
+      effects: { operations: 0, attempts: 0, outbox: 0, deliveries: 0 },
+    },
+  };
 }

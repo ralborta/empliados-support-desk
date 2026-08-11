@@ -29,7 +29,10 @@ import {
   pseudonymPerson,
   syntheticPhone,
 } from "./deid.js";
-import { assertStage9BAuthorized } from "./authorize.js";
+import {
+  assertStage9BAuthorized,
+  revokeHistoricalAuthorization,
+} from "./authorize.js";
 import {
   evaluateApprovedOffline,
   loadEvalOnlyFlags,
@@ -40,11 +43,13 @@ import { GATED_PREPARE_ONLY } from "@wara-v2/orchestrator";
 describe("fase9A governance synthetic", () => {
   before(() => {
     // reset local governance dirs for hermetic tests
+    revokeHistoricalAuthorization();
     rmSync(GOV_DIRS.drop, { recursive: true, force: true });
     ensureGovDirs();
   });
 
   function writeSynth(name: string, messages: unknown[]) {
+    ensureGovDirs();
     const body = {
       synthetic: true,
       messages,
@@ -384,6 +389,8 @@ describe("fase9A governance synthetic", () => {
   });
 
   it("45-48. 9B bloqueada; sin entrega", () => {
+    const authPath = join(GOV_DIRS.reports, "HISTORICAL_AUTH.json");
+    if (existsSync(authPath)) rmSync(authPath);
     assert.throws(() => assertStage9BAuthorized(), /stage_9B_blocked/);
     assert.equal(ALLOW_EXTERNAL_MUTATIONS, false);
   });
