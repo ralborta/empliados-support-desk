@@ -568,3 +568,8 @@ export {
   type LlmProposal,
 } from "./llm-proposal.js";
 
+export {
+  LLM_PROPOSAL_OPENAI_JSON_SCHEMA,
+  normalizeOpenAiProposal,
+} from "./llm-json-schema.js";
+

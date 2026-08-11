@@ -18,12 +18,15 @@ export type AuthorizedFetchInit = {
 };
 
 export type NetworkAudit = {
+  at: string;
   hostname: string;
   path: string;
+  endpoint: string;
   method: string;
   status?: number;
   bytes?: number;
   redirected: false;
+  redirect_rejected?: boolean;
 };
 
 const auditLog: NetworkAudit[] = [];
@@ -86,8 +89,10 @@ export async function authorizedOpenAiFetch(
   }
 
   const audit: NetworkAudit = {
+    at: new Date().toISOString(),
     hostname: parsed.hostname,
     path: parsed.pathname,
+    endpoint: FIXED_OPENAI_ENDPOINT,
     method: "POST",
     redirected: false,
   };
@@ -101,8 +106,10 @@ export async function authorizedOpenAiFetch(
       redirect: "manual",
     });
 
-    // Redirects forbidden
     if (res.status >= 300 && res.status < 400) {
+      audit.redirect_rejected = true;
+      audit.status = res.status;
+      auditLog.push(audit);
       throw new Error(`network_redirect_forbidden:${res.status}`);
     }
 

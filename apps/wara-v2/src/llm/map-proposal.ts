@@ -78,7 +78,7 @@ export function proposalToOrchestratorDecision(
     },
     rawModelMeta: {
       provider: "openai",
-      model_id: "gpt-4o-mini",
+      model_id: "gpt-4o-mini-2024-07-18",
     },
   };
 }

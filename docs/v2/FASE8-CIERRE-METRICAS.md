@@ -1,0 +1,21 @@
+# Cierre cuantitativo Fase 8 (benchmark oficial)
+
+- **Modelo:** `gpt-4o-mini-2024-07-18` (snapshot fijo)
+- **Alias:** `gpt-4o-mini` fuera de benchmarks oficiales (`WARA_V2_LLM_ALLOW_ALIAS=true` solo experimento)
+- **Structured Outputs:** `response_format.type=json_schema`, `strict=true`, validación adicional `LlmProposal`
+- **Fixtures:** 19 · **Repeticiones real:** 2 · **Requests OpenAI:** 38
+- **Intent accuracy:** 1.00
+- **Clarify accuracy:** 0.60
+- **Extraction accuracy:** 0.50
+- **Campos inventados (total):** 0
+- **Schema compliance:** 0.921
+- **Policy reject rate:** 0.526
+- **Security OK rate:** 1.00
+- **Latencia p50/p95:** 1961 / 10241 ms
+- **Tokens avg/total:** 607.4 / 23081
+- **Costo estimado total:** ~USD 0.0052
+- **Estabilidad intent entre repeticiones:** 1.00
+- **Tráfico:** solo `api.openai.com` `/v1/chat/completions` · redirects rechazados: 0 · otros destinos: ninguno
+- **Efectos:** 0 operations / confirmations / attempts / outbox / deliveries
+- **Evidencia local (gitignored):** `apps/wara-v2/.local-evidence/fase8/`
+- **Mecanismo de captura:** `authorizedOpenAiFetch` → `NetworkAudit` in-process (`redirect: manual`)

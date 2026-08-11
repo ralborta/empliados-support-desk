@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { FakeModelAdapter } from "@wara-v2/orchestrator";
-import { applyPhase8TestFlags, loadPhase8LlmActivation } from "./flags.js";
+import { applyPhase8TestFlags, loadPhase8LlmActivation, OFFICIAL_MODEL_SNAPSHOT } from "./flags.js";
 import { OpenAiChatAdapter } from "./openai-adapter.js";
 import { clearNetworkAudit, getNetworkAudit } from "./network.js";
 import { SYNTHETIC_FIXTURES } from "./dataset.js";
@@ -42,6 +42,7 @@ describe("fase8 llm live eval (optional)", () => {
     clearNetworkAudit();
     applyPhase8TestFlags({
       OPENAI_API_KEY: key,
+      WARA_V2_LLM_MODEL: OFFICIAL_MODEL_SNAPSHOT,
       WARA_V2_DATABASE_URL:
         process.env.WARA_V2_DATABASE_URL ??
         "postgresql://wara_v2:x@127.0.0.1:5433/wara_v2",

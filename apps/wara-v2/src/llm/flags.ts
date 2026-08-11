@@ -1,6 +1,7 @@
 /**
  * Activación deliberada Fase 8 — fail-closed.
- * REAL_MODEL_ENABLED=true solo no basta.
+ * Snapshot oficial reproducible: gpt-4o-mini-2024-07-18
+ * Alias gpt-4o-mini = solo experimento (no benchmark oficial).
  */
 export type Phase8LlmActivation = {
   REAL_MODEL_ENABLED: true;
@@ -11,16 +12,21 @@ export type Phase8LlmActivation = {
   REAL_CHANNELS_ENABLED: false;
   SYNTHETIC_DATA_ONLY: true;
   provider: "openai";
-  model: "gpt-4o-mini";
+  model: typeof OFFICIAL_MODEL_SNAPSHOT | typeof EXPERIMENTAL_MODEL_ALIAS;
   endpoint: "https://api.openai.com/v1/chat/completions";
   environment: "local" | "ci";
   bindHost: "127.0.0.1" | "localhost";
   databaseUrl: string;
   apiKey: string;
+  benchmarkOfficial: boolean;
 };
 
 export const ALLOWED_PROVIDER = "openai" as const;
-export const ALLOWED_MODEL = "gpt-4o-mini" as const;
+/** Snapshot fijo para benchmarks oficiales / reproducibles. */
+export const OFFICIAL_MODEL_SNAPSHOT = "gpt-4o-mini-2024-07-18" as const;
+/** Alias no reproducible — solo con WARA_V2_LLM_ALLOW_ALIAS=true (experimento). */
+export const EXPERIMENTAL_MODEL_ALIAS = "gpt-4o-mini" as const;
+export const ALLOWED_MODEL = OFFICIAL_MODEL_SNAPSHOT;
 export const FIXED_OPENAI_ENDPOINT =
   "https://api.openai.com/v1/chat/completions" as const;
 export const FIXED_OPENAI_HOSTNAME = "api.openai.com" as const;
@@ -28,10 +34,9 @@ export const FIXED_OPENAI_HOSTNAME = "api.openai.com" as const;
 function reqExact(env: NodeJS.ProcessEnv, name: string, expected: string): void {
   const v = env[name];
   if (v === undefined || v === "") throw new Error(`flag_missing:${name}`);
-  if (v !== expected && !(expected === "true" && v === "1") && !(expected === "false" && (v === "0" || v === "false"))) {
-    // allow true/1 and false/0 aliases for booleans encoded as expected "true"/"false"
-    if (expected === "true" && (v === "true" || v === "1")) return;
-    if (expected === "false" && (v === "false" || v === "0")) return;
+  if (expected === "true" && (v === "true" || v === "1")) return;
+  if (expected === "false" && (v === "false" || v === "0")) return;
+  if (v !== expected) {
     throw new Error(`flag_invalid:${name}=${v};expected=${expected}`);
   }
 }
@@ -41,14 +46,9 @@ function isDiscardableDb(url: string): boolean {
   if (/railway|vercel|easypanel|prod|staging|neon\.tech|supabase/i.test(url)) {
     return false;
   }
-  // embedded harness / loopback
   return /127\.0\.0\.1|localhost/.test(url);
 }
 
-/**
- * Carga activación LLM real. Cualquier ausencia/contradicción ⇒ throw.
- * No muta process.env.
- */
 export function loadPhase8LlmActivation(
   env: NodeJS.ProcessEnv = process.env,
 ): Phase8LlmActivation {
@@ -65,10 +65,19 @@ export function loadPhase8LlmActivation(
     throw new Error(`provider_not_allowed:${provider || "missing"}`);
   }
   const model = env.WARA_V2_LLM_MODEL ?? "";
-  if (model !== ALLOWED_MODEL) {
-    throw new Error(`model_not_allowed:${model || "missing"}`);
+  let benchmarkOfficial = true;
+  if (model === OFFICIAL_MODEL_SNAPSHOT) {
+    benchmarkOfficial = true;
+  } else if (
+    model === EXPERIMENTAL_MODEL_ALIAS &&
+    env.WARA_V2_LLM_ALLOW_ALIAS === "true"
+  ) {
+    benchmarkOfficial = false;
+  } else {
+    throw new Error(
+      `model_not_allowed:${model || "missing"};official=${OFFICIAL_MODEL_SNAPSHOT}`,
+    );
   }
-  // Endpoint fijo en código — rechazar override
   if (env.WARA_V2_LLM_ENDPOINT && env.WARA_V2_LLM_ENDPOINT !== FIXED_OPENAI_ENDPOINT) {
     throw new Error("endpoint_override_forbidden");
   }
@@ -92,9 +101,6 @@ export function loadPhase8LlmActivation(
   if (!apiKey || apiKey.length < 20) {
     throw new Error("llm_credential_missing");
   }
-  if (/sk-proj-prod|production/i.test(apiKey)) {
-    // soft check — still require explicit local/ci env above
-  }
 
   return {
     REAL_MODEL_ENABLED: true,
@@ -105,30 +111,14 @@ export function loadPhase8LlmActivation(
     REAL_CHANNELS_ENABLED: false,
     SYNTHETIC_DATA_ONLY: true,
     provider: ALLOWED_PROVIDER,
-    model: ALLOWED_MODEL,
+    model: model as Phase8LlmActivation["model"],
     endpoint: FIXED_OPENAI_ENDPOINT,
     environment,
     bindHost,
     databaseUrl,
     apiKey,
+    benchmarkOfficial,
   };
-}
-
-/** REAL_MODEL_ENABLED solo no habilita el adaptador. */
-export function assertRealModelAloneInsufficient(
-  env: NodeJS.ProcessEnv = process.env,
-): void {
-  if (env.REAL_MODEL_ENABLED === "true") {
-    try {
-      loadPhase8LlmActivation(env);
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith("flag_missing:SHADOW_MODE")) {
-        return; // expected fail-closed
-      }
-      // other missing flags also prove insufficiency
-      return;
-    }
-  }
 }
 
 export function applyPhase8TestFlags(extra: Record<string, string> = {}): void {
@@ -140,11 +130,15 @@ export function applyPhase8TestFlags(extra: Record<string, string> = {}): void {
   process.env.REAL_CHANNELS_ENABLED = "false";
   process.env.SYNTHETIC_DATA_ONLY = "true";
   process.env.WARA_V2_LLM_PROVIDER = "openai";
-  process.env.WARA_V2_LLM_MODEL = "gpt-4o-mini";
+  process.env.WARA_V2_LLM_MODEL = OFFICIAL_MODEL_SNAPSHOT;
   process.env.WARA_V2_ENV = "local";
   process.env.WARA_V2_BIND_HOST = "127.0.0.1";
-  delete process.env.WARA_V2_LLM_ENDPOINT; // endpoint fijo en código
-  if (!process.env.WARA_V2_DATABASE_URL || /railway|vercel|prod/i.test(process.env.WARA_V2_DATABASE_URL)) {
+  delete process.env.WARA_V2_LLM_ENDPOINT;
+  delete process.env.WARA_V2_LLM_ALLOW_ALIAS;
+  if (
+    !process.env.WARA_V2_DATABASE_URL ||
+    /railway|vercel|prod/i.test(process.env.WARA_V2_DATABASE_URL)
+  ) {
     process.env.WARA_V2_DATABASE_URL =
       "postgresql://wara_v2:x@127.0.0.1:5433/wara_v2";
   }

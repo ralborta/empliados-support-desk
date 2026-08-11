@@ -1,9 +1,13 @@
 /**
- * Adaptador OpenAI real (único proveedor Fase 8).
- * Sin SDK. FakeModelAdapter permanece el default del runtime.
+ * Adaptador OpenAI real — Structured Outputs strict + snapshot oficial.
+ * FakeModelAdapter permanece el default del runtime.
  */
 import type { ModelAdapter, TurnContext } from "@wara-v2/orchestrator";
-import { parseLlmProposal } from "@wara-v2/contracts";
+import {
+  parseLlmProposal,
+  LLM_PROPOSAL_OPENAI_JSON_SCHEMA,
+  normalizeOpenAiProposal,
+} from "@wara-v2/contracts";
 import {
   FIXED_OPENAI_ENDPOINT,
   loadPhase8LlmActivation,
@@ -27,6 +31,7 @@ export type LlmCallMetrics = {
   validation: "ok" | string;
   correlation_id?: string;
   prompt_hash: string;
+  response_format: "json_schema_strict";
 };
 
 export type OpenAiAdapterOpts = {
@@ -37,7 +42,6 @@ export type OpenAiAdapterOpts = {
   budget?: TokenBudget;
   breaker?: CircuitBreaker;
   onMetrics?: (m: LlmCallMetrics) => void;
-  /** Solo tests: inyectar cuerpo de respuesta ya parseado del proveedor. */
   mockProviderBody?: unknown;
 };
 
@@ -78,7 +82,14 @@ export class OpenAiChatAdapter implements ModelAdapter {
           model: this.activation.model,
           temperature: 0,
           max_tokens: 800,
-          response_format: { type: "json_object" },
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "llm_proposal_v1",
+              strict: true,
+              schema: LLM_PROPOSAL_OPENAI_JSON_SCHEMA,
+            },
+          },
           messages: [
             { role: "system", content: system },
             { role: "user", content: user },
@@ -100,10 +111,9 @@ export class OpenAiChatAdapter implements ModelAdapter {
                 authorization: `Bearer ${this.activation.apiKey}`,
               },
               body: bodyStr,
-              timeoutMs: this.opts.timeoutMs ?? 15_000,
+              timeoutMs: this.opts.timeoutMs ?? 20_000,
               fetchImpl: this.opts.fetchImpl,
             });
-            // Solo reintentar antes de obtener cuerpo útil
             if (result.status === 429 || result.status >= 500) {
               lastErr = new Error(
                 result.status === 429 ? "rate_limit" : `transient_${result.status}`,
@@ -115,7 +125,10 @@ export class OpenAiChatAdapter implements ModelAdapter {
           } catch (e) {
             lastErr = e;
             const cls = classifyLlmError(e);
-            if (cls === "timeout_before_response" || cls === "connection_interrupted") {
+            if (
+              cls === "timeout_before_response" ||
+              cls === "connection_interrupted"
+            ) {
               attempt += 1;
               continue;
             }
@@ -129,7 +142,10 @@ export class OpenAiChatAdapter implements ModelAdapter {
         }
 
         let parsedProvider: {
-          choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+          choices?: Array<{
+            message?: { content?: string | null; refusal?: string | null };
+            finish_reason?: string;
+          }>;
           usage?: { prompt_tokens?: number; completion_tokens?: number };
         };
         try {
@@ -138,11 +154,14 @@ export class OpenAiChatAdapter implements ModelAdapter {
           throw new Error("llm_result_malformed_json:provider_envelope");
         }
         const choice = parsedProvider.choices?.[0];
+        if (choice?.message?.refusal) {
+          throw new Error("model_refusal");
+        }
         if (choice?.finish_reason === "length") {
           throw new Error("truncated_response");
         }
         content = choice?.message?.content ?? "";
-        if (!content) throw new Error("empty_response");
+        if (!content || !content.trim()) throw new Error("empty_response");
         inputTokens = parsedProvider.usage?.prompt_tokens ?? 0;
         outputTokens = parsedProvider.usage?.completion_tokens ?? 0;
       }
@@ -154,7 +173,8 @@ export class OpenAiChatAdapter implements ModelAdapter {
         throw new Error("llm_result_malformed_json:content");
       }
 
-      const proposal = parseLlmProposal(json);
+      // Rechazo adicional vía schema interno LlmProposal (no reparación silenciosa)
+      const proposal = parseLlmProposal(normalizeOpenAiProposal(json));
       const decision = proposalToOrchestratorDecision(proposal);
       const cost = estimateCostUsd(inputTokens || 200, outputTokens || 100);
       this.budget.assertWithin(inputTokens + outputTokens || 300, cost);
@@ -172,6 +192,7 @@ export class OpenAiChatAdapter implements ModelAdapter {
         cost_usd_est: cost,
         validation: "ok",
         prompt_hash: promptHash,
+        response_format: "json_schema_strict",
       });
 
       return decision;
@@ -189,6 +210,7 @@ export class OpenAiChatAdapter implements ModelAdapter {
         cost_usd_est: 0,
         validation: cls,
         prompt_hash: promptHash,
+        response_format: "json_schema_strict",
       });
       throw e;
     } finally {
@@ -197,7 +219,6 @@ export class OpenAiChatAdapter implements ModelAdapter {
   }
 }
 
-/** Factory: no se crea si la activación falla. */
 export function tryCreateOpenAiAdapter(
   opts?: OpenAiAdapterOpts,
 ): OpenAiChatAdapter {

@@ -49,6 +49,10 @@ next-env.d.ts
 .env*.local
 docs/postman/*.local.postman_environment.json
 
+# WARA V2 local evidence / governance (discardable, never commit)
+apps/wara-v2/.local-evidence/
+apps/wara-v2/.local-data/
+
 # WARA V2 build outputs
 apps/*/dist/
 packages/*/dist/
