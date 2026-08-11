@@ -1,33 +1,51 @@
-# Fase 10A — Shadow canary (antes de activar número real)
+# Fase 10A — Shadow canary en EasyPanel (NO Vercel)
 
-## Estado
+## Corrección de runtime
 
-Código listo **local**. Canary real **NO activado** hasta autorización explícita.
+El canary y el tráfico V1/V2 de esta fase se operan en **EasyPanel** (front + backend).
+No se asume Vercel como destino de activación.
 
-## Flags (fail-closed)
+## Estado EasyPanel (inspección actual)
 
-| Flag | Valor requerido para ON |
-|------|-------------------------|
-| `WARA_V2_SHADOW` | `true` |
-| `WARA_V2_SHADOW_CANARY` | `true` |
-| `EVALUATION_ONLY` | `true` |
-| `DELIVERY_ENABLED` | `false` (si `true` ⇒ error) |
-| `ALLOW_EXTERNAL_MUTATIONS` | `false` |
-| `REAL_CHANNELS_ENABLED` | `false` |
-| `WARA_V2_SHADOW_TENANT` | exacto, p.ej. `tenant_internal_ops` |
-| `WARA_V2_SHADOW_ALLOWLIST` | E.164 exactos CSV, **sin `*`** |
-| `WARA_V2_SHADOW_KILL` | `true` detiene todo |
-| `WARA_V2_SHADOW_PORT` | default `8787` (solo loopback) |
+En el panel accesible hoy **no aparece** un proyecto `wara` / mesa-ayuda.
+Proyectos visibles: pulze, misreclamos-caseops, logistica, agente-cleexs, livra, battlexi, transitone.
 
-Ausencia de flags ⇒ shadow apagado. Restart no habilita globalmente.
+Hace falta que indiques (o creemos) los servicios:
 
-## Comandos
+| Rol | Servicio EasyPanel esperado |
+|-----|-----------------------------|
+| Front V1 (Next / panel) | p.ej. `wara-front` o nombre real |
+| Backend V1 (API turn/WhatsApp) | p.ej. `wara-api` / mismo app Node |
+| Shadow canary 10A (opcional dedicado) | `wara-v2-shadow` en red interna |
+
+## Flags a setear en EasyPanel (backend que corre `whatsappTurn`)
 
 ```bash
-pnpm --filter @wara-v2/app test:shadow-canary
-pnpm --filter @wara-v2/app dev:shadow-canary   # solo tras auth de activación
+WARA_V2_SHADOW=true
+WARA_V2_SHADOW_CANARY=true
+WARA_V2_SHADOW_KILL=false
+EVALUATION_ONLY=true
+DELIVERY_ENABLED=false
+ALLOW_EXTERNAL_MUTATIONS=false
+REAL_CHANNELS_ENABLED=false
+WARA_V2_SHADOW_TENANT=tenant_internal_ops
+WARA_V2_SHADOW_ALLOWLIST=+5491133788190
+# opcional, DNS interno EasyPanel:
+# WARA_V2_SHADOW_URL=http://wara-v2-shadow:8787/v2/shadow-canary
 ```
 
-## Prohibido en 10A
+## Comportamiento
 
-WhatsApp send, ops, attempts, outbox, deliveries, WARA writes, DeliveryGate execute, rollout clientes, Fase 10B.
+1. El mensaje sigue en V1 (EasyPanel).
+2. Hook fire-and-forget **in-process** (`setImmediate`) — sin `waitUntil` de Vercel.
+3. Copia opcional HTTP al servicio shadow interno.
+4. Cero WhatsApp / ops / outbox desde V2.
+
+## Activación
+
+1. Confirmar nombres de proyecto/servicios EasyPanel front+back.
+2. Desplegar commit con el hook a esos servicios.
+3. Setear flags solo en backend (allowlist de un número).
+4. Observar 10 conversaciones; kill switch = `WARA_V2_SHADOW_KILL=true`.
+
+Sin push/deploy hasta autorización explícita de despliegue EasyPanel.

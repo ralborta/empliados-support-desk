@@ -1,10 +1,9 @@
 /**
  * Hook V1 → shadow canary 10A (fire-and-forget).
- * Preferencia: in-process (Vercel/Next). Fallback HTTP loopback local.
- * Fail-closed sin flags. Cero impacto en respuesta V1.
+ * Runtime objetivo: EasyPanel (front + backend), no Vercel.
+ * In-process + HTTP interno opcional. Fail-closed sin flags.
  */
 import { createHash } from "node:crypto";
-import { waitUntil } from "@vercel/functions";
 import { runShadowCanaryInProcess } from "@/lib/shadowCanaryInProcess";
 
 function isTrue(v: string | undefined): boolean {
@@ -16,10 +15,18 @@ function normalizeE164(raw: string): string | null {
   if (digits.startsWith("+") && /^\+[1-9]\d{6,14}$/.test(digits)) return digits;
   const only = raw.replace(/\D/g, "");
   if (only.length >= 10 && only.length <= 15) {
-    // AR mobile often stored as 54911...
     return only.startsWith("54") ? `+${only}` : `+${only}`;
   }
   return null;
+}
+
+/** Desacoplado de V1 — setImmediate (Node / EasyPanel). */
+function runDetached(job: () => Promise<void>): void {
+  setImmediate(() => {
+    void job().catch(() => {
+      /* V1 isolation */
+    });
+  });
 }
 
 export type V1ShadowHookInput = {
@@ -68,12 +75,19 @@ export function maybeEnqueueWaraV2ShadowCopy(input: V1ShadowHookInput): void {
         /* V1 isolation */
       }
 
-      // Fallback opcional a API loopback (dev local)
+      // HTTP interno EasyPanel / local (opcional)
+      // WARA_V2_SHADOW_URL=http://wara-v2-shadow:8787/v2/shadow-canary
+      const shadowUrl = process.env.WARA_V2_SHADOW_URL?.trim();
       const host = process.env.WARA_V2_BIND_HOST || "127.0.0.1";
-      if (host !== "127.0.0.1" && host !== "localhost") return;
       const port = process.env.WARA_V2_SHADOW_PORT || "8787";
+      const url =
+        shadowUrl ||
+        (host === "127.0.0.1" || host === "localhost"
+          ? `http://${host}:${port}/v2/shadow-canary`
+          : "");
+      if (!url) return;
       try {
-        await fetch(`http://${host}:${port}/v2/shadow-canary`, {
+        await fetch(url, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -89,17 +103,11 @@ export function maybeEnqueueWaraV2ShadowCopy(input: V1ShadowHookInput): void {
           signal: AbortSignal.timeout(1500),
         });
       } catch {
-        /* API local ausente: ok */
+        /* servicio shadow ausente: ok */
       }
     };
 
-    try {
-      waitUntil(job());
-    } catch {
-      setImmediate(() => {
-        void job();
-      });
-    }
+    runDetached(job);
   } catch {
     /* V1 isolation */
   }
