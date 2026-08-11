@@ -17,6 +17,7 @@ Schema y migraciones aislados de V1 (`prisma/`). Documentación: `docs/v2/` 0.2.
 | `20260811183000_domain_invariants` | command_id, payload immutable, confirm 1:1, supersede bi/acyclic, attempts append-only |
 | `20260811190000_turn_idempotency` | `turns.idempotency_key` único (Fase 4) |
 | `20260811200000_outbox_claims` | claims SKIP LOCKED, kind, classification, reconcile (Fase 5) |
+| `20260811210000_attempt_canonical` | contador canónico attempt + FK outbox→attempt; claim sin ++independiente (Fase 6) |
 
 ## Comandos
 
