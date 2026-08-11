@@ -1,0 +1,39 @@
+# WARA Conversacional V2 — docker compose LOCAL (no EasyPanel / no prod)
+# Uso: docker compose -f docker-compose.wara-v2.yml up -d
+# PostgreSQL = autoridad lease/fence/seq | Redis = solo wakeup/secundario
+
+services:
+  wara-v2-postgres:
+    image: postgres:16-alpine
+    container_name: wara-v2-postgres
+    environment:
+      POSTGRES_USER: wara_v2
+      POSTGRES_PASSWORD: wara_v2_local_dev_only
+      POSTGRES_DB: wara_v2
+    ports:
+      - "5433:5432"
+    volumes:
+      - wara_v2_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wara_v2 -d wara_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  wara-v2-redis:
+    image: redis:7-alpine
+    container_name: wara-v2-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "wara_v2_local_dev_only"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - wara_v2_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "wara_v2_local_dev_only", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  wara_v2_pg_data:
+  wara_v2_redis_data:

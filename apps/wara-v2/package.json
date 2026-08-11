@@ -1,0 +1,25 @@
+{
+  "name": "@wara-v2/app",
+  "version": "0.2.3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm --filter @wara-v2/contracts test",
+    "dev:api": "tsx src/api/main.ts",
+    "dev:worker": "tsx src/worker/main.ts"
+  },
+  "dependencies": {
+    "@wara-v2/contracts": "workspace:*",
+    "@wara-v2/domain": "workspace:*",
+    "@wara-v2/executors": "workspace:*",
+    "@wara-v2/infra": "workspace:*",
+    "@wara-v2/orchestrator": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.23.5",
+    "typescript": "^5"
+  }
+}

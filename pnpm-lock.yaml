@@ -91,6 +91,90 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  apps/wara-v2:
+    dependencies:
+      '@wara-v2/contracts':
+        specifier: workspace:*
+        version: link:../../packages/wara-v2-contracts
+      '@wara-v2/domain':
+        specifier: workspace:*
+        version: link:../../packages/wara-v2-domain
+      '@wara-v2/executors':
+        specifier: workspace:*
+        version: link:../../packages/wara-v2-executors
+      '@wara-v2/infra':
+        specifier: workspace:*
+        version: link:../../packages/wara-v2-infra
+      '@wara-v2/orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/wara-v2-orchestrator
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      tsx:
+        specifier: ^4.23.5
+        version: 4.23.5
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/wara-v2-contracts:
+    dependencies:
+      zod:
+        specifier: ^4.2.1
+        version: 4.2.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      tsx:
+        specifier: ^4.23.5
+        version: 4.23.5
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/wara-v2-domain:
+    dependencies:
+      '@wara-v2/contracts':
+        specifier: workspace:*
+        version: link:../wara-v2-contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/wara-v2-executors:
+    dependencies:
+      '@wara-v2/contracts':
+        specifier: workspace:*
+        version: link:../wara-v2-contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/wara-v2-infra:
+    dependencies:
+      '@wara-v2/contracts':
+        specifier: workspace:*
+        version: link:../wara-v2-contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/wara-v2-orchestrator:
+    dependencies:
+      '@wara-v2/contracts':
+        specifier: workspace:*
+        version: link:../wara-v2-contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
 packages:
 
   '@alloc/quick-lru@5.2.0':

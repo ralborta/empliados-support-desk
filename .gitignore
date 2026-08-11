@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -36,6 +37,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!apps/wara-v2/.env.example
 
 # vercel
 .vercel
@@ -45,3 +48,7 @@ yarn-error.log*
 next-env.d.ts
 .env*.local
 docs/postman/*.local.postman_environment.json
+
+# WARA V2 build outputs
+apps/*/dist/
+packages/*/dist/
