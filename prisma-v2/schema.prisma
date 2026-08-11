@@ -144,6 +144,23 @@ enum DeliveryStatus {
   unknown_outcome
 }
 
+enum OutboxKind {
+  outbound_message
+  external_effect
+}
+
+enum ResultClassification {
+  success
+  permanent_failure
+  retryable_failure
+  timeout_before_send
+  timeout_after_send
+  ambiguous_result
+  unknown_outcome
+  duplicate_idempotent
+  denied_pre_http
+}
+
 enum TurnOutcome {
   ok
   ok_simulated
@@ -494,29 +511,45 @@ model OperationEvent {
 // ─── Delivery Outbox ─────────────────────────────────────────────────
 
 model DeliveryOutbox {
-  id                 String         @id @default(cuid())
-  turnId             String         @map("turn_id")
-  conversationId     String         @map("conversation_id")
+  id                 String                @id @default(cuid())
+  turnId             String?               @map("turn_id")
+  conversationId     String                @map("conversation_id")
   channel            Channel
-  channelAccountId   String         @map("channel_account_id")
+  channelAccountId   String                @map("channel_account_id")
   payload            Json
-  payloadHash        String         @map("payload_hash")
-  status             DeliveryStatus @default(pending)
-  attemptCount       Int            @default(0) @map("attempt_count")
-  externalDeliveryId String?        @map("external_delivery_id")
-  idempotencyKey     String         @unique @map("idempotency_key")
-  lastError          String?        @map("last_error")
-  executionMode      ExecutionMode  @default(dry_run) @map("execution_mode")
-  suppressReason     String?        @map("suppress_reason")
-  createdAt          DateTime       @default(now()) @map("created_at")
-  updatedAt          DateTime       @updatedAt @map("updated_at")
-  deliveredAt        DateTime?      @map("delivered_at") @db.Timestamptz(6)
+  payloadHash        String                @map("payload_hash")
+  status             DeliveryStatus        @default(pending)
+  attemptCount       Int                   @default(0) @map("attempt_count")
+  maxAttempts        Int                   @default(3) @map("max_attempts")
+  externalDeliveryId String?               @map("external_delivery_id")
+  idempotencyKey     String                @unique @map("idempotency_key")
+  lastError          String?               @map("last_error")
+  executionMode      ExecutionMode         @default(dry_run) @map("execution_mode")
+  suppressReason     String?               @map("suppress_reason")
+  /// Fase 5 — outbox claims / efectos
+  kind               OutboxKind            @default(outbound_message)
+  operationId        String?               @map("operation_id")
+  attemptId          String?               @map("attempt_id")
+  toolName           String?               @map("tool_name")
+  destinationKey     String?               @map("destination_key")
+  requestFingerprint String?               @map("request_fingerprint")
+  claimOwnerId       String?               @map("claim_owner_id")
+  claimFence         BigInt?               @map("claim_fence")
+  claimExpiresAt     DateTime?             @map("claim_expires_at") @db.Timestamptz(6)
+  nextAttemptAt      DateTime?             @map("next_attempt_at") @db.Timestamptz(6)
+  lastClassification ResultClassification? @map("last_classification")
+  reconcileStatus    ReconciliationStatus  @default(not_needed) @map("reconcile_status")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  deliveredAt        DateTime?             @map("delivered_at") @db.Timestamptz(6)
 
-  turn         Turn         @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  turn         Turn?        @relation(fields: [turnId], references: [id], onDelete: SetNull)
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([status, createdAt])
+  @@index([status, nextAttemptAt, createdAt])
   @@index([conversationId])
+  @@index([operationId])
+  @@index([claimExpiresAt])
   @@map("delivery_outbox")
 }
 

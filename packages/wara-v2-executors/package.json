@@ -5,14 +5,27 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "tsx --test src/classification.unit.test.ts",
+    "test:pg": "pnpm --filter @wara-v2/db build && node ../wara-v2-db/scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/executors exec tsx --test src/executors.pg.test.ts",
+    "test": "pnpm test:unit && pnpm test:pg"
   },
   "dependencies": {
-    "@wara-v2/contracts": "workspace:*"
+    "@wara-v2/contracts": "workspace:*",
+    "@wara-v2/db": "workspace:*",
+    "@wara-v2/domain": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.23.5",
     "typescript": "^5"
   }
 }
