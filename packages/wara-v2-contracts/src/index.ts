@@ -548,3 +548,14 @@ export const MODEL_CANNOT_ORDER_COMMIT = true as const;
 
 /** Declaración: PostgreSQL es la única autoridad de lease/fencing. */
 export const PG_SOLE_LOCK_AUTHORITY = true as const;
+
+export {
+  CANONICAL_INGRESS_SCHEMA_VERSION,
+  CanonicalIngressSchema,
+  parseCanonicalIngress,
+  tenantScopedKey,
+  tenantScopedMessageKey,
+  assertNoForbiddenKeys,
+  type CanonicalIngress,
+} from "./ingress.js";
+

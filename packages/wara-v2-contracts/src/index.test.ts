@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { randomUUID } from "node:crypto";
 import {
   ExpectedEffectSchema,
   MODEL_CANNOT_ORDER_COMMIT,
@@ -9,6 +10,9 @@ import {
   V2_DEFAULTS,
   parseOrchestratorDecision,
   payloadHash,
+  parseCanonicalIngress,
+  CANONICAL_INGRESS_SCHEMA_VERSION,
+  tenantScopedKey,
 } from "./index.js";
 
 const validDecision = {
@@ -107,5 +111,36 @@ describe("wara-v2 contracts", () => {
     assert.equal(V2_DEFAULTS.MODEL_MAX_RETRIES, 1);
     assert.equal(MODEL_CANNOT_ORDER_COMMIT, true);
     assert.equal(PG_SOLE_LOCK_AUTHORITY, true);
+  });
+});
+
+describe("CanonicalIngressSchema", () => {
+  const base = () => ({
+    schema_version: CANONICAL_INGRESS_SCHEMA_VERSION,
+    source: "synthetic" as const,
+    tenant_id: "t1",
+    external_conversation_id: "c1",
+    external_message_id: "m1",
+    received_at: new Date().toISOString(),
+    message_type: "text" as const,
+    content: { text: "hola" },
+    correlation_id: randomUUID(),
+    is_shadow: true,
+  });
+
+  it("acepta ingress canónico v1", () => {
+    const p = parseCanonicalIngress(base());
+    assert.equal(p.schema_version, 1);
+    assert.equal(tenantScopedKey("t1", "c1"), "t1::c1");
+  });
+
+  it("rechaza tools / metadata no allowlisted", () => {
+    assert.throws(() => parseCanonicalIngress({ ...base(), tools: [] }));
+    assert.throws(() =>
+      parseCanonicalIngress({
+        ...base(),
+        metadata: { evil: "x" },
+      }),
+    );
   });
 });

@@ -1,6 +1,6 @@
-# Diferencias Fase 6 vs documentación 0.2.3
+# Diferencias WARA V2 vs documentación 0.2.3
 
-## Alineado
+## Fase 6 (alineado)
 
 - Runtime E2E local: TurnPipeline + dominio + Prisma + locks PG + DeliveryGate + outbox/dispatcher/reconciler.
 - Attempt write-once creado **antes** del HTTP, atómico con outbox.
@@ -8,13 +8,23 @@
 - DeliveryGate única puerta a `prepareEffectOutbox` (`gatedPrepareEffect`).
 - Locks vía `wara_v2_acquire/renew/release_conversation_lock` (sin in-memory en runtime).
 
-## Extensiones
+## Fase 7 (añadido)
+
+- API HTTP loopback (`127.0.0.1`) con shadow/replay.
+- Contrato canónico de ingress (`CanonicalIngressSchema` v1).
+- Auth fake Bearer + scopes por tenant.
+- Flags fail-closed: `SHADOW_MODE`, `DELIVERY_ENABLED=false`, `REAL_*=false`.
+- Matriz 30/30 Fase 6 + tests individuales de gaps (`fase6-coverage.pg.test.ts`).
+- Adaptadores modelo/canal locales; Future LLM stub deshabilitado (no SDK).
+
+## Extensiones / fuera de alcance
 
 | Ítem | Nota |
 |------|------|
 | FakeModelAdapter | Sin LLM real |
-| Workers locales | outbox + reconcile en `apps/wara-v2` |
-| Redis | No usado (wakeup opcional futuro) |
-| API HTTP pública | Todavía no (Fase 7+) |
+| Workers locales | outbox + reconcile vía API controlada |
+| Redis | No usado |
+| LLM / BBC / WhatsApp / OAuth | Fuera de Fase 7 |
+| Push / producción / V1 | Intactos |
 
-Sin push, sin producción, sin servicios externos reales.
+Sin push, sin producción, sin servicios externos reales. Fase 8 bloqueada.

@@ -63,7 +63,7 @@ export async function validatePreHttp(
     return { ok: false, reason: "operation_superseded" };
   }
   if (op.status === "suspended") return { ok: false, reason: "operation_suspended" };
-  if (op.status === "cancelled" || op.status === "expired") {
+  if (op.status === "cancelled" || op.status === "expired" || op.status === "cancel_requested") {
     return { ok: false, reason: `operation_${op.status}` };
   }
   if (op.status !== "processing") {

@@ -6,8 +6,10 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "test": "pnpm test:e2e",
+    "test": "pnpm test:e2e && pnpm test:fase6-coverage && pnpm test:api",
     "test:e2e": "pnpm --filter @wara-v2/db build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/executors build && node ../../packages/wara-v2-db/scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/app exec tsx --test src/runtime/e2e.pg.test.ts",
+    "test:fase6-coverage": "pnpm --filter @wara-v2/db build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/executors build && node ../../packages/wara-v2-db/scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/app exec tsx --test src/runtime/fase6-coverage.pg.test.ts",
+    "test:api": "pnpm --filter @wara-v2/db build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/executors build && node ../../packages/wara-v2-db/scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/app exec tsx --test src/api/api.pg.test.ts",
     "dev:api": "tsx src/api/main.ts",
     "dev:worker": "tsx src/worker/main.ts"
   },
