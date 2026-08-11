@@ -17,6 +17,15 @@ export type PersistedTurn = {
 
 export type TurnStore = {
   findByIdempotencyKey(key: string): Promise<PersistedTurn | null>;
+  /** Crea fila stub del turno (permite FK outbox antes del finish). */
+  beginTurn?(turn: {
+    id: string;
+    conversationId: string;
+    idempotencyKey: string;
+    ownerId: string;
+    fencingToken: bigint;
+    mode: ExecutionMode;
+  }): Promise<void>;
   saveTurn(turn: PersistedTurn, traces: TraceEvent[]): Promise<void>;
   /** Simula fallo de persistencia. */
   failNextSave?: boolean;
@@ -31,6 +40,12 @@ export type LockHandle = {
 export type LockPort = {
   acquire(conversationId: string, ownerId: string, leaseMs?: number): Promise<LockHandle | null>;
   release(conversationId: string, ownerId: string, fencingToken: bigint): Promise<boolean>;
+  renew?(
+    conversationId: string,
+    ownerId: string,
+    fencingToken: bigint,
+    leaseMs?: number,
+  ): Promise<boolean>;
 };
 
 export type OperationPort = {
@@ -58,6 +73,29 @@ export class InMemoryTurnStore implements TurnStore {
   async findByIdempotencyKey(key: string) {
     const id = this.byKey.get(key);
     return id ? this.turns.get(id) ?? null : null;
+  }
+
+  async beginTurn(turn: {
+    id: string;
+    conversationId: string;
+    idempotencyKey: string;
+    ownerId: string;
+    fencingToken: bigint;
+    mode: ExecutionMode;
+  }) {
+    this.turns.set(turn.id, {
+      id: turn.id,
+      conversationId: turn.conversationId,
+      idempotencyKey: turn.idempotencyKey,
+      outcome: "ok_simulated",
+      mode: turn.mode,
+      fencingToken: turn.fencingToken,
+      ownerId: turn.ownerId,
+      decision: null,
+      policy: null,
+      responsePlan: null,
+    });
+    this.byKey.set(turn.idempotencyKey, turn.id);
   }
 
   async saveTurn(turn: PersistedTurn, traces: TraceEvent[]) {

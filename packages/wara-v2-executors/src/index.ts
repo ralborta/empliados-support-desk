@@ -35,7 +35,8 @@ export {
   reconcileLocalSimulator,
 } from "./simulator/client.js";
 export { validatePreHttp } from "./prehttp/validate.js";
-export { prepareEffectOutbox } from "./outbox/prepare.js";
+export { prepareEffectOutbox, openRetryAttempt } from "./outbox/prepare.js";
+export type { PrepareEffectResult, PrepareEffectInput } from "./outbox/prepare.js";
 export { OutboxDispatcher } from "./outbox/dispatcher.js";
 export { EffectReconciler } from "./reconcile/reconciler.js";
 export {

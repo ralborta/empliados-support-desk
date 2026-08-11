@@ -1,6 +1,6 @@
 /**
  * Dispatcher de outbox — claim SKIP LOCKED, pre-HTTP, HTTP simulado, complete.
- * Transiciones de operación vía OperationDomainService.
+ * Attempt write-once ya existe (prepare/openRetryAttempt); outcomes vía dominio + eventos.
  */
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@wara-v2/db";
@@ -8,13 +8,11 @@ import {
   OperationDomainService,
   PrismaUnitOfWork,
   type OperationDomainEvent,
-  type AttemptOutcome,
 } from "@wara-v2/domain";
 import {
   classifyAttemptResult,
   mayAutoRetry,
   requiresReconcile,
-  toAttemptOutcome,
   toDomainEvent,
   type ResultClassification,
 } from "../classification.js";
@@ -26,12 +24,14 @@ import {
 } from "../simulator/client.js";
 import type { SimScenario } from "../simulator/local-server.js";
 import { assertPhase5Guarantees } from "../guarantees.js";
+import { openRetryAttempt } from "./prepare.js";
 
 export type DispatchOnceResult = {
   handled: boolean;
   outboxId?: string;
   classification?: ResultClassification;
   reason?: string;
+  attemptId?: string;
 };
 
 export class OutboxDispatcher {
@@ -44,9 +44,7 @@ export class OutboxDispatcher {
       simulatorUrl: string;
       allowedPorts: ReadonlySet<number>;
       scenario?: SimScenario;
-      /** Hook: crash after HTTP before persist */
       crashAfterHttp?: boolean;
-      /** Hook: skip HTTP (simulate persistence failure before send) */
       failBeforeHttpPersist?: boolean;
     },
   ) {
@@ -65,6 +63,7 @@ export class OutboxDispatcher {
         attempt_count: number;
         max_attempts: number;
         status: string;
+        attempt_id: string | null;
         last_classification: string | null;
       }>
     >(
@@ -76,14 +75,11 @@ export class OutboxDispatcher {
     if (!claimed.length) return { handled: false };
     const row = claimed[0]!;
 
-    // Claim vencido sin resultado → ya marcado unknown_outcome por SQL
     if (row.status === "unknown_outcome") {
       if (row.operation_id) {
         await this.applyDomainOutcome(row.operation_id, "unknown_outcome", {
-          httpStatus: null,
-          outcome: "unknown_outcome",
           notes: "claim_expired_without_result",
-          fencingToken: BigInt(row.claim_fence),
+          existingAttemptId: row.attempt_id,
         });
       }
       return {
@@ -91,10 +87,58 @@ export class OutboxDispatcher {
         outboxId: row.id,
         classification: "unknown_outcome",
         reason: "claim_expired_recovery",
+        attemptId: row.attempt_id ?? undefined,
       };
     }
 
     const fence = BigInt(row.claim_fence);
+
+    // Re-adquirir lease solo si está vencida (recuperación post-turno).
+    // Si otro owner la tiene vigente, pre-HTTP deniega.
+    if (row.operation_id) {
+      const op = await this.prisma.operation.findUnique({
+        where: { id: row.operation_id },
+      });
+      if (op) {
+        const lock = await this.prisma.conversationLock.findUnique({
+          where: { conversationId: op.conversationId },
+        });
+        const now = Date.now();
+        if (
+          !lock ||
+          !lock.leaseExpiresAt ||
+          lock.leaseExpiresAt.getTime() <= now
+        ) {
+          await this.prisma.$queryRawUnsafe(
+            `SELECT * FROM wara_v2_acquire_conversation_lock($1, $2, interval '30 seconds')`,
+            op.conversationId,
+            this.opts.ownerId,
+          );
+        }
+      }
+    }
+
+    // Write-once attempt debe existir antes del HTTP
+    const opened = await openRetryAttempt(this.prisma, {
+      outboxId: row.id,
+      ownerId: this.opts.ownerId,
+      lockFencingToken: fence,
+    });
+    if (!opened.ok) {
+      return this.complete(row.id, fence, {
+        classification: "denied_pre_http",
+        status: "failed",
+        error: opened.reason,
+        nextAttemptAt: null,
+        reconcile: "not_needed",
+        http: null,
+        operationId: row.operation_id,
+        idempotencyKey: row.idempotency_key,
+        attemptId: null,
+        applyDomain: false,
+      });
+    }
+
     const pre = await validatePreHttp(this.prisma, {
       outboxId: row.id,
       ownerId: this.opts.ownerId,
@@ -107,19 +151,22 @@ export class OutboxDispatcher {
       return this.complete(row.id, fence, {
         classification: "denied_pre_http",
         status:
-          mayAutoRetry("denied_pre_http") && row.attempt_count < row.max_attempts
+          mayAutoRetry("denied_pre_http") && opened.attemptNo < row.max_attempts
             ? "pending"
             : "failed",
         error: pre.reason,
         nextAttemptAt:
-          mayAutoRetry("denied_pre_http") && row.attempt_count < row.max_attempts
-            ? new Date(Date.now() + backoffMs(row.attempt_count))
+          mayAutoRetry("denied_pre_http") && opened.attemptNo < row.max_attempts
+            ? new Date(Date.now() + backoffMs(opened.attemptNo))
             : null,
         reconcile: "not_needed",
         http: null,
         operationId: row.operation_id,
         idempotencyKey: row.idempotency_key,
+        attemptId: opened.attemptId,
         applyDomain: false,
+        requeueForRetry:
+          mayAutoRetry("denied_pre_http") && opened.attemptNo < row.max_attempts,
       });
     }
 
@@ -159,36 +206,18 @@ export class OutboxDispatcher {
       if (this.opts.scenario === "timeout_after_send" && http.errorCode === "TIMEOUT") {
         return "timeout_after_send" as const;
       }
-      if (this.opts.scenario === "reset_after_write") {
-        return "unknown_outcome" as const;
-      }
+      if (this.opts.scenario === "reset_after_write") return "unknown_outcome" as const;
       if (this.opts.scenario === "malformed_after_process") {
         return "unknown_outcome" as const;
       }
       return base;
     })();
 
-    return this.finishWithClassification(row, fence, classification, http);
-  }
-
-  private async finishWithClassification(
-    row: {
-      id: string;
-      operation_id: string | null;
-      idempotency_key: string;
-      attempt_count: number;
-      max_attempts: number;
-    },
-    fence: bigint,
-    classification: ResultClassification,
-    http: SimulatorClientResult,
-  ): Promise<DispatchOnceResult> {
     const retry =
-      mayAutoRetry(classification) && row.attempt_count < row.max_attempts;
+      mayAutoRetry(classification) && opened.attemptNo < row.max_attempts;
     const needsReconcile = requiresReconcile(classification);
 
-    let status: "delivered" | "failed" | "pending" | "unknown_outcome" =
-      "failed";
+    let status: "delivered" | "failed" | "pending" | "unknown_outcome" = "failed";
     if (classification === "success" || classification === "duplicate_idempotent") {
       status = "delivered";
     } else if (needsReconcile) {
@@ -202,13 +231,14 @@ export class OutboxDispatcher {
       status,
       error: http.errorCode,
       nextAttemptAt: retry
-        ? new Date(Date.now() + backoffMs(row.attempt_count))
+        ? new Date(Date.now() + backoffMs(opened.attemptNo))
         : null,
       reconcile: needsReconcile ? "pending" : "not_needed",
       http,
       operationId: row.operation_id,
       idempotencyKey: row.idempotency_key,
       externalId: http.externalId,
+      attemptId: opened.attemptId,
       applyDomain: true,
       requeueForRetry: retry,
     });
@@ -227,23 +257,19 @@ export class OutboxDispatcher {
       operationId: string | null;
       idempotencyKey: string;
       externalId?: string;
+      attemptId: string | null;
       applyDomain: boolean;
       requeueForRetry?: boolean;
     },
   ): Promise<DispatchOnceResult> {
     if (args.operationId && args.applyDomain) {
       await this.applyDomainOutcome(args.operationId, args.classification, {
-        httpStatus: args.http?.httpStatus ?? null,
-        outcome: toAttemptOutcome(args.classification),
         notes: args.classification,
-        fencingToken: fence,
-        idempotencyKey: args.idempotencyKey,
-        externalId: args.externalId,
+        existingAttemptId: args.attemptId,
+        httpStatus: args.http?.httpStatus ?? null,
         error: args.error,
         reconcile: args.reconcile,
       });
-
-      // Reintento: retryable_failed → queued → processing (dominio)
       if (args.requeueForRetry && args.status === "pending") {
         await this.requeueAfterRetryable(args.operationId);
       }
@@ -263,7 +289,7 @@ export class OutboxDispatcher {
       args.classification,
       args.externalId ?? null,
       args.error,
-      null,
+      args.attemptId,
       args.nextAttemptAt,
       args.reconcile,
     );
@@ -274,6 +300,7 @@ export class OutboxDispatcher {
         outboxId,
         classification: args.classification,
         reason: "stale_fence_complete_rejected",
+        attemptId: args.attemptId ?? undefined,
       };
     }
 
@@ -281,6 +308,7 @@ export class OutboxDispatcher {
       handled: true,
       outboxId,
       classification: args.classification,
+      attemptId: args.attemptId ?? undefined,
     };
   }
 
@@ -323,12 +351,9 @@ export class OutboxDispatcher {
     operationId: string,
     classification: ResultClassification | "unknown_outcome" | "retryable_failure",
     meta: {
-      httpStatus: number | null;
-      outcome: string;
       notes: string;
-      fencingToken: bigint;
-      idempotencyKey?: string;
-      externalId?: string;
+      existingAttemptId: string | null;
+      httpStatus?: number | null;
       error?: string | null;
       reconcile?: string;
     },
@@ -355,10 +380,8 @@ export class OutboxDispatcher {
           fromStatus: op.status,
           toStatus: op.status,
           event: "retry_forbidden_unknown_outcome",
-          meta: {
-            classification,
-            notes: meta.notes,
-          },
+          meta: { classification, notes: meta.notes },
+          attemptId: meta.existingAttemptId,
           commandId: randomUUID(),
         },
       });
@@ -369,25 +392,16 @@ export class OutboxDispatcher {
       classification === "retryable_failure"
         ? "retryable_failure"
         : (classification as ResultClassification),
-    ) as OperationDomainEvent;
-
-    // Map unknown_outcome classification to ambiguous_result event
+    );
     const event: OperationDomainEvent =
       classification === "unknown_outcome"
         ? "ambiguous_result"
-        : eventName === "ambiguous_result" ||
-            eventName === "attempt_success" ||
-            eventName === "attempt_permanent_failed" ||
-            eventName === "attempt_retryable_failed" ||
-            eventName === "timeout_before_send" ||
-            eventName === "timeout_after_send"
-          ? eventName
-          : "ambiguous_result";
-
-    if (op.status !== "processing" && op.status !== "retryable_failed") {
-      // Recovery path: force unknown if still processing-like
-      if (op.status === "reconciling") return;
-    }
+        : (["attempt_success", "attempt_permanent_failed", "attempt_retryable_failed",
+            "timeout_before_send", "timeout_after_send", "ambiguous_result"].includes(
+              eventName,
+            )
+            ? (eventName as OperationDomainEvent)
+            : "ambiguous_result");
 
     const lock = await this.prisma.conversationLock.findUnique({
       where: { conversationId: op.conversationId },
@@ -401,6 +415,7 @@ export class OutboxDispatcher {
         actor: this.opts.ownerId,
         context: {
           mutationsDisabled: true,
+          existingAttemptId: meta.existingAttemptId ?? undefined,
           lock: lock
             ? {
                 ownerId: lock.ownerId ?? this.opts.ownerId,
@@ -410,30 +425,30 @@ export class OutboxDispatcher {
             : null,
           claimedOwnerId: lock?.ownerId ?? this.opts.ownerId,
           claimedFencingToken: lock?.fencingToken,
-          attempt: {
-            id: randomUUID(),
-            requestHash: meta.idempotencyKey ?? operationId,
-            fencingToken: meta.fencingToken,
-            ownerId: this.opts.ownerId,
-            outcome: meta.outcome as AttemptOutcome,
-            startedAt: new Date(),
-            finishedAt: new Date(),
-            externalIdempotencyKey: meta.idempotencyKey ?? null,
-            externalReference: meta.externalId ?? null,
-            httpStatus: meta.httpStatus,
-            error: meta.error ? { code: meta.error } : null,
-            reconciliationStatus:
-              meta.reconcile === "pending"
-                ? "pending"
-                : meta.reconcile === "needs_human"
-                  ? "needs_human"
-                  : "not_needed",
-            reconciliationNotes: meta.notes,
-          },
         },
       });
+      // Evento append-only de resultado HTTP (sin mutar OperationAttempt)
+      if (meta.existingAttemptId) {
+        await this.prisma.operationEvent.create({
+          data: {
+            id: randomUUID(),
+            operationId,
+            fromStatus: null,
+            toStatus: null,
+            event: `attempt_result:${classification}`,
+            actor: this.opts.ownerId,
+            meta: {
+              httpStatus: meta.httpStatus,
+              error: meta.error,
+              reconcile: meta.reconcile,
+              immutableAttemptId: meta.existingAttemptId,
+            },
+            attemptId: meta.existingAttemptId,
+            commandId: randomUUID(),
+          },
+        });
+      }
     } catch {
-      // Fallback append-only si la transición de dominio no aplica (p.ej. fence)
       await this.prisma.operationEvent.create({
         data: {
           id: randomUUID(),
@@ -442,6 +457,7 @@ export class OutboxDispatcher {
           toStatus: op.status,
           event: `domain_apply_failed:${event}`,
           meta: { classification, notes: meta.notes },
+          attemptId: meta.existingAttemptId,
           commandId: randomUUID(),
         },
       });

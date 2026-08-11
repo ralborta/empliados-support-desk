@@ -6,12 +6,14 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "test": "pnpm --filter @wara-v2/contracts test",
+    "test": "pnpm test:e2e",
+    "test:e2e": "pnpm --filter @wara-v2/db build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/executors build && node ../../packages/wara-v2-db/scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/app exec tsx --test src/runtime/e2e.pg.test.ts",
     "dev:api": "tsx src/api/main.ts",
     "dev:worker": "tsx src/worker/main.ts"
   },
   "dependencies": {
     "@wara-v2/contracts": "workspace:*",
+    "@wara-v2/db": "workspace:*",
     "@wara-v2/domain": "workspace:*",
     "@wara-v2/executors": "workspace:*",
     "@wara-v2/infra": "workspace:*",

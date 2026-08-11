@@ -16,6 +16,7 @@ import {
   prepareEffectOutbox,
   OutboxDispatcher,
   EffectReconciler,
+  simulatorGatePass,
   type LocalSimulator,
 } from "./index.js";
 import { seedReadyOperation } from "./test-fixtures.js";
@@ -38,6 +39,7 @@ async function prepAndId(
     allowedPorts: ports,
     companyId,
     unitId: "unit_1",
+    deliveryGate: simulatorGatePass(),
   });
   assert.equal(prep.ok, true, prep.ok ? "" : prep.reason);
   if (!prep.ok) throw new Error(prep.reason);
@@ -279,8 +281,10 @@ describe("@wara-v2/executors fase5", () => {
   it("14. lease conversación vencida antes del HTTP", async () => {
     const fx = await seedReadyOperation(prisma);
     const prep = await prepAndId(prisma, fx, sim.baseUrl, ports);
+    // Otro owner retiene la lease vigente → pre-HTTP deniega
     await prisma.$executeRawUnsafe(
-      `UPDATE conversation_locks SET lease_expires_at = now() - interval '1 second'
+      `UPDATE conversation_locks
+       SET owner_id = 'other_owner', lease_expires_at = now() + interval '60 seconds'
        WHERE conversation_id = $1`,
       fx.conversation.id,
     );

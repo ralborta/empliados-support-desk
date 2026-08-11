@@ -481,7 +481,8 @@ model OperationAttempt {
   reconciliationStatus   ReconciliationStatus @default(not_needed) @map("reconciliation_status")
   reconciliationNotes    String?              @map("reconciliation_notes")
 
-  operation Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operation Operation        @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  outboxes  DeliveryOutbox[]
 
   @@unique([operationId, attemptNo])
   @@index([outcome, reconciliationStatus])
@@ -543,13 +544,15 @@ model DeliveryOutbox {
   updatedAt          DateTime              @updatedAt @map("updated_at")
   deliveredAt        DateTime?             @map("delivered_at") @db.Timestamptz(6)
 
-  turn         Turn?        @relation(fields: [turnId], references: [id], onDelete: SetNull)
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  turn         Turn?              @relation(fields: [turnId], references: [id], onDelete: SetNull)
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attempt      OperationAttempt?  @relation(fields: [attemptId], references: [id], onDelete: SetNull)
 
   @@index([status, nextAttemptAt, createdAt])
   @@index([conversationId])
   @@index([operationId])
   @@index([claimExpiresAt])
+  @@index([attemptId])
   @@map("delivery_outbox")
 }
 

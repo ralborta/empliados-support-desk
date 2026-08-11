@@ -1,22 +1,20 @@
 /**
- * Gateway stub Fase 1 — sin listen productivo, sin BBC, sin mutaciones.
- * dry_run / shadow: DeliveryGate suppress (fases posteriores).
+ * API stub Fase 6 — runtime local disponible vía workers; sin HTTP público aún.
  */
-import { V2_DEFAULTS } from "@wara-v2/contracts";
 import { localEnvDefaults } from "@wara-v2/infra";
+import { ALLOW_EXTERNAL_MUTATIONS } from "@wara-v2/executors";
 
-export function describeApiStub() {
+export function describeApi() {
   return {
     service: "wara-v2-api",
-    phase: 1,
+    phase: 6,
     mode: localEnvDefaults.WARA_V2_EXECUTION_MODE,
-    defaults: V2_DEFAULTS,
+    allowExternalMutations: ALLOW_EXTERNAL_MUTATIONS,
     listening: false,
-    whatsappSend: false,
-    note: "Scaffold only. No HTTP server bound in Phase 1.",
+    note: "Fase 6: composición runtime en worker/harness E2E. Sin endpoint público.",
   };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  console.log(JSON.stringify(describeApiStub(), null, 2));
+  console.log(JSON.stringify(describeApi(), null, 2));
 }

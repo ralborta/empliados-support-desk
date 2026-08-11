@@ -145,5 +145,10 @@ export type ApplyCommand = {
     attempt?: Omit<CreateAttemptInput, "operationId" | "attemptNo" | "id"> & {
       id?: string;
     };
+    /**
+     * Fase 6: Attempt ya creado write-once pre-HTTP.
+     * Si está set, record_attempt_outcome solo enlaza eventos (no INSERT ni ++contador).
+     */
+    existingAttemptId?: string;
   };
 };

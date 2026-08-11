@@ -96,6 +96,9 @@ importers:
       '@wara-v2/contracts':
         specifier: workspace:*
         version: link:../../packages/wara-v2-contracts
+      '@wara-v2/db':
+        specifier: workspace:*
+        version: link:../../packages/wara-v2-db
       '@wara-v2/domain':
         specifier: workspace:*
         version: link:../../packages/wara-v2-domain

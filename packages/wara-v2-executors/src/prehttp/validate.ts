@@ -103,13 +103,9 @@ export async function validatePreHttp(
   if (lock.ownerId !== ctx.ownerId) {
     return { ok: false, reason: "conversation_owner_mismatch" };
   }
-  const lockFence =
-    payload.lockFence != null
-      ? BigInt(String(payload.lockFence))
-      : lock.fencingToken;
-  if (lock.fencingToken !== lockFence) {
-    return { ok: false, reason: "conversation_fence_mismatch" };
-  }
+  // Fase 6: el fence de conversación puede renovarse tras el turno;
+  // la autoridad de despacho es claim_owner + claim_fence del outbox (ya validados).
+  // payload.lockFence es evidencia del prepare; no bloquea si la lease actual es válida.
 
   if (op.confirmationId) {
     const confirmation = await prisma.operationConfirmation.findUnique({

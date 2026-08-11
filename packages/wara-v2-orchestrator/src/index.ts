@@ -1,8 +1,8 @@
 /**
- * WARA V2 — Orquestador Fase 4 (Policy + DeliveryGate).
- * Sin HTTP externo. dry_run + V2_MUTATIONS_DISABLED.
+ * WARA V2 — Orquestador Fase 6 (runtime E2E local + DeliveryGate + PG locks).
+ * Sin HTTP externo real. dry_run + V2_MUTATIONS_DISABLED.
  */
-export const PHASE = 4 as const;
+export const PHASE = 6 as const;
 export const ORCHESTRATOR_STUB = false as const;
 
 export {
@@ -48,7 +48,20 @@ export {
   type LockPort,
   type IngressPort,
   type OutboxPort,
+  type OperationPort,
 } from "./persistence/ports.js";
+export {
+  PrismaLockPort,
+  PrismaIngressPort,
+  PrismaTurnStore,
+  PrismaOutboxPort,
+  PrismaOperationPort,
+} from "./persistence/prisma-ports.js";
+export {
+  gatedPrepareEffect,
+  toDeliveryGateSnapshot,
+  GATED_PREPARE_ONLY,
+} from "./delivery/gated-prepare.js";
 export { composeResponse } from "./composer/response.js";
 export {
   executeStubTool,

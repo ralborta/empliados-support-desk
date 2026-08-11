@@ -226,36 +226,38 @@ export class OperationDomainService {
 
       let attemptId: string | null = null;
       let attemptCount = op.attemptCount;
-      if (
-        decision.effects.includes("record_attempt_outcome") &&
-        command.context?.attempt
-      ) {
-        attemptCount = op.attemptCount + 1;
-        const attempt = await repo.createAttempt({
-          id: command.context.attempt.id ?? randomUUID(),
-          operationId: op.id,
-          attemptNo: attemptCount,
-          requestHash: command.context.attempt.requestHash,
-          fencingToken: command.context.attempt.fencingToken,
-          ownerId: command.context.attempt.ownerId,
-          outcome: command.context.attempt.outcome,
-          startedAt: command.context.attempt.startedAt,
-          finishedAt: command.context.attempt.finishedAt,
-          externalIdempotencyKey:
-            command.context.attempt.externalIdempotencyKey ?? null,
-          externalReference: command.context.attempt.externalReference ?? null,
-          httpStatus: command.context.attempt.httpStatus ?? null,
-          error: command.context.attempt.error ?? null,
-          reconciliationStatus:
-            command.context.attempt.reconciliationStatus ??
-            (decision.toStatus === "unknown_outcome" ? "pending" : "not_needed"),
-          reconciliationNotes:
-            command.context.attempt.reconciliationNotes ??
-            (decision.effects.includes("note_cancel_during_reconcile")
-              ? "cancel_requested_during_attempt"
-              : null),
-        });
-        attemptId = attempt.id;
+      if (decision.effects.includes("record_attempt_outcome")) {
+        if (command.context?.existingAttemptId) {
+          // Write-once pre-HTTP: no mutar fila ni re-incrementar contador canónico.
+          attemptId = command.context.existingAttemptId;
+        } else if (command.context?.attempt) {
+          attemptCount = op.attemptCount + 1;
+          const attempt = await repo.createAttempt({
+            id: command.context.attempt.id ?? randomUUID(),
+            operationId: op.id,
+            attemptNo: attemptCount,
+            requestHash: command.context.attempt.requestHash,
+            fencingToken: command.context.attempt.fencingToken,
+            ownerId: command.context.attempt.ownerId,
+            outcome: command.context.attempt.outcome,
+            startedAt: command.context.attempt.startedAt,
+            finishedAt: command.context.attempt.finishedAt,
+            externalIdempotencyKey:
+              command.context.attempt.externalIdempotencyKey ?? null,
+            externalReference: command.context.attempt.externalReference ?? null,
+            httpStatus: command.context.attempt.httpStatus ?? null,
+            error: command.context.attempt.error ?? null,
+            reconciliationStatus:
+              command.context.attempt.reconciliationStatus ??
+              (decision.toStatus === "unknown_outcome" ? "pending" : "not_needed"),
+            reconciliationNotes:
+              command.context.attempt.reconciliationNotes ??
+              (decision.effects.includes("note_cancel_during_reconcile")
+                ? "cancel_requested_during_attempt"
+                : null),
+          });
+          attemptId = attempt.id;
+        }
       }
 
       const updated = await repo.updateStatus({

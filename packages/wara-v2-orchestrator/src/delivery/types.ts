@@ -115,16 +115,25 @@ export function evaluateDeliveryGate(
     req.mutationsDisabled === true
       ? req.intent !== "external_mutation" || req.executionMode === "dry_run"
       : false;
-  // Con mutations disabled, external_mutation nunca pasa mutation_policy como "real".
+  // Con mutations disabled, external_mutation nunca pasa como "real".
+  // intent=simulate (simulador local Fase 5/6) sí puede pasar mutation_policy.
   if (req.mutationsDisabled) {
-    checks.mutation_policy = false;
-    reasons.push("V2_MUTATIONS_DISABLED");
+    if (req.intent === "simulate") {
+      checks.mutation_policy = true;
+    } else {
+      checks.mutation_policy = false;
+      reasons.push("V2_MUTATIONS_DISABLED");
+    }
   }
 
   if (req.toolName) {
     checks.tool_authorized = req.allowToolCalls.includes(req.toolName);
     if (!checks.tool_authorized) reasons.push(`tool_not_authorized:${req.toolName}`);
-    if (COMMIT_TOOLS.has(req.toolName) && req.mutationsDisabled) {
+    if (
+      COMMIT_TOOLS.has(req.toolName) &&
+      req.mutationsDisabled &&
+      req.intent !== "simulate"
+    ) {
       checks.mutation_policy = false;
       reasons.push("commit_blocked_mutations_disabled");
     }
@@ -193,7 +202,7 @@ export function evaluateDeliveryGate(
     checks.company_unit = Boolean(companyOk && unitOk && isolationOk);
     if (!checks.company_unit) reasons.push("company_unit_isolation");
 
-    if (COMMIT_TOOLS.has(req.toolName ?? "")) {
+    if (COMMIT_TOOLS.has(req.toolName ?? "") && req.intent !== "simulate") {
       const c = req.confirmation;
       checks.confirmation_valid = Boolean(
         c &&

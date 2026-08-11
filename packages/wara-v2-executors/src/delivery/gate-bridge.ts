@@ -22,8 +22,11 @@ export function simulatorGatePass(): DeliveryGateSnapshot {
 }
 
 export function assertDeliveryGateAllowsLocalEffect(
-  gate: DeliveryGateSnapshot,
+  gate: DeliveryGateSnapshot | null | undefined,
 ): { ok: true } | { ok: false; reason: string } {
+  if (!gate) {
+    return { ok: false, reason: "delivery_gate_required" };
+  }
   if (gate.allowExternalEffect !== false) {
     return { ok: false, reason: "gate_allow_external_effect_must_be_false" };
   }

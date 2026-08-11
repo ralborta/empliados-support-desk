@@ -19,6 +19,7 @@ import { buildTurnContext, routeIntent } from "../context/build-context.js";
 import { buildPolicyDecision, assertNoModelOrderedCommit } from "../policy/engine.js";
 import { evaluateDeliveryGate } from "../delivery/gate.js";
 import type { DeliveryGateResult } from "../delivery/types.js";
+import { gatedPrepareEffect } from "../delivery/gated-prepare.js";
 import { composeResponse } from "../composer/response.js";
 import { executeStubTool, assertNoExternalSideEffects } from "../tools/stub-executor.js";
 import type { ModelAdapter } from "../model/adapters.js";
@@ -48,6 +49,15 @@ export type TurnPipelineDeps = {
   /** Mutable list used when no OperationPort — tests seed here. */
   activeOperationsBag?: OperationRecord[];
   mutationsDisabled?: boolean;
+  /**
+   * Fase 6: runtime de efectos simulados.
+   * prepareEffectOutbox SOLO vía gatedPrepareEffect (DeliveryGate).
+   */
+  effectRuntime?: {
+    prisma: import("@wara-v2/db").PrismaClient;
+    simulatorUrl: string;
+    allowedPorts: ReadonlySet<number>;
+  };
 };
 
 /**
@@ -165,6 +175,18 @@ export class TurnPipeline {
       fencingToken: String(lock.fencingToken),
       ownerId: lock.ownerId,
     });
+
+    if (this.deps.turns.beginTurn) {
+      await this.deps.turns.beginTurn({
+        id: turnId,
+        conversationId: input.conversation.conversationId,
+        idempotencyKey: input.commandId,
+        ownerId,
+        fencingToken: lock.fencingToken,
+        mode: executionMode,
+      });
+      trace("turn_begun", { turnId });
+    }
 
     try {
       const activeOps =
@@ -464,10 +486,90 @@ export class TurnPipeline {
             executionMode,
             featureFlags,
             mutationsDisabled: true,
+            toolName: "commit_odometer_update",
             operation: applied.operation,
+            confirmation: null,
+            expectedPayloadHash: applied.operation.payloadHash,
+            expectedOperationVersion: applied.operation.operationVersion,
+            activeCompanyId: input.conversation.activeCompanyId,
+            activeUnitId: input.conversation.activeUnitId,
+            proposedCompanyId: applied.operation.companyId,
+            proposedUnitId: applied.operation.unitId,
             allowToolCalls: policy.allowToolCalls,
+            lock,
+            claimedOwnerId: lock.ownerId,
+            claimedFencingToken: lock.fencingToken,
             now: context.now,
           });
+          trace("delivery_gate_after_confirm", {
+            outcome: lastDelivery.outcome,
+            reasons: lastDelivery.reasons,
+          });
+
+          // Única puerta a prepareEffectOutbox
+          if (
+            this.deps.effectRuntime &&
+            lastDelivery.outcome !== "denied" &&
+            applied.operation.status === "confirmed"
+          ) {
+            const queued = await this.deps.domain.apply({
+              commandId: `${input.commandId}:enqueue:confirm`,
+              event: "enqueue_commit",
+              operationId: applied.operation.id,
+              context: {
+                mutationsDisabled: true,
+                executionMode: "dry_run",
+                expectedPayloadHash: applied.operation.payloadHash,
+                expectedOperationVersion: applied.operation.operationVersion,
+              },
+            });
+            const idxQ = activeOps.findIndex((o) => o.id === applied.operation.id);
+            if (idxQ >= 0) activeOps[idxQ] = queued.operation;
+
+            const prep = await gatedPrepareEffect(
+              this.deps.effectRuntime.prisma,
+              {
+                intent: "simulate",
+                executionMode,
+                featureFlags,
+                mutationsDisabled: true,
+                toolName: "commit_odometer_update",
+                operation: queued.operation,
+                expectedPayloadHash: queued.operation.payloadHash,
+                expectedOperationVersion: queued.operation.operationVersion,
+                activeCompanyId: input.conversation.activeCompanyId,
+                activeUnitId: input.conversation.activeUnitId,
+                proposedCompanyId: queued.operation.companyId,
+                proposedUnitId: queued.operation.unitId,
+                allowToolCalls: policy.allowToolCalls,
+                lock,
+                claimedOwnerId: lock.ownerId,
+                claimedFencingToken: lock.fencingToken,
+                now: context.now,
+              },
+              {
+                operationId: queued.operation.id,
+                conversationId: input.conversation.conversationId,
+                channelAccountId: input.inbound.channelAccountId,
+                toolName: "commit_odometer_update",
+                ownerId: lock.ownerId,
+                lockFencingToken: lock.fencingToken,
+                simulatorUrl: this.deps.effectRuntime.simulatorUrl,
+                allowedPorts: this.deps.effectRuntime.allowedPorts,
+                turnId,
+                companyId: queued.operation.companyId,
+                unitId: queued.operation.unitId,
+                executionMode: "dry_run",
+              },
+            );
+            trace("gated_prepare", {
+              ok: prep.ok,
+              reason: prep.ok ? undefined : prep.reason,
+              outboxId: prep.ok ? prep.prepare.outboxId : undefined,
+              attemptId: prep.ok ? prep.prepare.attemptId : undefined,
+              attemptNo: prep.ok ? prep.prepare.attemptNo : undefined,
+            });
+          }
         }
 
         if (step.action === "cancel_operation") {
