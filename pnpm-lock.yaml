@@ -204,7 +204,22 @@ importers:
       '@wara-v2/contracts':
         specifier: workspace:*
         version: link:../wara-v2-contracts
+      '@wara-v2/db':
+        specifier: workspace:*
+        version: link:../wara-v2-db
+      '@wara-v2/domain':
+        specifier: workspace:*
+        version: link:../wara-v2-domain
+      '@wara-v2/executors':
+        specifier: workspace:*
+        version: link:../wara-v2-executors
     devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      tsx:
+        specifier: ^4.23.5
+        version: 4.23.5
       typescript:
         specifier: ^5
         version: 5.9.3

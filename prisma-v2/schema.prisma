@@ -346,6 +346,8 @@ model Turn {
   responsePlan         Json?         @map("response_plan")
   mode                 ExecutionMode @default(dry_run)
   outcome              TurnOutcome?
+  /// Idempotencia de comando de turno (Fase 4).
+  idempotencyKey       String?       @unique @map("idempotency_key")
   startedAt            DateTime      @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt           DateTime?     @map("finished_at") @db.Timestamptz(6)
 

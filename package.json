@@ -14,7 +14,7 @@
     "test:db": "tsx scripts/verify-pending-action-state.mjs",
     "v2:typecheck": "pnpm v2:build && pnpm --filter @wara-v2/contracts typecheck && pnpm --filter @wara-v2/db typecheck && pnpm --filter @wara-v2/domain typecheck && pnpm --filter @wara-v2/orchestrator typecheck && pnpm --filter @wara-v2/executors typecheck && pnpm --filter @wara-v2/infra typecheck && pnpm --filter @wara-v2/app typecheck",
     "v2:build": "pnpm --filter @wara-v2/contracts build && pnpm --filter @wara-v2/db build && pnpm --filter @wara-v2/domain build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/executors build && pnpm --filter @wara-v2/infra build && pnpm --filter @wara-v2/app build",
-    "v2:test": "pnpm --filter @wara-v2/contracts test && pnpm --filter @wara-v2/db test && pnpm --filter @wara-v2/domain test",
+    "v2:test": "pnpm --filter @wara-v2/contracts test && pnpm --filter @wara-v2/db test && pnpm --filter @wara-v2/domain test && pnpm --filter @wara-v2/orchestrator test",
     "sync-builderbot-maestro": "node scripts/sync-builderbot-maestro.mjs",
     "sync-builderbot-inicio-turn": "node scripts/sync-builderbot-inicio-turn.mjs",
     "prepare": "husky"

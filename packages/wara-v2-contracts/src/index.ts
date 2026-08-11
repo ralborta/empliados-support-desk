@@ -112,6 +112,7 @@ export const ChannelSchema = z.enum([
   "simulator",
   "shadow",
 ]);
+export type Channel = z.infer<typeof ChannelSchema>;
 
 export const ExecutionModeSchema = z.enum([
   "dry_run",
