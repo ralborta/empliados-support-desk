@@ -480,6 +480,8 @@ model OperationEvent {
   meta        Json             @default("{}")
   turnId      String?          @map("turn_id")
   attemptId   String?          @map("attempt_id")
+  /// Idempotencia de comando de dominio (Fase 3).
+  commandId   String?          @unique @map("command_id")
 
   operation Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
 

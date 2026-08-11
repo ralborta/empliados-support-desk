@@ -1,4 +1,4 @@
-# Prisma V2 (Fase 2)
+# Prisma V2
 
 Schema y migraciones aislados de V1 (`prisma/`). Documentación: `docs/v2/` 0.2.3 / ADR-040.
 
@@ -9,27 +9,20 @@ Schema y migraciones aislados de V1 (`prisma/`). Documentación: `docs/v2/` 0.2.
 - No aplicar sobre staging/producción/bases compartidas.
 - Mutaciones de negocio siguen desactivadas (`dry_run`).
 
+## Migraciones
+
+| Nombre | Contenido |
+|--------|-----------|
+| `20260811170000_init_v2` | Schema + ConversationLock functions + guards base |
+| `20260811183000_domain_invariants` | command_id, payload immutable, confirm 1:1, supersede bi/acyclic, attempts append-only |
+
 ## Comandos
 
 ```bash
-# Validar / formatear / generar cliente
 pnpm --filter @wara-v2/db prisma:format
 pnpm --filter @wara-v2/db prisma:validate
 pnpm --filter @wara-v2/db prisma:generate
-
-# Migrar (requiere WARA_V2_DATABASE_URL local)
-pnpm --filter @wara-v2/db prisma:migrate:deploy
-
-# Tests unit + constraints (embedded PG descartable)
+pnpm --filter @wara-v2/db prisma:migrate:deploy   # solo DB local
 pnpm --filter @wara-v2/db test
+pnpm --filter @wara-v2/domain test
 ```
-
-## SQL fuera de Prisma
-
-`sql/conversation_lock_and_guards.sql` (incluido en la migración inicial):
-
-- `wara_v2_acquire|renew|release_conversation_lock`
-- Triggers append-only (`operation_events`, `message_ingress_attempts`, `turn_traces`)
-- Protección canónica de `message_ingresses`
-- Índice parcial `operations_one_active_per_lineage`
-- Trigger de coherencia supersede + fencing monotónico
