@@ -52,3 +52,4 @@ docs/postman/*.local.postman_environment.json
 # WARA V2 build outputs
 apps/*/dist/
 packages/*/dist/
+packages/wara-v2-db/src/generated/

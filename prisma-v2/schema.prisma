@@ -1,0 +1,528 @@
+// WARA Conversacional V2 — Prisma schema (doc 0.2.3 / ADR-040)
+// Aislado de V1. Nunca apuntar a DATABASE_URL de producción.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../packages/wara-v2-db/src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("WARA_V2_DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────
+
+enum Channel {
+  whatsapp_test
+  whatsapp_pilot
+  whatsapp_production
+  simulator
+  shadow
+}
+
+enum ConversationStatus {
+  open
+  paused
+  closed
+}
+
+enum GoalId {
+  none
+  clarify
+  list_capabilities
+  resolve_units
+  unit_status
+  update_odometer
+  issue_certificate
+  create_maintenance
+  odoo_ticket
+  human_handoff
+  bot_pause
+}
+
+enum ProcessingStatus {
+  idle
+  queued
+  processing
+  error
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+  system
+}
+
+enum IngressStatus {
+  accepted
+  duplicate
+  duplicate_conflict
+  rejected
+}
+
+enum IngressAttemptResult {
+  accepted
+  duplicate
+  duplicate_conflict
+  rejected
+}
+
+enum OperationType {
+  update_odometer
+  issue_certificate
+  create_maintenance
+  odoo_ticket
+}
+
+enum OperationStatus {
+  draft
+  collecting_data
+  awaiting_confirmation
+  confirmed
+  queued
+  processing
+  succeeded
+  retryable_failed
+  permanent_failed
+  unknown_outcome
+  reconciling
+  cancel_requested
+  cancelled
+  expired
+  superseded
+  suspended
+}
+
+enum ConfirmationActorType {
+  customer
+  agent
+  system
+}
+
+enum ConfirmationStatus {
+  valid
+  invalidated
+  expired
+  superseded_binding
+  consumed
+}
+
+enum AttemptOutcome {
+  not_sent
+  sent_awaiting
+  confirmed_success
+  confirmed_failure
+  timeout_before_send
+  timeout_after_send
+  unknown_outcome
+  retryable_failed
+  permanent_failed
+}
+
+enum ReconciliationStatus {
+  not_needed
+  pending
+  resolved
+  needs_human
+}
+
+enum ExecutionMode {
+  dry_run
+  simulation
+  shadow
+  pilot
+  production
+}
+
+enum DeliveryStatus {
+  pending
+  sending
+  delivered
+  failed
+  suppressed
+  unknown_outcome
+}
+
+enum TurnOutcome {
+  ok
+  ok_simulated
+  ok_partial
+  needs_user_input
+  invalid_model_output
+  failed_model_timeout
+  failed_executor
+  failed_lock
+  failed_cas
+  deduped
+  duplicate_conflict
+  delivery_suppressed
+  unknown_outcome
+  needs_human_reconciliation
+}
+
+// ─── Identity ────────────────────────────────────────────────────────
+
+model Customer {
+  id              String    @id @default(cuid())
+  phoneE164       String    @unique @map("phone_e164")
+  displayName     String?   @map("display_name")
+  botPausedAt     DateTime? @map("bot_paused_at")
+  humanTakeoverAt DateTime? @map("human_takeover_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  memberships   CompanyMembership[]
+  conversations Conversation[]
+  operations    Operation[]
+
+  @@map("customers")
+}
+
+model CompanyMembership {
+  id             String   @id @default(cuid())
+  customerId     String   @map("customer_id")
+  companyId      String   @map("company_id")
+  role           String   @default("member")
+  waraContactRef String?  @map("wara_contact_ref")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, companyId])
+  @@index([companyId])
+  @@map("company_memberships")
+}
+
+model Conversation {
+  id               String             @id @default(cuid())
+  customerId       String             @map("customer_id")
+  channel          Channel
+  channelAccountId String             @map("channel_account_id")
+  activeCompanyId  String?            @map("active_company_id")
+  status           ConversationStatus @default(open)
+  /// Autoridad de orden inbound (ADR-019). No usar received_at.
+  nextSeq          BigInt             @default(0) @map("next_seq")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  customer   Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  state      ConversationState?
+  lock       ConversationLock?
+  messages   Message[]
+  turns      Turn[]
+  operations Operation[]
+  outbox     DeliveryOutbox[]
+  ingresses  MessageIngress[]
+
+  @@unique([customerId, channel, channelAccountId])
+  @@index([customerId])
+  @@map("conversations")
+}
+
+/// Única autoridad de lease + fencing (ADR-040). Reloj = now() de PostgreSQL.
+model ConversationLock {
+  conversationId String    @id @map("conversation_id")
+  ownerId        String?   @map("owner_id")
+  fencingToken   BigInt    @default(0) @map("fencing_token")
+  leaseExpiresAt DateTime  @default(dbgenerated("'epoch'::timestamptz")) @map("lease_expires_at") @db.Timestamptz(6)
+  acquiredAt     DateTime? @map("acquired_at") @db.Timestamptz(6)
+  renewedAt      DateTime? @map("renewed_at") @db.Timestamptz(6)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([leaseExpiresAt])
+  @@map("conversation_locks")
+}
+
+model ConversationState {
+  conversationId      String           @id @map("conversation_id")
+  stateVersion        Int              @default(0) @map("state_version")
+  goal                GoalId           @default(none)
+  activeUnitId        String?          @map("active_unit_id")
+  activeUnitLabel     String?          @map("active_unit_label")
+  activeOperationId   String?          @map("active_operation_id")
+  collectedSlots      Json             @default("{}") @map("collected_slots")
+  missingSlots        Json             @default("[]") @map("missing_slots")
+  pendingQuestion     Json?            @map("pending_question")
+  pendingConfirmation Json?            @map("pending_confirmation")
+  lastUserAct         String?          @map("last_user_act")
+  openIntents         Json             @default("[]") @map("open_intents")
+  sideQuestions       Json             @default("[]") @map("side_questions")
+  topicStack          Json             @default("[]") @map("topic_stack")
+  allowedNextActs     Json             @default("[]") @map("allowed_next_acts")
+  processingStatus    ProcessingStatus @default(idle) @map("processing_status")
+  schemaVersion       Int              @default(1) @map("schema_version")
+  expiresAt           DateTime?        @map("expires_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  activeOperation Operation?   @relation("ActiveOperation", fields: [activeOperationId], references: [id], onDelete: SetNull)
+
+  @@map("conversation_states")
+}
+
+// ─── Ingress / Messages / Turns ──────────────────────────────────────
+
+model MessageIngress {
+  provider           String        @map("provider")
+  channelAccountId   String        @map("channel_account_id")
+  externalMessageId  String        @map("external_message_id")
+  conversationId     String        @map("conversation_id")
+  inboundPayloadHash String        @map("inbound_payload_hash")
+  /// Estado del registro canónico (primer accepted no se sobrescribe).
+  ingressStatus      IngressStatus @default(accepted) @map("ingress_status")
+  firstSeenAt        DateTime      @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  associatedTurnId   String?       @map("associated_turn_id")
+  associatedSeq      BigInt?       @map("associated_seq")
+
+  conversation Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attempts     MessageIngressAttempt[]
+
+  @@id([provider, channelAccountId, externalMessageId])
+  @@index([conversationId])
+  @@map("message_ingresses")
+}
+
+model MessageIngressAttempt {
+  id                    String               @id @default(cuid())
+  provider              String               @map("provider")
+  channelAccountId      String               @map("channel_account_id")
+  externalMessageId     String               @map("external_message_id")
+  attemptedAt           DateTime             @default(now()) @map("attempted_at") @db.Timestamptz(6)
+  payloadHash           String               @map("payload_hash")
+  result                IngressAttemptResult
+  reason                String?
+  conversationId        String?              @map("conversation_id")
+  linkedIngressProvider String?              @map("linked_ingress_provider")
+  linkedIngressAccount  String?              @map("linked_ingress_account")
+  linkedIngressExtId    String?              @map("linked_ingress_ext_id")
+
+  linkedIngress MessageIngress? @relation(fields: [linkedIngressProvider, linkedIngressAccount, linkedIngressExtId], references: [provider, channelAccountId, externalMessageId], onDelete: SetNull)
+
+  @@index([provider, channelAccountId, externalMessageId])
+  @@index([attemptedAt])
+  @@map("message_ingress_attempts")
+}
+
+model Message {
+  id                String           @id @default(cuid())
+  conversationId    String           @map("conversation_id")
+  seq               BigInt?          @map("seq")
+  direction         MessageDirection
+  provider          String?
+  channelAccountId  String?          @map("channel_account_id")
+  externalMessageId String?          @map("external_message_id")
+  payloadHash       String?          @map("payload_hash")
+  bodyText          String           @map("body_text")
+  rawPayload        Json?            @map("raw_payload")
+  receivedAt        DateTime?        @map("received_at") @db.Timestamptz(6)
+  gatewayReceivedAt DateTime?        @map("gateway_received_at") @db.Timestamptz(6)
+  sentAt            DateTime?        @map("sent_at") @db.Timestamptz(6)
+  turnId            String?          @map("turn_id")
+  processingState   String?          @map("processing_state")
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  conversation  Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  turn          Turn?                   @relation(fields: [turnId], references: [id], onDelete: SetNull)
+  confirmations OperationConfirmation[]
+
+  @@unique([conversationId, seq])
+  @@index([conversationId, processingState])
+  @@map("messages")
+}
+
+model Turn {
+  id                   String        @id @default(cuid())
+  conversationId       String        @map("conversation_id")
+  inboundMessageId     String?       @map("inbound_message_id")
+  seqProcessed         BigInt?       @map("seq_processed")
+  ownerId              String?       @map("owner_id")
+  fencingToken         BigInt?       @map("fencing_token")
+  orchestratorDecision Json?         @map("orchestrator_decision")
+  policyResult         Json?         @map("policy_result")
+  responsePlan         Json?         @map("response_plan")
+  mode                 ExecutionMode @default(dry_run)
+  outcome              TurnOutcome?
+  startedAt            DateTime      @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt           DateTime?     @map("finished_at") @db.Timestamptz(6)
+
+  conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  traces       TurnTrace[]
+  outbox       DeliveryOutbox[]
+
+  @@index([conversationId, startedAt])
+  @@map("turns")
+}
+
+model TurnTrace {
+  id     String   @id @default(cuid())
+  turnId String   @map("turn_id")
+  at     DateTime @default(now()) @db.Timestamptz(6)
+  event  String
+  meta   Json     @default("{}")
+
+  turn Turn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+
+  @@index([turnId, at])
+  @@map("turn_traces")
+}
+
+// ─── Operations ──────────────────────────────────────────────────────
+
+model Operation {
+  id                   String          @id @default(cuid()) @map("id")
+  lineageId            String          @map("lineage_id")
+  operationVersion     Int             @map("operation_version")
+  type                 OperationType
+  conversationId       String          @map("conversation_id")
+  customerId           String          @map("customer_id")
+  /// Inmutable una vez creada la fila.
+  companyId            String          @map("company_id")
+  unitId               String?         @map("unit_id")
+  payload              Json
+  payloadHash          String          @map("payload_hash")
+  payloadSchemaVersion Int             @default(1) @map("payload_schema_version")
+  status               OperationStatus @default(draft)
+  requiresConfirmation Boolean         @default(true) @map("requires_confirmation")
+  confirmationId       String?         @unique @map("confirmation_id")
+  idempotencyKey       String          @unique @map("idempotency_key")
+  attemptCount         Int             @default(0) @map("attempt_count")
+  result               Json?
+  error                Json?
+  supersedesId         String?         @map("supersedes_id")
+  /// Denormalizado; coherencia bidireccional vía SQL/app (no FK Prisma dual).
+  supersededById       String?         @map("superseded_by_id")
+  cancelRequestedAt    DateTime?       @map("cancel_requested_at") @db.Timestamptz(6)
+  queuedAt             DateTime?       @map("queued_at") @db.Timestamptz(6)
+  processingAt         DateTime?       @map("processing_at") @db.Timestamptz(6)
+  finishedAt           DateTime?       @map("finished_at") @db.Timestamptz(6)
+  expiresAt            DateTime?       @map("expires_at") @db.Timestamptz(6)
+  executionMode        ExecutionMode   @default(dry_run) @map("execution_mode")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+
+  conversation Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customer     Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  confirmation OperationConfirmation? @relation("OpConfirmation", fields: [confirmationId], references: [id], onDelete: SetNull)
+  supersedes   Operation?             @relation("SupersedeChain", fields: [supersedesId], references: [id], onDelete: SetNull)
+  replacedBy   Operation[]            @relation("SupersedeChain")
+  attempts     OperationAttempt[]
+  events       OperationEvent[]
+  asActiveIn   ConversationState[]    @relation("ActiveOperation")
+
+  @@unique([lineageId, operationVersion])
+  @@unique([supersedesId])
+  @@index([conversationId, status])
+  @@index([customerId, companyId])
+  @@index([lineageId])
+  @@index([status, expiresAt])
+  @@index([supersededById])
+  @@map("operations")
+}
+
+model OperationConfirmation {
+  id                    String                @id @default(cuid())
+  operationId           String                @map("operation_id")
+  operationVersion      Int                   @map("operation_version")
+  payloadHash           String                @map("payload_hash")
+  confirmationMessageId String                @map("confirmation_message_id")
+  actorType             ConfirmationActorType @map("actor_type")
+  actorId               String                @map("actor_id")
+  confirmedAt           DateTime              @map("confirmed_at") @db.Timestamptz(6)
+  expiresAt             DateTime              @map("expires_at") @db.Timestamptz(6)
+  status                ConfirmationStatus    @default(valid)
+  invalidationReason    String?               @map("invalidation_reason")
+  createdAt             DateTime              @default(now()) @map("created_at")
+
+  confirmationMessage Message    @relation(fields: [confirmationMessageId], references: [id], onDelete: Restrict)
+  boundOperation      Operation? @relation("OpConfirmation")
+
+  @@index([operationId, status])
+  @@map("operation_confirmations")
+}
+
+model OperationAttempt {
+  id                     String               @id @default(cuid())
+  operationId            String               @map("operation_id")
+  attemptNo              Int                  @map("attempt_no")
+  requestHash            String               @map("request_hash")
+  externalIdempotencyKey String?              @map("external_idempotency_key")
+  externalReference      String?              @map("external_reference")
+  startedAt              DateTime             @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt             DateTime?            @map("finished_at") @db.Timestamptz(6)
+  fencingToken           BigInt               @map("fencing_token")
+  ownerId                String               @map("owner_id")
+  outcome                AttemptOutcome
+  httpStatus             Int?                 @map("http_status")
+  error                  Json?
+  reconciliationStatus   ReconciliationStatus @default(not_needed) @map("reconciliation_status")
+  reconciliationNotes    String?              @map("reconciliation_notes")
+
+  operation Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@unique([operationId, attemptNo])
+  @@index([outcome, reconciliationStatus])
+  @@map("operation_attempts")
+}
+
+model OperationEvent {
+  id          String           @id @default(cuid())
+  operationId String           @map("operation_id")
+  at          DateTime         @default(now()) @db.Timestamptz(6)
+  fromStatus  OperationStatus? @map("from_status")
+  toStatus    OperationStatus? @map("to_status")
+  event       String
+  actor       String?
+  meta        Json             @default("{}")
+  turnId      String?          @map("turn_id")
+  attemptId   String?          @map("attempt_id")
+
+  operation Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@index([operationId, at])
+  @@map("operation_events")
+}
+
+// ─── Delivery Outbox ─────────────────────────────────────────────────
+
+model DeliveryOutbox {
+  id                 String         @id @default(cuid())
+  turnId             String         @map("turn_id")
+  conversationId     String         @map("conversation_id")
+  channel            Channel
+  channelAccountId   String         @map("channel_account_id")
+  payload            Json
+  payloadHash        String         @map("payload_hash")
+  status             DeliveryStatus @default(pending)
+  attemptCount       Int            @default(0) @map("attempt_count")
+  externalDeliveryId String?        @map("external_delivery_id")
+  idempotencyKey     String         @unique @map("idempotency_key")
+  lastError          String?        @map("last_error")
+  executionMode      ExecutionMode  @default(dry_run) @map("execution_mode")
+  suppressReason     String?        @map("suppress_reason")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+  deliveredAt        DateTime?      @map("delivered_at") @db.Timestamptz(6)
+
+  turn         Turn         @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([conversationId])
+  @@map("delivery_outbox")
+}
+
+// ─── Feature flags (mínimo) ──────────────────────────────────────────
+
+model FeatureFlag {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("feature_flags")
+}
