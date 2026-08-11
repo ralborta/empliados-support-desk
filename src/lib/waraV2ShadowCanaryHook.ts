@@ -1,11 +1,11 @@
 /**
- * Hook V1 → copia shadow 10A (fire-and-forget HTTP loopback).
- * Fail-closed: sin flags no hace nada. Si el API V2 no corre, el fetch falla
- * en silencio y V1 continúa.
- *
- * Activación canary real requiere autorización explícita adicional.
+ * Hook V1 → shadow canary 10A (fire-and-forget).
+ * Preferencia: in-process (Vercel/Next). Fallback HTTP loopback local.
+ * Fail-closed sin flags. Cero impacto en respuesta V1.
  */
 import { createHash } from "node:crypto";
+import { waitUntil } from "@vercel/functions";
+import { runShadowCanaryInProcess } from "@/lib/shadowCanaryInProcess";
 
 function isTrue(v: string | undefined): boolean {
   return v === "true" || v === "1";
@@ -15,7 +15,10 @@ function normalizeE164(raw: string): string | null {
   const digits = raw.replace(/[^\d+]/g, "");
   if (digits.startsWith("+") && /^\+[1-9]\d{6,14}$/.test(digits)) return digits;
   const only = raw.replace(/\D/g, "");
-  if (only.length >= 10 && only.length <= 15) return `+${only}`;
+  if (only.length >= 10 && only.length <= 15) {
+    // AR mobile often stored as 54911...
+    return only.startsWith("54") ? `+${only}` : `+${only}`;
+  }
   return null;
 }
 
@@ -50,36 +53,53 @@ export function maybeEnqueueWaraV2ShadowCopy(input: V1ShadowHookInput): void {
 
     const tenant =
       process.env.WARA_V2_SHADOW_TENANT?.trim() || "tenant_internal_ops";
-    const port = process.env.WARA_V2_SHADOW_PORT || "8787";
-    const host = process.env.WARA_V2_BIND_HOST || "127.0.0.1";
-    if (host !== "127.0.0.1" && host !== "localhost") return;
 
-    const url = `http://${host}:${port}/v2/shadow-canary`;
-    const body = JSON.stringify({
-      phone_e164: phone,
-      tenant_id: tenant,
-      text,
-      message_id: messageId,
-      has_attachment: false,
-      v1_outcome_sanitized: input.v1OutcomeCode
-        ? { outcome_code: input.v1OutcomeCode }
-        : undefined,
-    });
+    const job = async () => {
+      try {
+        await runShadowCanaryInProcess({
+          phone_e164: phone,
+          text,
+          message_id: messageId,
+          tenant_id: tenant,
+          has_attachment: false,
+          v1_outcome_code: input.v1OutcomeCode,
+        });
+      } catch {
+        /* V1 isolation */
+      }
 
-    // No await — aislamiento total de V1
-    setImmediate(() => {
-      void fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-correlation-id": messageId,
-        },
-        body,
-        signal: AbortSignal.timeout(2000),
-      }).catch(() => {
-        /* V2 caído / lento: ignorar */
+      // Fallback opcional a API loopback (dev local)
+      const host = process.env.WARA_V2_BIND_HOST || "127.0.0.1";
+      if (host !== "127.0.0.1" && host !== "localhost") return;
+      const port = process.env.WARA_V2_SHADOW_PORT || "8787";
+      try {
+        await fetch(`http://${host}:${port}/v2/shadow-canary`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-correlation-id": messageId,
+          },
+          body: JSON.stringify({
+            phone_e164: phone,
+            tenant_id: tenant,
+            text,
+            message_id: `${messageId}_http`,
+            has_attachment: false,
+          }),
+          signal: AbortSignal.timeout(1500),
+        });
+      } catch {
+        /* API local ausente: ok */
+      }
+    };
+
+    try {
+      waitUntil(job());
+    } catch {
+      setImmediate(() => {
+        void job();
       });
-    });
+    }
   } catch {
     /* V1 isolation */
   }
