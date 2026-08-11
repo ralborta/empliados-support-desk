@@ -13,6 +13,8 @@ import {
   parseCanonicalIngress,
   CANONICAL_INGRESS_SCHEMA_VERSION,
   tenantScopedKey,
+  parseLlmProposal,
+  LLM_PROPOSAL_CONTRACT_VERSION,
 } from "./index.js";
 
 const validDecision = {
@@ -140,6 +142,39 @@ describe("CanonicalIngressSchema", () => {
       parseCanonicalIngress({
         ...base(),
         metadata: { evil: "x" },
+      }),
+    );
+  });
+});
+
+describe("LlmProposalSchema", () => {
+  it("acepta propuesta v1 y rechaza commit/tools", () => {
+    const p = parseLlmProposal({
+      contract_version: LLM_PROPOSAL_CONTRACT_VERSION,
+      proposed_intent: "clarify",
+      proposed_act_type: "unclear",
+      extracted_fields: {},
+      missing_fields: ["unit"],
+      confidence: 0.5,
+      proposed_user_reply: "¿Qué unidad?",
+      needs_clarification: true,
+      evidence_refs: [],
+      reason_codes: ["needs_clarification"],
+    });
+    assert.equal(p.contract_version, 1);
+    assert.throws(() =>
+      parseLlmProposal({
+        contract_version: 1,
+        proposed_intent: "update_odometer",
+        proposed_act_type: "new_request",
+        extracted_fields: {},
+        missing_fields: [],
+        confidence: 0.9,
+        proposed_user_reply: "x",
+        needs_clarification: false,
+        evidence_refs: [],
+        reason_codes: ["ok"],
+        commit: true,
       }),
     );
   });

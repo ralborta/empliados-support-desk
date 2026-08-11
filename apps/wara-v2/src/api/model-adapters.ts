@@ -36,18 +36,19 @@ export class TimeoutModelAdapter implements ModelAdapter {
 }
 
 /**
- * Stub estructural para futuro LLM — no importable como activo.
- * No realiza HTTP, no lee API keys, no se habilita por env simple.
+ * Stub Fase 7 — permanece deshabilitado.
+ * El adaptador real Fase 8 es OpenAiChatAdapter (activación deliberada).
  */
 export const FutureLlmAdapterStub = {
   name: "future-llm-stub",
   enabled: false as const,
-  note: "Fase 8+ only with explicit authorization; no SDK bundled",
+  note: "Disabled; use apps/wara-v2/src/llm/openai-adapter.ts with Phase 8 flags",
 } as const;
 
+/** Para API Fase 7: real model debe permanecer off. */
 export function assertNoRealModel(): void {
   if (process.env.REAL_MODEL_ENABLED === "true") {
-    throw new Error("REAL_MODEL_ENABLED_forbidden_in_phase7");
+    throw new Error("REAL_MODEL_ENABLED_forbidden_in_phase7_api");
   }
   if (FutureLlmAdapterStub.enabled) {
     throw new Error("future_llm_must_stay_disabled");

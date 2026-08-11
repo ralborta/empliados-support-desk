@@ -1,30 +1,19 @@
 # Diferencias WARA V2 vs documentación 0.2.3
 
-## Fase 6 (alineado)
+## Fase 6–7 (previas)
 
-- Runtime E2E local: TurnPipeline + dominio + Prisma + locks PG + DeliveryGate + outbox/dispatcher/reconciler.
-- Attempt write-once creado **antes** del HTTP, atómico con outbox.
-- Contador canónico: `operations.attempt_count` (= attempt_no); outbox espeja con trigger.
-- DeliveryGate única puerta a `prepareEffectOutbox` (`gatedPrepareEffect`).
-- Locks vía `wara_v2_acquire/renew/release_conversation_lock` (sin in-memory en runtime).
+- Runtime E2E, DeliveryGate, attempt canónico, API loopback shadow/replay.
+- Matriz 30/30 Fase 6 + auth fake.
 
-## Fase 7 (añadido)
+## Fase 8 (añadido)
 
-- API HTTP loopback (`127.0.0.1`) con shadow/replay.
-- Contrato canónico de ingress (`CanonicalIngressSchema` v1).
-- Auth fake Bearer + scopes por tenant.
-- Flags fail-closed: `SHADOW_MODE`, `DELIVERY_ENABLED=false`, `REAL_*=false`.
-- Matriz 30/30 Fase 6 + tests individuales de gaps (`fase6-coverage.pg.test.ts`).
-- Adaptadores modelo/canal locales; Future LLM stub deshabilitado (no SDK).
+- Puerto LLM + contrato `LlmProposal` v1.
+- Único adaptador real: OpenAI `gpt-4o-mini` vía `https://api.openai.com/v1/chat/completions` (sin SDK).
+- Activación fail-closed (flags + proveedor + modelo + endpoint fijo + DB descartable + loopback + SYNTHETIC_DATA_ONLY).
+- `FakeModelAdapter` sigue siendo el default del runtime.
+- Dataset sintético versionado + evaluador + suite de seguridad.
+- Eval live opcional: `WARA_V2_LLM_LIVE=true`.
 
-## Extensiones / fuera de alcance
+## Fuera de alcance
 
-| Ítem | Nota |
-|------|------|
-| FakeModelAdapter | Sin LLM real |
-| Workers locales | outbox + reconcile vía API controlada |
-| Redis | No usado |
-| LLM / BBC / WhatsApp / OAuth | Fuera de Fase 7 |
-| Push / producción / V1 | Intactos |
-
-Sin push, sin producción, sin servicios externos reales. Fase 8 bloqueada.
+- Canales reales, WhatsApp/BBC/WARA/Odoo, datos reales, Fase 9, push, producción.

@@ -559,3 +559,12 @@ export {
   type CanonicalIngress,
 } from "./ingress.js";
 
+export {
+  LLM_PROPOSAL_CONTRACT_VERSION,
+  LlmProposalSchema,
+  LlmReasonCodeSchema,
+  parseLlmProposal,
+  assertNoForbiddenLlmKeys,
+  type LlmProposal,
+} from "./llm-proposal.js";
+
