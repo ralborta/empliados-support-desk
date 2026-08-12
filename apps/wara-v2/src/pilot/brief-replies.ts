@@ -113,6 +113,79 @@ export function parseNumericListSelection(text: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+const ORDINALS: Record<string, number> = {
+  primera: 1,
+  primer: 1,
+  uno: 1,
+  segunda: 2,
+  segundo: 2,
+  dos: 2,
+  tercera: 3,
+  tercero: 3,
+  tres: 3,
+  cuarta: 4,
+  cuarto: 4,
+  cuatro: 4,
+};
+
+/** "la segunda", "el tercero" — índice ordinal en listado vigente. */
+export function parseOrdinalListSelection(text: string): number | null {
+  const n = norm(text);
+  const m = n.match(/^(?:la|el)\s+(primera|primer|segunda|segundo|tercera|tercero|cuarta|cuarto|uno|dos|tres|cuatro)$/);
+  if (!m?.[1]) return null;
+  return ORDINALS[m[1]] ?? null;
+}
+
+export type ContextualListRef = {
+  kind: "selected" | "previous" | "next" | "first_on_page" | "last_on_page";
+  wantsStatus: boolean;
+};
+
+/** Referencias al listado o unidad activa: "esa", "la de arriba", "donde está esa?". */
+export function parseContextualListRef(
+  text: string,
+  ctx: { hasListing: boolean; hasSelected: boolean },
+): ContextualListRef | null {
+  const raw = String(text ?? "").trim();
+  const n = norm(raw);
+  if (!n || n.length > 80) return null;
+
+  const wantsStatus =
+    /\b(donde\s+esta|donde\s+está|como\s+esta|como\s+está|estado|gps|ubicacion|ubicación)\b/.test(n);
+
+  if (/^(esa|ese|esa\s+misma|la\s+esa|el\s+ese)$/.test(n)) {
+    if (!ctx.hasSelected && !ctx.hasListing) return null;
+    return { kind: "selected", wantsStatus };
+  }
+
+  if (/^(la\s+de\s+arriba|la\s+primera\s+de\s+la\s+lista|la\s+primera)$/.test(n) && ctx.hasListing) {
+    return { kind: "first_on_page", wantsStatus };
+  }
+
+  if (/^(la\s+ultima|la\s+última|la\s+de\s+abajo)$/.test(n) && ctx.hasListing) {
+    return { kind: "last_on_page", wantsStatus };
+  }
+
+  if (/^(la\s+anterior|la\s+de\s+antes|la\s+previa)$/.test(n) && ctx.hasListing) {
+    return { kind: "previous", wantsStatus };
+  }
+
+  if (/^(la\s+siguiente|la\s+proxima|la\s+próxima|la\s+otra)$/.test(n) && (ctx.hasListing || ctx.hasSelected)) {
+    return { kind: "next", wantsStatus };
+  }
+
+  if (wantsStatus && /^(donde\s+esta\s+esa|donde\s+está\s+esa|y\s+esa\??|y\s+la\s+otra\??)$/.test(n)) {
+    if (!ctx.hasSelected && !ctx.hasListing) return null;
+    return { kind: "selected", wantsStatus: true };
+  }
+
+  if (/^esa\s+no,?\s+la\s+siguiente$/.test(n) && ctx.hasListing) {
+    return { kind: "next", wantsStatus: false };
+  }
+
+  return null;
+}
+
 export function looksLikeFleetListContinuation(text: string): boolean {
   const n = norm(text);
   if (!n) return false;

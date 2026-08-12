@@ -7,6 +7,7 @@ import { looksLikeBriefConfirmation } from "./brief-replies.js";
 const NON_PLATE_PREFIX_WORDS = new Set([
   "que", "los", "por", "con", "una", "uno", "eso", "esa", "ese", "el", "la", "las",
   "unos", "unas", "de", "del", "al", "en", "para", "a", "no", "nop", "nope", "nel", "nah", "veo",
+  "si", "sii", "sip", "dale", "ok", "okey", "listo", "yes",
 ]);
 
 const EMPIEZA_RE = "emp(?:ie|i|e)za(?:n)?";
@@ -93,7 +94,7 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
 
   const laQue = norm.match(
     new RegExp(
-      `\\b(?:la|el|esa|ese)\\s+(?:q|que)\\s+(?:${EMPIEZA_RE}|${COMIENZA_RE})\\s+(?:con\\s+)?([a-z0-9]{2,6})\\b`,
+      `\\b(?:la|el|esa|ese|alguna|algunas|algun|algún)?\\s*(?:patente|patentes|unidad|unidades|dominio|dominios)?\\s*(?:q|que)\\s+(?:${EMPIEZA_RE}|${COMIENZA_RE}|arran(?:que|ca|can)|inici(?:a|an))\\s+(?:con|en\\s+)?([a-z0-9]{2,6})\\b`,
     ),
   );
   if (laQue?.[1] && !NON_PLATE_PREFIX_WORDS.has(laQue[1])) {
@@ -119,12 +120,55 @@ export function extractPlatePrefixFromMessage(rawText: string | undefined | null
     if (!NON_PLATE_PREFIX_WORDS.has(hint.toLowerCase()) && !isPlausibleVehiclePlate(hint)) return hint;
   }
 
-  const paraPatente = norm.match(/\bpatente\b(?:\s+(?:con|de|del|q|que))?\s+([a-z0-9]{2,6})\b/i);
+  const paraPatente = norm.match(/\bpatentes?\b(?:\s+(?:con|de|del|q|que|en))?\s+([a-z0-9]{2,6})\b/i);
   if (paraPatente?.[1] && !NON_PLATE_PREFIX_WORDS.has(paraPatente[1])) {
     return paraPatente[1].replace(/\s+/g, "").toUpperCase();
   }
 
+  const buscarPatentes = norm.match(
+    /\b(?:buscame|busca|buscar|mostrame|mostrar|listame|listar|dame|pasame)\b[^.]{0,40}?\bpatentes?\b[^.]{0,20}?\b([a-z0-9]{2,6})\b/,
+  );
+  if (buscarPatentes?.[1] && !NON_PLATE_PREFIX_WORDS.has(buscarPatentes[1])) {
+    return buscarPatentes[1].replace(/\s+/g, "").toUpperCase();
+  }
+
   return extractPlatePrefixAfterFuzzyStartsVerb(norm);
+}
+
+/** Fragmento contenido en patente: "las que tengan 815", "contiene AA82". */
+export function extractPlateContainsFromMessage(rawText: string | undefined | null): string | null {
+  const norm = String(rawText ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return null;
+
+  const tengan = norm.match(
+    /\b(?:tengan|tenga|contienen|contenga|contiene|incluyan|incluye)\s+(?:el|la|los|las)?\s*([a-z0-9]{2,8})\b/,
+  );
+  if (tengan?.[1] && !NON_PLATE_PREFIX_WORDS.has(tengan[1])) {
+    return tengan[1].replace(/\s+/g, "").toUpperCase();
+  }
+
+  const queTengan = norm.match(/\bque\s+tengan\s+([a-z0-9]{2,8})\b/);
+  if (queTengan?.[1] && !NON_PLATE_PREFIX_WORDS.has(queTengan[1])) {
+    return queTengan[1].replace(/\s+/g, "").toUpperCase();
+  }
+
+  return null;
+}
+
+export function filterUnitsByPlateContains<T extends { patente?: string | null; unidad?: string | null }>(
+  units: T[],
+  fragment: string,
+): T[] {
+  const f = fragment.replace(/\s+/g, "").toUpperCase();
+  if (f.length < 2) return [];
+  return units.filter((u) => {
+    const unitPlate = normalizeLoosePlate(u.patente || u.unidad || "");
+    return unitPlate.includes(f);
+  });
 }
 
 export function extractPlateSuffixFromMessage(rawText: string | undefined | null): string | null {
@@ -154,6 +198,7 @@ export function extractPartialPlateToken(text: string): string | null {
   const stripped = text.trim().replace(/^(la|el|esa|ese)\s+/i, "");
   const compact = stripped.replace(/[\s\-_.]+/g, "").toUpperCase();
   if (detectLoosePlate(text)) return null;
+  if (/^\d{1,3}$/.test(compact)) return null;
   if (compact.length < 2 || compact.length > 6) return null;
   if (!/^[A-Z0-9]{2,6}$/.test(compact)) return null;
   if (NON_PLATE_PREFIX_WORDS.has(compact.toLowerCase())) return null;
@@ -187,7 +232,7 @@ export function filterUnitsByPlateSuffix<T extends { patente?: string | null; un
 }
 
 export function extractUnitSearchHint(text: string): {
-  kind: "plate" | "prefix" | "suffix" | "partial";
+  kind: "plate" | "prefix" | "suffix" | "partial" | "contains";
   value: string;
 } | null {
   const plate = detectLoosePlate(text);
@@ -196,6 +241,8 @@ export function extractUnitSearchHint(text: string): {
   if (prefix) return { kind: "prefix", value: prefix };
   const suffix = extractPlateSuffixFromMessage(text);
   if (suffix) return { kind: "suffix", value: suffix };
+  const contains = extractPlateContainsFromMessage(text);
+  if (contains) return { kind: "contains", value: contains };
   const partial = extractPartialPlateToken(text);
   if (partial) return { kind: "partial", value: partial };
   return null;

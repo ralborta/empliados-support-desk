@@ -35,6 +35,7 @@ import {
   looksLikePlatesOnlyRequest,
   looksLikeResumeTramite,
   parseNumericListSelection,
+  parseOrdinalListSelection,
 } from "./brief-replies.js";
 import {
   buildPaginatedListing,
@@ -68,6 +69,13 @@ import { looksLikeTicketIntent } from "./ticket-core.js";
 import { escalateToTicket, tryResolveTicketTurn } from "./ticket-turn.js";
 import { detectLoosePlate } from "./plates.js";
 import { extractUnitSearchHint } from "./plate-prefix.js";
+import {
+  hasSemanticUnitSearchSignal,
+  recordListingPick,
+  resolveSemanticUnitSearch,
+} from "./unit-search-turn.js";
+import { looksLikeOperationalServiceIntent } from "./service-catalog.js";
+import { interpretSemanticTurn } from "./semantic-turn.js";
 import {
   buildCompanyMenuMessage,
   buildCompanyResetMessage,
@@ -351,50 +359,28 @@ async function resolveUnitForGps(
 
   const explicit = hasExplicitUnitReference(text);
 
-  if (explicit) {
-    const byPlate = resolveUnitByPlateFromFleet(fleet.units, text);
-    if (byPlate.kind === "one") {
-      state.selectedUnit = toFleetUnitRef(byPlate.unit);
+  if (explicit || looksLikeGpsReportRequest(text) || hasSemanticUnitSearchSignal(text, state)) {
+    const outcome = await resolveSemanticUnitSearch({
+      state,
+      text,
+      fleet: fleet.units,
+      useLlm: false,
+    });
+    if (outcome.kind === "unit") {
+      state.selectedUnit = toFleetUnitRef(outcome.unit);
       state.pendingConfirmation = null;
-      return { kind: "unit", unit: byPlate.unit };
+      return { kind: "unit", unit: outcome.unit };
     }
-    if (byPlate.kind === "many") {
-      const listing = buildPaginatedListing({
-        units: byPlate.units,
-        page: 1,
-        kind: "search_results",
-        searchLabel: detectLoosePlate(text) ?? text.trim(),
-      });
-      const msg = formatPaginatedFleetMessage(listing, state.companyName);
-      showListing(state, listing, msg);
-      return { kind: "reply", message: msg };
+    if (outcome.kind === "listing") {
+      showListing(state, outcome.listing, outcome.message);
+      return { kind: "reply", message: outcome.message };
     }
-
-    const byName = resolveUnitByNameFromFleet(fleet.units, text);
-    if (byName.kind === "one") {
-      state.selectedUnit = toFleetUnitRef(byName.unit);
-      state.pendingConfirmation = null;
-      return { kind: "unit", unit: byName.unit };
-    }
-    if (byName.kind === "many") {
-      const listing = buildPaginatedListing({
-        units: byName.units,
-        page: 1,
-        kind: "search_results",
-        searchLabel: extractExplicitUnitToken(text) ?? text.trim(),
-      });
-      const msg = formatPaginatedFleetMessage(listing, state.companyName);
-      showListing(state, listing, msg);
-      return { kind: "reply", message: msg };
-    }
-
-    const token = extractExplicitUnitToken(text);
-    if (token) {
+    if (outcome.kind === "not_found") {
       state.pendingConfirmation = null;
       return {
         kind: "reply",
         message:
-          `No encontré «${token}» en las unidades de ${state.companyName || "tu empresa"} según WARA. ` +
+          `${outcome.message} ` +
           `No uso la unidad anterior. Decime la patente exacta o pedime la lista.`,
       };
     }
@@ -524,6 +510,15 @@ export async function resolveOperationalTurn(input: {
 
   await ensureSessionToken(state, env);
 
+  // Interpretación semántica temprana (servicios antes que búsqueda de unidades).
+  const semantic = interpretSemanticTurn(text, {
+    lastListing: state.lastListing,
+    selectedUnit: state.selectedUnit,
+    listingFresh: isListingFresh(state.lastListing),
+    activeTramite: state.activeTramite,
+    lastAgentQuestion: state.lastAgentQuestion,
+  });
+
   if (looksLikeResumeTramite(text) && state.suspendedTramite) {
     resumeSuspendedTramite(state);
     savePilotConversationState(state);
@@ -533,6 +528,55 @@ export async function resolveOperationalTurn(input: {
         ? `Retomamos con ${state.selectedUnit.label}. ¿Seguimos?`
         : "Retomamos el trámite anterior. ¿Qué necesitás?");
     return { kind: "reply", message: resumeMsg, state };
+  }
+
+  // Nueva intención de servicio explícita — antes de seguir un trámite de campos
+  // y antes de cualquier búsqueda de unidad (evita «No encontré un certificado»).
+  if (
+    semantic.intent === "certificate" ||
+    (looksLikeCertificateIntent(text) &&
+      state.activeTramite !== "certificate_issue" &&
+      state.pendingConfirmation?.action !== "certificate_issue")
+  ) {
+    if (
+      state.activeTramite !== "none" &&
+      state.activeTramite !== "certificate_issue" &&
+      state.activeTramite !== "list_units" &&
+      state.activeTramite !== "unit_gps_report"
+    ) {
+      suspendTramiteForSideQuery(state);
+    }
+    const fleetCert = await fetchFleet(state, env);
+    if (!fleetCert.ok) {
+      savePilotConversationState(state);
+      return { kind: "reply", message: fleetCert.error, state };
+    }
+    const cert = await tryResolveCertificateTurn({
+      state,
+      text,
+      messageId: input.messageId,
+      env,
+      fleetUnits: fleetCert.units,
+    });
+    if (cert.kind === "gps_side") {
+      const activeUnitRef =
+        state.certificateDraft?.unit ??
+        state.pendingConfirmation?.unit ??
+        state.selectedUnit;
+      suspendTramiteForSideQuery(state);
+      const side = await handleGpsSideQueryDuringTramite({
+        state,
+        text: cert.text,
+        fleetUnits: fleetCert.units,
+        activeUnitRef,
+      });
+      savePilotConversationState(state);
+      return { kind: "reply", message: side.message, state };
+    }
+    if (cert.kind === "reply") {
+      savePilotConversationState(state);
+      return { kind: "reply", message: cert.message, state };
+    }
   }
 
   if (looksLikeChangeUnit(text)) {
@@ -789,7 +833,7 @@ export async function resolveOperationalTurn(input: {
     };
   }
 
-  const numericIdx = parseNumericListSelection(text);
+  const numericIdx = parseNumericListSelection(text) ?? parseOrdinalListSelection(text);
   if (numericIdx != null && isListingFresh(state.lastListing)) {
     const picked = resolveUnitFromListing(state.lastListing!, numericIdx);
     if (!picked) {
@@ -815,6 +859,7 @@ export async function resolveOperationalTurn(input: {
       };
     }
     const msg = askGpsConfirmation(state, unit);
+    recordListingPick(state, numericIdx);
     savePilotConversationState(state);
     return { kind: "reply", message: msg, state };
   }
@@ -909,36 +954,63 @@ export async function resolveOperationalTurn(input: {
       }
     }
   }
-  if (searchToken && !looksLikeGreetingOnly(text) && !state.suspendedTramite) {
+  if (
+    (searchToken || hasSemanticUnitSearchSignal(text, state)) &&
+    !looksLikeGreetingOnly(text) &&
+    !state.suspendedTramite &&
+    !looksLikeBriefConfirmation(text) &&
+    !looksLikeOperationalServiceIntent(text) &&
+    semantic.intent !== "certificate" &&
+    semantic.intent !== "odometer_update" &&
+    semantic.intent !== "horometer_update" &&
+    semantic.intent !== "maintenance" &&
+    semantic.intent !== "ticket" &&
+    semantic.intent !== "human_handoff"
+  ) {
     const fleet = await fetchFleet(state, env);
     if (!fleet.ok) {
       savePilotConversationState(state);
       return { kind: "reply", message: fleet.error, state };
     }
-    const byName = resolveUnitByNameFromFleet(fleet.units, text);
-    if (byName.kind === "one") {
-      const msg = askGpsConfirmation(state, byName.unit);
-      savePilotConversationState(state);
-      return { kind: "reply", message: msg, state };
-    }
-    if (byName.kind === "many") {
-      const msg = await handleListUnits(state, env, 1, "search_results", searchToken, byName.units);
-      savePilotConversationState(state);
-      return { kind: "reply", message: msg, state };
-    }
-    savePilotConversationState(state);
-    const hint = extractUnitSearchHint(text);
-    const notFoundMsg =
-      hint?.kind === "prefix" || hint?.kind === "partial"
-        ? `No encontré unidades que empiecen con «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Probá con más letras de la patente o pedime la lista.`
-        : hint?.kind === "suffix"
-          ? `No encontré unidades que terminen en «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Decime más de la patente o pedime la lista.`
-          : `No encontré «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Decime la patente exacta o pedime la lista.`;
-    return {
-      kind: "reply",
-      message: notFoundMsg,
+    const outcome = await resolveSemanticUnitSearch({
       state,
-    };
+      text,
+      fleet: fleet.units,
+      useLlm: false,
+    });
+    if (outcome.kind === "unit") {
+      const msg = askGpsConfirmation(state, outcome.unit);
+      savePilotConversationState(state);
+      return { kind: "reply", message: msg, state };
+    }
+    if (outcome.kind === "listing") {
+      showListing(state, outcome.listing, outcome.message);
+      savePilotConversationState(state);
+      return { kind: "reply", message: outcome.message, state };
+    }
+    if (outcome.kind === "not_found") {
+      savePilotConversationState(state);
+      return { kind: "reply", message: outcome.message, state };
+    }
+    if (searchToken) {
+      const byName = resolveUnitByNameFromFleet(fleet.units, text);
+      if (byName.kind === "one") {
+        const msg = askGpsConfirmation(state, byName.unit);
+        savePilotConversationState(state);
+        return { kind: "reply", message: msg, state };
+      }
+      if (byName.kind === "many") {
+        const msg = await handleListUnits(state, env, 1, "search_results", searchToken, byName.units);
+        savePilotConversationState(state);
+        return { kind: "reply", message: msg, state };
+      }
+      savePilotConversationState(state);
+      return {
+        kind: "reply",
+        message: `No encontré «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Decime la patente exacta o pedime la lista.`,
+        state,
+      };
+    }
   }
 
   savePilotConversationState(state);

@@ -83,6 +83,8 @@ export type PilotConversationState = {
   step: string;
   selectedUnit: PilotSelectedUnit | null;
   lastListing: PaginatedFleetListing | null;
+  /** Último índice elegido del listado (para «la siguiente» / «la anterior»). */
+  lastListingPickIndex: number | null;
   pendingConfirmation: PilotPendingConfirmation | null;
   lastAgentQuestion: string | null;
   suspendedTramite: PilotSuspendedTramite | null;
@@ -142,6 +144,7 @@ export function createEmptyPilotState(input: {
     step: "idle",
     selectedUnit: null,
     lastListing: null,
+    lastListingPickIndex: null,
     pendingConfirmation: null,
     lastAgentQuestion: null,
     suspendedTramite: null,
@@ -221,6 +224,7 @@ function normalizeLoadedState(state: PilotConversationState): PilotConversationS
     certificateOperations: state.certificateOperations ?? {},
     ticketDraft: state.ticketDraft ?? null,
     ticketOperations: state.ticketOperations ?? {},
+    lastListingPickIndex: state.lastListingPickIndex ?? null,
     suspendedTramite: state.suspendedTramite
       ? {
           ...state.suspendedTramite,

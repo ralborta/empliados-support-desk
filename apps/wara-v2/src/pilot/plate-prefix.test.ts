@@ -35,6 +35,10 @@ describe("plate-prefix V2", () => {
     assert.equal(extractPartialPlateToken("AA815"), "AA815");
   });
 
+  it("alguna patente que arranque en ad", () => {
+    assert.equal(extractPlatePrefixFromMessage("alguna patente que arranque en ad"), "AD");
+  });
+
   it("filtra unidades por prefijo AD", () => {
     const matches = filterUnitsByPlatePrefix(UNITS, "AD");
     assert.equal(matches.length, 2);

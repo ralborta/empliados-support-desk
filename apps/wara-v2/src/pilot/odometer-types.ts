@@ -19,6 +19,10 @@ export type OdometerDraft = {
   valuePrevious: number | null;
   fechaLecturaIso: string | null;
   fechaDisplay: string | null;
+  /** Día parcial YYYY-MM-DD (sin hora aún). */
+  fechaDatePart: string | null;
+  /** Hora parcial HH:mm:ss (sin día aún). */
+  fechaTimePart: string | null;
   step: OdometerDraftStep;
 };
 

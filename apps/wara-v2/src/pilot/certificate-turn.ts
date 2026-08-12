@@ -57,8 +57,8 @@ function emptyDraft(): CertificateDraft {
 
 function buildConfirmQuestion(unitLabel: string): string {
   return (
-    `Voy a solicitar el certificado de cobertura en WARA:\n` +
-    `• ${unitLabel}\n\n` +
+    `Puedo solicitar el certificado de cobertura de ${unitLabel}.\n` +
+    `¿Querés que lo genere?\n\n` +
     `Si está correcto, respondé CONFIRMO.`
   );
 }
@@ -197,7 +197,9 @@ export async function tryResolveCertificateTurn(input: {
     state.certificateDraft = emptyDraft();
     state.pendingConfirmation = null;
     state.activeTramite = "none";
-    return { kind: "reply", message: "Cancelé el trámite de certificado.", state };
+    state.step = "idle";
+    // Conservar selectedUnit — cancelar solo el certificado.
+    return { kind: "reply", message: "Cancelé el trámite de certificado. La unidad sigue activa. ¿En qué más te ayudo?", state };
   }
 
   if (

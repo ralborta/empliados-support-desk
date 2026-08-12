@@ -3,6 +3,20 @@
  */
 import type { MeterType } from "./odometer-types.js";
 import { detectLoosePlate } from "./plates.js";
+import { looksLikeOdometerOrHorometerService } from "./service-catalog.js";
+import {
+  formatFechaDisplay as formatFechaDisplayV1,
+  parseFechaFromText,
+} from "./odometro-fecha.js";
+
+export {
+  parseFechaFromText,
+  fechaLecturaTieneHora,
+  mergeFechaConHoraSuelt,
+  looksLikeClockTimeOnlyMessage,
+  isFechaEnFuturo,
+  getCalendarContext,
+} from "./odometro-fecha.js";
 
 function norm(text: string): string {
   return text
@@ -28,12 +42,13 @@ export function looksLikeOdometerIntent(text: string | undefined | null): boolea
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (detectLoosePlate(raw)) return false;
+  if (looksLikeOdometerOrHorometerService(raw)) return true;
   const t = norm(raw);
-  if (/^(el\s+|la\s+|del\s+)?(od[oó]metro|hor[oó]metro|kilometraje)s?$/.test(t.replace(/[!?.¡¿]+/g, ""))) {
+  if (/^(el\s+|la\s+|del\s+)?(odometro|horometro|kilometraje)s?$/.test(t.replace(/[!?.¡¿]+/g, ""))) {
     return true;
   }
-  if (/\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)) {
-    if (/\b(qu[eé]\s+es|como\s+funciona|para\s+qu[eé])\b/.test(t)) return false;
+  if (/\b(odometro|horometro|kilometraje|kilometros)\b/.test(t)) {
+    if (/\b(que\s+es|como\s+funciona|para\s+que)\b/.test(t)) return false;
     return true;
   }
   return false;
@@ -75,22 +90,39 @@ export function extractNumericReading(text: string, meterType?: MeterType | null
   return Math.round(n);
 }
 
-export function parseFechaLectura(text: string): string | null {
-  const raw = String(text ?? "").trim();
-  const m = raw.match(
-    /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
-  );
-  if (!m) return null;
-  const [, d, mo, y, h, mi, s] = m;
-  const year = y.length === 2 ? `20${y}` : y;
-  return `${year}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}T${(h ?? "00").padStart(2, "0")}:${(mi ?? "00").padStart(2, "0")}:${(s ?? "00").padStart(2, "0")}`;
+const DEFAULT_TZ = "America/Argentina/Buenos_Aires";
+
+/** Parseo de fecha/hora natural (port V1). Devuelve naive local YYYY-MM-DDTHH:mm:ss. */
+export function parseFechaLectura(
+  text: string,
+  timezone = DEFAULT_TZ,
+): string | null {
+  return parseFechaFromText(text, timezone) ?? null;
 }
 
 export function formatFechaDisplay(iso: string): string {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  return formatFechaDisplayV1(iso) ?? iso;
+}
+
+/** "2026-08-09T00:00:00" → "domingo 9 de agosto". */
+export function formatFechaDiaLargo(iso: string, timezone = DEFAULT_TZ): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return iso;
-  const [, y, mo, d, h, mi] = m;
-  return `${d}/${mo}/${y} ${h}:${mi}`;
+  const [, y, mo, d] = m;
+  try {
+    const weekday = new Intl.DateTimeFormat("es-AR", {
+      timeZone: timezone,
+      weekday: "long",
+    }).format(new Date(`${y}-${mo}-${d}T12:00:00`));
+    const longDate = new Intl.DateTimeFormat("es-AR", {
+      timeZone: timezone,
+      day: "numeric",
+      month: "long",
+    }).format(new Date(`${y}-${mo}-${d}T12:00:00`));
+    return `${weekday} ${longDate}`;
+  } catch {
+    return `${d}/${mo}/${y}`;
+  }
 }
 
 /** Convierte fecha local naive AR → ISO UTC para WARA (misma regla que V1). */

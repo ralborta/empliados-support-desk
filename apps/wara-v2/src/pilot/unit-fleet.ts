@@ -346,10 +346,19 @@ export function extractSearchToken(text: string): string | null {
     return text.trim().replace(/^(la|el|esa|ese)\s+/i, "").replace(/[\s\-_.]+/g, "").toUpperCase();
   }
   const cleaned = text
-    .replace(/\b(reporte|informe|estado|gps|de|la|el|unidad|unidades|quiero|dame|pasame|decime)\b/gi, " ")
+    .replace(
+      /\b(reporte|informe|estado|gps|de|la|el|unidad|unidades|quiero|dame|pasame|decime|certificado|cobertura|poliza|comprobante|constancia|odometro|horometro|mantenimiento)\b/gi,
+      " ",
+    )
     .trim();
-  if (cleaned.length >= 2 && cleaned.length <= 40) return cleaned;
-  return null;
+  if (!cleaned || cleaned.length < 2 || cleaned.length > 40) return null;
+  const normClean = cleaned
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/^(un|una|el|la|los|las)$/.test(normClean)) return null;
+  if (/\b(certificado|cobertura|poliza|comprobante|odometro|horometro)\b/.test(normClean)) return null;
+  return cleaned;
 }
 
 export function isListingFresh(listing: PaginatedFleetListing | null | undefined): boolean {

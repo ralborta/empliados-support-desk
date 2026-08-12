@@ -14,12 +14,16 @@ import {
   detectMeterTypeFromText,
   extractNumericReading,
   formatCurrentReading,
+  formatFechaDiaLargo,
   formatFechaDisplay,
+  fechaLecturaTieneHora,
   looksLikeCancelOdometer,
+  looksLikeClockTimeOnlyMessage,
   looksLikeExplicitConfirm,
   looksLikeExplicitReject,
   looksLikeOdometerIntent,
   looksLikeOdometerSideInfoQuery,
+  mergeFechaConHoraSuelt,
   parseFechaLectura,
   validateNoRetroceso,
   validateReading,
@@ -67,8 +71,41 @@ function emptyDraft(): OdometerDraft {
     valuePrevious: null,
     fechaLecturaIso: null,
     fechaDisplay: null,
+    fechaDatePart: null,
+    fechaTimePart: null,
     step: "idle",
   };
+}
+
+function finishFechaAndConfirm(
+  state: PilotConversationState,
+  draft: OdometerDraft,
+  fecha: string,
+): OdometerTurnResult {
+  draft.fechaLecturaIso = fecha;
+  draft.fechaDisplay = formatFechaDisplay(fecha);
+  draft.fechaDatePart = fecha.slice(0, 10);
+  draft.fechaTimePart = fecha.slice(11, 19);
+  draft.step = "await_confirm";
+  if (!draft.unit || draft.valueNew == null || !draft.meterType) {
+    return { kind: "reply", message: "Faltan datos del trámite.", state };
+  }
+  const q = buildConfirmQuestion(
+    draft.unit,
+    draft.meterType,
+    draft.valueNew,
+    draft.fechaDisplay,
+    draft.valuePrevious,
+  );
+  const opId = createOperationId();
+  state.pendingConfirmation = {
+    action: "odometer_write",
+    unit: draft.unit,
+    askedAt: new Date().toISOString(),
+    question: q,
+    operationId: opId,
+  };
+  return { kind: "reply", message: q, state };
 }
 
 function previousReading(unit: WaraUnidadEstado, meterType: MeterType): number | null {
@@ -372,36 +409,66 @@ export async function tryResolveOdometerTurn(input: {
   }
 
   if (draft.step === "await_fecha") {
-    const fecha = parseFechaLectura(text);
+    const TZ = "America/Argentina/Buenos_Aires";
+
+    // Hora suelta + día ya guardado
+    if (
+      (draft.fechaDatePart || (draft.fechaLecturaIso && !fechaLecturaTieneHora(draft.fechaLecturaIso))) &&
+      looksLikeClockTimeOnlyMessage(text)
+    ) {
+      const base =
+        draft.fechaLecturaIso ??
+        (draft.fechaDatePart ? `${draft.fechaDatePart}T00:00:00` : null);
+      const merged = mergeFechaConHoraSuelt(base, text, TZ);
+      if (merged) return finishFechaAndConfirm(state, draft, merged);
+    }
+
+    // Día relativo/numérico + hora ya guardada
+    if (draft.fechaTimePart && !looksLikeClockTimeOnlyMessage(text)) {
+      const parsed = parseFechaLectura(text, TZ);
+      if (parsed) {
+        const day = parsed.slice(0, 10);
+        const combined = `${day}T${draft.fechaTimePart}`;
+        return finishFechaAndConfirm(state, draft, combined);
+      }
+    }
+
+    const fecha = parseFechaLectura(text, TZ);
     if (!fecha) {
       return {
         kind: "reply",
-        message: "Necesito fecha y hora juntas (ej. 06/08/2026 15:50). Sin eso no registro.",
+        message:
+          "No entendí la fecha. Decime el día (ej. el domingo, ayer, 09/08/2026) y la hora (ej. 11:30).",
         state,
       };
     }
-    draft.fechaLecturaIso = fecha;
-    draft.fechaDisplay = formatFechaDisplay(fecha);
-    draft.step = "await_confirm";
-    if (!draft.unit || draft.valueNew == null || !draft.meterType) {
-      return { kind: "reply", message: "Faltan datos del trámite.", state };
+
+    // Solo hora (parse asume hoy) → pedir día
+    if (looksLikeClockTimeOnlyMessage(text)) {
+      draft.fechaTimePart = fecha.slice(11, 19);
+      draft.fechaLecturaIso = null;
+      draft.fechaDisplay = null;
+      return {
+        kind: "reply",
+        message: `Perfecto, ${fecha.slice(11, 16)}. ¿De qué día es la lectura?`,
+        state,
+      };
     }
-    const q = buildConfirmQuestion(
-      draft.unit,
-      draft.meterType,
-      draft.valueNew,
-      draft.fechaDisplay,
-      draft.valuePrevious,
-    );
-    const opId = createOperationId();
-    state.pendingConfirmation = {
-      action: "odometer_write",
-      unit: draft.unit,
-      askedAt: new Date().toISOString(),
-      question: q,
-      operationId: opId,
-    };
-    return { kind: "reply", message: q, state };
+
+    // Solo día sin hora → pedir hora
+    if (!fechaLecturaTieneHora(fecha, text)) {
+      draft.fechaDatePart = fecha.slice(0, 10);
+      draft.fechaLecturaIso = fecha;
+      draft.fechaDisplay = formatFechaDisplay(fecha);
+      const diaLargo = formatFechaDiaLargo(fecha, TZ);
+      return {
+        kind: "reply",
+        message: `Perfecto, ${diaLargo}. ¿A qué hora?`,
+        state,
+      };
+    }
+
+    return finishFechaAndConfirm(state, draft, fecha);
   }
 
   return { kind: "none" };

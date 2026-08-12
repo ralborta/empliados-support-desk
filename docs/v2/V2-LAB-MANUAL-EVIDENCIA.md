@@ -78,15 +78,34 @@ En lab live, tras llegar a pantalla de CONFIRMO, la consulta lateral `donde esta
 
 **Cobertura del escenario resume/GPS/corregir:** verde en `odometer-parity.test.ts` (mock, `ALLOW_EXTERNAL_MUTATIONS=false`).
 
-### 3.4 Persistencia tras reinicio — **no confirmada en live**
+### 3.4 Persistencia tras reinicio — OK (live, post-fix)
 
-Se creó estado mid-flow (`odometerStep: await_fecha`, unidad `AA 175 BY`) y se reinició `v2-shadow`.
+Tras fix `32d5340` / `6fd18dc`:
 
-Tras reinicio: `GET /api/pilot/state` → `{ "state": null }`.
+| Paso | Resultado |
+|------|-----------|
+| Mid-flow (`await_confirm`, AA 175 BY, 130500 km) | State en disco (`persistence.fileExists: true`) |
+| Restart v2-shadow | `conversationsRecovered: 1` |
+| GET /api/pilot/state | Unidad, trámite, pending CONFIRMO recuperados |
+| CONFIRMO | `[Lab] Registro simulado OK — Sin escritura real.` |
+| Segundo CONFIRMO | `Esa operación ya fue procesada (idempotencia).` |
 
-**Hipótesis:** volumen `/data/pilot-state` no está rehidratando al arranque (revisar mount en EasyPanel) o el proceso no invoca `ensurePilotStateLoaded()` antes del primer GET.
+**Causa raíz:** `configurePilotStatePersistence` no se invocaba al arranque del proceso HTTP; `flushToDisk` tragaba errores en silencio; cada turno reseteaba `loadedFromDisk` vía `configure` idempotente ausente.
 
-**Cobertura alternativa:** persistencia en disco verde en `odometer-parity.test.ts` (mock JSON en temp dir).
+### 3.5 GPS lateral — OK (live, post-fix `6fd18dc`)
+
+Transcripción live:
+
+```
+→ ¿dónde está el vehículo?
+← Funcionamiento normal: la unidad AA 175 BY (M900-071) … Decime «continuamos».
+→ continuamos
+← Voy a registrar en WARA: … CONFIRMO.
+→ CONFIRMO
+← [Lab] Registro simulado OK — Sin escritura real.
+```
+
+**Causa raíz:** consulta GPS con odómetro en `await_confirm` devolvía `none` en `odometer-turn` y caía al buscador genérico; además «vehículo» se trataba como token de unidad explícita.
 
 ---
 

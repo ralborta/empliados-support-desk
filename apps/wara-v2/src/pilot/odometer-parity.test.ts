@@ -154,6 +154,8 @@ describe("odómetro/horómetro V2 — lab", () => {
       valuePrevious: 120000,
       fechaLecturaIso: null,
       fechaDisplay: null,
+      fechaDatePart: null,
+      fechaTimePart: null,
       step: "await_value",
     };
     st.activeTramite = "odometer_update";
@@ -172,6 +174,8 @@ describe("odómetro/horómetro V2 — lab", () => {
       valuePrevious: 120000,
       fechaLecturaIso: null,
       fechaDisplay: null,
+      fechaDatePart: null,
+      fechaTimePart: null,
       step: "await_value",
     };
     st.activeTramite = "odometer_update";
