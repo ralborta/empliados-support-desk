@@ -48,8 +48,7 @@ export async function findTicketByV2OperationId(
   });
   for (const msg of recent) {
     const raw = msg.rawPayload as Record<string, unknown> | null;
-    const bridge = raw?.v2Bridge as V2BridgePayload | undefined;
-    if (bridge?.operationId === operationId && msg.ticket) {
+    if (raw?.v2Bridge === true && raw.operationId === operationId && msg.ticket) {
       return { ticketId: msg.ticket.id, ticketCode: msg.ticket.code };
     }
   }
@@ -141,8 +140,9 @@ export function extractLatestV2OperationFromMessages(
 ): V2BridgePayload | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const raw = messages[i]?.rawPayload as Record<string, unknown> | null;
-    const bridge = raw?.v2Bridge as V2BridgePayload | undefined;
-    if (bridge?.v2Bridge && bridge.operationId) return bridge;
+    if (raw?.v2Bridge === true && typeof raw.operationId === "string") {
+      return raw as unknown as V2BridgePayload;
+    }
   }
   return null;
 }
