@@ -58,6 +58,7 @@ import { findCompletedByConfirmMessageId as findOdometerByConfirm, findMostRecen
 import { findMaintenanceByConfirmMessageId } from "./maintenance-operation.js";
 import { findCertificateByConfirmMessageId } from "./certificate-operation.js";
 import { findTicketByConfirmMessageId } from "./ticket-operation.js";
+import { isV2BlockedByHumanTakeover, HUMAN_TAKEOVER_SILENT } from "./human-takeover-guard.js";
 import { tryResolveOdometerTurn } from "./odometer-turn.js";
 import { looksLikeMaintenanceIntent } from "./maintenance-core.js";
 import { tryResolveMaintenanceTurn } from "./maintenance-turn.js";
@@ -442,6 +443,10 @@ export async function resolveOperationalTurn(input: {
   const tenantId = input.tenantId;
 
   await hydratePilotStateFromPrisma(tenantId, input.phone);
+
+  if (await isV2BlockedByHumanTakeover({ phone: input.phone, tenantId, env })) {
+    return { kind: "reply", message: HUMAN_TAKEOVER_SILENT, state: getPilotConversationState(tenantId, input.phone) ?? createEmptyPilotState({ tenantId, phone: input.phone }) };
+  }
 
   let state =
     getPilotConversationState(tenantId, input.phone) ??

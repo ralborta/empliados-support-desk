@@ -30,7 +30,7 @@ import { createOdooHelpdeskTicketDryRun } from "./odoo-ticket-client.js";
 import { priorityLabel } from "./maintenance-core.js";
 import { isPilotDryRun } from "./write-gates.js";
 import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
-import { createV1LocalTicketIfEnabled } from "./v1-local-ticket-bridge.js";
+import { invokeLabTicketBridge } from "./pilot-bridge-sync.js";
 
 export type TicketTurnResult =
   | { kind: "none" }
@@ -223,17 +223,26 @@ async function executeTicket(
     env,
   });
 
-  if (result.ok && !dryRun) {
-    void createV1LocalTicketIfEnabled(
-      {
-        customerId: state.phone,
-        contactName: state.companyName ?? state.customerName ?? "Cliente",
-        title: subject,
-        messageText: description,
+  if (result.ok) {
+    await invokeLabTicketBridge({
+      state,
+      operationId,
+      payloadHash: record.payloadHash,
+      tramite: "odoo_ticket",
+      operationStatus: record.status,
+      title: subject,
+      messageText: description,
+      derivationReason: draft.reason,
+      externalResult: record.odooTicketRef ?? String(record.odooTicketId ?? ""),
+      unknownOutcome: /timeout_after_send|unknown/i.test(record.resultSummary ?? ""),
+      collectedData: {
+        category: draft.category,
         priority: draft.priority,
+        odooDryRun: dryRun,
       },
+      priority: draft.priority === "URGENT" ? "URGENT" : draft.priority === "HIGH" ? "HIGH" : draft.priority === "LOW" ? "LOW" : "NORMAL",
       env,
-    );
+    });
   }
 
   state.ticketDraft = null;

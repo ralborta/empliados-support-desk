@@ -122,20 +122,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: "Cliente sin teléfono registrado" }, { status: 400 });
     }
 
-    // Enviar mensaje a BuilderBot → WhatsApp
-    try {
-      await sendWhatsAppMessage({
-        number: ticket.customer.phone,
-        message: text.trim() || " ",
-        mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
-      });
-      console.log(`[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`);
-    } catch (error: any) {
-      console.error(`[Messages] ❌ Error al enviar mensaje:`, error);
-      return NextResponse.json({ 
-        error: "No se pudo enviar el mensaje al cliente", 
-        details: error.message 
-      }, { status: 500 });
+    // Enviar mensaje a BuilderBot → WhatsApp (suprimido en V2 LAB)
+    const labSuppress =
+      process.env.WARA_V2_LAB_MODE === "true" || process.env.DELIVERY_ENABLED === "false";
+    if (!labSuppress) {
+      try {
+        await sendWhatsAppMessage({
+          number: ticket.customer.phone,
+          message: text.trim() || " ",
+          mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
+        });
+        console.log(`[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`);
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[Messages] ❌ Error al enviar mensaje:`, error);
+        return NextResponse.json({
+          error: "No se pudo enviar el mensaje al cliente",
+          details: errMsg,
+        }, { status: 500 });
+      }
+    } else {
+      console.log(`[Messages] LAB: mensaje humano simulado (sin WhatsApp) → ${ticket.customer.phone}`);
     }
   }
 

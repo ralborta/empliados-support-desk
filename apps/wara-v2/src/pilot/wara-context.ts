@@ -74,6 +74,9 @@ export async function resolvePilotWaraTurn(input: {
   });
 
   if (result.kind === "reply" || result.kind === "duplicate") {
+    if (!result.message.trim()) {
+      return { kind: "reply", message: "" };
+    }
     return { kind: "reply", message: result.message };
   }
 

@@ -12,6 +12,7 @@ import { ConversationSummary } from "@/components/tickets/ConversationSummary";
 import { AssignAgentDropdown } from "@/components/tickets/AssignAgentDropdown";
 import { MessageAttachments } from "@/components/tickets/MessageAttachments";
 import { QuickActionsPanel } from "@/components/tickets/QuickActionsPanel";
+import { V2OperationPanel } from "@/components/tickets/V2OperationPanel";
 import { resolutionModeLabels } from "@/lib/wara";
 import { formatDateTimeAR } from "@/lib/formatDateTimeAR";
 import { usePollWhenVisible } from "@/lib/hooks/usePollWhenVisible";
@@ -266,6 +267,7 @@ export function TicketDetailView({
                 </div>
               )}
             </div>
+            <V2OperationPanel ticketId={ticket.id} />
             <ConversationSummary
               ticketId={ticket.id}
               initialSummary={ticket.aiSummary}

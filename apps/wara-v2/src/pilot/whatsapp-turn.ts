@@ -255,6 +255,9 @@ export async function handlePilotWhatsAppTurn(input: {
   });
 
   if (waraResolution.kind === "reply") {
+    if (!waraResolution.message.trim()) {
+      return { status: 200, body: silent({ skipResponse_s: "true" }) };
+    }
     return { status: 200, body: reply(waraResolution.message) };
   }
 
