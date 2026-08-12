@@ -5,50 +5,91 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WARA V2 — Chat laboratorio</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { max-width: 960px; margin: 0 auto; padding: 1rem; }
-    h1 { font-size: 1.25rem; margin-bottom: 0.25rem; }
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, sans-serif;
+      --wara: #4a0e1c;
+    }
+    body { max-width: 960px; margin: 0 auto; padding: 1rem; background: #f8fafc; }
+    h1 { font-size: 1.25rem; margin-bottom: 0.25rem; color: var(--wara); }
     .muted { opacity: 0.75; font-size: 0.9rem; }
+    .banner {
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.85rem;
+      margin: 0.75rem 0;
+    }
     .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; align-items: center; }
-    input[type="password"], input[type="text"] { flex: 1; min-width: 200px; padding: 0.5rem; }
-    button { padding: 0.5rem 0.75rem; cursor: pointer; }
-    #log { border: 1px solid #8884; border-radius: 8px; padding: 0.75rem; min-height: 280px; max-height: 50vh; overflow: auto; white-space: pre-wrap; }
-    .user { color: #2563eb; margin: 0.5rem 0; }
+    input[type="password"], input[type="text"] { flex: 1; min-width: 200px; padding: 0.5rem; border-radius: 6px; border: 1px solid #cbd5e1; }
+    button { padding: 0.5rem 0.75rem; cursor: pointer; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; }
+    button.primary { background: var(--wara); color: #fff; border-color: var(--wara); }
+    button.primary:hover { background: #6b1428; }
+    #log {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.75rem;
+      min-height: 300px;
+      max-height: 52vh;
+      overflow: auto;
+      white-space: pre-wrap;
+      background: #fff;
+    }
+    .user { color: #1d4ed8; margin: 0.5rem 0; }
     .bot { color: #15803d; margin: 0.5rem 0; }
+    .sys { color: #64748b; margin: 0.35rem 0; font-size: 0.85rem; }
     .err { color: #b91c1c; margin: 0.5rem 0; }
-    #state { font-family: ui-monospace, monospace; font-size: 0.8rem; background: #8881; padding: 0.75rem; border-radius: 8px; overflow: auto; max-height: 240px; }
-    .badge { display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px; background: #8883; font-size: 0.75rem; }
+    #state { font-family: ui-monospace, monospace; font-size: 0.75rem; background: #f1f5f9; padding: 0.75rem; border-radius: 8px; overflow: auto; max-height: 200px; }
+    .badge { display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px; background: #4a0e1c22; font-size: 0.75rem; color: var(--wara); }
+    .phone-emulate { font-family: ui-monospace, monospace; font-weight: 600; color: var(--wara); }
+    .shortcuts button { font-size: 0.8rem; }
+    a.lab-link { color: var(--wara); font-weight: 600; }
   </style>
 </head>
 <body>
   <h1>WARA V2 — Chat de laboratorio</h1>
-  <p class="muted">Sin WhatsApp real · Solo allowlist · DELIVERY_ENABLED=false</p>
+  <p class="muted">Emula WhatsApp sin enviar mensajes reales · DELIVERY_ENABLED=false</p>
 
-  <div class="row">
+  <div class="banner">
+    Este chat simula los mensajes de WhatsApp del número
+    <span class="phone-emulate" id="phoneDisplay">__LAB_PHONE__</span>.
+    Los tickets derivados aparecen en
+    <a class="lab-link" id="frontLabLink" href="__LAB_FRONT_URL__/tickets" target="_blank" rel="noopener">front-v2-lab</a>.
+  </div>
+
+  <div class="row" id="keyRow">
     <label>API key <input type="password" id="apiKey" placeholder="WARA_V2_TURN_API_KEY" autocomplete="off" /></label>
     <button type="button" id="saveKey">Guardar clave</button>
     <span class="badge" id="status">sin clave</span>
   </div>
 
-  <div class="row">
-    <span class="muted">Teléfono canary: <strong id="phone">+5491133788190</strong></span>
+  <div class="row shortcuts">
+    <button type="button" data-msg="listas de unidades">1. Listas unidades</button>
+    <button type="button" data-msg="2">2. Empresa 2</button>
+    <button type="button" data-msg="1">3. Unidad 1</button>
+    <button type="button" data-msg="necesito hablar con un asesor">4. Pedir asesor</button>
+    <button type="button" data-msg="CONFIRMO">5. CONFIRMO</button>
     <button type="button" id="newChat">Nueva conversación</button>
-    <button type="button" id="refreshState">Actualizar estado</button>
+    <button type="button" id="refreshState">Estado</button>
   </div>
 
   <div id="log" aria-live="polite"></div>
 
   <div class="row">
-    <input type="text" id="input" placeholder="Escribí un mensaje…" autocomplete="off" />
-    <button type="button" id="send">Enviar</button>
+    <input type="text" id="input" placeholder="Escribí un mensaje como si fuera WhatsApp…" autocomplete="off" />
+    <button type="button" id="send" class="primary">Enviar</button>
   </div>
 
-  <h2>Estado conversacional (diagnóstico)</h2>
+  <h2 style="font-size:1rem;color:#475569">Estado conversacional</h2>
   <pre id="state">—</pre>
 
   <script>
-    const PHONE = "+5491133788190";
-    const TENANT = "tenant_internal_ops";
+    const PHONE = "__LAB_PHONE__";
+    const TENANT = "__LAB_TENANT__";
+    const FRONT_LAB = "__LAB_FRONT_URL__";
+    const AUTO_AUTH = __LAB_AUTO_AUTH__;
+    const PRESET_KEY = "__LAB_API_KEY__";
     const KEY_STORAGE = "wara_v2_lab_api_key";
 
     const el = (id) => document.getElementById(id);
@@ -62,7 +103,7 @@
     }
 
     function getKey() {
-      return sessionStorage.getItem(KEY_STORAGE) || "";
+      return sessionStorage.getItem(KEY_STORAGE) || PRESET_KEY || "";
     }
 
     function setStatus(text, ok) {
@@ -74,7 +115,11 @@
     function append(role, text) {
       const div = document.createElement("div");
       div.className = role;
-      div.textContent = (role === "user" ? "Vos: " : role === "bot" ? "V2: " : "") + text;
+      const prefix =
+        role === "user" ? "Vos (" + PHONE + "): " :
+        role === "bot" ? "Atilio V2: " :
+        role === "sys" ? "· " : "";
+      div.textContent = prefix + text;
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
     }
@@ -91,7 +136,7 @@
         },
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || res.statusText);
+      if (!res.ok) throw new Error(body.error || body.message || res.statusText);
       return body;
     }
 
@@ -111,25 +156,26 @@
         body: JSON.stringify({ phone: PHONE, tenantId: TENANT }),
       });
       log.innerHTML = "";
-      append("bot", "Conversación reiniciada.");
+      append("sys", "Conversación reiniciada para " + PHONE);
       await refreshState();
     }
 
-    async function sendMessage() {
-      const text = input.value.trim();
+    async function sendMessage(textOverride) {
+      const text = (textOverride ?? input.value).trim();
       if (!text) return;
-      input.value = "";
+      if (!textOverride) input.value = "";
       const messageId = uuid();
-      append("user", text + "  [id:" + messageId.slice(0, 8) + "…]");
+      append("user", text);
       try {
         const data = await api("/api/whatsapp/turn", {
           method: "POST",
           body: JSON.stringify({ phone: PHONE, message: text, messageId }),
         });
         if (data.message) append("bot", data.message);
+        else if (data.skipResponse_s === "true") append("sys", "(V2 en silencio — takeover humano activo)");
         else if (data.error) append("err", data.error);
-        else append("bot", "(sin respuesta — skip)");
-        setStatus("ok", true);
+        else append("sys", "(sin respuesta)");
+        setStatus("conectado", true);
         await refreshState();
       } catch (e) {
         append("err", e.message);
@@ -141,21 +187,35 @@
       const v = apiKeyInput.value.trim();
       if (!v) return;
       sessionStorage.setItem(KEY_STORAGE, v);
-      setStatus("clave guardada (sesión)", true);
+      setStatus("clave guardada", true);
     };
 
-    el("send").onclick = sendMessage;
+    el("send").onclick = () => sendMessage();
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendMessage();
     });
     el("newChat").onclick = () => resetChat().catch((e) => append("err", e.message));
     el("refreshState").onclick = () => refreshState();
 
-    const saved = getKey();
-    if (saved) {
-      apiKeyInput.value = saved;
-      setStatus("clave en sesión", true);
+    document.querySelectorAll("[data-msg]").forEach((btn) => {
+      btn.addEventListener("click", () => sendMessage(btn.getAttribute("data-msg")));
+    });
+
+    if (AUTO_AUTH && PRESET_KEY) {
+      apiKeyInput.value = "••••••••";
+      el("keyRow").style.display = "none";
+      setStatus("listo — emula " + PHONE, true);
+      append("sys", "Chat configurado. Emulando WhatsApp de " + PHONE + ". Usá los atajos o escribí abajo.");
+    } else {
+      const saved = getKey();
+      if (saved) {
+        apiKeyInput.value = saved;
+        setStatus("clave en sesión", true);
+      }
     }
+
+    el("phoneDisplay").textContent = PHONE;
+    el("frontLabLink").href = FRONT_LAB + "/tickets";
     refreshState();
   </script>
 </body>

@@ -22,6 +22,7 @@ import {
   initPilotStatePersistenceFromEnv,
   sanitizeStateForLab,
 } from "../pilot/conversation-state.js";
+import { getLabChatConfig, renderLabChatHtml } from "../pilot/lab-chat-config.js";
 
 export type ShadowCanaryServer = {
   port: number;
@@ -147,8 +148,20 @@ export async function startShadowCanaryServer(opts?: {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/lab/config") {
+        const cfg = getLabChatConfig();
+        respondJson(200, {
+          phone: cfg.phone,
+          tenant: cfg.tenant,
+          frontLabUrl: cfg.frontLabUrl,
+          autoAuth: cfg.autoAuth,
+        });
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/lab/chat") {
-        respondHtml(200, readFileSync(LAB_CHAT_PATH, "utf8"));
+        const html = renderLabChatHtml(readFileSync(LAB_CHAT_PATH, "utf8"));
+        respondHtml(200, html);
         return;
       }
 
