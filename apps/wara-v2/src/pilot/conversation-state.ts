@@ -14,6 +14,9 @@ import type { WaraEmpresaContact } from "./wara-types.js";
 import type { FleetUnitRef, PaginatedFleetListing } from "./unit-fleet.js";
 import { SESSION_TTL_MS } from "./unit-fleet.js";
 import type { OdometerDraft, OdometerOperationRecord } from "./odometer-types.js";
+import type { CertificateDraft, CertificateOperationRecord } from "./certificate-types.js";
+import type { MaintenanceDraft, MaintenanceOperationRecord } from "./maintenance-types.js";
+import type { TicketDraft, TicketOperationRecord } from "./ticket-types.js";
 
 export type PilotTramiteType =
   | "none"
@@ -21,12 +24,21 @@ export type PilotTramiteType =
   | "unit_gps_report"
   | "search_unit"
   | "await_confirm"
-  | "odometer_update";
+  | "odometer_update"
+  | "maintenance_consult"
+  | "maintenance_request"
+  | "certificate_issue"
+  | "odoo_ticket";
 
 export type PilotSelectedUnit = FleetUnitRef;
 
 export type PilotPendingConfirmation = {
-  action: "gps_report" | "odometer_write";
+  action:
+    | "gps_report"
+    | "odometer_write"
+    | "maintenance_write"
+    | "certificate_issue"
+    | "odoo_ticket_create";
   unit: PilotSelectedUnit;
   askedAt: string;
   question: string;
@@ -40,6 +52,9 @@ export type PilotSuspendedTramite = {
   lastListing: PaginatedFleetListing | null;
   pendingConfirmation: PilotPendingConfirmation | null;
   odometerDraft: OdometerDraft | null;
+  maintenanceDraft: MaintenanceDraft | null;
+  certificateDraft: CertificateDraft | null;
+  ticketDraft: TicketDraft | null;
   savedAt: string;
 };
 
@@ -72,6 +87,12 @@ export type PilotConversationState = {
   processedMessageIds: Record<string, string>;
   odometerDraft: OdometerDraft | null;
   odometerOperations: Record<string, OdometerOperationRecord>;
+  maintenanceDraft: MaintenanceDraft | null;
+  maintenanceOperations: Record<string, MaintenanceOperationRecord>;
+  certificateDraft: CertificateDraft | null;
+  certificateOperations: Record<string, CertificateOperationRecord>;
+  ticketDraft: TicketDraft | null;
+  ticketOperations: Record<string, TicketOperationRecord>;
 };
 
 const memory = new Map<string, PilotConversationState>();
@@ -124,6 +145,12 @@ export function createEmptyPilotState(input: {
     processedMessageIds: {},
     odometerDraft: null,
     odometerOperations: {},
+    maintenanceDraft: null,
+    maintenanceOperations: {},
+    certificateDraft: null,
+    certificateOperations: {},
+    ticketDraft: null,
+    ticketOperations: {},
   };
 }
 
@@ -177,6 +204,27 @@ export function getPilotPersistenceDiagnostics(): PilotPersistenceDiagnostics {
   };
 }
 
+function normalizeLoadedState(state: PilotConversationState): PilotConversationState {
+  return {
+    ...state,
+    odometerOperations: state.odometerOperations ?? {},
+    maintenanceDraft: state.maintenanceDraft ?? null,
+    maintenanceOperations: state.maintenanceOperations ?? {},
+    certificateDraft: state.certificateDraft ?? null,
+    certificateOperations: state.certificateOperations ?? {},
+    ticketDraft: state.ticketDraft ?? null,
+    ticketOperations: state.ticketOperations ?? {},
+    suspendedTramite: state.suspendedTramite
+      ? {
+          ...state.suspendedTramite,
+          maintenanceDraft: state.suspendedTramite.maintenanceDraft ?? null,
+          certificateDraft: state.suspendedTramite.certificateDraft ?? null,
+          ticketDraft: state.suspendedTramite.ticketDraft ?? null,
+        }
+      : null,
+  };
+}
+
 function ensureLoaded(): void {
   if (loadedFromDisk || !persistencePath) {
     loadedFromDisk = true;
@@ -190,7 +238,7 @@ function ensureLoaded(): void {
     const parsed = JSON.parse(raw) as Record<string, PilotConversationState>;
     for (const [k, v] of Object.entries(parsed)) {
       if (v?.schemaVersion === 1) {
-        memory.set(k, v);
+        memory.set(k, normalizeLoadedState(v));
         conversationsRecovered += 1;
       }
     }
@@ -286,41 +334,104 @@ export function clearOperationalTramite(state: PilotConversationState): void {
   state.lastAgentQuestion = null;
   state.suspendedTramite = null;
   state.odometerDraft = null;
+  state.maintenanceDraft = null;
+  state.certificateDraft = null;
+  state.ticketDraft = null;
 }
 
 export function suspendCurrentTramite(state: PilotConversationState): void {
-  if (state.activeTramite === "none" && !state.pendingConfirmation && !state.odometerDraft) return;
+  if (
+    state.activeTramite === "none" &&
+    !state.pendingConfirmation &&
+    !state.odometerDraft &&
+    !state.maintenanceDraft &&
+    !state.certificateDraft &&
+    !state.ticketDraft
+  ) {
+    return;
+  }
+  const tramite =
+    state.activeTramite === "none"
+      ? state.odometerDraft
+        ? "odometer_update"
+        : state.maintenanceDraft
+          ? state.maintenanceDraft.mode === "consult"
+            ? "maintenance_consult"
+            : "maintenance_request"
+          : state.certificateDraft
+            ? "certificate_issue"
+            : state.ticketDraft
+              ? "odoo_ticket"
+              : "none"
+      : state.activeTramite;
   state.suspendedTramite = {
-    tramite: state.activeTramite === "none" && state.odometerDraft ? "odometer_update" : state.activeTramite,
+    tramite,
     step: state.step,
     selectedUnit: state.selectedUnit,
     lastListing: state.lastListing,
     pendingConfirmation: state.pendingConfirmation,
     odometerDraft: state.odometerDraft,
+    maintenanceDraft: state.maintenanceDraft,
+    certificateDraft: state.certificateDraft,
+    ticketDraft: state.ticketDraft,
     savedAt: new Date().toISOString(),
   };
   state.activeTramite = "none";
   state.step = "interrupted";
   state.pendingConfirmation = null;
   state.odometerDraft = null;
+  state.maintenanceDraft = null;
+  state.certificateDraft = null;
+  state.ticketDraft = null;
 }
 
-/** Suspende odómetro pendiente (CONFIRMO) para consulta lateral GPS sin perder draft. */
-export function suspendOdometerForSideQuery(state: PilotConversationState): void {
-  if (!state.pendingConfirmation && !state.odometerDraft) return;
+/** Suspende trámite pendiente para consulta lateral sin perder draft. */
+export function suspendTramiteForSideQuery(state: PilotConversationState): void {
+  if (
+    !state.pendingConfirmation &&
+    !state.odometerDraft &&
+    !state.maintenanceDraft &&
+    !state.certificateDraft &&
+    !state.ticketDraft
+  ) {
+    return;
+  }
   suspendCurrentTramite(state);
 }
+
+/** @deprecated use suspendTramiteForSideQuery */
+export const suspendOdometerForSideQuery = suspendTramiteForSideQuery;
 
 export function resumeSuspendedTramite(state: PilotConversationState): boolean {
   const s = state.suspendedTramite;
   if (!s) return false;
-  state.activeTramite = s.tramite === "none" && s.odometerDraft ? "odometer_update" : s.tramite;
+  state.activeTramite = s.tramite;
   state.step = s.step;
   state.selectedUnit = s.selectedUnit;
   state.lastListing = s.lastListing;
   state.pendingConfirmation = s.pendingConfirmation;
   state.odometerDraft = s.odometerDraft;
+  state.maintenanceDraft = s.maintenanceDraft;
+  state.certificateDraft = s.certificateDraft;
+  state.ticketDraft = s.ticketDraft;
   state.suspendedTramite = null;
+  if (s.tramite === "odometer_update") {
+    state.maintenanceDraft = null;
+    state.certificateDraft = null;
+    state.ticketDraft = null;
+  } else if (s.tramite === "maintenance_consult" || s.tramite === "maintenance_request") {
+    state.odometerDraft = null;
+    state.certificateDraft = null;
+    state.ticketDraft = null;
+  } else if (s.tramite === "certificate_issue") {
+    state.odometerDraft = null;
+    state.maintenanceDraft = null;
+    state.ticketDraft = null;
+  } else if (s.tramite === "odoo_ticket") {
+    state.odometerDraft = null;
+    state.maintenanceDraft = null;
+    state.certificateDraft = null;
+  }
   state.step = "resumed";
   return true;
 }
@@ -396,6 +507,9 @@ export function sanitizeStateForLab(
     processedMessageIdsCount: Object.keys(state.processedMessageIds ?? {}).length,
     odometerStep: state.odometerDraft?.step ?? null,
     odometerOperationsCount: Object.keys(state.odometerOperations ?? {}).length,
+    maintenanceStep: state.maintenanceDraft?.step ?? null,
+    certificateStep: state.certificateDraft?.step ?? null,
+    ticketStep: state.ticketDraft?.step ?? null,
   };
 }
 

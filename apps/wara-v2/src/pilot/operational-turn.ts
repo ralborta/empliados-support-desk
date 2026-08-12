@@ -14,6 +14,7 @@ import {
   savePilotConversationState,
   suspendCurrentTramite,
   suspendOdometerForSideQuery,
+  suspendTramiteForSideQuery,
   type PilotConversationState,
   type PilotSelectedUnit,
 } from "./conversation-state.js";
@@ -52,8 +53,17 @@ import {
 } from "./unit-fleet.js";
 import { buildGpsReportForUnit } from "./gps-core.js";
 import { looksLikeOdometerIntent, looksLikeExplicitConfirm } from "./odometer-core.js";
-import { findCompletedByConfirmMessageId, findMostRecentCompletedOdometerOp } from "./odometer-operation.js";
+import { findCompletedByConfirmMessageId as findOdometerByConfirm, findMostRecentCompletedOdometerOp } from "./odometer-operation.js";
+import { findMaintenanceByConfirmMessageId } from "./maintenance-operation.js";
+import { findCertificateByConfirmMessageId } from "./certificate-operation.js";
+import { findTicketByConfirmMessageId } from "./ticket-operation.js";
 import { tryResolveOdometerTurn } from "./odometer-turn.js";
+import { looksLikeMaintenanceIntent } from "./maintenance-core.js";
+import { tryResolveMaintenanceTurn } from "./maintenance-turn.js";
+import { looksLikeCertificateIntent } from "./certificate-core.js";
+import { tryResolveCertificateTurn } from "./certificate-turn.js";
+import { looksLikeTicketIntent } from "./ticket-core.js";
+import { escalateToTicket, tryResolveTicketTurn } from "./ticket-turn.js";
 import { detectLoosePlate } from "./plates.js";
 import {
   buildCompanyMenuMessage,
@@ -190,6 +200,76 @@ async function fetchFleet(
   state.fleetCache = filterValidFleetUnits(fleet.unidades);
   state.fleetCacheAt = new Date().toISOString();
   return { ok: true, units: state.fleetCache };
+}
+
+async function handleGpsSideQueryDuringTramite(input: {
+  state: PilotConversationState;
+  text: string;
+  fleetUnits: WaraUnidadEstado[];
+  activeUnitRef: PilotSelectedUnit | null;
+}): Promise<{ ok: true; message: string; state: PilotConversationState } | { ok: false; message: string; state: PilotConversationState }> {
+  const { state, text, fleetUnits } = input;
+  let targetUnit: WaraUnidadEstado | null = null;
+  const alternatePlate = detectLoosePlate(text);
+  const alternateCode = extractUnitNameCode(text);
+  const hasNamedAlternate = Boolean(alternatePlate || alternateCode);
+  const activeUnitRef = input.activeUnitRef;
+
+  if (hasNamedAlternate) {
+    const byPlate = resolveUnitByPlateFromFleet(fleetUnits, text);
+    if (byPlate.kind === "one") targetUnit = byPlate.unit;
+    else if (byPlate.kind === "many") {
+      const listing = buildPaginatedListing({
+        units: byPlate.units,
+        page: 1,
+        kind: "search_results",
+        searchLabel: alternatePlate ?? text.trim(),
+      });
+      const msg = formatPaginatedFleetMessage(listing, state.companyName);
+      showListing(state, listing, msg);
+      return { ok: false, message: msg, state };
+    } else {
+      const byName = resolveUnitByNameFromFleet(fleetUnits, text);
+      if (byName.kind === "one") targetUnit = byName.unit;
+      else if (byName.kind === "many") {
+        const listing = buildPaginatedListing({
+          units: byName.units,
+          page: 1,
+          kind: "search_results",
+          searchLabel: alternateCode ?? extractExplicitUnitToken(text) ?? text.trim(),
+        });
+        const msg = formatPaginatedFleetMessage(listing, state.companyName);
+        showListing(state, listing, msg);
+        return { ok: false, message: msg, state };
+      }
+    }
+    if (!targetUnit) {
+      return {
+        ok: false,
+        message: "No encontré esa unidad para el GPS. El trámite pendiente sigue en pausa — decime «continuamos».",
+        state,
+      };
+    }
+  } else if (activeUnitRef) {
+    targetUnit = findUnitInFleetByRef(fleetUnits, activeUnitRef);
+  }
+
+  if (!targetUnit) {
+    return {
+      ok: false,
+      message: "No pude ubicar la unidad para el GPS. Decime «continuamos» para retomar el trámite.",
+      state,
+    };
+  }
+
+  const gpsMsg = buildGpsReportForUnit(targetUnit);
+  state.activeTramite = "none";
+  state.step = "gps_side_query";
+  return {
+    ok: true,
+    message: `${gpsMsg}\n\nCuando quieras seguimos con el trámite pendiente. Decime «continuamos».`,
+    state,
+  };
 }
 
 function setSelectedUnit(state: PilotConversationState, unit: WaraUnidadEstado): PilotSelectedUnit {
@@ -447,9 +527,44 @@ export async function resolveOperationalTurn(input: {
   }
 
   if (looksLikeChangeUnit(text)) {
+    if (
+      state.certificateDraft &&
+      state.certificateDraft.step !== "idle" &&
+      state.pendingConfirmation?.action !== "certificate_issue"
+    ) {
+      state.selectedUnit = null;
+      state.certificateDraft.unit = null;
+      state.certificateDraft.step = "await_unit";
+      state.step = "change_unit";
+      savePilotConversationState(state);
+      return {
+        kind: "reply",
+        message: "Dale, cambiamos de unidad para el certificado. Decime la patente.",
+        state,
+      };
+    }
+    if (
+      state.maintenanceDraft &&
+      state.maintenanceDraft.step !== "idle" &&
+      state.pendingConfirmation?.action !== "maintenance_write"
+    ) {
+      state.selectedUnit = null;
+      state.maintenanceDraft.unit = null;
+      state.maintenanceDraft.step = "await_unit";
+      state.step = "change_unit";
+      savePilotConversationState(state);
+      return {
+        kind: "reply",
+        message: "Dale, cambiamos de unidad para el mantenimiento. Decime la patente.",
+        state,
+      };
+    }
     state.selectedUnit = null;
     state.pendingConfirmation = null;
     state.odometerDraft = null;
+    state.maintenanceDraft = null;
+    state.certificateDraft = null;
+    state.ticketDraft = null;
     state.activeTramite = "none";
     state.step = "change_unit";
     savePilotConversationState(state);
@@ -479,77 +594,135 @@ export async function resolveOperationalTurn(input: {
         const savedDraft = odo.state.odometerDraft;
         const savedPending = odo.state.pendingConfirmation;
         const activeUnitRef = savedDraft?.unit ?? savedPending?.unit ?? odo.state.selectedUnit;
-        suspendOdometerForSideQuery(odo.state);
-        let targetUnit: WaraUnidadEstado | null = null;
-        const alternatePlate = detectLoosePlate(text);
-        const alternateCode = extractUnitNameCode(text);
-        const hasNamedAlternate = Boolean(alternatePlate || alternateCode);
-
-        if (hasNamedAlternate) {
-          const byPlate = resolveUnitByPlateFromFleet(fleetOdo.units, text);
-          if (byPlate.kind === "one") targetUnit = byPlate.unit;
-          else if (byPlate.kind === "many") {
-            const listing = buildPaginatedListing({
-              units: byPlate.units,
-              page: 1,
-              kind: "search_results",
-              searchLabel: alternatePlate ?? text.trim(),
-            });
-            const msg = formatPaginatedFleetMessage(listing, odo.state.companyName);
-            showListing(odo.state, listing, msg);
-            savePilotConversationState(odo.state);
-            return { kind: "reply", message: msg, state: odo.state };
-          } else {
-            const byName = resolveUnitByNameFromFleet(fleetOdo.units, text);
-            if (byName.kind === "one") targetUnit = byName.unit;
-            else if (byName.kind === "many") {
-              const listing = buildPaginatedListing({
-                units: byName.units,
-                page: 1,
-                kind: "search_results",
-                searchLabel: alternateCode ?? extractExplicitUnitToken(text) ?? text.trim(),
-              });
-              const msg = formatPaginatedFleetMessage(listing, odo.state.companyName);
-              showListing(odo.state, listing, msg);
-              savePilotConversationState(odo.state);
-              return { kind: "reply", message: msg, state: odo.state };
-            }
-          }
-          if (!targetUnit) {
-            savePilotConversationState(odo.state);
-            return {
-              kind: "reply",
-              message:
-                "No encontré esa unidad para el GPS. El registro pendiente sigue en pausa — decime «continuamos».",
-              state: odo.state,
-            };
-          }
-        } else if (activeUnitRef) {
-          targetUnit = findUnitInFleetByRef(fleetOdo.units, activeUnitRef);
-        }
-        if (!targetUnit) {
-          savePilotConversationState(odo.state);
-          return {
-            kind: "reply",
-            message: "No pude ubicar la unidad para el GPS. Decime «continuamos» para retomar el registro.",
-            state: odo.state,
-          };
-        }
-        const gpsMsg = buildGpsReportForUnit(targetUnit);
-        odo.state.activeTramite = "none";
-        odo.state.step = "gps_side_query";
-        savePilotConversationState(odo.state);
-        return {
-          kind: "reply",
-          message:
-            `${gpsMsg}\n\nCuando quieras seguimos con el registro pendiente. Decime «continuamos».`,
+        suspendTramiteForSideQuery(odo.state);
+        const side = await handleGpsSideQueryDuringTramite({
           state: odo.state,
-        };
+          text: odo.text,
+          fleetUnits: fleetOdo.units,
+          activeUnitRef,
+        });
+        savePilotConversationState(odo.state);
+        return { kind: "reply", message: side.message, state: odo.state };
       }
       if (odo.kind === "reply") {
         savePilotConversationState(odo.state);
         return { kind: "reply", message: odo.message, state: odo.state };
       }
+    }
+  }
+
+  if (
+    state.activeTramite === "maintenance_consult" ||
+    state.activeTramite === "maintenance_request" ||
+    (state.maintenanceDraft && state.maintenanceDraft.step !== "idle") ||
+    state.pendingConfirmation?.action === "maintenance_write" ||
+    looksLikeMaintenanceIntent(text)
+  ) {
+    if (
+      (state.odometerDraft && state.odometerDraft.step !== "idle") ||
+      state.pendingConfirmation?.action === "odometer_write" ||
+      (state.certificateDraft && state.certificateDraft.step !== "idle") ||
+      state.activeTramite === "odometer_update" ||
+      state.activeTramite === "certificate_issue"
+    ) {
+      suspendTramiteForSideQuery(state);
+    }
+    const fleetMaint = await fetchFleet(state, env);
+    if (fleetMaint.ok) {
+      const maint = await tryResolveMaintenanceTurn({
+        state,
+        text,
+        messageId: input.messageId,
+        env,
+        fleetUnits: fleetMaint.units,
+      });
+      if (maint.kind === "gps_side") {
+        const activeUnitRef =
+          state.maintenanceDraft?.unit ??
+          state.pendingConfirmation?.unit ??
+          state.selectedUnit;
+        suspendTramiteForSideQuery(state);
+        const side = await handleGpsSideQueryDuringTramite({
+          state,
+          text: maint.text,
+          fleetUnits: fleetMaint.units,
+          activeUnitRef,
+        });
+        savePilotConversationState(state);
+        return { kind: "reply", message: side.message, state };
+      }
+      if (maint.kind === "ticket_escalation") {
+        const ticket = await escalateToTicket({
+          state,
+          messageId: input.messageId,
+          env,
+          category: "maintenance_escalation",
+          reason: maint.reason,
+        });
+        savePilotConversationState(state);
+        if (ticket.kind === "reply") {
+          return { kind: "reply", message: ticket.message, state };
+        }
+      }
+      if (maint.kind === "reply") {
+        savePilotConversationState(state);
+        return { kind: "reply", message: maint.message, state };
+      }
+    }
+  }
+
+  if (
+    state.activeTramite === "certificate_issue" ||
+    (state.certificateDraft && state.certificateDraft.step !== "idle") ||
+    state.pendingConfirmation?.action === "certificate_issue" ||
+    looksLikeCertificateIntent(text)
+  ) {
+    const fleetCert = await fetchFleet(state, env);
+    if (fleetCert.ok) {
+      const cert = await tryResolveCertificateTurn({
+        state,
+        text,
+        messageId: input.messageId,
+        env,
+        fleetUnits: fleetCert.units,
+      });
+      if (cert.kind === "gps_side") {
+        const activeUnitRef =
+          state.certificateDraft?.unit ??
+          state.pendingConfirmation?.unit ??
+          state.selectedUnit;
+        suspendTramiteForSideQuery(state);
+        const side = await handleGpsSideQueryDuringTramite({
+          state,
+          text: cert.text,
+          fleetUnits: fleetCert.units,
+          activeUnitRef,
+        });
+        savePilotConversationState(state);
+        return { kind: "reply", message: side.message, state };
+      }
+      if (cert.kind === "reply") {
+        savePilotConversationState(state);
+        return { kind: "reply", message: cert.message, state };
+      }
+    }
+  }
+
+  if (
+    state.activeTramite === "odoo_ticket" ||
+    (state.ticketDraft && state.ticketDraft.step !== "idle") ||
+    state.pendingConfirmation?.action === "odoo_ticket_create" ||
+    looksLikeTicketIntent(text)
+  ) {
+    const ticket = await tryResolveTicketTurn({
+      state,
+      text,
+      messageId: input.messageId,
+      env,
+    });
+    if (ticket.kind === "reply") {
+      savePilotConversationState(state);
+      return { kind: "reply", message: ticket.message, state };
     }
   }
 
@@ -710,8 +883,11 @@ export async function resolveOperationalTurn(input: {
     !state.pendingConfirmation &&
     (looksLikeExplicitConfirm(text) || looksLikeBriefConfirmation(text))
   ) {
-    const dupConfirm = findCompletedByConfirmMessageId(state.odometerOperations ?? {}, input.messageId);
-    if (dupConfirm) {
+    const dupOdo = findOdometerByConfirm(state.odometerOperations ?? {}, input.messageId);
+    const dupMaint = findMaintenanceByConfirmMessageId(state.maintenanceOperations ?? {}, input.messageId);
+    const dupCert = findCertificateByConfirmMessageId(state.certificateOperations ?? {}, input.messageId);
+    const dupTicket = findTicketByConfirmMessageId(state.ticketOperations ?? {}, input.messageId);
+    if (dupOdo || dupMaint || dupCert || dupTicket) {
       savePilotConversationState(state);
       return { kind: "reply", message: "Este CONFIRMO ya fue procesado.", state };
     }
