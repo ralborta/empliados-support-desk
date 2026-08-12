@@ -7,6 +7,11 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { handleWhatsAppTurn } from "@/lib/whatsappTurn";
 import { resolveV1HotfixCanary, v1HotfixCanaryStatus } from "@/lib/v1HotfixCanary";
+import {
+  checkCanaryProxyLoop,
+  hasCanaryProxyHop,
+  proxyCanaryToProductionFallback,
+} from "@/lib/v1HotfixCanaryProxy";
 
 export const maxDuration = 60;
 
@@ -54,6 +59,11 @@ export async function POST(req: NextRequest) {
   const denied = requireBuilderBotContextAuth(req);
   if (denied) return denied;
 
+  const loop = checkCanaryProxyLoop(req.headers);
+  if (!loop.ok) {
+    return NextResponse.json(loop.body, { status: loop.status });
+  }
+
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
@@ -76,35 +86,32 @@ export async function POST(req: NextRequest) {
     ""
   ).trim();
 
-  const canary = resolveV1HotfixCanary(rawPhone);
+  const canary = resolveV1HotfixCanary(rawPhone, {
+    isProxyHopTarget: hasCanaryProxyHop(req.headers),
+  });
   if (canary.action === "reject") {
     return NextResponse.json(
       {
         ok: false,
         ok_s: "false",
-        error: "Hotfix canary mal configurado (allowlist vacía o inválida)",
+        error:
+          canary.reason === "fallback_url_invalid"
+            ? "Fallback inmutable inválido o alias prohibido"
+            : "Hotfix canary mal configurado (allowlist vacía o inválida)",
         canary: v1HotfixCanaryStatus(),
       },
       { status: 503 },
     );
   }
   if (canary.action === "proxy") {
-    const proxyRes = await fetch(`${canary.fallbackUrl}/api/whatsapp/turn`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey ?? "",
-      },
-      body: JSON.stringify(parsed.data),
-      cache: "no-store",
+    const proxy = await proxyCanaryToProductionFallback({
+      fallbackBaseUrl: canary.fallbackUrl,
+      path: "/api/whatsapp/turn",
+      body: parsed.data,
+      apiKey: apiKey ?? "",
     });
-    const proxyJson = await proxyRes.json().catch(() => ({
-      ok: false,
-      ok_s: "false",
-      error: "Fallback producción no respondió JSON",
-    }));
-    return NextResponse.json(proxyJson, {
-      status: proxyRes.status,
+    return NextResponse.json(proxy.json, {
+      status: proxy.status,
       headers: {
         "x-wara-v1-canary": "proxied_to_production",
         "x-wara-v1-canary-fallback": canary.fallbackUrl,

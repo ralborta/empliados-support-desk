@@ -43,6 +43,7 @@ const PUSH_SUITES = [
   "verify-odometer-resume-after-side-query.mjs",
   "verify-hotfix-stabilization-regression.mjs",
   "verify-v1-hotfix-canary-gate.mjs",
+  "verify-v1-hotfix-canary-proxy.mjs",
   "verify-odometer-write-guard.mjs",
   "verify-outbound-dedup.mjs",
   "verify-company-continuation-mention.mjs",

@@ -4,6 +4,10 @@
  * para teléfonos en allowlist; el resto se proxya a producción estable (031dc5a).
  */
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import {
+  PRODUCTION_IMMUTABLE_FALLBACK_DEFAULT,
+  resolveImmutableFallbackUrl,
+} from "@/lib/v1HotfixCanaryProxy";
 
 const E164_RE = /^\+[1-9]\d{6,14}$/;
 
@@ -66,20 +70,23 @@ export function isV1HotfixCanaryAllowlistedPhone(rawPhone: string): boolean {
   return false;
 }
 
-export function v1HotfixCanaryFallbackBaseUrl(): string {
-  return (
-    process.env.WARA_V1_HOTFIX_CANARY_FALLBACK_URL?.trim() ||
-    process.env.WARA_V1_PRODUCTION_URL?.trim() ||
-    "https://wara.nivel41.com"
-  ).replace(/\/+$/, "");
+export function v1HotfixCanaryFallbackBaseUrl(): string | null {
+  const v = resolveImmutableFallbackUrl();
+  return v.ok ? v.url : null;
 }
 
 export type V1HotfixCanaryDecision =
-  | { action: "process"; reason: "canary_off" | "allowlisted" }
+  | { action: "process"; reason: "canary_off" | "allowlisted" | "proxy_hop_target" }
   | { action: "proxy"; reason: "not_allowlisted"; fallbackUrl: string }
-  | { action: "reject"; reason: "canary_misconfigured" };
+  | { action: "reject"; reason: "canary_misconfigured" | "fallback_url_invalid" };
 
-export function resolveV1HotfixCanary(rawPhone: string): V1HotfixCanaryDecision {
+export function resolveV1HotfixCanary(
+  rawPhone: string,
+  opts?: { isProxyHopTarget?: boolean },
+): V1HotfixCanaryDecision {
+  if (opts?.isProxyHopTarget) {
+    return { action: "process", reason: "proxy_hop_target" };
+  }
   if (!isV1HotfixCanaryEnabled()) {
     return { action: "process", reason: "canary_off" };
   }
@@ -92,22 +99,31 @@ export function resolveV1HotfixCanary(rawPhone: string): V1HotfixCanaryDecision 
   if (list.length === 0) {
     return { action: "reject", reason: "canary_misconfigured" };
   }
+  const fallback = resolveImmutableFallbackUrl();
+  if (!fallback.ok) {
+    return { action: "reject", reason: "fallback_url_invalid" };
+  }
   if (isV1HotfixCanaryAllowlistedPhone(rawPhone)) {
     return { action: "process", reason: "allowlisted" };
   }
-  return { action: "proxy", reason: "not_allowlisted", fallbackUrl: v1HotfixCanaryFallbackBaseUrl() };
+  return { action: "proxy", reason: "not_allowlisted", fallbackUrl: fallback.url };
 }
 
 export function v1HotfixCanaryStatus(): {
   enabled: boolean;
   allowlist: string[];
-  fallbackUrl: string;
+  fallbackUrl: string | null;
+  fallbackUrlValid: boolean;
+  productionImmutableDefault: string;
   commitSha: string | null;
 } {
+  const fallback = resolveImmutableFallbackUrl();
   return {
     enabled: isV1HotfixCanaryEnabled(),
     allowlist: v1HotfixCanaryAllowlist(),
-    fallbackUrl: v1HotfixCanaryFallbackBaseUrl(),
+    fallbackUrl: fallback.ok ? fallback.url : null,
+    fallbackUrlValid: fallback.ok,
+    productionImmutableDefault: PRODUCTION_IMMUTABLE_FALLBACK_DEFAULT,
     commitSha: process.env.VERCEL_GIT_COMMIT_SHA?.trim() || null,
   };
 }

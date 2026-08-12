@@ -65,6 +65,11 @@ import {
   recordOdometerWriteGuard,
 } from "@/lib/odometerWriteGuard";
 import { resolveV1HotfixCanary } from "@/lib/v1HotfixCanary";
+import {
+  checkCanaryProxyLoop,
+  hasCanaryProxyHop,
+  proxyCanaryToProductionFallback,
+} from "@/lib/v1HotfixCanaryProxy";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
 import { composeOdometerDialogueReply } from "@/lib/odometerDialogueAI";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
@@ -518,13 +523,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "API key inválida o faltante", message: "No pude autenticar la solicitud interna." }, { status: BB_STATUS });
   }
 
+  const loop = checkCanaryProxyLoop(req.headers);
+  if (!loop.ok) {
+    return NextResponse.json(loop.body, { status: loop.status });
+  }
+
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const inboundMessageId =
     parsed.data.messageId?.trim() ||
     parsed.data.message_id?.trim() ||
     req.headers.get("x-message-id")?.trim() ||
     null;
-  const canary = resolveV1HotfixCanary(rawPhone);
+  const canary = resolveV1HotfixCanary(rawPhone, {
+    isProxyHopTarget: hasCanaryProxyHop(req.headers),
+  });
   if (canary.action === "reject") {
     return NextResponse.json(
       { ok: false, error: "Hotfix canary mal configurado", message: "No pude procesar el trámite." },
@@ -532,14 +544,13 @@ export async function POST(req: NextRequest) {
     );
   }
   if (canary.action === "proxy") {
-    const proxyRes = await fetch(`${canary.fallbackUrl}/api/wara/odometro-horometro`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": keyFromRequest(req, parsed.data) ?? "" },
-      body: JSON.stringify(parsed.data),
-      cache: "no-store",
+    const proxy = await proxyCanaryToProductionFallback({
+      fallbackBaseUrl: canary.fallbackUrl,
+      path: "/api/wara/odometro-horometro",
+      body: parsed.data,
+      apiKey: keyFromRequest(req, parsed.data) ?? "",
     });
-    const proxyJson = await proxyRes.json().catch(() => ({ ok: false, message: "Fallback error" }));
-    return NextResponse.json(proxyJson, { status: proxyRes.status });
+    return NextResponse.json(proxy.json, { status: proxy.status });
   }
   const rawText = (
     parsed.data.rawText ??
