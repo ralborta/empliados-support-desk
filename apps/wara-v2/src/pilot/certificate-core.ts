@@ -2,12 +2,15 @@
  * Reglas determinísticas certificado de cobertura V2 (portadas de V1).
  */
 import { looksLikeCertificateService } from "./service-catalog.js";
+import { noteLegacyTextReclassification } from "./semantic/reclass-guard.js";
 
 export function looksLikeCertificateIntent(text: string | undefined | null): boolean {
+  noteLegacyTextReclassification("looksLikeCertificateIntent", text);
   return looksLikeCertificateService(text);
 }
 
 export function looksLikeCancelCertificate(text: string | undefined | null): boolean {
+  noteLegacyTextReclassification("looksLikeCancelCertificate", text);
   const t = String(text ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

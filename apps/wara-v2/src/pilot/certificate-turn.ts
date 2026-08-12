@@ -31,6 +31,7 @@ import { toFleetUnitRef } from "./unit-fleet.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
 import { isPilotDryRun } from "./write-gates.js";
 import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
+import { isInsideUnifiedBrainContext } from "./semantic/reclass-guard.js";
 
 export type CertificateTurnResult =
   | { kind: "none" }
@@ -181,19 +182,21 @@ export async function tryResolveCertificateTurn(input: {
   fleetUnits: WaraUnidadEstado[];
 }): Promise<CertificateTurnResult> {
   const { state, text, messageId, env } = input;
+  const unified = isInsideUnifiedBrainContext();
   const activeCert =
     state.activeTramite === "certificate_issue" ||
     (state.certificateDraft && state.certificateDraft.step !== "idle") ||
     state.pendingConfirmation?.action === "certificate_issue";
 
-  if (!activeCert && !looksLikeCertificateIntent(text)) return { kind: "none" };
+  // Con cerebro unificado la intención ya está autorizada por TurnDecision (no looksLike*).
+  if (!activeCert && !unified && !looksLikeCertificateIntent(text)) return { kind: "none" };
 
   if (!state.certificateDraft) state.certificateDraft = emptyDraft();
   if (!state.certificateOperations) state.certificateOperations = {};
   const draft = state.certificateDraft;
-  resolveCertificateType(text);
+  if (!unified) resolveCertificateType(text);
 
-  if (looksLikeCancelCertificate(text)) {
+  if (!unified && looksLikeCancelCertificate(text)) {
     state.certificateDraft = emptyDraft();
     state.pendingConfirmation = null;
     state.activeTramite = "none";

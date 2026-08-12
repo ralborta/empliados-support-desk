@@ -9,6 +9,7 @@ import {
   UnitSearchInterpretationSchema,
   validateUnitSearchInterpretation,
 } from "./unit-search-semantics.js";
+import { traceLlmCall } from "./semantic-trace.js";
 
 const UNDERSTAND_TIMEOUT_MS = 8_000;
 const MIN_CONFIDENCE = 0.72;
@@ -91,9 +92,11 @@ export async function understandUnitSearchUtterance(
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), UNDERSTAND_TIMEOUT_MS);
+    const model = process.env.WARA_V2_UTTERANCE_MODEL?.trim() || "gpt-4o-mini";
+    traceLlmCall("utterance-understanding-v2", model);
     const response = await openai.chat.completions.create(
       {
-        model: process.env.WARA_V2_UTTERANCE_MODEL?.trim() || "gpt-4o-mini",
+        model,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: user },

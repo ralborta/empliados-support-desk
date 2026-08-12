@@ -2,6 +2,8 @@
  * Catálogo semántico de servicios operativos V2.
  * Precedencia: servicios > búsqueda de unidades.
  */
+import { noteLegacyTextReclassification } from "./semantic/reclass-guard.js";
+
 function norm(text: string): string {
   return text
     .normalize("NFD")
@@ -123,6 +125,7 @@ export function looksLikeTicketOrHandoffService(text: string | undefined | null)
 
 /** True si el mensaje es claramente un servicio/trámite, no una búsqueda de unidad. */
 export function looksLikeOperationalServiceIntent(text: string | undefined | null): boolean {
+  noteLegacyTextReclassification("looksLikeOperationalServiceIntent", text);
   return (
     looksLikeCertificateService(text) ||
     looksLikeOdometerOrHorometerService(text) ||
@@ -131,7 +134,9 @@ export function looksLikeOperationalServiceIntent(text: string | undefined | nul
   );
 }
 
+/** Precedencia: servicios > búsqueda de unidades. */
 export function classifyServiceIntent(text: string | undefined | null): ServiceIntent {
+  noteLegacyTextReclassification("classifyServiceIntent", text);
   const t = String(text ?? "");
   if (looksLikeCertificateService(t)) return "certificate";
   if (looksLikeOdometerOrHorometerService(t)) {

@@ -23,6 +23,12 @@ import {
   sanitizeStateForLab,
 } from "../pilot/conversation-state.js";
 import { getLabChatConfig, renderLabChatHtml } from "../pilot/lab-chat-config.js";
+import {
+  isUnifiedSemanticBrainEnabled,
+  semanticModelName,
+} from "../pilot/semantic/brain-flags.js";
+import { INTERPRET_TURN_PROMPT_VERSION } from "../pilot/semantic/interpret-turn-prompt.js";
+import { getLastLabTurnDiagnosis } from "../pilot/semantic/lab-turn-diagnosis.js";
 
 export type ShadowCanaryServer = {
   port: number;
@@ -133,6 +139,7 @@ export async function startShadowCanaryServer(opts?: {
         const degraded =
           persistence.enabled &&
           (!persistence.pathWritable || persistence.startupWarning != null);
+        const unified = isUnifiedSemanticBrainEnabled(process.env);
         respondJson(200, {
           status: degraded ? "degraded" : "ok",
           phase: "10A",
@@ -144,6 +151,24 @@ export async function startShadowCanaryServer(opts?: {
           commit: gitCommit,
           lab_chat: "/lab/chat",
           persistence,
+          semanticBrain: {
+            enabled: unified,
+            mode: unified ? "unified_llm" : "legacy_rules",
+            model: unified ? semanticModelName(process.env) : null,
+            promptVersion: unified ? INTERPRET_TURN_PROMPT_VERSION : null,
+            legacyFallbackEnabled: false,
+          },
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/lab/last-turn-diagnosis") {
+        if (!isAuthorized(req)) {
+          respondJson(401, { error: "unauthorized" });
+          return;
+        }
+        respondJson(200, {
+          diagnosis: getLastLabTurnDiagnosis(),
         });
         return;
       }

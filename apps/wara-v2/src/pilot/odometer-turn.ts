@@ -40,6 +40,7 @@ import { isPilotDryRun } from "./write-gates.js";
 import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
 import { findUnitInFleetByRef, toFleetUnitRef } from "./unit-fleet.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
+import { isInsideUnifiedBrainContext } from "./semantic/reclass-guard.js";
 
 export type OdometerTurnResult =
   | { kind: "none" }
@@ -258,13 +259,14 @@ export async function tryResolveOdometerTurn(input: {
   fleetUnits: WaraUnidadEstado[];
 }): Promise<OdometerTurnResult> {
   const { state, text, messageId, env } = input;
+  const unified = isInsideUnifiedBrainContext();
   if (!state.odometerDraft) state.odometerDraft = emptyDraft();
   if (!state.odometerOperations) state.odometerOperations = {};
 
   const draft = state.odometerDraft;
   const meterTypeHint = draft.meterType ?? detectMeterTypeFromText(text) ?? "odometro";
 
-  if (looksLikeCancelOdometer(text)) {
+  if (!unified && looksLikeCancelOdometer(text)) {
     state.odometerDraft = emptyDraft();
     state.pendingConfirmation = null;
     state.activeTramite = "none";
@@ -283,6 +285,7 @@ export async function tryResolveOdometerTurn(input: {
   }
 
   if (
+    !unified &&
     state.pendingConfirmation?.action === "odometer_write" &&
     draft.step === "await_confirm" &&
     looksLikeGpsReportRequest(text)
@@ -335,7 +338,12 @@ export async function tryResolveOdometerTurn(input: {
     }
   }
 
-  if (!looksLikeOdometerIntent(text) && draft.step === "idle" && state.activeTramite !== "odometer_update") {
+  if (
+    !unified &&
+    !looksLikeOdometerIntent(text) &&
+    draft.step === "idle" &&
+    state.activeTramite !== "odometer_update"
+  ) {
     return { kind: "none" };
   }
 

@@ -8,6 +8,7 @@ import {
   formatFechaDisplay as formatFechaDisplayV1,
   parseFechaFromText,
 } from "./odometro-fecha.js";
+import { noteLegacyTextReclassification } from "./semantic/reclass-guard.js";
 
 export {
   parseFechaFromText,
@@ -39,6 +40,7 @@ export function looksLikeExplicitReject(text: string | undefined | null): boolea
 }
 
 export function looksLikeOdometerIntent(text: string | undefined | null): boolean {
+  noteLegacyTextReclassification("looksLikeOdometerIntent", text);
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (detectLoosePlate(raw)) return false;
@@ -68,6 +70,7 @@ export function detectMeterTypeFromText(text: string): MeterType | null {
 }
 
 export function looksLikeCancelOdometer(text: string | undefined | null): boolean {
+  noteLegacyTextReclassification("looksLikeCancelOdometer", text);
   const t = norm(String(text ?? ""));
   // Nunca tratar «no quiero cambiar el odómetro» como cancelación genérica:
   // es ambiguo o es rechazo/cambio — lo decide TurnDecision.

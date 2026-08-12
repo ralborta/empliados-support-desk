@@ -82,6 +82,28 @@ import {
   type TurnDecision,
 } from "./turn-decision.js";
 import {
+  beginSemanticTrace,
+  finishSemanticTrace,
+  abandonSemanticTrace,
+  isSemanticTraceEnabled,
+  traceRuleSemantic,
+} from "./semantic-trace.js";
+import { isUnifiedSemanticBrainEnabled, logBrainMetrics } from "./semantic/brain-flags.js";
+import { interpretTurn } from "./semantic/interpret-turn.js";
+import { buildInterpretTurnInput } from "./semantic/build-context.js";
+import { applySemanticPolicy } from "./semantic/policy-engine.js";
+import { executeTurnDecision } from "./semantic/execute-decision.js";
+import {
+  appendAssistantTurn,
+  appendUserTurn,
+} from "./semantic/conversation-history.js";
+import {
+  getLegacyReclassAttempt,
+  noteLegacyTextReclassification,
+  runWithUnifiedBrainContext,
+} from "./semantic/reclass-guard.js";
+import { recordLabTurnDiagnosis } from "./semantic/lab-turn-diagnosis.js";
+import {
   buildCompanyMenuMessage,
   buildCompanyResetMessage,
   buildCompanyStatusReply,
@@ -223,36 +245,37 @@ async function handleGpsSideQueryDuringTramite(input: {
   text: string;
   fleetUnits: WaraUnidadEstado[];
   activeUnitRef: PilotSelectedUnit | null;
+  /** Preferido: entity ya extraída por TurnDecision (sin re-leer intención del texto). */
+  entity?: { type?: string; value?: string | null; matchMode?: string | null } | null;
 }): Promise<{ ok: true; message: string; state: PilotConversationState } | { ok: false; message: string; state: PilotConversationState }> {
   const { state, text, fleetUnits } = input;
   let targetUnit: WaraUnidadEstado | null = null;
-  const alternatePlate = detectLoosePlate(text);
-  const alternateCode = extractUnitNameCode(text);
-  const hasNamedAlternate = Boolean(alternatePlate || alternateCode);
   const activeUnitRef = input.activeUnitRef;
+  const entityValue = String(input.entity?.value ?? "").trim();
 
-  if (hasNamedAlternate) {
-    const byPlate = resolveUnitByPlateFromFleet(fleetUnits, text);
+  // Prioridad: entity de TurnDecision. No se usa el texto para cambiar intención.
+  if (entityValue) {
+    const byPlate = resolveUnitByPlateFromFleet(fleetUnits, entityValue);
     if (byPlate.kind === "one") targetUnit = byPlate.unit;
     else if (byPlate.kind === "many") {
       const listing = buildPaginatedListing({
         units: byPlate.units,
         page: 1,
         kind: "search_results",
-        searchLabel: alternatePlate ?? text.trim(),
+        searchLabel: entityValue,
       });
       const msg = formatPaginatedFleetMessage(listing, state.companyName);
       showListing(state, listing, msg);
       return { ok: false, message: msg, state };
     } else {
-      const byName = resolveUnitByNameFromFleet(fleetUnits, text);
+      const byName = resolveUnitByNameFromFleet(fleetUnits, entityValue);
       if (byName.kind === "one") targetUnit = byName.unit;
       else if (byName.kind === "many") {
         const listing = buildPaginatedListing({
           units: byName.units,
           page: 1,
           kind: "search_results",
-          searchLabel: alternateCode ?? extractExplicitUnitToken(text) ?? text.trim(),
+          searchLabel: entityValue,
         });
         const msg = formatPaginatedFleetMessage(listing, state.companyName);
         showListing(state, listing, msg);
@@ -266,8 +289,51 @@ async function handleGpsSideQueryDuringTramite(input: {
         state,
       };
     }
-  } else if (activeUnitRef) {
-    targetUnit = findUnitInFleetByRef(fleetUnits, activeUnitRef);
+  } else {
+    // Residual documentado: patente alternativa solo si decision.entity faltó.
+    // No cambia intención; solo resuelve unidad. Instrumentado como reclasificación residual.
+    const alternatePlate = detectLoosePlate(text);
+    const alternateCode = extractUnitNameCode(text);
+    const hasNamedAlternate = Boolean(alternatePlate || alternateCode);
+    if (hasNamedAlternate) {
+      noteLegacyTextReclassification("gps_lateral_text_plate_fallback", text);
+      const byPlate = resolveUnitByPlateFromFleet(fleetUnits, text);
+      if (byPlate.kind === "one") targetUnit = byPlate.unit;
+      else if (byPlate.kind === "many") {
+        const listing = buildPaginatedListing({
+          units: byPlate.units,
+          page: 1,
+          kind: "search_results",
+          searchLabel: alternatePlate ?? text.trim(),
+        });
+        const msg = formatPaginatedFleetMessage(listing, state.companyName);
+        showListing(state, listing, msg);
+        return { ok: false, message: msg, state };
+      } else {
+        const byName = resolveUnitByNameFromFleet(fleetUnits, text);
+        if (byName.kind === "one") targetUnit = byName.unit;
+        else if (byName.kind === "many") {
+          const listing = buildPaginatedListing({
+            units: byName.units,
+            page: 1,
+            kind: "search_results",
+            searchLabel: alternateCode ?? extractExplicitUnitToken(text) ?? text.trim(),
+          });
+          const msg = formatPaginatedFleetMessage(listing, state.companyName);
+          showListing(state, listing, msg);
+          return { ok: false, message: msg, state };
+        }
+      }
+      if (!targetUnit) {
+        return {
+          ok: false,
+          message: "No encontré esa unidad para el GPS. El trámite pendiente sigue en pausa — decime «continuamos».",
+          state,
+        };
+      }
+    } else if (activeUnitRef) {
+      targetUnit = findUnitInFleetByRef(fleetUnits, activeUnitRef);
+    }
   }
 
   if (!targetUnit) {
@@ -515,13 +581,275 @@ export async function resolveOperationalTurn(input: {
 
   await ensureSessionToken(state, env);
 
+  // ——— Cerebro semántico unificado (única autoridad cuando el flag está ON) ———
+  if (isUnifiedSemanticBrainEnabled(env)) {
+    appendUserTurn(state, text);
+
+    // Atajos inequívocos permitidos (sin LLM)
+    const listingFresh = isListingFresh(state.lastListing);
+    const numericIdx = parseNumericListSelection(text) ?? parseOrdinalListSelection(text);
+    if (numericIdx != null && listingFresh) {
+      const picked = resolveUnitFromListing(state.lastListing!, numericIdx);
+      if (picked) {
+        const fleet = await fetchFleet(state, env);
+        if (fleet.ok) {
+          const unit = findUnitInFleetByRef(fleet.units, picked);
+          if (unit) {
+            const msg = askGpsConfirmation(state, unit);
+            recordListingPick(state, numericIdx);
+            appendAssistantTurn(state, msg, null);
+            savePilotConversationState(state);
+            logBrainMetrics({
+              brain_version: "unified_v1",
+              model: null,
+              latency_ms: null,
+              decision_action: "select_entity",
+              decision_intent: "gps",
+              confidence: 1,
+              handler: "numeric_list_shortcut",
+              clarification: false,
+              input_tokens: null,
+              output_tokens: null,
+              error: null,
+            });
+            recordLabTurnDiagnosis({
+              at: new Date().toISOString(),
+              brain_version: "unified_v1",
+              action: "select_entity",
+              intent: "gps",
+              confidence: 1,
+              reasoningCode: "CONTEXTUAL_REFERENCE",
+              handler: "numeric_list_shortcut",
+              latency_ms: null,
+              model: null,
+              clarification: false,
+              legacy_text_reclassification_attempted: false,
+              legacy_reclass_reasons: [],
+              llm_called: false,
+              error: null,
+            });
+            return { kind: "reply", message: msg, state };
+          }
+        }
+      }
+    }
+
+    if (
+      state.pendingConfirmation &&
+      /^confirmo\b/i.test(text.trim()) &&
+      text.trim().length <= 12
+    ) {
+      // CONFIRMO exacto con operación pendiente — atajo
+      const fleet = await fetchFleet(state, env);
+      const fleetUnits = fleet.ok ? fleet.units : [];
+      const confirmoDecision = {
+        action: "answer_pending" as const,
+        intent: "none" as const,
+        confidence: 1,
+        answer: "confirm" as const,
+        currentTramiteDisposition: "keep" as const,
+        reasoningCode: "ANSWER_TO_PENDING" as const,
+      };
+      let reclass = { attempted: false, reasons: [] as string[] };
+      const exec = await runWithUnifiedBrainContext(
+        {
+          originalMessage: text,
+          decisionAction: confirmoDecision.action,
+          decisionIntent: confirmoDecision.intent,
+        },
+        async () => {
+          const r = await executeTurnDecision(confirmoDecision, state, {
+            messageId: input.messageId,
+            env,
+            fleetUnits,
+            originalMessage: text,
+            showListing: (s, l, m) => {
+              showListing(s, l, m);
+            },
+            askGpsConfirmation,
+            deliverGpsReport,
+            handleGpsSideQuery: async (sideInput) => {
+              const side = await handleGpsSideQueryDuringTramite(sideInput);
+              return { message: side.message, state: side.state };
+            },
+          });
+          reclass = getLegacyReclassAttempt();
+          return r;
+        },
+      );
+      appendAssistantTurn(state, exec.message, null);
+      savePilotConversationState(state);
+      logBrainMetrics({
+        brain_version: "unified_v1",
+        model: null,
+        latency_ms: null,
+        decision_action: "answer_pending",
+        decision_intent: "none",
+        confidence: 1,
+        handler: "confirmo_shortcut",
+        clarification: false,
+        input_tokens: null,
+        output_tokens: null,
+        error: null,
+      });
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: "answer_pending",
+        intent: "none",
+        confidence: 1,
+        reasoningCode: "ANSWER_TO_PENDING",
+        handler: "confirmo_shortcut",
+        latency_ms: null,
+        model: null,
+        clarification: false,
+        legacy_text_reclassification_attempted: reclass.attempted,
+        legacy_reclass_reasons: reclass.reasons,
+        llm_called: false,
+        error: null,
+      });
+      return { kind: "reply", message: exec.message, state };
+    }
+
+    const interpreted = await interpretTurn(buildInterpretTurnInput(text, state), env);
+    const policy = applySemanticPolicy(interpreted.decision, state);
+    const decision = policy.decision;
+
+    const fleet = await fetchFleet(state, env);
+    if (!fleet.ok) {
+      appendAssistantTurn(state, fleet.error, decision);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: decision.action,
+        intent: decision.intent,
+        confidence: decision.confidence,
+        reasoningCode: decision.reasoningCode ?? null,
+        handler: null,
+        latency_ms: interpreted.latencyMs,
+        model: interpreted.model,
+        clarification: decision.action === "clarify",
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: true,
+        error: fleet.error.slice(0, 80),
+      });
+      return { kind: "reply", message: fleet.error, state };
+    }
+
+    let reclass = { attempted: false, reasons: [] as string[] };
+    const exec = await runWithUnifiedBrainContext(
+      {
+        originalMessage: text,
+        decisionAction: decision.action,
+        decisionIntent: decision.intent,
+      },
+      async () => {
+        const r = await executeTurnDecision(decision, state, {
+          messageId: input.messageId,
+          env,
+          fleetUnits: fleet.units,
+          originalMessage: text,
+          showListing: (s, l, m) => {
+            showListing(s, l, m);
+          },
+          askGpsConfirmation,
+          deliverGpsReport,
+          handleGpsSideQuery: async (sideInput) => {
+            const side = await handleGpsSideQueryDuringTramite(sideInput);
+            return { message: side.message, state: side.state };
+          },
+        });
+        reclass = getLegacyReclassAttempt();
+        return r;
+      },
+    );
+
+    appendAssistantTurn(state, exec.message, decision);
+    state.lastAgentQuestion =
+      decision.action === "clarify" ? exec.message : state.lastAgentQuestion ?? exec.message;
+    savePilotConversationState(state);
+    logBrainMetrics({
+      brain_version: "unified_v1",
+      model: interpreted.model,
+      latency_ms: interpreted.latencyMs,
+      decision_action: decision.action,
+      decision_intent: decision.intent,
+      confidence: decision.confidence,
+      handler: exec.handler,
+      clarification: decision.action === "clarify",
+      input_tokens: interpreted.inputTokens,
+      output_tokens: interpreted.outputTokens,
+      error: interpreted.error ?? (policy.ok ? null : "policy_rejected"),
+    });
+    recordLabTurnDiagnosis({
+      at: new Date().toISOString(),
+      brain_version: "unified_v1",
+      action: decision.action,
+      intent: decision.intent,
+      confidence: decision.confidence,
+      reasoningCode: decision.reasoningCode ?? null,
+      handler: exec.handler,
+      latency_ms: interpreted.latencyMs,
+      model: interpreted.model,
+      clarification: decision.action === "clarify",
+      legacy_text_reclassification_attempted: reclass.attempted,
+      legacy_reclass_reasons: reclass.reasons,
+      llm_called: true,
+      error: interpreted.error ?? (policy.ok ? null : "policy_rejected"),
+    });
+    return { kind: "reply", message: exec.message, state };
+  }
+
+  beginSemanticTrace(text, state);
+  const traced = <T extends OperationalTurnResult>(
+    handler: string,
+    reason: string,
+    result: T,
+  ): T => {
+    if (isSemanticTraceEnabled()) {
+      const preview =
+        result.kind === "reply" || result.kind === "duplicate"
+          ? result.message
+          : "[llm-fallback]";
+      finishSemanticTrace({
+        state: result.state,
+        handlerSelected: handler,
+        selectionReason: reason,
+        replyKind: result.kind,
+        replyPreview: preview,
+      });
+    }
+    return result;
+  };
+
+  try {
   // ÚNICA decisión semántica por turno — antes de cualquier handler operativo.
+  // NOTA DIAGNÓSTICO: decideTurn + interpretSemanticTurn son REGLAS, no LLM.
   const turnDecision: TurnDecision = decideTurn(text, state);
   const pendingTramite = pendingTramiteFromState(state);
+  const semantic = interpretSemanticTurn(text, {
+    lastListing: state.lastListing,
+    selectedUnit: state.selectedUnit,
+    listingFresh: isListingFresh(state.lastListing),
+    activeTramite: state.activeTramite,
+    lastAgentQuestion: state.lastAgentQuestion,
+  });
+  traceRuleSemantic({
+    turnDecision,
+    semantic,
+    deterministicBefore:
+      turnDecision.kind !== "general" ? `decideTurn:${turnDecision.kind}` : null,
+  });
 
   if (turnDecision.kind === "clarify") {
     savePilotConversationState(state);
-    return { kind: "reply", message: turnDecision.question, state };
+    return traced("clarify", "turnDecision.clarify", {
+      kind: "reply",
+      message: turnDecision.question,
+      state,
+    });
   }
 
   // answer_pending reject/confirm/provide_fields: no cortocircuitar —
@@ -556,13 +884,14 @@ export async function resolveOperationalTurn(input: {
           const unitHint = state.selectedUnit?.label ? ` de ${state.selectedUnit.label}` : "";
           const prefix = `De acuerdo, dejo pendiente el ${fromLabel} y seguimos con el odómetro${unitHint}. `;
           savePilotConversationState(odo.state);
-          return {
+          return traced("odometer_switch", "turnDecision.start_new_intent+suspend", {
             kind: "reply",
-            message: odo.message.startsWith("Pasame") || odo.message.startsWith("Decime")
-              ? prefix + odo.message
-              : odo.message,
+            message:
+              odo.message.startsWith("Pasame") || odo.message.startsWith("Decime")
+                ? prefix + odo.message
+                : odo.message,
             state: odo.state,
-          };
+          });
         }
       }
     }
@@ -579,20 +908,17 @@ export async function resolveOperationalTurn(input: {
         });
         if (cert.kind === "reply") {
           savePilotConversationState(state);
-          return { kind: "reply", message: cert.message, state };
+          return traced("certificate_switch", "turnDecision.start_new_intent+suspend", {
+            kind: "reply",
+            message: cert.message,
+            state,
+          });
         }
       }
     }
   }
 
-  // Interpretación semántica de búsqueda (no reemplaza TurnDecision).
-  const semantic = interpretSemanticTurn(text, {
-    lastListing: state.lastListing,
-    selectedUnit: state.selectedUnit,
-    listingFresh: isListingFresh(state.lastListing),
-    activeTramite: state.activeTramite,
-    lastAgentQuestion: state.lastAgentQuestion,
-  });
+  // semantic ya calculado arriba (trace). No reemplaza TurnDecision.
 
   if (looksLikeResumeTramite(text) && state.suspendedTramite) {
     resumeSuspendedTramite(state);
@@ -602,7 +928,11 @@ export async function resolveOperationalTurn(input: {
       (state.selectedUnit
         ? `Retomamos con ${state.selectedUnit.label}. ¿Seguimos?`
         : "Retomamos el trámite anterior. ¿Qué necesitás?");
-    return { kind: "reply", message: resumeMsg, state };
+    return traced("resume", "looksLikeResumeTramite", {
+      kind: "reply",
+      message: resumeMsg,
+      state,
+    });
   }
 
   // Nueva intención de servicio explícita — solo si TurnDecision lo autorizó
@@ -651,7 +981,11 @@ export async function resolveOperationalTurn(input: {
     }
     if (cert.kind === "reply") {
       savePilotConversationState(state);
-      return { kind: "reply", message: cert.message, state };
+      return traced("certificate_handler", "early_certificate_path", {
+        kind: "reply",
+        message: cert.message,
+        state,
+      });
     }
   }
 
@@ -735,7 +1069,11 @@ export async function resolveOperationalTurn(input: {
       }
       if (odo.kind === "reply") {
         savePilotConversationState(odo.state);
-        return { kind: "reply", message: odo.message, state: odo.state };
+        return traced("odometer_handler", "tryResolveOdometerTurn", {
+          kind: "reply",
+          message: odo.message,
+          state: odo.state,
+        });
       }
     }
   }
@@ -1062,11 +1400,19 @@ export async function resolveOperationalTurn(input: {
     if (outcome.kind === "listing") {
       showListing(state, outcome.listing, outcome.message);
       savePilotConversationState(state);
-      return { kind: "reply", message: outcome.message, state };
+      return traced("unit_search", "resolveSemanticUnitSearch.listing;useLlm=false", {
+        kind: "reply",
+        message: outcome.message,
+        state,
+      });
     }
     if (outcome.kind === "not_found") {
       savePilotConversationState(state);
-      return { kind: "reply", message: outcome.message, state };
+      return traced("unit_search", "resolveSemanticUnitSearch.not_found;useLlm=false", {
+        kind: "reply",
+        message: outcome.message,
+        state,
+      });
     }
     if (searchToken) {
       const byName = resolveUnitByNameFromFleet(fleet.units, text);
@@ -1091,7 +1437,14 @@ export async function resolveOperationalTurn(input: {
 
   savePilotConversationState(state);
   const snapshot = await buildSnapshot(state, env);
-  return { kind: "llm", state, snapshot };
+  return traced("llm_fallback", "no_operational_handler_matched; useLlm_unit_search=false", {
+    kind: "llm",
+    state,
+    snapshot,
+  });
+  } finally {
+    abandonSemanticTrace(state, "return_without_explicit_finish");
+  }
 }
 
 export {

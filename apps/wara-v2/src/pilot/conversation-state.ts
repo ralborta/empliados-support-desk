@@ -102,6 +102,15 @@ export type PilotConversationState = {
   certificateOperations: Record<string, CertificateOperationRecord>;
   ticketDraft: TicketDraft | null;
   ticketOperations: Record<string, TicketOperationRecord>;
+  /** Últimos turnos sanitizados (user/assistant) para interpretTurn. */
+  recentTurns?: Array<{
+    role: "user" | "assistant";
+    text: string;
+    at: string;
+    intent?: string;
+    action?: string;
+    tramite?: string;
+  }>;
 };
 
 const memory = new Map<string, PilotConversationState>();
@@ -161,6 +170,7 @@ export function createEmptyPilotState(input: {
     certificateOperations: {},
     ticketDraft: null,
     ticketOperations: {},
+    recentTurns: [],
   };
 }
 
