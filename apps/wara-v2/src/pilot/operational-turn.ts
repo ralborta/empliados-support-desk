@@ -13,6 +13,7 @@ import {
   resumeSuspendedTramite,
   savePilotConversationState,
   suspendCurrentTramite,
+  suspendOdometerForSideQuery,
   type PilotConversationState,
   type PilotSelectedUnit,
 } from "./conversation-state.js";
@@ -433,6 +434,17 @@ export async function resolveOperationalTurn(input: {
 
   await ensureSessionToken(state, env);
 
+  if (looksLikeResumeTramite(text) && state.suspendedTramite) {
+    resumeSuspendedTramite(state);
+    savePilotConversationState(state);
+    const resumeMsg =
+      state.pendingConfirmation?.question ??
+      (state.selectedUnit
+        ? `Retomamos con ${state.selectedUnit.label}. ¿Seguimos?`
+        : "Retomamos el trámite anterior. ¿Qué necesitás?");
+    return { kind: "reply", message: resumeMsg, state };
+  }
+
   if (looksLikeChangeUnit(text)) {
     state.selectedUnit = null;
     state.pendingConfirmation = null;
@@ -462,6 +474,74 @@ export async function resolveOperationalTurn(input: {
         env,
         fleetUnits: fleetOdo.units,
       });
+      if (odo.kind === "gps_side_during_odometer") {
+        const savedDraft = odo.state.odometerDraft;
+        const savedPending = odo.state.pendingConfirmation;
+        const activeUnitRef = savedDraft?.unit ?? savedPending?.unit ?? odo.state.selectedUnit;
+        suspendOdometerForSideQuery(odo.state);
+        let targetUnit: WaraUnidadEstado | null = null;
+        const explicit = hasExplicitUnitReference(text);
+        if (explicit) {
+          const byPlate = resolveUnitByPlateFromFleet(fleetOdo.units, text);
+          if (byPlate.kind === "one") targetUnit = byPlate.unit;
+          else if (byPlate.kind === "many") {
+            const listing = buildPaginatedListing({
+              units: byPlate.units,
+              page: 1,
+              kind: "search_results",
+              searchLabel: detectLoosePlate(text) ?? text.trim(),
+            });
+            const msg = formatPaginatedFleetMessage(listing, odo.state.companyName);
+            showListing(odo.state, listing, msg);
+            savePilotConversationState(odo.state);
+            return { kind: "reply", message: msg, state: odo.state };
+          } else {
+            const byName = resolveUnitByNameFromFleet(fleetOdo.units, text);
+            if (byName.kind === "one") targetUnit = byName.unit;
+            else if (byName.kind === "many") {
+              const listing = buildPaginatedListing({
+                units: byName.units,
+                page: 1,
+                kind: "search_results",
+                searchLabel: extractExplicitUnitToken(text) ?? text.trim(),
+              });
+              const msg = formatPaginatedFleetMessage(listing, odo.state.companyName);
+              showListing(odo.state, listing, msg);
+              savePilotConversationState(odo.state);
+              return { kind: "reply", message: msg, state: odo.state };
+            }
+          }
+          if (!targetUnit) {
+            savePilotConversationState(odo.state);
+            return {
+              kind: "reply",
+              message:
+                `No encontré esa unidad para el GPS. El registro pendiente sigue en pausa — decime «continuamos».`,
+              state: odo.state,
+            };
+          }
+        } else if (activeUnitRef) {
+          targetUnit = findUnitInFleetByRef(fleetOdo.units, activeUnitRef);
+        }
+        if (!targetUnit) {
+          savePilotConversationState(odo.state);
+          return {
+            kind: "reply",
+            message: "No pude ubicar la unidad para el GPS. Decime «continuamos» para retomar el registro.",
+            state: odo.state,
+          };
+        }
+        const gpsMsg = buildGpsReportForUnit(targetUnit);
+        odo.state.activeTramite = "none";
+        odo.state.step = "gps_side_query";
+        savePilotConversationState(odo.state);
+        return {
+          kind: "reply",
+          message:
+            `${gpsMsg}\n\nCuando quieras seguimos con el registro pendiente. Decime «continuamos».`,
+          state: odo.state,
+        };
+      }
       if (odo.kind === "reply") {
         savePilotConversationState(odo.state);
         return { kind: "reply", message: odo.message, state: odo.state };
@@ -486,17 +566,6 @@ export async function resolveOperationalTurn(input: {
       message: "Listo, cancelé el trámite activo. ¿En qué más te ayudo?",
       state,
     };
-  }
-
-  if (looksLikeResumeTramite(text) && state.suspendedTramite) {
-    resumeSuspendedTramite(state);
-    savePilotConversationState(state);
-    const resumeMsg =
-      state.pendingConfirmation?.question ??
-      (state.selectedUnit
-        ? `Retomamos con ${state.selectedUnit.label}. ¿Seguimos?`
-        : "Retomamos el trámite anterior. ¿Qué necesitás?");
-    return { kind: "reply", message: resumeMsg, state };
   }
 
   if (state.pendingConfirmation && looksLikeBriefConfirmation(text)) {
@@ -651,7 +720,7 @@ export async function resolveOperationalTurn(input: {
       }
     }
   }
-  if (searchToken && !looksLikeGreetingOnly(text)) {
+  if (searchToken && !looksLikeGreetingOnly(text) && !state.suspendedTramite) {
     const fleet = await fetchFleet(state, env);
     if (!fleet.ok) {
       savePilotConversationState(state);

@@ -27,6 +27,7 @@ import {
 import {
   looksLikeBriefConfirmation,
   looksLikeBriefRejection,
+  looksLikeGpsReportRequest,
   looksLikePendingConfirmComprehensionAck,
   looksLikeResumePausedTramite,
 } from "./brief-replies.js";
@@ -36,7 +37,8 @@ import type { WaraUnidadEstado } from "./wara-types.js";
 
 export type OdometerTurnResult =
   | { kind: "none" }
-  | { kind: "reply"; message: string; state: PilotConversationState };
+  | { kind: "reply"; message: string; state: PilotConversationState }
+  | { kind: "gps_side_during_odometer"; text: string; state: PilotConversationState };
 
 export type OdometerWriteDeps = {
   registerReading?: (input: {
@@ -226,6 +228,14 @@ export async function tryResolveOdometerTurn(input: {
         `Seguimos con tu registro pendiente: ${state.pendingConfirmation.question}`,
       state,
     };
+  }
+
+  if (
+    state.pendingConfirmation?.action === "odometer_write" &&
+    draft.step === "await_confirm" &&
+    looksLikeGpsReportRequest(text)
+  ) {
+    return { kind: "gps_side_during_odometer", text, state };
   }
 
   if (

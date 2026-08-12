@@ -12,7 +12,7 @@ import { resolveOperationalTurn } from "./operational-turn.js";
 import type { PilotWaraSession, WaraPromptSnapshot } from "./wara-types.js";
 import {
   resetPilotConversationStatesForTests,
-  configurePilotStatePersistence,
+  initPilotStatePersistenceFromEnv,
 } from "./conversation-state.js";
 
 export type PilotWaraResolution =
@@ -34,9 +34,7 @@ export async function resolvePilotWaraTurn(input: {
   const text = input.text.trim() || "Hola";
   const tenantId = (input.tenantId ?? env.WARA_V2_SHADOW_TENANT ?? "tenant_internal_ops").trim();
 
-  if (env.WARA_V2_PILOT_STATE_PATH?.trim()) {
-    configurePilotStatePersistence(env.WARA_V2_PILOT_STATE_PATH.trim());
-  }
+  initPilotStatePersistenceFromEnv(env);
 
   if (!isWaraReadConfigured(env)) {
     const session = initPilotWaraSession(input.phone, [], null);

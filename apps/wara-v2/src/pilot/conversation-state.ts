@@ -5,6 +5,11 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { normalizeWaraPhone } from "./wara-client.js";
+import {
+  probePersistencePath,
+  sanitizePersistencePath,
+  type PilotPersistenceDiagnostics,
+} from "./persistence-diagnostics.js";
 import type { WaraEmpresaContact } from "./wara-types.js";
 import type { FleetUnitRef, PaginatedFleetListing } from "./unit-fleet.js";
 import { SESSION_TTL_MS } from "./unit-fleet.js";
@@ -34,6 +39,7 @@ export type PilotSuspendedTramite = {
   selectedUnit: PilotSelectedUnit | null;
   lastListing: PaginatedFleetListing | null;
   pendingConfirmation: PilotPendingConfirmation | null;
+  odometerDraft: OdometerDraft | null;
   savedAt: string;
 };
 
@@ -71,6 +77,11 @@ export type PilotConversationState = {
 const memory = new Map<string, PilotConversationState>();
 let persistencePath: string | null = null;
 let loadedFromDisk = false;
+let conversationsRecovered = 0;
+let lastPersistOkAt: string | null = null;
+let lastPersistError: string | null = null;
+let lastLoadError: string | null = null;
+let startupWarning: string | null = null;
 
 function stateKey(tenantId: string, phone: string): string {
   return `${tenantId}:${normalizeWaraPhone(phone)}`;
@@ -117,8 +128,53 @@ export function createEmptyPilotState(input: {
 }
 
 export function configurePilotStatePersistence(path: string | null): void {
-  persistencePath = path;
+  const next = path?.trim() || null;
+  if (next === persistencePath && loadedFromDisk) return;
+  persistencePath = next;
   loadedFromDisk = false;
+  if (next) ensureLoaded();
+}
+
+export function initPilotStatePersistenceFromEnv(env: NodeJS.ProcessEnv = process.env): PilotPersistenceDiagnostics {
+  const path = env.WARA_V2_PILOT_STATE_PATH?.trim() || null;
+  startupWarning = null;
+  if (!path) {
+    persistencePath = null;
+    loadedFromDisk = true;
+    return getPilotPersistenceDiagnostics();
+  }
+  const probe = probePersistencePath(path);
+  if (!probe.accessible || !probe.writable) {
+    startupWarning = "persistence_path_not_writable";
+    console.error(
+      JSON.stringify({
+        event: "pilot_persistence_startup_failed",
+        pathPartial: sanitizePersistencePath(path),
+        accessible: probe.accessible,
+        writable: probe.writable,
+      }),
+    );
+  }
+  configurePilotStatePersistence(path);
+  return getPilotPersistenceDiagnostics();
+}
+
+export function getPilotPersistenceDiagnostics(): PilotPersistenceDiagnostics {
+  const path = persistencePath;
+  const probe = path ? probePersistencePath(path) : null;
+  return {
+    enabled: Boolean(path),
+    pathPartial: sanitizePersistencePath(path),
+    pathAccessible: probe?.accessible ?? false,
+    pathWritable: probe?.writable ?? false,
+    fileExists: probe?.fileExists ?? false,
+    fileLoaded: loadedFromDisk && Boolean(path),
+    conversationsRecovered,
+    lastPersistOkAt,
+    lastPersistError,
+    lastLoadError,
+    startupWarning,
+  };
 }
 
 function ensureLoaded(): void {
@@ -127,15 +183,34 @@ function ensureLoaded(): void {
     return;
   }
   loadedFromDisk = true;
+  conversationsRecovered = 0;
   if (!existsSync(persistencePath)) return;
   try {
     const raw = readFileSync(persistencePath, "utf8");
     const parsed = JSON.parse(raw) as Record<string, PilotConversationState>;
     for (const [k, v] of Object.entries(parsed)) {
-      if (v?.schemaVersion === 1) memory.set(k, v);
+      if (v?.schemaVersion === 1) {
+        memory.set(k, v);
+        conversationsRecovered += 1;
+      }
     }
-  } catch {
-    // corrupt file — start fresh in memory
+    lastLoadError = null;
+    console.info(
+      JSON.stringify({
+        event: "pilot_persistence_loaded",
+        pathPartial: sanitizePersistencePath(persistencePath),
+        conversationsRecovered,
+      }),
+    );
+  } catch (e) {
+    lastLoadError = e instanceof Error ? e.message.slice(0, 120) : "load_failed";
+    console.error(
+      JSON.stringify({
+        event: "pilot_persistence_load_error",
+        pathPartial: sanitizePersistencePath(persistencePath),
+        error: lastLoadError,
+      }),
+    );
   }
 }
 
@@ -145,8 +220,17 @@ function flushToDisk(): void {
     mkdirSync(dirname(persistencePath), { recursive: true });
     const obj = Object.fromEntries(memory.entries());
     writeFileSync(persistencePath, JSON.stringify(obj), "utf8");
-  } catch {
-    // lab-only best effort
+    lastPersistOkAt = new Date().toISOString();
+    lastPersistError = null;
+  } catch (e) {
+    lastPersistError = e instanceof Error ? e.message.slice(0, 120) : "persist_failed";
+    console.error(
+      JSON.stringify({
+        event: "pilot_persistence_write_error",
+        pathPartial: sanitizePersistencePath(persistencePath),
+        error: lastPersistError,
+      }),
+    );
   }
 }
 
@@ -205,28 +289,37 @@ export function clearOperationalTramite(state: PilotConversationState): void {
 }
 
 export function suspendCurrentTramite(state: PilotConversationState): void {
-  if (state.activeTramite === "none" && !state.pendingConfirmation) return;
+  if (state.activeTramite === "none" && !state.pendingConfirmation && !state.odometerDraft) return;
   state.suspendedTramite = {
-    tramite: state.activeTramite,
+    tramite: state.activeTramite === "none" && state.odometerDraft ? "odometer_update" : state.activeTramite,
     step: state.step,
     selectedUnit: state.selectedUnit,
     lastListing: state.lastListing,
     pendingConfirmation: state.pendingConfirmation,
+    odometerDraft: state.odometerDraft,
     savedAt: new Date().toISOString(),
   };
   state.activeTramite = "none";
   state.step = "interrupted";
   state.pendingConfirmation = null;
+  state.odometerDraft = null;
+}
+
+/** Suspende odómetro pendiente (CONFIRMO) para consulta lateral GPS sin perder draft. */
+export function suspendOdometerForSideQuery(state: PilotConversationState): void {
+  if (!state.pendingConfirmation && !state.odometerDraft) return;
+  suspendCurrentTramite(state);
 }
 
 export function resumeSuspendedTramite(state: PilotConversationState): boolean {
   const s = state.suspendedTramite;
   if (!s) return false;
-  state.activeTramite = s.tramite;
+  state.activeTramite = s.tramite === "none" && s.odometerDraft ? "odometer_update" : s.tramite;
   state.step = s.step;
   state.selectedUnit = s.selectedUnit;
   state.lastListing = s.lastListing;
   state.pendingConfirmation = s.pendingConfirmation;
+  state.odometerDraft = s.odometerDraft;
   state.suspendedTramite = null;
   state.step = "resumed";
   return true;
@@ -310,6 +403,11 @@ export function resetPilotConversationStatesForTests(): void {
   memory.clear();
   loadedFromDisk = false;
   persistencePath = null;
+  conversationsRecovered = 0;
+  lastPersistOkAt = null;
+  lastPersistError = null;
+  lastLoadError = null;
+  startupWarning = null;
 }
 
 export function listPilotConversationStatesForTests(): PilotConversationState[] {

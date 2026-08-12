@@ -18,6 +18,8 @@ import { getOdooConfigStatus } from "../pilot/odoo-status.js";
 import {
   deletePilotConversationState,
   getPilotConversationState,
+  getPilotPersistenceDiagnostics,
+  initPilotStatePersistenceFromEnv,
   sanitizeStateForLab,
 } from "../pilot/conversation-state.js";
 
@@ -97,6 +99,13 @@ export async function startShadowCanaryServer(opts?: {
     // Permitir arrancar apagado (health only)
   }
 
+  const persistenceBoot = initPilotStatePersistenceFromEnv(process.env);
+  const gitCommit =
+    process.env.GIT_COMMIT_SHA?.trim() ||
+    process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
+    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+    null;
+
   const server = http.createServer(async (req, res) => {
     const correlationId =
       (req.headers["x-correlation-id"] as string) || "shadow";
@@ -119,16 +128,21 @@ export async function startShadowCanaryServer(opts?: {
       const url = new URL(req.url ?? "/", `http://${host}`);
 
       if (req.method === "GET" && url.pathname === "/health") {
+        const persistence = getPilotPersistenceDiagnostics();
+        const degraded =
+          persistence.enabled &&
+          (!persistence.pathWritable || persistence.startupWarning != null);
         respondJson(200, {
-          status: "ok",
+          status: degraded ? "degraded" : "ok",
           phase: "10A",
           shadow_enabled: cfg.enabled,
           delivery_enabled: false,
           pilot_whatsapp: isPilotWhatsAppEnabled(),
           wara_read: isWaraReadConfigured(),
           odoo_configured: getOdooConfigStatus().configured,
-          commit: process.env.GIT_COMMIT_SHA?.trim() || null,
+          commit: gitCommit,
           lab_chat: "/lab/chat",
+          persistence,
         });
         return;
       }

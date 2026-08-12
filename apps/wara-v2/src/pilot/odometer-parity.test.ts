@@ -31,6 +31,9 @@ const UNIT_ODO: WaraUnidadEstado = {
   unidad: "M600-001",
   patente: "AA100AA",
   odometro: 120000,
+  ultimo_reporte: { hace_segundos: 90 },
+  ultima_posicion: { hace_segundos: 100 },
+  ignicion: { hace_segundos: 110, estado: true },
 };
 
 const UNIT_HORO: WaraUnidadEstado = {
@@ -39,6 +42,16 @@ const UNIT_HORO: WaraUnidadEstado = {
   patente: "BB200BB",
   horometro: 4500,
   odometro: 80000,
+};
+
+const UNIT_MYQ: WaraUnidadEstado = {
+  movil_id: 300,
+  unidad: "MYQ-999",
+  patente: "CC300CC",
+  odometro: 90000,
+  ultimo_reporte: { hace_segundos: 120 },
+  ultima_posicion: { hace_segundos: 130 },
+  ignicion: { hace_segundos: 140, estado: true },
 };
 
 const CONTACTS = [{ id: 1, nombre: "Test", empresa: "Lab" }];
@@ -362,6 +375,56 @@ describe("odómetro/horómetro V2 — lab", () => {
     await turn("odometro", mid("o"));
     const ch = await turn("cambiar unidad", mid("cu"));
     assert.match(ch.message, /unidad|patente|lista/i);
+  });
+
+  async function setupPendingOdometerConfirm() {
+    await turn("listas de unidades");
+    await turn("1", mid("pick"));
+    await turn("odometro", mid("s"));
+    await turn("130500 km", mid("v"));
+    const confirm = await turn("06/08/2026 15:50", mid("f"));
+    assert.match(confirm.message, /CONFIRMO/i);
+    return confirm;
+  }
+
+  it("GPS lateral — ¿dónde está el vehículo? → continuamos → CONFIRMO (misma unidad)", async () => {
+    await setupPendingOdometerConfirm();
+    const gps = await turn("¿dónde está el vehículo?", mid("gps1"));
+    assert.match(gps.message, /continuamos|registro pendiente/i);
+    assert.equal(writes, 0);
+    const resume = await turn("continuamos", mid("resume1"));
+    assert.match(resume.message, /CONFIRMO|130500/i);
+    const ok = await turn("CONFIRMO", mid("c1"));
+    assert.match(ok.message, /simulado|registr/i);
+    assert.equal(writes, 1);
+    const dup = await turn("CONFIRMO", mid("c2"));
+    assert.match(dup.message, /idempotencia|procesada/i);
+    assert.equal(writes, 1);
+  });
+
+  it("GPS lateral — reporte GPS y frases alternativas", async () => {
+    await setupPendingOdometerConfirm();
+    assert.match((await turn("reporte GPS", mid("gps2"))).message, /continuamos/i);
+    await turn("continuamos", mid("r2"));
+    assert.match((await turn("¿dónde está esa unidad?", mid("gps3"))).message, /continuamos/i);
+  });
+
+  it("GPS lateral — unidad distinta MYQ no altera operación pendiente", async () => {
+    setPilotOperationalDepsForTests({
+      createToken: async () => ({ ok: true, sessionToken: "tok" }),
+      consultarFleet: async () => ({ ok: true, unidades: [UNIT_ODO, UNIT_HORO, UNIT_MYQ] }),
+    });
+    await setupPendingOdometerConfirm();
+    const side = await turn("¿y dónde está MYQ?", mid("gps4"));
+    assert.match(side.message, /MYQ|continuamos/i);
+    assert.equal(writes, 0);
+    const resume = await turn("continuamos", mid("r4"));
+    assert.match(resume.message, /AA100AA|130500|CONFIRMO/i);
+    const st = getPilotConversationState(TENANT, PHONE);
+    assert.equal(st?.odometerDraft?.unit?.patente, "AA100AA");
+    await turn("CONFIRMO", mid("c4"));
+    assert.equal(writes, 1);
+    assert.equal(lastPayload?.patente, "AA100AA");
   });
 });
 
