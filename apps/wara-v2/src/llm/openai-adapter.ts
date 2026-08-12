@@ -43,6 +43,11 @@ export type OpenAiAdapterOpts = {
   breaker?: CircuitBreaker;
   onMetrics?: (m: LlmCallMetrics) => void;
   mockProviderBody?: unknown;
+  buildMessages?: (ctx: TurnContext) => {
+    system: string;
+    user: string;
+    fixtureHash: string;
+  };
 };
 
 export class OpenAiChatAdapter implements ModelAdapter {
@@ -67,7 +72,9 @@ export class OpenAiChatAdapter implements ModelAdapter {
     this.breaker.assertClosed();
     this.inflight += 1;
     const started = Date.now();
-    const { system, user, fixtureHash } = buildSanitizedMessages(context);
+    const { system, user, fixtureHash } = (
+      this.opts.buildMessages ?? buildSanitizedMessages
+    )(context);
     const promptHash = hashPromptParts(system, user);
 
     try {

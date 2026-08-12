@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { loadShadowCanaryConfig } from "./flags.js";
 import { processShadowCanaryCopy } from "./enqueue.js";
+import {
+  handlePilotWhatsAppTurn,
+  isPilotWhatsAppEnabled,
+} from "../pilot/whatsapp-turn.js";
 
 export type ShadowCanaryServer = {
   port: number;
@@ -50,7 +54,39 @@ export async function startShadowCanaryServer(opts?: {
           phase: "10A",
           shadow_enabled: c.enabled,
           delivery_enabled: false,
+          pilot_whatsapp: isPilotWhatsAppEnabled(),
         });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/whatsapp/turn") {
+        const chunks: Buffer[] = [];
+        for await (const c of req) {
+          chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+          if (Buffer.concat(chunks).length > 64 * 1024) {
+            respond(413, { error: "payload_too_large" });
+            return;
+          }
+        }
+        const raw = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as {
+          phone?: string;
+          from?: string;
+          body?: string;
+          rawText?: string;
+          message?: string;
+          api_key?: string;
+          apiKey?: string;
+        };
+        const headerKey = String(req.headers["x-api-key"] ?? "").trim();
+        const auth = String(req.headers.authorization ?? "").replace(
+          /^Bearer\s+/i,
+          "",
+        );
+        const result = await handlePilotWhatsAppTurn({
+          phone: String(raw.phone ?? raw.from ?? ""),
+          text: String(raw.body ?? raw.rawText ?? raw.message ?? ""),
+          apiKey: headerKey || auth.trim() || raw.api_key || raw.apiKey,
+        });
+        respond(result.status, result.body);
         return;
       }
       if (req.method === "POST" && url.pathname === "/v2/shadow-canary") {
