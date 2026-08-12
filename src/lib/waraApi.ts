@@ -13,6 +13,8 @@ import {
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
+  looksLikeResumePausedTramite,
+  looksLikePendingConfirmComprehensionAck,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerInfoRequest,
   looksLikeOdometerIntentStart,
@@ -779,11 +781,13 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   ) {
     return true;
   }
-  // "Gracias" sin confirmar — seguir en flujo y recordar CONFIRMO (no skip silencioso).
+  // "Gracias" / "ah entiendo" / "continuamos" con CONFIRMO vivo: no abandonar el trámite.
   if (
     odometerFlowAwaitingInput &&
-    looksLikeConversationAcknowledgement(text) &&
-    hasPendingOdometerConfirmation(threadText)
+    hasPendingOdometerConfirmation(threadText) &&
+    (looksLikeConversationAcknowledgement(text) ||
+      looksLikePendingConfirmComprehensionAck(text) ||
+      looksLikeResumePausedTramite(text))
   ) {
     return true;
   }

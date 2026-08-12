@@ -56,6 +56,8 @@ import {
   isBarePlatePrefixHint,
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
+  looksLikeResumePausedTramite,
+  looksLikePendingConfirmComprehensionAck,
   detectLoosePlate,
   extractPlatePrefixFromMessage,
   hasPendingMaintenancePlateRequest,
@@ -284,6 +286,26 @@ export async function runTurnExecutorPhase(params: {
   // CONFIRMO pendiente + "No"/rechazo: la IA razona (¿cancelar? ¿era consulta? ¿corregir unidad?).
   // Nunca asumir "no era esa patente" sin razonar el contexto del resumen.
   const pendingKind = detectPendingConfirmKind(thread);
+  // Consulta lateral ya respondida: "ah entiendo" / "continuamos porfa" debe retomar
+  // el CONFIRMO, no silenciar ni registrar como si hubiera dicho CONFIRMO.
+  if (
+    pendingKind &&
+    (looksLikeResumePausedTramite(selectionText) ||
+      looksLikePendingConfirmComprehensionAck(selectionText))
+  ) {
+    const reminder = buildPendingConfirmStillWaitingReminder(pendingKind);
+    const prefix = looksLikeResumePausedTramite(selectionText) ? "Dale, seguimos. " : "Dale. ";
+    return {
+      message: `${prefix}${reminder}`,
+      executor:
+        pendingKind === "odometro"
+          ? "odometro"
+          : pendingKind === "certificados"
+            ? "certificados"
+            : "mantenimiento",
+      ok: true,
+    };
+  }
   if (pendingKind && looksLikePendingConfirmPushback(selectionText, pendingKind)) {
     const stance = await reasonPendingConfirmationRejection({
       selectionText,
@@ -895,6 +917,13 @@ export async function runTurnExecutorPhase(params: {
     threadCtx,
   });
   if (agentResult?.usedAgent) {
+    if (!String(agentResult.message ?? "").trim() && pendingKind) {
+      return {
+        message: buildPendingConfirmStillWaitingReminder(pendingKind),
+        executor: agentResult.executor,
+        ok: true,
+      };
+    }
     return {
       message: agentResult.message,
       executor: agentResult.executor,
@@ -959,6 +988,8 @@ export async function runTurnExecutorPhase(params: {
     ) {
       finalMessage =
         "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan).";
+    } else if (pendingKind) {
+      finalMessage = buildPendingConfirmStillWaitingReminder(pendingKind);
     } else {
       finalMessage = buildUnexpectedTurnFallbackMessage(selectionText);
     }

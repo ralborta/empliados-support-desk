@@ -2270,6 +2270,48 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
  * "Si 19:00 de ayer", "Sí correcto", "Dale esa está bien" — afirmación con dato extra
  * durante confirmación pendiente. No es confirmación pura ni un trámite nuevo.
  */
+/**
+ * Tras una consulta lateral (qué es el odómetro, etc.), el cliente pide retomar
+ * el CONFIRMO pendiente: "continuamos", "bueno seguimos porfa".
+ * No es CONFIRMO (no registrar) ni cambio de empresa ("continuar con El Cacique").
+ */
+export function looksLikeResumePausedTramite(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 120) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(con|en)\s+(el|la)?\s*(wara|cacique|empresa)\b/.test(t)) return false;
+  if (/\bno\s+(continu|seguir|retom)/.test(t) || /\bcancel/.test(t)) return false;
+  return /\b(continuamos|continuar|continuemos|seguimos|sigamos|retomamos|retomar|retomemos|volvamos)\b/.test(
+    t,
+  );
+}
+
+/** "Ah entiendo" / "ah ok" corto después de una explicación, con CONFIRMO aún vivo. */
+export function looksLikePendingConfirmComprehensionAck(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 48) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(pasa|cambio|odometro|horometro|patente|confirmo|consulta|lista)\b/.test(t)) {
+    return false;
+  }
+  return /^(ah|aha|aja|ok|bueno|bien)?\s*(entiendo|entendido|claro)(\s+(gracias|ok|dale))?$/.test(t) ||
+    /^(ah ok|ah bueno|ah claro|ok entiendo)$/.test(t);
+}
+
 export function looksLikePendingTramiteAffirmation(text: string | undefined | null): boolean {
   if (looksLikeBriefConfirmation(text)) return true;
   const raw = String(text ?? "").trim();
