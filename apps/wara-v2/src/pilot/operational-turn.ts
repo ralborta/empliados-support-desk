@@ -49,6 +49,9 @@ import {
   type PaginatedFleetListing,
 } from "./unit-fleet.js";
 import { buildGpsReportForUnit } from "./gps-core.js";
+import { looksLikeOdometerIntent, looksLikeExplicitConfirm } from "./odometer-core.js";
+import { findCompletedByConfirmMessageId, findMostRecentCompletedOdometerOp } from "./odometer-operation.js";
+import { tryResolveOdometerTurn } from "./odometer-turn.js";
 import { detectLoosePlate } from "./plates.js";
 import {
   buildCompanyMenuMessage,
@@ -430,6 +433,42 @@ export async function resolveOperationalTurn(input: {
 
   await ensureSessionToken(state, env);
 
+  if (looksLikeChangeUnit(text)) {
+    state.selectedUnit = null;
+    state.pendingConfirmation = null;
+    state.odometerDraft = null;
+    state.activeTramite = "none";
+    state.step = "change_unit";
+    savePilotConversationState(state);
+    return {
+      kind: "reply",
+      message: "Dale, cambiamos de unidad. Decime la patente, el nombre o pedime la lista.",
+      state,
+    };
+  }
+
+  if (
+    state.activeTramite === "odometer_update" ||
+    (state.odometerDraft && state.odometerDraft.step !== "idle") ||
+    state.pendingConfirmation?.action === "odometer_write" ||
+    looksLikeOdometerIntent(text)
+  ) {
+    const fleetOdo = await fetchFleet(state, env);
+    if (fleetOdo.ok) {
+      const odo = await tryResolveOdometerTurn({
+        state,
+        text,
+        messageId: input.messageId,
+        env,
+        fleetUnits: fleetOdo.units,
+      });
+      if (odo.kind === "reply") {
+        savePilotConversationState(odo.state);
+        return { kind: "reply", message: odo.message, state: odo.state };
+      }
+    }
+  }
+
   if (looksLikeCompanyListQuestion(text)) {
     savePilotConversationState(state);
     return {
@@ -482,18 +521,6 @@ export async function resolveOperationalTurn(input: {
       savePilotConversationState(state);
       return { kind: "reply", message: msg, state };
     }
-  }
-
-  if (looksLikeChangeUnit(text)) {
-    state.selectedUnit = null;
-    state.pendingConfirmation = null;
-    state.step = "change_unit";
-    savePilotConversationState(state);
-    return {
-      kind: "reply",
-      message: "Dale, cambiamos de unidad. Decime la patente, el nombre o pedime la lista.",
-      state,
-    };
   }
 
   if (state.pendingConfirmation && looksLikeBriefRejection(text)) {
@@ -606,6 +633,24 @@ export async function resolveOperationalTurn(input: {
   }
 
   const searchToken = extractSearchToken(text);
+  if (
+    !state.pendingConfirmation &&
+    (looksLikeExplicitConfirm(text) || looksLikeBriefConfirmation(text))
+  ) {
+    const dupConfirm = findCompletedByConfirmMessageId(state.odometerOperations ?? {}, input.messageId);
+    if (dupConfirm) {
+      savePilotConversationState(state);
+      return { kind: "reply", message: "Este CONFIRMO ya fue procesado.", state };
+    }
+    const recent = findMostRecentCompletedOdometerOp(state.odometerOperations ?? {});
+    if (recent) {
+      const ageMs = Date.now() - new Date(recent.updatedAt).getTime();
+      if (ageMs < 10 * 60 * 1000) {
+        savePilotConversationState(state);
+        return { kind: "reply", message: "Esa operación ya fue procesada (idempotencia).", state };
+      }
+    }
+  }
   if (searchToken && !looksLikeGreetingOnly(text)) {
     const fleet = await fetchFleet(state, env);
     if (!fleet.ok) {

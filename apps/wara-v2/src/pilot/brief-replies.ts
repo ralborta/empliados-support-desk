@@ -85,6 +85,23 @@ export function looksLikeResumeTramite(text: string | undefined | null): boolean
   return /\b(seguimos|continuamos|retomar|retomemos|seguir|continuar|donde\s+quedamos|volvamos)\b/.test(n);
 }
 
+/** Tras consulta lateral con CONFIRMO pendiente — no registrar, retomar hilo. */
+export function looksLikeResumePausedTramite(text: string | undefined | null): boolean {
+  const n = norm(String(text ?? ""));
+  if (!n || n.length > 80) return false;
+  if (/\b(con|en|para)\s+(el|la)?\s*(cacique|wara|empresa)\b/.test(n)) return false;
+  return /^(continuamos|seguimos|dale\s+seguimos|bueno\s+seguimos|retomemos|volvamos)$/i.test(n.trim()) ||
+    /\b(continuemos|sigamos\s+con\s+el\s+tramite)\b/.test(n);
+}
+
+export function looksLikePendingConfirmComprehensionAck(text: string | undefined | null): boolean {
+  const n = norm(String(text ?? ""));
+  if (!n || n.length > 40) return false;
+  if (/\?/.test(String(text ?? ""))) return false;
+  return /^(ah\s+)?(entiendo|ok|okay|okey|ya)$/i.test(String(text ?? "").trim()) ||
+    /^ah\s+ok$/i.test(String(text ?? "").trim());
+}
+
 /** "22", "la 22", "opción 22" — solo si hay listado vigente. */
 export function parseNumericListSelection(text: string): number | null {
   const raw = text.trim();

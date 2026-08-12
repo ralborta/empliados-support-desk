@@ -23,6 +23,8 @@ export type WaraUnidadEstado = {
   ultimo_reporte?: { fecha?: string; hace_segundos?: number } | null;
   ultima_posicion?: { lat?: number; lon?: number; hace_segundos?: number } | null;
   ultima_ignicion?: { estado?: boolean | string | number; hace_segundos?: number } | null;
+  odometro?: number | null;
+  horometro?: number | null;
 };
 
 export type WaraConsultarEstadoUnidadesResult = {

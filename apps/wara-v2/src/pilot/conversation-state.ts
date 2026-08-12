@@ -8,21 +8,24 @@ import { normalizeWaraPhone } from "./wara-client.js";
 import type { WaraEmpresaContact } from "./wara-types.js";
 import type { FleetUnitRef, PaginatedFleetListing } from "./unit-fleet.js";
 import { SESSION_TTL_MS } from "./unit-fleet.js";
+import type { OdometerDraft, OdometerOperationRecord } from "./odometer-types.js";
 
 export type PilotTramiteType =
   | "none"
   | "list_units"
   | "unit_gps_report"
   | "search_unit"
-  | "await_confirm";
+  | "await_confirm"
+  | "odometer_update";
 
 export type PilotSelectedUnit = FleetUnitRef;
 
 export type PilotPendingConfirmation = {
-  action: "gps_report";
+  action: "gps_report" | "odometer_write";
   unit: PilotSelectedUnit;
   askedAt: string;
   question: string;
+  operationId?: string;
 };
 
 export type PilotSuspendedTramite = {
@@ -61,6 +64,8 @@ export type PilotConversationState = {
   fleetCacheAt: string | null;
   /** messageId → processedAt ISO; idempotencia por mensaje entrante. */
   processedMessageIds: Record<string, string>;
+  odometerDraft: OdometerDraft | null;
+  odometerOperations: Record<string, OdometerOperationRecord>;
 };
 
 const memory = new Map<string, PilotConversationState>();
@@ -106,6 +111,8 @@ export function createEmptyPilotState(input: {
     fleetCache: null,
     fleetCacheAt: null,
     processedMessageIds: {},
+    odometerDraft: null,
+    odometerOperations: {},
   };
 }
 
@@ -194,6 +201,7 @@ export function clearOperationalTramite(state: PilotConversationState): void {
   state.pendingFields = [];
   state.lastAgentQuestion = null;
   state.suspendedTramite = null;
+  state.odometerDraft = null;
 }
 
 export function suspendCurrentTramite(state: PilotConversationState): void {
@@ -293,6 +301,8 @@ export function sanitizeStateForLab(
     stateVersion: state.stateVersion,
     expiresAt: state.expiresAt,
     processedMessageIdsCount: Object.keys(state.processedMessageIds ?? {}).length,
+    odometerStep: state.odometerDraft?.step ?? null,
+    odometerOperationsCount: Object.keys(state.odometerOperations ?? {}).length,
   };
 }
 
