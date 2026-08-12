@@ -7,7 +7,7 @@ import { DateTime } from "luxon";
 export const DEFAULT_TENANT_TZ = "America/Argentina/Buenos_Aires";
 
 export const FECHA_LECTURA_QUESTION =
-  "¿De qué fecha y hora es la lectura? Podés decirme, por ejemplo, “el sábado a las 18:15” o “ayer a las 8”.";
+  "¿De qué día y hora es la lectura? Podés decirme, por ejemplo, “el sábado a las 18:15” o “ayer a las 8”.";
 
 const WEEKDAY_ES: Record<string, number> = {
   domingo: 7,
