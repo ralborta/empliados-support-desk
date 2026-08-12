@@ -14,18 +14,13 @@ if (!url.includes("wara_tickets_lab") && process.env.WARA_V2_LAB_MODE !== "true"
 
 const prisma = new PrismaClient();
 
-function hashPassword(password: string): string {
+function hashPassword(password) {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
   return `${salt}:${hash}`;
 }
 
-async function upsertAgent(input: {
-  email: string;
-  name: string;
-  role: "ADMIN" | "SUPPORT";
-  password: string;
-}) {
+async function upsertAgent(input) {
   const existing = await prisma.agentUser.findUnique({ where: { email: input.email } });
   if (existing) {
     console.log(`agent exists: ${input.email}`);
