@@ -40,6 +40,8 @@ const PUSH_SUITES = [
   "verify-generic-unit-consult-and-ticket-info.mjs",
   "verify-session-unit-continuity.mjs",
   "verify-maintenance-inherits-odometer-plate.mjs",
+  "verify-odometer-resume-after-side-query.mjs",
+  "verify-hotfix-stabilization-regression.mjs",
   "verify-outbound-dedup.mjs",
   "verify-company-continuation-mention.mjs",
   "verify-utterance-understanding.mjs",
