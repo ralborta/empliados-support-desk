@@ -71,13 +71,18 @@ export async function handleWhatsAppTurn(params: {
   const { rawPhone, body, apiKey } = params;
   const rawBody = body.trim();
   let selectionText = rawBody;
+  const startedAt = Date.now();
+  const deliver = (payload: JsonRecord) =>
+    deliverTurnToWhatsApp(rawPhone, payload, {
+      answeringText: selectionText || rawBody,
+      startedAt,
+    });
 
   if (!selectionText) {
     const lastInbound = await recentLastInboundTextForPhone(rawPhone);
     if (lastInbound) {
       if (await shouldIgnoreDuplicateInicioTurn(rawPhone, lastInbound)) {
-        return deliverTurnToWhatsApp(
-          rawPhone,
+        return deliver(
           buildTurnPayload(
             { registered: true, registered_s: "true" },
             {
@@ -108,8 +113,7 @@ export async function handleWhatsAppTurn(params: {
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
 
   if (!allowPhoneRequest(rawPhone, 20)) {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(
         { registered: true, registered_s: "true" },
         {
@@ -144,8 +148,7 @@ export async function handleWhatsAppTurn(params: {
     ) {
       // Bypass: /turn sigue procesando.
     } else {
-      return deliverTurnToWhatsApp(
-        rawPhone,
+      return deliver(
         buildTurnPayload(context, {
           message: "",
           skipResponse_s: "true",
@@ -159,8 +162,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   if (contextNextFlow === "derivar") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         nextFlow: "derivar",
         nextFlow_s: "derivar",
@@ -171,8 +173,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   if (contextNextFlow === "reply") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         nextFlow: "reply",
         nextFlow_s: "reply",
@@ -190,8 +191,7 @@ export async function handleWhatsAppTurn(params: {
     const resetMessage = firstName
       ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
       : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         message: resetMessage,
         nextFlow: "reply",
@@ -205,8 +205,7 @@ export async function handleWhatsAppTurn(params: {
   if (shouldDeferTurnExecutor()) {
     scheduleDeferredTurnExecutor({ rawPhone, selectionText, apiKey });
     // Sin mensaje intermedio: el cliente recibe solo la respuesta real vía waitUntil + API WA.
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         message: "",
         skipResponse_s: "true",
@@ -220,8 +219,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   const execPhase = await runTurnExecutorPhase({ rawPhone, selectionText, apiKey });
-  return deliverTurnToWhatsApp(
-    rawPhone,
+  return deliver(
     buildTurnPayload(context, {
       ok: execPhase.ok,
       ok_s: execPhase.ok ? "true" : "false",

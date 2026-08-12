@@ -39,6 +39,23 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
     body.messages.mediaUrl = mediaUrl;
   }
 
+  const dedupeKey = outboundSendKey(number, message);
+  const lastSentAt = recentWhatsAppSends.get(dedupeKey) ?? 0;
+  if (Date.now() - lastSentAt < SEND_DEDUP_MS) {
+    console.log('[BuilderBot] Skip envío duplicado (misma texto, <8s)', {
+      number,
+      messageLength: message.length,
+    });
+    return { skippedDuplicate: true };
+  }
+  recentWhatsAppSends.set(dedupeKey, Date.now());
+  if (recentWhatsAppSends.size > 200) {
+    const cutoff = Date.now() - SEND_DEDUP_MS;
+    for (const [key, at] of recentWhatsAppSends) {
+      if (at < cutoff) recentWhatsAppSends.delete(key);
+    }
+  }
+
   const headers = {
     'Content-Type': 'application/json',
     'x-api-builderbot': API_KEY,
@@ -56,6 +73,7 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
     console.log('[BuilderBot] ✅ Mensaje enviado exitosamente');
     return response.data;
   } catch (error: any) {
+    recentWhatsAppSends.delete(dedupeKey);
     console.error('[BuilderBot] ❌ Error al enviar mensaje:', {
       message: error.message,
       status: error.response?.status,
@@ -68,6 +86,13 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const recentWhatsAppSends = new Map<string, number>();
+const SEND_DEDUP_MS = 8_000;
+
+function outboundSendKey(number: string, message: string): string {
+  return `${String(number).replace(/\D/g, "")}:${message.trim().toLowerCase().slice(0, 240)}`;
+}
 
 const BLACKLIST_RETRIES = 3;
 const BLACKLIST_DELAY_MS = 1500;

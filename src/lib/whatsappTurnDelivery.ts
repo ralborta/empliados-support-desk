@@ -1,5 +1,6 @@
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
+import { isTurnReplyStale } from "@/lib/conversationThread";
 import {
   bbcShouldSendExecutorMessage,
   shouldTurnSendWhatsAppToCustomer,
@@ -7,15 +8,33 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
+export type TurnDeliveryOpts = {
+  answeringText?: string;
+  startedAt?: number;
+};
+
 /**
  * Fase 2 — Entrega al cliente: backend envía por API o BBC (legacy Fase 1).
  */
 export async function deliverTurnToWhatsApp(
   rawPhone: string,
   payload: JsonRecord,
+  opts?: TurnDeliveryOpts,
 ): Promise<JsonRecord> {
   const message = String(payload.message ?? payload.summaryText ?? "").trim();
   const nextFlow = String(payload.nextFlow_s ?? payload.nextFlow ?? "reply");
+
+  if (
+    message &&
+    opts?.answeringText &&
+    opts.startedAt &&
+    (await isTurnReplyStale(rawPhone, opts.answeringText, opts.startedAt))
+  ) {
+    console.info(
+      `[whatsappTurn] drop stale reply phone=${rawPhone.slice(0, 4)}… answering="${String(opts.answeringText).slice(0, 40)}"`,
+    );
+    return { ...payload, message: "", skipResponse_s: "true", stale_s: "true" };
+  }
 
   if (!message || nextFlow === "ignore") {
     return { ...payload, message, skipResponse_s: "true" };

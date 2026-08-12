@@ -42,25 +42,50 @@ export async function shouldIgnoreDuplicateInicioTurn(
   if (!customer) return false;
 
   const since = new Date(Date.now() - windowMs);
-  const lastInbound = await prisma.ticketMessage.findFirst({
+  const recentInbounds = await prisma.ticketMessage.findMany({
     where: {
       ticket: { customerId: customer.id },
       direction: "INBOUND",
       createdAt: { gte: since },
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: "asc" },
+    select: { ticketId: true, createdAt: true, text: true },
+    take: 24,
   });
-  if (!lastInbound?.text) return false;
-  if (normTurnText(lastInbound.text) !== normTurnText(text)) return false;
+  const firstSame = recentInbounds.find(
+    (msg) => normTurnText(msg.text) === normTurnText(text),
+  );
+  if (!firstSame) return false;
 
   const botReplies = await prisma.ticketMessage.count({
     where: {
-      ticketId: lastInbound.ticketId,
+      ticketId: firstSame.ticketId,
       direction: "OUTBOUND",
-      createdAt: { gt: lastInbound.createdAt, gte: since },
+      createdAt: { gt: firstSame.createdAt, gte: since },
     },
   });
   return botReplies > 0;
+}
+
+/** El cliente ya mandó otro texto después de que este turno arrancó: no enviar la respuesta vieja. */
+export async function isTurnReplyStale(
+  rawPhone: string,
+  answeringText: string,
+  startedAtMs: number,
+): Promise<boolean> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (!customer) return false;
+  const latest = await prisma.ticketMessage.findFirst({
+    where: {
+      ticket: { customerId: customer.id },
+      direction: "INBOUND",
+    },
+    orderBy: { createdAt: "desc" },
+    select: { text: true, createdAt: true },
+  });
+  if (!latest?.text) return false;
+  if (latest.createdAt.getTime() <= startedAtMs + 80) return false;
+  return normTurnText(latest.text) !== normTurnText(answeringText);
 }
 
 /** Texto reciente del ticket del cliente (mensajes persistidos en el panel). */
