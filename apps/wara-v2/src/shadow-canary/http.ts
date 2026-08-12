@@ -20,8 +20,9 @@ export async function startShadowCanaryServer(opts?: {
   port?: number;
 }): Promise<ShadowCanaryServer> {
   const host = opts?.host ?? process.env.WARA_V2_BIND_HOST ?? "127.0.0.1";
-  if (host !== "127.0.0.1" && host !== "localhost") {
-    throw new Error(`bind_host_not_loopback:${host}`);
+  // 0.0.0.0 solo para red interna EasyPanel (sin dominio público).
+  if (host !== "127.0.0.1" && host !== "localhost" && host !== "0.0.0.0") {
+    throw new Error(`bind_host_not_allowed:${host}`);
   }
   // Validar config al arrancar si se intenta habilitar
   const cfg = loadShadowCanaryConfig();
