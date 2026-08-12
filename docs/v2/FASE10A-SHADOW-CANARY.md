@@ -5,18 +5,19 @@
 El canary y el tráfico V1/V2 de esta fase se operan en **EasyPanel** (front + backend).
 No se asume Vercel como destino de activación.
 
-## Estado EasyPanel (inspección actual)
+## Proyecto EasyPanel creado: `wara`
 
-En el panel accesible hoy **no aparece** un proyecto `wara` / mesa-ayuda.
-Proyectos visibles: pulze, misreclamos-caseops, logistica, agente-cleexs, livra, battlexi, transitone.
+Servicios (nuevos, sin tocar otros proyectos ni `wara.nivel41.com`):
 
-Hace falta que indiques (o creemos) los servicios:
+| Servicio | Rol | Dominio |
+|----------|-----|---------|
+| `front` | Next.js UI | https://wara-front.wd75db.easypanel.host |
+| `backend` | Next.js API / turn | https://wara-backend.wd75db.easypanel.host |
+| `postgres` | DB privada | sin puerto público |
+| `redis` | locks/cola | sin puerto público |
+| `v2-shadow` | canary 10A | **sin dominio público** (red interna :8787) |
 
-| Rol | Servicio EasyPanel esperado |
-|-----|-----------------------------|
-| Front V1 (Next / panel) | p.ej. `wara-front` o nombre real |
-| Backend V1 (API turn/WhatsApp) | p.ej. `wara-api` / mismo app Node |
-| Shadow canary 10A (opcional dedicado) | `wara-v2-shadow` en red interna |
+Source GitHub: `ralborta/empliados-support-desk` branch **`main`** (la rama 10A aún no está en origin). Auto-deploy: OFF.
 
 ## Flags a setear en EasyPanel (backend que corre `whatsappTurn`)
 
