@@ -130,8 +130,30 @@ export function resolveNaturalReadingDatetime(
 ): NaturalDatetimeResolution {
   const timezone = opts.timezone?.trim() || DEFAULT_TENANT_TZ;
   const now = parseLocalNow(opts.localNow, timezone);
-  const n = norm(message);
+  let n = norm(message);
   if (!n) return { kind: "unresolved" };
+
+  // Negaciones del día no cuentan como propuesta de ese weekday.
+  // Ej: "la fecha no es del sábado" / "no fue el sábado".
+  // Si además afirma otro día ("era el domingo"), ese sí se resuelve.
+  const hadNegatedWeekday =
+    /\bno\s+(fue|era|es)\s+(del\s+|el\s+)?(sabado|domingo|lunes|martes|miercoles|jueves|viernes)\b/.test(
+      n,
+    ) || /\bla\s+fecha\s+no\s+es(\s+(del?\s+)?(sabado|domingo|lunes|martes|miercoles|jueves|viernes))?\b/.test(n);
+  if (hadNegatedWeekday) {
+    n = n
+      .replace(
+        /\bno\s+(fue|era|es)\s+(del\s+|el\s+)?(sabado|domingo|lunes|martes|miercoles|jueves|viernes)\b/g,
+        " ",
+      )
+      .replace(
+        /\bla\s+fecha\s+no\s+es(\s+(del?\s+)?(sabado|domingo|lunes|martes|miercoles|jueves|viernes))?\b/g,
+        " ",
+      )
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!n) return { kind: "unresolved" };
+  }
 
   const time = extractTime(n);
 

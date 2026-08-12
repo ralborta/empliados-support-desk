@@ -268,6 +268,28 @@ describe("natural datetime + field correction + anomaly", () => {
     assert.equal(d!.currentTramiteDisposition, "keep");
   });
 
+  it("la fecha no es del sábado → limpia date, no propone sábado", () => {
+    const st = seedOdoAwaitFecha({ fecha: "2026-08-06" });
+    const d = detectOdometerFieldCorrection("la fecha no es del sábado", st, {
+      timezone: TZ,
+      localNow: LOCAL_NOW,
+    });
+    assert.ok(d);
+    assert.equal(d!.action, "correct_fields");
+    assert.deepEqual(d!.fieldsToClear, ["date"]);
+    assert.equal(d!.fields?.date, null);
+  });
+
+  it("no era el sábado, era el domingo → reemplaza por domingo", () => {
+    const st = seedOdoAwaitFecha({ fecha: "2026-08-06" });
+    const d = detectOdometerFieldCorrection("no era el sábado, era el domingo", st, {
+      timezone: TZ,
+      localNow: LOCAL_NOW,
+    });
+    assert.ok(d);
+    assert.equal(d!.fields?.date, "2026-08-09");
+  });
+
   it("no fue el sábado / era el domingo corrige resumen", async () => {
     seedOdoAwaitFecha({ fecha: "2026-08-06", value: 121000 });
     const msg1 = msgOf(await turn("la fecha está mal"));

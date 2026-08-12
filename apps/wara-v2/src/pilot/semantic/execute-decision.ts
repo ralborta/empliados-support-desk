@@ -188,18 +188,32 @@ function handleCorrectOdometerFields(
       draft.fechaDisplay = formatFechaDisplay(merged);
       draft.fechaDatePart = date;
       draft.fechaTimePart = merged.slice(11, 19);
-      if (draft.unit && draft.valueNew != null) {
-        let q = buildOdometerConfirmQuestion(draft);
-        if (beforeFecha && beforeFecha !== draft.fechaDisplay) {
-          q =
-            `Corregí la fecha:\n` +
-            `Antes: ${beforeFecha}\n` +
-            `Ahora: ${draft.fechaDisplay}\n\n` +
-            q;
-        }
-        setOdometerConfirm(state, draft, q);
-        return { handler: "odometer", message: q, state };
+      if (!draft.unit) {
+        draft.step = "await_unit";
+        return {
+          handler: "odometer",
+          message: `Anoté ${draft.fechaDisplay}. Decime la patente para el ${draft.meterType === "horometro" ? "horómetro" : "odómetro"}.`,
+          state,
+        };
       }
+      if (draft.valueNew == null) {
+        draft.step = "await_value";
+        return {
+          handler: "odometer",
+          message: `Anoté ${draft.fechaDisplay}. Pasame el valor del ${draft.meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"}.`,
+          state,
+        };
+      }
+      let q = buildOdometerConfirmQuestion(draft);
+      if (beforeFecha && beforeFecha !== draft.fechaDisplay) {
+        q =
+          `Corregí la fecha:\n` +
+          `Antes: ${beforeFecha}\n` +
+          `Ahora: ${draft.fechaDisplay}\n\n` +
+          q;
+      }
+      setOdometerConfirm(state, draft, q);
+      return { handler: "odometer", message: q, state };
     } else if (date && !time) {
       draft.fechaDatePart = date;
       draft.fechaLecturaIso = `${date}T00:00:00`;

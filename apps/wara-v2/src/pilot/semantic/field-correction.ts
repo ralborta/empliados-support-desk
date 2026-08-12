@@ -92,11 +92,34 @@ export function detectOdometerFieldCorrection(
   if (wantsTimeClear) fieldsToClear.push("time");
   if (wantsValueClear) fieldsToClear.push("numericValue");
 
+  // Quitar cláusulas de negación para no tomar “no es del sábado” como fecha=sábado.
+  // Conservar el reemplazo afirmativo: “no era el sábado, era el domingo”.
+  const forReplacement = n
+    .replace(
+      /\bno\s+(fue|era|es)\s+(del\s+|el\s+)?(sabado|domingo|lunes|martes|miercoles|jueves|viernes)\b/g,
+      " ",
+    )
+    .replace(/\bla\s+fecha\s+no\s+es(\s+(del?\s+)?(sabado|domingo|lunes|martes|miercoles|jueves|viernes))?\b/g, " ")
+    .replace(/\besa\s+no\s+es\s+la\s+fecha\b/g, " ")
+    .trim();
+
+  const onlyNegation =
+    !forReplacement ||
+    /^(del|el|la|fecha|hora|valor)?[!?.]*$/.test(forReplacement) ||
+    (!/\b(era|hoy|ayer|anteayer|sabado|domingo|lunes|martes|miercoles|jueves|viernes|\d{1,2}\/\d{1,2}|\d{1,2}:\d{2})\b/.test(
+      forReplacement,
+    ) &&
+      (wantsDateClear || wantsDateClearAlt) &&
+      !wantsTimeClear &&
+      !wantsValueClear);
+
   // "era el domingo" / "era el 8, no el 6" / "era 18:30" / "cambiá la fecha al sábado 8"
-  const replacement = resolveNaturalReadingDatetime(text, {
-    timezone: opts?.timezone,
-    localNow: opts?.localNow,
-  });
+  const replacement = onlyNegation
+    ? ({ kind: "unresolved" } as const)
+    : resolveNaturalReadingDatetime(forReplacement || text, {
+        timezone: opts?.timezone,
+        localNow: opts?.localNow,
+      });
   const hasReplacementDate =
     replacement.kind === "resolved" &&
     (replacement.source === "weekday" ||
