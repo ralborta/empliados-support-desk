@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WARA V2 — Chat laboratorio</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 960px; margin: 0 auto; padding: 1rem; }
+    h1 { font-size: 1.25rem; margin-bottom: 0.25rem; }
+    .muted { opacity: 0.75; font-size: 0.9rem; }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; align-items: center; }
+    input[type="password"], input[type="text"] { flex: 1; min-width: 200px; padding: 0.5rem; }
+    button { padding: 0.5rem 0.75rem; cursor: pointer; }
+    #log { border: 1px solid #8884; border-radius: 8px; padding: 0.75rem; min-height: 280px; max-height: 50vh; overflow: auto; white-space: pre-wrap; }
+    .user { color: #2563eb; margin: 0.5rem 0; }
+    .bot { color: #15803d; margin: 0.5rem 0; }
+    .err { color: #b91c1c; margin: 0.5rem 0; }
+    #state { font-family: ui-monospace, monospace; font-size: 0.8rem; background: #8881; padding: 0.75rem; border-radius: 8px; overflow: auto; max-height: 240px; }
+    .badge { display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px; background: #8883; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <h1>WARA V2 — Chat de laboratorio</h1>
+  <p class="muted">Sin WhatsApp real · Solo allowlist · DELIVERY_ENABLED=false</p>
+
+  <div class="row">
+    <label>API key <input type="password" id="apiKey" placeholder="WARA_V2_TURN_API_KEY" autocomplete="off" /></label>
+    <button type="button" id="saveKey">Guardar clave</button>
+    <span class="badge" id="status">sin clave</span>
+  </div>
+
+  <div class="row">
+    <span class="muted">Teléfono canary: <strong id="phone">+5491133788190</strong></span>
+    <button type="button" id="newChat">Nueva conversación</button>
+    <button type="button" id="refreshState">Actualizar estado</button>
+  </div>
+
+  <div id="log" aria-live="polite"></div>
+
+  <div class="row">
+    <input type="text" id="input" placeholder="Escribí un mensaje…" autocomplete="off" />
+    <button type="button" id="send">Enviar</button>
+  </div>
+
+  <h2>Estado conversacional (diagnóstico)</h2>
+  <pre id="state">—</pre>
+
+  <script>
+    const PHONE = "+5491133788190";
+    const TENANT = "tenant_internal_ops";
+    const KEY_STORAGE = "wara_v2_lab_api_key";
+
+    const el = (id) => document.getElementById(id);
+    const log = el("log");
+    const statePre = el("state");
+    const input = el("input");
+    const apiKeyInput = el("apiKey");
+
+    function uuid() {
+      return crypto.randomUUID();
+    }
+
+    function getKey() {
+      return sessionStorage.getItem(KEY_STORAGE) || "";
+    }
+
+    function setStatus(text, ok) {
+      const s = el("status");
+      s.textContent = text;
+      s.style.background = ok ? "#16a34a33" : "#dc262633";
+    }
+
+    function append(role, text) {
+      const div = document.createElement("div");
+      div.className = role;
+      div.textContent = (role === "user" ? "Vos: " : role === "bot" ? "V2: " : "") + text;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    async function api(path, opts = {}) {
+      const key = getKey();
+      if (!key) throw new Error("Configurá la API key primero");
+      const res = await fetch(path, {
+        ...opts,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": key,
+          ...(opts.headers || {}),
+        },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || res.statusText);
+      return body;
+    }
+
+    async function refreshState() {
+      try {
+        const q = new URLSearchParams({ phone: PHONE, tenantId: TENANT });
+        const data = await api("/api/pilot/state?" + q.toString());
+        statePre.textContent = JSON.stringify(data.state, null, 2);
+      } catch (e) {
+        statePre.textContent = "Error: " + e.message;
+      }
+    }
+
+    async function resetChat() {
+      await api("/api/pilot/reset", {
+        method: "POST",
+        body: JSON.stringify({ phone: PHONE, tenantId: TENANT }),
+      });
+      log.innerHTML = "";
+      append("bot", "Conversación reiniciada.");
+      await refreshState();
+    }
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      const messageId = uuid();
+      append("user", text + "  [id:" + messageId.slice(0, 8) + "…]");
+      try {
+        const data = await api("/api/whatsapp/turn", {
+          method: "POST",
+          body: JSON.stringify({ phone: PHONE, message: text, messageId }),
+        });
+        if (data.message) append("bot", data.message);
+        else if (data.error) append("err", data.error);
+        else append("bot", "(sin respuesta — skip)");
+        setStatus("ok", true);
+        await refreshState();
+      } catch (e) {
+        append("err", e.message);
+        setStatus("error", false);
+      }
+    }
+
+    el("saveKey").onclick = () => {
+      const v = apiKeyInput.value.trim();
+      if (!v) return;
+      sessionStorage.setItem(KEY_STORAGE, v);
+      setStatus("clave guardada (sesión)", true);
+    };
+
+    el("send").onclick = sendMessage;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage();
+    });
+    el("newChat").onclick = () => resetChat().catch((e) => append("err", e.message));
+    el("refreshState").onclick = () => refreshState();
+
+    const saved = getKey();
+    if (saved) {
+      apiKeyInput.value = saved;
+      setStatus("clave en sesión", true);
+    }
+    refreshState();
+  </script>
+</body>
+</html>

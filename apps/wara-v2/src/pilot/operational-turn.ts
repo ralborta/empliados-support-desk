@@ -8,14 +8,18 @@ import {
   createEmptyPilotState,
   deletePilotConversationState,
   getPilotConversationState,
-  isDuplicateInbound,
-  recordInbound,
+  isDuplicateMessageId,
+  recordProcessedMessageId,
   resumeSuspendedTramite,
   savePilotConversationState,
   suspendCurrentTramite,
   type PilotConversationState,
   type PilotSelectedUnit,
 } from "./conversation-state.js";
+import {
+  extractExplicitUnitToken,
+  hasExplicitUnitReference,
+} from "./unit-reference.js";
 import {
   looksLikeBriefConfirmation,
   looksLikeBriefRejection,
@@ -65,7 +69,7 @@ export type PilotOperationalDeps = {
   consultarFleet?: (
     sessionToken: string,
   ) => Promise<{ ok: boolean; unidades: WaraUnidadEstado[]; error?: string }>;
-  createToken?: (contactId: number) => Promise<{ ok: boolean; sessionToken?: string }>;
+  createToken?: (contactId: number) => Promise<{ ok: boolean; sessionToken?: string; error?: string }>;
 };
 
 let testOperationalDeps: PilotOperationalDeps | undefined;
@@ -130,7 +134,18 @@ async function selectCompany(
     ? await d.createToken(matched.id)
     : await createChatBotToken(matched.id, env);
   if (!created.ok || !created.sessionToken) {
-    return "No pude abrir sesión en Wara para esa empresa. Probá de nuevo en un momento.";
+    const detail = created.error ? ` (${created.error})` : "";
+    const others = state.contacts
+      .filter((c) => c.id !== matched.id)
+      .map((c) => c.empresa || c.nombre)
+      .join(", ");
+    const hint = others
+      ? ` Podés probar con: ${others}.`
+      : " Elegí otra opción del menú si tenés más empresas.";
+    return (
+      `No pude abrir sesión en Wara para ${matched.empresa || matched.nombre}` +
+      ` (contacto ${matched.id})${detail}.${hint}`
+    );
   }
   state.selectedContactId = matched.id;
   state.companyName = matched.empresa || matched.nombre;
@@ -243,51 +258,70 @@ async function resolveUnitForGps(
   text: string,
   env: NodeJS.ProcessEnv,
 ): Promise<{ kind: "unit"; unit: WaraUnidadEstado } | { kind: "reply"; message: string } | { kind: "none" }> {
-  if (state.selectedUnit && (looksLikeBriefConfirmation(text) || looksLikeGpsReportRequest(text))) {
-    const fleet = await fetchFleet(state, env);
-    if (!fleet.ok) return { kind: "reply", message: fleet.error };
+  const fleet = await fetchFleet(state, env);
+  if (!fleet.ok) return { kind: "reply", message: fleet.error };
+
+  const explicit = hasExplicitUnitReference(text);
+
+  if (explicit) {
+    const byPlate = resolveUnitByPlateFromFleet(fleet.units, text);
+    if (byPlate.kind === "one") {
+      state.selectedUnit = toFleetUnitRef(byPlate.unit);
+      state.pendingConfirmation = null;
+      return { kind: "unit", unit: byPlate.unit };
+    }
+    if (byPlate.kind === "many") {
+      const listing = buildPaginatedListing({
+        units: byPlate.units,
+        page: 1,
+        kind: "search_results",
+        searchLabel: detectLoosePlate(text) ?? text.trim(),
+      });
+      const msg = formatPaginatedFleetMessage(listing, state.companyName);
+      showListing(state, listing, msg);
+      return { kind: "reply", message: msg };
+    }
+
+    const byName = resolveUnitByNameFromFleet(fleet.units, text);
+    if (byName.kind === "one") {
+      state.selectedUnit = toFleetUnitRef(byName.unit);
+      state.pendingConfirmation = null;
+      return { kind: "unit", unit: byName.unit };
+    }
+    if (byName.kind === "many") {
+      const listing = buildPaginatedListing({
+        units: byName.units,
+        page: 1,
+        kind: "search_results",
+        searchLabel: extractExplicitUnitToken(text) ?? text.trim(),
+      });
+      const msg = formatPaginatedFleetMessage(listing, state.companyName);
+      showListing(state, listing, msg);
+      return { kind: "reply", message: msg };
+    }
+
+    const token = extractExplicitUnitToken(text);
+    if (token) {
+      state.pendingConfirmation = null;
+      return {
+        kind: "reply",
+        message:
+          `No encontré «${token}» en las unidades de ${state.companyName || "tu empresa"} según WARA. ` +
+          `No uso la unidad anterior. Decime la patente exacta o pedime la lista.`,
+      };
+    }
+  }
+
+  if (looksLikeBriefConfirmation(text) && state.selectedUnit) {
     const unit = findUnitInFleetByRef(fleet.units, state.selectedUnit);
     if (unit) return { kind: "unit", unit };
   }
 
-  const fleet = await fetchFleet(state, env);
-  if (!fleet.ok) return { kind: "reply", message: fleet.error };
-
-  const byPlate = resolveUnitByPlateFromFleet(fleet.units, text);
-  if (byPlate.kind === "one") return { kind: "unit", unit: byPlate.unit };
-  if (byPlate.kind === "many") {
-    const listing = buildPaginatedListing({
-      units: byPlate.units,
-      page: 1,
-      kind: "search_results",
-      searchLabel: detectLoosePlate(text) ?? text.trim(),
-    });
-    const msg = formatPaginatedFleetMessage(listing, state.companyName);
-    showListing(state, listing, msg);
-    return { kind: "reply", message: msg };
+  if (looksLikeGpsReportRequest(text) && state.selectedUnit && !explicit) {
+    const unit = findUnitInFleetByRef(fleet.units, state.selectedUnit);
+    if (unit) return { kind: "unit", unit };
   }
 
-  const byName = resolveUnitByNameFromFleet(fleet.units, text);
-  if (byName.kind === "one") return { kind: "unit", unit: byName.unit };
-  if (byName.kind === "many") {
-    const listing = buildPaginatedListing({
-      units: byName.units,
-      page: 1,
-      kind: "search_results",
-      searchLabel: extractSearchToken(text) ?? text.trim(),
-    });
-    const msg = formatPaginatedFleetMessage(listing, state.companyName);
-    showListing(state, listing, msg);
-    return { kind: "reply", message: msg };
-  }
-
-  const token = extractSearchToken(text);
-  if (token) {
-    return {
-      kind: "reply",
-      message: `No encontré «${token}» en las unidades de ${state.companyName || "tu empresa"} según WARA. Decime la patente exacta o pedime la lista de unidades.`,
-    };
-  }
   return { kind: "none" };
 }
 
@@ -312,6 +346,7 @@ export async function resolveOperationalTurn(input: {
   tenantId: string;
   phone: string;
   text: string;
+  messageId: string;
   env?: NodeJS.ProcessEnv;
   contacts?: import("./wara-types.js").WaraEmpresaContact[];
   customerName?: string | null;
@@ -336,15 +371,15 @@ export async function resolveOperationalTurn(input: {
     state.customerName = input.customerName;
   }
 
-  if (isDuplicateInbound(state, text)) {
+  if (isDuplicateMessageId(state, input.messageId)) {
     savePilotConversationState(state);
     return {
       kind: "duplicate",
-      message: "Ya recibí ese mensaje hace un momento. ¿Querés agregar algo más?",
+      message: "Este mensaje ya fue procesado (messageId duplicado).",
       state,
     };
   }
-  recordInbound(state, text);
+  recordProcessedMessageId(state, input.messageId);
 
   if (!isWaraReadConfigured(env)) {
     savePilotConversationState(state);

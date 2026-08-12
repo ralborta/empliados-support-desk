@@ -26,6 +26,7 @@ export type PilotWaraResolution =
 export async function resolvePilotWaraTurn(input: {
   phone: string;
   text: string;
+  messageId: string;
   env?: NodeJS.ProcessEnv;
   tenantId?: string;
 }): Promise<PilotWaraResolution> {
@@ -68,6 +69,7 @@ export async function resolvePilotWaraTurn(input: {
     tenantId,
     phone: input.phone,
     text,
+    messageId: input.messageId,
     env,
     contacts: lookup.contactos,
     customerName: lookup.customerName ?? null,

@@ -214,6 +214,7 @@ export function createPilotModelAdapter(
 export async function handlePilotWhatsAppTurn(input: {
   phone: string;
   text: string;
+  messageId: string;
   apiKey?: string;
   env?: NodeJS.ProcessEnv;
   decide?: PilotDecide;
@@ -249,6 +250,7 @@ export async function handlePilotWhatsAppTurn(input: {
   const waraResolution = await resolvePilotWaraTurn({
     phone: input.phone,
     text: text || "Hola",
+    messageId: input.messageId,
     env,
   });
 

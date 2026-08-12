@@ -2,7 +2,6 @@
  * Memoria conversacional estructurada del piloto V2.
  * Aislada por tenant + teléfono; TTL 45 min; persistencia opcional en JSON.
  */
-import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { normalizeWaraPhone } from "./wara-client.js";
@@ -60,8 +59,8 @@ export type PilotConversationState = {
   pendingFields: string[];
   fleetCache: import("./wara-types.js").WaraUnidadEstado[] | null;
   fleetCacheAt: string | null;
-  lastInboundHash: string | null;
-  lastInboundAt: string | null;
+  /** messageId → processedAt ISO; idempotencia por mensaje entrante. */
+  processedMessageIds: Record<string, string>;
 };
 
 const memory = new Map<string, PilotConversationState>();
@@ -106,8 +105,7 @@ export function createEmptyPilotState(input: {
     pendingFields: [],
     fleetCache: null,
     fleetCacheAt: null,
-    lastInboundHash: null,
-    lastInboundAt: null,
+    processedMessageIds: {},
   };
 }
 
@@ -226,25 +224,76 @@ export function resumeSuspendedTramite(state: PilotConversationState): boolean {
   return true;
 }
 
-export function hashInboundText(text: string): string {
-  return createHash("sha256").update(text.trim(), "utf8").digest("hex");
+const MAX_PROCESSED_MESSAGE_IDS = 500;
+
+function pruneProcessedMessageIds(state: PilotConversationState, now = Date.now()): void {
+  if (!state.processedMessageIds) state.processedMessageIds = {};
+  const cutoff = now - SESSION_TTL_MS;
+  for (const [id, at] of Object.entries(state.processedMessageIds)) {
+    const t = new Date(at).getTime();
+    if (!Number.isFinite(t) || t < cutoff) delete state.processedMessageIds[id];
+  }
+  const keys = Object.keys(state.processedMessageIds);
+  if (keys.length > MAX_PROCESSED_MESSAGE_IDS) {
+    keys
+      .sort(
+        (a, b) =>
+          new Date(state.processedMessageIds[a]!).getTime() -
+          new Date(state.processedMessageIds[b]!).getTime(),
+      )
+      .slice(0, keys.length - MAX_PROCESSED_MESSAGE_IDS)
+      .forEach((k) => delete state.processedMessageIds[k]);
+  }
 }
 
-/** Duplicado dentro de 2 min con mismo hash → no reprocesar. */
-export function isDuplicateInbound(
+/** Solo reenvío del mismo messageId es duplicado (persiste en JSON de estado). */
+export function isDuplicateMessageId(
   state: PilotConversationState,
-  text: string,
-  windowMs = 2 * 60 * 1000,
+  messageId: string | null | undefined,
 ): boolean {
-  const hash = hashInboundText(text);
-  if (!state.lastInboundHash || state.lastInboundHash !== hash) return false;
-  if (!state.lastInboundAt) return false;
-  return Date.now() - new Date(state.lastInboundAt).getTime() < windowMs;
+  if (!messageId?.trim()) return false;
+  if (!state.processedMessageIds) state.processedMessageIds = {};
+  pruneProcessedMessageIds(state);
+  return Object.prototype.hasOwnProperty.call(state.processedMessageIds, messageId.trim());
 }
 
-export function recordInbound(state: PilotConversationState, text: string): void {
-  state.lastInboundHash = hashInboundText(text);
-  state.lastInboundAt = new Date().toISOString();
+export function recordProcessedMessageId(
+  state: PilotConversationState,
+  messageId: string | null | undefined,
+): void {
+  if (!messageId?.trim()) return;
+  if (!state.processedMessageIds) state.processedMessageIds = {};
+  state.processedMessageIds[messageId.trim()] = new Date().toISOString();
+  pruneProcessedMessageIds(state);
+}
+
+export function sanitizeStateForLab(
+  state: PilotConversationState | null,
+): Record<string, unknown> | null {
+  if (!state) return null;
+  return {
+    tenantId: state.tenantId,
+    phone: state.phone,
+    companyName: state.companyName,
+    activeTramite: state.activeTramite,
+    step: state.step,
+    selectedUnit: state.selectedUnit,
+    lastListing: state.lastListing
+      ? {
+          kind: state.lastListing.kind,
+          page: state.lastListing.page,
+          totalCount: state.lastListing.totalCount,
+          searchLabel: state.lastListing.searchLabel,
+        }
+      : null,
+    pendingConfirmation: state.pendingConfirmation
+      ? { action: state.pendingConfirmation.action, question: state.pendingConfirmation.question }
+      : null,
+    suspendedTramite: state.suspendedTramite ? { tramite: state.suspendedTramite.tramite } : null,
+    stateVersion: state.stateVersion,
+    expiresAt: state.expiresAt,
+    processedMessageIdsCount: Object.keys(state.processedMessageIds ?? {}).length,
+  };
 }
 
 export function resetPilotConversationStatesForTests(): void {

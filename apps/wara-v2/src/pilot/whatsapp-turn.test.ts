@@ -56,6 +56,7 @@ describe("piloto WhatsApp V2", () => {
     const r = await handlePilotWhatsAppTurn({
       phone: "+5491199999999",
       text: "Hola",
+      messageId: "test-out-1",
       apiKey: KEY,
       env: env(),
       decide: async () => {
@@ -71,6 +72,7 @@ describe("piloto WhatsApp V2", () => {
     const r = await handlePilotWhatsAppTurn({
       phone: "5491133788190",
       text: "Hola",
+      messageId: "test-hola-1",
       apiKey: KEY,
       env: env(),
       decide: async () => ({
@@ -91,6 +93,7 @@ describe("piloto WhatsApp V2", () => {
     const r = await handlePilotWhatsAppTurn({
       phone: PHONE,
       text: "Cambio de empresa",
+      messageId: "test-company-1",
       apiKey: KEY,
       env: { ...env(), WARA_OBTENER_EMPRESA_TOKEN: "" },
       decide: async () => ({

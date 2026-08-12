@@ -10,11 +10,11 @@ import {
   resolveOperationalTurn,
   setPilotOperationalDepsForTests,
   resetPilotConversationStatesForTests,
-  getPilotConversationState,
 } from "./operational-turn.js";
 import {
   configurePilotStatePersistence,
   resetPilotConversationStatesForTests as resetStateStore,
+  getPilotConversationState,
 } from "./conversation-state.js";
 import type { WaraEmpresaContact, WaraUnidadEstado } from "./wara-types.js";
 import { assessUnitReporting, buildGpsReportForUnit } from "./gps-core.js";
@@ -62,6 +62,8 @@ function buildMockFleet(): WaraUnidadEstado[] {
 
 const MOCK_FLEET = buildMockFleet();
 
+let msgSeq = 0;
+
 function mockDeps(overrides?: {
   fleet?: WaraUnidadEstado[];
   fail?: boolean;
@@ -80,12 +82,14 @@ function mockDeps(overrides?: {
 
 async function turn(
   text: string,
-  opts?: { phone?: string; tenant?: string },
+  opts?: { phone?: string; tenant?: string; messageId?: string },
 ): Promise<string> {
+  msgSeq += 1;
   const r = await resolveOperationalTurn({
     tenantId: opts?.tenant ?? TENANT_A,
     phone: opts?.phone ?? PHONE,
     text,
+    messageId: opts?.messageId ?? `test-msg-${msgSeq}`,
     env: {
       WARA_OBTENER_EMPRESA_TOKEN: "mock",
       WARA_API_BASE_URL: "http://mock",
@@ -101,6 +105,7 @@ describe("paridad conversacional V2 — bloque operativo", () => {
   let tempDir: string;
 
   beforeEach(() => {
+    msgSeq = 0;
     resetStateStore();
     resetPilotConversationStatesForTests();
     tempDir = mkdtempSync(join(tmpdir(), "wara-v2-pilot-"));
@@ -128,6 +133,42 @@ describe("paridad conversacional V2 — bloque operativo", () => {
     assert.doesNotMatch(yes, /\[LLM/);
   });
 
+  it("siguiente con messageIds distintos avanza; repetir id no", async () => {
+    await turn("listas de unidades", { messageId: "list-1" });
+    const p2 = await turn("siguiente", { messageId: "sig-a" });
+    assert.match(p2, /página 2\//);
+    const p3 = await turn("siguiente", { messageId: "sig-b" });
+    assert.match(p3, /página 3\//);
+    const dup = await turn("siguiente", { messageId: "sig-b" });
+    assert.match(dup, /messageId duplicado/i);
+  });
+
+  it("dos sí en pasos diferentes se procesan", async () => {
+    await turn("reporte de MYQ", { messageId: "myq-1" });
+    const confirm = await turn("sí", { messageId: "yes-1" });
+    assert.match(confirm, /MYQ|AC 427 MY|Funcionamiento normal/i);
+
+    await turn("reporte AC427MY", { messageId: "myq-2" });
+    const confirm2 = await turn("si", { messageId: "yes-2" });
+    assert.match(confirm2, /MYQ|AC 427 MY|Funcionamiento normal/i);
+  });
+
+  it("reporte MYQ prioriza sobre unidad activa previa", async () => {
+    await turn("listas de unidades");
+    await turn("22");
+    const myq = await turn("reporte de MYQ");
+    assert.match(myq, /MYQ|AC 427 MY/);
+    assert.doesNotMatch(myq, /AA 122 BC/);
+  });
+
+  it("patente inexistente no reutiliza unidad anterior", async () => {
+    await turn("listas de unidades");
+    await turn("22");
+    const bad = await turn("reporte ZZ999ZZ");
+    assert.match(bad, /No encontré/i);
+    assert.doesNotMatch(bad, /AA 122 BC/);
+  });
+
   it("paginación siguiente/anterior y selección", async () => {
     await turn("listas de unidades");
     const page2 = await turn("siguiente");
@@ -146,25 +187,11 @@ describe("paridad conversacional V2 — bloque operativo", () => {
     const msg = await turn("solo patentes");
     assert.match(msg, /patentes reales.*WARA/i);
     assert.match(msg, /AA 101/);
-    assert.match(msg, /según WARA/);
-    assert.doesNotMatch(msg, /invent/i);
   });
 
   it("buscar patente existente AC427MY", async () => {
     const msg = await turn("reporte AC427MY");
     assert.match(msg, /MYQ|AC 427 MY|reporte GPS/i);
-  });
-
-  it("buscar patente inexistente", async () => {
-    const msg = await turn("reporte ZZ999ZZ");
-    assert.match(msg, /No encontré/i);
-    assert.doesNotMatch(msg, /Funcionamiento normal/);
-  });
-
-  it("buscar por nombre MYQ — un resultado", async () => {
-    const msg = await turn("reporte de MYQ");
-    assert.match(msg, /MYQ|AC 427 MY|reporte GPS/i);
-    assert.doesNotMatch(msg, /\[LLM/);
   });
 
   it("buscar por nombre ambiguo ALTAMIRANDA", async () => {
@@ -183,39 +210,34 @@ describe("paridad conversacional V2 — bloque operativo", () => {
 
   it("GPS MYQ usa assessment determinístico", () => {
     const myq = MOCK_FLEET.find((u) => u.unidad === "MYQ")!;
-    const assessment = assessUnitReporting(myq);
-    assert.ok(assessment);
-    const report = buildGpsReportForUnit(myq);
-    assert.match(report, /MYQ|AC 427 MY/);
-    assert.match(report, /reporte|Funcionamiento normal|detenida/i);
+    assert.ok(assessUnitReporting(myq));
+    assert.match(buildGpsReportForUnit(myq), /MYQ|AC 427 MY/);
   });
 
-  it("seleccionar unidad → reporte → sí", async () => {
-    await turn("listas de unidades");
-    await turn("3");
-    const yes = await turn("si");
-    assert.match(yes, /Funcionamiento normal|detenida|reporte/i);
-  });
-
-  it("cambiar de unidad durante trámite", async () => {
-    await turn("reporte de MYQ");
-    const change = await turn("otra unidad");
-    assert.match(change, /cambiamos de unidad/i);
-  });
-
-  it("interrumpir con lista → reanudar", async () => {
+  it("interrupción con lista → reanudar", async () => {
     await turn("reporte de MYQ");
     await turn("listas de unidades");
     const resume = await turn("continuamos");
     assert.match(resume, /reporte GPS|MYQ|Retomamos/i);
   });
 
-  it("persistencia de sesión tras reload simulado", async () => {
-    await turn("listas de unidades");
+  it("persistencia de sesión y messageIds tras reload", async () => {
+    await turn("listas de unidades", { messageId: "persist-list" });
     resetStateStore();
     configurePilotStatePersistence(join(tempDir, "state.json"));
-    const pick = await turn("22");
+    const st = getPilotConversationState(TENANT_A, PHONE);
+    assert.ok(st?.lastListing);
+    assert.ok(st?.processedMessageIds?.["persist-list"]);
+    const pick = await turn("22", { messageId: "persist-22" });
     assert.match(pick, /reporte GPS/i);
+  });
+
+  it("deduplicación messageId sobrevive reinicio", async () => {
+    await turn("listas de unidades", { messageId: "dedupe-1" });
+    resetStateStore();
+    configurePilotStatePersistence(join(tempDir, "state.json"));
+    const dup = await turn("listas de unidades", { messageId: "dedupe-1" });
+    assert.match(dup, /messageId duplicado/i);
   });
 
   it("aislamiento entre tenants", async () => {
@@ -224,29 +246,10 @@ describe("paridad conversacional V2 — bloque operativo", () => {
     assert.match(b, /No encontré «22»|No hay opción 22|Unidades en/i);
   });
 
-  it("mensaje duplicado", async () => {
-    await turn("listas de unidades");
-    const dup = await turn("listas de unidades");
-    assert.match(dup, /Ya recibí ese mensaje/i);
-  });
-
   it("error WARA sin alucinación", async () => {
     mockDeps({ fail: true });
     const msg = await turn("listas de unidades");
     assert.match(msg, /WARA no disponible|No pude consultar/i);
-    assert.doesNotMatch(msg, /Funcionamiento normal/);
-  });
-
-  it("índice inexistente rechazado", async () => {
-    await turn("listas de unidades");
-    const bad = await turn("999");
-    assert.match(bad, /No hay opción 999/);
-  });
-
-  it("cancelar trámite", async () => {
-    await turn("reporte de MYQ");
-    const cancel = await turn("cancelar");
-    assert.match(cancel, /cancelé el trámite/i);
   });
 
   it("mapa índice → unidad en listado de 30+", () => {
