@@ -32,6 +32,8 @@ import {
   looksLikeBareOdometerTopicMention,
   looksLikeHorometerOnlyIntent,
   looksLikePendingTramiteAffirmation,
+  looksLikeResumePausedTramite,
+  looksLikePendingConfirmComprehensionAck,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -39,6 +41,7 @@ import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConvers
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
+  looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeConversationalUnitConcern,
@@ -2417,6 +2420,13 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   pendingActionType?: string | null;
 }): boolean {
   const { selectionText, threadText, pendingActionType } = params;
+  if (
+    looksLikeGreeting(selectionText) ||
+    looksLikeResumePausedTramite(selectionText) ||
+    looksLikePendingConfirmComprehensionAck(selectionText)
+  ) {
+    return false;
+  }
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   // Con pending de odómetro el trámite sigue vivo aunque el hilo dispare un falso
   // "superseded" (bug 2026-08-06: pedido de fecha/hora con "necesito").

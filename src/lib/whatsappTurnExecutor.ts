@@ -358,32 +358,19 @@ async function runTurnExecutorPhaseCore(params: {
   // Nunca asumir "no era esa patente" sin razonar el contexto del resumen.
   const pendingKind =
     detectPendingConfirmKind(thread) ?? pendingKindFromAction(pendingAction);
-  // Consulta lateral ya respondida: "ah entiendo" / "continuamos porfa" / "Hola"
-  // debe retomar el CONFIRMO, no silenciar ni registrar como si hubiera dicho CONFIRMO.
-  // pendingAction manda aunque el hilo se haya "superseded" por otra consulta.
+  // Saludo / "continuamos" / "ah entiendo" con trámite vivo: NO plantilla.
+  // Solo renovar el pending y dejar que el agente retome el hilo.
   if (
     pendingKind &&
+    pendingAction?.type === pendingKind &&
     (looksLikeResumePausedTramite(selectionText) ||
       looksLikePendingConfirmComprehensionAck(selectionText) ||
       looksLikeGreeting(selectionText))
   ) {
-    if (pendingAction?.type === pendingKind) {
-      await setPendingAction(prisma, rawPhone, pendingKind, {
-        summary: pendingAction.summary,
-        payload: pendingAction.payload,
-      });
-    }
-    const reminder = buildPendingConfirmStillWaitingReminder(pendingKind);
-    const prefix = looksLikeResumePausedTramite(selectionText)
-      ? "Dale, seguimos. "
-      : looksLikeGreeting(selectionText)
-        ? "Hola, seguimos. "
-        : "Dale. ";
-    return {
-      message: `${prefix}${reminder}`,
-      executor: executorForPendingKind(pendingKind),
-      ok: true,
-    };
+    await setPendingAction(prisma, rawPhone, pendingKind, {
+      summary: pendingAction.summary,
+      payload: pendingAction.payload,
+    });
   }
   if (pendingKind && looksLikePendingConfirmPushback(selectionText, pendingKind)) {
     const stance = await reasonPendingConfirmationRejection({
