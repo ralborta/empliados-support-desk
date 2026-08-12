@@ -1,7 +1,7 @@
 /**
  * Gateway piloto WhatsApp V2.
  * BBC entrega el mensaje ({message}); V2 no envía WhatsApp (DELIVERY_ENABLED=false).
- * Solo allowlist. Sin mutaciones WARA/Odoo.
+ * Solo allowlist. WARA/Odoo read-only; sin mutaciones.
  */
 import { randomUUID, createHash } from "node:crypto";
 import type { OrchestratorDecision } from "@wara-v2/contracts";
@@ -17,6 +17,8 @@ import { TokenBudget } from "../llm/circuit.js";
 import { parseExactPhoneAllowlist } from "../shadow-canary/allowlist.js";
 import { isAllowlistedPhone, toE164Guess } from "./phone.js";
 import { buildPilotMessages } from "./prompt.js";
+import { resolvePilotWaraTurn } from "./wara-context.js";
+import type { WaraPromptSnapshot } from "./wara-types.js";
 
 const FALLBACK =
   "Disculpá, tuve un problema para procesar eso. ¿Me lo repetís en una línea?";
@@ -103,32 +105,42 @@ function expectedApiKey(env: NodeJS.ProcessEnv): string {
   );
 }
 
+function looksLikeInternalFieldToken(s: string): boolean {
+  return /^[a-z][a-z0-9_]*$/i.test(s) && s.includes("_");
+}
+
 function extractReply(decision: unknown): string {
   if (!decision || typeof decision !== "object") return FALLBACK;
   const d = decision as OrchestratorDecision;
-  const fromHints = d.responseHints?.mustAsk?.[0]?.trim();
-  if (fromHints) return fromHints;
   const summary = String(d.interpretationSummary ?? "").trim();
-  return summary || FALLBACK;
+  if (summary && !looksLikeInternalFieldToken(summary)) return summary;
+  const mustAsk = d.responseHints?.mustAsk?.[0]?.trim();
+  if (mustAsk && !looksLikeInternalFieldToken(mustAsk)) return mustAsk;
+  return FALLBACK;
 }
 
 export function buildPilotTurnContext(input: {
   phone: string;
   text: string;
   tenantId: string;
+  wara?: WaraPromptSnapshot;
+  companyName?: string | null;
 }): TurnContext {
   const phone = toE164Guess(input.phone) || "+00000000000";
   const text = input.text.slice(0, 2000);
   const payloadHash = createHash("sha256").update(text, "utf8").digest("hex");
+  const companyId = input.companyName ?? input.wara?.company_name ?? input.tenantId;
   return {
     conversation: {
       conversationId: `pilot_${digitsSafe(phone)}`,
       customerId: `pilot_c_${digitsSafe(phone)}`,
-      activeCompanyId: input.tenantId,
+      activeCompanyId: companyId,
       activeUnitId: null,
       channel: "whatsapp_pilot",
       channelAccountId: "bbc-pilot",
-      membershipCompanyIds: [input.tenantId],
+      membershipCompanyIds: input.wara?.contacts_count
+        ? Array.from({ length: input.wara.contacts_count }, (_, i) => String(i + 1))
+        : [input.tenantId],
     },
     inbound: {
       messageId: randomUUID(),
@@ -188,13 +200,14 @@ export function createPilotActivation(
 export function createPilotModelAdapter(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl?: typeof fetch,
+  waraSnapshot?: WaraPromptSnapshot,
 ): ModelAdapter {
   return new OpenAiChatAdapter({
     activation: createPilotActivation(env),
     fetchImpl,
     timeoutMs: Number(env.WARA_V2_PILOT_TIMEOUT_MS ?? "20000"),
     budget: new TokenBudget(500_000, 5),
-    buildMessages: buildPilotMessages,
+    buildMessages: (ctx) => buildPilotMessages(ctx, waraSnapshot),
   });
 }
 
@@ -232,16 +245,30 @@ export async function handlePilotWhatsAppTurn(input: {
 
   const text = input.text.trim();
   const tenant = (env.WARA_V2_SHADOW_TENANT ?? "tenant_internal_ops").trim();
+
+  const waraResolution = await resolvePilotWaraTurn({
+    phone: input.phone,
+    text: text || "Hola",
+    env,
+  });
+
+  if (waraResolution.kind === "reply") {
+    return { status: 200, body: reply(waraResolution.message) };
+  }
+
   const ctx = buildPilotTurnContext({
     phone: input.phone,
     text: text || "Hola",
     tenantId: tenant,
+    wara: waraResolution.snapshot,
+    companyName: waraResolution.session.companyName,
   });
 
   try {
     const decide =
       input.decide ??
-      ((c: TurnContext) => createPilotModelAdapter(env).decide(c));
+      ((c: TurnContext) =>
+        createPilotModelAdapter(env, undefined, waraResolution.snapshot).decide(c));
     const decision = await decide(ctx);
     return { status: 200, body: reply(extractReply(decision)) };
   } catch {

@@ -11,6 +11,8 @@ import {
   handlePilotWhatsAppTurn,
   isPilotWhatsAppEnabled,
 } from "../pilot/whatsapp-turn.js";
+import { isWaraReadConfigured } from "../pilot/wara-client.js";
+import { getOdooConfigStatus } from "../pilot/odoo-status.js";
 
 export type ShadowCanaryServer = {
   port: number;
@@ -55,6 +57,8 @@ export async function startShadowCanaryServer(opts?: {
           shadow_enabled: c.enabled,
           delivery_enabled: false,
           pilot_whatsapp: isPilotWhatsAppEnabled(),
+          wara_read: isWaraReadConfigured(),
+          odoo_configured: getOdooConfigStatus().configured,
         });
         return;
       }

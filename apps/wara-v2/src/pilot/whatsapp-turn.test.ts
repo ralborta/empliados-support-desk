@@ -87,16 +87,21 @@ describe("piloto WhatsApp V2", () => {
     assert.doesNotMatch(r.body.message, /CONFIRMO/);
   });
 
-  it("auth inválida no llama al modelo", async () => {
+  it("no filtra nombres de campo interno como company_id", async () => {
     const r = await handlePilotWhatsAppTurn({
       phone: PHONE,
-      text: "Hola",
-      apiKey: "wrong",
-      env: env(),
-      decide: async () => {
-        throw new Error("should_not_call_model");
-      },
+      text: "Cambio de empresa",
+      apiKey: KEY,
+      env: { ...env(), WARA_OBTENER_EMPRESA_TOKEN: "" },
+      decide: async () => ({
+        schemaVersion: 2,
+        interpretationSummary: "¿Con qué empresa querés seguir?",
+        proposedGoal: "clarify",
+        acts: [],
+        responseHints: { mustAsk: ["company_id"] },
+      }),
     });
-    assert.equal(r.status, 401);
+    assert.equal(r.body.message, "¿Con qué empresa querés seguir?");
+    assert.doesNotMatch(r.body.message, /^company_id$/);
   });
 });
