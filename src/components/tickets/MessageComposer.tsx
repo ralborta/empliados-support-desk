@@ -10,11 +10,13 @@ export function MessageComposer({
   customerId,
   botPaused = false,
   onSent,
+  embedded = false,
 }: {
   ticketId: string;
   customerId?: string | null;
   botPaused?: boolean;
   onSent?: () => void;
+  embedded?: boolean;
 }) {
   const [text, setText] = useState("");
   const [direction, setDirection] = useState<MessageDirection>("OUTBOUND");
@@ -69,10 +71,14 @@ export function MessageComposer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+      className={
+        embedded
+          ? "bg-transparent"
+          : "overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+      }
     >
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
-        <span className="text-sm font-semibold text-slate-800">Responder</span>
+      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5">
+        <span className="text-xs font-semibold text-slate-800">Responder</span>
         <select
           value={direction}
           onChange={(e) => setDirection(e.target.value as MessageDirection)}
@@ -85,8 +91,8 @@ export function MessageComposer({
 
       <textarea
         id="ticket-reply-text"
-        className="w-full resize-none border-0 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
-        rows={4}
+        className="w-full resize-none border-0 bg-transparent px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+        rows={embedded ? 3 : 4}
         placeholder="Escribir tu respuesta..."
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -126,7 +132,7 @@ export function MessageComposer({
           >
             <List className="h-4 w-4" />
           </button>
-          {file ? <span className="ml-1 max-w-[120px] truncate text-xs text-violet-600">{file.name}</span> : null}
+          {file ? <span className="ml-1 max-w-[120px] truncate text-xs text-[#4a0e1c]">{file.name}</span> : null}
         </div>
 
         <div className="flex items-center gap-2">
@@ -136,7 +142,7 @@ export function MessageComposer({
           <button
             type="submit"
             disabled={loading}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-60"
+            className="rounded-lg bg-[#4a0e1c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-[#6b1428] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4a0e1c]/30 disabled:opacity-60 sm:text-sm sm:px-4 sm:py-2"
           >
             {loading ? "Enviando…" : "Enviar respuesta"}
           </button>

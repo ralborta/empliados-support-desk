@@ -25,6 +25,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     select: {
       id: true,
       from: true,
+      direction: true,
       text: true,
       createdAt: true,
       attachments: true,

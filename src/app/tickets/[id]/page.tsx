@@ -86,10 +86,10 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
           messages: conversation.map((msg) => ({
             id: msg.id,
             from: msg.from,
+            direction: msg.direction,
             text: msg.text,
             createdAt: msg.createdAt.toISOString(),
             attachments: msg.attachments ? JSON.parse(JSON.stringify(msg.attachments)) : null,
-            rawPayload: undefined,
           })),
         }}
         agentes={agentes}
