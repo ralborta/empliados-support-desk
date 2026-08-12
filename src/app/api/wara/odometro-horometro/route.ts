@@ -60,6 +60,11 @@ import {
 import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import {
+  checkOdometerWriteGuard,
+  recordOdometerWriteGuard,
+} from "@/lib/odometerWriteGuard";
+import { resolveV1HotfixCanary } from "@/lib/v1HotfixCanary";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
 import { composeOdometerDialogueReply } from "@/lib/odometerDialogueAI";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
@@ -106,6 +111,8 @@ const bodySchema = z
     rawText: z.string().optional(),
     body: z.string().optional(),
     message: z.string().optional(),
+    messageId: z.string().min(1).optional(),
+    message_id: z.string().min(1).optional(),
     confirm: z.string().optional(),
     confirmation: z.string().optional(),
     api_key: z.string().min(1).optional(),
@@ -512,6 +519,28 @@ export async function POST(req: NextRequest) {
   }
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
+  const inboundMessageId =
+    parsed.data.messageId?.trim() ||
+    parsed.data.message_id?.trim() ||
+    req.headers.get("x-message-id")?.trim() ||
+    null;
+  const canary = resolveV1HotfixCanary(rawPhone);
+  if (canary.action === "reject") {
+    return NextResponse.json(
+      { ok: false, error: "Hotfix canary mal configurado", message: "No pude procesar el trámite." },
+      { status: BB_STATUS },
+    );
+  }
+  if (canary.action === "proxy") {
+    const proxyRes = await fetch(`${canary.fallbackUrl}/api/wara/odometro-horometro`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": keyFromRequest(req, parsed.data) ?? "" },
+      body: JSON.stringify(parsed.data),
+      cache: "no-store",
+    });
+    const proxyJson = await proxyRes.json().catch(() => ({ ok: false, message: "Fallback error" }));
+    return NextResponse.json(proxyJson, { status: proxyRes.status });
+  }
   const rawText = (
     parsed.data.rawText ??
     parsed.data.body ??
@@ -1997,10 +2026,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  await clearPendingAction(prisma, rawPhone);
-  if (isConversationNotebookEnabled()) {
-    await clearSessionNotebook(prisma, rawPhone);
-  }
   if (!fecha) {
     return NextResponse.json(
       { ok: false, error: "Fecha inválida", message: "La fecha indicada no es válida." },
@@ -2012,6 +2037,32 @@ export async function POST(req: NextRequest) {
       { ok: false, error: "Patente requerida", message: "No pude identificar la patente para registrar." },
       { status: BB_STATUS },
     );
+  }
+
+  const guardCheck = await checkOdometerWriteGuard(prisma, rawPhone, {
+    patente,
+    fecha,
+    odometro: typeof odometro === "number" ? odometro : undefined,
+    horometro: typeof horometro === "number" ? horometro : undefined,
+    confirmMessageId: inboundMessageId,
+  });
+  if (guardCheck.kind === "duplicate") {
+    const responseMessage = await humanizeBotReply(guardCheck.message, {
+      context: "Aviso de operación odómetro ya registrada (idempotencia)",
+    });
+    await appendOutboundBotMessage(rawPhone, responseMessage, {
+      source: "wara_odometro_response",
+      stage: "duplicate_write_blocked",
+    });
+    return NextResponse.json(
+      { ok: true, ok_s: "true", duplicateBlocked: true, message: responseMessage },
+      { status: BB_STATUS },
+    );
+  }
+
+  await clearPendingAction(prisma, rawPhone);
+  if (isConversationNotebookEnabled()) {
+    await clearSessionNotebook(prisma, rawPhone);
   }
 
   const fleetUnit = await findFleetUnitByPlate(session.sessionToken, patente);
@@ -2055,6 +2106,15 @@ export async function POST(req: NextRequest) {
       ? "Confirmación de cambio de odómetro/horómetro registrado con éxito"
       : "Aviso de error al registrar el cambio de odómetro/horómetro",
   });
+  if (result.ok) {
+    await recordOdometerWriteGuard(prisma, rawPhone, {
+      patente,
+      fecha,
+      odometro: typeof odometro === "number" ? odometro : undefined,
+      horometro: typeof horometro === "number" ? horometro : undefined,
+      confirmMessageId: inboundMessageId,
+    });
+  }
   await appendOutboundBotMessage(rawPhone, responseMessage, {
     source: "wara_odometro_response",
     ok: result.ok,

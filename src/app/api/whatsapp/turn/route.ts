@@ -6,6 +6,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { handleWhatsAppTurn } from "@/lib/whatsappTurn";
+import { resolveV1HotfixCanary, v1HotfixCanaryStatus } from "@/lib/v1HotfixCanary";
 
 export const maxDuration = 60;
 
@@ -16,6 +17,8 @@ const bodySchema = z
     body: z.string().optional(),
     rawText: z.string().optional(),
     message: z.string().optional(),
+    messageId: z.string().min(1).optional(),
+    message_id: z.string().min(1).optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -73,11 +76,58 @@ export async function POST(req: NextRequest) {
     ""
   ).trim();
 
+  const canary = resolveV1HotfixCanary(rawPhone);
+  if (canary.action === "reject") {
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        error: "Hotfix canary mal configurado (allowlist vacía o inválida)",
+        canary: v1HotfixCanaryStatus(),
+      },
+      { status: 503 },
+    );
+  }
+  if (canary.action === "proxy") {
+    const proxyRes = await fetch(`${canary.fallbackUrl}/api/whatsapp/turn`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey ?? "",
+      },
+      body: JSON.stringify(parsed.data),
+      cache: "no-store",
+    });
+    const proxyJson = await proxyRes.json().catch(() => ({
+      ok: false,
+      ok_s: "false",
+      error: "Fallback producción no respondió JSON",
+    }));
+    return NextResponse.json(proxyJson, {
+      status: proxyRes.status,
+      headers: {
+        "x-wara-v1-canary": "proxied_to_production",
+        "x-wara-v1-canary-fallback": canary.fallbackUrl,
+      },
+    });
+  }
+
   const payload = await handleWhatsAppTurn({
     rawPhone,
     body,
     apiKey: apiKey ?? "",
+    inboundMessageId:
+      parsed.data.messageId?.trim() ||
+      parsed.data.message_id?.trim() ||
+      req.headers.get("x-message-id")?.trim() ||
+      undefined,
   });
 
-  return NextResponse.json(payload, { status: 200 });
+  return NextResponse.json(payload, {
+    status: 200,
+    headers: {
+      "x-wara-v1-canary": canary.reason === "allowlisted" ? "allowlisted" : "off",
+      "x-wara-v1-hotfix-sha": v1HotfixCanaryStatus().commitSha ?? "",
+    },
+  });
 }

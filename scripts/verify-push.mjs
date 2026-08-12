@@ -42,6 +42,8 @@ const PUSH_SUITES = [
   "verify-maintenance-inherits-odometer-plate.mjs",
   "verify-odometer-resume-after-side-query.mjs",
   "verify-hotfix-stabilization-regression.mjs",
+  "verify-v1-hotfix-canary-gate.mjs",
+  "verify-odometer-write-guard.mjs",
   "verify-outbound-dedup.mjs",
   "verify-company-continuation-mention.mjs",
   "verify-utterance-understanding.mjs",

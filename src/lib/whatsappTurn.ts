@@ -67,8 +67,9 @@ export async function handleWhatsAppTurn(params: {
   rawPhone: string;
   body: string;
   apiKey: string;
+  inboundMessageId?: string;
 }): Promise<JsonRecord> {
-  const { rawPhone, body, apiKey } = params;
+  const { rawPhone, body, apiKey, inboundMessageId: _inboundMessageId } = params;
   const rawBody = body.trim();
   let selectionText = rawBody;
   const startedAt = Date.now();

@@ -12,6 +12,7 @@ import {
   obtenerEmpresaPorNumero,
 } from "@/lib/waraApi";
 import { pruebasContactAliasesSummary } from "@/config/pruebasContactAliases";
+import { v1HotfixCanaryStatus, isV1HotfixCanaryAllowlistedPhone } from "@/lib/v1HotfixCanary";
 import {
   isOdooTicketEscalationEnabled,
   odooTicketEscalationBlockReason,
@@ -93,6 +94,10 @@ export async function GET(req: NextRequest) {
     apiBaseUrl:
       process.env.WARA_API_BASE_URL?.trim() ||
       "https://apps.visionblo.com/rb/app/api_interna",
+    hotfixCanary: {
+      ...v1HotfixCanaryStatus(),
+      phoneAllowlisted: phone ? isV1HotfixCanaryAllowlistedPhone(phone) : null,
+    },
   };
 
   const baseOverride =
