@@ -35,6 +35,7 @@ import {
   looksLikeUnitConsultFollowUp,
   looksLikeUnitReportingStatusCue,
   looksLikeSubstantiveCustomerMessage,
+  looksLikeGreeting,
   threadHasRecentUnitProblemListenPrompt,
   looksLikeOperationalMaintenanceIntent,
   looksLikeOpcionesInfoRequest,
@@ -97,7 +98,7 @@ import {
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
-import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
+import { getPendingAction, clearPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { getActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
@@ -264,7 +265,77 @@ export function scheduleDeferredTurnExecutor(params: {
   );
 }
 
+function pendingKindFromAction(
+  pendingAction: Awaited<ReturnType<typeof getPendingAction>>,
+): "odometro" | "certificados" | "mantenimiento" | null {
+  if (
+    pendingAction?.type === "odometro" ||
+    pendingAction?.type === "certificados" ||
+    pendingAction?.type === "mantenimiento"
+  ) {
+    return pendingAction.type;
+  }
+  return null;
+}
+
+function executorForPendingKind(
+  kind: "odometro" | "certificados" | "mantenimiento",
+): TurnExecutorId {
+  if (kind === "odometro") return "odometro";
+  if (kind === "certificados") return "certificados";
+  return "mantenimiento";
+}
+
+function ensureTurnNeverSilent(
+  result: { message: string; executor: TurnExecutorId; ok: boolean },
+  selectionText: string,
+  pendingKind: "odometro" | "certificados" | "mantenimiento" | null,
+): { message: string; executor: TurnExecutorId; ok: boolean } {
+  const message = String(result.message ?? "").trim();
+  if (message) return { ...result, message };
+  if (pendingKind) {
+    return {
+      message: `Dale, seguimos. ${buildPendingConfirmStillWaitingReminder(pendingKind)}`,
+      executor: executorForPendingKind(pendingKind),
+      ok: true,
+    };
+  }
+  if (looksLikeGreeting(selectionText)) {
+    return {
+      message: "Hola, seguimos por acá. ¿Qué necesitás?",
+      executor: result.executor,
+      ok: true,
+    };
+  }
+  if (looksLikeResumePausedTramite(selectionText)) {
+    return {
+      message: "Dale, seguimos. ¿En qué te ayudo?",
+      executor: result.executor,
+      ok: true,
+    };
+  }
+  return {
+    ...result,
+    message: buildUnexpectedTurnFallbackMessage(selectionText),
+    ok: true,
+  };
+}
+
 export async function runTurnExecutorPhase(params: {
+  rawPhone: string;
+  selectionText: string;
+  apiKey: string;
+}): Promise<{ message: string; executor: TurnExecutorId; ok: boolean }> {
+  const pendingAction = await getPendingAction(prisma, params.rawPhone);
+  const threadCtx = await loadTurnThreadContext(params.rawPhone, params.selectionText);
+  const pendingKind =
+    detectPendingConfirmKind(threadCtx.classificationThread) ??
+    pendingKindFromAction(pendingAction);
+  const result = await runTurnExecutorPhaseCore(params);
+  return ensureTurnNeverSilent(result, params.selectionText, pendingKind);
+}
+
+async function runTurnExecutorPhaseCore(params: {
   rawPhone: string;
   selectionText: string;
   apiKey: string;
@@ -285,24 +356,32 @@ export async function runTurnExecutorPhase(params: {
 
   // CONFIRMO pendiente + "No"/rechazo: la IA razona (¿cancelar? ¿era consulta? ¿corregir unidad?).
   // Nunca asumir "no era esa patente" sin razonar el contexto del resumen.
-  const pendingKind = detectPendingConfirmKind(thread);
-  // Consulta lateral ya respondida: "ah entiendo" / "continuamos porfa" debe retomar
-  // el CONFIRMO, no silenciar ni registrar como si hubiera dicho CONFIRMO.
+  const pendingKind =
+    detectPendingConfirmKind(thread) ?? pendingKindFromAction(pendingAction);
+  // Consulta lateral ya respondida: "ah entiendo" / "continuamos porfa" / "Hola"
+  // debe retomar el CONFIRMO, no silenciar ni registrar como si hubiera dicho CONFIRMO.
+  // pendingAction manda aunque el hilo se haya "superseded" por otra consulta.
   if (
     pendingKind &&
     (looksLikeResumePausedTramite(selectionText) ||
-      looksLikePendingConfirmComprehensionAck(selectionText))
+      looksLikePendingConfirmComprehensionAck(selectionText) ||
+      looksLikeGreeting(selectionText))
   ) {
+    if (pendingAction?.type === pendingKind) {
+      await setPendingAction(prisma, rawPhone, pendingKind, {
+        summary: pendingAction.summary,
+        payload: pendingAction.payload,
+      });
+    }
     const reminder = buildPendingConfirmStillWaitingReminder(pendingKind);
-    const prefix = looksLikeResumePausedTramite(selectionText) ? "Dale, seguimos. " : "Dale. ";
+    const prefix = looksLikeResumePausedTramite(selectionText)
+      ? "Dale, seguimos. "
+      : looksLikeGreeting(selectionText)
+        ? "Hola, seguimos. "
+        : "Dale. ";
     return {
       message: `${prefix}${reminder}`,
-      executor:
-        pendingKind === "odometro"
-          ? "odometro"
-          : pendingKind === "certificados"
-            ? "certificados"
-            : "mantenimiento",
+      executor: executorForPendingKind(pendingKind),
       ok: true,
     };
   }
@@ -624,6 +703,8 @@ export async function runTurnExecutorPhase(params: {
     }
     const keepActiveUnitThread =
       !!activeUnitForNl?.plate &&
+      !looksLikeGreeting(selectionText) &&
+      !looksLikeResumePausedTramite(selectionText) &&
       (threadAwaitingUnitProblem ||
         looksLikeUnitConsultFollowUp(selectionText) ||
         looksLikeUnitReportingStatusCue(selectionText) ||
@@ -681,6 +762,10 @@ export async function runTurnExecutorPhase(params: {
         `[utteranceUnderstanding] hilo-unidad-activa-vs-referent phone=${rawPhone.slice(0, 4)}… plate=${activeUnitForNl.plate} referent=${understanding.referent}`,
       );
     }
+  }
+
+  if (looksLikeGreeting(selectionText) || looksLikeResumePausedTramite(selectionText)) {
+    skipSchematicUnitRoute = true;
   }
 
   // Guías de plataforma (Agenda, Perfiles, Notificaciones, Unidades…) → manual PDF + IA.

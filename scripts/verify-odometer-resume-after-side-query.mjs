@@ -9,7 +9,11 @@ import {
   looksLikePendingConfirmComprehensionAck,
   looksLikePendingTramiteAffirmation,
 } from "../src/lib/wara.ts";
-import { shouldContinueOdometerFlow } from "../src/lib/waraApi.ts";
+import {
+  shouldContinueOdometerFlow,
+  looksLikeGreeting,
+  looksLikeSubstantiveCustomerMessage,
+} from "../src/lib/waraApi.ts";
 import { resolvePendingConfirmationExecutor } from "../src/lib/pendingConfirmation.ts";
 
 let failed = 0;
@@ -46,6 +50,15 @@ assert(
   "shouldContinueOdometerFlow continuamos",
 );
 assert(shouldContinueOdometerFlow("Ah entiendo", pendingSummary), "shouldContinueOdometerFlow ah entiendo");
+assert(looksLikeGreeting("Hola"), "hola es saludo");
+assert(
+  !looksLikeSubstantiveCustomerMessage("Hola"),
+  "hola no es follow-up de unidad activa",
+);
+assert(
+  looksLikeResumePausedTramite("Buenos continuamos porfa?"),
+  "continuamos sigue siendo retomar",
+);
 
 if (failed) {
   console.error(`\n${failed} FAIL`);

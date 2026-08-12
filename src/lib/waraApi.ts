@@ -1423,6 +1423,7 @@ export function threadHasRecentNoEquipmentExplanation(threadText: string): boole
 export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {
   const text = (raw ?? "").trim();
   if (text.length < 4) return false;
+  if (looksLikeGreeting(text)) return false;
   const norm = normCompanyToken(text);
   if (
     /^(ok|si|no|gracias|muchas gracias|listo|dale|bueno|perfecto|genial|entendido|de acuerdo|confirmo)$/.test(
