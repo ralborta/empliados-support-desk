@@ -1,30 +1,92 @@
-# Entrega — Frontend V2 Lab + Bridge real
+# Entrega — Frontend V2 Lab (bridge + UI operativa)
 
 **Fecha:** 2026-08-12  
 **Rama:** `feat/wara-conversacional-v2`  
-**SHA implementado:** `c8cab39` (fix panel Operación V2 + seed) sobre base `e757e1a` (bridge + takeover)
+**SHA UI desplegado:** `ec08aa0` — *feat(v2-lab-ui): densificar mesa operativa con identidad WARA*  
+**SHA bridge previo:** `c8cab39` · base bridge `e757e1a`
 
 ---
 
-## Servicios (aislados — sin tocar V1 productivo)
+## URL y deploy
 
-| Servicio EasyPanel | URL | DB |
+| Servicio EasyPanel | URL | Commit desplegado | DB |
+|---|---|---|---|
+| **front-v2-lab** | https://wara-front-v2-lab.wd75db.easypanel.host | `ec08aa0` | `wara_tickets_lab` |
+| **v2-shadow** | https://wara-v2.wd75db.easypanel.host | (sin cambio UI) | `wara_v2` |
+
+**Confirmación — frontend productivo NO tocado:**
+
+| Servicio | Branch | SHA | Deploy UI |
+|---|---|---|---|
+| `wara/front` | `hotfix/resume-confirmo` | `3900aaf` | Sin deploy |
+| `wara/backend` | — | — | Sin cambios |
+| BBC / WhatsApp productivo | — | — | Sin cambios |
+
+---
+
+## Mejoras UI (solo lab)
+
+Principios aplicados: identidad bordó `#4a0e1c`, mayor densidad operativa, conversación y acciones prioritarias, sin reducir funcionalidades ni cambiar contratos API (salvo `direction` en GET mensajes para notas internas).
+
+### Lista — Todos los tickets
+
+- Encabezado compacto: título + contador + búsqueda en una fila.
+- Barra unificada: filtros Estado / Prioridad / Asignado + chip **Sin asignar** + fusión duplicados (modo compacto + tooltip).
+- Métricas con altura reducida (~40 % menos padding).
+- Tabla más arriba; `thead` sticky; filas `<tr>` clicables con hover bordó y foco accesible (`tabIndex`, `Enter`).
+- Jerarquía: asunto bold, ID mono secundario.
+- Actividad relativa visible; fecha exacta en `title` (tooltip nativo).
+- Chip **Sin asignar** en columna Asignado.
+
+### Detalle de ticket
+
+- Encabezado compacto; ID en `text-[11px]` secundario.
+- Layout XL: conversación ~70 % + sidebar 17.5 rem.
+- Historial con scroll interno; compositor fijo abajo (`embedded`).
+- `ConversationThread`: agrupación por emisor, separadores de fecha, estilos cliente / Atilio / agente / nota interna.
+- Tabs más bajos; activo con borde bordó.
+- Panel derecho reordenado: **Asignación → Resumen IA → Acciones → Prioridad → Operación V2**.
+- Resumen IA: tarjeta slate neutra (sin rosa/alerta).
+- Acciones: Resolver primaria bordó; secundarias slate; Cerrar destructiva; Nota interna ámbar; confirmación en Resolver/Cerrar.
+- Badges cabecera: Atilio V2, Derivado a humano, IA pausada (`TicketV2HeaderBadges`).
+- Operación V2: trámite, unidad, estado, operationId abreviado, IA activa/pausada, resultado, reconciliación, motivo derivación — sin payloads completos.
+
+### Capturas antes / después
+
+| Vista | Antes | Después (1440 px, lab live) |
 |---|---|---|
-| **front-v2-lab** | https://wara-front-v2-lab.wd75db.easypanel.host | `wara_tickets_lab` |
-| **v2-shadow** | https://wara-v2.wd75db.easypanel.host | `wara_v2` |
+| Lista | `docs/v2/assets/ui-before/lista-tickets.png` | `docs/v2/assets/ui-after/lista-tickets-1440.png` |
+| Detalle | `docs/v2/assets/ui-before/detalle-ticket.png` | `docs/v2/assets/ui-after/detalle-ticket-1440.png` |
 
-**No modificados:** `wara/front`, `wara/backend`, `wara.nivel41.com` (HTTP 200 verificado).
-
-**Aislamiento DB confirmado:** `wara` (prod mesa) = 14 tickets · `wara_tickets_lab` = 1 ticket de prueba lab.
+*Antes:* capturas del frontend operativo previo (prod-style, 12/08/2026 14:33).  
+*Después:* front-v2-lab tras deploy `ec08aa0`.
 
 ---
 
-## Frontend V2 lab
+## Componentes modificados / nuevos
 
-- Next.js completo (`src/app/`) — login, dashboard, tickets, filtros, clientes, agentes, configuración, monitor, detalle, takeover, fusión duplicados.
-- Banner ámbar **V2 LAB** cuando `WARA_V2_LAB_MODE=true`.
-- Seed idempotente: agentes ADMIN/SUPPORT (`scripts/seed-wara-tickets-lab.mjs`).
-- Migraciones V1 aplicadas al arranque (20/20).
+| Archivo | Cambio |
+|---|---|
+| `src/lib/formatRelativeTime.ts` | Tiempo relativo, fecha exacta, separadores |
+| `src/lib/ui/waraTheme.ts` | Tokens acento WARA |
+| `src/components/tickets/ConversationThread.tsx` | **Nuevo** — hilo agrupado |
+| `src/components/tickets/TicketV2HeaderBadges.tsx` | **Nuevo** — badges V2 |
+| `src/components/tickets/TicketPriorityPanel.tsx` | **Nuevo** — prioridad en sidebar |
+| `src/components/tickets/TicketsPageToolbar.tsx` | Header + barra filtros unificada |
+| `src/components/tickets/TicketsTable.tsx` | Sticky, filas clicables, chips |
+| `src/components/tickets/TicketsListPage.tsx` | Métricas compactas |
+| `src/components/tickets/MergeDuplicateOpenTicketsButton.tsx` | Modo compact + tooltip |
+| `src/components/tickets/TicketDetailView.tsx` | Layout conversación + reorden panel |
+| `src/components/tickets/QuickActionsPanel.tsx` | Jerarquía + confirmación |
+| `src/components/tickets/ConversationSummary.tsx` | Estilo neutro |
+| `src/components/tickets/V2OperationPanel.tsx` | Labels ES, IA activa/pausada |
+| `src/components/tickets/MessageComposer.tsx` | Modo embedded, botón bordó |
+| `src/components/tickets/TicketsLayout.tsx` | Padding reducido |
+| `src/components/ui/ConfirmDialog.tsx` | Confirm bordó |
+| `src/app/tickets/[id]/page.tsx` | Pasa `direction` en mensajes |
+| `src/app/api/tickets/[id]/messages/route.ts` | GET incluye `direction` |
+
+**Funcionalidad preservada (reubicada):** modo resolución y categoría siguen en tab **Detalles**; prioridad movida a `TicketPriorityPanel`.
 
 ---
 
@@ -33,75 +95,48 @@
 | Componente | Ruta |
 |---|---|
 | Gates | `src/lib/v2Bridge/gates.ts` |
-| Creación ticket | `src/lib/v2Bridge/createLabTicket.ts` — `attachToOpenConversation`, `autoAssignNewTicket`, idempotencia por `operationId` |
-| API bridge | `POST /api/v2/bridge/ticket` (header `x-api-key`) |
+| Creación ticket | `src/lib/v2Bridge/createLabTicket.ts` |
+| API bridge | `POST /api/v2/bridge/ticket` |
 | Customer pause | `GET /api/v2/bridge/customer-status` |
-| Cliente v2-shadow | `apps/wara-v2/src/pilot/v1-bridge-client.ts` |
 
-**Gates activos:** `WARA_V2_V1_TICKET_BRIDGE_ENABLED=true`, `WARA_V2_LAB_MODE=true`, allowlist tenant/teléfono, `DELIVERY_ENABLED=false`.
-
-**Verificado live:**
-- Ticket creado: código `1208261`, `autoAssigned: true`
-- Re-post mismo `operationId` → mismo ticket, `created: false` (sin duplicado)
+**Verificado:** ticket `1208261`, idempotencia por `operationId`, takeover (`botPausedAt`).
 
 ---
 
-## Takeover humano
-
-- `human-takeover-guard.ts`: V2 consulta `botPausedAt` vía bridge antes de responder.
-- Respuesta silenciosa (`skipResponse_s: true`) — no compite con agente humano.
-- Respuestas humanas en lab: **sin WhatsApp** (`WARA_V2_LAB_MODE` / `DELIVERY_ENABLED=false` en messages route).
-- **Reactivación IA:** cerrar ticket o toggle bot en cliente → `reactivateAtilioAfterTicketClosed` / `BotPausedToggle` (mismo mecanismo V1).
-
----
-
-## Sección Operación V2
-
-- UI: `src/components/tickets/V2OperationPanel.tsx` en sidebar del detalle.
-- API: `GET /api/tickets/[id]/v2-operation` (autenticada, sin exponer secrets).
-- Muestra: trámite, unidad, operationId abreviado, estado, fecha, resultado, unknown_outcome, reconciliación, datos recopilados, motivo derivación.
-
----
-
-## Tests y build
+## Validación realizada
 
 | Check | Resultado |
 |---|---|
-| `pnpm exec tsc --noEmit` (root + wara-v2) | OK |
-| `pnpm test` wara-v2 shadow-canary | 78/78 |
+| `pnpm exec tsc --noEmit` | OK |
 | `pnpm run build:next` | OK |
-| Script E2E bridge | `scripts/v2-lab-bridge-e2e.mjs` |
+| Deploy EasyPanel `front-v2-lab` @ `ec08aa0` | OK (build Nixpacks success) |
+| Login + lista + detalle en lab (Playwright 1440 px) | OK — capturas en `ui-after/` |
+| `wara/front` sin deploy | SHA sigue `3900aaf` |
+
+### Validación pendiente / manual recomendada
+
+- Viewports 1366, 1920, notebook altura limitada, tablet, mobile.
+- Navegación teclado completa (Tab en filtros, filas, acciones, compositor).
+- Estados vacíos (lista sin tickets), loading, error API.
+- Textos largos en asunto y conversaciones extensas (>100 msgs).
+- Ticket con y sin Operación V2 en DB lab.
+
+---
+
+## Deuda visual restante
+
+1. Badge **Derivado a humano** aparece cuando hay operación V2; falta condicionar solo a derivación real (no toda operación).
+2. Etiquetas sugeridas (antes en QuickActions) no reintroducidas — evaluar tab Detalles o sidebar.
+3. Dashboard y pantallas secundarias (clientes, agentes) mantienen spacing anterior.
+4. Algunos acentos violeta/rosa pueden persistir fuera del flujo tickets (sidebar global, login).
+5. Capturas responsive adicionales (tablet/mobile) pendientes.
 
 ---
 
 ## Evidencia cero impacto productivo
 
 - `DELIVERY_ENABLED=false` en front-v2-lab y v2-shadow
-- `WARA_V2_ODOMETER_WRITE_ENABLED=false`, `WARA_V2_ODOO_WRITE_ENABLED=false`, `WARA_V2_ROUTER_ENABLED=false`
-- Bridge escribe **solo** en `wara_tickets_lab`
-- Cero tickets insertados en DB `wara` productiva durante pruebas
+- Bridge escribe solo en `wara_tickets_lab`
+- Solo se desplegó `wara/front-v2-lab`; **no** `wara/front`, BBC, WhatsApp, V1 delivery
 
----
-
-## Deuda para conectar número de Raúl
-
-1. Bridge apuntando a DB tickets **productiva** (no lab) con gates de canary estrictos
-2. `WARA_V2_ROUTER_ENABLED` + allowlist teléfono Raúl
-3. `WARA_V2_DELIVERY_ENABLED` / WhatsApp real autorizado
-4. Escrituras WARA/Odoo con gates explícitos
-5. Front prod o canary — **no** reutilizar `wara/front` hasta cutover planificado
-
----
-
-## Recorrido lab pendiente manual (capturas)
-
-Tras deploy `c8cab39` en front-v2-lab:
-
-1. Login SUPPORT/ADMIN en https://wara-front-v2-lab.wd75db.easypanel.host
-2. Ver ticket bridge en lista
-3. Abrir detalle → panel **Operación V2**
-4. Tomar ticket → verificar pausa V2 (`customer-status botPaused: true`)
-5. Respuesta humana simulada (sin WhatsApp)
-6. Cerrar ticket → reactivar IA → re-derivación sin duplicado
-
-Script automatizado parcial: `node scripts/v2-lab-bridge-e2e.mjs`
+Script E2E bridge: `node scripts/v2-lab-bridge-e2e.mjs`
