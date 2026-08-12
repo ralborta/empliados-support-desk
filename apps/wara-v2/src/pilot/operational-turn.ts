@@ -111,6 +111,17 @@ import {
 import {
   cancelActiveOrPendingTramite,
 } from "./semantic/cancel-active-tramite.js";
+import { detectOdometerFieldCorrection } from "./semantic/field-correction.js";
+import {
+  FECHA_LECTURA_QUESTION,
+  DEFAULT_TENANT_TZ,
+} from "./semantic/natural-datetime.js";
+import {
+  formatAnomalyQuestion,
+  looksLikeAnomalyAck,
+  looksLikeAnomalyReject,
+} from "./semantic/reading-anomaly.js";
+import { DateTime } from "luxon";
 import {
   buildCompanyMenuMessage,
   buildCompanyResetMessage,
@@ -646,6 +657,115 @@ export async function resolveOperationalTurn(input: {
       return { kind: "reply", message: cancelled.message, state };
     }
 
+    // Atajo: corrección de campos (fecha/hora/valor) — no cancelar.
+    {
+      const localNow = DateTime.now()
+        .setZone(DEFAULT_TENANT_TZ)
+        .toFormat("yyyy-MM-dd'T'HH:mm:ss");
+      const correction = detectOdometerFieldCorrection(text, state, {
+        timezone: DEFAULT_TENANT_TZ,
+        localNow,
+      });
+      if (correction) {
+        const fleet = await fetchFleet(state, env);
+        const fleetUnits = fleet.ok ? fleet.units : [];
+        let reclass = { attempted: false, reasons: [] as string[] };
+        const exec = await runWithUnifiedBrainContext(
+          {
+            originalMessage: text,
+            decisionAction: correction.action,
+            decisionIntent: correction.intent,
+          },
+          async () => {
+            const r = await executeTurnDecision(correction, state, {
+              messageId: input.messageId,
+              env,
+              fleetUnits,
+              originalMessage: text,
+              showListing: (s, l, m) => {
+                showListing(s, l, m);
+              },
+              askGpsConfirmation,
+              deliverGpsReport,
+              handleGpsSideQuery: async (sideInput) => {
+                const side = await handleGpsSideQueryDuringTramite(sideInput);
+                return { message: side.message, state: side.state };
+              },
+            });
+            reclass = getLegacyReclassAttempt();
+            return r;
+          },
+        );
+        appendAssistantTurn(state, exec.message, correction);
+        savePilotConversationState(state);
+        recordLabTurnDiagnosis({
+          at: new Date().toISOString(),
+          brain_version: "unified_v1",
+          action: correction.action,
+          intent: correction.intent,
+          answer: null,
+          currentTramiteDisposition: "keep",
+          confidence: correction.confidence,
+          reasoningCode: correction.reasoningCode,
+          handler: "field_correction_shortcut",
+          latency_ms: null,
+          model: null,
+          clarification: false,
+          legacy_text_reclassification_attempted: reclass.attempted,
+          legacy_reclass_reasons: reclass.reasons,
+          llm_called: false,
+          error: null,
+        });
+        return { kind: "reply", message: exec.message, state };
+      }
+    }
+
+    // Atajo: confirmación reforzada de valor anómalo.
+    if (state.odometerDraft?.step === "await_anomaly_confirm") {
+      const draft = state.odometerDraft;
+      const meterType = draft.meterType ?? "odometro";
+      if (looksLikeAnomalyAck(text)) {
+        draft.valueNew = draft.anomalyCandidate ?? draft.valueNew;
+        draft.anomalyCandidate = null;
+        draft.step = "await_fecha";
+        const msg = FECHA_LECTURA_QUESTION;
+        appendAssistantTurn(state, msg, null);
+        savePilotConversationState(state);
+        recordLabTurnDiagnosis({
+          at: new Date().toISOString(),
+          brain_version: "unified_v1",
+          action: "answer_pending",
+          intent: meterType === "horometro" ? "horometer" : "odometer",
+          answer: "confirm",
+          currentTramiteDisposition: "keep",
+          confidence: 1,
+          reasoningCode: "ANSWER_TO_PENDING",
+          handler: "anomaly_ack_shortcut",
+          latency_ms: null,
+          model: null,
+          clarification: false,
+          legacy_text_reclassification_attempted: false,
+          legacy_reclass_reasons: [],
+          llm_called: false,
+          error: null,
+        });
+        return { kind: "reply", message: msg, state };
+      }
+      if (looksLikeAnomalyReject(text)) {
+        draft.anomalyCandidate = null;
+        draft.valueNew = null;
+        draft.step = "await_value";
+        const msg = `Ok, descarté ese valor. Pasame el ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"} correcto.`;
+        appendAssistantTurn(state, msg, null);
+        savePilotConversationState(state);
+        return { kind: "reply", message: msg, state };
+      }
+      const msg = formatAnomalyQuestion(draft.anomalyCandidate ?? 0, meterType);
+      appendAssistantTurn(state, msg, null);
+      savePilotConversationState(state);
+      return { kind: "reply", message: msg, state };
+    }
+
     // Atajo: continuar → reponer resumen/confirmación pendiente (no ejecutar).
     if (isUnequivocalContinueCommand(text) && state.pendingConfirmation?.question) {
       const pending = state.pendingConfirmation;
@@ -810,7 +930,14 @@ export async function resolveOperationalTurn(input: {
     }
 
     const interpreted = await interpretTurn(buildInterpretTurnInput(text, state), env);
-    const policy = applySemanticPolicy(interpreted.decision, state);
+    const localNow = DateTime.now()
+      .setZone(DEFAULT_TENANT_TZ)
+      .toFormat("yyyy-MM-dd'T'HH:mm:ss");
+    const policy = applySemanticPolicy(interpreted.decision, state, {
+      timezone: DEFAULT_TENANT_TZ,
+      message: text,
+      localNow,
+    });
     const decision = policy.decision;
 
     const fleet = await fetchFleet(state, env);

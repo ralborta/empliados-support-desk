@@ -40,6 +40,13 @@ import { isPilotDryRun } from "./write-gates.js";
 import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
 import { findUnitInFleetByRef, toFleetUnitRef } from "./unit-fleet.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
+import { FECHA_LECTURA_QUESTION } from "./semantic/natural-datetime.js";
+import {
+  formatAnomalyQuestion,
+  isAnomalousReading,
+  looksLikeAnomalyAck,
+  looksLikeAnomalyReject,
+} from "./semantic/reading-anomaly.js";
 import { isInsideUnifiedBrainContext } from "./semantic/reclass-guard.js";
 
 export type OdometerTurnResult =
@@ -406,12 +413,54 @@ export async function tryResolveOdometerTurn(input: {
     if (!valCheck.ok) return { kind: "reply", message: valCheck.reason, state };
     const retro = validateNoRetroceso(value, draft.valuePrevious);
     if (!retro.ok) return { kind: "reply", message: retro.reason, state };
+    if (
+      isAnomalousReading({
+        valueNew: value,
+        valuePrevious: draft.valuePrevious,
+        meterType,
+        env,
+      })
+    ) {
+      draft.anomalyCandidate = value;
+      draft.meterType = meterType;
+      draft.step = "await_anomaly_confirm";
+      return {
+        kind: "reply",
+        message: formatAnomalyQuestion(value, meterType),
+        state,
+      };
+    }
     draft.valueNew = value;
     draft.meterType = meterType;
     draft.step = "await_fecha";
     return {
       kind: "reply",
-      message: "¿Con qué fecha y hora es la lectura? (ej. 06/08/2026 15:50)",
+      message: FECHA_LECTURA_QUESTION,
+      state,
+    };
+  }
+
+  if (draft.step === "await_anomaly_confirm") {
+    const meterType = draft.meterType ?? meterTypeHint;
+    if (looksLikeAnomalyAck(text) || looksLikeExplicitConfirm(text)) {
+      draft.valueNew = draft.anomalyCandidate ?? draft.valueNew;
+      draft.anomalyCandidate = null;
+      draft.step = "await_fecha";
+      return { kind: "reply", message: FECHA_LECTURA_QUESTION, state };
+    }
+    if (looksLikeAnomalyReject(text) || looksLikeExplicitReject(text)) {
+      draft.anomalyCandidate = null;
+      draft.valueNew = null;
+      draft.step = "await_value";
+      return {
+        kind: "reply",
+        message: `Ok, descarté ese valor. Pasame el ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"} correcto.`,
+        state,
+      };
+    }
+    return {
+      kind: "reply",
+      message: formatAnomalyQuestion(draft.anomalyCandidate ?? 0, meterType),
       state,
     };
   }

@@ -69,6 +69,10 @@ export const TurnDecisionSchema = z.object({
     .nullable()
     .optional(),
   currentTramiteDisposition: z.enum(["keep", "suspend", "cancel", "complete"]),
+  fieldsToClear: z
+    .array(z.enum(["date", "time", "numericValue", "unit"]))
+    .nullable()
+    .optional(),
   ambiguity: z
     .object({
       candidates: z.array(z.string()).min(1),

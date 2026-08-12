@@ -28,6 +28,7 @@ import {
   semanticTraceStats,
   type SemanticTraceRecord,
 } from "./semantic-trace.js";
+import { FECHA_LECTURA_QUESTION } from "./semantic/natural-datetime.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
 
 process.env.WARA_V2_SEMANTIC_TRACE = "true";
@@ -224,7 +225,7 @@ async function main() {
         fechaTimePart: null,
         step: "await_fecha",
       };
-      st.lastAgentQuestion = "¿Con qué fecha y hora es la lectura? (ej. 06/08/2026 15:50)";
+      st.lastAgentQuestion = FECHA_LECTURA_QUESTION;
       savePilotConversationState(st);
     },
     texts: ["el domingo", "11:30"],

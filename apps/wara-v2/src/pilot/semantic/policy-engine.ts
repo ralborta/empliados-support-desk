@@ -11,6 +11,10 @@ import {
   detectDecisionConflict,
   noteDecisionConflict,
 } from "./decision-conflict.js";
+import {
+  DEFAULT_TENANT_TZ,
+  reconcileLlmReadingFields,
+} from "./natural-datetime.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -29,6 +33,12 @@ export type PolicyResult =
   | { ok: true; decision: TurnDecision }
   | { ok: false; decision: TurnDecision; reason: string };
 
+export type PolicyOptions = {
+  timezone?: string;
+  message?: string;
+  localNow?: string;
+};
+
 function isValidDate(iso: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(iso) && !Number.isNaN(Date.parse(`${iso}T12:00:00`));
 }
@@ -46,12 +56,22 @@ function conflictClarify(state: PilotConversationState, reason: string): PolicyR
   };
 }
 
+function isMeterReadingContext(decision: TurnDecision, state: PilotConversationState): boolean {
+  return (
+    decision.intent === "odometer" ||
+    decision.intent === "horometer" ||
+    state.activeTramite === "odometer_update" ||
+    Boolean(state.odometerDraft && state.odometerDraft.step !== "idle")
+  );
+}
+
 export function applySemanticPolicy(
   decision: TurnDecision,
   state: PilotConversationState,
-  opts?: { timezone?: string },
+  opts?: PolicyOptions,
 ): PolicyResult {
-  const tz = opts?.timezone ?? "America/Argentina/Buenos_Aires";
+  const tz = opts?.timezone ?? DEFAULT_TENANT_TZ;
+  const message = opts?.message ?? "";
 
   if (!CAPABILITIES.has(decision.intent)) {
     return {
@@ -94,7 +114,6 @@ export function applySemanticPolicy(
   }
 
   // Normalizar: disposition cancel + answer ausente ⇒ answer cancel.
-  // (confirm+cancel ya fue rechazado como decision_conflict arriba.)
   if (
     decision.action === "answer_pending" &&
     decision.currentTramiteDisposition === "cancel" &&
@@ -130,6 +149,7 @@ export function applySemanticPolicy(
         answer: null,
         entity: null,
         fields: null,
+        fieldsToClear: null,
       },
     };
   }
@@ -184,27 +204,71 @@ export function applySemanticPolicy(
     }
   }
 
-  if (decision.fields?.date && decision.action === "provide_fields") {
+  // Validación determinística de fechas naturales (weekday / futuro / ejemplo inducido).
+  if (
+    message &&
+    isMeterReadingContext(decision, state) &&
+    (decision.action === "provide_fields" ||
+      decision.action === "correct_fields" ||
+      (decision.action === "answer_pending" && (decision.fields?.date || decision.fields?.time)))
+  ) {
+    const hasDateSignal =
+      Boolean(decision.fields?.date) ||
+      Boolean(decision.fields?.time) ||
+      /\b(hoy|ayer|anteayer|domingo|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|\d{1,2}\/\d{1,2}\/\d{2,4}|tipo\s+\d)\b/i.test(
+        message,
+      );
+    if (hasDateSignal) {
+      const reconciled = reconcileLlmReadingFields({
+        message,
+        timezone: tz,
+        localNow: opts?.localNow,
+        llmDate: decision.fields?.date,
+        llmTime: decision.fields?.time,
+      });
+      if (!reconciled.ok) {
+        return {
+          ok: false,
+          reason:
+            reconciled.reason === "future_explicit" ? "future_date" : "date_weekday_mismatch",
+          decision: safeClarifyDecision(reconciled.question),
+        };
+      }
+      const nextFields = {
+        ...(decision.fields ?? {}),
+        date: reconciled.date,
+        time: reconciled.time,
+        timezone: decision.fields?.timezone ?? tz,
+      };
+      // time_only: no inventar date; dejar null para que execute conserve draft.
+      if (reconciled.diagnosis.cause === "time_only") {
+        nextFields.date = null;
+      }
+      decision = {
+        ...decision,
+        fields: nextFields,
+        action:
+          decision.action === "answer_pending" && (reconciled.date || reconciled.time)
+            ? "provide_fields"
+            : decision.action,
+      };
+    }
+  } else if (decision.fields?.date && decision.action === "provide_fields") {
+    // Fallback legacy sin mensaje: solo snap futuro en lecturas.
     const today = new Date().toLocaleDateString("en-CA", { timeZone: tz });
-    if (decision.fields.date > today) {
-      const meterIntent =
-        decision.intent === "odometer" ||
-        decision.intent === "horometer" ||
-        state.activeTramite === "odometer_update";
-      if (meterIntent) {
-        const [y, m, d] = decision.fields.date.split("-").map(Number);
-        const dt = new Date(Date.UTC(y!, m! - 1, d!));
-        dt.setUTCDate(dt.getUTCDate() - 7);
-        const snapped = dt.toISOString().slice(0, 10);
-        if (snapped <= today) {
-          return {
-            ok: true,
-            decision: {
-              ...decision,
-              fields: { ...decision.fields, date: snapped, timezone: decision.fields.timezone ?? tz },
-            },
-          };
-        }
+    if (decision.fields.date > today && isMeterReadingContext(decision, state)) {
+      const [y, m, d] = decision.fields.date.split("-").map(Number);
+      const dt = new Date(Date.UTC(y!, m! - 1, d!));
+      dt.setUTCDate(dt.getUTCDate() - 7);
+      const snapped = dt.toISOString().slice(0, 10);
+      if (snapped <= today) {
+        return {
+          ok: true,
+          decision: {
+            ...decision,
+            fields: { ...decision.fields, date: snapped, timezone: decision.fields.timezone ?? tz },
+          },
+        };
       }
       return {
         ok: false,

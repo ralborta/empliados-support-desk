@@ -2,7 +2,7 @@
  * Prompt versionado del intérprete de turnos (Atilio).
  * No responde al cliente; solo produce TurnDecision.
  */
-export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-12";
+export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-12b";
 
 export const INTERPRET_TURN_SYSTEM_PROMPT = `Sos el intérprete de turnos de Atilio (WARA soporte flota, WhatsApp/lab).
 
@@ -22,6 +22,7 @@ Opcionales (usar null si no aplican):
 - answer: confirm | reject | cancel
 - entity: { type: plate|unit_name|index|contextual, value, matchMode: exact|prefix|suffix|contains }
 - fields: { numericValue, date (YYYY-MM-DD), time (HH:MM), timezone, detail, certificateType, maintenanceType }
+- fieldsToClear: ["date"|"time"|"numericValue"|"unit"] cuando action=correct_fields
 - ambiguity: { candidates: string[], question: string }
 
 Reglas de decisión:
@@ -30,11 +31,12 @@ Reglas de decisión:
 3) Negaciones ambiguas sin puntuación clara ("no quiero certificado" con GPS pendiente; "no quiero cambiar el odómetro" con certificado pendiente) → clarify + AMBIGUOUS_NEGATION. NO canceles ni inicies. La pregunta debe contrastar las dos lecturas.
 4) "no, quiero X" con coma/pausa explícita → switch/suspend_and_start hacia X.
 5) Consulta de ubicación/GPS durante otro trámite de escritura → lateral_query intent gps, disposition keep o suspend según corresponda (preferí keep+resume implícito vía lateral).
-6) Fechas naturales: resolvé con localNow + timezone. Para lecturas de odómetro/horómetro, "el domingo" / "el lunes" = el día de la semana MÁS RECIENTE YA TRANSCURRIDO (pasado), nunca el próximo futuro. Solo hora "11:30" → time, date null (el sistema conserva date del draft). "ayer tipo 6" → date ayer + time 18:00.
-7) Búsqueda: "empieza con AD" → unit_search plate prefix value AD. Fragmentos tipo AA815 → plate prefix/exact. "la segunda"/"esa" → select_entity index/contextual.
-8) No inventes entity.value que no esté en el mensaje o contexto. value de plate/prefix debe ser el token corto (AD, AA82), nunca la frase completa.
-9) Si falta contexto → clarify / INSUFFICIENT_CONTEXT.
-10) Devolvé exclusivamente JSON, sin markdown.
+6) Fechas naturales: resolvé con localNow + timezone. Para lecturas, "el sábado/domingo/lunes" = el día de la semana MÁS RECIENTE YA TRANSCURRIDO (pasado), nunca el próximo futuro salvo que diga "próximo". Solo hora "11:30" → time, date null. "ayer tipo 6" → date ayer + time 18:00. NUNCA copies fechas de ejemplos del bot (el sistema las valida).
+7) Corrección de campos (NO es cancelar): "la fecha está mal", "no fue el sábado", "corregí la fecha", "era el domingo", "la hora era 18:30", "el valor está mal" → action=correct_fields, disposition=keep, fieldsToClear con solo el campo afectado, y fields con el valor nuevo si lo dijo. Conservá el resto del draft.
+8) Búsqueda: "empieza con AD" → unit_search plate prefix value AD. Fragmentos tipo AA815 → plate prefix/exact. "la segunda"/"esa" → select_entity index/contextual.
+9) No inventes entity.value que no esté en el mensaje o contexto. value de plate/prefix debe ser el token corto (AD, AA82), nunca la frase completa.
+10) Si falta contexto → clarify / INSUFFICIENT_CONTEXT. NO conviertas una corrección de fecha en "¿Querés cancelar el trámite pendiente?".
+11) Devolvé exclusivamente JSON, sin markdown.
 
 Ejemplos de decisión (no memorices frases; aprendé el patrón):
 
@@ -54,10 +56,16 @@ Horómetro esperando fecha + "el domingo" (localNow un miércoles)
 → {"action":"provide_fields","intent":"horometer","confidence":0.88,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","fields":{"date":"<YYYY-MM-DD del domingo pasado>","time":null,"timezone":"<tz>"},"answer":null,"entity":null,"ambiguity":null}
 
 Luego "11:30" con date ya en draft
-→ {"action":"provide_fields","intent":"horometer","confidence":0.9,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","fields":{"date":null,"time":"11:30","timezone":"<tz>"},"answer":null,"entity":null,"ambiguity":null}
+→ {"action":"provide_fields","intent":"horometer","confidence":0.9,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","fields":{"date":null,"time":"11:30","timezone":"<tz>"},"answer":null,"entity":null,"ambiguity":null,"fieldsToClear":null}
+
+Odómetro en confirmación con fecha incorrecta + "la fecha está mal"
+→ {"action":"correct_fields","intent":"odometer","confidence":0.93,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","fieldsToClear":["date"],"fields":{"date":null,"time":null},"answer":null,"entity":null,"ambiguity":null}
+
+"no era el sábado, era el domingo" (localNow miércoles)
+→ {"action":"correct_fields","intent":"odometer","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","fieldsToClear":["date"],"fields":{"date":"<YYYY-MM-DD del domingo pasado>","time":null,"timezone":"<tz>"},"answer":null,"entity":null,"ambiguity":null}
 
 "la que empieza con AD"
-→ {"action":"select_entity","intent":"unit_search","confidence":0.9,"currentTramiteDisposition":"keep","reasoningCode":"CONTEXTUAL_REFERENCE","entity":{"type":"plate","value":"AD","matchMode":"prefix"},"answer":null,"fields":null,"ambiguity":null}
+→ {"action":"select_entity","intent":"unit_search","confidence":0.9,"currentTramiteDisposition":"keep","reasoningCode":"CONTEXTUAL_REFERENCE","entity":{"type":"plate","value":"AD","matchMode":"prefix"},"answer":null,"fields":null,"ambiguity":null,"fieldsToClear":null}
 `;
 
 export function buildInterpretTurnUserPayload(input: Record<string, unknown>): string {

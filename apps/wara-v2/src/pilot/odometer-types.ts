@@ -10,6 +10,7 @@ export type OdometerDraftStep =
   | "await_unit"
   | "await_value"
   | "await_fecha"
+  | "await_anomaly_confirm"
   | "await_confirm";
 
 export type OdometerDraft = {
@@ -17,6 +18,8 @@ export type OdometerDraft = {
   unit: PilotSelectedUnit | null;
   valueNew: number | null;
   valuePrevious: number | null;
+  /** Valor anómalo pendiente de confirmación reforzada. */
+  anomalyCandidate?: number | null;
   fechaLecturaIso: string | null;
   fechaDisplay: string | null;
   /** Día parcial YYYY-MM-DD (sin hora aún). */

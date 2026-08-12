@@ -12,7 +12,7 @@
     "test:api": "pnpm --filter @wara-v2/db build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/executors build && node ../../packages/wara-v2-db/scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/app exec tsx --test src/api/api.pg.test.ts",
     "test:llm": "pnpm --filter @wara-v2/contracts build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/app exec tsx --test --test-concurrency=1 src/llm/llm.security.test.ts src/governance/governance.test.ts src/governance/fase9b.test.ts",
     "test:semantic-brain-live": "WARA_V2_UNIFIED_SEMANTIC_BRAIN=true WARA_V2_SEMANTIC_LIVE=true pnpm --filter @wara-v2/app exec tsx --test --test-concurrency=1 src/pilot/semantic/unified-brain.live.test.ts",
-    "test:shadow-canary": "pnpm --filter @wara-v2/contracts build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/app exec tsx --test --test-concurrency=1 src/shadow-canary/fase10a.test.ts src/pilot/whatsapp-turn.test.ts src/pilot/wara-context.test.ts src/pilot/conversation-parity.test.ts src/pilot/human-conversation.test.ts src/pilot/acceptance-conversation.test.ts src/pilot/negation-intent.test.ts src/pilot/odometer-parity.test.ts src/pilot/tramite-combined-parity.test.ts src/pilot/pilot-gates-router.test.ts src/pilot/semantic/policy-engine.test.ts src/pilot/semantic/gps-lateral-entity.test.ts src/pilot/semantic/certificate-cancel.test.ts",
+    "test:shadow-canary": "pnpm --filter @wara-v2/contracts build && pnpm --filter @wara-v2/orchestrator build && pnpm --filter @wara-v2/app exec tsx --test --test-concurrency=1 src/shadow-canary/fase10a.test.ts src/pilot/whatsapp-turn.test.ts src/pilot/wara-context.test.ts src/pilot/conversation-parity.test.ts src/pilot/human-conversation.test.ts src/pilot/acceptance-conversation.test.ts src/pilot/negation-intent.test.ts src/pilot/odometer-parity.test.ts src/pilot/tramite-combined-parity.test.ts src/pilot/pilot-gates-router.test.ts src/pilot/semantic/policy-engine.test.ts src/pilot/semantic/gps-lateral-entity.test.ts src/pilot/semantic/certificate-cancel.test.ts src/pilot/semantic/natural-datetime.test.ts",
     "test:pilot-persistence": "pnpm --filter @wara-v2/db build && node ../../packages/wara-v2-db/scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/app exec tsx --test src/pilot/pilot-persistence.pg.test.ts",
     "test:llm-live": "pnpm --filter @wara-v2/contracts build && pnpm --filter @wara-v2/orchestrator build && WARA_V2_LLM_LIVE=true pnpm --filter @wara-v2/app exec tsx --test src/llm/llm.live.test.ts",
     "gov:9b": "tsx src/governance/cli-9b.ts",
@@ -27,9 +27,11 @@
     "@wara-v2/domain": "workspace:*",
     "@wara-v2/executors": "workspace:*",
     "@wara-v2/infra": "workspace:*",
-    "@wara-v2/orchestrator": "workspace:*"
+    "@wara-v2/orchestrator": "workspace:*",
+    "luxon": "^3.7.2"
   },
   "devDependencies": {
+    "@types/luxon": "^3.7.4",
     "@types/node": "^20",
     "tsx": "^4.23.5",
     "typescript": "^5"
