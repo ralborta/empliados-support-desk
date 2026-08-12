@@ -1,34 +1,19 @@
 /**
- * Resolución piloto V2 con WARA read-only + estado Odoo.
+ * Resolución piloto V2 con WARA read-only + router operacional determinístico.
  * Mutaciones WARA/Odoo siguen deshabilitadas.
  */
-import {
-  consultarEstadoUnidades,
-  createChatBotToken,
-  isWaraReadConfigured,
-  obtenerEmpresaPorNumero,
-} from "./wara-client.js";
-import {
-  buildCompanyMenuMessage,
-  buildCompanyResetMessage,
-  buildCompanyStatusReply,
-  formatUnitsList,
-} from "./wara-format.js";
-import {
-  looksLikeChangeCompanyRequest,
-  looksLikeCompanyListQuestion,
-  looksLikeCompanySelection,
-  looksLikeUnitsListRequest,
-  matchCompanySelection,
-} from "./wara-intents.js";
+import { isWaraReadConfigured, obtenerEmpresaPorNumero } from "./wara-client.js";
 import { getOdooConfigStatus } from "./odoo-status.js";
 import {
-  clearPilotWaraSession,
-  getPilotWaraSession,
   initPilotWaraSession,
-  savePilotWaraSession,
+  resetPilotWaraSessionsForTests as resetLegacyPilotSessions,
 } from "./wara-session.js";
+import { resolveOperationalTurn } from "./operational-turn.js";
 import type { PilotWaraSession, WaraPromptSnapshot } from "./wara-types.js";
+import {
+  resetPilotConversationStatesForTests,
+  configurePilotStatePersistence,
+} from "./conversation-state.js";
 
 export type PilotWaraResolution =
   | { kind: "reply"; message: string }
@@ -38,108 +23,25 @@ export type PilotWaraResolution =
       snapshot: WaraPromptSnapshot;
     };
 
-function requiresCompanySelection(session: PilotWaraSession): boolean {
-  return session.contacts.length > 1 && session.selectedContactId == null;
-}
-
-async function ensureSessionToken(
-  session: PilotWaraSession,
-  env: NodeJS.ProcessEnv,
-): Promise<PilotWaraSession> {
-  if (session.sessionToken && session.selectedContactId != null) return session;
-
-  if (session.contacts.length === 1 && session.selectedContactId == null) {
-    const c = session.contacts[0]!;
-    const created = await createChatBotToken(c.id, env);
-    if (created.ok && created.sessionToken) {
-      session.selectedContactId = c.id;
-      session.companyName = c.empresa || c.nombre;
-      session.sessionToken = created.sessionToken;
-      savePilotWaraSession(session);
-    }
-    return session;
-  }
-
-  if (session.selectedContactId != null && !session.sessionToken) {
-    const created = await createChatBotToken(session.selectedContactId, env);
-    if (created.ok && created.sessionToken) {
-      session.sessionToken = created.sessionToken;
-      savePilotWaraSession(session);
-    }
-  }
-  return session;
-}
-
-async function selectCompany(
-  session: PilotWaraSession,
-  text: string,
-  env: NodeJS.ProcessEnv,
-): Promise<{ ok: boolean; message?: string }> {
-  const matched = matchCompanySelection(text, session.contacts);
-  if (!matched) {
-    return {
-      ok: false,
-      message:
-        `No reconocí esa opción.\n\n${buildCompanyMenuMessage(session.contacts)}`,
-    };
-  }
-  const created = await createChatBotToken(matched.id, env);
-  if (!created.ok || !created.sessionToken) {
-    return {
-      ok: false,
-      message:
-        "No pude abrir sesión en Wara para esa empresa. Probá de nuevo en un momento.",
-    };
-  }
-  session.selectedContactId = matched.id;
-  session.companyName = matched.empresa || matched.nombre;
-  session.sessionToken = created.sessionToken;
-  savePilotWaraSession(session);
-  return {
-    ok: true,
-    message: `Perfecto, sigo con ${session.companyName}. ¿En qué te puedo ayudar?`,
-  };
-}
-
-async function buildSnapshot(
-  session: PilotWaraSession,
-  env: NodeJS.ProcessEnv,
-): Promise<WaraPromptSnapshot> {
-  const odoo = getOdooConfigStatus(env);
-  let units_preview: string[] = [];
-  if (session.sessionToken) {
-    const fleet = await consultarEstadoUnidades(session.sessionToken, env);
-    if (fleet.ok) {
-      units_preview = fleet.unidades.slice(0, 8).map((u) => {
-        const p = u.patente?.trim() || "";
-        const n = u.unidad?.trim() || "";
-        return p && n ? `${p} (${n})` : p || n;
-      });
-    }
-  }
-  return {
-    wara_configured: isWaraReadConfigured(env),
-    odoo_configured: odoo.configured,
-    company_name: session.companyName,
-    customer_name: session.customerName,
-    contacts_count: session.contacts.length,
-    units_preview,
-    requires_company_selection: requiresCompanySelection(session),
-  };
-}
-
 export async function resolvePilotWaraTurn(input: {
   phone: string;
   text: string;
   env?: NodeJS.ProcessEnv;
+  tenantId?: string;
 }): Promise<PilotWaraResolution> {
   const env = input.env ?? process.env;
   const text = input.text.trim() || "Hola";
+  const tenantId = (input.tenantId ?? env.WARA_V2_SHADOW_TENANT ?? "tenant_internal_ops").trim();
+
+  if (env.WARA_V2_PILOT_STATE_PATH?.trim()) {
+    configurePilotStatePersistence(env.WARA_V2_PILOT_STATE_PATH.trim());
+  }
 
   if (!isWaraReadConfigured(env)) {
+    const session = initPilotWaraSession(input.phone, [], null);
     return {
       kind: "llm",
-      session: initPilotWaraSession(input.phone, [], null),
+      session,
       snapshot: {
         wara_configured: false,
         odoo_configured: getOdooConfigStatus(env).configured,
@@ -162,70 +64,35 @@ export async function resolvePilotWaraTurn(input: {
     };
   }
 
-  let session =
-    getPilotWaraSession(input.phone) ??
-    initPilotWaraSession(
-      input.phone,
-      lookup.contactos,
-      lookup.customerName ?? null,
-    );
+  const result = await resolveOperationalTurn({
+    tenantId,
+    phone: input.phone,
+    text,
+    env,
+    contacts: lookup.contactos,
+    customerName: lookup.customerName ?? null,
+  });
 
-  if (session.contacts.length !== lookup.contactos.length) {
-    session.contacts = lookup.contactos;
-    savePilotWaraSession(session);
+  if (result.kind === "reply" || result.kind === "duplicate") {
+    return { kind: "reply", message: result.message };
   }
 
-  if (looksLikeChangeCompanyRequest(text)) {
-    clearPilotWaraSession(input.phone);
-    session = initPilotWaraSession(
-      input.phone,
-      lookup.contactos,
-      lookup.customerName ?? null,
-    );
-    return { kind: "reply", message: buildCompanyResetMessage(lookup.contactos) };
-  }
+  const st = result.state;
+  const session: PilotWaraSession = {
+    phone: st.phone,
+    contacts: st.contacts,
+    selectedContactId: st.selectedContactId,
+    companyName: st.companyName,
+    sessionToken: st.sessionToken,
+    customerName: st.customerName,
+  };
 
-  if (requiresCompanySelection(session)) {
-    if (looksLikeCompanySelection(text)) {
-      const sel = await selectCompany(session, text, env);
-      return { kind: "reply", message: sel.message ?? "Listo." };
-    }
-    return {
-      kind: "reply",
-      message: buildCompanyMenuMessage(session.contacts),
-    };
-  }
-
-  session = await ensureSessionToken(session, env);
-
-  if (looksLikeCompanyListQuestion(text)) {
-    return {
-      kind: "reply",
-      message: buildCompanyStatusReply(session.companyName, session.contacts),
-    };
-  }
-
-  if (looksLikeUnitsListRequest(text)) {
-    if (!session.sessionToken) {
-      return {
-        kind: "reply",
-        message: "Primero elegí la empresa con la que querés operar.",
-      };
-    }
-    const fleet = await consultarEstadoUnidades(session.sessionToken, env);
-    if (!fleet.ok) {
-      return {
-        kind: "reply",
-        message:
-          fleet.error ??
-          "No pude consultar las unidades en Wara. Probá de nuevo en un momento.",
-      };
-    }
-    return { kind: "reply", message: formatUnitsList(fleet.unidades) };
-  }
-
-  const snapshot = await buildSnapshot(session, env);
-  return { kind: "llm", session, snapshot };
+  return { kind: "llm", session, snapshot: result.snapshot };
 }
 
-export { resetPilotWaraSessionsForTests } from "./wara-session.js";
+export function resetPilotWaraSessionsForTests(): void {
+  resetLegacyPilotSessions();
+  resetPilotConversationStatesForTests();
+}
+
+export { resetPilotConversationStatesForTests } from "./conversation-state.js";
