@@ -2,6 +2,7 @@
  * Cliente WARA certificado de cobertura V2 — mismo endpoint que V1.
  */
 import type { CertificateWaraPayload } from "./certificate-types.js";
+import { isCertificateWriteEnabled } from "./write-gates.js";
 
 function waraMaintenanceApiBaseUrl(env: NodeJS.ProcessEnv): string {
   return (
@@ -39,9 +40,10 @@ export async function issueCertificadoCobertura(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<IssueCertificateResult> {
   const payload = buildCertificateWaraPayload(input);
-  const dryRun = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
+  const gateEnabled = isCertificateWriteEnabled(env);
+  const legacyBlock = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
 
-  if (dryRun) {
+  if (!gateEnabled || legacyBlock) {
     return {
       ok: true,
       dryRun: true,
@@ -59,6 +61,12 @@ export async function issueCertificadoCobertura(
     body: JSON.stringify(payload),
     cache: "no-store",
     signal: AbortSignal.timeout(Number(env.WARA_API_TIMEOUT_MS ?? 15_000)),
+  }).catch((e: unknown) => {
+    const err = e instanceof Error ? e.message : String(e);
+    if (/abort|timeout/i.test(err)) {
+      throw new Error(`timeout_after_send:${err}`);
+    }
+    throw e;
   });
 
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;

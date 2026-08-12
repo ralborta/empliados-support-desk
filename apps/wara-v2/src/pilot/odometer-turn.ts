@@ -32,6 +32,8 @@ import {
   looksLikeResumePausedTramite,
 } from "./brief-replies.js";
 import { registerOdometerHorometro } from "./odometer-wara.js";
+import { isPilotDryRun } from "./write-gates.js";
+import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
 import { findUnitInFleetByRef, toFleetUnitRef } from "./unit-fleet.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
 
@@ -131,7 +133,7 @@ async function executeWrite(
     return { kind: "reply", message: "Este CONFIRMO ya fue procesado.", state };
   }
 
-  const dryRun = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
+  const dryRun = isPilotDryRun("odometer", env);
   const operationId = createOperationId();
 
   let result: { ok: boolean; error?: string; summary?: string; payload?: Record<string, unknown> };
@@ -179,6 +181,19 @@ async function executeWrite(
 
   if (!state.odometerOperations) state.odometerOperations = {};
   state.odometerOperations[operationId] = record;
+
+  void syncPilotOperationToPrisma({
+    state,
+    operationId,
+    type: "update_odometer",
+    gateKind: "odometer",
+    messageId,
+    payloadHash: record.payloadHash,
+    payload: (result.payload ?? {}) as Record<string, unknown>,
+    status: record.status,
+    resultSummary: record.resultSummary,
+    env,
+  });
 
   state.odometerDraft = null;
   state.pendingConfirmation = null;

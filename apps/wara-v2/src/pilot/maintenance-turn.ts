@@ -36,6 +36,8 @@ import {
 import { createOdooHelpdeskTicketDryRun } from "./odoo-ticket-client.js";
 import { findUnitInFleetByRef, toFleetUnitRef } from "./unit-fleet.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
+import { isPilotDryRun } from "./write-gates.js";
+import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
 
 export type MaintenanceTurnResult =
   | { kind: "none" }
@@ -108,7 +110,7 @@ async function executeMaintenanceRequest(
   const dupConfirm = findMaintenanceByConfirmMessageId(state.maintenanceOperations ?? {}, messageId);
   if (dupConfirm) return { kind: "reply", message: "Este CONFIRMO ya fue procesado.", state };
 
-  const dryRun = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
+  const dryRun = isPilotDryRun("odoo", env);
   const operationId = createMaintenanceOperationId();
   const company = state.companyName ?? "tu empresa";
   const subject = `${draft.unit.patente} - ${draft.service}`;
@@ -172,6 +174,20 @@ async function executeMaintenanceRequest(
 
   if (!state.maintenanceOperations) state.maintenanceOperations = {};
   state.maintenanceOperations[operationId] = record;
+
+  void syncPilotOperationToPrisma({
+    state,
+    operationId,
+    type: "create_maintenance",
+    gateKind: "odoo",
+    messageId,
+    payloadHash: record.payloadHash,
+    payload: (record.odooPayload ?? {}) as Record<string, unknown>,
+    status: record.status,
+    resultSummary: record.resultSummary,
+    env,
+  });
+
   state.maintenanceDraft = null;
   state.pendingConfirmation = null;
   state.activeTramite = "none";

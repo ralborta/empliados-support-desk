@@ -28,6 +28,9 @@ import {
 } from "./ticket-operation.js";
 import { createOdooHelpdeskTicketDryRun } from "./odoo-ticket-client.js";
 import { priorityLabel } from "./maintenance-core.js";
+import { isPilotDryRun } from "./write-gates.js";
+import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
+import { createV1LocalTicketIfEnabled } from "./v1-local-ticket-bridge.js";
 
 export type TicketTurnResult =
   | { kind: "none" }
@@ -125,7 +128,7 @@ async function executeTicket(
   const dupConfirm = findTicketByConfirmMessageId(state.ticketOperations ?? {}, messageId);
   if (dupConfirm) return { kind: "reply", message: "Este CONFIRMO ya fue procesado.", state };
 
-  const dryRun = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
+  const dryRun = isPilotDryRun("odoo", env);
   const operationId = createTicketOperationId();
   const company = state.companyName ?? "tu empresa";
   const subject = `${categoryLabel(draft.category)} · ${draft.unit?.patente ?? state.phone}`;
@@ -205,6 +208,34 @@ async function executeTicket(
 
   if (!state.ticketOperations) state.ticketOperations = {};
   state.ticketOperations[operationId] = record;
+
+  void syncPilotOperationToPrisma({
+    state,
+    operationId,
+    type: "odoo_ticket",
+    gateKind: "odoo",
+    messageId,
+    payloadHash: record.payloadHash,
+    payload: (record.odooPayload ?? {}) as Record<string, unknown>,
+    status: record.status,
+    externalReference: record.odooTicketRef ?? String(record.odooTicketId ?? ""),
+    resultSummary: record.resultSummary,
+    env,
+  });
+
+  if (result.ok && !dryRun) {
+    void createV1LocalTicketIfEnabled(
+      {
+        customerId: state.phone,
+        contactName: state.companyName ?? state.customerName ?? "Cliente",
+        title: subject,
+        messageText: description,
+        priority: draft.priority,
+      },
+      env,
+    );
+  }
+
   state.ticketDraft = null;
   state.pendingConfirmation = null;
   state.activeTramite = "none";

@@ -11,8 +11,15 @@ import {
   type PilotPersistenceDiagnostics,
 } from "./persistence-diagnostics.js";
 import type { WaraEmpresaContact } from "./wara-types.js";
-import type { FleetUnitRef, PaginatedFleetListing } from "./unit-fleet.js";
-import { SESSION_TTL_MS } from "./unit-fleet.js";
+import { SESSION_TTL_MS, type FleetUnitRef, type PaginatedFleetListing } from "./unit-fleet.js";
+import {
+  isPrismaPersistencePrimary,
+  pilotPersistenceMode,
+} from "./write-gates.js";
+import {
+  loadPilotStateFromPrisma,
+  savePilotStateToPrisma,
+} from "./pilot-prisma-store.js";
 import type { OdometerDraft, OdometerOperationRecord } from "./odometer-types.js";
 import type { CertificateDraft, CertificateOperationRecord } from "./certificate-types.js";
 import type { MaintenanceDraft, MaintenanceOperationRecord } from "./maintenance-types.js";
@@ -309,7 +316,34 @@ export function savePilotConversationState(state: PilotConversationState): void 
   state.expiresAt = defaultExpiresAt();
   state.stateVersion += 1;
   memory.set(stateKey(state.tenantId, state.phone), state);
-  flushToDisk();
+  const mode = pilotPersistenceMode();
+  if (mode === "prisma" || mode === "dual") {
+    void savePilotStateToPrisma(state).then((r) => {
+      if (!r.ok) {
+        lastPersistError = r.error ?? "prisma_persist_failed";
+        console.error(JSON.stringify({ event: "pilot_prisma_persist_error", error: lastPersistError }));
+      } else {
+        lastPersistOkAt = new Date().toISOString();
+      }
+    });
+  }
+  if (mode === "json" || mode === "dual") {
+    flushToDisk();
+  }
+}
+
+export async function hydratePilotStateFromPrisma(
+  tenantId: string,
+  phone: string,
+): Promise<PilotConversationState | null> {
+  if (!isPrismaPersistencePrimary()) return null;
+  const key = stateKey(tenantId, phone);
+  const cached = memory.get(key);
+  if (cached && !isPilotStateExpired(cached)) return cached;
+  const loaded = await loadPilotStateFromPrisma(tenantId, phone);
+  if (!loaded || isPilotStateExpired(loaded)) return null;
+  memory.set(key, loaded);
+  return loaded;
 }
 
 export function deletePilotConversationState(tenantId: string, phone: string): void {

@@ -15,6 +15,7 @@ import {
   suspendCurrentTramite,
   suspendOdometerForSideQuery,
   suspendTramiteForSideQuery,
+  hydratePilotStateFromPrisma,
   type PilotConversationState,
   type PilotSelectedUnit,
 } from "./conversation-state.js";
@@ -439,6 +440,8 @@ export async function resolveOperationalTurn(input: {
   const env = input.env ?? process.env;
   const text = input.text.trim() || "Hola";
   const tenantId = input.tenantId;
+
+  await hydratePilotStateFromPrisma(tenantId, input.phone);
 
   let state =
     getPilotConversationState(tenantId, input.phone) ??

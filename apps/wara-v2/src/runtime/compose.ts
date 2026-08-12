@@ -132,12 +132,14 @@ export async function createV2Runtime(opts?: {
           },
         });
       }
+      const simTenantId = input.companyId ?? "tenant_simulator";
       let conversation = await prisma.conversation.findUnique({
         where: {
-          customerId_channel_channelAccountId: {
+          customerId_channel_channelAccountId_tenantId: {
             customerId: customer.id,
             channel: "simulator",
             channelAccountId: "sim_local",
+            tenantId: simTenantId,
           },
         },
       });
@@ -146,6 +148,7 @@ export async function createV2Runtime(opts?: {
           data: {
             id: input.conversationId ?? randomUUID(),
             customerId: customer.id,
+            tenantId: simTenantId,
             channel: "simulator",
             channelAccountId: "sim_local",
             activeCompanyId: input.companyId,

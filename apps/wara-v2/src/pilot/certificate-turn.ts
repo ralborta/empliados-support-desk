@@ -29,6 +29,8 @@ import {
 import { issueCertificadoCobertura } from "./certificate-wara.js";
 import { toFleetUnitRef } from "./unit-fleet.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
+import { isPilotDryRun } from "./write-gates.js";
+import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
 
 export type CertificateTurnResult =
   | { kind: "none" }
@@ -82,7 +84,7 @@ async function executeIssue(
   const dupConfirm = findCertificateByConfirmMessageId(state.certificateOperations ?? {}, messageId);
   if (dupConfirm) return { kind: "reply", message: "Este CONFIRMO ya fue procesado.", state };
 
-  const dryRun = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
+  const dryRun = isPilotDryRun("certificate", env);
   const operationId = createCertificateOperationId();
 
   let result: { ok: boolean; error?: string; summary?: string; url?: string; payload?: Record<string, unknown> };
@@ -118,6 +120,21 @@ async function executeIssue(
 
   if (!state.certificateOperations) state.certificateOperations = {};
   state.certificateOperations[operationId] = record;
+
+  void syncPilotOperationToPrisma({
+    state,
+    operationId,
+    type: "issue_certificate",
+    gateKind: "certificate",
+    messageId,
+    payloadHash: record.payloadHash,
+    payload: (record.waraPayload ?? {}) as Record<string, unknown>,
+    status: record.status,
+    externalReference: record.deliveryUrl,
+    resultSummary: record.resultSummary,
+    env,
+  });
+
   state.certificateDraft = null;
   state.pendingConfirmation = null;
   state.activeTramite = "none";

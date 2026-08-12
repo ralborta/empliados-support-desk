@@ -1,10 +1,11 @@
 /**
  * Cliente Odoo Helpdesk V2 — payload compatible con V1 createHelpdeskTicket.
- * Escrituras bloqueadas salvo ALLOW_EXTERNAL_MUTATIONS=true.
+ * Escrituras bloqueadas salvo WARA_V2_ODOO_WRITE_ENABLED=true.
  */
-import { getOdooConfigStatus } from "./odoo-status.js";
 import type { MaintenancePriority } from "./maintenance-types.js";
 import type { TicketCategory } from "./ticket-types.js";
+import { isOdooWriteEnabled } from "./write-gates.js";
+import { createHelpdeskTicketReal } from "./odoo-api-real.js";
 
 export type OdooTicketPayload = {
   subject: string;
@@ -58,10 +59,10 @@ export async function createOdooHelpdeskTicketDryRun(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<CreateOdooTicketDryRunResult> {
   const payload = input;
-  const odooValues = buildOdooHelpdeskPayload(payload);
-  const dryRun = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
+  const gateEnabled = isOdooWriteEnabled(env);
+  const legacyBlock = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
 
-  if (dryRun) {
+  if (!gateEnabled || legacyBlock) {
     ticketIdSeq += 1;
     const simulatedRef = `DRY-${ticketIdSeq}`;
     return {
@@ -73,14 +74,30 @@ export async function createOdooHelpdeskTicketDryRun(
     };
   }
 
-  const cfg = getOdooConfigStatus(env);
-  if (!cfg.configured) {
-    return { ok: false, error: `Odoo no configurado: ${cfg.missing.join(", ")}`, payload };
+  try {
+    const real = await createHelpdeskTicketReal(
+      {
+        subject: payload.subject,
+        description: payload.description,
+        customerName: payload.customerName,
+        customerPhone: payload.customerPhone,
+        companyName: payload.companyName,
+        priority: payload.priority,
+      },
+      env,
+    );
+    return {
+      ok: true,
+      dryRun: false,
+      payload,
+      ticketId: real.ticketId,
+      ref: real.ref,
+    };
+  } catch (e) {
+    const err = e instanceof Error ? e.message : String(e);
+    if (/abort|timeout/i.test(err)) {
+      return { ok: false, error: `timeout_after_send:${err}`, payload };
+    }
+    return { ok: false, error: err, payload };
   }
-
-  return {
-    ok: false,
-    error: "Escritura Odoo real no implementada en piloto V2 (usar V1)",
-    payload,
-  };
 }
