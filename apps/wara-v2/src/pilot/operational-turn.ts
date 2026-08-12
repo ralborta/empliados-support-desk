@@ -37,6 +37,7 @@ import {
 import {
   buildPaginatedListing,
   extractSearchToken,
+  extractUnitNameCode,
   filterValidFleetUnits,
   findUnitInFleetByRef,
   formatPaginatedFleetMessage,
@@ -480,8 +481,11 @@ export async function resolveOperationalTurn(input: {
         const activeUnitRef = savedDraft?.unit ?? savedPending?.unit ?? odo.state.selectedUnit;
         suspendOdometerForSideQuery(odo.state);
         let targetUnit: WaraUnidadEstado | null = null;
-        const explicit = hasExplicitUnitReference(text);
-        if (explicit) {
+        const alternatePlate = detectLoosePlate(text);
+        const alternateCode = extractUnitNameCode(text);
+        const hasNamedAlternate = Boolean(alternatePlate || alternateCode);
+
+        if (hasNamedAlternate) {
           const byPlate = resolveUnitByPlateFromFleet(fleetOdo.units, text);
           if (byPlate.kind === "one") targetUnit = byPlate.unit;
           else if (byPlate.kind === "many") {
@@ -489,7 +493,7 @@ export async function resolveOperationalTurn(input: {
               units: byPlate.units,
               page: 1,
               kind: "search_results",
-              searchLabel: detectLoosePlate(text) ?? text.trim(),
+              searchLabel: alternatePlate ?? text.trim(),
             });
             const msg = formatPaginatedFleetMessage(listing, odo.state.companyName);
             showListing(odo.state, listing, msg);
@@ -503,7 +507,7 @@ export async function resolveOperationalTurn(input: {
                 units: byName.units,
                 page: 1,
                 kind: "search_results",
-                searchLabel: extractExplicitUnitToken(text) ?? text.trim(),
+                searchLabel: alternateCode ?? extractExplicitUnitToken(text) ?? text.trim(),
               });
               const msg = formatPaginatedFleetMessage(listing, odo.state.companyName);
               showListing(odo.state, listing, msg);
@@ -516,7 +520,7 @@ export async function resolveOperationalTurn(input: {
             return {
               kind: "reply",
               message:
-                `No encontré esa unidad para el GPS. El registro pendiente sigue en pausa — decime «continuamos».`,
+                "No encontré esa unidad para el GPS. El registro pendiente sigue en pausa — decime «continuamos».",
               state: odo.state,
             };
           }
