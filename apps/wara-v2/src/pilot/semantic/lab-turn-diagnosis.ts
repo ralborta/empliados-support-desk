@@ -6,6 +6,8 @@ export type LabTurnDiagnosis = {
   brain_version: "unified_v1" | "legacy_rules";
   action: string | null;
   intent: string | null;
+  answer?: string | null;
+  currentTramiteDisposition?: string | null;
   confidence: number | null;
   reasoningCode: string | null;
   handler: string | null;
@@ -16,6 +18,17 @@ export type LabTurnDiagnosis = {
   legacy_reclass_reasons: string[];
   llm_called: boolean;
   error: string | null;
+  stateBefore?: {
+    activeTramite: string | null;
+    pendingConfirmation: string | null;
+    suspendedTramite: string | null;
+  } | null;
+  stateAfter?: {
+    activeTramite: string | null;
+    pendingConfirmation: string | null;
+    suspendedTramite: string | null;
+    certificateDraft: string | null;
+  } | null;
 };
 
 let last: LabTurnDiagnosis | null = null;

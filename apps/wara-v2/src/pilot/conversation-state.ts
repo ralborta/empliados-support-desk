@@ -19,6 +19,7 @@ import {
 import {
   loadPilotStateFromPrisma,
   savePilotStateToPrisma,
+  deletePilotStateFromPrisma,
 } from "./pilot-prisma-store.js";
 import type { OdometerDraft, OdometerOperationRecord } from "./odometer-types.js";
 import type { CertificateDraft, CertificateOperationRecord } from "./certificate-types.js";
@@ -364,6 +365,72 @@ export function deletePilotConversationState(tenantId: string, phone: string): v
   ensureLoaded();
   memory.delete(stateKey(tenantId, phone));
   flushToDisk();
+  const mode = pilotPersistenceMode();
+  if (mode === "prisma" || mode === "dual") {
+    void deletePilotStateFromPrisma(tenantId, phone).then((r) => {
+      if (!r.ok) {
+        console.error(
+          JSON.stringify({ event: "pilot_prisma_delete_error", error: r.error ?? "delete_failed" }),
+        );
+      }
+    });
+  }
+}
+
+/** Limpia trámites/historial; conserva identidad y opcionalmente empresa/unidad. */
+export function softResetPilotConversation(
+  state: PilotConversationState,
+  opts?: { clearCompanyAndUnit?: boolean },
+): PilotConversationState {
+  state.activeTramite = "none";
+  state.step = "idle";
+  state.lastListing = null;
+  state.lastListingPickIndex = null;
+  state.pendingConfirmation = null;
+  state.pendingFields = [];
+  state.lastAgentQuestion = null;
+  state.suspendedTramite = null;
+  state.odometerDraft = null;
+  state.maintenanceDraft = null;
+  state.certificateDraft = null;
+  state.ticketDraft = null;
+  state.recentTurns = [];
+  state.confirmedFields = {};
+  if (opts?.clearCompanyAndUnit) {
+    state.selectedContactId = null;
+    state.companyName = null;
+    state.sessionToken = null;
+    state.selectedUnit = null;
+    state.fleetCache = null;
+    state.fleetCacheAt = null;
+  }
+  return touchPilotState(state);
+}
+
+export async function resetPilotConversationLab(
+  tenantId: string,
+  phone: string,
+  mode: "soft" | "hard" = "soft",
+): Promise<PilotConversationState | null> {
+  ensureLoaded();
+  const existing = getPilotConversationState(tenantId, phone);
+  if (!existing) {
+    // Asegurar borrado Prisma aunque no haya memoria.
+    deletePilotConversationState(tenantId, phone);
+    await deletePilotStateFromPrisma(tenantId, phone);
+    return null;
+  }
+  if (mode === "hard") {
+    deletePilotConversationState(tenantId, phone);
+    await deletePilotStateFromPrisma(tenantId, phone);
+    return null;
+  }
+  softResetPilotConversation(existing, { clearCompanyAndUnit: false });
+  // Persistencia síncrona vía save (incrementa version).
+  savePilotConversationState(existing);
+  // Releer para verificar.
+  const afterMem = getPilotConversationState(tenantId, phone);
+  return afterMem;
 }
 
 export function touchPilotState(state: PilotConversationState): PilotConversationState {

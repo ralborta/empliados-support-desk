@@ -70,7 +70,8 @@
     <button type="button" data-msg="1">3. Unidad 1</button>
     <button type="button" data-msg="necesito hablar con un asesor">4. Pedir asesor</button>
     <button type="button" data-msg="CONFIRMO">5. CONFIRMO</button>
-    <button type="button" id="newChat">Nueva conversación</button>
+    <button type="button" id="newChat" title="Limpia trámites, drafts, confirmaciones e historial. Conserva empresa/unidad.">Nueva conversación</button>
+    <button type="button" id="hardReset" title="Limpia también empresa y unidad">Reiniciar todo</button>
     <button type="button" id="refreshState">Estado</button>
   </div>
 
@@ -150,13 +151,29 @@
       }
     }
 
-    async function resetChat() {
-      await api("/api/pilot/reset", {
+    async function resetChat(mode) {
+      const data = await api("/api/pilot/reset", {
         method: "POST",
-        body: JSON.stringify({ phone: PHONE, tenantId: TENANT }),
+        body: JSON.stringify({ phone: PHONE, tenantId: TENANT, mode }),
       });
       log.innerHTML = "";
-      append("sys", "Conversación reiniciada para " + PHONE);
+      append(
+        "sys",
+        mode === "hard"
+          ? "Reinicio total para " + PHONE + " (sin empresa/unidad)."
+          : "Nueva conversación para " + PHONE + " (trámites e historial limpios).",
+      );
+      if (data.verify) {
+        append(
+          "sys",
+          "Verify: pending=" +
+            data.verify.pendingConfirmation +
+            " cert=" +
+            data.verify.certificateDraft +
+            " turns=" +
+            data.verify.recentTurns,
+        );
+      }
       await refreshState();
     }
 
@@ -194,7 +211,8 @@
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") sendMessage();
     });
-    el("newChat").onclick = () => resetChat().catch((e) => append("err", e.message));
+    el("newChat").onclick = () => resetChat("soft").catch((e) => append("err", e.message));
+    el("hardReset").onclick = () => resetChat("hard").catch((e) => append("err", e.message));
     el("refreshState").onclick = () => refreshState();
 
     document.querySelectorAll("[data-msg]").forEach((btn) => {

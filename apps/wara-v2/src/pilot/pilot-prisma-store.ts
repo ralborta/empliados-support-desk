@@ -233,6 +233,32 @@ export async function ensurePilotConversationIds(
   return { customerId: customer.id, conversationId: conv.id };
 }
 
+export async function deletePilotStateFromPrisma(
+  tenantId: string,
+  phone: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ ok: boolean; error?: string }> {
+  const db = getPilotPrisma();
+  if (!db) return { ok: true };
+  const phoneE164 = normalizeWaraPhone(phone);
+  try {
+    const customer = await db.customer.findUnique({ where: { phoneE164 } });
+    if (!customer) return { ok: true };
+    const conv = await db.conversation.findFirst({
+      where: {
+        customerId: customer.id,
+        tenantId,
+        channel: channelForEnv(env),
+      },
+    });
+    if (!conv) return { ok: true };
+    await db.conversationState.deleteMany({ where: { conversationId: conv.id } });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 120) : "delete_failed" };
+  }
+}
+
 export function shouldUsePrismaPersistence(env: NodeJS.ProcessEnv = process.env): boolean {
   return isPrismaPersistencePrimary(env) && Boolean(getPilotPrisma());
 }

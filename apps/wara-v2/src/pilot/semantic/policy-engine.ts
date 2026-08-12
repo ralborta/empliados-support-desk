@@ -5,6 +5,12 @@
 import type { TurnDecision } from "./turn-decision-schema.js";
 import { safeClarifyDecision } from "./turn-decision-schema.js";
 import type { PilotConversationState } from "../conversation-state.js";
+import { isCompoundCancelContinueQuestion } from "./cancel-command.js";
+import {
+  binaryClarifyForConflict,
+  detectDecisionConflict,
+  noteDecisionConflict,
+} from "./decision-conflict.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -31,6 +37,15 @@ function isValidTime(t: string): boolean {
   return /^([01]?\d|2[0-3]):[0-5]\d$/.test(t.trim());
 }
 
+function conflictClarify(state: PilotConversationState, reason: string): PolicyResult {
+  noteDecisionConflict(reason);
+  return {
+    ok: false,
+    reason: `decision_conflict:${reason}`,
+    decision: safeClarifyDecision(binaryClarifyForConflict(state)),
+  };
+}
+
 export function applySemanticPolicy(
   decision: TurnDecision,
   state: PilotConversationState,
@@ -46,14 +61,76 @@ export function applySemanticPolicy(
     };
   }
 
+  // Conflictos contradictorios: no ejecutar / no confirmar / no modificar.
+  const conflict = detectDecisionConflict(decision, state);
+  if (conflict) {
+    return conflictClarify(state, conflict.reason);
+  }
+
   if (decision.action === "clarify") {
     if (!decision.ambiguity?.question?.trim()) {
       return { ok: false, reason: "clarify_without_question", decision: safeClarifyDecision() };
     }
-    // Ambigüedad nunca produce efectos
+    let question = decision.ambiguity.question.trim();
+    // Nunca ofrecer pregunta compuesta cancelar/continuar: sí queda ambiguo.
+    if (isCompoundCancelContinueQuestion(question)) {
+      const aboutCert =
+        /\bcertificado\b/i.test(question) ||
+        state.pendingConfirmation?.action === "certificate_issue" ||
+        state.activeTramite === "certificate_issue";
+      question = aboutCert
+        ? "¿Querés cancelar la solicitud del certificado?"
+        : "¿Querés cancelar el trámite pendiente?";
+    }
     return {
       ok: true,
-      decision: { ...decision, currentTramiteDisposition: "keep" },
+      decision: {
+        ...decision,
+        answer: null,
+        currentTramiteDisposition: "keep",
+        ambiguity: { ...decision.ambiguity, question },
+      },
+    };
+  }
+
+  // Normalizar: disposition cancel + answer ausente ⇒ answer cancel.
+  // (confirm+cancel ya fue rechazado como decision_conflict arriba.)
+  if (
+    decision.action === "answer_pending" &&
+    decision.currentTramiteDisposition === "cancel" &&
+    (decision.answer == null || decision.answer === undefined)
+  ) {
+    return {
+      ok: true,
+      decision: { ...decision, answer: "cancel" },
+    };
+  }
+
+  // No reiniciar el mismo trámite pendiente vía switch/start.
+  if (
+    (decision.action === "switch_intent" ||
+      decision.action === "suspend_and_start" ||
+      decision.action === "start_intent") &&
+    decision.intent === "certificate" &&
+    (state.pendingConfirmation?.action === "certificate_issue" ||
+      state.activeTramite === "certificate_issue")
+  ) {
+    return {
+      ok: true,
+      decision: {
+        action: "clarify",
+        intent: "certificate",
+        confidence: Math.min(decision.confidence, 0.6),
+        currentTramiteDisposition: "keep",
+        reasoningCode: "INSUFFICIENT_CONTEXT",
+        ambiguity: {
+          candidates: ["cancelar_certificado", "continuar_certificado"],
+          question: "¿Querés cancelar la solicitud del certificado?",
+        },
+        answer: null,
+        entity: null,
+        fields: null,
+      },
     };
   }
 
@@ -79,7 +156,6 @@ export function applySemanticPolicy(
         decision: safeClarifyDecision("¿Me pasás la patente o el nombre de la unidad?"),
       };
     }
-    // Evitar que el modelo meta la frase completa como value
     if (/\s/.test(v) && v.split(/\s+/).length > 3) {
       return {
         ok: false,
@@ -108,7 +184,6 @@ export function applySemanticPolicy(
     }
   }
 
-  // Fecha futura en lecturas: preferir el mismo día de la semana anterior (no reclasifica lenguaje).
   if (decision.fields?.date && decision.action === "provide_fields") {
     const today = new Date().toLocaleDateString("en-CA", { timeZone: tz });
     if (decision.fields.date > today) {
@@ -141,9 +216,7 @@ export function applySemanticPolicy(
     }
   }
 
-  // answer_pending requiere pending real
   if (decision.action === "answer_pending" && !state.pendingConfirmation) {
-    // Permitir si hay draft activo esperando campos — se trata como provide
     if (decision.answer === "confirm" || decision.answer === "reject") {
       return {
         ok: false,

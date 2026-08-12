@@ -14,7 +14,8 @@ type PilotOpStatus =
   | "dry_run"
   | "written"
   | "failed"
-  | "duplicate_blocked";
+  | "duplicate_blocked"
+  | "cancelled";
 
 type PrismaOpStatus =
   | "draft"
@@ -37,6 +38,7 @@ function mapStatus(
     case "duplicate_blocked":
       return "succeeded";
     case "failed":
+    case "cancelled":
       return "permanent_failed";
     case "awaiting_confirm":
       return "awaiting_confirmation";

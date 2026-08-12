@@ -33,6 +33,13 @@ import { tryResolveOdometerTurn } from "../odometer-turn.js";
 import { tryResolveCertificateTurn } from "../certificate-turn.js";
 import { tryResolveMaintenanceTurn } from "../maintenance-turn.js";
 import { tryResolveTicketTurn } from "../ticket-turn.js";
+import {
+  CANCEL_CERT_REPLY,
+  COMPOUND_CHOICE_REPLY,
+  isBinaryCancelQuestion,
+  isCompoundCancelContinueQuestion,
+} from "./cancel-command.js";
+import { cancelActiveOrPendingTramite } from "./cancel-active-tramite.js";
 
 export type ExecuteDeps = {
   messageId: string;
@@ -98,7 +105,64 @@ async function handleAnswerPending(
     };
   }
 
+  const answeringBinaryCancel =
+    isBinaryCancelQuestion(pending.question) || isBinaryCancelQuestion(state.lastAgentQuestion);
+  const answeringCompound =
+    isCompoundCancelContinueQuestion(pending.question) ||
+    isCompoundCancelContinueQuestion(state.lastAgentQuestion);
+
+  // Pregunta compuesta: sí/no/reject/confirm no pueden ejecutar ni cancelar.
+  if (
+    answeringCompound &&
+    (decision.answer === "confirm" || decision.answer === "reject")
+  ) {
+    return {
+      handler: "answer_pending",
+      message: COMPOUND_CHOICE_REPLY,
+      state,
+    };
+  }
+
+  // Disposition cancel o answer cancel tienen prioridad sobre confirm.
+  // "reject" solo cancela si NO estamos ante una pregunta binaria de cancelación
+  // (en ese caso "no" = conservar el trámite).
+  const wantsCancel =
+    decision.currentTramiteDisposition === "cancel" ||
+    decision.answer === "cancel" ||
+    (decision.answer === "reject" && !answeringBinaryCancel);
+
+  if (wantsCancel) {
+    const r = cancelActiveOrPendingTramite(state);
+    return {
+      handler: r.cancelled === "none" ? "answer_pending" : r.cancelled,
+      message: r.cancelled === "certificate" ? CANCEL_CERT_REPLY : r.message,
+      state,
+    };
+  }
+
+  if (decision.answer === "reject" && answeringBinaryCancel) {
+    let reply = pending.question;
+    if (pending.action === "certificate_issue") {
+      reply =
+        `Puedo solicitar el certificado de cobertura de ${pending.unit.label}.\n` +
+        `¿Querés que lo genere?\n\n` +
+        `Si está correcto, respondé CONFIRMO.`;
+      state.pendingConfirmation = { ...pending, question: reply };
+    }
+    state.lastAgentQuestion = reply;
+    return { handler: "certificate", message: reply, state };
+  }
+
   if (decision.answer === "confirm") {
+    // Pregunta binaria de cancelación: sí → cancelar.
+    if (answeringBinaryCancel) {
+      const r = cancelActiveOrPendingTramite(state);
+      return {
+        handler: r.cancelled === "none" ? "answer_pending" : r.cancelled,
+        message: r.cancelled === "certificate" ? CANCEL_CERT_REPLY : r.message,
+        state,
+      };
+    }
     if (pending.action === "gps_report") {
       const unit = findUnitInFleetByRef(deps.fleetUnits, pending.unit);
       if (!unit) {
@@ -153,33 +217,12 @@ async function handleAnswerPending(
     }
   }
 
-  if (decision.answer === "reject" || decision.answer === "cancel") {
-    const action = pending.action;
-    state.pendingConfirmation = null;
-    if (action === "gps_report") {
-      state.activeTramite = "none";
-      state.step = "rejected";
-      return {
-        handler: "gps",
-        message: "Ok, no avanzo con el reporte GPS. Decime otra patente o qué necesitás.",
-        state,
-      };
-    }
-    if (action === "certificate_issue") {
-      state.certificateDraft = null;
-      state.activeTramite = "none";
-      return { handler: "certificate", message: "Ok, cancelé el certificado. ¿En qué más te ayudo?", state };
-    }
-    if (action === "odometer_write") {
-      if (state.odometerDraft) state.odometerDraft.step = "await_value";
-      return {
-        handler: "odometer",
-        message: "Ok, no registro. Decime el valor correcto cuando quieras.",
-        state,
-      };
-    }
-    clearOperationalTramite(state);
-    return { handler: "answer_pending", message: "Listo, cancelé el trámite. ¿En qué más te ayudo?", state };
+  // answer null con pregunta binaria de cancelación + texto no clasificado: no ejecutar.
+  if (
+    isCompoundCancelContinueQuestion(pending.question) ||
+    isCompoundCancelContinueQuestion(state.lastAgentQuestion)
+  ) {
+    return { handler: "answer_pending", message: COMPOUND_CHOICE_REPLY, state };
   }
 
   return {

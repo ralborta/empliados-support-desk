@@ -10,7 +10,12 @@ export type CertificateDraft = {
   step: CertificateDraftStep;
 };
 
-export type CertificateOperationStatus = "dry_run" | "written" | "failed" | "duplicate_blocked";
+export type CertificateOperationStatus =
+  | "dry_run"
+  | "written"
+  | "failed"
+  | "duplicate_blocked"
+  | "cancelled";
 
 export type CertificateOperationRecord = {
   operationId: string;

@@ -16,10 +16,10 @@ import {
 import { isWaraReadConfigured } from "../pilot/wara-client.js";
 import { getOdooConfigStatus } from "../pilot/odoo-status.js";
 import {
-  deletePilotConversationState,
   getPilotConversationState,
   getPilotPersistenceDiagnostics,
   initPilotStatePersistenceFromEnv,
+  resetPilotConversationLab,
   sanitizeStateForLab,
 } from "../pilot/conversation-state.js";
 import { getLabChatConfig, renderLabChatHtml } from "../pilot/lab-chat-config.js";
@@ -224,8 +224,24 @@ export async function startShadowCanaryServer(opts?: {
           respondJson(400, { error: "phone_required" });
           return;
         }
-        deletePilotConversationState(tenantId, phone);
-        respondJson(200, { ok: true });
+        const mode = raw.mode === "hard" || raw.mode === "full" ? "hard" : "soft";
+        const after = await resetPilotConversationLab(tenantId, phone, mode);
+        // Verificación: no debe reaparecer pending/drafts.
+        const verify = getPilotConversationState(tenantId, phone);
+        respondJson(200, {
+          ok: true,
+          mode,
+          cleared: after == null || mode === "hard",
+          state: sanitizeStateForLab(verify ?? after),
+          verify: {
+            pendingConfirmation: verify?.pendingConfirmation?.action ?? null,
+            certificateDraft: verify?.certificateDraft?.step ?? null,
+            suspendedTramite: verify?.suspendedTramite?.tramite ?? null,
+            recentTurns: verify?.recentTurns?.length ?? 0,
+            companyName: verify?.companyName ?? null,
+            selectedUnit: verify?.selectedUnit?.label ?? null,
+          },
+        });
         return;
       }
 

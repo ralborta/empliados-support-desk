@@ -104,6 +104,14 @@ import {
 } from "./semantic/reclass-guard.js";
 import { recordLabTurnDiagnosis } from "./semantic/lab-turn-diagnosis.js";
 import {
+  shouldUseCancelShortcut,
+  isUnequivocalContinueCommand,
+  isCompoundCancelContinueQuestion,
+} from "./semantic/cancel-command.js";
+import {
+  cancelActiveOrPendingTramite,
+} from "./semantic/cancel-active-tramite.js";
+import {
   buildCompanyMenuMessage,
   buildCompanyResetMessage,
   buildCompanyStatusReply,
@@ -585,6 +593,94 @@ export async function resolveOperationalTurn(input: {
   if (isUnifiedSemanticBrainEnabled(env)) {
     appendUserTurn(state, text);
 
+    // Atajo: cancelar inequívoco por estado (sin LLM). Frases mixtas → cerebro.
+    if (shouldUseCancelShortcut(text, state)) {
+      const cancelled = cancelActiveOrPendingTramite(state);
+      appendAssistantTurn(state, cancelled.message, null);
+      savePilotConversationState(state);
+      logBrainMetrics({
+        brain_version: "unified_v1",
+        model: null,
+        latency_ms: null,
+        decision_action: "answer_pending",
+        decision_intent:
+          cancelled.cancelled === "certificate"
+            ? "certificate"
+            : cancelled.cancelled === "odometer"
+              ? "odometer"
+              : cancelled.cancelled === "gps"
+                ? "gps"
+                : "none",
+        confidence: 1,
+        handler: "cancel_shortcut",
+        clarification: false,
+        input_tokens: null,
+        output_tokens: null,
+        error: null,
+      });
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: "answer_pending",
+        intent:
+          cancelled.cancelled === "certificate"
+            ? "certificate"
+            : cancelled.cancelled === "odometer"
+              ? "odometer"
+              : cancelled.cancelled === "gps"
+                ? "gps"
+                : "none",
+        answer: "cancel",
+        currentTramiteDisposition: cancelled.cancelled === "none" ? "keep" : "cancel",
+        confidence: 1,
+        reasoningCode: "ANSWER_TO_PENDING",
+        handler: "cancel_shortcut",
+        latency_ms: null,
+        model: null,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: false,
+        error: null,
+      });
+      return { kind: "reply", message: cancelled.message, state };
+    }
+
+    // Atajo: continuar → reponer resumen/confirmación pendiente (no ejecutar).
+    if (isUnequivocalContinueCommand(text) && state.pendingConfirmation?.question) {
+      const pending = state.pendingConfirmation;
+      let reply = pending.question;
+      if (isCompoundCancelContinueQuestion(reply) && pending.action === "certificate_issue") {
+        reply =
+          `Puedo solicitar el certificado de cobertura de ${pending.unit.label}.\n` +
+          `¿Querés que lo genere?\n\n` +
+          `Si está correcto, respondé CONFIRMO.`;
+        state.pendingConfirmation = { ...pending, question: reply };
+      }
+      state.lastAgentQuestion = reply;
+      appendAssistantTurn(state, reply, null);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: "answer_pending",
+        intent: "none",
+        answer: null,
+        currentTramiteDisposition: "keep",
+        confidence: 1,
+        reasoningCode: "ANSWER_TO_PENDING",
+        handler: "continue_shortcut",
+        latency_ms: null,
+        model: null,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: false,
+        error: null,
+      });
+      return { kind: "reply", message: reply, state };
+    }
+
     // Atajos inequívocos permitidos (sin LLM)
     const listingFresh = isListingFresh(state.lastListing);
     const numericIdx = parseNumericListSelection(text) ?? parseOrdinalListSelection(text);
@@ -697,6 +793,8 @@ export async function resolveOperationalTurn(input: {
         brain_version: "unified_v1",
         action: "answer_pending",
         intent: "none",
+        answer: "confirm",
+        currentTramiteDisposition: "keep",
         confidence: 1,
         reasoningCode: "ANSWER_TO_PENDING",
         handler: "confirmo_shortcut",
@@ -788,6 +886,8 @@ export async function resolveOperationalTurn(input: {
       brain_version: "unified_v1",
       action: decision.action,
       intent: decision.intent,
+      answer: decision.answer ?? null,
+      currentTramiteDisposition: decision.currentTramiteDisposition ?? null,
       confidence: decision.confidence,
       reasoningCode: decision.reasoningCode ?? null,
       handler: exec.handler,
@@ -798,6 +898,12 @@ export async function resolveOperationalTurn(input: {
       legacy_reclass_reasons: reclass.reasons,
       llm_called: true,
       error: interpreted.error ?? (policy.ok ? null : "policy_rejected"),
+      stateAfter: {
+        activeTramite: state.activeTramite,
+        pendingConfirmation: state.pendingConfirmation?.action ?? null,
+        suspendedTramite: state.suspendedTramite?.tramite ?? null,
+        certificateDraft: state.certificateDraft?.step ?? null,
+      },
     });
     return { kind: "reply", message: exec.message, state };
   }

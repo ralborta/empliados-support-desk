@@ -97,7 +97,7 @@ export function safeClarifyDecision(question?: string): TurnDecision {
       candidates: ["no_entendido", "repetir"],
       question:
         question ??
-        "No pude interpretar bien eso. ¿Querés continuar con el trámite actual, cambiar a otro servicio, o cancelar?",
+        "No pude interpretar bien eso. ¿Querés cancelar el trámite pendiente?",
     },
     reasoningCode: "INSUFFICIENT_CONTEXT",
   };
