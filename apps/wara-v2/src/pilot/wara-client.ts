@@ -50,7 +50,13 @@ function errorFromWara(json: Record<string, unknown> | null, fallback: string): 
 function normalizeContact(raw: unknown): WaraEmpresaContact | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
-  const id = typeof o.id === "number" ? o.id : typeof o.ID === "number" ? o.ID : null;
+  const idRaw = o.id ?? o.ID ?? o.contacto_id ?? o.contactoId ?? o.ContactoId;
+  const id =
+    typeof idRaw === "number"
+      ? idRaw
+      : typeof idRaw === "string" && /^\d+$/.test(idRaw)
+        ? Number.parseInt(idRaw, 10)
+        : null;
   if (id == null) return null;
   const nombre = String(o.nombre ?? o.Nombre ?? o.name ?? "").trim();
   const empresa = String(o.empresa ?? o.Empresa ?? o.company ?? nombre).trim();
