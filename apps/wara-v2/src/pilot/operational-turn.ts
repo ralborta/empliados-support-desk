@@ -67,6 +67,7 @@ import { tryResolveCertificateTurn } from "./certificate-turn.js";
 import { looksLikeTicketIntent } from "./ticket-core.js";
 import { escalateToTicket, tryResolveTicketTurn } from "./ticket-turn.js";
 import { detectLoosePlate } from "./plates.js";
+import { extractUnitSearchHint } from "./plate-prefix.js";
 import {
   buildCompanyMenuMessage,
   buildCompanyResetMessage,
@@ -926,9 +927,16 @@ export async function resolveOperationalTurn(input: {
       return { kind: "reply", message: msg, state };
     }
     savePilotConversationState(state);
+    const hint = extractUnitSearchHint(text);
+    const notFoundMsg =
+      hint?.kind === "prefix" || hint?.kind === "partial"
+        ? `No encontré unidades que empiecen con «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Probá con más letras de la patente o pedime la lista.`
+        : hint?.kind === "suffix"
+          ? `No encontré unidades que terminen en «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Decime más de la patente o pedime la lista.`
+          : `No encontré «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Decime la patente exacta o pedime la lista.`;
     return {
       kind: "reply",
-      message: `No encontré «${searchToken}» en WARA para ${state.companyName || "tu empresa"}. Decime la patente exacta o pedime la lista.`,
+      message: notFoundMsg,
       state,
     };
   }

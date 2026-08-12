@@ -9,6 +9,12 @@ import {
   normalizeLoosePlate,
   normalizePlate,
 } from "./plates.js";
+import {
+  extractUnitSearchHint,
+  filterUnitsByPlatePrefix,
+  filterUnitsByPlateSuffix,
+  isBarePlatePrefixHint,
+} from "./plate-prefix.js";
 
 export const FLEET_PAGE_SIZE = 8;
 export const SESSION_TTL_MS = 45 * 60 * 1000;
@@ -308,6 +314,19 @@ export function resolveUnitByNameFromFleet(
     if (byPlate.length === 1) return { kind: "one", unit: byPlate[0]! };
     if (byPlate.length > 1) return { kind: "many", units: byPlate };
   }
+
+  const searchHint = extractUnitSearchHint(text);
+  if (searchHint?.kind === "prefix" || searchHint?.kind === "partial") {
+    const byPrefix = filterUnitsByPlatePrefix(valid, searchHint.value);
+    if (byPrefix.length === 1) return { kind: "one", unit: byPrefix[0]! };
+    if (byPrefix.length > 1) return { kind: "many", units: byPrefix };
+  }
+  if (searchHint?.kind === "suffix") {
+    const bySuffix = filterUnitsByPlateSuffix(valid, searchHint.value);
+    if (bySuffix.length === 1) return { kind: "one", unit: bySuffix[0]! };
+    if (bySuffix.length > 1) return { kind: "many", units: bySuffix };
+  }
+
   const terms = normalizeToken(text)
     .split(/\s+/)
     .filter((t) => t.length >= 3);
@@ -319,10 +338,13 @@ export function resolveUnitByNameFromFleet(
 }
 
 export function extractSearchToken(text: string): string | null {
-  const plate = detectLoosePlate(text);
-  if (plate) return plate;
+  const hint = extractUnitSearchHint(text);
+  if (hint) return hint.value;
   const code = extractUnitNameCode(text);
   if (code) return code;
+  if (isBarePlatePrefixHint(text)) {
+    return text.trim().replace(/^(la|el|esa|ese)\s+/i, "").replace(/[\s\-_.]+/g, "").toUpperCase();
+  }
   const cleaned = text
     .replace(/\b(reporte|informe|estado|gps|de|la|el|unidad|unidades|quiero|dame|pasame|decime)\b/gi, " ")
     .trim();
