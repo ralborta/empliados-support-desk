@@ -14,6 +14,8 @@ import {
   findUnitInFleetByRef,
   formatPaginatedFleetMessage,
   formatUnitLabel,
+  resolveUnitByNameFromFleet,
+  resolveUnitByPlateFromFleet,
   toFleetUnitRef,
   type PaginatedFleetListing,
 } from "../unit-fleet.js";
@@ -114,6 +116,37 @@ function setOdometerConfirm(state: PilotConversationState, draft: OdometerDraft,
     operationId: state.pendingConfirmation?.operationId,
   };
   state.lastAgentQuestion = question;
+}
+
+/** Adjunta unidad al draft de odómetro (start / await_unit). */
+function bindUnitToOdometerDraft(
+  draft: OdometerDraft,
+  state: PilotConversationState,
+  unit: WaraUnidadEstado,
+): void {
+  const ref = toFleetUnitRef(unit);
+  draft.unit = ref;
+  state.selectedUnit = ref;
+  draft.valuePrevious =
+    draft.meterType === "horometro" ? (unit.horometro ?? null) : (unit.odometro ?? null);
+  draft.step = "await_value";
+}
+
+function resolveUnitFromDecisionOrText(
+  decision: TurnDecision,
+  deps: ExecuteDeps,
+): WaraUnidadEstado | null {
+  const candidates = [
+    decision.entity?.value?.trim(),
+    deps.originalMessage?.trim(),
+  ].filter(Boolean) as string[];
+  for (const raw of candidates) {
+    const byPlate = resolveUnitByPlateFromFleet(deps.fleetUnits, raw);
+    if (byPlate.kind === "one") return byPlate.unit;
+    const byName = resolveUnitByNameFromFleet(deps.fleetUnits, raw);
+    if (byName.kind === "one") return byName.unit;
+  }
+  return null;
 }
 
 function handleCorrectOdometerFields(
@@ -280,7 +313,7 @@ function handleCorrectOdometerFields(
 function handleProvideOdometerFields(
   decision: TurnDecision,
   state: PilotConversationState,
-  deps?: ExecuteDeps,
+  deps: ExecuteDeps,
 ): ExecuteResult | null {
   const draft = state.odometerDraft;
   if (!draft || draft.step === "idle") return null;
@@ -292,6 +325,21 @@ function handleProvideOdometerFields(
   const fields = decision.fields ?? {};
   const meterType = draft.meterType ?? (decision.intent === "horometer" ? "horometro" : "odometro");
   draft.meterType = meterType;
+
+  // Patente / unidad mientras falta unidad en el draft.
+  if (draft.step === "await_unit") {
+    const unit = resolveUnitFromDecisionOrText(decision, deps);
+    if (unit) {
+      bindUnitToOdometerDraft(draft, state, unit);
+      if (fields.numericValue == null) {
+        return {
+          handler: "odometer",
+          message: `Pasame el valor del ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"}.`,
+          state,
+        };
+      }
+    }
+  }
 
   // Confirmación reforzada de valor anómalo.
   if (draft.step === "await_anomaly_confirm") {
@@ -589,6 +637,11 @@ async function startMeter(
       draft.valuePrevious = meterType === "horometro" ? (fu.horometro ?? null) : (fu.odometro ?? null);
     }
   }
+  // Si el start ya trae patente/unidad, adjuntarla.
+  if (draft.step === "await_unit") {
+    const fromEntity = resolveUnitFromDecisionOrText(decision, deps);
+    if (fromEntity) bindUnitToOdometerDraft(draft, state, fromEntity);
+  }
   state.odometerDraft = draft;
   if (decision.fields?.numericValue != null && draft.step === "await_value") {
     return handleProvideOdometerFields(
@@ -798,6 +851,19 @@ export async function executeTurnDecision(
   }
 
   if (decision.action === "select_entity" || decision.intent === "unit_search") {
+    // Durante odómetro/horómetro esperando unidad: no desviar a GPS.
+    if (state.odometerDraft?.step === "await_unit") {
+      const unit = resolveUnitFromDecisionOrText(decision, deps);
+      if (unit) {
+        bindUnitToOdometerDraft(state.odometerDraft, state, unit);
+        const meterType = state.odometerDraft.meterType ?? "odometro";
+        return {
+          handler: "odometer",
+          message: `Pasame el valor del ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"}.`,
+          state,
+        };
+      }
+    }
     return handleUnitSearch(decision, state, deps);
   }
 
