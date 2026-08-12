@@ -69,7 +69,12 @@ export function detectMeterTypeFromText(text: string): MeterType | null {
 
 export function looksLikeCancelOdometer(text: string | undefined | null): boolean {
   const t = norm(String(text ?? ""));
-  return /\b(cancelar|cancela|no quiero|dej[aá]|olvidalo|salir del tr[aá]mite)\b/.test(t);
+  // Nunca tratar «no quiero cambiar el odómetro» como cancelación genérica:
+  // es ambiguo o es rechazo/cambio — lo decide TurnDecision.
+  if (/\bno\s+(quiero|necesito)\b/.test(t) && /\b(odometro|horometro|km|horas?)\b/.test(t)) {
+    return false;
+  }
+  return /\b(cancelar|cancela|dej[aá]|olvidalo|salir del tr[aá]mite)\b/.test(t);
 }
 
 export function extractNumericReading(text: string, meterType?: MeterType | null): number | null {

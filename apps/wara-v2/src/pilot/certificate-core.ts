@@ -14,11 +14,10 @@ export function looksLikeCancelCertificate(text: string | undefined | null): boo
     .toLowerCase()
     .trim();
   if (!t) return false;
+  // Cancelaciones explícitas. «no quiero certificado» lo resuelve TurnDecision
+  // (ambiguo vs rechazo del certificado pendiente).
   if (/^(cancelar|cancela|salir|abortar|detener)$/.test(t)) return true;
-  return (
-    /\bno\s+(quiero|necesito)\b[^.!?]*\b(certificado|cobertura|poliza|comprobante)\b/.test(t) ||
-    /\b(cancelar|cancela|anular|olvidal[oa])\b[^.!?]*\b(certificado|cobertura|tramite)?\b/.test(t)
-  );
+  return /\b(cancelar|cancela|anular)\b/.test(t);
 }
 
 export const CERTIFICATE_TYPES = [{ id: "cobertura", label: "Certificado de cobertura" }] as const;

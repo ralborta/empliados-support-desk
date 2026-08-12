@@ -77,6 +77,11 @@ import {
 import { looksLikeOperationalServiceIntent } from "./service-catalog.js";
 import { interpretSemanticTurn } from "./semantic-turn.js";
 import {
+  decideTurn,
+  pendingTramiteFromState,
+  type TurnDecision,
+} from "./turn-decision.js";
+import {
   buildCompanyMenuMessage,
   buildCompanyResetMessage,
   buildCompanyStatusReply,
@@ -510,7 +515,77 @@ export async function resolveOperationalTurn(input: {
 
   await ensureSessionToken(state, env);
 
-  // Interpretación semántica temprana (servicios antes que búsqueda de unidades).
+  // ÚNICA decisión semántica por turno — antes de cualquier handler operativo.
+  const turnDecision: TurnDecision = decideTurn(text, state);
+  const pendingTramite = pendingTramiteFromState(state);
+
+  if (turnDecision.kind === "clarify") {
+    savePilotConversationState(state);
+    return { kind: "reply", message: turnDecision.question, state };
+  }
+
+  // answer_pending reject/confirm/provide_fields: no cortocircuitar —
+  // los handlers de pendingConfirmation existentes conservan el copy esperado.
+  // lateral_query GPS: no iniciar reporte nuevo; dejar que el handler del trámite
+  // activo lo trate como gps_side (o caer al path lateral más abajo).
+
+  if (turnDecision.kind === "start_new_intent" && turnDecision.suspendCurrent && pendingTramite !== "none") {
+    const fromLabel =
+      pendingTramite === "certificate"
+        ? "certificado"
+        : pendingTramite === "gps_report"
+          ? "reporte GPS"
+          : pendingTramite === "odometer"
+            ? "odómetro"
+            : "trámite";
+    suspendTramiteForSideQuery(state);
+    // Limpiar pending del trámite abandonado para no re-ofrecerlo
+    if (turnDecision.intent === "odometer_update" || turnDecision.intent === "horometer_update") {
+      state.certificateDraft = null;
+      state.pendingConfirmation = null;
+      const fleetOdo = await fetchFleet(state, env);
+      if (fleetOdo.ok) {
+        const odo = await tryResolveOdometerTurn({
+          state,
+          text,
+          messageId: input.messageId,
+          env,
+          fleetUnits: fleetOdo.units,
+        });
+        if (odo.kind === "reply") {
+          const unitHint = state.selectedUnit?.label ? ` de ${state.selectedUnit.label}` : "";
+          const prefix = `De acuerdo, dejo pendiente el ${fromLabel} y seguimos con el odómetro${unitHint}. `;
+          savePilotConversationState(odo.state);
+          return {
+            kind: "reply",
+            message: odo.message.startsWith("Pasame") || odo.message.startsWith("Decime")
+              ? prefix + odo.message
+              : odo.message,
+            state: odo.state,
+          };
+        }
+      }
+    }
+    if (turnDecision.intent === "certificate") {
+      state.pendingConfirmation = null;
+      const fleetCert = await fetchFleet(state, env);
+      if (fleetCert.ok) {
+        const cert = await tryResolveCertificateTurn({
+          state,
+          text: "quiero un certificado",
+          messageId: input.messageId,
+          env,
+          fleetUnits: fleetCert.units,
+        });
+        if (cert.kind === "reply") {
+          savePilotConversationState(state);
+          return { kind: "reply", message: cert.message, state };
+        }
+      }
+    }
+  }
+
+  // Interpretación semántica de búsqueda (no reemplaza TurnDecision).
   const semantic = interpretSemanticTurn(text, {
     lastListing: state.lastListing,
     selectedUnit: state.selectedUnit,
@@ -530,11 +605,12 @@ export async function resolveOperationalTurn(input: {
     return { kind: "reply", message: resumeMsg, state };
   }
 
-  // Nueva intención de servicio explícita — antes de seguir un trámite de campos
-  // y antes de cualquier búsqueda de unidad (evita «No encontré un certificado»).
+  // Nueva intención de servicio explícita — solo si TurnDecision lo autorizó
+  // (nunca secuestrar GPS pendiente con «no quiero certificado»).
   if (
-    semantic.intent === "certificate" ||
+    (turnDecision.kind === "start_new_intent" && turnDecision.intent === "certificate") ||
     (looksLikeCertificateIntent(text) &&
+      pendingTramite === "none" &&
       state.activeTramite !== "certificate_issue" &&
       state.pendingConfirmation?.action !== "certificate_issue")
   ) {
