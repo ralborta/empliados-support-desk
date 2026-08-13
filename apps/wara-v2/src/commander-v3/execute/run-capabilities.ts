@@ -201,7 +201,7 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
       state.pendingWrite &&
       state.pendingWrite.operationId !== pendingBefore?.operationId
     ) {
-      void syncV3PendingWriteToFrontend({
+      await syncV3PendingWriteToFrontend({
         state,
         pendingWrite: state.pendingWrite,
         messageId,
@@ -211,7 +211,7 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
     }
     // Confirm → committed + bridge front-v2-lab
     if (r.writeAttempt && pendingBefore && !state.pendingWrite) {
-      void syncV3PendingWriteToFrontend({
+      await syncV3PendingWriteToFrontend({
         state,
         pendingWrite: pendingBefore,
         messageId,
@@ -777,7 +777,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         plate: unit.plate,
         company: ctx.state.company?.name ?? null,
       };
-      const operationId = `cert_${randomUUID().slice(0, 12)}`;
+      const operationId = randomUUID();
       const payloadHash = hashPayload(payload);
       const version = 1;
       const q = `¿Confirmás el certificado de cobertura para ${unit.label}? ${confirmOrCancelHint()}`;
@@ -818,7 +818,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
     case "hourmeter.update":
     case "maintenance.create":
     case "handoff.create": {
-      return commitWrite(req.name, ctx);
+      return await commitWrite(req.name, ctx);
     }
     case "odometer.prepare":
     case "hourmeter.prepare": {
@@ -1069,7 +1069,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         date: collected.date,
         time: collected.time,
       };
-      const operationId = `${meter}_${randomUUID().slice(0, 12)}`;
+      const operationId = randomUUID();
       const payloadHash = hashPayload(payload);
       const dateDisp = formatDateDdMmYy(collected.date);
       const q = `¿Confirmás ${meter === "hourmeter" ? "horómetro" : "odómetro"} ${collected.value} el ${dateDisp} a las ${collected.time} en ${unit.label}? ${confirmOrCancelHint()}`;
@@ -1162,7 +1162,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         kind: meta.kind,
         priority: meta.priority,
       };
-      const operationId = `maint_${randomUUID().slice(0, 12)}`;
+      const operationId = randomUUID();
       const payloadHash = hashPayload(payload);
       return {
         capability: req.name,
@@ -1230,7 +1230,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         unit: ctx.state.unit?.label ?? null,
         company: ctx.state.company?.name ?? null,
       };
-      const operationId = `ticket_${randomUUID().slice(0, 12)}`;
+      const operationId = randomUUID();
       const payloadHash = hashPayload(payload);
       return {
         capability: req.name,
@@ -1287,7 +1287,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
   }
 }
 
-function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
+async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResult> {
   const pw = ctx.state.pendingWrite;
   if (!pw) {
     return { capability: name, ok: false, facts: [], error: "no_pending", writeAttempt: true };
@@ -1329,7 +1329,7 @@ function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
       unit: unitLabel ?? null,
       company: ctx.state.company?.name ?? null,
     };
-    const operationId = `ticket_${randomUUID().slice(0, 12)}`;
+    const operationId = randomUUID();
     const handoffPw = {
       operationId,
       version: 1,
@@ -1337,7 +1337,7 @@ function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
       task: "handoff",
       summary: payload,
     };
-    void syncV3PendingWriteToFrontend({
+    await syncV3PendingWriteToFrontend({
       state: ctx.state,
       pendingWrite: handoffPw,
       messageId: ctx.messageId?.trim() || `v3_${randomUUID().slice(0, 12)}`,
@@ -1383,7 +1383,7 @@ function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
       unit: ctx.state.unit?.label ?? null,
       company: ctx.state.company?.name ?? null,
     };
-    const operationId = `ticket_${randomUUID().slice(0, 12)}`;
+    const operationId = randomUUID();
     return {
       capability: name,
       ok: true,

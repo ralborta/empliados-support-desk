@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ad", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ad/);
+  it("prompt version bump 13ae", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ae/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1769,7 +1769,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     await syncV3PendingWriteToFrontend({
       state: s,
       pendingWrite: {
-        operationId: "odo_test_123",
+        operationId: "11111111-1111-4111-8111-111111111111",
         version: 1,
         payloadHash: "abc",
         task: "odometer",

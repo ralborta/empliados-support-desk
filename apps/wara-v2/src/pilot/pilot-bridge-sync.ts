@@ -20,7 +20,7 @@ export async function invokeLabTicketBridge(input: {
   env?: NodeJS.ProcessEnv;
 }): Promise<void> {
   const env = input.env ?? process.env;
-  await createV1LocalTicketIfEnabled(
+  const result = await createV1LocalTicketIfEnabled(
     {
       phoneE164: input.state.phone,
       tenantId: input.state.tenantId,
@@ -45,4 +45,9 @@ export async function invokeLabTicketBridge(input: {
     },
     env,
   );
+  if (!result.ok && !result.skipped) {
+    console.warn("[lab-ticket-bridge]", input.operationId, result.error);
+  } else if (!result.ok && result.skipped) {
+    console.warn("[lab-ticket-bridge] skipped", input.operationId, result.error);
+  }
 }

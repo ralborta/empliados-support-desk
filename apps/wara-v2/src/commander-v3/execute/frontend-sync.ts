@@ -119,8 +119,8 @@ export async function syncV3PendingWriteToFrontend(input: {
             : "v3_awaiting_confirmation",
       env,
     });
-  } catch {
-    // No tumbar el turno conversacional por fallo de ledger
+  } catch (err) {
+    console.warn("[v3-frontend-sync] prisma", pw.operationId, err);
   }
 
   const shouldBridge =
@@ -158,7 +158,7 @@ export async function syncV3PendingWriteToFrontend(input: {
       priority: opType === "odoo_ticket" ? "NORMAL" : "LOW",
       env,
     });
-  } catch {
-    // idem
+  } catch (err) {
+    console.warn("[v3-frontend-sync] bridge", pw.operationId, err);
   }
 }

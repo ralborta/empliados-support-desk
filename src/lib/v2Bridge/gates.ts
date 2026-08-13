@@ -37,7 +37,14 @@ export function isBridgeTenantAllowed(tenantId: string, env: NodeJS.ProcessEnv =
   return allowed.includes(tenantId);
 }
 
+function isPilotOpen(env: NodeJS.ProcessEnv): boolean {
+  const t = (env.WARA_V2_PILOT_OPEN ?? "").trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "si";
+}
+
 export function isBridgePhoneAllowed(phoneE164: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  // Paridad con cliente shadow (v1-local-ticket-bridge): piloto abierto = mismo alcance.
+  if (isPilotOpen(env)) return true;
   const list = parsePhoneAllowlist(
     env.WARA_V2_BRIDGE_PHONE_ALLOWLIST ?? env.WARA_V2_SHADOW_ALLOWLIST ?? "",
   );
