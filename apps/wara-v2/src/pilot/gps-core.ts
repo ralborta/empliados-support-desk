@@ -149,6 +149,9 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
 
 export function buildGpsLabSummary(unit: WaraUnidadEstado, assessment: GpsAssessment): string {
   const label = formatUnitLabel(unit);
+  const maps = mapsLinkForUnit(unit);
+  const mapsSuffix = maps ? ` Ubicación aprox.: ${maps}` : "";
+
   if (assessment.status === "ok") {
     const ign = ignitionLabel(unit);
     return (
@@ -156,34 +159,61 @@ export function buildGpsLabSummary(unit: WaraUnidadEstado, assessment: GpsAssess
       (ign === "encendida"
         ? "; la ignición está encendida (puede llevar rato en ON sin cambiar de estado). "
         : " y la ignición acompaña. ") +
-      `Último reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, posición hace ${formatMinutesAgo(assessment.positionElapsed)}.`
+      `Último reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, posición hace ${formatMinutesAgo(assessment.positionElapsed)}.${mapsSuffix}`
     );
   }
   if (assessment.status === "coherent_pause") {
     return (
       `La unidad ${label} está detenida. Reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, ` +
-      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}, ignición apagada. Es normal que no actualice posición mientras está parada.`
+      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}, ignición apagada. Es normal que no actualice posición mientras está parada.${mapsSuffix}`
     );
   }
   if (assessment.status === "missing_report") {
     return (
       `La unidad ${label} no tiene reporte reciente (último hace ${formatMinutesAgo(assessment.reportElapsed)}). ` +
-      `En laboratorio no genero tickets; revisá la conectividad del equipo.`
+      `En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.`
     );
   }
   if (assessment.status === "ignition_failure") {
     return (
       `La unidad ${label} muestra posible falla de ignición: reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, ` +
-      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}. En laboratorio no genero tickets.`
+      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}. En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.${mapsSuffix}`
     );
   }
-  return `La unidad ${label} presenta ${assessment.reason}. En laboratorio no genero tickets.`;
+  return (
+    `La unidad ${label} presenta ${assessment.reason}. ` +
+    `En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.${mapsSuffix}`
+  );
+}
+
+function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
+  const lat = unit.ultima_posicion?.lat;
+  const lon = unit.ultima_posicion?.lon;
+  if (typeof lat !== "number" || typeof lon !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return `https://maps.google.com/?q=${lat},${lon}`;
 }
 
 export function buildGpsReportForUnit(unit: WaraUnidadEstado): string {
+  const hasAnyTelemetry =
+    unit.ultimo_reporte != null ||
+    unit.ultima_posicion != null ||
+    unit.ultima_ignicion != null;
+
+  if (!hasAnyTelemetry) {
+    return (
+      `La unidad ${formatUnitLabel(unit)} no tiene equipo GPS / telemetría cargada en WARA ` +
+      `(sin reporte, posición ni ignición). No puedo afirmar ubicación. ` +
+      `Si necesitás seguimiento, pedime derivar a un asesor.`
+    );
+  }
+
   const assessment = assessUnitReporting(unit);
   if (!assessment) {
-    return `No tengo datos de telemetría recientes para ${formatUnitLabel(unit)} en WARA. No puedo afirmar posición ni ignición.`;
+    return (
+      `No tengo datos de telemetría recientes para ${formatUnitLabel(unit)} en WARA. ` +
+      `No puedo afirmar posición ni ignición.`
+    );
   }
   return buildGpsLabSummary(unit, assessment);
 }

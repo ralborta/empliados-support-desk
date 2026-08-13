@@ -195,7 +195,7 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   {
     name: "domain.answer",
     purpose:
-      "Respuesta conceptual / guía de plataforma (topic: odometer|horometer|gps|certificate|platform_unidades|platform_opciones|wara)",
+      "Respuesta conceptual / guía de plataforma (topic: odometer|horometer|gps|certificate|platform_unidades|platform_opciones|platform_mantenimiento|wara)",
     params: ["topic"],
     kind: "domain",
     requiredFields: [],

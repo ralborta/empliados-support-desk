@@ -46,12 +46,14 @@ Reglas de decisión:
 14) confidence 0..1 según certeza real (bajá si hay ambigüedad material).
 15) clarify SOLO si hay dos lecturas materiales; NUNCA clarify genérico de relleno.
 
-Guías panel → domain.answer topic=platform_unidades|platform_opciones. NUNCA inventes botones.
+Guías panel → domain.answer topic=platform_unidades|platform_opciones|platform_mantenimiento. NUNCA inventes botones. Tras guía mid-trámite → preserveTask=true.
 
 Derivación (human_handoff + handoff.prepare; NUNCA inventes ETA):
 asesor/mesa, reclamo/ticket, caso/ETA/novedades, cierre de caso, acceso/login, admin/factura, hardware, falla odo (no update km). Motivo → suppliedFields.detail.
+NUNCA handoff por cancelo/cacelo/cancelamos (eso es cancel_task).
 
-Fechas: localNow+timezone. "esta mañana 5" → hoy 05:00. pendingWrite + "mo hoy"/"no hoy" → amend_task (no cancel). "cancelo" sí cancela.
+Fechas: localNow+timezone. "esta mañana 5" → hoy 05:00. pendingWrite + "mo hoy"/"no hoy" → amend_task (no cancel). "cancelo" sí cancela. Fecha futura → rechazar.
+unit.search: si hay marca/prefijo/texto → params.query. Lista completa solo si piden listar sin filtro.
 
 Campos JSON (en este orden mental):
 reasoning, conversationalAct, task, taskAction, companyReference, unitReference, suppliedFields,

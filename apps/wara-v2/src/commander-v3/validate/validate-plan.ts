@@ -37,7 +37,13 @@ export function validateTurnPlan(
     (plan.conversationalAct === "confirm_write" || plan.taskAction === "confirm") &&
     !state.pendingWrite
   ) {
-    errors.push("confirm_without_pending_write");
+    const anomalyPending =
+      state.activeTask?.collected?.anomalyCandidate != null &&
+      state.lastQuestion?.expected === "confirmation" &&
+      String(state.lastQuestion.purpose ?? "").includes("anomaly");
+    if (!anomalyPending) {
+      errors.push("confirm_without_pending_write");
+    }
   }
 
   if (

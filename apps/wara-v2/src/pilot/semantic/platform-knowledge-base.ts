@@ -182,3 +182,25 @@ Resumen de accesos rápidos:
 - Crear un nuevo grupo: pie del panel → botón "Crear Grupo".
 - Mover unidades entre grupos: pie del panel → botón "Mover unidades".
 `.trim();
+
+export const MANTENIMIENTO_KNOWLEDGE_BASE = `
+Módulo de Mantenimiento — Plataforma Wara (guía informativa)
+
+¿Qué es? Permite gestionar planes preventivos, tareas y mantenimientos correctivos de la flota.
+No confundir con registrar un odómetro/horómetro (eso es otro trámite).
+
+Tipos frecuentes:
+- Preventivo / service: trabajo programado por km u horas.
+- Correctivo: reparación por falla o avería.
+- Plan: agenda de tareas recurrentes.
+- RFID / periféricos: temas de tags o accesorios (suele requerir asesor).
+
+En la plataforma (resumen):
+- Se crean o consultan planes preventivos y tareas.
+- Las órdenes correctivas listan reparaciones pendientes.
+- El odómetro/horómetro de la unidad alimenta alertas y planes (actualizar lecturas ayuda al plan).
+
+Por WhatsApp:
+- Si querés que yo REGISTRE un pedido operativo: patente/unidad + detalle (y prioridad si la sabés) → confirmás con CONFIRMO.
+- Si solo querés el paso a paso del módulo, preguntá preventivo o correctivo y te oriento con esta guía.
+`.trim();

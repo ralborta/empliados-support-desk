@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13g", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13g/);
+  it("prompt version bump 13h", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13h/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -410,5 +410,165 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.equal(exec.facts.some((f) => /Seguimos con/i.test(f)), false);
     assert.equal(exec.state.lastQuestion?.expected, "value");
+  });
+
+  it("unit.search con query filtra flota", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.fleetCache = [
+      {
+        movilId: 1,
+        plate: "AA111AA",
+        name: "M300-001",
+        label: "AA 111 AA (M300-001)",
+      },
+      {
+        movilId: 2,
+        plate: "BB222BB",
+        name: "M900-002",
+        label: "BB 222 BB (M900-002)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "busca",
+      conversationalAct: "inform",
+      requestedCapabilities: [
+        { name: "unit.search", params: { query: "M300", mode: "query" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "M300",
+    });
+    assert.match(exec.facts.join(" "), /M300-001/);
+    assert.doesNotMatch(exec.facts.join(" "), /M900-002/);
+  });
+
+  it("odometer.prepare rechaza fecha futura", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 1,
+      plate: "AA111AA",
+      name: "M300-001",
+      label: "AA 111 AA",
+    };
+    s.fleetCache = [
+      {
+        movilId: 1,
+        plate: "AA111AA",
+        name: "M300-001",
+        label: "AA 111 AA",
+        odometer: 1000,
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "fecha",
+      conversationalAct: "continue_task",
+      task: "odometer",
+      taskAction: "continue",
+      suppliedFields: {
+        value: 1100,
+        date: "2099-01-01",
+        time: "10:00",
+      },
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: s.unit,
+      resolvedCompanyId: null,
+      message: "2099-01-01",
+    });
+    assert.match(exec.facts.join(" "), /futura/i);
+    assert.equal(exec.state.pendingWrite, null);
+  });
+
+  it("cancelo no abre handoff", async () => {
+    const { enrichPlanForCancelGuard } = await import("../enrich/cancel-guard.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    const plan = TurnPlanSchema.parse({
+      reasoning: "mal handoff",
+      conversationalAct: "start_task",
+      task: "human_handoff",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "handoff.prepare", params: {} }],
+      suppliedFields: { detail: "cancelación de trámite" },
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+      responseGoal: { purpose: "confirm_write", facts: [] },
+      confidence: 0.8,
+    });
+    const enriched = enrichPlanForCancelGuard(plan, s, "cancelo");
+    assert.equal(enriched.conversationalAct, "cancel_task");
+    assert.equal(enriched.requestedCapabilities.length, 0);
+  });
+
+  it("maintenance.prepare infiere tipo/prioridad", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 1,
+      plate: "AA111AA",
+      name: "M1",
+      label: "AA 111 AA",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "maint",
+      conversationalAct: "start_task",
+      task: "maintenance",
+      taskAction: "start",
+      suppliedFields: { detail: "correctivo urgente frenos" },
+      requestedCapabilities: [{ name: "maintenance.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "confirm_write", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: s.unit,
+      resolvedCompanyId: null,
+      message: "correctivo urgente frenos",
+    });
+    assert.match(exec.facts.join(" "), /correctivo/i);
+    assert.match(exec.facts.join(" "), /URGENT/);
+  });
+
+  it("domain.answer platform_mantenimiento fallback", async () => {
+    const plan = TurnPlanSchema.parse({
+      reasoning: "guia",
+      conversationalAct: "answer_lateral",
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "platform_mantenimiento" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "como hago un preventivo",
+    });
+    assert.match(exec.facts.join(" "), /preventivo|Mantenimiento/i);
   });
 });

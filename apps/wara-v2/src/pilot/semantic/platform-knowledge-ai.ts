@@ -7,15 +7,17 @@ import { FIXED_OPENAI_ENDPOINT } from "../../llm/flags.js";
 import { authorizedOpenAiFetch } from "../../llm/network.js";
 import { semanticModelName, semanticTimeoutMs } from "./brain-flags.js";
 import {
+  MANTENIMIENTO_KNOWLEDGE_BASE,
   OPCIONES_KNOWLEDGE_BASE,
   UNIDADES_KNOWLEDGE_BASE,
 } from "./platform-knowledge-base.js";
 
-export type PlatformGuideKind = "opciones" | "unidades";
+export type PlatformGuideKind = "opciones" | "unidades" | "mantenimiento";
 
 const KB: Record<PlatformGuideKind, string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
   unidades: UNIDADES_KNOWLEDGE_BASE,
+  mantenimiento: MANTENIMIENTO_KNOWLEDGE_BASE,
 };
 
 const SYSTEM_RULES = `Sos Atilio, soporte WARA por WhatsApp/lab (Argentina).
@@ -97,6 +99,7 @@ export function platformKindFromTopic(
 ): PlatformGuideKind | null {
   if (topic === "platform_unidades") return "unidades";
   if (topic === "platform_opciones") return "opciones";
+  if (topic === "platform_mantenimiento") return "mantenimiento";
   return null;
 }
 
@@ -122,6 +125,24 @@ export function platformStaticFallback(kind: PlatformGuideKind, question: string
     return (
       "El módulo Unidades (ícono del auto en la barra lateral) es el centro de la flota: grupos, puntos de estado (verde/azul/rojo), ficha expandida y MIS ATAJOS. " +
       "Decime qué querés hacer (historial, compartir posición, certificado, orden de trabajo) y te guío con los pasos."
+    );
+  }
+  if (kind === "mantenimiento") {
+    if (/\bpreventiv/.test(q)) {
+      return (
+        "Preventivo/service: se programa por km u horas según el plan en el módulo Mantenimiento. " +
+        "Si querés que yo registre un pedido por WhatsApp, dame unidad + detalle y confirmás con CONFIRMO."
+      );
+    }
+    if (/\bcorrectiv|repar|falla/.test(q)) {
+      return (
+        "Correctivo: registra una reparación por falla. En plataforma va como tarea/orden correctiva. " +
+        "Por WhatsApp: unidad + qué falló → CONFIRMO."
+      );
+    }
+    return (
+      "El módulo Mantenimiento cubre planes preventivos, correctivos y tareas. " +
+      "Si es solo guía, pedime preventivo o correctivo. Si es pedido operativo, dame unidad y detalle."
     );
   }
   if (/\bagenda|contacto\b/.test(q)) {

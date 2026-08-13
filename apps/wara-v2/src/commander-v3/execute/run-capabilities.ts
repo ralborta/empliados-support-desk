@@ -12,10 +12,16 @@ import {
   platformStaticFallback,
 } from "../../pilot/semantic/platform-knowledge-ai.js";
 import { categoryLabel, inferTicketCategory } from "../../pilot/ticket-core.js";
+import {
+  formatAnomalyQuestion,
+  isAnomalousReading,
+} from "../../pilot/semantic/reading-anomaly.js";
 import { getCapability } from "../capabilities/catalog.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan, CapabilityRequest } from "../types/turn-plan.js";
 import type { UnitRef } from "../types/refs.js";
+import { filterFleetCacheByQuery } from "./fleet-query.js";
+import { inferMaintenanceMeta } from "./maintenance-meta.js";
 
 export type ToolResult = {
   capability: string;
@@ -108,7 +114,18 @@ function inferDefaultCapabilities(
       }
       return [];
     case "confirm_write":
-      if (!state.pendingWrite) return [];
+      if (!state.pendingWrite) {
+        // Confirmación de anomalía de lectura (pre-pendingWrite)
+        if (
+          state.activeTask?.collected?.anomalyCandidate != null &&
+          String(state.lastQuestion?.purpose ?? "").includes("anomaly")
+        ) {
+          const meter =
+            state.activeTask.type === "hourmeter" ? "hourmeter" : "odometer";
+          return [{ name: `${meter}.prepare`, params: {} }];
+        }
+        return [];
+      }
       if (state.pendingWrite.task.includes("certificate")) {
         return [{ name: "certificate.issue", params: {} }];
       }
@@ -318,7 +335,19 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
     }
     case "unit.search": {
       const pageSize = 8;
-      const items = ctx.state.fleetCache.slice(0, pageSize).map((u, i) => ({
+      const query = String(
+        req.params?.query ??
+          ctx.plan.unitReference?.value ??
+          ctx.message ??
+          "",
+      ).trim();
+      const mode = String(req.params?.mode ?? (query ? "query" : "list"));
+      const filtered =
+        mode !== "list" && query
+          ? filterFleetCacheByQuery(ctx.state, query)
+          : ctx.state.fleetCache;
+      const source = filtered.length ? filtered : ctx.state.fleetCache;
+      const items = source.slice(0, pageSize).map((u, i) => ({
         index: i + 1,
         label: u.label,
         movilId: u.movilId,
@@ -327,16 +356,26 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         kind: "fleet" as const,
         page: 1,
         pageSize,
-        totalCount: ctx.state.fleetCache.length,
+        totalCount: source.length,
         items,
         fetchedAt: new Date().toISOString(),
       };
-      const header = `Unidades en ${ctx.state.company?.name ?? "tu empresa"} (página 1/${Math.max(1, Math.ceil(listing.totalCount / pageSize))}, ${listing.totalCount} en total):`;
+      const scope =
+        query && filtered.length
+          ? `coincidencias de «${query}»`
+          : query && !filtered.length
+            ? `sin coincidencias de «${query}»; muestro el listado general`
+            : "listado";
+      const header = `Unidades en ${ctx.state.company?.name ?? "tu empresa"} (${scope}, página 1/${Math.max(1, Math.ceil(listing.totalCount / pageSize))}, ${listing.totalCount} en total):`;
       const body = items.map((i) => `${i.index}. ${i.label}`).join("\n");
       return {
         capability: req.name,
         ok: true,
-        facts: [`${header}\n\n${body}\n\nDecime el número o la patente.`],
+        facts: [
+          items.length
+            ? `${header}\n\n${body}\n\nDecime el número o la patente.`
+            : `No encontré unidades${query ? ` para «${query}»` : ""} en la flota cargada.`,
+        ],
         data: {
           statePatch: {
             lastListing: listing,
@@ -345,7 +384,6 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               purpose: "select_unit",
               expected: "unit" as const,
             },
-            // XOR: expectativa de unidad = lastQuestion, no pendingEntity paralelo
             pendingEntity: null,
           },
         },
@@ -520,19 +558,90 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         ...(ctx.state.activeTask?.collected ?? {}),
         ...(ctx.plan.suppliedFields ?? {}),
       };
+
+      // Anomalía ya pendiente + confirm_write → aceptar valor candidato
+      if (
+        collected.anomalyCandidate != null &&
+        (ctx.plan.conversationalAct === "confirm_write" ||
+          ctx.plan.taskAction === "confirm")
+      ) {
+        collected.value = collected.anomalyCandidate;
+        delete collected.anomalyCandidate;
+      }
+
       const still = [];
       if (collected.value == null) still.push("value");
       if (!collected.date) still.push("date");
       if (!collected.time) still.push("time");
       if (still.length) {
+        // Anomalía al recibir valor (antes de pedir fecha/hora)
+        if (
+          still[0] !== "value" &&
+          collected.value != null &&
+          collected.anomalyCandidate == null
+        ) {
+          const prev =
+            meter === "hourmeter"
+              ? (ctx.state.fleetCache.find((u) => u.movilId === unit.movilId)
+                  ?.hourmeter ?? null)
+              : (ctx.state.fleetCache.find((u) => u.movilId === unit.movilId)
+                  ?.odometer ?? null);
+          if (
+            isAnomalousReading({
+              valueNew: Number(collected.value),
+              valuePrevious: prev,
+              meterType: meter === "hourmeter" ? "horometro" : "odometro",
+              env: ctx.env,
+            })
+          ) {
+            return {
+              capability: req.name,
+              ok: true,
+              facts: [
+                `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} Respondé CONFIRMO si el valor es correcto.`,
+              ],
+              data: {
+                statePatch: {
+                  unit,
+                  activeTask: {
+                    type: meter as "odometer" | "hourmeter",
+                    status: "collecting" as const,
+                    collected: {
+                      ...collected,
+                      anomalyCandidate: Number(collected.value),
+                      value: null,
+                    },
+                    missing: ["value", "date", "time"],
+                  },
+                  pendingEntity: null,
+                  pendingWrite: null,
+                  lastQuestion: {
+                    id: randomUUID(),
+                    purpose: `meter_anomaly_${meter}`,
+                    expected: "confirmation" as const,
+                  },
+                },
+              },
+            };
+          }
+        }
+
         const expected =
-          still[0] === "value" ? "value" : still[0] === "date" ? "date" : "time";
+          still[0] === "value"
+            ? "value"
+            : still.includes("date") && still.includes("time")
+              ? "date"
+              : still[0] === "date"
+                ? "date"
+                : "time";
         const ask =
           expected === "value"
             ? `Pasame el valor del ${meter === "hourmeter" ? "horómetro (hs)" : "odómetro (km)"}.`
-            : expected === "date"
-              ? "¿Qué fecha de lectura? (ej. hoy, 11/08/26)"
-              : "¿A qué hora? (ej. 14:30)";
+            : still.includes("date") && still.includes("time")
+              ? "¿Fecha y hora de la lectura? (ej. hoy 14:30)"
+              : expected === "date"
+                ? "¿Qué fecha de lectura? (ej. hoy, 11/08/26)"
+                : "¿A qué hora? (ej. 14:30)";
         return {
           capability: req.name,
           ok: true,
@@ -556,6 +665,88 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           },
         };
       }
+
+      // Fecha futura → rechazar
+      const today = new Date().toLocaleDateString("en-CA", {
+        timeZone: "America/Argentina/Buenos_Aires",
+      });
+      if (
+        typeof collected.date === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(collected.date) &&
+        collected.date > today
+      ) {
+        return {
+          capability: req.name,
+          ok: true,
+          facts: [
+            `La fecha ${collected.date} es futura. Pasame una fecha de lectura de hoy o anterior (ej. hoy).`,
+          ],
+          data: {
+            statePatch: {
+              unit,
+              activeTask: {
+                type: meter as "odometer" | "hourmeter",
+                status: "collecting" as const,
+                collected: { ...collected, date: null },
+                missing: ["date", ...(collected.time ? [] : ["time"])],
+              },
+              pendingWrite: null,
+              lastQuestion: {
+                id: randomUUID(),
+                purpose: "meter_date",
+                expected: "date" as const,
+              },
+            },
+          },
+        };
+      }
+
+      // Anomalía con todos los campos (por si el valor llegó junto con fecha/hora)
+      const prevFull =
+        meter === "hourmeter"
+          ? (ctx.state.fleetCache.find((u) => u.movilId === unit.movilId)
+              ?.hourmeter ?? null)
+          : (ctx.state.fleetCache.find((u) => u.movilId === unit.movilId)
+              ?.odometer ?? null);
+      if (
+        collected.anomalyCandidate == null &&
+        isAnomalousReading({
+          valueNew: Number(collected.value),
+          valuePrevious: prevFull,
+          meterType: meter === "hourmeter" ? "horometro" : "odometro",
+          env: ctx.env,
+        })
+      ) {
+        return {
+          capability: req.name,
+          ok: true,
+          facts: [
+            `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} Respondé CONFIRMO si el valor es correcto.`,
+          ],
+          data: {
+            statePatch: {
+              unit,
+              activeTask: {
+                type: meter as "odometer" | "hourmeter",
+                status: "collecting" as const,
+                collected: {
+                  ...collected,
+                  anomalyCandidate: Number(collected.value),
+                  value: null,
+                },
+                missing: ["value"],
+              },
+              pendingWrite: null,
+              lastQuestion: {
+                id: randomUUID(),
+                purpose: `meter_anomaly_${meter}`,
+                expected: "confirmation" as const,
+              },
+            },
+          },
+        };
+      }
+
       const payload = {
         task: meter,
         movilId: unit.movilId,
@@ -614,7 +805,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
                 collected: { detail },
                 missing: ["unit"],
               },
-              pendingEntity: { type: "unit" as const, purpose: "maintenance" },
+              pendingEntity: null,
               lastQuestion: {
                 id: randomUUID(),
                 purpose: "unit_for_maintenance",
@@ -647,14 +838,21 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           },
         };
       }
-      const payload = { task: "maintenance", movilId: unit.movilId, detail };
+      const meta = inferMaintenanceMeta(detail);
+      const payload = {
+        task: "maintenance",
+        movilId: unit.movilId,
+        detail,
+        kind: meta.kind,
+        priority: meta.priority,
+      };
       const operationId = `maint_${randomUUID().slice(0, 12)}`;
       const payloadHash = hashPayload(payload);
       return {
         capability: req.name,
         ok: true,
         facts: [
-          `¿Confirmás el pedido de mantenimiento para ${unit.label}? Detalle: ${detail}. Respondé CONFIRMO.`,
+          `¿Confirmás el pedido de mantenimiento (${meta.kindLabel}, prioridad ${meta.priority}) para ${unit.label}? Detalle: ${detail}. Respondé CONFIRMO.`,
         ],
         data: {
           statePatch: {
@@ -662,7 +860,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
             activeTask: {
               type: "maintenance" as const,
               status: "awaiting_confirmation" as const,
-              collected: { detail },
+              collected: { detail, kind: meta.kind, priority: meta.priority },
               missing: [],
             },
             pendingWrite: {
