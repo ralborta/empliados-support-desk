@@ -147,7 +147,29 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
   switch (req.name) {
     case "company.get_active": {
       if (!ctx.state.company) {
-        return { capability: req.name, ok: false, facts: [], error: "no_company" };
+        const names = ctx.state.availableCompanies.map((c) => c.name).filter(Boolean);
+        if (names.length === 0) {
+          return {
+            capability: req.name,
+            ok: true,
+            facts: ["Todavía no hay una empresa seleccionada en esta sesión."],
+          };
+        }
+        if (names.length === 1) {
+          return {
+            capability: req.name,
+            ok: true,
+            facts: [`Todavía no fijamos empresa; la disponible es ${names[0]}.`],
+          };
+        }
+        const lines = names.map((n, i) => `${i + 1}. ${n}`).join("\n");
+        return {
+          capability: req.name,
+          ok: true,
+          facts: [
+            `Todavía no hay empresa activa. Podés elegir una:\n${lines}`,
+          ],
+        };
       }
       return {
         capability: req.name,

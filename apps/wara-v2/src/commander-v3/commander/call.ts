@@ -109,15 +109,59 @@ async function chatJson(input: {
   }
 }
 
-function coercePlan(raw: unknown): unknown {
+export function coercePlan(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const o = { ...(raw as Record<string, unknown>) };
 
-  // task: "certificate.prepare" → certificate
-  if (typeof o.task === "string" && o.task.includes(".")) {
-    o.task = o.task.split(".")[0];
+  // Capabilities pedidas (normalizar antes de tocar task).
+  if (!Array.isArray(o.requestedCapabilities)) o.requestedCapabilities = [];
+  const caps = o.requestedCapabilities as Array<{ name?: string; params?: unknown }>;
+
+  // task: "certificate.prepare" → certificate; "company.get_active" → null + cap
+  if (typeof o.task === "string") {
+    const rawTask = o.task.trim();
+    if (rawTask.includes(".")) {
+      const [head, ...rest] = rawTask.split(".");
+      const capName = rawTask;
+      if (head === "company" || head === "domain" || head === "unit") {
+        if (!caps.some((c) => c.name === capName)) {
+          caps.push({ name: capName, params: {} });
+        }
+        o.task = null;
+      } else {
+        o.task = head === "horometer" ? "hourmeter" : head;
+        if (rest[0] === "prepare" || rest[0] === "get_status") {
+          const implied =
+            head === "gps"
+              ? "gps.get_status"
+              : `${head === "horometer" ? "hourmeter" : head}.prepare`;
+          if (!caps.some((c) => String(c.name) === implied)) {
+            caps.push({ name: implied, params: {} });
+          }
+        }
+      }
+    } else if (rawTask === "horometer") {
+      o.task = "hourmeter";
+    } else if (
+      rawTask === "company" ||
+      rawTask === "domain" ||
+      rawTask === "unit"
+    ) {
+      o.task = null;
+    }
   }
-  if (o.task === "horometer") o.task = "hourmeter";
+  const allowedTasks = new Set([
+    "certificate",
+    "odometer",
+    "hourmeter",
+    "maintenance",
+    "gps",
+    "unit_query",
+    "human_handoff",
+  ]);
+  if (o.task != null && !allowedTasks.has(String(o.task))) {
+    o.task = null;
+  }
 
   // conversationalAct normalize
   const actAliases: Record<string, string> = {
@@ -130,6 +174,7 @@ function coercePlan(raw: unknown): unknown {
     confirm: "confirm_write",
     lateral: "answer_lateral",
     query: "inform",
+    read: "inform",
   };
   if (typeof o.conversationalAct === "string") {
     const a = o.conversationalAct.toLowerCase();
@@ -153,9 +198,6 @@ function coercePlan(raw: unknown): unknown {
     typeof o.conversationalAct !== "string" ||
     !allowedActs.has(o.conversationalAct)
   ) {
-    const caps = Array.isArray(o.requestedCapabilities)
-      ? (o.requestedCapabilities as Array<{ name?: string }>)
-      : [];
     if (caps.some((c) => String(c.name ?? "").includes("prepare"))) {
       o.conversationalAct = "start_task";
     } else if (caps.some((c) => /issue|update|create/.test(String(c.name ?? "")))) {
@@ -164,10 +206,6 @@ function coercePlan(raw: unknown): unknown {
       o.conversationalAct = "inform";
     }
   } else {
-    // Act válido pero incoherente con capabilities (ej. greet + certificate.prepare)
-    const caps = Array.isArray(o.requestedCapabilities)
-      ? (o.requestedCapabilities as Array<{ name?: string }>)
-      : [];
     if (
       (o.conversationalAct === "greet" || o.conversationalAct === "inform") &&
       caps.some((c) => String(c.name ?? "").includes("prepare"))
@@ -181,6 +219,7 @@ function coercePlan(raw: unknown): unknown {
     write_prepare: "start",
     prepare: "start",
     write_commit: "confirm",
+    read: "continue",
   };
   if (typeof o.taskAction === "string" && actMap[o.taskAction]) {
     o.taskAction = actMap[o.taskAction];
@@ -191,18 +230,26 @@ function coercePlan(raw: unknown): unknown {
       String(o.taskAction),
     )
   ) {
+    // Lecturas / consultas: no forzar "start" (rompe company.get_active).
+    const readOnly = caps.every(
+      (c) =>
+        !String(c.name ?? "").includes("prepare") &&
+        !/issue|update|create/.test(String(c.name ?? "")),
+    );
     o.taskAction =
       o.conversationalAct === "confirm_write"
         ? "confirm"
         : o.conversationalAct === "cancel_task"
           ? "cancel"
-          : "start";
+          : readOnly
+            ? null
+            : "start";
   }
 
   o.companyReference = coerceEntityRef(o.companyReference, "company");
   o.unitReference = coerceEntityRef(o.unitReference, "unit");
 
-  if (!Array.isArray(o.requestedCapabilities)) o.requestedCapabilities = [];
+  o.requestedCapabilities = caps;
   if (!o.stateIntent || typeof o.stateIntent !== "object") {
     o.stateIntent = {
       preserveCompany: true,
@@ -214,6 +261,8 @@ function coercePlan(raw: unknown): unknown {
     o.responseGoal = { purpose: "inform", facts: [], nextQuestion: null };
   } else {
     const rg = { ...(o.responseGoal as Record<string, unknown>) };
+    const originalPurpose =
+      typeof rg.purpose === "string" ? rg.purpose : "";
     if (typeof rg.purpose === "string" && !PURPOSE.has(rg.purpose)) {
       const p = rg.purpose.toLowerCase();
       if (p.includes("confirm")) rg.purpose = "confirm_write";
@@ -223,15 +272,24 @@ function coercePlan(raw: unknown): unknown {
       else if (p.includes("resume") || p.includes("retom")) rg.purpose = "resume";
       else rg.purpose = "inform";
     }
-    if (!Array.isArray(rg.facts)) {
-      rg.facts =
-        typeof rg.purpose === "string" && !PURPOSE.has(String((o.responseGoal as { purpose?: string }).purpose))
-          ? [String((o.responseGoal as { purpose?: string }).purpose)]
-          : [];
+    if (typeof rg.facts === "string") {
+      const f = rg.facts.trim();
+      rg.facts = f ? [f] : [];
+    } else if (!Array.isArray(rg.facts)) {
+      rg.facts = originalPurpose && !PURPOSE.has(originalPurpose) ? [originalPurpose] : [];
     }
+    if (rg.nextQuestion === undefined) rg.nextQuestion = null;
     o.responseGoal = rg;
   }
-  if (typeof o.confidence !== "number") o.confidence = 0.5;
+  if (typeof o.confidence !== "number" || !Number.isFinite(o.confidence)) {
+    o.confidence = 0.5;
+  } else {
+    o.confidence = Math.min(1, Math.max(0, o.confidence));
+  }
+  // suppliedFields vacío u objeto raro
+  if (o.suppliedFields != null && typeof o.suppliedFields !== "object") {
+    o.suppliedFields = null;
+  }
   return o;
 }
 

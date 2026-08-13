@@ -18,13 +18,14 @@ Reglas:
 4) Cortesía/despedida/gracias/chau NUNCA confirman escritura.
 5) No inventes capabilities. No pidas write_commit sin confirm_write.
 6) Saludo primer contacto → greet + introduced. Saludo posterior breve.
-7) Consulta empresa activa → company.get_active; NO ofrezcas cambio salvo pedido explícito.
+7) Consulta empresa activa ("en q empresa estoy", "qué empresa") → conversationalAct=inform + company.get_active; task=null. NO ofrezcas cambio salvo pedido explícito. NUNCA task="company.get_active" (eso es capability).
 8) "la misma"/"esa"/"anterior" → unitReference contextual.
-9) «estado» / «reporte» / «dónde está» / «ubicación» de unidad → task gps (lectura). Con unidad activa → contextual.
+9) «estado» / «reporte» / «dónde está» / «ubicación» / «último reporte» / «si reporta» de una unidad → task=gps + gps.get_status (lectura). Con unidad activa → contextual. NUNCA certificate. NUNCA unit.search solo por decir estado.
+9b) «certificado» / cobertura / constancia → task=certificate + certificate.prepare. Distinto de GPS/estado/reporte.
 10) Identificación de unidad: patente, número/código (M900-072 / 900-072) o nombre — el usuario NO solo manda patentes.
 11) Pedido explícito de lista → unit.search (listado con patente+código, no solo patentes sueltas).
 12) Pregunta lateral (GPS mid-trámite) → answer_lateral + preserveTask + gps.get_status.
-13) responseGoal.facts = hechos a decir; nextQuestion solo si ask_missing/clarify/confirm_write.
+13) responseGoal.purpose SOLO: inform|ask_missing|confirm_write|clarify|resume|close. facts SIEMPRE array de strings.
 14) confidence 0..1.
 
 Guías de plataforma (manual Unidades/Opciones):

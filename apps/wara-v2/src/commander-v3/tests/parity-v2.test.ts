@@ -8,10 +8,11 @@ import { executeCapabilities } from "../execute/run-capabilities.js";
 import { createEmptyConversationStateV3 } from "../types/state.js";
 import { TurnPlanSchema } from "../types/turn-plan.js";
 import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
+import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13b", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13b/);
+  it("prompt version bump 13c", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13c/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -118,5 +119,63 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /Acceso|plataforma|CONFIRMO/i);
     assert.equal(exec.state.pendingWrite?.task, "handoff");
+  });
+
+  it("coerce: company.get_active inválido → plan válido inform", () => {
+    const coerced = coercePlan({
+      conversationalAct: "inform",
+      task: "company.get_active",
+      taskAction: "read",
+      companyReference: null,
+      unitReference: null,
+      suppliedFields: {},
+      amendment: null,
+      lateralQuestion: null,
+      requestedCapabilities: [{ name: "company.get_active", params: {} }],
+      stateIntent: {
+        preserveCompany: false,
+        preserveUnit: false,
+        preserveTask: false,
+      },
+      responseGoal: {
+        purpose: "Informar la empresa activa",
+        facts: "La empresa activa es WARA.",
+        nextQuestion: null,
+      },
+      confidence: 1,
+    });
+    const parsed = TurnPlanSchema.safeParse(coerced);
+    assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+    assert.equal(parsed.data!.task, null);
+    assert.equal(parsed.data!.responseGoal.purpose, "inform");
+    assert.ok(Array.isArray(parsed.data!.responseGoal.facts));
+    assert.ok(
+      parsed.data!.requestedCapabilities.some((c) => c.name === "company.get_active"),
+    );
+  });
+
+  it("company.get_active sin empresa lista disponibles", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const plan = TurnPlanSchema.parse({
+      conversationalAct: "inform",
+      requestedCapabilities: [{ name: "company.get_active", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.99,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "en q empresa estoy?",
+    });
+    assert.match(exec.facts.join(" "), /no hay empresa activa|elegir|WARA|Cacique/i);
   });
 });
