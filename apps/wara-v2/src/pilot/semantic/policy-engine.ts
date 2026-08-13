@@ -20,6 +20,13 @@ import {
   looksLikeUnitCorrection,
   looksLikeUnitStatusOfActive,
 } from "./unit-context.js";
+import {
+  DISCARD_OR_EDIT_QUESTION,
+  isAmbiguousCancelClarifyQuestion,
+  looksLikeFarewell,
+  looksLikeUnequivocalCancelRequest,
+} from "./turn-precedence.js";
+import { hasCancellableTramite } from "./cancel-active-tramite.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -32,6 +39,7 @@ const CAPABILITIES = new Set([
   "ticket",
   "human_handoff",
   "domain_knowledge",
+  "query_active_company",
   "none",
 ]);
 
@@ -89,6 +97,76 @@ export function applySemanticPolicy(
 
   // Preguntas conceptuales: no deben caer en menú general.
   decision = maybeRewriteGeneralToDomain(decision, message, state);
+
+  // Consulta de empresa activa — nunca domain "unit" / definición de unidad.
+  if (decision.intent === "query_active_company" || decision.action === "query_context") {
+    decision = {
+      ...decision,
+      action: "query_context",
+      intent: "query_active_company",
+      currentTramiteDisposition: "keep",
+      reasoningCode: "QUERY_CONTEXT",
+      companyReference: decision.companyReference ?? "active",
+      answer: null,
+      domainQuestion: null,
+      ambiguity: null,
+    };
+    return { ok: true, decision };
+  }
+  if (
+    /\bempresa\b/i.test(message) &&
+    (decision.action === "answer_domain_question" ||
+      decision.intent === "domain_knowledge" ||
+      decision.domainQuestion?.topic === "unit" ||
+      decision.action === "general")
+  ) {
+    decision = {
+      ...decision,
+      action: "query_context",
+      intent: "query_active_company",
+      currentTramiteDisposition: "keep",
+      reasoningCode: "QUERY_CONTEXT",
+      companyReference: "active",
+      answer: null,
+      domainQuestion: null,
+      ambiguity: null,
+    };
+    return { ok: true, decision };
+  }
+
+  // Cancelación inequívoca: la policy no puede promover confirm.
+  if (looksLikeUnequivocalCancelRequest(message) && hasCancellableTramite(state)) {
+    decision = {
+      ...decision,
+      action: "answer_pending",
+      answer: "cancel",
+      currentTramiteDisposition: "cancel",
+      reasoningCode: "ANSWER_TO_PENDING",
+      ambiguity: null,
+    };
+    return { ok: true, decision };
+  }
+
+  // Despedida / cierre: nunca confirmar escritura.
+  if (looksLikeFarewell(message) && state.pendingConfirmation) {
+    const writePending =
+      state.pendingConfirmation.action === "odoo_ticket_create" ||
+      state.pendingConfirmation.action === "maintenance_write" ||
+      state.pendingConfirmation.action === "odometer_write" ||
+      state.pendingConfirmation.action === "certificate_issue";
+    if (writePending) {
+      decision = {
+        ...decision,
+        action: "general",
+        intent: "none",
+        answer: null,
+        currentTramiteDisposition: "cancel",
+        reasoningCode: "GENERAL_CONVERSATION",
+        ambiguity: null,
+      };
+      return { ok: true, decision };
+    }
+  }
 
   // Estado de la unidad activa → GPS, no unit_list masivo.
   if (
@@ -180,14 +258,8 @@ export function applySemanticPolicy(
     }
     let question = decision.ambiguity.question.trim();
     // Nunca ofrecer pregunta compuesta cancelar/continuar: sí queda ambiguo.
-    if (isCompoundCancelContinueQuestion(question)) {
-      const aboutCert =
-        /\bcertificado\b/i.test(question) ||
-        state.pendingConfirmation?.action === "certificate_issue" ||
-        state.activeTramite === "certificate_issue";
-      question = aboutCert
-        ? "¿Querés cancelar la solicitud del certificado?"
-        : "¿Querés cancelar el trámite pendiente?";
+    if (isCompoundCancelContinueQuestion(question) || isAmbiguousCancelClarifyQuestion(question)) {
+      question = DISCARD_OR_EDIT_QUESTION;
     }
     return {
       ok: true,

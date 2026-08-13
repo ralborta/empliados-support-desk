@@ -50,6 +50,17 @@ import {
   renderResponsePlan,
 } from "./response-plan.js";
 import {
+  assertStructuredWriteConfirmation,
+  bindPendingConfirmationQuestion,
+  clearLastAgentQuestion,
+  DISCARD_OR_EDIT_QUESTION,
+  inferExpectedAnswerTypeFromQuestion,
+  looksLikeFarewell,
+  looksLikeUnequivocalCancelRequest,
+  replyActiveCompany,
+  setLastAgentQuestion,
+} from "./turn-precedence.js";
+import {
   formatAnomalyQuestion,
   isAnomalousReading,
   looksLikeAnomalyAck,
@@ -137,14 +148,16 @@ function buildOdometerConfirmQuestion(draft: OdometerDraft): string {
 
 function setOdometerConfirm(state: PilotConversationState, draft: OdometerDraft, question: string): void {
   draft.step = "await_confirm";
+  const prev = state.pendingConfirmation;
   state.pendingConfirmation = {
     action: "odometer_write",
     unit: draft.unit!,
     askedAt: new Date().toISOString(),
     question,
-    operationId: state.pendingConfirmation?.operationId,
+    operationId: prev?.operationId,
+    version: (prev?.version ?? 0) + 1,
   };
-  state.lastAgentQuestion = question;
+  bindPendingConfirmationQuestion(state, question, "confirm_odometer_write");
 }
 
 /** Adjunta unidad al draft de odómetro (start / await_unit). */
@@ -543,27 +556,68 @@ async function handleAnswerPending(
     };
   }
 
+  const expected =
+    state.lastAgentQuestionMeta?.expectedAnswerType ??
+    inferExpectedAnswerTypeFromQuestion(
+      state.lastAgentQuestion ?? pending.question,
+      pending.action,
+    );
+
   const answeringBinaryCancel =
-    isBinaryCancelQuestion(pending.question) || isBinaryCancelQuestion(state.lastAgentQuestion);
+    expected === "cancel_confirmation" ||
+    isBinaryCancelQuestion(pending.question) ||
+    isBinaryCancelQuestion(state.lastAgentQuestion);
   const answeringCompound =
+    expected === "choice" ||
     isCompoundCancelContinueQuestion(pending.question) ||
     isCompoundCancelContinueQuestion(state.lastAgentQuestion);
 
-  // Pregunta compuesta: sí/no/reject/confirm no pueden ejecutar ni cancelar.
+  // Texto inequívoco de cancelación: no depende del LLM.
+  if (looksLikeUnequivocalCancelRequest(deps.originalMessage)) {
+    const r = cancelActiveOrPendingTramite(state);
+    return {
+      handler: r.cancelled === "none" ? "answer_pending" : r.cancelled,
+      message: r.cancelled === "certificate" ? CANCEL_CERT_REPLY : r.message,
+      state,
+    };
+  }
+
+  // Despedida con escritura pendiente: cancelar sin ejecutar.
+  if (looksLikeFarewell(deps.originalMessage)) {
+    const r = cancelActiveOrPendingTramite(state);
+    return {
+      handler: r.cancelled === "none" ? "farewell" : r.cancelled,
+      message:
+        pending.action === "odoo_ticket_create"
+          ? "De acuerdo. No generé el ticket. Cuando quieras, seguimos."
+          : r.message,
+      state,
+    };
+  }
+
+  // Pregunta choice (descartar vs modificar): sí solo no alcanza.
   if (
     answeringCompound &&
     (decision.answer === "confirm" || decision.answer === "reject")
   ) {
+    setLastAgentQuestion(state, {
+      text: DISCARD_OR_EDIT_QUESTION,
+      purpose: "choose_discard_or_edit",
+      expectedAnswerType: "choice",
+      options: [
+        { id: "cancel", meaning: "descartar" },
+        { id: "edit", meaning: "modificar" },
+      ],
+      pendingAction: pending.action,
+    });
     return {
       handler: "answer_pending",
-      message: COMPOUND_CHOICE_REPLY,
+      message: DISCARD_OR_EDIT_QUESTION,
       state,
     };
   }
 
   // Disposition cancel o answer cancel tienen prioridad sobre confirm.
-  // "reject" solo cancela si NO estamos ante una pregunta binaria de cancelación
-  // (en ese caso "no" = conservar el trámite).
   const wantsCancel =
     decision.currentTramiteDisposition === "cancel" ||
     decision.answer === "cancel" ||
@@ -587,7 +641,12 @@ async function handleAnswerPending(
         `Si está correcto, respondé CONFIRMO.`;
       state.pendingConfirmation = { ...pending, question: reply };
     }
-    state.lastAgentQuestion = reply;
+    setLastAgentQuestion(state, {
+      text: reply,
+      purpose: "confirm_write",
+      expectedAnswerType: "confirmation",
+      pendingAction: pending.action,
+    });
     return { handler: "certificate", message: reply, state };
   }
 
@@ -601,10 +660,82 @@ async function handleAnswerPending(
         state,
       };
     }
+
+    // Choice descartar/modificar: solo cancelar si eligió descartar explícitamente.
+    if (expected === "choice") {
+      const t = deps.originalMessage
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      if (/\b(descart|cancel)/.test(t)) {
+        const r = cancelActiveOrPendingTramite(state);
+        return {
+          handler: r.cancelled === "none" ? "answer_pending" : r.cancelled,
+          message: r.message,
+          state,
+        };
+      }
+      if (/\b(modific|correg|cambiar\s+dato)/.test(t)) {
+        return {
+          handler: "answer_pending",
+          message: "Ok, ¿qué dato querés corregir?",
+          state,
+        };
+      }
+      setLastAgentQuestion(state, {
+        text: DISCARD_OR_EDIT_QUESTION,
+        purpose: "choose_discard_or_edit",
+        expectedAnswerType: "choice",
+        options: [
+          { id: "cancel", meaning: "descartar" },
+          { id: "edit", meaning: "modificar" },
+        ],
+        pendingAction: pending.action,
+      });
+      return { handler: "answer_pending", message: DISCARD_OR_EDIT_QUESTION, state };
+    }
+
+    // Guardrail: escritura solo con decisión confirm + binding + sin veto de seguridad.
+    const isWrite =
+      pending.action === "odometer_write" ||
+      pending.action === "certificate_issue" ||
+      pending.action === "maintenance_write" ||
+      pending.action === "odoo_ticket_create";
+    if (isWrite) {
+      const gate = assertStructuredWriteConfirmation({
+        decisionAnswer: decision.answer,
+        confidence: decision.confidence,
+        state,
+        originalMessage: deps.originalMessage,
+        expectedAction: pending.action,
+      });
+      if (!gate.ok) {
+        console.error(
+          JSON.stringify({
+            event: "wara_v2_write_confirm_blocked",
+            reason: gate.reason,
+            pendingAction: pending.action,
+            operationId: pending.operationId ?? null,
+            questionId: pending.questionId ?? null,
+          }),
+        );
+        if (!state.lastAgentQuestionMeta || state.lastAgentQuestionMeta.expectedAnswerType !== "confirmation") {
+          bindPendingConfirmationQuestion(state, pending.question, "confirm_write");
+        }
+        return {
+          handler: "answer_pending",
+          message:
+            "Para confirmar la operación respondé CONFIRMO. Si no querés seguir, decime cancelo.",
+          state,
+        };
+      }
+    }
+
     if (pending.action === "gps_report") {
       const unit = findUnitInFleetByRef(deps.fleetUnits, pending.unit);
       if (!unit) {
         state.pendingConfirmation = null;
+        clearLastAgentQuestion(state);
         return { handler: "gps", message: "No pude encontrar esa unidad. Pedime la lista.", state };
       }
       return {
@@ -613,49 +744,71 @@ async function handleAnswerPending(
         state,
       };
     }
-    // Reutilizar paths de escritura con CONFIRMO sintético (ya autorizado por decisión).
+    // Ejecución autorizada por decisión estructurada — sin inventar texto del usuario.
     if (pending.action === "odometer_write") {
       const r = await tryResolveOdometerTurn({
         state,
-        text: "CONFIRMO",
+        text: deps.originalMessage,
         messageId: deps.messageId,
         env: deps.env,
         fleetUnits: deps.fleetUnits,
+        structuredConfirm: true,
       });
       if (r.kind === "reply") return { handler: "odometer", message: r.message, state: r.state };
     }
     if (pending.action === "certificate_issue") {
       const r = await tryResolveCertificateTurn({
         state,
-        text: "CONFIRMO",
+        text: deps.originalMessage,
         messageId: deps.messageId,
         env: deps.env,
         fleetUnits: deps.fleetUnits,
+        structuredConfirm: true,
       });
       if (r.kind === "reply") return { handler: "certificate", message: r.message, state };
     }
     if (pending.action === "maintenance_write") {
       const r = await tryResolveMaintenanceTurn({
         state,
-        text: "CONFIRMO",
+        text: deps.originalMessage,
         messageId: deps.messageId,
         env: deps.env,
         fleetUnits: deps.fleetUnits,
+        structuredConfirm: true,
       });
       if (r.kind === "reply") return { handler: "maintenance", message: r.message, state };
     }
     if (pending.action === "odoo_ticket_create") {
       const r = await tryResolveTicketTurn({
         state,
-        text: "CONFIRMO",
+        text: deps.originalMessage,
         messageId: deps.messageId,
         env: deps.env,
+        structuredConfirm: true,
       });
       if (r.kind === "reply") return { handler: "ticket", message: r.message, state };
     }
   }
 
-  // answer null con pregunta binaria de cancelación + texto no clasificado: no ejecutar.
+  // No reimprimir el formulario de escritura si la última pregunta era aclaración de cancel.
+  if (expected === "cancel_confirmation" || expected === "choice") {
+    setLastAgentQuestion(state, {
+      text: DISCARD_OR_EDIT_QUESTION,
+      purpose: "choose_discard_or_edit",
+      expectedAnswerType: "choice",
+      options: [
+        { id: "cancel", meaning: "descartar" },
+        { id: "edit", meaning: "modificar" },
+      ],
+      pendingAction: pending.action,
+    });
+    return {
+      handler: "answer_pending",
+      message: DISCARD_OR_EDIT_QUESTION,
+      state,
+    };
+  }
+
   if (
     isCompoundCancelContinueQuestion(pending.question) ||
     isCompoundCancelContinueQuestion(state.lastAgentQuestion)
@@ -1038,9 +1191,49 @@ export async function executeTurnDecision(
   deps: ExecuteDeps,
 ): Promise<ExecuteResult> {
   if (decision.action === "clarify") {
+    const q = decision.ambiguity!.question;
+    setLastAgentQuestion(state, {
+      text: q,
+      purpose: "clarify",
+      expectedAnswerType: inferExpectedAnswerTypeFromQuestion(q, state.pendingConfirmation?.action),
+      options:
+        /\bdescartar\b/i.test(q) && /\bmodificar\b/i.test(q)
+          ? [
+              { id: "cancel", meaning: "descartar" },
+              { id: "edit", meaning: "modificar" },
+            ]
+          : undefined,
+      pendingAction: state.pendingConfirmation?.action ?? null,
+    });
     return {
       handler: "clarify",
-      message: decision.ambiguity!.question,
+      message: q,
+      state,
+    };
+  }
+
+  if (decision.action === "query_context" || decision.intent === "query_active_company") {
+    return {
+      handler: "query_active_company",
+      message: replyActiveCompany(state),
+      state,
+    };
+  }
+
+  // Despedida / cierre con disposition cancel: limpiar escritura pendiente sin ejecutar.
+  if (
+    decision.action === "general" &&
+    decision.currentTramiteDisposition === "cancel" &&
+    state.pendingConfirmation
+  ) {
+    const pendingAction = state.pendingConfirmation.action;
+    const r = cancelActiveOrPendingTramite(state);
+    return {
+      handler: "farewell",
+      message:
+        pendingAction === "odoo_ticket_create"
+          ? "De acuerdo. No generé el ticket. Cuando quieras, seguimos."
+          : r.message,
       state,
     };
   }

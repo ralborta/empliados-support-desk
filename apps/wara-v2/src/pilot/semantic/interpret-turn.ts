@@ -21,6 +21,12 @@ export type InterpretTurnInput = {
   localNow: string;
   timezone: string;
   company?: { id: string; name: string };
+  companyContext?: {
+    activeCompanyId: string | null;
+    activeCompanyName: string | null;
+    availableCompanies: Array<{ id: string; name: string }>;
+    pendingCompanySelection: boolean;
+  };
   selectedUnit?: { id: string; plate?: string; name?: string };
   previousSelectedUnit?: { id: string; plate?: string; name?: string };
   proposedUnit?: { id: string; plate?: string; label?: string };
@@ -36,6 +42,14 @@ export type InterpretTurnInput = {
   };
   suspendedTramite?: { type: string; step: string };
   lastAgentQuestion?: string;
+  lastAgentQuestionMeta?: {
+    id: string;
+    purpose: string;
+    expectedAnswerType: string;
+    options?: Array<{ id: string; meaning: string }> | null;
+    pendingAction?: string | null;
+  };
+  expectedAnswerType?: string | null;
   activeListSummary?: { type: string; page: number; visibleIndexes: number[] };
   recentTurns: Array<{ role: "user" | "assistant"; text: string }>;
   availableCapabilities: string[];
@@ -165,6 +179,7 @@ export async function interpretTurn(
     localNow: input.localNow,
     timezone: input.timezone,
     company: input.company ?? null,
+    companyContext: input.companyContext ?? null,
     selectedUnit: input.selectedUnit ?? null,
     previousSelectedUnit: input.previousSelectedUnit ?? null,
     proposedUnit: input.proposedUnit ?? null,
@@ -172,8 +187,11 @@ export async function interpretTurn(
     activeStep: input.activeStep,
     pendingConfirmation: input.pendingConfirmation ?? null,
     activeDraft: input.activeDraft ?? null,
+    pendingEntityResolution: input.pendingEntityResolution ?? null,
     suspendedTramite: input.suspendedTramite ?? null,
     lastAgentQuestion: input.lastAgentQuestion?.slice(0, 240) ?? null,
+    lastAgentQuestionMeta: input.lastAgentQuestionMeta ?? null,
+    expectedAnswerType: input.expectedAnswerType ?? null,
     activeListSummary: input.activeListSummary ?? null,
     recentTurns: input.recentTurns.slice(-8).map((t) => ({
       role: t.role,

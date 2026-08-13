@@ -15,6 +15,7 @@ export const TurnDecisionActionSchema = z.enum([
   "select_entity",
   "lateral_query",
   "answer_domain_question",
+  "query_context",
   "clarify",
   "general",
 ]);
@@ -30,6 +31,7 @@ export const TurnDecisionIntentSchema = z.enum([
   "ticket",
   "human_handoff",
   "domain_knowledge",
+  "query_active_company",
   "none",
 ]);
 
@@ -42,6 +44,7 @@ export const ReasoningCodeSchema = z.enum([
   "CONTEXTUAL_REFERENCE",
   "LATERAL_QUERY",
   "DOMAIN_QUESTION",
+  "QUERY_CONTEXT",
   "INSUFFICIENT_CONTEXT",
   "GENERAL_CONVERSATION",
 ]);
@@ -112,6 +115,7 @@ export const TurnDecisionSchema = z.object({
     .nullable()
     .optional(),
   domainQuestion: DomainQuestionSchema,
+  companyReference: z.enum(["active", "none", "named"]).nullable().optional(),
   currentTramiteDisposition: z.enum(["keep", "suspend", "cancel", "complete"]),
   fieldsToClear: z
     .array(z.enum(["date", "time", "numericValue", "unit"]))
@@ -139,6 +143,7 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
   if ("ambiguity" in o) o.ambiguity = nullish(o.ambiguity);
   if ("fieldsToClear" in o) o.fieldsToClear = nullish(o.fieldsToClear);
   if ("domainQuestion" in o) o.domainQuestion = nullish(o.domainQuestion);
+  if ("companyReference" in o) o.companyReference = nullish(o.companyReference);
   if (o.entity && typeof o.entity === "object" && !Array.isArray(o.entity)) {
     const e = { ...(o.entity as Record<string, unknown>) };
     e.value = nullish(e.value);

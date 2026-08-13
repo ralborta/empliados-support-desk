@@ -26,10 +26,10 @@ import { executeTurnDecision } from "./execute-decision.js";
 import { applySemanticPolicy } from "./policy-engine.js";
 import {
   CANCEL_CERT_REPLY,
-  COMPOUND_CHOICE_REPLY,
   shouldUseCancelShortcut,
   mentionsAnotherServiceAlongsideCancel,
 } from "./cancel-command.js";
+import { DISCARD_OR_EDIT_QUESTION } from "./turn-precedence.js";
 import {
   getDecisionConflictCount,
   resetDecisionConflictCountForTests,
@@ -243,7 +243,7 @@ describe("certificate cancel regressions (unified brain)", () => {
       ...execDeps,
       originalMessage: "sí",
     });
-    assert.equal(exec.message, COMPOUND_CHOICE_REPLY);
+    assert.equal(exec.message, DISCARD_OR_EDIT_QUESTION);
     assert.equal(certWrites, 0);
     assert.equal(st.pendingConfirmation?.action, "certificate_issue");
   });
@@ -262,7 +262,7 @@ describe("certificate cancel regressions (unified brain)", () => {
       ...execDeps,
       originalMessage: "no",
     });
-    assert.equal(exec.message, COMPOUND_CHOICE_REPLY);
+    assert.equal(exec.message, DISCARD_OR_EDIT_QUESTION);
     assert.equal(certWrites, 0);
   });
 
@@ -323,7 +323,7 @@ describe("certificate cancel regressions (unified brain)", () => {
     assert.equal(lab.pendingConfirmation, null);
   });
 
-  it("policy reescribe pregunta compuesta a binaria", () => {
+  it("policy reescribe pregunta compuesta a opciones diferenciadas", () => {
     const st = seedCertPending();
     const decision: TurnDecision = {
       action: "clarify",
@@ -337,6 +337,6 @@ describe("certificate cancel regressions (unified brain)", () => {
       },
     };
     const policy = applySemanticPolicy(decision, st);
-    assert.equal(policy.decision.ambiguity?.question, "¿Querés cancelar la solicitud del certificado?");
+    assert.equal(policy.decision.ambiguity?.question, DISCARD_OR_EDIT_QUESTION);
   });
 });

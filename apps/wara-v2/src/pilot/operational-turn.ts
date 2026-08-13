@@ -111,6 +111,7 @@ import {
 import {
   cancelActiveOrPendingTramite,
 } from "./semantic/cancel-active-tramite.js";
+import { looksLikeFarewell, bindPendingConfirmationQuestion } from "./semantic/turn-precedence.js";
 import { detectOdometerFieldCorrection } from "./semantic/field-correction.js";
 import {
   FECHA_LECTURA_QUESTION,
@@ -965,6 +966,72 @@ export async function resolveOperationalTurn(input: {
       return { kind: "reply", message: cancelled.message, state };
     }
 
+    // Despedida con escritura pendiente: NUNCA confirmar — cancelar/descartar.
+    if (
+      looksLikeFarewell(text) &&
+      state.pendingConfirmation &&
+      state.pendingConfirmation.action !== "gps_report"
+    ) {
+      const pendingAction = state.pendingConfirmation.action;
+      const cancelled = cancelActiveOrPendingTramite(state);
+      const msg =
+        pendingAction === "odoo_ticket_create"
+          ? "De acuerdo. No generé el ticket. Cuando quieras, seguimos."
+          : cancelled.message;
+      appendAssistantTurn(state, msg, null);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: "general",
+        intent: "none",
+        answer: null,
+        currentTramiteDisposition: "cancel",
+        confidence: 1,
+        reasoningCode: "GENERAL_CONVERSATION",
+        handler: "farewell_shortcut",
+        latency_ms: null,
+        model: null,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: false,
+        error: null,
+      });
+      return { kind: "reply", message: msg, state };
+    }
+
+    // Respuesta vinculada a cancel_confirmation: "sí" → cancelar (no reabrir formulario).
+    if (
+      state.pendingConfirmation &&
+      state.lastAgentQuestionMeta?.expectedAnswerType === "cancel_confirmation" &&
+      looksLikeBriefConfirmation(text) &&
+      !looksLikeFarewell(text)
+    ) {
+      const cancelled = cancelActiveOrPendingTramite(state);
+      appendAssistantTurn(state, cancelled.message, null);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: "answer_pending",
+        intent: "none",
+        answer: "confirm",
+        currentTramiteDisposition: "cancel",
+        confidence: 1,
+        reasoningCode: "ANSWER_TO_PENDING",
+        handler: "cancel_confirm_shortcut",
+        latency_ms: null,
+        model: null,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: false,
+        error: null,
+      });
+      return { kind: "reply", message: cancelled.message, state };
+    }
+
     // Atajo: corrección de campos (fecha/hora/valor) — no cancelar.
     {
       const localNow = DateTime.now()
@@ -1165,9 +1232,19 @@ export async function resolveOperationalTurn(input: {
     if (
       state.pendingConfirmation &&
       /^confirmo\b/i.test(text.trim()) &&
-      text.trim().length <= 12
+      text.trim().length <= 24
     ) {
-      // CONFIRMO exacto con operación pendiente — atajo
+      // CONFIRMO del usuario con operación pendiente — atajo (texto real, no sintético).
+      if (
+        !state.lastAgentQuestionMeta ||
+        state.lastAgentQuestionMeta.expectedAnswerType !== "confirmation"
+      ) {
+        bindPendingConfirmationQuestion(
+          state,
+          state.pendingConfirmation.question,
+          "confirm_write",
+        );
+      }
       const fleet = await fetchFleet(state, env);
       const fleetUnits = fleet.ok ? fleet.units : [];
       const confirmoDecision = {
@@ -1304,8 +1381,13 @@ export async function resolveOperationalTurn(input: {
     );
 
     appendAssistantTurn(state, exec.message, decision);
-    state.lastAgentQuestion =
-      decision.action === "clarify" ? exec.message : state.lastAgentQuestion ?? exec.message;
+    if (decision.action === "clarify") {
+      // already set in executeTurnDecision
+    } else if (decision.action === "query_context") {
+      /* keep previous meta */
+    } else {
+      state.lastAgentQuestion = state.lastAgentQuestion ?? exec.message;
+    }
     savePilotConversationState(state);
     logBrainMetrics({
       brain_version: "unified_v1",

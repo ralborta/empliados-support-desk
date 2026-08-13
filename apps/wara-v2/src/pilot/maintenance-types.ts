@@ -20,7 +20,12 @@ export type MaintenanceDraft = {
   mode: "consult" | "request";
 };
 
-export type MaintenanceOperationStatus = "dry_run" | "written" | "failed" | "duplicate_blocked";
+export type MaintenanceOperationStatus =
+  | "dry_run"
+  | "written"
+  | "failed"
+  | "duplicate_blocked"
+  | "cancelled";
 
 export type MaintenanceOperationRecord = {
   operationId: string;

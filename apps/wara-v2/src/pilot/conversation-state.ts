@@ -30,6 +30,7 @@ import type {
   UnitClarificationState,
   UnitSelectionSource,
 } from "./semantic/unit-context.js";
+import type { LastAgentQuestionMeta } from "./semantic/turn-precedence.js";
 
 export type PilotTramiteType =
   | "none"
@@ -56,6 +57,10 @@ export type PilotPendingConfirmation = {
   askedAt: string;
   question: string;
   operationId?: string;
+  /** Versión de la operación pendiente — invalida confirmaciones stale. */
+  version?: number;
+  /** id de lastAgentQuestionMeta vigente al pedir confirmación. */
+  questionId?: string;
 };
 
 export type PilotSuspendedTramite = {
@@ -101,6 +106,8 @@ export type PilotConversationState = {
   lastListingPickIndex: number | null;
   pendingConfirmation: PilotPendingConfirmation | null;
   lastAgentQuestion: string | null;
+  /** Expectativa tipada de la última pregunta del agente (sí/no, CONFIRMO, etc.). */
+  lastAgentQuestionMeta: LastAgentQuestionMeta | null;
   suspendedTramite: PilotSuspendedTramite | null;
   confirmedFields: Record<string, string>;
   pendingFields: string[];
@@ -182,6 +189,7 @@ export function createEmptyPilotState(input: {
     lastListingPickIndex: null,
     pendingConfirmation: null,
     lastAgentQuestion: null,
+    lastAgentQuestionMeta: null,
     suspendedTramite: null,
     confirmedFields: {},
     pendingFields: [],
@@ -276,6 +284,7 @@ function normalizeLoadedState(state: PilotConversationState): PilotConversationS
       greetedAt: null,
       introducedAtilio: false,
     },
+    lastAgentQuestionMeta: state.lastAgentQuestionMeta ?? null,
     suspendedTramite: state.suspendedTramite
       ? {
           ...state.suspendedTramite,
@@ -429,6 +438,7 @@ export function softResetPilotConversation(
   state.pendingConfirmation = null;
   state.pendingFields = [];
   state.lastAgentQuestion = null;
+  state.lastAgentQuestionMeta = null;
   state.suspendedTramite = null;
   state.odometerDraft = null;
   state.maintenanceDraft = null;
@@ -500,6 +510,7 @@ export function clearOperationalTramite(state: PilotConversationState): void {
   state.pendingConfirmation = null;
   state.pendingFields = [];
   state.lastAgentQuestion = null;
+  state.lastAgentQuestionMeta = null;
   state.suspendedTramite = null;
   state.odometerDraft = null;
   state.maintenanceDraft = null;

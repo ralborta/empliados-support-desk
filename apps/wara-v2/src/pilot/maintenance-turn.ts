@@ -38,6 +38,7 @@ import { findUnitInFleetByRef, toFleetUnitRef } from "./unit-fleet.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
 import { isPilotDryRun } from "./write-gates.js";
 import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
+import { bindPendingConfirmationQuestion } from "./semantic/turn-precedence.js";
 
 export type MaintenanceTurnResult =
   | { kind: "none" }
@@ -232,6 +233,7 @@ export async function tryResolveMaintenanceTurn(input: {
   messageId: string;
   env: NodeJS.ProcessEnv;
   fleetUnits: WaraUnidadEstado[];
+  structuredConfirm?: boolean;
 }): Promise<MaintenanceTurnResult> {
   const { state, text, messageId, env } = input;
   const activeMaint =
@@ -249,6 +251,10 @@ export async function tryResolveMaintenanceTurn(input: {
   if (!state.maintenanceOperations) state.maintenanceOperations = {};
 
   const draft = state.maintenanceDraft;
+
+  if (input.structuredConfirm && state.pendingConfirmation?.action === "maintenance_write") {
+    return executeMaintenanceRequest(state, draft, messageId, env);
+  }
 
   if (looksLikeCancelMaintenance(text)) {
     state.maintenanceDraft = emptyDraft("request");
@@ -387,7 +393,9 @@ export async function tryResolveMaintenanceTurn(input: {
       askedAt: new Date().toISOString(),
       question: q,
       operationId: createMaintenanceOperationId(),
+      version: 1,
     };
+    bindPendingConfirmationQuestion(state, q, "confirm_maintenance_write");
     return { kind: "reply", message: q, state };
   }
 

@@ -31,6 +31,7 @@ import { priorityLabel } from "./maintenance-core.js";
 import { isPilotDryRun } from "./write-gates.js";
 import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
 import { invokeLabTicketBridge } from "./pilot-bridge-sync.js";
+import { bindPendingConfirmationQuestion } from "./semantic/turn-precedence.js";
 
 export type TicketTurnResult =
   | { kind: "none" }
@@ -268,6 +269,7 @@ export async function tryResolveTicketTurn(input: {
   text: string;
   messageId: string;
   env: NodeJS.ProcessEnv;
+  structuredConfirm?: boolean;
 }): Promise<TicketTurnResult> {
   const { state, text, messageId, env } = input;
   const activeTicket =
@@ -275,13 +277,17 @@ export async function tryResolveTicketTurn(input: {
     (state.ticketDraft && state.ticketDraft.step !== "idle") ||
     state.pendingConfirmation?.action === "odoo_ticket_create";
 
-  if (!activeTicket && !looksLikeTicketIntent(text)) return { kind: "none" };
+  if (!activeTicket && !looksLikeTicketIntent(text) && !input.structuredConfirm) return { kind: "none" };
 
   if (!state.ticketDraft) {
     state.ticketDraft = emptyDraft(inferTicketCategory(text));
   }
   if (!state.ticketOperations) state.ticketOperations = {};
   const draft = state.ticketDraft;
+
+  if (input.structuredConfirm && state.pendingConfirmation?.action === "odoo_ticket_create") {
+    return executeTicket(state, draft, messageId, env);
+  }
 
   if (looksLikeCancelTicket(text)) {
     state.ticketDraft = emptyDraft();
@@ -296,7 +302,9 @@ export async function tryResolveTicketTurn(input: {
       draft.step = "await_reason";
       return { kind: "reply", message: "Ok, no creo el ticket. Decime el motivo correcto.", state };
     }
-    if (looksLikeExplicitConfirm(text) || looksLikeBriefConfirmation(text)) {
+    // Solo confirmación explícita del usuario — cortesía/despedida nunca ejecutan.
+    // No sintetizar CONFIRMO: el texto debe ser el del turno actual.
+    if (/^confirmo\b/i.test(text.trim()) && text.trim().length <= 24) {
       return executeTicket(state, draft, messageId, env);
     }
     if (text.trim().length >= 6) {
@@ -349,8 +357,11 @@ export async function tryResolveTicketTurn(input: {
       askedAt: new Date().toISOString(),
       question: q,
       operationId: createTicketOperationId(),
+      version: 1,
     };
-    if (looksLikeExplicitConfirm(text) || looksLikeBriefConfirmation(text)) {
+    bindPendingConfirmationQuestion(state, q, "confirm_ticket");
+    // Solo CONFIRMO explícito del usuario — nunca cortesía/despedida.
+    if (/^confirmo\b/i.test(text.trim()) && text.trim().length <= 24) {
       return executeTicket(state, draft, messageId, env);
     }
     return { kind: "reply", message: q, state };

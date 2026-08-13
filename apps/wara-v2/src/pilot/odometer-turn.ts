@@ -264,6 +264,8 @@ export async function tryResolveOdometerTurn(input: {
   messageId: string;
   env: NodeJS.ProcessEnv;
   fleetUnits: WaraUnidadEstado[];
+  /** Confirmación ya validada por decisión estructurada (no reinterpretar texto). */
+  structuredConfirm?: boolean;
 }): Promise<OdometerTurnResult> {
   const { state, text, messageId, env } = input;
   const unified = isInsideUnifiedBrainContext();
@@ -272,6 +274,10 @@ export async function tryResolveOdometerTurn(input: {
 
   const draft = state.odometerDraft;
   const meterTypeHint = draft.meterType ?? detectMeterTypeFromText(text) ?? "odometro";
+
+  if (input.structuredConfirm && state.pendingConfirmation?.action === "odometer_write") {
+    return executeWrite(state, draft, messageId, env);
+  }
 
   if (!unified && looksLikeCancelOdometer(text)) {
     state.odometerDraft = emptyDraft();

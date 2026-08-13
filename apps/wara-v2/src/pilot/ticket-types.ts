@@ -21,7 +21,12 @@ export type TicketDraft = {
   step: TicketDraftStep;
 };
 
-export type TicketOperationStatus = "dry_run" | "written" | "failed" | "duplicate_blocked";
+export type TicketOperationStatus =
+  | "dry_run"
+  | "written"
+  | "failed"
+  | "duplicate_blocked"
+  | "cancelled";
 
 export type TicketOperationRecord = {
   operationId: string;

@@ -180,6 +180,7 @@ export async function tryResolveCertificateTurn(input: {
   messageId: string;
   env: NodeJS.ProcessEnv;
   fleetUnits: WaraUnidadEstado[];
+  structuredConfirm?: boolean;
 }): Promise<CertificateTurnResult> {
   const { state, text, messageId, env } = input;
   const unified = isInsideUnifiedBrainContext();
@@ -195,6 +196,10 @@ export async function tryResolveCertificateTurn(input: {
   if (!state.certificateOperations) state.certificateOperations = {};
   const draft = state.certificateDraft;
   if (!unified) resolveCertificateType(text);
+
+  if (input.structuredConfirm && state.pendingConfirmation?.action === "certificate_issue" && draft.unit) {
+    return executeIssue(state, draft, messageId, env);
+  }
 
   if (!unified && looksLikeCancelCertificate(text)) {
     state.certificateDraft = emptyDraft();

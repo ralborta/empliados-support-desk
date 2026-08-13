@@ -3,6 +3,7 @@
  * No son heurísticas conversacionales: son órdenes al trámite activo/pending.
  */
 import type { PilotConversationState } from "../conversation-state.js";
+import { looksLikeUnequivocalCancelRequest } from "./turn-precedence.js";
 
 function norm(text: string): string {
   return text
@@ -65,9 +66,9 @@ export function shouldUseCancelShortcut(
     Boolean,
   ).length;
 
-  // Bare cancelar / cancelalo: solo con un único trámite cancelable.
-  if (/^(cancelar|cancela|cancelalo|cancelala|anular|anula)$/.test(t)) {
-    return activeCount === 1;
+  // Cancelación inequívoca con un único trámite cancelable.
+  if (looksLikeUnequivocalCancelRequest(t) && activeCount === 1) {
+    return true;
   }
 
   // cancelar el certificado / no quiero el certificado → solo si certificado es el objetivo.

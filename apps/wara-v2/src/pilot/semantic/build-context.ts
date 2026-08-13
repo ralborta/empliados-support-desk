@@ -4,10 +4,11 @@
 import type { PilotConversationState } from "../conversation-state.js";
 import type { InterpretTurnInput } from "./interpret-turn.js";
 import { recentTurnsForInterpreter } from "./conversation-history.js";
+import { buildCompanyContext } from "./turn-precedence.js";
 
 const TZ = "America/Argentina/Buenos_Aires";
 
-const CAPABILITIES = [
+  const CAPABILITIES = [
   "unit_list",
   "unit_search",
   "gps",
@@ -18,6 +19,7 @@ const CAPABILITIES = [
   "ticket",
   "human_handoff",
   "domain_knowledge",
+  "query_active_company",
 ];
 
 const REQUIRED: Record<string, string[]> = {
@@ -64,6 +66,7 @@ export function buildInterpretTurnInput(
 ): InterpretTurnInput {
   const localNow = new Date().toLocaleString("sv-SE", { timeZone: TZ }).replace(" ", "T");
   const list = state.lastListing;
+  const companyContext = buildCompanyContext(state);
   return {
     message,
     localNow,
@@ -71,6 +74,7 @@ export function buildInterpretTurnInput(
     company: state.companyName
       ? { id: String(state.selectedContactId ?? ""), name: state.companyName }
       : undefined,
+    companyContext,
     selectedUnit: state.selectedUnit
       ? {
           id: String(state.selectedUnit.movil_id),
@@ -113,6 +117,16 @@ export function buildInterpretTurnInput(
       ? { type: state.suspendedTramite.tramite, step: state.suspendedTramite.step }
       : undefined,
     lastAgentQuestion: state.lastAgentQuestion ?? state.pendingConfirmation?.question,
+    lastAgentQuestionMeta: state.lastAgentQuestionMeta
+      ? {
+          id: state.lastAgentQuestionMeta.id,
+          purpose: state.lastAgentQuestionMeta.purpose,
+          expectedAnswerType: state.lastAgentQuestionMeta.expectedAnswerType,
+          options: state.lastAgentQuestionMeta.options ?? null,
+          pendingAction: state.lastAgentQuestionMeta.pendingAction ?? null,
+        }
+      : undefined,
+    expectedAnswerType: state.lastAgentQuestionMeta?.expectedAnswerType ?? null,
     activeListSummary: list
       ? {
           type: list.kind,
