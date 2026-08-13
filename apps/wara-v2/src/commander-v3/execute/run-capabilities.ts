@@ -85,21 +85,23 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
       ? [...ctx.plan.requestedCapabilities]
       : inferDefaultCapabilities(ctx.plan, state);
 
-  // Contrato: unit_query siempre ejecuta unit.search (el LLM no puede “prometer” la lista sin tool).
+  // Contrato: unit_query lista flota SOLO si no estamos seleccionando una unidad.
   if (
     ctx.plan.task === "unit_query" &&
-    !caps.some((c) => c.name === "unit.search")
+    !caps.some((c) => c.name === "unit.search") &&
+    !caps.some((c) => c.name === "unit.select") &&
+    !ctx.resolvedUnit
   ) {
     caps.unshift({ name: "unit.search", params: {} });
   }
 
   const toolFacts: string[] = [];
+  const selectingUnit = caps.some((c) => c.name === "unit.select");
   for (const req of caps) {
-    // Si ya hay unidad resuelta/seleccionada y no es consulta de listado, no volver a listar.
+    // Nunca listar flota en el mismo turno que unit.select / ref exacta de este turno.
     if (
       req.name === "unit.search" &&
-      ctx.plan.task !== "unit_query" &&
-      (ctx.resolvedUnit || state.unit)
+      (selectingUnit || Boolean(ctx.resolvedUnit))
     ) {
       continue;
     }

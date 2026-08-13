@@ -333,27 +333,16 @@ export async function runCommanderTurn(
     }
   }
 
-  // Contrato: si la unidad ya está resuelta (ref exacta / activa), NO listar flota
-  // en el mismo turno de odo/horo/cert. Evita "Unidad: X" + listado + "decime patente".
+  // Contrato: si este turno SELECCIONA o ya RESUELVE una unidad exacta,
+  // no listar flota (evita "¿En qué te ayudo?" + listado completo).
   const unitAlreadyKnown = Boolean(
     resolvedUnit ||
-      (state.unit &&
-        plan.unitReference?.reference === "active") ||
       plan.requestedCapabilities.some((c) => c.name === "unit.select"),
   );
-  const writingTask =
-    plan.task === "odometer" ||
-    plan.task === "hourmeter" ||
-    plan.task === "certificate" ||
-    plan.requestedCapabilities.some(
-      (c) =>
-        c.name === "odometer.prepare" ||
-        c.name === "hourmeter.prepare" ||
-        c.name === "certificate.prepare",
-    );
-  if (unitAlreadyKnown && writingTask && plan.task !== "unit_query") {
+  if (unitAlreadyKnown) {
     plan = {
       ...plan,
+      task: plan.task === "unit_query" ? null : plan.task,
       requestedCapabilities: plan.requestedCapabilities.filter(
         (c) => c.name !== "unit.search",
       ),

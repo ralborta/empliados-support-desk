@@ -12,7 +12,7 @@ import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("prompt version bump 13j", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13q/);
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13r/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -669,6 +669,66 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     const text = exec.facts.join("\n");
     assert.match(text, /Unidad: AA 175 BY|Pasame el valor|odómetro/i);
+    assert.doesNotMatch(text, /listado completo|Decime el número o la patente/i);
+    assert.equal(
+      exec.results.some((r) => r.capability === "unit.search"),
+      false,
+    );
+  });
+
+  it("unit.select no re-lista flota (solo ayuda)", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.fleetCache = [
+      {
+        movilId: 1,
+        plate: "AA175BY",
+        name: "M900-071",
+        label: "AA 175 BY (M900-071)",
+      },
+      {
+        movilId: 2,
+        plate: "BB222BB",
+        name: "M900-072",
+        label: "BB 222 BB (M900-072)",
+      },
+    ];
+    s.lastQuestion = { id: "1", purpose: "select_unit", expected: "unit" };
+    const unit = {
+      movilId: 1,
+      plate: "AA175BY",
+      name: "M900-071",
+      label: "AA 175 BY (M900-071)",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "eligió unidad",
+      conversationalAct: "inform",
+      task: "unit_query",
+      unitReference: {
+        kind: "unit",
+        mode: "unit_name",
+        value: "900071",
+        reference: null,
+      },
+      requestedCapabilities: [
+        { name: "unit.select", params: { movilId: 1 } },
+        { name: "unit.search", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: unit,
+      resolvedCompanyId: null,
+      message: "900071",
+    });
+    const text = exec.facts.join("\n");
+    assert.match(text, /Unidad: AA 175 BY|¿En qué te ayudo/i);
     assert.doesNotMatch(text, /listado completo|Decime el número o la patente/i);
     assert.equal(
       exec.results.some((r) => r.capability === "unit.search"),
