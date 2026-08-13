@@ -1,6 +1,7 @@
 # Diagnóstico — GPS / plantilla genérica / saludo
 
 **Fecha:** 2026-08-13  
+**SHA local:** `4558157`  
 **Regla:** sin deploy hasta revisión.
 
 ## Trace de la captura (fallida en lab)
