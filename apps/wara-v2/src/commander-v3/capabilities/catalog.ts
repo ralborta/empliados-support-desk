@@ -44,7 +44,8 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   },
   {
     name: "unit.search",
-    purpose: "Buscar unidades / listar flota",
+    purpose:
+      "Buscar unidades o listar flota completa (lista/la lista/lista porfa/listado → sin query)",
     params: ["query", "mode"],
     kind: "read",
     requiredFields: ["company"],
