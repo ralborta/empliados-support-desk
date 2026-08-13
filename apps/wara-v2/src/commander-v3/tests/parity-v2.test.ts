@@ -12,7 +12,7 @@ import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("prompt version bump 13j", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13m/);
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13n/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -471,6 +471,47 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /M300-001/);
     assert.doesNotMatch(exec.facts.join(" "), /M900-002/);
+  });
+
+  it("unit.search lista no usa el mensaje como query", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.fleetCache = [
+      {
+        movilId: 1,
+        plate: "AA175BY",
+        name: "M900-071",
+        label: "AA 175 BY (M900-071)",
+      },
+      {
+        movilId: 2,
+        plate: "AA385NP",
+        name: "M600-095",
+        label: "AA 385 NP (M600-095)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "lista",
+      conversationalAct: "inform",
+      task: "unit_query",
+      requestedCapabilities: [{ name: "unit.search", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.95,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "me pasas la lista de unidades?",
+    });
+    const text = exec.facts.join("\n");
+    assert.match(text, /listado completo|Unidades en/i);
+    assert.match(text, /M900-071/);
+    assert.match(text, /M600-095/);
   });
 
   it("odometer.prepare rechaza fecha futura", async () => {

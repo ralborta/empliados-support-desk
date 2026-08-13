@@ -20,7 +20,10 @@ import { getCapability } from "../capabilities/catalog.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan, CapabilityRequest } from "../types/turn-plan.js";
 import type { UnitRef } from "../types/refs.js";
-import { filterFleetCacheByQuery } from "./fleet-query.js";
+import {
+  filterFleetCacheByQuery,
+  isStructuredFleetQuery,
+} from "./fleet-query.js";
 import { inferMaintenanceMeta } from "./maintenance-meta.js";
 
 export type ToolResult = {
@@ -340,18 +343,26 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
     }
     case "unit.search": {
       const pageSize = 8;
-      const query = String(
-        req.params?.query ??
-          ctx.plan.unitReference?.value ??
-          ctx.message ??
-          "",
-      ).trim();
-      const mode = String(req.params?.mode ?? (query ? "query" : "list"));
+      // Solo query estructurada del TurnPlan — NUNCA el mensaje crudo (rompe "lista de unidades").
+      const rawQuery = String(req.params?.query ?? "").trim();
+      const query = isStructuredFleetQuery(rawQuery) ? rawQuery : "";
+      const modeRaw = String(req.params?.mode ?? "").trim().toLowerCase();
+      const mode =
+        modeRaw === "list" || (modeRaw === "query" && query)
+          ? modeRaw === "list"
+            ? "list"
+            : "query"
+          : query
+            ? "query"
+            : "list";
       const filtered =
-        mode !== "list" && query
+        mode === "query" && query
           ? filterFleetCacheByQuery(ctx.state, query)
           : ctx.state.fleetCache;
-      const source = filtered.length ? filtered : ctx.state.fleetCache;
+      const source =
+        mode === "query" && query
+          ? filtered
+          : ctx.state.fleetCache;
       const items = source.slice(0, pageSize).map((u, i) => ({
         index: i + 1,
         label: u.label,
@@ -365,13 +376,33 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         items,
         fetchedAt: new Date().toISOString(),
       };
+      if (!ctx.state.fleetCache.length) {
+        return {
+          capability: req.name,
+          ok: false,
+          facts: [
+            "No pude cargar la flota de unidades ahora. Probá de nuevo en un momento.",
+          ],
+          error: "no_fleet",
+          data: {
+            statePatch: {
+              lastListing: null,
+              lastQuestion: {
+                id: randomUUID(),
+                purpose: "retry_fleet",
+                expected: "unit" as const,
+              },
+            },
+          },
+        };
+      }
       const scope =
-        query && filtered.length
+        mode === "query" && query && filtered.length
           ? `coincidencias de «${query}»`
-          : query && !filtered.length
-            ? `sin coincidencias de «${query}»; muestro el listado general`
-            : "listado";
-      const header = `Unidades en ${ctx.state.company?.name ?? "tu empresa"} (${scope}, página 1/${Math.max(1, Math.ceil(listing.totalCount / pageSize))}, ${listing.totalCount} en total):`;
+          : mode === "query" && query && !filtered.length
+            ? `sin coincidencias de «${query}»`
+            : "listado completo";
+      const header = `Unidades en ${ctx.state.company?.name ?? "tu empresa"} (${scope}, página 1/${Math.max(1, Math.ceil(Math.max(listing.totalCount, 1) / pageSize))}, ${listing.totalCount} en total):`;
       const body = items.map((i) => `${i.index}. ${i.label}`).join("\n");
       return {
         capability: req.name,

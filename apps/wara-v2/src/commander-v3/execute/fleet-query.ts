@@ -12,6 +12,19 @@ import {
 } from "../../pilot/plates.js";
 import type { ConversationStateV3 } from "../types/state.js";
 
+/** Query válida de filtro (patente/código/marca corta). Frases conversacionales no son query. */
+export function isStructuredFleetQuery(query: string): boolean {
+  const q = query.trim();
+  if (!q || q.length > 40) return false;
+  if (/[?]/.test(q)) return false;
+  if (extractUnitNameCode(q)) return true;
+  const plate = normalizeLoosePlate(q);
+  if (plate && isPlausibleVehiclePlate(plate)) return true;
+  const words = q.split(/\s+/).filter(Boolean);
+  // Filtro de flota = token corto (marca/prefijo), no oración.
+  return words.length <= 2 && q.length <= 24;
+}
+
 export function filterFleetCacheByQuery(
   state: ConversationStateV3,
   query: string,

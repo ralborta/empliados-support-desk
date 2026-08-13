@@ -5,12 +5,20 @@ import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
 
 const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
-- Español rioplatense natural: vos, cálido, breve, sin sonar a formulario.
-- Una o dos frases cortas + pregunta si hace falta. Como un colega que ayuda.
+- Español rioplatense natural: vos, cálido, humano. Como un colega que ayuda, no un formulario.
 - NO inventes hechos. NO agregues tools. NO cambies empresa/unidad.
-- NO menús genéricos. NO corrijas ortografía del usuario.
-- Usá SOLO los hechos validados y el responseGoal.
-- Evitá tono robótico ("Indique…", "Por favor proporcione…"). Preferí "¿Cuántos km?", "¿Qué unidad?", "Mandame CONFIRMO y lo grabo".`;
+- Usá SOLO los hechos validados (facts) y el responseGoal.
+- LISTADOS: si hay un listado numerado en facts, copialo COMPLETO tal cual (todas las líneas 1. 2. 3.…). PROHIBIDO resumir como "tengo el listado" o "¿alguna en particular?" sin pegar las unidades.
+- Si el usuario preguntó algo fuera del trámite, respondé eso primero con los facts disponibles; no lo ignores para forzar el flujo.
+- Si no hay facts suficientes o no estás seguro, preguntá con naturalidad qué precisan (una sola pregunta).
+- Evitá tono robótico. Preferí "¿Cuántos km?", "¿Qué unidad?", "Mandame CONFIRMO y lo grabo".
+- NO menús genéricos inventados. NO corrijas ortografía del usuario.`;
+
+function looksLikeListingFact(f: string): boolean {
+  const lines = f.split("\n").filter((l) => l.trim());
+  const numbered = lines.filter((l) => /^\d+\.\s/.test(l.trim())).length;
+  return numbered >= 2 || (/Unidades en/i.test(f) && numbered >= 1);
+}
 
 export async function redactReply(input: {
   plan: TurnPlan;
@@ -59,6 +67,15 @@ export async function redactReply(input: {
     };
   }
 
+  // Hechos validados con listado: no pasar por LLM (evita "tengo el listado" sin ítems).
+  if (input.facts.some(looksLikeListingFact)) {
+    return {
+      reply: fallbackFromFacts(input.facts, input.plan),
+      usedLlm: false,
+      latencyMs: 0,
+    };
+  }
+
   const purpose = input.plan.responseGoal.purpose;
   const wantsNatural =
     purpose === "ask_missing" ||
@@ -67,7 +84,6 @@ export async function redactReply(input: {
     purpose === "confirm_write" ||
     Boolean(input.plan.responseGoal.nextQuestion);
 
-  // Datos puros cortos: sin LLM. Conversación (pedir dato, confirmar, aclarar): LLM.
   if (!wantsNatural && input.facts.length === 1 && input.facts[0]!.length < 500) {
     return { reply: input.facts[0]!, usedLlm: false, latencyMs: 0 };
   }
@@ -102,7 +118,7 @@ export async function redactReply(input: {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.45,
+        temperature: 0.4,
         messages: [
           { role: "system", content: REDACTOR_SYSTEM },
           {
@@ -115,6 +131,8 @@ export async function redactReply(input: {
               unit: input.state.unit?.label ?? null,
               task: input.state.activeTask?.type ?? null,
               act: input.plan.conversationalAct,
+              userMessageHint:
+                "Respondé de forma humana. Si hay listado en facts, incluilo completo.",
             }),
           },
         ],
@@ -151,7 +169,9 @@ export async function redactReply(input: {
 
 function fallbackFromFacts(facts: string[], plan: TurnPlan): string {
   if (facts.length && plan.responseGoal.nextQuestion) {
-    return `${facts.join("\n\n")}\n\n${plan.responseGoal.nextQuestion}`;
+    const joined = facts.join("\n\n");
+    if (facts.some(looksLikeListingFact)) return joined;
+    return `${joined}\n\n${plan.responseGoal.nextQuestion}`;
   }
   if (facts.length) return facts.join("\n\n");
   if (plan.responseGoal.nextQuestion) return plan.responseGoal.nextQuestion;
