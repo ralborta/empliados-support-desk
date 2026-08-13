@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ae", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ae/);
+  it("prompt version bump 13af", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13af/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1784,5 +1784,51 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
         WARA_V2_LAB_MODE: "true",
       },
     });
+  });
+
+  it("km numérico mid-odo no switch a unit_query ni aviso pendiente", async () => {
+    const { isSwitchingTask, enrichPlanForTaskSwitch } = await import(
+      "../enrich/task-switch.js"
+    );
+    const { enrichPlanForMeterValueFallback } = await import(
+      "../enrich/expected-field-capture.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value", "date", "time"],
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "meter_value",
+      expected: "value",
+    };
+    s.unit = {
+      movilId: 7,
+      plate: "AG562SP",
+      name: "900077",
+      label: "AG 562 SP",
+    };
+    let plan = TurnPlanSchema.parse({
+      reasoning: "LLM confunde el km con unit_query",
+      conversationalAct: "start_task",
+      task: "unit_query",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "unit.search", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "clarify", facts: [] },
+      confidence: 0.7,
+    });
+    assert.equal(isSwitchingTask(plan, s), false);
+    plan = enrichPlanForMeterValueFallback(plan, s, "900078");
+    assert.equal(plan.suppliedFields?.value, 900078);
+    assert.equal(plan.conversationalAct, "continue_task");
+    plan = enrichPlanForTaskSwitch(plan, s);
+    assert.equal(
+      (plan.responseGoal.facts ?? []).some((f) => /Dejamos pendiente/i.test(f)),
+      false,
+    );
   });
 });

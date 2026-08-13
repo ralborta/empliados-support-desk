@@ -89,7 +89,9 @@ export function enrichPlanForExpectedFields(
       suppliedFields: { ...(plan.suppliedFields ?? {}), value },
       responseGoal: {
         purpose: "ask_missing",
-        facts: [],
+        facts: (plan.responseGoal.facts ?? []).filter(
+          (f) => !/Dejamos pendiente/i.test(f),
+        ),
         nextQuestion: null,
       },
       reasoning:
@@ -101,6 +103,52 @@ export function enrichPlanForExpectedFields(
   }
 
   return plan;
+}
+
+/** Si mid-odo pide km y el mensaje es solo número, capturar aunque el LLM mienta el act. */
+export function enrichPlanForMeterValueFallback(
+  plan: TurnPlan,
+  state: ConversationStateV3,
+  message: string,
+): TurnPlan {
+  if (
+    state.activeTask?.type !== "odometer" &&
+    state.activeTask?.type !== "hourmeter"
+  ) {
+    return plan;
+  }
+  if (state.activeTask.status !== "collecting" || state.pendingWrite) {
+    return plan;
+  }
+  if (state.activeTask.collected?.value != null) return plan;
+  if (plan.suppliedFields?.value != null) return plan;
+
+  const t = message.trim();
+  const m = t.match(/^(\d+(?:[.,]\d+)?)$/);
+  if (!m) return plan;
+  const value = Number(m[1]!.replace(",", "."));
+  if (!Number.isFinite(value)) return plan;
+
+  const meter = state.activeTask.type;
+  let next: TurnPlan = {
+    ...plan,
+    conversationalAct: "continue_task",
+    task: meter,
+    taskAction: "continue",
+    suppliedFields: { ...(plan.suppliedFields ?? {}), value },
+    responseGoal: {
+      purpose: "ask_missing",
+      facts: (plan.responseGoal.facts ?? []).filter(
+        (f) => !/Dejamos pendiente/i.test(f),
+      ),
+      nextQuestion: null,
+    },
+    reasoning:
+      plan.reasoning ||
+      `Fallback: valor ${value} en mensaje numérico durante recolección de ${meter}.`,
+  };
+  next = ensureCap(next, `${meter}.prepare`);
+  return next;
 }
 
 function enrichExpectedUnit(

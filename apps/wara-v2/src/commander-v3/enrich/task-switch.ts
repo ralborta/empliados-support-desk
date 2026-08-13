@@ -29,11 +29,30 @@ function taskLabel(task: string | null | undefined): string {
   }
 }
 
+const OPERATIONAL_SWITCH_TARGETS = new Set<string>([
+  "certificate",
+  "odometer",
+  "hourmeter",
+  "maintenance",
+  "gps",
+  "human_handoff",
+]);
+
 export function isSwitchingTask(
   plan: TurnPlan,
   state: ConversationStateV3,
 ): boolean {
   if (!plan.task) return false;
+  // unit_query no es un trámite operativo: el LLM lo usa al pedirle km/patente
+  // y no debe suspender odómetro/cert ("Seguimos con trámite").
+  if (!OPERATIONAL_SWITCH_TARGETS.has(plan.task)) return false;
+
+  // Si estamos pidiendo un campo concreto, el mensaje es la respuesta — no un switch.
+  const expected = state.lastQuestion?.expected;
+  if (expected === "value" || expected === "date" || expected === "time") {
+    return false;
+  }
+
   const act =
     plan.conversationalAct === "start_task" ||
     plan.conversationalAct === "switch_task" ||

@@ -18,7 +18,10 @@ import {
 } from "./enrich/company-capture.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
-import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
+import {
+  enrichPlanForExpectedFields,
+  enrichPlanForMeterValueFallback,
+} from "./enrich/expected-field-capture.js";
 import { enrichPlanForMeterUnitInMessage } from "./enrich/meter-unit-from-message.js";
 import {
   enrichPlanForFleetSearchQuery,
@@ -407,6 +410,9 @@ export async function runCommanderTurn(
   plan = enrichPlanWithNaturalDatetime(plan, state, input.message, dtOpts);
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
   plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+  // Campos esperados ANTES del switch: un "900078" es el km, no un trámite nuevo.
+  plan = enrichPlanForExpectedFields(plan, state, input.message);
+  plan = enrichPlanForMeterValueFallback(plan, state, input.message);
   plan = enrichPlanForTaskSwitch(plan, state);
   plan = enrichPlanForCancelGuard(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
@@ -414,13 +420,12 @@ export async function runCommanderTurn(
   plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
   plan = enrichPlanForIdlePendingConfirm(plan, state, input.message);
   plan = enrichPlanForIdlePendingClarifyAnswer(plan, state, input.message);
-  plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterUnitInMessage(plan, state, input.message);
   plan = enrichPlanPromoteGpsFromReasoning(plan, state);
   plan = enrichPlanForGpsUnitInMessage(plan, state, input.message);
   plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
 
-  // Mid odómetro/horómetro: nunca GPS ni otro hijack; seguir pidiendo km/fecha.
+  // Mid odómetro/horómetro: nunca GPS/unit_query hijack; seguir pidiendo km/fecha.
   if (
     (state.activeTask?.type === "odometer" ||
       state.activeTask?.type === "hourmeter") &&
@@ -429,29 +434,63 @@ export async function runCommanderTurn(
   ) {
     const meter = state.activeTask.type;
     const prep = meter === "hourmeter" ? "hourmeter.prepare" : "odometer.prepare";
+    const switchTarget = plan.task;
+    const realOpsSwitch =
+      (plan.conversationalAct === "switch_task" ||
+        plan.taskAction === "switch" ||
+        plan.conversationalAct === "start_task") &&
+      switchTarget &&
+      switchTarget !== meter &&
+      (switchTarget === "certificate" ||
+        switchTarget === "gps" ||
+        switchTarget === "maintenance" ||
+        switchTarget === "human_handoff" ||
+        switchTarget === "odometer" ||
+        switchTarget === "hourmeter");
+    const answeringField =
+      state.lastQuestion?.expected === "value" ||
+      state.lastQuestion?.expected === "date" ||
+      state.lastQuestion?.expected === "time" ||
+      /^\d+(?:[.,]\d+)?$/.test(input.message.trim());
+    const keepSwitch = Boolean(realOpsSwitch) && !answeringField;
+    const scrubbedFacts = (plan.responseGoal.facts ?? []).filter(
+      (f) => !/Dejamos pendiente/i.test(f),
+    );
     plan = {
       ...plan,
-      task: meter,
+      task: keepSwitch ? switchTarget! : meter,
       conversationalAct:
-        plan.conversationalAct === "cancel_task" ||
-        plan.conversationalAct === "switch_task"
-          ? plan.conversationalAct
-          : "continue_task",
+        plan.conversationalAct === "cancel_task"
+          ? "cancel_task"
+          : keepSwitch
+            ? "switch_task"
+            : "continue_task",
       taskAction:
-        plan.taskAction === "cancel" || plan.taskAction === "switch"
-          ? plan.taskAction
-          : "continue",
-      requestedCapabilities: [
-        ...plan.requestedCapabilities.filter(
-          (c) =>
-            c.name !== "gps.get_status" &&
-            c.name !== "unit.search" &&
-            c.name !== "domain.answer",
-        ),
-        ...(plan.requestedCapabilities.some((c) => c.name === prep)
-          ? []
-          : [{ name: prep, params: {} }]),
-      ],
+        plan.taskAction === "cancel"
+          ? "cancel"
+          : keepSwitch
+            ? "switch"
+            : "continue",
+      responseGoal: keepSwitch
+        ? plan.responseGoal
+        : {
+            ...plan.responseGoal,
+            purpose: "ask_missing",
+            facts: scrubbedFacts,
+          },
+      requestedCapabilities: keepSwitch
+        ? plan.requestedCapabilities
+        : [
+            ...plan.requestedCapabilities.filter(
+              (c) =>
+                c.name !== "gps.get_status" &&
+                c.name !== "unit.search" &&
+                c.name !== "domain.answer",
+            ),
+            ...(plan.requestedCapabilities.some((c) => c.name === prep)
+              ? []
+              : [{ name: prep, params: {} }]),
+          ],
     };
   }
 
