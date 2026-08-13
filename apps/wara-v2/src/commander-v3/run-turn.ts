@@ -21,6 +21,7 @@ import { enrichPlanForMeterUnitInMessage } from "./enrich/meter-unit-from-messag
 import {
   enrichPlanForFleetSearchQuery,
   enrichPlanForGpsUnitInMessage,
+  enrichPlanPromoteGpsFromReasoning,
 } from "./enrich/gps-unit-from-message.js";
 import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
 import {
@@ -316,6 +317,7 @@ export async function runCommanderTurn(
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterUnitInMessage(plan, state, input.message);
+  plan = enrichPlanPromoteGpsFromReasoning(plan);
   plan = enrichPlanForGpsUnitInMessage(plan, state, input.message);
   plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
 
@@ -463,9 +465,16 @@ export async function runCommanderTurn(
 
   // Contrato: si este turno SELECCIONA o ya RESUELVE una unidad exacta,
   // no listar flota (evita "¿En qué te ayudo?" + listado completo).
+  // Con unidad YA activa + GPS/trámite de lectura/escritura: tampoco listar.
   const unitAlreadyKnown = Boolean(
     resolvedUnit ||
-      plan.requestedCapabilities.some((c) => c.name === "unit.select"),
+      plan.requestedCapabilities.some((c) => c.name === "unit.select") ||
+      (state.unit &&
+        (plan.task === "gps" ||
+          plan.task === "odometer" ||
+          plan.task === "hourmeter" ||
+          plan.task === "certificate" ||
+          plan.requestedCapabilities.some((c) => c.name === "gps.get_status"))),
   );
   if (unitAlreadyKnown) {
     plan = {
@@ -477,7 +486,7 @@ export async function runCommanderTurn(
     };
   }
 
-  // Orden estable: select → prepare → resto (search solo si sigue faltando unidad)
+  // Orden estable: select → search (si falta unidad) → prepare → resto
   {
     const caps = plan.requestedCapabilities;
     const select = caps.filter((c) => c.name === "unit.select");
@@ -491,7 +500,7 @@ export async function runCommanderTurn(
     );
     plan = {
       ...plan,
-      requestedCapabilities: [...select, ...prepare, ...rest, ...search],
+      requestedCapabilities: [...select, ...search, ...prepare, ...rest],
     };
   }
   if (

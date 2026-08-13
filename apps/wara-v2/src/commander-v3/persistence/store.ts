@@ -61,7 +61,13 @@ export function resetConversationStateV3(
       prev.conversationMetadata.introducedAtilio;
   }
   if (seed?.company) empty.company = seed.company;
+  if (seed?.unit) empty.unit = seed.unit;
+  if (seed?.previousUnit) empty.previousUnit = seed.previousUnit;
   if (seed?.fleetCache) empty.fleetCache = seed.fleetCache;
+  if (seed?.activeTask) empty.activeTask = seed.activeTask;
+  if (seed?.pendingEntity) empty.pendingEntity = seed.pendingEntity;
+  if (seed?.lastQuestion) empty.lastQuestion = seed.lastQuestion;
+  if (seed?.lastListing) empty.lastListing = seed.lastListing;
   saveConversationStateV3(empty);
   traces().delete(key(tenantId, phone));
   return empty;

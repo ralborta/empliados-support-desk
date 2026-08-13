@@ -292,7 +292,7 @@ export async function handlePilotWhatsAppTurn(input: {
         customerName: ctx.customerName,
       });
       if (!result.reply.trim()) {
-        return { status: 200, body: silent({ skipResponse_s: "true" }) };
+        return { status: 200, body: reply(FALLBACK) };
       }
       return { status: 200, body: reply(result.reply) };
     } catch {

@@ -406,6 +406,58 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         mode === "query" && query
           ? filterFleetCacheByQuery(ctx.state, query)
           : ctx.state.fleetCache;
+      const wantsGps =
+        ctx.plan.task === "gps" ||
+        ctx.plan.requestedCapabilities.some((c) => c.name === "gps.get_status");
+      // Una sola coincidencia: fijar unidad (GPS sigue con gps.get_status; si no, preguntar)
+      if (filtered.length === 1) {
+        const only = filtered[0]!;
+        const unit = {
+          movilId: only.movilId,
+          plate: only.plate,
+          name: only.name,
+          label: only.label,
+        };
+        const writingNow = ctx.plan.requestedCapabilities.some(
+          (c) =>
+            c.name === "odometer.prepare" ||
+            c.name === "hourmeter.prepare" ||
+            c.name === "certificate.prepare",
+        );
+        const askWhat =
+          !wantsGps &&
+          !writingNow &&
+          ctx.plan.task !== "odometer" &&
+          ctx.plan.task !== "hourmeter" &&
+          ctx.plan.task !== "certificate"
+            ? "¿En qué te ayudo con esta unidad? (estado/reporte, odómetro, certificado…)"
+            : null;
+        return {
+          capability: req.name,
+          ok: true,
+          facts: askWhat
+            ? [`Unidad: ${unit.label}.`, askWhat]
+            : [`Unidad: ${unit.label}.`],
+          data: {
+            statePatch: {
+              previousUnit:
+                ctx.state.unit && ctx.state.unit.movilId !== unit.movilId
+                  ? ctx.state.unit
+                  : ctx.state.previousUnit,
+              unit,
+              pendingEntity: null,
+              lastQuestion: askWhat
+                ? {
+                    id: randomUUID(),
+                    purpose: "unit_help",
+                    expected: "free_text" as const,
+                  }
+                : null,
+              lastListing: null,
+            },
+          },
+        };
+      }
       const source =
         mode === "query" && query
           ? filtered
@@ -492,7 +544,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         ctx.plan.task !== "hourmeter" &&
         ctx.plan.task !== "certificate" &&
         ctx.plan.task !== "gps"
-          ? "¿En qué te ayudo con esta unidad? (estado, odómetro, certificado…)"
+          ? "¿En qué te ayudo con esta unidad? (estado/reporte, odómetro, certificado…)"
           : null;
       return {
         capability: req.name,
@@ -515,8 +567,13 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               ctx.state.pendingEntity?.type === "unit"
                 ? null
                 : ctx.state.pendingEntity,
-            lastQuestion:
-              ctx.state.lastQuestion?.expected === "unit"
+            lastQuestion: askWhat
+              ? {
+                  id: randomUUID(),
+                  purpose: "unit_help",
+                  expected: "free_text" as const,
+                }
+              : ctx.state.lastQuestion?.expected === "unit"
                 ? null
                 : ctx.state.lastQuestion,
           },
@@ -548,7 +605,30 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         unitFromRef(ctx.resolvedUnit ?? ctx.state.unit, ctx.fleetUnits) ??
         ctx.fleetUnits.find((u) => u.movil_id === ctx.state.unit?.movilId);
       if (!unit) {
-        return { capability: req.name, ok: false, facts: [], error: "no_unit" };
+        return {
+          capability: req.name,
+          ok: false,
+          facts: [
+            "Para el reporte GPS necesito la patente, el número de la lista o la marca/prefijo de la unidad.",
+          ],
+          error: "no_unit",
+          data: {
+            statePatch: {
+              lastQuestion: {
+                id: randomUUID(),
+                purpose: "unit_for_gps",
+                expected: "unit" as const,
+              },
+              pendingEntity: null,
+              activeTask: {
+                type: "gps" as const,
+                status: "collecting" as const,
+                collected: {},
+                missing: ["unit"],
+              },
+            },
+          },
+        };
       }
       const report = buildGpsReportForUnit(unit);
       return { capability: req.name, ok: true, facts: [report] };

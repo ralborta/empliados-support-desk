@@ -75,8 +75,31 @@ export function resolveUnitReference(
     return { status: "not_found", query: String(n) };
   }
 
+  // movilId explícito (a veces el LLM manda mode=id + número interno)
+  if (ref.mode === "id") {
+    const id = Number.parseInt(ref.value, 10);
+    if (Number.isFinite(id)) {
+      const fu = state.fleetCache.find((f) => f.movilId === id);
+      if (fu) return { status: "exact", unit: fleetToUnitRef(fu) };
+    }
+    // mode=id con patente/texto: cae al match por valor abajo
+  }
+
   const raw = ref.value.trim();
   if (!raw) return { status: "none" };
+
+  if (/^\d{1,8}$/.test(raw)) {
+    const asMovil = Number.parseInt(raw, 10);
+    const byMovil = state.fleetCache.find((f) => f.movilId === asMovil);
+    if (byMovil) return { status: "exact", unit: fleetToUnitRef(byMovil) };
+    if (state.lastListing) {
+      const item = state.lastListing.items.find((i) => i.index === asMovil);
+      if (item?.movilId != null) {
+        const fu = state.fleetCache.find((f) => f.movilId === item.movilId);
+        if (fu) return { status: "exact", unit: fleetToUnitRef(fu) };
+      }
+    }
+  }
 
   const plateNorm = normalizeLoosePlate(raw);
   if (plateNorm && isPlausibleVehiclePlate(plateNorm)) {

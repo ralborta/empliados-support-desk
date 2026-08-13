@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13w", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13w/);
+  it("prompt version bump 13x", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13x/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1316,6 +1316,89 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     const enriched = enrichPlanForExpectedFields(plan, s, "La NISSAN");
     assert.equal(enriched.task, "gps");
     assert.ok(enriched.unitReference);
+    assert.ok(
+      enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+    );
+  });
+
+  it("gps con unidad activa no lista flota", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 7,
+      plate: "AG562SP",
+      name: "NISSAN 2404",
+      label: "AG 562 SP (NISSAN 2404)",
+    };
+    s.fleetCache = [
+      s.unit,
+      {
+        movilId: 8,
+        plate: "AA111AA",
+        name: "FORD 1",
+        label: "AA 111 AA (FORD 1)",
+      },
+    ];
+    const fleetUnits = [
+      {
+        movil_id: 7,
+        unidad: "NISSAN 2404",
+        patente: "AG562SP",
+        ultimo_reporte: { hace_segundos: 40 },
+        ultima_posicion: { hace_segundos: 40, lat: -34.6, lon: -58.4 },
+        ultima_ignicion: { hace_segundos: 40, estado: false },
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "estado con unidad activa",
+      conversationalAct: "inform",
+      task: "gps",
+      requestedCapabilities: [
+        { name: "gps.get_status", params: {} },
+        { name: "unit.search", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    // Simula el strip de run-turn
+    const stripped = {
+      ...plan,
+      requestedCapabilities: plan.requestedCapabilities.filter(
+        (c) => c.name !== "unit.search",
+      ),
+    };
+    const exec = await executeCapabilities({
+      state: s,
+      plan: stripped,
+      env: {},
+      fleetUnits: fleetUnits as never,
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "estado de reporte",
+    });
+    assert.match(exec.facts.join(" "), /reporte|Funcionamiento|detenida|NISSAN|AG 562/i);
+    assert.doesNotMatch(exec.facts.join(" "), /listado completo|Decime el número/i);
+  });
+
+  it("promote GPS desde reasoning del LLM", async () => {
+    const { enrichPlanPromoteGpsFromReasoning } = await import(
+      "../enrich/gps-unit-from-message.js"
+    );
+    const plan = TurnPlanSchema.parse({
+      reasoning:
+        "El usuario pide el reporte GPS de la unidad con prefijo AG; hay que consultar estado.",
+      conversationalAct: "inform",
+      task: "unit_query",
+      requestedCapabilities: [
+        { name: "unit.search", params: { query: "AG", mode: "query" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanPromoteGpsFromReasoning(plan);
+    assert.equal(enriched.task, "gps");
     assert.ok(
       enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"),
     );

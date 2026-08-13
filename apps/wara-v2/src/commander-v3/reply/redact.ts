@@ -22,7 +22,7 @@ function looksLikeListingFact(f: string): boolean {
 
 function looksLikeOperationalFact(f: string): boolean {
   if (looksLikeListingFact(f)) return true;
-  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente/i.test(
+  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente|Último reporte|no tiene reporte|detenida|falla de ignición|Decime el número|reporte GPS/i.test(
     f,
   );
 }

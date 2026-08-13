@@ -62,7 +62,8 @@ Reglas de decisión:
 9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
 9b) certificado/cobertura → task=certificate + certificate.prepare.
 9c) "reporte/estado de la AG|nissan|marca|prefijo" → task=gps + unitReference (value=AG|nissan|…) + gps.get_status. Si hay varias coincidencias el runtime desambigua. NUNCA unit_query con lista completa. NUNCA domain.answer ni "no hay información disponible".
-9d) Con unidad ya activa + "estado/reporte/ubicación" → gps.get_status (preserveUnit). NUNCA menú genérico "¿qué info sobre WARA?" ni company.list.
+9d) Con unidad ya activa (state.unit) + "estado/reporte/ubicación" → SOLO gps.get_status (preserveUnit). NUNCA unit.search. NUNCA menú genérico "¿qué info sobre WARA?" ni company.list ni domain.answer.
+9e) Tras preguntar "¿en qué te ayudo con esta unidad?" + respuesta estado/reporte → gps.get_status sobre esa unidad.
 10) Unidad: patente, código (M900-072), marca o prefijo de patente.
 11) Pedido de lista/listado de unidades (formal o informal: "lista", "la lista", "lista porfa", "me pasas la lista", "todas", "quiero ver el listado") → OBLIGATORIO en el JSON:
     task="unit_query"
@@ -114,7 +115,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,

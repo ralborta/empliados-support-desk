@@ -61,6 +61,50 @@ function isGpsPlan(plan: TurnPlan): boolean {
   return plan.requestedCapabilities.some((c) => c.name === "gps.get_status");
 }
 
+function reasoningImpliesGps(plan: TurnPlan): boolean {
+  const blob = `${plan.reasoning ?? ""} ${plan.responseGoal?.nextQuestion ?? ""} ${
+    plan.lateralQuestion?.topic ?? ""
+  }`.toLowerCase();
+  return /\b(reporte|gps|ubicaci[oó]n|localizaci|donde est|último reporte|ultimo reporte|estado de (la )?unidad|estado\/reporte)\b/.test(
+    blob,
+  );
+}
+
+/** Repara unit_query → gps cuando el reasoning del LLM ya dijo que es reporte. */
+export function enrichPlanPromoteGpsFromReasoning(plan: TurnPlan): TurnPlan {
+  if (isGpsPlan(plan)) return plan;
+  if (
+    plan.task === "odometer" ||
+    plan.task === "hourmeter" ||
+    plan.task === "certificate"
+  ) {
+    return plan;
+  }
+  if (!reasoningImpliesGps(plan)) return plan;
+
+  const caps = plan.requestedCapabilities.filter((c) => c.name !== "domain.answer");
+  if (!caps.some((c) => c.name === "gps.get_status")) {
+    caps.push({ name: "gps.get_status", params: {} });
+  }
+  return {
+    ...plan,
+    task: "gps",
+    taskAction: plan.taskAction ?? "start",
+    conversationalAct:
+      plan.conversationalAct === "switch_task"
+        ? "switch_task"
+        : plan.conversationalAct === "continue_task"
+          ? "continue_task"
+          : plan.conversationalAct === "answer_lateral"
+            ? "answer_lateral"
+            : "start_task",
+    requestedCapabilities: caps,
+    reasoning:
+      plan.reasoning ||
+      "El reasoning indica pedido de reporte GPS; se corrige task=gps.",
+  };
+}
+
 function extractFleetFilterHint(
   message: string,
   state: ConversationStateV3,
