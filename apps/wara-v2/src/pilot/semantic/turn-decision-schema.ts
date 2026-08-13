@@ -47,6 +47,7 @@ export const ReasoningCodeSchema = z.enum([
   "QUERY_CONTEXT",
   "INSUFFICIENT_CONTEXT",
   "GENERAL_CONVERSATION",
+  "AMEND_PENDING_SLOT",
 ]);
 
 export const DomainQuestionSchema = z
@@ -87,6 +88,7 @@ export const SpeechActSchema = z.enum([
   "negate_intent",
   "cancel",
   "confirm",
+  "amend",
   "farewell",
   "courtesy",
   "clarify",
@@ -96,6 +98,17 @@ export const CompanyActionSchema = z.enum(["query_active", "select", "change", "
 
 /** Qué intención/cambio niega el usuario. Enum cerrado — no inspeccionar texto libre. */
 export const NegatedActionSchema = z.enum(["change_company", "change_unit"]);
+
+/** Slot a enmendar dentro del trámite activo (sin cancelar ni confirmar escritura). */
+export const AmendTargetSchema = z.enum([
+  "company",
+  "unit",
+  "value",
+  "date",
+  "time",
+  "detail",
+  "priority",
+]);
 
 export const DispositionExtSchema = z.enum([
   "continue_active",
@@ -107,18 +120,27 @@ export const DispositionExtSchema = z.enum([
 ]);
 
 export type NegatedAction = z.infer<typeof NegatedActionSchema>;
+export type AmendTarget = z.infer<typeof AmendTargetSchema>;
 
-/** Keep de empresa: triple estructurado obligatorio. */
+/** Keep de empresa: companyAction=keep + negatedAction=change_company + speechAct tipado. */
 export function isStructuredCompanyKeep(decision: {
   speechAct?: string | null;
   companyAction?: string | null;
   negatedAction?: string | null;
 }): boolean {
   return (
-    decision.speechAct === "negate_intent" &&
     decision.companyAction === "keep" &&
-    decision.negatedAction === "change_company"
+    decision.negatedAction === "change_company" &&
+    (decision.speechAct === "negate_intent" || decision.speechAct === "amend")
   );
+}
+
+/** Amend estructurado: speechAct + amendTarget (enum cerrado). */
+export function isStructuredAmend(decision: {
+  speechAct?: string | null;
+  amendTarget?: string | null;
+}): boolean {
+  return decision.speechAct === "amend" && decision.amendTarget != null;
 }
 
 export const TurnDecisionSchema = z.object({
@@ -133,6 +155,8 @@ export const TurnDecisionSchema = z.object({
   /** Disposition extendida (opcional; mapea a currentTramiteDisposition). */
   disposition: DispositionExtSchema.nullable().optional(),
   negatedAction: NegatedActionSchema.nullable().optional(),
+  /** Slot a modificar sin cancelar el trámite (requiere speechAct=amend). */
+  amendTarget: AmendTargetSchema.nullable().optional(),
   answerToQuestionId: z.string().nullable().optional(),
   targetIntent: TurnDecisionIntentSchema.nullable().optional(),
   entity: z
@@ -200,6 +224,11 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
     const allowed = NegatedActionSchema.safeParse(v);
     o.negatedAction = allowed.success ? allowed.data : null;
   }
+  if ("amendTarget" in o) {
+    const v = nullish(o.amendTarget);
+    const allowed = AmendTargetSchema.safeParse(v);
+    o.amendTarget = allowed.success ? allowed.data : null;
+  }
   if ("answerToQuestionId" in o) o.answerToQuestionId = nullish(o.answerToQuestionId);
   if ("targetIntent" in o) o.targetIntent = nullish(o.targetIntent);
   if ("fields" in o) o.fields = nullish(o.fields);
@@ -236,6 +265,7 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
       negate_intent: "general",
       cancel: "answer_pending",
       confirm: "answer_pending",
+      amend: "general",
       farewell: "general",
       courtesy: "general",
       clarify: "clarify",

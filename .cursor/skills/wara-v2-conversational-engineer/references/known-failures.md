@@ -63,5 +63,23 @@ Causas aún en investigación; no convertir en matchers:
 | Cancel en etapa de confirmación de escritura a veces no cancela | decisión clasificada como `provide_fields` en vez de cancel estructurado |
 | Pregunta de dominio mid-trámite cae en reply de empresa | señales `query_active_company` residuales |
 | Switch certificado→odómetro pide unidad de nuevo | unidad no preservada en transición de trámite |
+| «quiero cambiar de unidad» con pending → cancel clarificado | faltaba `speechAct=amend`+`amendTarget=unit` (contrato amend) |
+| Dual keep empresa + change unidad | un TurnDecision con `amend`+`keep` tipado; reply prioriza amend |
 
 Corregir por contrato/transición general; **prohibido** parchear con frases, regex de intención o `includes`.
+
+## 8. Amend de slot pendiente
+
+**Contrato:** con trámite/pending activo, modificar un slot = `speechAct=amend` + `amendTarget` (enum).  
+Efecto: invalidar `pendingConfirmation`, conservar `activeTramite`, abrir captura del slot.  
+Distinto de `confirm` / `cancel`.
+
+**Amend vs cancel:** mutuamente excluyentes. Si el mismo `TurnDecision` trae `speechAct=amend` y cualquier señal de cancel (`answer=cancel` | `speechAct=cancel` | `disposition=cancel_active` | `currentTramiteDisposition=cancel`) → policy `decision_conflict:amend_vs_cancel` → clarify. **Prohibido** “amend gana siempre”. Cancel puro sigue cancelando.
+
+**Limitaciones abiertas (fuera del commit amend(unit); no corregir aquí):**
+
+1. `entity` incluida en el mismo mensaje de amend no se empaqueta/aplica en el mismo turno.
+2. `confirmo` mientras espera la nueva unidad puede reclasificarse como `amend` y volver a pedir patente.
+3. No hay registro de invalidación en ledger: la operación real de certificado se crea recién al confirmar; amend solo borra `pendingConfirmation`.
+4. ResponsePlan de retoma E/F4 pendiente.
+5. Resolver general de unidad pendiente (incl. `unit_name`).

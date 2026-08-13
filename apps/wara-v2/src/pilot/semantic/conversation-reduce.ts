@@ -3,8 +3,8 @@
  * No recibe texto libre del usuario.
  */
 import type { PilotConversationState } from "../conversation-state.js";
-import type { TurnDecision } from "./turn-decision-schema.js";
-import { isStructuredCompanyKeep } from "./turn-decision-schema.js";
+import type { AmendTarget, TurnDecision } from "./turn-decision-schema.js";
+import { isStructuredAmend, isStructuredCompanyKeep } from "./turn-decision-schema.js";
 import { cancelActiveOrPendingTramite } from "./cancel-active-tramite.js";
 import {
   clearLastAgentQuestion,
@@ -12,6 +12,7 @@ import {
   type ExpectedAnswerType,
 } from "./turn-precedence.js";
 import { createEmptyPilotState } from "../conversation-state.js";
+import { createPendingEntityResolution } from "./pending-entity-resolution.js";
 
 export type DominantExpectation =
   | { kind: "pendingConfirmation" }
@@ -27,6 +28,7 @@ export type ReduceAction =
   | { type: "change_company" }
   | { type: "select_company" }
   | { type: "cancel_active" }
+  | { type: "amend_slot"; target: AmendTarget }
   | { type: "set_expectation"; expectedAnswerType: ExpectedAnswerType; text: string; purpose: string }
   | { type: "clear_expectation" }
   | { type: "continue" };
@@ -160,6 +162,111 @@ export function companyActionFromDecision(decision: TurnDecision): "query_active
   return null;
 }
 
+function parentIntentFromState(
+  state: PilotConversationState,
+): "certificate" | "odometer" | "horometer" | "maintenance" | "ticket" | "gps" | null {
+  if (state.activeTramite === "certificate_issue" || state.certificateDraft) return "certificate";
+  if (state.activeTramite === "odometer_update" || state.odometerDraft) {
+    return state.odometerDraft?.meterType === "horometro" ? "horometer" : "odometer";
+  }
+  if (state.activeTramite === "maintenance_request" || state.maintenanceDraft) return "maintenance";
+  if (state.activeTramite === "odoo_ticket" || state.ticketDraft) return "ticket";
+  if (state.activeTramite === "unit_gps_report") return "gps";
+  return null;
+}
+
+function applyAmendUnit(state: PilotConversationState): string {
+  // Invalidar confirmación vigente; conservar trámite.
+  state.pendingConfirmation = null;
+  const parent = parentIntentFromState(state);
+  if (state.certificateDraft) {
+    state.certificateDraft = { unit: null, step: "await_unit" };
+    state.activeTramite = "certificate_issue";
+  }
+  if (state.odometerDraft) {
+    state.odometerDraft = {
+      ...state.odometerDraft,
+      unit: null,
+      step: "await_unit",
+      valueNew: state.odometerDraft.valueNew,
+    };
+    state.activeTramite = "odometer_update";
+  }
+  if (state.selectedUnit) {
+    state.previousSelectedUnit = state.selectedUnit;
+    state.selectedUnit = null;
+  }
+  const ask = "¿Qué patente o unidad buscás?";
+  // XOR: una sola expectativa dominante. Captura de unidad → pendingEntityResolution
+  // (mismo patrón que startCertificate sin unidad). No setExpectedField(unit) en paralelo.
+  clearLastAgentQuestion(state);
+  state.lastAgentQuestion = ask;
+  if (parent) {
+    state.pendingEntityResolution = createPendingEntityResolution({
+      parentIntent: parent,
+      returnToStep:
+        parent === "certificate"
+          ? "certificate.await_unit"
+          : parent === "odometer" || parent === "horometer"
+            ? "odometer.await_unit"
+            : parent === "maintenance"
+              ? "maintenance.await_unit"
+              : "unit",
+      sourceMessageId: `amend-unit-${Date.now().toString(36)}`,
+    });
+  }
+  return ask;
+}
+
+function applyAmendField(
+  state: PilotConversationState,
+  target: Exclude<AmendTarget, "unit" | "company">,
+): string {
+  state.pendingConfirmation = null;
+  if (target === "value" && state.odometerDraft) {
+    state.odometerDraft = {
+      ...state.odometerDraft,
+      valueNew: null,
+      step: "await_value",
+    };
+    const ask = "Pasame el valor del odómetro (km).";
+    setExpectedField(state, {
+      text: ask,
+      purpose: "amend_value",
+      expectedAnswerType: "numeric_value",
+    });
+    return ask;
+  }
+  if ((target === "date" || target === "time") && state.odometerDraft) {
+    state.odometerDraft = {
+      ...state.odometerDraft,
+      fechaLecturaIso: null,
+      fechaDisplay: null,
+      fechaDatePart: target === "date" ? null : state.odometerDraft.fechaDatePart,
+      fechaTimePart: target === "time" ? null : state.odometerDraft.fechaTimePart,
+      step: "await_fecha",
+    };
+    const ask =
+      target === "date"
+        ? "¿Qué fecha tiene la lectura?"
+        : "¿A qué hora fue la lectura?";
+    setExpectedField(state, {
+      text: ask,
+      purpose: `amend_${target}`,
+      expectedAnswerType: target,
+    });
+    return ask;
+  }
+  if (target === "detail" && state.maintenanceDraft) {
+    clearLastAgentQuestion(state);
+    state.lastAgentQuestion = "Contame el detalle actualizado del mantenimiento.";
+    return state.lastAgentQuestion;
+  }
+  // priority / fallback
+  clearLastAgentQuestion(state);
+  return "Decime qué dato querés corregir.";
+}
+
 /**
  * Reducer: aplica efectos de estado derivados SOLO de TurnDecision.
  * Los handlers operativos completan responsePlan.message cuando action=continue.
@@ -172,8 +279,11 @@ export function reduceConversationState(
   const invariantBefore = assertExpectationInvariant(state);
 
   const companyAct = companyActionFromDecision(turnDecision);
+  const amending = isStructuredAmend(turnDecision);
 
-  if (companyAct === "query_active") {
+  // F5: keep tipado + amend → reply de amend (keep es efecto silencioso de empresa).
+  // NO implica “amend gana siempre” frente a cancel: eso se aclara en policy.
+  if (companyAct === "query_active" && !amending) {
     return {
       stateAfter: state,
       action: { type: "query_company" },
@@ -182,8 +292,7 @@ export function reduceConversationState(
     };
   }
 
-  if (companyAct === "keep") {
-    // Negar cambio: cero mutación de contexto.
+  if (companyAct === "keep" && !amending) {
     return {
       stateAfter: state,
       action: { type: "keep_company" },
@@ -197,7 +306,7 @@ export function reduceConversationState(
     };
   }
 
-  if (companyAct === "change") {
+  if (companyAct === "change" && !amending) {
     return {
       stateAfter: state,
       action: { type: "change_company" },
@@ -206,8 +315,7 @@ export function reduceConversationState(
     };
   }
 
-  if (companyAct === "select") {
-    // Selección por entity/fields de la decisión; el match ocurre en operational-turn.
+  if (companyAct === "select" && !amending) {
     return {
       stateAfter: state,
       action: { type: "select_company" },
@@ -216,7 +324,33 @@ export function reduceConversationState(
     };
   }
 
-  // Cancelación estructurada (disposition o answer), sin leer texto.
+  if (amending) {
+    const target = turnDecision.amendTarget!;
+    if (target === "company") {
+      // Enmendar empresa ≡ cambio estructurado de empresa (selector), sin cancelar escritura previa aparte.
+      state.pendingConfirmation = null;
+      return {
+        stateAfter: state,
+        action: { type: "change_company" },
+        responsePlan: { kind: "reply" },
+        invariantError: assertExpectationInvariant(state) ?? invariantBefore,
+      };
+    }
+    let message: string;
+    if (target === "unit") {
+      message = applyAmendUnit(state);
+    } else {
+      message = applyAmendField(state, target);
+    }
+    return {
+      stateAfter: state,
+      action: { type: "amend_slot", target },
+      responsePlan: { kind: "reply", message },
+      invariantError: assertExpectationInvariant(state) ?? invariantBefore,
+    };
+  }
+
+  // Cancelación estructurada. Amend ya se resolvió arriba; no reescribir cancel→amend.
   const wantsCancel =
     turnDecision.currentTramiteDisposition === "cancel" ||
     turnDecision.answer === "cancel" ||
@@ -225,6 +359,7 @@ export function reduceConversationState(
 
   if (
     wantsCancel &&
+    !isStructuredAmend(turnDecision) &&
     (turnDecision.action === "answer_pending" ||
       turnDecision.action === "general" ||
       turnDecision.speechAct === "cancel" ||
@@ -266,7 +401,6 @@ export function reduceConversationState(
     (state.lastAgentQuestionMeta?.expectedAnswerType === "choice" ||
       state.lastAgentQuestionMeta?.purpose === "choose_discard_or_edit")
   ) {
-    // El campo pedido por el draft manda: limpiar residual antes de execute.
     clearLastAgentQuestion(state);
   }
 

@@ -7,7 +7,11 @@
  * (numeric_value / date / time) — completan fields, no eligen trámite.
  */
 import type { TurnDecision } from "./turn-decision-schema.js";
-import { isStructuredCompanyKeep, safeClarifyDecision } from "./turn-decision-schema.js";
+import {
+  isStructuredAmend,
+  isStructuredCompanyKeep,
+  safeClarifyDecision,
+} from "./turn-decision-schema.js";
 import type { PilotConversationState } from "../conversation-state.js";
 import {
   binaryClarifyForConflict,
@@ -148,8 +152,25 @@ export function applySemanticPolicy(
     };
   }
 
-  // Keep de empresa: solo triple estructurado (sin regex / includes sobre texto).
-  if (isStructuredCompanyKeep(decision)) {
+  // Amend vs cancel: mutuamente excluyentes. Conflicto → clarify (NO “amend gana siempre”).
+  // Debe ir ANTES de normalizar keep+amend (esa normalización limpia answer/disposition).
+  const cancelSignal =
+    decision.answer === "cancel" ||
+    decision.speechAct === "cancel" ||
+    decision.disposition === "cancel_active" ||
+    decision.currentTramiteDisposition === "cancel";
+  if (decision.speechAct === "amend" && cancelSignal) {
+    return {
+      ok: false,
+      reason: "decision_conflict:amend_vs_cancel",
+      decision: safeClarifyDecision(
+        "¿Querés cancelar el trámite o solo cambiar un dato (por ejemplo la unidad)?",
+      ),
+    };
+  }
+
+  // Keep de empresa tipado. Si viene junto con amend, no reescribir speechAct (F5).
+  if (isStructuredCompanyKeep(decision) && decision.speechAct !== "amend") {
     return {
       ok: true,
       decision: {
@@ -165,9 +186,47 @@ export function applySemanticPolicy(
       },
     };
   }
-  // keep espurio (p.ej. negate de unidad sin change_company): descartar.
-  if (decision.companyAction === "keep") {
+  if (isStructuredCompanyKeep(decision) && decision.speechAct === "amend") {
+    decision = {
+      ...decision,
+      companyAction: "keep",
+      negatedAction: "change_company",
+      currentTramiteDisposition: "keep",
+      answer: null,
+    };
+  } else if (decision.companyAction === "keep") {
+    // keep espurio (p.ej. sin change_company): descartar.
     decision = { ...decision, companyAction: null };
+  }
+
+  // Amend: modificar un slot del trámite activo — no confirm / no cancel.
+  if (decision.speechAct === "amend") {
+    if (!isStructuredAmend(decision)) {
+      return {
+        ok: false,
+        reason: "amend_without_target",
+        decision: safeClarifyDecision(
+          "¿Qué querés modificar del trámite: unidad, valor, fecha, hora u otro dato?",
+        ),
+      };
+    }
+    return {
+      ok: true,
+      decision: {
+        ...decision,
+        action: "general",
+        speechAct: "amend",
+        amendTarget: decision.amendTarget,
+        answer: null,
+        currentTramiteDisposition: "keep",
+        ambiguity: null,
+        reasoningCode:
+          decision.reasoningCode === "GENERAL_CONVERSATION" ||
+          decision.reasoningCode === "AMBIGUOUS_NEGATION"
+            ? "AMEND_PENDING_SLOT"
+            : decision.reasoningCode,
+      },
+    };
   }
   if (decision.companyAction === "change") {
     return {
