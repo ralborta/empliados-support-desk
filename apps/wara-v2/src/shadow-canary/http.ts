@@ -176,6 +176,7 @@ export async function startShadowCanaryServer(opts?: {
             promptVersion: COMMANDER_V3_PROMPT_VERSION,
             path: "apps/wara-v2/src/commander-v3",
           },
+          pilot_open: process.env.WARA_V2_PILOT_OPEN === "true" || process.env.WARA_V2_PILOT_OPEN === "1",
         });
         return;
       }
@@ -356,14 +357,8 @@ export async function startShadowCanaryServer(opts?: {
 
       if (req.method === "POST" && url.pathname === "/api/whatsapp/turn") {
         const raw = await readJsonBody(req);
-        const messageId = parseMessageId(raw);
-        if (!messageId) {
-          respondJson(400, {
-            error: "messageId_required",
-            hint: "Incluí messageId único por mensaje (UUID).",
-          });
-          return;
-        }
+        // BBC Inicio no manda messageId: generamos uno estable por turno.
+        const messageId = parseMessageId(raw) || randomUUID();
         const result = await handlePilotWhatsAppTurn({
           phone: String(raw.phone ?? raw.from ?? ""),
           text: String(raw.body ?? raw.rawText ?? raw.message ?? ""),

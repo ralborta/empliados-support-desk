@@ -41,15 +41,55 @@ describe("piloto WhatsApp V2", () => {
     );
   });
 
-  it("no arranca si hay delivery o canales reales", () => {
+  it("no arranca si hay delivery (doble envío)", () => {
     assert.equal(
       isPilotWhatsAppEnabled(env({ DELIVERY_ENABLED: "true" })),
+      false,
+    );
+  });
+
+  it("lab cerrado: no arranca con mutaciones globales", () => {
+    assert.equal(
+      isPilotWhatsAppEnabled(env({ ALLOW_EXTERNAL_MUTATIONS: "true" })),
       false,
     );
     assert.equal(
       isPilotWhatsAppEnabled(env({ REAL_CHANNELS_ENABLED: "true" })),
       false,
     );
+  });
+
+  it("PILOT_OPEN: acepta mutaciones y cualquier número", async () => {
+    const { isPilotOpen } = await import("./whatsapp-turn.js");
+    assert.equal(isPilotOpen(env({ WARA_V2_PILOT_OPEN: "true" })), true);
+    assert.equal(
+      isPilotWhatsAppEnabled(
+        env({
+          WARA_V2_PILOT_OPEN: "true",
+          ALLOW_EXTERNAL_MUTATIONS: "true",
+        }),
+      ),
+      true,
+    );
+    const r = await handlePilotWhatsAppTurn({
+      phone: "+5491199999999",
+      text: "Hola",
+      messageId: "test-open-1",
+      apiKey: KEY,
+      env: env({
+        WARA_V2_PILOT_OPEN: "true",
+        WARA_CONVERSATION_COMMANDER_V3: "false",
+        WARA_OBTENER_EMPRESA_TOKEN: "",
+      }),
+      decide: async () => ({
+        schemaVersion: 2,
+        interpretationSummary: "Hola abierto",
+        proposedGoal: "clarify",
+        acts: [],
+      }),
+    });
+    assert.equal(r.status, 200);
+    assert.match(r.body.message, /Hola abierto/);
   });
 
   it("número fuera de allowlist no recibe respuesta", async () => {

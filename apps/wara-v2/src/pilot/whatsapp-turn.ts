@@ -1,7 +1,7 @@
 /**
- * Gateway piloto WhatsApp V2.
- * BBC entrega el mensaje ({message}); V2 no envía WhatsApp (DELIVERY_ENABLED=false).
- * Solo allowlist. WARA/Odoo read-only; sin mutaciones.
+ * Gateway piloto WhatsApp V2 / Commander V3.
+ * BBC entrega el mensaje y envía la respuesta ({message}); V2 no manda WA directo.
+ * Modo lab: allowlist. Modo abierto: WARA_V2_PILOT_OPEN=true (todos los números).
  */
 import { randomUUID, createHash } from "node:crypto";
 import type { OrchestratorDecision } from "@wara-v2/contracts";
@@ -53,6 +53,11 @@ function isTrue(v: string | undefined): boolean {
   return v === "true" || v === "1";
 }
 
+/** Cutover WhatsApp: todos los números (sin allowlist). Kill switch sigue vigente. */
+export function isPilotOpen(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isTrue(env.WARA_V2_PILOT_OPEN);
+}
+
 function silent(extra?: Partial<PilotTurnBody>): PilotTurnBody {
   return {
     ok: true,
@@ -98,9 +103,16 @@ export function isPilotWhatsAppEnabled(
     return false;
   }
   if (!isTrue(env.WARA_V2_PILOT_WHATSAPP)) return false;
-  if (isTrue(env.DELIVERY_ENABLED)) return false;
-  if (isTrue(env.ALLOW_EXTERNAL_MUTATIONS)) return false;
-  if (isTrue(env.REAL_CHANNELS_ENABLED)) return false;
+  // V2 no envía WA propio (BBC lo hace con messageMapping). Delivery ON acá = riesgo de doble envío.
+  if (isTrue(env.DELIVERY_ENABLED) || isTrue(env.WARA_V2_DELIVERY_ENABLED)) {
+    return false;
+  }
+  // Lab cerrado: no mezclar con mutaciones/canales reales globales.
+  // Modo abierto (PILOT_OPEN): permite writes vía gates específicos + ALLOW_EXTERNAL_MUTATIONS.
+  if (!isPilotOpen(env)) {
+    if (isTrue(env.ALLOW_EXTERNAL_MUTATIONS)) return false;
+    if (isTrue(env.REAL_CHANNELS_ENABLED)) return false;
+  }
   return true;
 }
 
@@ -247,7 +259,10 @@ export async function handlePilotWhatsAppTurn(input: {
   }
 
   const allowlist = loadPilotAllowlist(env);
-  if (allowlist.length === 0 || !isAllowlistedPhone(input.phone, allowlist)) {
+  if (
+    !isPilotOpen(env) &&
+    (allowlist.length === 0 || !isAllowlistedPhone(input.phone, allowlist))
+  ) {
     return { status: 200, body: silent() };
   }
 
