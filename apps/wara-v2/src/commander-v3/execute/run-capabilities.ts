@@ -95,7 +95,19 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
 
   const toolFacts: string[] = [];
   for (const req of caps) {
-    const r = await runOne(req, { ...ctx, state });
+    // Si ya hay unidad resuelta/seleccionada y no es consulta de listado, no volver a listar.
+    if (
+      req.name === "unit.search" &&
+      ctx.plan.task !== "unit_query" &&
+      (ctx.resolvedUnit || state.unit)
+    ) {
+      continue;
+    }
+    const r = await runOne(req, {
+      ...ctx,
+      state,
+      resolvedUnit: ctx.resolvedUnit ?? state.unit,
+    });
     results.push(r);
     toolFacts.push(...r.facts);
     if (r.data?.statePatch && typeof r.data.statePatch === "object") {
@@ -453,10 +465,30 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       const previousUnit = ctx.state.unit;
       const already =
         ctx.state.unit?.movilId != null && ctx.state.unit.movilId === unit.movilId;
+      const writingNow = ctx.plan.requestedCapabilities.some(
+        (c) =>
+          c.name === "odometer.prepare" ||
+          c.name === "hourmeter.prepare" ||
+          c.name === "certificate.prepare",
+      );
+      const askWhat =
+        !writingNow &&
+        ctx.plan.task !== "odometer" &&
+        ctx.plan.task !== "hourmeter" &&
+        ctx.plan.task !== "certificate" &&
+        ctx.plan.task !== "gps"
+          ? "¿En qué te ayudo con esta unidad? (estado, odómetro, certificado…)"
+          : null;
       return {
         capability: req.name,
         ok: true,
-        facts: already ? [] : [`Unidad: ${unit.label}.`],
+        facts: already
+          ? askWhat
+            ? [askWhat]
+            : []
+          : askWhat
+            ? [`Unidad: ${unit.label}.`, askWhat]
+            : [`Unidad: ${unit.label}.`],
         data: {
           statePatch: {
             previousUnit:

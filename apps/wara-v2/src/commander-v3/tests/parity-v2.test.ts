@@ -12,7 +12,7 @@ import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("prompt version bump 13j", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13p/);
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13q/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -613,6 +613,67 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.match(text, /2\.\s*BB 222 BB/);
     assert.doesNotMatch(text, /inventada|Dame un segundo/i);
     assert.ok(exec.results.some((r) => r.capability === "unit.search"));
+  });
+
+  it("odometer + unidad resuelta no vuelve a listar flota", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.fleetCache = [
+      {
+        movilId: 1,
+        plate: "AA175BY",
+        name: "M900-071",
+        label: "AA 175 BY (M900-071)",
+      },
+      {
+        movilId: 2,
+        plate: "BB222BB",
+        name: "M900-072",
+        label: "BB 222 BB (M900-072)",
+      },
+    ];
+    const unit = {
+      movilId: 1,
+      plate: "AA175BY",
+      name: "M900-071",
+      label: "AA 175 BY (M900-071)",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "odo con unidad",
+      conversationalAct: "start_task",
+      task: "odometer",
+      taskAction: "start",
+      unitReference: {
+        kind: "unit",
+        mode: "unit_name",
+        value: "M900-071",
+        reference: null,
+      },
+      requestedCapabilities: [
+        { name: "unit.select", params: { movilId: 1 } },
+        { name: "unit.search", params: {} },
+        { name: "odometer.prepare", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.95,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: unit,
+      resolvedCompanyId: null,
+      message: "odometro m900071",
+    });
+    const text = exec.facts.join("\n");
+    assert.match(text, /Unidad: AA 175 BY|Pasame el valor|odómetro/i);
+    assert.doesNotMatch(text, /listado completo|Decime el número o la patente/i);
+    assert.equal(
+      exec.results.some((r) => r.capability === "unit.search"),
+      false,
+    );
   });
 
   it("odometer.prepare rechaza fecha futura", async () => {

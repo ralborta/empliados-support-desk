@@ -17,6 +17,7 @@ import {
 } from "./enrich/company-capture.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
+import { enrichPlanForMeterUnitInMessage } from "./enrich/meter-unit-from-message.js";
 import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
 import { enrichPlanForConfirmationOutcome } from "./enrich/confirmation-outcome.js";
 import {
@@ -219,6 +220,7 @@ export async function runCommanderTurn(
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForExpectedFields(plan, state, input.message);
+  plan = enrichPlanForMeterUnitInMessage(plan, state, input.message);
 
   // Switch: ejecutar el nuevo trámite sobre estado limpio (sin collected ajeno)
   if (isSwitchingTask(plan, state) && plan.task) {
@@ -317,7 +319,9 @@ export async function runCommanderTurn(
       plan.unitReference ||
       state.pendingEntity?.type === "unit" ||
       state.lastQuestion?.expected === "unit" ||
-      plan.conversationalAct === "continue_task"
+      plan.conversationalAct === "continue_task" ||
+      plan.conversationalAct === "start_task" ||
+      plan.taskAction === "start"
     ) {
       plan = {
         ...plan,
@@ -327,6 +331,51 @@ export async function runCommanderTurn(
         ],
       };
     }
+  }
+
+  // Contrato: si la unidad ya está resuelta (ref exacta / activa), NO listar flota
+  // en el mismo turno de odo/horo/cert. Evita "Unidad: X" + listado + "decime patente".
+  const unitAlreadyKnown = Boolean(
+    resolvedUnit ||
+      (state.unit &&
+        plan.unitReference?.reference === "active") ||
+      plan.requestedCapabilities.some((c) => c.name === "unit.select"),
+  );
+  const writingTask =
+    plan.task === "odometer" ||
+    plan.task === "hourmeter" ||
+    plan.task === "certificate" ||
+    plan.requestedCapabilities.some(
+      (c) =>
+        c.name === "odometer.prepare" ||
+        c.name === "hourmeter.prepare" ||
+        c.name === "certificate.prepare",
+    );
+  if (unitAlreadyKnown && writingTask && plan.task !== "unit_query") {
+    plan = {
+      ...plan,
+      requestedCapabilities: plan.requestedCapabilities.filter(
+        (c) => c.name !== "unit.search",
+      ),
+    };
+  }
+
+  // Orden estable: select → prepare → resto (search solo si sigue faltando unidad)
+  {
+    const caps = plan.requestedCapabilities;
+    const select = caps.filter((c) => c.name === "unit.select");
+    const prepare = caps.filter((c) => String(c.name).endsWith(".prepare"));
+    const search = caps.filter((c) => c.name === "unit.search");
+    const rest = caps.filter(
+      (c) =>
+        c.name !== "unit.select" &&
+        c.name !== "unit.search" &&
+        !String(c.name).endsWith(".prepare"),
+    );
+    plan = {
+      ...plan,
+      requestedCapabilities: [...select, ...prepare, ...rest, ...search],
+    };
   }
   if (
     resolvedCompany &&
