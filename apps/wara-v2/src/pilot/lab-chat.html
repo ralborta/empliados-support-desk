@@ -65,6 +65,12 @@
   </div>
 
   <div class="row shortcuts">
+    <label class="badge">Conductor
+      <select id="conductorMode" title="V2 actual vs Commander V3">
+        <option value="v2">V2 actual</option>
+        <option value="v3">Commander V3</option>
+      </select>
+    </label>
     <button type="button" data-msg="listas de unidades">1. Listas unidades</button>
     <button type="button" data-msg="2">2. Empresa 2</button>
     <button type="button" data-msg="1">3. Unidad 1</button>
@@ -73,6 +79,7 @@
     <button type="button" id="newChat" title="Limpia trámites, drafts, confirmaciones e historial. Conserva empresa/unidad.">Nueva conversación</button>
     <button type="button" id="hardReset" title="Limpia también empresa y unidad">Reiniciar todo</button>
     <button type="button" id="refreshState">Estado</button>
+    <button type="button" id="showTrace" title="Último TurnPlan / tools V3">Trace V3</button>
   </div>
 
   <div id="log" aria-live="polite"></div>
@@ -118,7 +125,7 @@
       div.className = role;
       const prefix =
         role === "user" ? "Vos (" + PHONE + "): " :
-        role === "bot" ? "Atilio V2: " :
+        role === "bot" ? (el("conductorMode").value === "v3" ? "Atilio V3: " : "Atilio V2: ") :
         role === "sys" ? "· " : "";
       div.textContent = prefix + text;
       log.appendChild(div);
@@ -144,14 +151,29 @@
     async function refreshState() {
       try {
         const q = new URLSearchParams({ phone: PHONE, tenantId: TENANT });
-        const data = await api("/api/pilot/state?" + q.toString());
-        statePre.textContent = JSON.stringify(data.state, null, 2);
+        if (el("conductorMode").value === "v3") {
+          const data = await api("/api/lab/v3/state?" + q.toString());
+          statePre.textContent = JSON.stringify(data.state, null, 2);
+        } else {
+          const data = await api("/api/pilot/state?" + q.toString());
+          statePre.textContent = JSON.stringify(data.state, null, 2);
+        }
       } catch (e) {
         statePre.textContent = "Error: " + e.message;
       }
     }
 
     async function resetChat(mode) {
+      if (el("conductorMode").value === "v3") {
+        await api("/api/lab/v3/reset", {
+          method: "POST",
+          body: JSON.stringify({ phone: PHONE, tenantId: TENANT, mode }),
+        });
+        log.innerHTML = "";
+        append("sys", "Reinicio estado Commander V3 (" + mode + ") para " + PHONE);
+        await refreshState();
+        return;
+      }
       const data = await api("/api/pilot/reset", {
         method: "POST",
         body: JSON.stringify({ phone: PHONE, tenantId: TENANT, mode }),
@@ -174,6 +196,17 @@
             data.verify.recentTurns,
         );
       }
+      await refreshState();
+    }
+
+    async function syncConductorMode() {
+      const mode = el("conductorMode").value === "v3" ? "v3" : "v2";
+      sessionStorage.setItem("wara_lab_conductor", mode);
+      await api("/api/lab/conductor", {
+        method: "POST",
+        body: JSON.stringify({ phone: PHONE, mode }),
+      });
+      append("sys", "Conductor activo: " + (mode === "v3" ? "Commander V3" : "V2 actual"));
       await refreshState();
     }
 
@@ -214,6 +247,20 @@
     el("newChat").onclick = () => resetChat("soft").catch((e) => append("err", e.message));
     el("hardReset").onclick = () => resetChat("hard").catch((e) => append("err", e.message));
     el("refreshState").onclick = () => refreshState();
+    el("showTrace").onclick = async () => {
+      try {
+        const q = new URLSearchParams({ phone: PHONE, tenantId: TENANT });
+        const data = await api("/api/lab/v3/trace?" + q.toString());
+        statePre.textContent = JSON.stringify(data.trace, null, 2);
+      } catch (e) {
+        append("err", e.message);
+      }
+    };
+    el("conductorMode").onchange = () => syncConductorMode().catch((e) => append("err", e.message));
+    const savedMode = sessionStorage.getItem("wara_lab_conductor");
+    if (savedMode === "v3" || savedMode === "v2") {
+      el("conductorMode").value = savedMode;
+    }
 
     document.querySelectorAll("[data-msg]").forEach((btn) => {
       btn.addEventListener("click", () => sendMessage(btn.getAttribute("data-msg")));

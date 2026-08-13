@@ -1,0 +1,198 @@
+import { randomUUID } from "node:crypto";
+import type { ConversationStateV3, ActiveTaskV3 } from "../types/state.js";
+import { assertExpectationXorV3 } from "../types/state.js";
+import type { TurnPlan } from "../types/turn-plan.js";
+import type { CompanyRef, UnitRef } from "../types/refs.js";
+
+export type ApplyInput = {
+  state: ConversationStateV3;
+  plan: TurnPlan;
+  resolvedUnit: UnitRef | null;
+  resolvedCompany: CompanyRef | null;
+  unitMany?: UnitRef[];
+  message: string;
+  reply: string;
+};
+
+export function applyCommanderState(input: ApplyInput): {
+  state: ConversationStateV3;
+  xorError: string | null;
+} {
+  let s: ConversationStateV3 = {
+    ...input.state,
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Company select
+  if (input.resolvedCompany) {
+    s = { ...s, company: input.resolvedCompany, pendingEntity: null };
+  }
+
+  // Unit select exact
+  if (input.resolvedUnit) {
+    const prev = s.unit;
+    s = {
+      ...s,
+      previousUnit: prev && prev.movilId !== input.resolvedUnit.movilId ? prev : s.previousUnit,
+      unit: input.resolvedUnit,
+      pendingEntity:
+        s.pendingEntity?.type === "unit" ? null : s.pendingEntity,
+    };
+  }
+
+  // Ambiguous units
+  if (input.unitMany && input.unitMany.length > 0) {
+    s = {
+      ...s,
+      pendingEntity: {
+        type: "unit",
+        purpose: s.activeTask?.type ?? "unit_query",
+        candidates: input.unitMany,
+      },
+      lastQuestion: {
+        id: randomUUID(),
+        purpose: "disambiguate_unit",
+        expected: "unit",
+      },
+      lastListing: {
+        kind: "search",
+        page: 1,
+        pageSize: 10,
+        totalCount: input.unitMany.length,
+        items: input.unitMany.map((u, i) => ({
+          index: i + 1,
+          label: u.label,
+          movilId: u.movilId,
+        })),
+        fetchedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  // Task lifecycle from plan
+  if (
+    input.plan.conversationalAct === "cancel_task" ||
+    input.plan.taskAction === "cancel"
+  ) {
+    s = {
+      ...s,
+      activeTask: s.activeTask
+        ? { ...s.activeTask, status: "cancelled" }
+        : null,
+      pendingWrite: null,
+      pendingEntity: null,
+      lastQuestion: null,
+      suspendedTask: null,
+    };
+  } else if (
+    (input.plan.conversationalAct === "switch_task" ||
+      input.plan.taskAction === "switch") &&
+    input.plan.task
+  ) {
+    const suspended =
+      s.activeTask && input.plan.stateIntent.preserveTask
+        ? { task: s.activeTask, reason: "switch" }
+        : s.suspendedTask;
+    s = {
+      ...s,
+      suspendedTask: suspended,
+      activeTask: {
+        type: input.plan.task,
+        status: "collecting",
+        collected: { ...(input.plan.suppliedFields ?? {}) },
+        missing: [],
+      },
+      pendingWrite: null,
+    };
+  } else if (
+    (input.plan.conversationalAct === "start_task" ||
+      input.plan.taskAction === "start") &&
+    input.plan.task &&
+    !s.activeTask
+  ) {
+    s = {
+      ...s,
+      activeTask: {
+        type: input.plan.task,
+        status: "collecting",
+        collected: { ...(input.plan.suppliedFields ?? {}) },
+        missing: [],
+      },
+    };
+  } else if (
+    input.plan.conversationalAct === "amend_task" &&
+    input.plan.amendment?.target === "unit"
+  ) {
+    s = {
+      ...s,
+      pendingWrite: null,
+      unit: null,
+      pendingEntity: {
+        type: "unit",
+        purpose: s.activeTask?.type ?? "amend",
+      },
+      lastQuestion: {
+        id: randomUUID(),
+        purpose: "amend_unit",
+        expected: "unit",
+      },
+      activeTask: s.activeTask
+        ? { ...s.activeTask, status: "collecting", missing: ["unit"] }
+        : s.activeTask,
+    };
+  }
+
+  // Merge supplied fields into active task
+  if (s.activeTask && input.plan.suppliedFields) {
+    const collected = {
+      ...s.activeTask.collected,
+      ...Object.fromEntries(
+        Object.entries(input.plan.suppliedFields).filter(([, v]) => v != null),
+      ),
+    };
+    s = {
+      ...s,
+      activeTask: { ...s.activeTask, collected },
+    };
+  }
+
+  // Greet metadata
+  if (input.plan.conversationalAct === "greet") {
+    s = {
+      ...s,
+      conversationMetadata: {
+        introducedAtilio: true,
+        greetedAt: s.conversationMetadata.greetedAt ?? new Date().toISOString(),
+      },
+    };
+  }
+
+  // History
+  const turns = [
+    ...s.recentTurns,
+    { role: "user" as const, text: input.message, at: new Date().toISOString() },
+    { role: "assistant" as const, text: input.reply, at: new Date().toISOString() },
+  ].slice(-20);
+  s = { ...s, recentTurns: turns };
+
+  // Clear competing expectations for confirmations handled
+  if (input.plan.conversationalAct === "confirm_write") {
+    // execute layer patches pendingWrite; ensure XOR
+  }
+
+  const xorError = assertExpectationXorV3(s);
+  return { state: s, xorError };
+}
+
+export function softCancelActive(state: ConversationStateV3): ConversationStateV3 {
+  return {
+    ...state,
+    activeTask: state.activeTask
+      ? ({ ...state.activeTask, status: "cancelled" } as ActiveTaskV3)
+      : null,
+    pendingWrite: null,
+    pendingEntity: null,
+    lastQuestion: null,
+    updatedAt: new Date().toISOString(),
+  };
+}

@@ -29,6 +29,18 @@ import {
 } from "../pilot/semantic/brain-flags.js";
 import { INTERPRET_TURN_PROMPT_VERSION } from "../pilot/semantic/interpret-turn-prompt.js";
 import { getLastLabTurnDiagnosis } from "../pilot/semantic/lab-turn-diagnosis.js";
+import {
+  isConversationCommanderV3Enabled,
+  COMMANDER_V3_PROMPT_VERSION,
+  getConversationStateV3,
+  getLastTraceV3,
+  resetConversationStateV3,
+} from "../commander-v3/index.js";
+import {
+  getLabConductorMode,
+  setLabConductorMode,
+} from "../commander-v3/lab/conductor-mode.js";
+import { commanderV3ModelName } from "../commander-v3/flags.js";
 
 export type ShadowCanaryServer = {
   port: number;
@@ -158,6 +170,12 @@ export async function startShadowCanaryServer(opts?: {
             promptVersion: unified ? INTERPRET_TURN_PROMPT_VERSION : null,
             legacyFallbackEnabled: false,
           },
+          conversationCommanderV3: {
+            enabled: isConversationCommanderV3Enabled(process.env),
+            model: commanderV3ModelName(process.env),
+            promptVersion: COMMANDER_V3_PROMPT_VERSION,
+            path: "apps/wara-v2/src/commander-v3",
+          },
         });
         return;
       }
@@ -242,6 +260,97 @@ export async function startShadowCanaryServer(opts?: {
             selectedUnit: verify?.selectedUnit?.label ?? null,
           },
         });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/lab/conductor") {
+        if (!isAuthorized(req)) {
+          respondJson(401, { error: "unauthorized" });
+          return;
+        }
+        const phone = url.searchParams.get("phone")?.trim() || "";
+        if (!phone) {
+          respondJson(400, { error: "phone_required" });
+          return;
+        }
+        respondJson(200, {
+          mode: getLabConductorMode(phone),
+          envForcedV3: isConversationCommanderV3Enabled(process.env),
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/lab/conductor") {
+        const raw = await readJsonBody(req);
+        if (!isAuthorized(req, raw)) {
+          respondJson(401, { error: "unauthorized" });
+          return;
+        }
+        const phone = String(raw.phone ?? "").trim();
+        const mode = raw.mode === "v3" ? "v3" : "v2";
+        if (!phone) {
+          respondJson(400, { error: "phone_required" });
+          return;
+        }
+        setLabConductorMode(phone, mode);
+        respondJson(200, { ok: true, mode });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/lab/v3/state") {
+        if (!isAuthorized(req)) {
+          respondJson(401, { error: "unauthorized" });
+          return;
+        }
+        const tenantId =
+          url.searchParams.get("tenantId")?.trim() ||
+          process.env.WARA_V2_SHADOW_TENANT?.trim() ||
+          "tenant_internal_ops";
+        const phone = url.searchParams.get("phone")?.trim() || "";
+        if (!phone) {
+          respondJson(400, { error: "phone_required" });
+          return;
+        }
+        respondJson(200, { state: getConversationStateV3(tenantId, phone) });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/lab/v3/trace") {
+        if (!isAuthorized(req)) {
+          respondJson(401, { error: "unauthorized" });
+          return;
+        }
+        const tenantId =
+          url.searchParams.get("tenantId")?.trim() ||
+          process.env.WARA_V2_SHADOW_TENANT?.trim() ||
+          "tenant_internal_ops";
+        const phone = url.searchParams.get("phone")?.trim() || "";
+        if (!phone) {
+          respondJson(400, { error: "phone_required" });
+          return;
+        }
+        respondJson(200, { trace: getLastTraceV3(tenantId, phone) });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/lab/v3/reset") {
+        const raw = await readJsonBody(req);
+        if (!isAuthorized(req, raw)) {
+          respondJson(401, { error: "unauthorized" });
+          return;
+        }
+        const tenantId =
+          (typeof raw.tenantId === "string" && raw.tenantId.trim()) ||
+          process.env.WARA_V2_SHADOW_TENANT?.trim() ||
+          "tenant_internal_ops";
+        const phone = String(raw.phone ?? "").trim();
+        if (!phone) {
+          respondJson(400, { error: "phone_required" });
+          return;
+        }
+        const mode = raw.mode === "soft" ? "soft" : "hard";
+        const state = resetConversationStateV3(tenantId, phone, mode);
+        respondJson(200, { ok: true, mode, state });
         return;
       }
 

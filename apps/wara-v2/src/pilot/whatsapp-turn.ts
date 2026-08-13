@@ -19,6 +19,13 @@ import { isAllowlistedPhone, toE164Guess } from "./phone.js";
 import { buildPilotMessages } from "./prompt.js";
 import { resolvePilotWaraTurn } from "./wara-context.js";
 import type { WaraPromptSnapshot } from "./wara-types.js";
+import {
+  isConversationCommanderV3Enabled,
+  runCommanderTurn,
+} from "../commander-v3/index.js";
+import { loadCommanderV3Context } from "../commander-v3/lab/load-context.js";
+import { saveConversationStateV3 } from "../commander-v3/persistence/store.js";
+import { resolveConductorEnabled } from "../commander-v3/lab/conductor-mode.js";
 
 const FALLBACK =
   "Disculpá, tuve un problema para procesar eso. ¿Me lo repetís en una línea?";
@@ -246,6 +253,37 @@ export async function handlePilotWhatsAppTurn(input: {
 
   const text = input.text.trim();
   const tenant = (env.WARA_V2_SHADOW_TENANT ?? "tenant_internal_ops").trim();
+
+  // Commander V3 — path aislado; V2 brain no interviene.
+  if (resolveConductorEnabled(input.phone, env) || isConversationCommanderV3Enabled(env)) {
+    const ctx = await loadCommanderV3Context({
+      phone: input.phone,
+      tenantId: tenant,
+      env,
+    });
+    if (!ctx.ok) {
+      return { status: 200, body: reply(ctx.message) };
+    }
+    saveConversationStateV3(ctx.state);
+    try {
+      const result = await runCommanderTurn({
+        tenantId: tenant,
+        phone: input.phone,
+        message: text || "Hola",
+        messageId: input.messageId,
+        env,
+        contacts: ctx.contacts,
+        fleetUnits: ctx.fleetUnits,
+        customerName: ctx.customerName,
+      });
+      if (!result.reply.trim()) {
+        return { status: 200, body: silent({ skipResponse_s: "true" }) };
+      }
+      return { status: 200, body: reply(result.reply) };
+    } catch {
+      return { status: 200, body: reply(FALLBACK) };
+    }
+  }
 
   const waraResolution = await resolvePilotWaraTurn({
     phone: input.phone,
