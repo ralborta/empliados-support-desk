@@ -960,9 +960,13 @@ async function startCertificate(
   const fromEntity = resolveUnitFromDecisionOrText(decision, deps);
   if (fromEntity) {
     const cont = continueAfterUnitResolved(state, fromEntity, { parentIntent: "certificate" });
-    const prefix =
-      decision.action === "suspend_and_start" || decision.action === "switch_intent"
-        ? "De acuerdo, dejo pendiente el trámite anterior. "
+    const hadSuspend =
+      decision.action === "suspend_and_start" ||
+      (decision.action === "switch_intent" && decision.currentTramiteDisposition === "suspend");
+    const prefix = hadSuspend
+      ? "De acuerdo, dejo pendiente el trámite anterior. "
+      : decision.action === "switch_intent"
+        ? "De acuerdo, seguimos con el certificado. "
         : "";
     return { handler: cont.handler, message: prefix + cont.message, state };
   }
@@ -999,9 +1003,13 @@ async function startCertificate(
     question: q,
   };
   state.lastAgentQuestion = q;
-  const prefix =
-    decision.action === "suspend_and_start" || decision.action === "switch_intent"
-      ? "De acuerdo, dejo pendiente el trámite anterior. "
+  const hadSuspend =
+    decision.action === "suspend_and_start" ||
+    (decision.action === "switch_intent" && decision.currentTramiteDisposition === "suspend");
+  const prefix = hadSuspend
+    ? "De acuerdo, dejo pendiente el trámite anterior. "
+    : decision.action === "switch_intent"
+      ? "De acuerdo, seguimos con el certificado. "
       : "";
   return { handler: "certificate", message: prefix + q, state };
 }

@@ -404,6 +404,66 @@ describe("sesión: empresa / cancel / farewell", () => {
     assert.equal(pol.decision.currentTramiteDisposition, "cancel");
   });
 
+  it("policy+execute: general+certificate con pending odometer arranca certificado", async () => {
+    const st = seedCompanyActive();
+    st.activeTramite = "odometer_update";
+    st.odometerDraft = {
+      meterType: "horometro",
+      step: "await_confirm",
+      unit: st.selectedUnit!,
+      valueNew: 75,
+      valuePrevious: 50,
+      fechaLecturaIso: "2026-08-13T01:30:00-03:00",
+      fechaDisplay: "13/08/2026 01:30",
+      fechaDatePart: "2026-08-13",
+      fechaTimePart: "01:30:00",
+    } as any;
+    const q = "Si está correcto, respondé CONFIRMO.";
+    st.pendingConfirmation = {
+      action: "odometer_write",
+      unit: st.selectedUnit!,
+      askedAt: new Date().toISOString(),
+      question: q,
+    };
+    bindPendingConfirmationQuestion(st, q, "confirm_write");
+    savePilotConversationState(st);
+
+    const pol = applySemanticPolicy(
+      {
+        action: "general",
+        intent: "certificate",
+        confidence: 0.9,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "GENERAL_CONVERSATION",
+        speechAct: null,
+        answer: null,
+        entity: null,
+        fields: null,
+        ambiguity: null,
+      },
+      st,
+    );
+    assert.equal(pol.decision.action, "switch_intent");
+    assert.equal(pol.decision.intent, "certificate");
+    assert.equal(pol.decision.currentTramiteDisposition, "cancel");
+
+    const exec = await executeTurnDecision(pol.decision, st, {
+      messageId: "m-reject-cert",
+      env: process.env,
+      fleetUnits: [UNIT],
+      originalMessage: "no confirmo quiero certificado",
+      showListing: () => undefined,
+      askGpsConfirmation: () => "",
+      deliverGpsReport: () => "",
+      handleGpsSideQuery: async () => ({ message: "", state: st }),
+    });
+    assert.match(exec.message, /certificado de cobertura/i);
+    assert.doesNotMatch(exec.message, /En qué te puedo ayudar/i);
+    assert.equal(exec.state.pendingConfirmation?.action, "certificate_issue");
+    assert.equal(exec.state.activeTramite, "certificate_issue");
+    assert.equal(exec.state.odometerDraft, null);
+  });
+
   it("cancel + luego GPS de la misma unidad", async () => {
     seedMaintenancePending();
     await turn("cancelalo");

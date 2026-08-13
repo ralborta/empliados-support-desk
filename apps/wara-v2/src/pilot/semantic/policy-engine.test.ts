@@ -105,4 +105,71 @@ describe("semantic policy engine", () => {
     assert.equal(unitNeg.decision.companyAction, null);
     assert.equal(unitNeg.decision.intent, "odometer");
   });
+
+  it("general+certificate con pending odometer → switch_intent cancel", () => {
+    const st = createEmptyPilotState({ tenantId: "t", phone: "+54911" });
+    st.activeTramite = "odometer_update";
+    st.pendingConfirmation = {
+      action: "odometer_write",
+      unit: { movilId: 1, label: "AA496GJ", patente: "AA496GJ", unidad: "M900-077" },
+      askedAt: new Date().toISOString(),
+      question: "Si está correcto, respondé CONFIRMO.",
+    };
+    const r = applySemanticPolicy(
+      baseDecision({
+        action: "general",
+        intent: "certificate",
+        confidence: 0.9,
+        reasoningCode: "GENERAL_CONVERSATION",
+        speechAct: null,
+      }),
+      st,
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.decision.action, "switch_intent");
+    assert.equal(r.decision.intent, "certificate");
+    assert.equal(r.decision.currentTramiteDisposition, "cancel");
+    assert.equal(r.decision.reasoningCode, "SWITCH_INTENT");
+  });
+
+  it("general+certificate NEW_EXPLICIT_INTENT sin pending → start_intent", () => {
+    const st = createEmptyPilotState({ tenantId: "t", phone: "+54911" });
+    const r = applySemanticPolicy(
+      baseDecision({
+        action: "general",
+        intent: "certificate",
+        confidence: 0.95,
+        reasoningCode: "NEW_EXPLICIT_INTENT",
+        speechAct: "start_intent",
+      }),
+      st,
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.decision.action, "start_intent");
+    assert.equal(r.decision.intent, "certificate");
+    assert.equal(r.decision.currentTramiteDisposition, "keep");
+  });
+
+  it("no coacciona general+odometer con negate_intent de unidad", () => {
+    const st = createEmptyPilotState({ tenantId: "t", phone: "+54911" });
+    st.activeTramite = "odometer_update";
+    st.pendingConfirmation = {
+      action: "odometer_write",
+      unit: { movilId: 1, label: "AA496GJ", patente: "AA496GJ", unidad: "M900-077" },
+      askedAt: new Date().toISOString(),
+      question: "CONFIRMO?",
+    };
+    const r = applySemanticPolicy(
+      baseDecision({
+        action: "general",
+        intent: "odometer",
+        speechAct: "negate_intent",
+        negatedAction: "change_unit",
+        reasoningCode: "GENERAL_CONVERSATION",
+      }),
+      st,
+    );
+    assert.equal(r.decision.action, "general");
+    assert.equal(r.decision.speechAct, "negate_intent");
+  });
 });

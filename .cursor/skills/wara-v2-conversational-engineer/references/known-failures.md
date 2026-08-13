@@ -68,10 +68,17 @@ Causas aún en investigación; no convertir en matchers:
 | Patente con `pendingEntityResolution` cae a menú general / «dato falta» | LLM etiquetaba `amend`/`provide_fields`/`unit_name`; faltaba coerce a `select_entity` + parser de campo esperado |
 | «me pasas la lista?» con captura de unidad abierta solo re-pregunta patente | guard `awaitingUnitEarly` bloqueaba `intent=unit_list` (regresión del coerce de captura) |
 | Tras listar, «hola»/ruido re-emite las 408 unidades | `lastAgentQuestion` se pisaba con el cuerpo del listado; el re-ask de await_unit lo re-enviaba |
+| pending CONFIRMO + «no confirmo quiero certificado» → menú genérico | LLM devolvía `action=general`+`intent=certificate`; execute caía al fallback y **dejaba** el pending |
 
 Corregir por contrato/transición general; **prohibido** parchear con frases, regex de intención o `includes`.
 
-## 9. Lista de flota bloqueada bajo captura de unidad
+## 8. Rechazo de CONFIRMO + nuevo servicio caía a menú genérico
+
+**Causa raíz:** `intent` de servicio correcto (`certificate`) con `action=general` no es ejecutable; el fallback de execute respondía «¿En qué te puedo ayudar?» sin cancelar ni switch.
+
+**Contrato:** pedido explícito de otro servicio (o rechazo de confirmación + nuevo servicio) → `switch_intent`/`start_intent` + disposition `cancel` si había pending de escritura. `NEW_EXPLICIT_INTENT`/`SWITCH_INTENT` NUNCA con `action=general`.
+
+**Dirección:** prompt 13j + reconcile estructural en policy (`coerceGeneralServiceStart`); no matchers de frase.
 
 **Causa raíz:** el early-guard de `pendingEntityResolution` / `await_unit` trataba `unit_list` como ruido (cortesía/general) y re-emitía la pregunta de patente.
 

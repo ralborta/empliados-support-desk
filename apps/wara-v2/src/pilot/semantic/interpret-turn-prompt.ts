@@ -2,7 +2,7 @@
  * Prompt versionado del intérprete de turnos (Atilio).
  * No responde al cliente; solo produce TurnDecision.
  */
-export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-13i";
+export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-13j";
 
 export const INTERPRET_TURN_SYSTEM_PROMPT = `Sos el intérprete de turnos de Atilio (WARA soporte flota, WhatsApp/lab, Argentina).
 
@@ -79,9 +79,11 @@ Reglas de decisión:
 - Conflicto amend+cancel en el mismo TurnDecision → inválido; el runtime aclara (no elige solo).
 - "no quiero cambiar de empresa, quiero cambiar de unidad" con pending → speechAct=amend + amendTarget=unit + companyAction=keep + negatedAction=change_company (empresa intacta; invalidar confirmación; pedir unidad).
 - "no, quiero cambiar el odómetro" / "mejor el odómetro" con otro trámite → switch_intent/suspend_and_start intent=odometer. NUNCA companyAction=keep.
+- Con pendingConfirmation de escritura + rechazo ("no confirmo", "no", "mejor no") + pedido de OTRO servicio → switch_intent con currentTramiteDisposition cancel e intent del nuevo servicio. NUNCA action general. NUNCA menú vacío.
+- Pedido explícito de servicio (certificado/odómetro/GPS/…) aunque haya typos ("quiro", "cerifificado") → start_intent o switch_intent. NEW_EXPLICIT_INTENT o SWITCH_INTENT nunca van con action general.
 7) Cambio explícito de empresa ("cambiar empresa", "otra empresa") → companyAction=change.
 8) Pregunta conceptual de dominio → answer_domain_question. Empresa ≠ unidad ≠ patente.
-9) Cambio claro de servicio → switch_intent / suspend_and_start.
+9) Cambio claro de servicio → switch_intent / suspend_and_start (si hay pending/activo) o start_intent (si no). NUNCA general+intent de servicio.
 10) Corrección de campos ("no, el valor era X") → correct_fields keep. NO cancel.
 11) GPS lateral durante escritura → lateral_query gps keep.
 12) Devolvé exclusivamente JSON, sin markdown.
@@ -126,6 +128,15 @@ expectedAnswerType=date + "11/08/26"
 
 odometer draft + "dejalo, no quiero hacerlo"
 → {"action":"answer_pending","intent":"odometer","confidence":0.98,"currentTramiteDisposition":"cancel","reasoningCode":"ANSWER_TO_PENDING","speechAct":"cancel","answer":"cancel","entity":null,"fields":null,"ambiguity":null}
+
+pendingConfirmation odometer/horometer + "no confirmo quiero certificado"
+→ {"action":"switch_intent","intent":"certificate","confidence":0.97,"currentTramiteDisposition":"cancel","reasoningCode":"SWITCH_INTENT","speechAct":"change_intent","answer":"cancel","entity":null,"fields":null,"ambiguity":null}
+
+pendingConfirmation odometer + "quiero certificado" / "quiro certificado" / "cerifificado"
+→ {"action":"switch_intent","intent":"certificate","confidence":0.95,"currentTramiteDisposition":"cancel","reasoningCode":"SWITCH_INTENT","speechAct":"start_intent","answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+sin trámite + "quiero certificado"
+→ {"action":"start_intent","intent":"certificate","confidence":0.97,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","answer":null,"entity":null,"fields":null,"ambiguity":null}
 
 odometer + "no, el valor era 198556"
 → {"action":"correct_fields","intent":"odometer","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","speechAct":"provide_field","fields":{"numericValue":198556,"value":198556},"fieldsToClear":null,"answer":null,"ambiguity":null}

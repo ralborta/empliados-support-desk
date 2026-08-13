@@ -82,6 +82,109 @@ function meterIntent(state: PilotConversationState): "odometer" | "horometer" {
   return state.odometerDraft?.meterType === "horometro" ? "horometer" : "odometer";
 }
 
+/** Intents que arrancan un servicio (no query/none). */
+const STARTABLE_SERVICE_INTENTS = new Set([
+  "certificate",
+  "odometer",
+  "horometer",
+  "gps",
+  "maintenance",
+  "ticket",
+  "human_handoff",
+]);
+
+function pendingImpliesIntent(state: PilotConversationState): string | null {
+  const a = state.pendingConfirmation?.action;
+  if (a === "odometer_write") {
+    return state.odometerDraft?.meterType === "horometro" ? "horometer" : "odometer";
+  }
+  if (a === "certificate_issue") return "certificate";
+  if (a === "gps_report") return "gps";
+  if (a === "maintenance_write") return "maintenance";
+  if (a === "odoo_ticket_create") return "ticket";
+  if (state.activeTramite === "odometer_update") {
+    return state.odometerDraft?.meterType === "horometro" ? "horometer" : "odometer";
+  }
+  if (state.activeTramite === "certificate_issue") return "certificate";
+  if (state.activeTramite === "search_unit" || state.activeTramite === "unit_gps_report") {
+    return "gps";
+  }
+  if (
+    state.activeTramite === "maintenance_request" ||
+    state.activeTramite === "maintenance_consult"
+  ) {
+    return "maintenance";
+  }
+  if (state.activeTramite === "odoo_ticket") return "ticket";
+  return null;
+}
+
+/**
+ * Consistencia estructural: intent de servicio + action=general no es ejecutable
+ * (cae al menú y deja pending vivo). No lee el texto del usuario.
+ * Preserva amend / negate / farewell / company actions.
+ */
+function coerceGeneralServiceStart(
+  decision: TurnDecision,
+  state: PilotConversationState,
+): TurnDecision {
+  if (decision.action !== "general") return decision;
+  if (!STARTABLE_SERVICE_INTENTS.has(decision.intent)) return decision;
+  if (
+    decision.speechAct === "amend" ||
+    decision.speechAct === "negate_intent" ||
+    decision.speechAct === "farewell" ||
+    decision.speechAct === "courtesy" ||
+    decision.speechAct === "confirm" ||
+    isStructuredAmend(decision) ||
+    isStructuredCompanyKeep(decision)
+  ) {
+    return decision;
+  }
+  if (
+    decision.companyAction === "query_active" ||
+    decision.companyAction === "change" ||
+    decision.companyAction === "select" ||
+    decision.companyAction === "keep"
+  ) {
+    return decision;
+  }
+
+  const hasActive =
+    Boolean(state.pendingConfirmation) ||
+    (state.activeTramite != null && state.activeTramite !== "none");
+  const currentIntent = pendingImpliesIntent(state);
+  const intentDiffers = currentIntent != null && currentIntent !== decision.intent;
+  const wantsService =
+    decision.reasoningCode === "NEW_EXPLICIT_INTENT" ||
+    decision.reasoningCode === "SWITCH_INTENT" ||
+    decision.speechAct === "start_intent" ||
+    decision.speechAct === "change_intent" ||
+    decision.answer === "reject" ||
+    decision.answer === "cancel" ||
+    (Boolean(state.pendingConfirmation) && intentDiffers);
+
+  if (!wantsService) return decision;
+
+  return {
+    ...decision,
+    action: hasActive ? "switch_intent" : "start_intent",
+    speechAct:
+      decision.speechAct === "cancel" || decision.answer === "cancel"
+        ? "cancel"
+        : decision.speechAct === "change_intent"
+          ? "change_intent"
+          : "start_intent",
+    currentTramiteDisposition: hasActive ? "cancel" : "keep",
+    reasoningCode: hasActive ? "SWITCH_INTENT" : "NEW_EXPLICIT_INTENT",
+    answer:
+      hasActive && (decision.answer === "reject" || decision.answer === "cancel")
+        ? "cancel"
+        : decision.answer ?? null,
+    ambiguity: null,
+  };
+}
+
 /** Parser de campo: solo si el estado ya espera ese campo. */
 function fillExpectedFieldsFromMessage(
   decision: TurnDecision,
@@ -151,6 +254,9 @@ export function applySemanticPolicy(
       decision: safeClarifyDecision("Ese servicio no está disponible. ¿Qué necesitás?"),
     };
   }
+
+  // Intent de servicio con action=general → start/switch (antes de amend/company).
+  decision = coerceGeneralServiceStart(decision, state);
 
   // Amend vs cancel: mutuamente excluyentes. Conflicto → clarify (NO “amend gana siempre”).
   // Debe ir ANTES de normalizar keep+amend (esa normalización limpia answer/disposition).
