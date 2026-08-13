@@ -311,9 +311,21 @@ export function coercePlan(raw: unknown): unknown {
   } else {
     o.confidence = Math.min(1, Math.max(0, o.confidence));
   }
-  // suppliedFields vacío u objeto raro
+  // suppliedFields vacío u objeto raro; value string → number (LLM suele mandar "129556")
   if (o.suppliedFields != null && typeof o.suppliedFields !== "object") {
     o.suppliedFields = null;
+  } else if (o.suppliedFields && typeof o.suppliedFields === "object") {
+    const sf = { ...(o.suppliedFields as Record<string, unknown>) };
+    if (typeof sf.value === "string") {
+      const raw = sf.value.trim().replace(",", ".");
+      if (/^\d+(?:\.\d+)?$/.test(raw)) {
+        const n = Number(raw);
+        sf.value = Number.isFinite(n) ? n : null;
+      } else {
+        sf.value = null;
+      }
+    }
+    o.suppliedFields = sf;
   }
   // reasoning obligatorio para el schema; si falta, sintetizar mínimo
   if (typeof o.reasoning !== "string" || !o.reasoning.trim()) {

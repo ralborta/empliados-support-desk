@@ -12,7 +12,7 @@ import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("prompt version bump 13j", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13l/);
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13m/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -157,6 +157,27 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       parsed.data!.requestedCapabilities.some((c) => c.name === "company.get_active"),
     );
     assert.ok(parsed.data!.reasoning.length > 0);
+  });
+
+  it("coerce: suppliedFields.value string → number (km sueltos)", () => {
+    const coerced = coercePlan({
+      reasoning: "valor km",
+      conversationalAct: "continue_task",
+      task: "odometer",
+      taskAction: "continue",
+      suppliedFields: { value: "129556" },
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: {
+        preserveCompany: true,
+        preserveUnit: true,
+        preserveTask: true,
+      },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const parsed = TurnPlanSchema.safeParse(coerced);
+    assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+    assert.equal(parsed.data!.suppliedFields?.value, 129556);
   });
 
   it("company.get_active sin empresa lista disponibles", async () => {

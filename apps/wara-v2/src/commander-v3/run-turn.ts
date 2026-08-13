@@ -125,6 +125,25 @@ export async function runCommanderTurn(
     validation = validateTurnPlan(plan, state);
   }
 
+  const localNow = DateTime.now()
+    .setZone(DEFAULT_TENANT_TZ)
+    .toFormat("yyyy-MM-dd'T'HH:mm:ss");
+  const dtOpts = { timezone: DEFAULT_TENANT_TZ, localNow };
+
+  // Si el plan LLM falla pero hay campo esperado capturable (ej. "129556" con expected=value),
+  // recuperar sin pedir de nuevo el número.
+  if (!validation.ok || !plan) {
+    const recovered = tryRecoverExpectedFieldPlan(
+      state,
+      input.message,
+      dtOpts,
+    );
+    if (recovered) {
+      plan = recovered;
+      validation = validateTurnPlan(plan, state);
+    }
+  }
+
   if (!validation.ok || !plan) {
     const clarify = buildConflictClarify(validation.errors, state);
     const { reply, latencyMs: redactMs } = await redactReply({
@@ -192,13 +211,7 @@ export async function runCommanderTurn(
     return { reply, state: after, trace };
   }
 
-  const localNow = DateTime.now()
-    .setZone(DEFAULT_TENANT_TZ)
-    .toFormat("yyyy-MM-dd'T'HH:mm:ss");
-  plan = enrichPlanWithNaturalDatetime(plan, state, input.message, {
-    timezone: DEFAULT_TENANT_TZ,
-    localNow,
-  });
+  plan = enrichPlanWithNaturalDatetime(plan, state, input.message, dtOpts);
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
   plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
   plan = enrichPlanForTaskSwitch(plan, state);
@@ -483,4 +496,49 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
     return "Pasame el valor numérico para continuar.";
   }
   return "Necesito una aclaración puntual: ¿qué querés hacer exactamente con el trámite actual?";
+}
+
+/** Stub + enrich de campo esperado cuando el TurnPlan LLM es null/inválido. */
+function tryRecoverExpectedFieldPlan(
+  state: ConversationStateV3,
+  message: string,
+  dtOpts: { timezone: string; localNow: string },
+): TurnPlan | null {
+  const expected = state.lastQuestion?.expected;
+  if (
+    expected !== "value" &&
+    expected !== "unit" &&
+    expected !== "date" &&
+    expected !== "time"
+  ) {
+    return null;
+  }
+  const base: TurnPlan = {
+    reasoning: "Captura de campo esperado tras plan inválido o ausente.",
+    conversationalAct: "continue_task",
+    task: state.activeTask?.type ?? null,
+    taskAction: "continue",
+    requestedCapabilities: [],
+    stateIntent: {
+      preserveCompany: true,
+      preserveUnit: true,
+      preserveTask: true,
+    },
+    responseGoal: { purpose: "ask_missing", facts: [], nextQuestion: null },
+    confidence: 0.85,
+  };
+  let next = enrichPlanForExpectedFields(base, state, message);
+  if (expected === "date" || expected === "time") {
+    next = enrichPlanWithNaturalDatetime(next, state, message, dtOpts);
+  }
+  const captured =
+    (expected === "value" && next.suppliedFields?.value != null) ||
+    (expected === "unit" && Boolean(next.unitReference)) ||
+    (expected === "date" &&
+      (Boolean(next.suppliedFields?.date) ||
+        Boolean(next.suppliedFields?.observedAt))) ||
+    (expected === "time" &&
+      (Boolean(next.suppliedFields?.time) ||
+        Boolean(next.suppliedFields?.observedAt)));
+  return captured ? next : null;
 }
