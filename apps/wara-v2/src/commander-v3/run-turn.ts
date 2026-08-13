@@ -582,7 +582,7 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
     return "No me quedó claro si querés corregir un dato o cancelar el trámite. ¿Cuál de las dos?";
   }
   if (state.pendingWrite) {
-    return `Hay una confirmación pendiente de ${state.pendingWrite.task}. ¿Confirmás con CONFIRMO o cancelamos?`;
+    return `Hay una confirmación pendiente de ${state.pendingWrite.task}. ¿Confirmás con CONFIRMO o cancelamos con CANCELAR?`;
   }
   if (state.pendingEntity?.type === "unit") {
     return "Necesito la patente o el número de la unidad para seguir.";

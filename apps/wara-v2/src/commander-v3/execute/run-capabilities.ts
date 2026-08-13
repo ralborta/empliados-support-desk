@@ -51,6 +51,19 @@ function hashPayload(obj: unknown): string {
   return createHash("sha256").update(JSON.stringify(obj)).digest("hex").slice(0, 32);
 }
 
+/** Fecha interna YYYY-MM-DD → display dd/mm/aa (WhatsApp). */
+export function formatDateDdMmYy(isoDate: unknown): string {
+  if (typeof isoDate !== "string") return String(isoDate ?? "");
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (!m) return isoDate;
+  return `${m[3]}/${m[2]}/${m[1]!.slice(2)}`;
+}
+
+/** Pie de confirmación de escritura (CONFIRMO o CANCELAR). */
+function confirmOrCancelHint(): string {
+  return "Respondé CONFIRMO o CANCELAR.";
+}
+
 function unitFromRef(
   ref: UnitRef | null,
   fleet: WaraUnidadEstado[],
@@ -575,7 +588,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       const operationId = `cert_${randomUUID().slice(0, 12)}`;
       const payloadHash = hashPayload(payload);
       const version = 1;
-      const q = `¿Confirmás el certificado de cobertura para ${unit.label}? Respondé CONFIRMO para emitir (simulado).`;
+      const q = `¿Confirmás el certificado de cobertura para ${unit.label}? ${confirmOrCancelHint()}`;
       return {
         capability: req.name,
         ok: true,
@@ -690,7 +703,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               capability: req.name,
               ok: true,
               facts: [
-                `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} Respondé CONFIRMO si el valor es correcto.`,
+                `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} ${confirmOrCancelHint()}`,
               ],
               data: {
                 statePatch: {
@@ -771,7 +784,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           capability: req.name,
           ok: true,
           facts: [
-            `La fecha ${collected.date} es futura. Pasame una fecha de lectura de hoy o anterior (ej. hoy).`,
+            `La fecha ${formatDateDdMmYy(collected.date)} es futura. Pasame una fecha de lectura de hoy o anterior (ej. hoy, 11/08/26).`,
           ],
           data: {
             statePatch: {
@@ -813,7 +826,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           capability: req.name,
           ok: true,
           facts: [
-            `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} Respondé CONFIRMO si el valor es correcto.`,
+            `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} ${confirmOrCancelHint()}`,
           ],
           data: {
             statePatch: {
@@ -848,7 +861,8 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       };
       const operationId = `${meter}_${randomUUID().slice(0, 12)}`;
       const payloadHash = hashPayload(payload);
-      const q = `¿Confirmás ${meter === "hourmeter" ? "horómetro" : "odómetro"} ${collected.value} el ${collected.date} ${collected.time} en ${unit.label}? Respondé CONFIRMO.`;
+      const dateDisp = formatDateDdMmYy(collected.date);
+      const q = `¿Confirmás ${meter === "hourmeter" ? "horómetro" : "odómetro"} ${collected.value} el ${dateDisp} a las ${collected.time} en ${unit.label}? ${confirmOrCancelHint()}`;
       return {
         capability: req.name,
         ok: true,
@@ -944,7 +958,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         capability: req.name,
         ok: true,
         facts: [
-          `¿Confirmás el pedido de mantenimiento (${meta.kindLabel}, prioridad ${meta.priority}) para ${unit.label}? Detalle: ${detail}. Respondé CONFIRMO.`,
+          `¿Confirmás el pedido de mantenimiento (${meta.kindLabel}, prioridad ${meta.priority}) para ${unit.label}? Detalle: ${detail}. ${confirmOrCancelHint()}`,
         ],
         data: {
           statePatch: {
@@ -1012,7 +1026,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         capability: req.name,
         ok: true,
         facts: [
-          `¿Confirmás generar el ticket (${categoryLabel(category)})? Motivo: ${detail}. Respondé CONFIRMO (no alcanza con gracias/chau).`,
+          `¿Confirmás generar el ticket (${categoryLabel(category)})? Motivo: ${detail}. ${confirmOrCancelHint()} (no alcanza con gracias/chau).`,
         ],
         data: {
           statePatch: {
@@ -1113,7 +1127,7 @@ function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
       ok: true,
       facts: [
         `${detail}. Te derivo con un asesor.`,
-        `¿Confirmás el ticket (${categoryLabel(category)})? Motivo: ${detail}. Respondé CONFIRMO.`,
+        `¿Confirmás el ticket (${categoryLabel(category)})? Motivo: ${detail}. ${confirmOrCancelHint()}`,
       ],
       writeAttempt: true,
       writeExecuted: false,
