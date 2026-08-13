@@ -6,18 +6,25 @@ import type { TurnPlan } from "../types/turn-plan.js";
 
 const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
 - Español rioplatense natural: vos, cálido, humano. Como un colega que ayuda, no un formulario.
+- PROHIBIDO saludar en cada mensaje. NUNCA empieces con "Hola", "Hola ¿cómo estás?", "Buenas" salvo que purpose/act sea saludo explícito.
 - NO inventes hechos. NO agregues tools. NO cambies empresa/unidad.
-- Usá SOLO los hechos validados (facts) y el responseGoal.
-- LISTADOS: si hay un listado numerado en facts, copialo COMPLETO tal cual (todas las líneas 1. 2. 3.…). PROHIBIDO resumir como "tengo el listado" o "¿alguna en particular?" sin pegar las unidades.
-- Si el usuario preguntó algo fuera del trámite, respondé eso primero con los facts disponibles; no lo ignores para forzar el flujo.
-- Si no hay facts suficientes o no estás seguro, preguntá con naturalidad qué precisan (una sola pregunta).
-- Evitá tono robótico. Preferí "¿Cuántos km?", "¿Qué unidad?", "Mandame CONFIRMO y lo grabo".
-- NO menús genéricos inventados. NO corrijas ortografía del usuario.`;
+- Usá SOLO los hechos validados (facts) y el responseGoal. Si hay un fact operativo (pedir km, fecha, CONFIRMO, listado, GPS), priorizalo y acortá sin vaciarlo.
+- LISTADOS: si hay un listado numerado en facts, copialo COMPLETO tal cual. PROHIBIDO resumir como "tengo el listado" sin ítems.
+- Si el usuario preguntó algo fuera del trámite, respondé con los facts; no digas "no tengo información" si hay facts.
+- Si no hay facts, una sola pregunta concreta. NO inventes menús.
+- NO corrijas ortografía del usuario.`;
 
 function looksLikeListingFact(f: string): boolean {
   const lines = f.split("\n").filter((l) => l.trim());
   const numbered = lines.filter((l) => /^\d+\.\s/.test(l.trim())).length;
   return numbered >= 2 || (/Unidades en/i.test(f) && numbered >= 1);
+}
+
+function looksLikeOperationalFact(f: string): boolean {
+  if (looksLikeListingFact(f)) return true;
+  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)/i.test(
+    f,
+  );
 }
 
 export async function redactReply(input: {
@@ -67,8 +74,8 @@ export async function redactReply(input: {
     };
   }
 
-  // Hechos validados con listado: no pasar por LLM (evita "tengo el listado" sin ítems).
-  if (input.facts.some(looksLikeListingFact)) {
+  // Hechos operativos / listados: no pasar por LLM (evita "Hola" + inventos).
+  if (input.facts.some(looksLikeOperationalFact)) {
     return {
       reply: fallbackFromFacts(input.facts, input.plan),
       usedLlm: false,
@@ -118,7 +125,7 @@ export async function redactReply(input: {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.4,
+        temperature: 0.35,
         messages: [
           { role: "system", content: REDACTOR_SYSTEM },
           {
@@ -131,8 +138,7 @@ export async function redactReply(input: {
               unit: input.state.unit?.label ?? null,
               task: input.state.activeTask?.type ?? null,
               act: input.plan.conversationalAct,
-              userMessageHint:
-                "Respondé de forma humana. Si hay listado en facts, incluilo completo.",
+              rules: "Sin saludo. Sin inventar. Solo facts.",
             }),
           },
         ],
@@ -149,7 +155,9 @@ export async function redactReply(input: {
     const body = JSON.parse(result.text) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    const text = body.choices?.[0]?.message?.content?.trim();
+    let text = body.choices?.[0]?.message?.content?.trim() ?? "";
+    // Cinturón: sacar saludos residuales del redactor
+    text = text.replace(/^(hola[^.!?]*[.!?]\s*)+/i, "").trim();
     if (!text) {
       return {
         reply: fallbackFromFacts(input.facts, input.plan),
@@ -170,7 +178,7 @@ export async function redactReply(input: {
 function fallbackFromFacts(facts: string[], plan: TurnPlan): string {
   if (facts.length && plan.responseGoal.nextQuestion) {
     const joined = facts.join("\n\n");
-    if (facts.some(looksLikeListingFact)) return joined;
+    if (facts.some(looksLikeOperationalFact)) return joined;
     return `${joined}\n\n${plan.responseGoal.nextQuestion}`;
   }
   if (facts.length) return facts.join("\n\n");

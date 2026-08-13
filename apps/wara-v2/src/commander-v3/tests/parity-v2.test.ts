@@ -12,7 +12,7 @@ import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("prompt version bump 13j", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13o/);
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13p/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -40,6 +40,61 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.equal(enriched.suppliedFields?.date, "2026-08-13");
     assert.equal(enriched.suppliedFields?.time, "05:00");
+  });
+
+  it("el sábado 14:30 con acto inform → sábado pasado + prepare", () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: { value: 256444 },
+      missing: ["date", "time"],
+    };
+    s.lastQuestion = { id: "1", purpose: "meter_date", expected: "date" };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "llm inventó sábado futuro",
+      conversationalAct: "inform",
+      task: null,
+      suppliedFields: { date: "2026-08-15", time: "14:30" },
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: ["no tengo info"] },
+      confidence: 0.5,
+    });
+    const enriched = enrichPlanWithNaturalDatetime(plan, s, "el sabado 14:30", {
+      timezone: "America/Argentina/Buenos_Aires",
+      localNow: "2026-08-13T14:00:00",
+    });
+    assert.equal(enriched.conversationalAct, "continue_task");
+    assert.equal(enriched.suppliedFields?.date, "2026-08-08");
+    assert.equal(enriched.suppliedFields?.time, "14:30");
+    assert.ok(
+      enriched.requestedCapabilities.some((c) => c.name === "odometer.prepare"),
+    );
+  });
+
+  it("greet falso mid-trámite → continue_task", async () => {
+    const { enrichPlanForGreetingPolicy } = await import(
+      "../enrich/greeting-policy.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: { value: 1 },
+      missing: ["date", "time"],
+    };
+    s.lastQuestion = { id: "1", purpose: "meter_date", expected: "date" };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "saludo inventado",
+      conversationalAct: "greet",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForGreetingPolicy(plan, s, "el sabado 14:30");
+    assert.equal(enriched.conversationalAct, "continue_task");
   });
 
   it("mo hoy con pending odometer → amend_task no cancel", () => {

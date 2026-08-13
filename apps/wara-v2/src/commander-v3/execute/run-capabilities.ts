@@ -175,31 +175,34 @@ function inferDefaultCapabilities(
   if (plan.task === "unit_query") {
     return [{ name: "unit.search", params: {} }];
   }
+  // Medidor/certificado: también con inform/continue (no solo start_task).
+  if (plan.task === "odometer") {
+    const caps: CapabilityRequest[] = [
+      { name: "odometer.prepare", params: {} },
+    ];
+    if (!state.unit && !plan.unitReference) {
+      caps.push({ name: "unit.search", params: {} });
+    }
+    return caps;
+  }
+  if (plan.task === "hourmeter") {
+    const caps: CapabilityRequest[] = [
+      { name: "hourmeter.prepare", params: {} },
+    ];
+    if (!state.unit && !plan.unitReference) {
+      caps.push({ name: "unit.search", params: {} });
+    }
+    return caps;
+  }
+  if (plan.task === "certificate") {
+    return [{ name: "certificate.prepare", params: {} }];
+  }
   if (
     plan.taskAction === "start" ||
     plan.taskAction === "switch" ||
     plan.conversationalAct === "start_task" ||
     plan.conversationalAct === "switch_task"
   ) {
-    if (plan.task === "certificate") return [{ name: "certificate.prepare", params: {} }];
-    if (plan.task === "odometer") {
-      const caps: CapabilityRequest[] = [
-        { name: "odometer.prepare", params: {} },
-      ];
-      if (!state.unit && !plan.unitReference) {
-        caps.push({ name: "unit.search", params: {} });
-      }
-      return caps;
-    }
-    if (plan.task === "hourmeter") {
-      const caps: CapabilityRequest[] = [
-        { name: "hourmeter.prepare", params: {} },
-      ];
-      if (!state.unit && !plan.unitReference) {
-        caps.push({ name: "unit.search", params: {} });
-      }
-      return caps;
-    }
     if (plan.task === "maintenance") return [{ name: "maintenance.prepare", params: {} }];
     if (plan.task === "human_handoff") return [{ name: "handoff.prepare", params: {} }];
     if (plan.task === "gps") return [{ name: "gps.get_status", params: {} }];

@@ -27,12 +27,44 @@ export function enrichPlanForGreetingPolicy(
   state: ConversationStateV3,
   message: string,
 ): TurnPlan {
-  if (!isUserGreetingMessage(message)) return plan;
+  if (!isUserGreetingMessage(message)) {
+    // Mid-trámite el LLM a veces pone greet sin que el usuario haya saludado.
+    if (
+      plan.conversationalAct === "greet" &&
+      (state.activeTask ||
+        state.pendingWrite ||
+        state.lastQuestion?.expected === "value" ||
+        state.lastQuestion?.expected === "date" ||
+        state.lastQuestion?.expected === "time" ||
+        state.lastQuestion?.expected === "unit" ||
+        state.lastQuestion?.expected === "confirmation")
+    ) {
+      return {
+        ...plan,
+        conversationalAct: state.pendingWrite ? "inform" : "continue_task",
+        task: plan.task ?? state.activeTask?.type ?? null,
+        taskAction: plan.taskAction ?? (state.pendingWrite ? null : "continue"),
+        reasoning:
+          (plan.reasoning ? `${plan.reasoning} ` : "") +
+          "No hay saludo del usuario: continúo el trámite (no greet).",
+      };
+    }
+    return plan;
+  }
 
   // No pisar confirmación de escritura en curso
   if (
     plan.conversationalAct === "confirm_write" ||
     state.lastQuestion?.expected === "confirmation"
+  ) {
+    return plan;
+  }
+
+  // No pisar captura de medidor/certificado por un "hola" embebido raro
+  if (
+    state.lastQuestion?.expected === "value" ||
+    state.lastQuestion?.expected === "date" ||
+    state.lastQuestion?.expected === "time"
   ) {
     return plan;
   }

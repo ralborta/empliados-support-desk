@@ -28,6 +28,15 @@ function meterPending(state: ConversationStateV3): boolean {
   return t.includes("odometer") || t.includes("hourmeter");
 }
 
+function ensurePrepare(plan: TurnPlan, meter: "odometer" | "hourmeter"): TurnPlan {
+  const name = `${meter}.prepare`;
+  if (plan.requestedCapabilities.some((c) => c.name === name)) return plan;
+  return {
+    ...plan,
+    requestedCapabilities: [...plan.requestedCapabilities, { name, params: {} }],
+  };
+}
+
 /**
  * Enriquece el TurnPlan con fecha/hora naturales y convierte cancel→amend
  * cuando el mensaje es corrección de fecha del resumen (mo hoy / no hoy / etc.).
@@ -44,31 +53,57 @@ export function enrichPlanWithNaturalDatetime(
 
   let next = plan;
 
-  // Captura de fecha/hora esperada o prepare: rellenar fields desde resolución natural.
+  const meterType =
+    state.activeTask?.type === "hourmeter"
+      ? "hourmeter"
+      : state.activeTask?.type === "odometer"
+        ? "odometer"
+        : plan.task === "hourmeter"
+          ? "hourmeter"
+          : plan.task === "odometer"
+            ? "odometer"
+            : null;
+
   const expectingDateTime =
     state.lastQuestion?.expected === "date" ||
     state.lastQuestion?.expected === "time" ||
-    (state.activeTask?.type === "odometer" || state.activeTask?.type === "hourmeter");
+    Boolean(
+      meterType &&
+        (state.activeTask?.missing?.includes("date") ||
+          state.activeTask?.missing?.includes("time")),
+    );
 
+  // Captura de fecha/hora: la resolución natural gana al LLM (weekday/relative).
+  // No depende del acto: si el LLM pone "inform"/"greet" igual hay que capturar.
   if (
     expectingDateTime &&
     resolved.kind === "resolved" &&
     resolved.date &&
-    (next.conversationalAct === "continue_task" ||
-      next.conversationalAct === "amend_task" ||
-      next.conversationalAct === "start_task" ||
-      next.conversationalAct === "ask" ||
-      next.taskAction === "continue" ||
-      next.taskAction === "amend")
+    next.conversationalAct !== "cancel_task" &&
+    next.conversationalAct !== "confirm_write" &&
+    next.conversationalAct !== "farewell"
   ) {
+    const meter = meterType ?? "odometer";
     next = {
       ...next,
+      conversationalAct: "continue_task",
+      task: next.task ?? state.activeTask?.type ?? meter,
+      taskAction: "continue",
       suppliedFields: {
         ...(next.suppliedFields ?? {}),
         date: resolved.date,
         time: resolved.time ?? next.suppliedFields?.time ?? null,
       },
+      responseGoal: {
+        purpose: "ask_missing",
+        facts: [],
+        nextQuestion: null,
+      },
+      reasoning:
+        next.reasoning ||
+        `Fecha/hora natural resuelta: ${resolved.date}${resolved.time ? ` ${resolved.time}` : ""}.`,
     };
+    next = ensurePrepare(next, meter);
   }
 
   // Cancel + pending meter + corrección de fecha → amend (no cancel).

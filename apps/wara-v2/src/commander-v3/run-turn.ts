@@ -272,6 +272,28 @@ export async function runCommanderTurn(
     plan = { ...plan, task: "unit_query" };
   }
 
+  // Trámites de escritura: si el LLM eligió el task, asegurar *.prepare
+  const ensurePrepareFor = (
+    task: "odometer" | "hourmeter" | "certificate",
+    cap: string,
+  ) => {
+    if (
+      plan.task === task &&
+      !plan.requestedCapabilities.some((c) => c.name === cap)
+    ) {
+      plan = {
+        ...plan,
+        requestedCapabilities: [
+          ...plan.requestedCapabilities,
+          { name: cap, params: {} },
+        ],
+      };
+    }
+  };
+  ensurePrepareFor("odometer", "odometer.prepare");
+  ensurePrepareFor("hourmeter", "hourmeter.prepare");
+  ensurePrepareFor("certificate", "certificate.prepare");
+
   // Ensure company selected for ops if only one contact
   if (!state.company && state.availableCompanies.length === 1) {
     state = { ...state, company: state.availableCompanies[0]! };
