@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13h", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13h/);
+  it("prompt version bump 13i", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13i/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -570,5 +570,102 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       message: "como hago un preventivo",
     });
     assert.match(exec.facts.join(" "), /preventivo|Mantenimiento/i);
+  });
+
+  it("no confirmo con pendingWrite → cancel_task", async () => {
+    const { enrichPlanForConfirmationOutcome } = await import(
+      "../enrich/confirmation-outcome.js"
+    );
+    const { applyCommanderState } = await import("../state/apply-patch.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "odo_1",
+      version: 1,
+      payloadHash: "h",
+      task: "odometer",
+      summary: {},
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_odometer",
+      expected: "confirmation",
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "awaiting_confirmation",
+      collected: { value: 125663 },
+      missing: [],
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "mal domain",
+      conversationalAct: "answer_lateral",
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "odometer" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.5,
+    });
+    const enriched = enrichPlanForConfirmationOutcome(plan, s, "no conbfirmo");
+    assert.equal(enriched.conversationalAct, "cancel_task");
+    assert.equal(enriched.requestedCapabilities.length, 0);
+    const applied = applyCommanderState({
+      state: s,
+      plan: enriched,
+      resolvedUnit: null,
+      resolvedCompany: null,
+      message: "no conbfirmo",
+      reply: "ok",
+    });
+    assert.equal(applied.state.pendingWrite, null);
+    assert.equal(applied.state.lastQuestion, null);
+  });
+
+  it("start hourmeter con pending odometer → switch limpia pending", async () => {
+    const { enrichPlanForConfirmationOutcome } = await import(
+      "../enrich/confirmation-outcome.js"
+    );
+    const { applyCommanderState } = await import("../state/apply-patch.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "odo_1",
+      version: 1,
+      payloadHash: "h",
+      task: "odometer",
+      summary: {},
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "awaiting_confirmation",
+      collected: {},
+      missing: [],
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_odometer",
+      expected: "confirmation",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "quiere horo",
+      conversationalAct: "start_task",
+      task: "hourmeter",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "hourmeter.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForConfirmationOutcome(plan, s, "cambio de horometro");
+    assert.equal(enriched.conversationalAct, "switch_task");
+    const applied = applyCommanderState({
+      state: s,
+      plan: enriched,
+      resolvedUnit: null,
+      resolvedCompany: null,
+      message: "cambio de horometro",
+      reply: "ok",
+    });
+    assert.equal(applied.state.pendingWrite, null);
+    assert.equal(applied.state.activeTask?.type, "hourmeter");
   });
 });

@@ -22,7 +22,7 @@ export function isUnequivocalCancelMessage(message: string): boolean {
 
 export function enrichPlanForCancelGuard(
   plan: TurnPlan,
-  _state: ConversationStateV3,
+  state: ConversationStateV3,
   message: string,
 ): TurnPlan {
   if (!isUnequivocalCancelMessage(message)) return plan;
@@ -31,28 +31,13 @@ export function enrichPlanForCancelGuard(
     plan.task === "human_handoff" ||
     plan.requestedCapabilities.some((c) => c.name.startsWith("handoff."));
 
-  if (!wantsHandoff && plan.conversationalAct !== "cancel_task") {
-    // cancel explícito con trámite: forzar cancel_task
-    if (plan.task || plan.conversationalAct === "start_task") {
-      return {
-        ...plan,
-        conversationalAct: "cancel_task",
-        taskAction: "cancel",
-        requestedCapabilities: [],
-        responseGoal: {
-          purpose: "inform",
-          facts: [],
-          nextQuestion: null,
-        },
-        reasoning:
-          (plan.reasoning ? `${plan.reasoning} ` : "") +
-          "El usuario canceló de forma inequívoca.",
-      };
-    }
-    return plan;
-  }
+  const hasActiveWork = Boolean(
+    state.pendingWrite ||
+      state.activeTask ||
+      state.lastQuestion?.expected === "confirmation",
+  );
 
-  if (wantsHandoff) {
+  if (wantsHandoff || hasActiveWork || plan.conversationalAct === "start_task") {
     return {
       ...plan,
       conversationalAct: "cancel_task",
@@ -61,12 +46,14 @@ export function enrichPlanForCancelGuard(
       requestedCapabilities: [],
       responseGoal: {
         purpose: "inform",
-        facts: ["Cancelé el trámite. No genero ticket por una cancelación."],
+        facts: wantsHandoff
+          ? ["Cancelé el trámite. No genero ticket por una cancelación."]
+          : ["Cancelé el trámite pendiente. ¿En qué te ayudo?"],
         nextQuestion: null,
       },
       reasoning:
         (plan.reasoning ? `${plan.reasoning} ` : "") +
-        "Cancelación inequívoca: no abrir handoff/ticket.",
+        "Cancelación inequívoca: cancel_task (no handoff / no domain).",
     };
   }
 

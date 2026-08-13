@@ -103,22 +103,32 @@ export function applyCommanderState(input: ApplyInput): {
         missing: [],
       },
       pendingWrite: null,
+      lastQuestion: null,
+      pendingEntity: null,
     };
   } else if (
     (input.plan.conversationalAct === "start_task" ||
       input.plan.taskAction === "start") &&
-    input.plan.task &&
-    !s.activeTask
+    input.plan.task
   ) {
-    s = {
-      ...s,
-      activeTask: {
-        type: input.plan.task,
-        status: "collecting",
-        collected: { ...(input.plan.suppliedFields ?? {}) },
-        missing: [],
-      },
-    };
+    // Si ya hay trámite/pending de OTRO tipo, start = reemplazo (limpia confirm)
+    const replacing =
+      Boolean(s.pendingWrite) ||
+      (s.activeTask != null && s.activeTask.type !== input.plan.task);
+    if (!s.activeTask || replacing) {
+      s = {
+        ...s,
+        activeTask: {
+          type: input.plan.task,
+          status: "collecting",
+          collected: { ...(input.plan.suppliedFields ?? {}) },
+          missing: [],
+        },
+        pendingWrite: replacing ? null : s.pendingWrite,
+        lastQuestion: replacing ? null : s.lastQuestion,
+        pendingEntity: replacing ? null : s.pendingEntity,
+      };
+    }
   } else if (
     input.plan.conversationalAct === "amend_task" &&
     input.plan.amendment?.target === "unit"

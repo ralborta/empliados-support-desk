@@ -154,7 +154,12 @@ function inferDefaultCapabilities(
       return [{ name: "gps.get_status", params: {} }];
     }
   }
-  if (plan.taskAction === "start" || plan.conversationalAct === "start_task") {
+  if (
+    plan.taskAction === "start" ||
+    plan.taskAction === "switch" ||
+    plan.conversationalAct === "start_task" ||
+    plan.conversationalAct === "switch_task"
+  ) {
     if (plan.task === "certificate") return [{ name: "certificate.prepare", params: {} }];
     if (plan.task === "odometer") {
       const caps: CapabilityRequest[] = [

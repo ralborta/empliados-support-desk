@@ -18,6 +18,7 @@ import {
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
 import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
+import { enrichPlanForConfirmationOutcome } from "./enrich/confirmation-outcome.js";
 import { applyCommanderState } from "./state/apply-patch.js";
 import { redactReply } from "./reply/redact.js";
 import {
@@ -194,6 +195,7 @@ export async function runCommanderTurn(
     localNow,
   });
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
+  plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
   plan = enrichPlanForCancelGuard(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
