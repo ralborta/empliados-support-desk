@@ -25,6 +25,12 @@ export type InterpretTurnInput = {
   activeStep: string;
   pendingConfirmation?: { action: string; question: string };
   activeDraft?: Record<string, unknown>;
+  pendingEntityResolution?: {
+    parentIntent: string;
+    returnToStep: string;
+    searchMode: string | null;
+    query: string | null;
+  };
   suspendedTramite?: { type: string; step: string };
   lastAgentQuestion?: string;
   activeListSummary?: { type: string; page: number; visibleIndexes: number[] };

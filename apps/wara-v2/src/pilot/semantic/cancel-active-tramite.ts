@@ -40,6 +40,7 @@ export function cancelActiveOrPendingTramite(state: PilotConversationState): Can
     markCertificateOpsCancelled(state);
     state.certificateDraft = null;
     state.pendingConfirmation = null;
+    state.pendingEntityResolution = null;
     state.activeTramite = "none";
     state.step = "idle";
     state.lastAgentQuestion = null;
@@ -53,6 +54,7 @@ export function cancelActiveOrPendingTramite(state: PilotConversationState): Can
 
   if (pending === "gps_report" || active === "await_confirm" || active === "unit_gps_report") {
     state.pendingConfirmation = null;
+    state.pendingEntityResolution = null;
     state.activeTramite = "none";
     state.step = "idle";
     state.lastAgentQuestion = null;
@@ -65,6 +67,7 @@ export function cancelActiveOrPendingTramite(state: PilotConversationState): Can
   if (pending === "odometer_write" || active === "odometer_update" || state.odometerDraft) {
     state.odometerDraft = null;
     state.pendingConfirmation = null;
+    state.pendingEntityResolution = null;
     state.activeTramite = "none";
     state.step = "idle";
     state.lastAgentQuestion = null;
@@ -78,6 +81,7 @@ export function cancelActiveOrPendingTramite(state: PilotConversationState): Can
   if (pending === "maintenance_write" || active.startsWith("maintenance") || state.maintenanceDraft) {
     state.maintenanceDraft = null;
     state.pendingConfirmation = null;
+    state.pendingEntityResolution = null;
     state.activeTramite = "none";
     state.step = "idle";
     state.lastAgentQuestion = null;
@@ -90,6 +94,7 @@ export function cancelActiveOrPendingTramite(state: PilotConversationState): Can
   if (pending === "odoo_ticket_create" || active === "odoo_ticket" || state.ticketDraft) {
     state.ticketDraft = null;
     state.pendingConfirmation = null;
+    state.pendingEntityResolution = null;
     state.activeTramite = "none";
     state.step = "idle";
     state.lastAgentQuestion = null;

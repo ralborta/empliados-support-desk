@@ -86,6 +86,14 @@ export function buildInterpretTurnInput(
         }
       : undefined,
     activeDraft: draftSummary(state),
+    pendingEntityResolution: state.pendingEntityResolution
+      ? {
+          parentIntent: state.pendingEntityResolution.parentIntent,
+          returnToStep: state.pendingEntityResolution.returnToStep,
+          searchMode: state.pendingEntityResolution.searchMode ?? null,
+          query: state.pendingEntityResolution.query ?? null,
+        }
+      : undefined,
     suspendedTramite: state.suspendedTramite
       ? { type: state.suspendedTramite.tramite, step: state.suspendedTramite.step }
       : undefined,

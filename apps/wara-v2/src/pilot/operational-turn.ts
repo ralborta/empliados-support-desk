@@ -121,6 +121,11 @@ import {
   looksLikeAnomalyAck,
   looksLikeAnomalyReject,
 } from "./semantic/reading-anomaly.js";
+import {
+  continueAfterUnitResolved,
+  ensurePendingForAwaitingUnit,
+  resolveParentIntentForUnitSelection,
+} from "./semantic/pending-entity-resolution.js";
 import { DateTime } from "luxon";
 import {
   buildCompanyMenuMessage,
@@ -381,24 +386,26 @@ function setSelectedUnit(state: PilotConversationState, unit: WaraUnidadEstado):
 }
 
 function askGpsConfirmation(state: PilotConversationState, unit: WaraUnidadEstado): string {
-  const ref = setSelectedUnit(state, unit);
-  state.activeTramite = "await_confirm";
-  state.step = "confirm_gps";
-  const q = `¿Querés el reporte GPS de ${ref.label}?`;
-  state.pendingConfirmation = {
-    action: "gps_report",
-    unit: ref,
-    askedAt: new Date().toISOString(),
-    question: q,
-  };
-  state.lastAgentQuestion = q;
-  return q;
+  const cont = continueAfterUnitResolved(state, unit, { parentIntent: "gps" });
+  return cont.message;
+}
+
+/** Selección de unidad respetando pendingEntityResolution / trámite padre. */
+function afterUnitSelected(
+  state: PilotConversationState,
+  unit: WaraUnidadEstado,
+  messageId: string,
+): string {
+  ensurePendingForAwaitingUnit(state, messageId);
+  const parent = resolveParentIntentForUnitSelection(state);
+  return continueAfterUnitResolved(state, unit, { parentIntent: parent }).message;
 }
 
 function deliverGpsReport(state: PilotConversationState, unit: WaraUnidadEstado): string {
   state.activeTramite = "unit_gps_report";
   state.step = "delivered";
   state.pendingConfirmation = null;
+  state.pendingEntityResolution = null;
   setSelectedUnit(state, unit);
   const msg = buildGpsReportForUnit(unit);
   state.lastAgentQuestion = null;
@@ -411,8 +418,18 @@ function showListing(
   message: string,
 ): string {
   state.lastListing = listing;
-  state.activeTramite = "list_units";
-  state.step = `page_${listing.page}`;
+  const parent = resolveParentIntentForUnitSelection(state);
+  if (!parent) {
+    state.activeTramite = "list_units";
+    state.step = `page_${listing.page}`;
+  } else {
+    // Mantener trámite padre; el listado es subtarea.
+    if (parent === "certificate") state.activeTramite = "certificate_issue";
+    else if (parent === "odometer" || parent === "horometer") state.activeTramite = "odometer_update";
+    else if (parent === "maintenance") state.activeTramite = "maintenance_request";
+    else if (parent === "ticket") state.activeTramite = "odoo_ticket";
+    else if (parent === "gps") state.activeTramite = "search_unit";
+  }
   state.lastAgentQuestion = message;
   return message;
 }
@@ -811,7 +828,11 @@ export async function resolveOperationalTurn(input: {
         if (fleet.ok) {
           const unit = findUnitInFleetByRef(fleet.units, picked);
           if (unit) {
-            const msg = askGpsConfirmation(state, unit);
+            ensurePendingForAwaitingUnit(state, input.messageId);
+            const parentBefore = resolveParentIntentForUnitSelection(state);
+            const msg = continueAfterUnitResolved(state, unit, {
+              parentIntent: parentBefore,
+            }).message;
             recordListingPick(state, numericIdx);
             appendAssistantTurn(state, msg, null);
             savePilotConversationState(state);
@@ -820,7 +841,7 @@ export async function resolveOperationalTurn(input: {
               model: null,
               latency_ms: null,
               decision_action: "select_entity",
-              decision_intent: "gps",
+              decision_intent: parentBefore ?? "unit_search",
               confidence: 1,
               handler: "numeric_list_shortcut",
               clarification: false,
@@ -832,7 +853,7 @@ export async function resolveOperationalTurn(input: {
               at: new Date().toISOString(),
               brain_version: "unified_v1",
               action: "select_entity",
-              intent: "gps",
+              intent: parentBefore ?? "unit_search",
               confidence: 1,
               reasoningCode: "CONTEXTUAL_REFERENCE",
               handler: "numeric_list_shortcut",
@@ -1505,7 +1526,7 @@ export async function resolveOperationalTurn(input: {
         state,
       };
     }
-    const msg = askGpsConfirmation(state, unit);
+    const msg = afterUnitSelected(state, unit, input.messageId);
     recordListingPick(state, numericIdx);
     savePilotConversationState(state);
     return { kind: "reply", message: msg, state };
@@ -1568,12 +1589,21 @@ export async function resolveOperationalTurn(input: {
       return { kind: "reply", message: resolved.message, state };
     }
     if (resolved.kind === "unit") {
-      if (state.selectedUnit && looksLikeBriefConfirmation(text)) {
+      if (
+        state.selectedUnit &&
+        looksLikeBriefConfirmation(text) &&
+        (resolveParentIntentForUnitSelection(state) === "gps" ||
+          state.pendingConfirmation?.action === "gps_report")
+      ) {
         const msg = deliverGpsReport(state, resolved.unit);
         savePilotConversationState(state);
         return { kind: "reply", message: msg, state };
       }
-      const msg = askGpsConfirmation(state, resolved.unit);
+      // GPS explícito → parent gps; patente suelta → respetar padre o preguntar.
+      const parent = looksLikeGpsReportRequest(text)
+        ? (resolveParentIntentForUnitSelection(state) ?? "gps")
+        : resolveParentIntentForUnitSelection(state);
+      const msg = continueAfterUnitResolved(state, resolved.unit, { parentIntent: parent }).message;
       savePilotConversationState(state);
       return { kind: "reply", message: msg, state };
     }
@@ -1626,7 +1656,7 @@ export async function resolveOperationalTurn(input: {
       useLlm: false,
     });
     if (outcome.kind === "unit") {
-      const msg = askGpsConfirmation(state, outcome.unit);
+      const msg = afterUnitSelected(state, outcome.unit, input.messageId);
       savePilotConversationState(state);
       return { kind: "reply", message: msg, state };
     }
@@ -1650,7 +1680,7 @@ export async function resolveOperationalTurn(input: {
     if (searchToken) {
       const byName = resolveUnitByNameFromFleet(fleet.units, text);
       if (byName.kind === "one") {
-        const msg = askGpsConfirmation(state, byName.unit);
+        const msg = afterUnitSelected(state, byName.unit, input.messageId);
         savePilotConversationState(state);
         return { kind: "reply", message: msg, state };
       }

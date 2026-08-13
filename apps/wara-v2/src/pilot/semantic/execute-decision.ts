@@ -50,6 +50,13 @@ import {
   looksLikeAnomalyReject,
 } from "./reading-anomaly.js";
 import type { ClearableField } from "./field-correction.js";
+import {
+  continueAfterUnitResolved,
+  createPendingEntityResolution,
+  ensurePendingForAwaitingUnit,
+  resolveParentIntentForUnitSelection,
+  touchPendingSearch,
+} from "./pending-entity-resolution.js";
 
 export type ExecuteDeps = {
   messageId: string;
@@ -642,6 +649,15 @@ async function startMeter(
     const fromEntity = resolveUnitFromDecisionOrText(decision, deps);
     if (fromEntity) bindUnitToOdometerDraft(draft, state, fromEntity);
   }
+  if (draft.step === "await_unit") {
+    state.pendingEntityResolution = createPendingEntityResolution({
+      parentIntent: meterType === "horometro" ? "horometer" : "odometer",
+      returnToStep: "odometer.await_unit",
+      sourceMessageId: deps.messageId,
+    });
+  } else {
+    state.pendingEntityResolution = null;
+  }
   state.odometerDraft = draft;
   if (decision.fields?.numericValue != null && draft.step === "await_value") {
     return handleProvideOdometerFields(
@@ -670,25 +686,40 @@ async function startMeter(
 async function startCertificate(
   decision: TurnDecision,
   state: PilotConversationState,
-  _deps: ExecuteDeps,
+  deps: ExecuteDeps,
 ): Promise<ExecuteResult> {
   applyDisposition(state, decision);
   // Arranque directo sin tryResolveCertificateTurn(texto usuario): evita looksLike* residual.
   state.pendingConfirmation = null;
   state.odometerDraft = null;
   state.activeTramite = "certificate_issue";
+  const fromEntity = resolveUnitFromDecisionOrText(decision, deps);
+  if (fromEntity) {
+    const cont = continueAfterUnitResolved(state, fromEntity, { parentIntent: "certificate" });
+    const prefix =
+      decision.action === "suspend_and_start" || decision.action === "switch_intent"
+        ? "De acuerdo, dejo pendiente el trámite anterior. "
+        : "";
+    return { handler: cont.handler, message: prefix + cont.message, state };
+  }
   const unit = state.selectedUnit;
   if (!unit) {
     state.certificateDraft = {
       unit: null,
       step: "await_unit",
     };
+    state.pendingEntityResolution = createPendingEntityResolution({
+      parentIntent: "certificate",
+      returnToStep: "certificate.await_unit",
+      sourceMessageId: deps.messageId,
+    });
     return {
       handler: "certificate",
       message: "¿De qué unidad querés el certificado de cobertura?",
       state,
     };
   }
+  state.pendingEntityResolution = null;
   state.certificateDraft = {
     unit,
     step: "await_confirm",
@@ -712,6 +743,9 @@ async function startCertificate(
 }
 
 function handleUnitSearch(decision: TurnDecision, state: PilotConversationState, deps: ExecuteDeps): ExecuteResult {
+  // Asegurar vínculo al trámite padre si estamos esperando unidad.
+  ensurePendingForAwaitingUnit(state, deps.messageId);
+
   const entity = decision.entity;
   if (!entity) {
     return {
@@ -727,23 +761,27 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
     if (listing && idx > 0) {
       const unit = listing.units[idx - 1];
       if (unit) {
-        const msg = deps.askGpsConfirmation(state, unit);
-        return { handler: "unit_search", message: msg, state };
+        const cont = continueAfterUnitResolved(state, unit);
+        return { handler: cont.handler, message: cont.message, state };
       }
     }
   }
 
+  const matchMode =
+    entity.matchMode === "prefix" ||
+    entity.matchMode === "suffix" ||
+    entity.matchMode === "contains" ||
+    entity.matchMode === "exact"
+      ? entity.matchMode
+      : "exact";
+  const query = (entity.value ?? "").trim().toUpperCase();
+  touchPendingSearch(state, { searchMode: matchMode, query });
+
   const interpretation: UnitSearchInterpretation = {
     intent: decision.intent === "gps" ? "unit_status" : "find_unit",
     entity: entity.type === "unit_name" ? "unit_name" : "license_plate",
-    matchMode:
-      entity.matchMode === "prefix" ||
-      entity.matchMode === "suffix" ||
-      entity.matchMode === "contains" ||
-      entity.matchMode === "exact"
-        ? entity.matchMode
-        : "exact",
-    query: (entity.value ?? "").trim().toUpperCase(),
+    matchMode,
+    query,
     confidence: "high",
     source: "rules",
   };
@@ -755,8 +793,8 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
   });
 
   if (result.kind === "one") {
-    const msg = deps.askGpsConfirmation(state, result.unit);
-    return { handler: "unit_search", message: msg, state };
+    const cont = continueAfterUnitResolved(state, result.unit);
+    return { handler: cont.handler, message: cont.message, state };
   }
   if (result.kind === "many") {
     const listing = buildPaginatedListing({
@@ -765,14 +803,24 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
       kind: "search_results",
       searchLabel: interpretation.query,
     });
+    const parent = resolveParentIntentForUnitSelection(state);
     const header = `Encontré ${result.units.length} unidades para «${interpretation.query}»${state.companyName ? ` en ${state.companyName}` : ""}:`;
-    const body = formatPaginatedFleetMessage(listing, state.companyName).replace(/^[\s\S]*?\n\n/, "");
     const message = `${header}\n\n${listing.units
       .slice(0, listing.pageSize)
       .map((u, i) => `${i + 1}. ${formatUnitLabel(u)}`)
-      .join("\n")}\n\nDecime el número o la patente/nombre de la unidad que querés consultar.`;
-    deps.showListing(state, listing, message);
-    void body;
+      .join("\n")}\n\nDecime el número o la patente/nombre de la unidad${parent ? " para continuar el trámite" : ""}.`;
+    // No pisar activeTramite del padre: solo actualizar listado.
+    state.lastListing = listing;
+    if (!state.pendingEntityResolution && !parent) {
+      deps.showListing(state, listing, message);
+    } else {
+      state.lastAgentQuestion = message;
+      if (parent === "certificate") state.activeTramite = "certificate_issue";
+      else if (parent === "odometer" || parent === "horometer") state.activeTramite = "odometer_update";
+      else if (parent === "maintenance") state.activeTramite = "maintenance_request";
+      else if (parent === "ticket") state.activeTramite = "odoo_ticket";
+      else if (parent === "gps") state.activeTramite = "search_unit";
+    }
     return { handler: "unit_search", message, state };
   }
 
@@ -851,26 +899,30 @@ export async function executeTurnDecision(
   }
 
   if (decision.action === "select_entity" || decision.intent === "unit_search") {
-    // Durante odómetro/horómetro esperando unidad: no desviar a GPS.
-    if (state.odometerDraft?.step === "await_unit") {
-      const unit = resolveUnitFromDecisionOrText(decision, deps);
-      if (unit) {
-        bindUnitToOdometerDraft(state.odometerDraft, state, unit);
-        const meterType = state.odometerDraft.meterType ?? "odometro";
-        return {
-          handler: "odometer",
-          message: `Pasame el valor del ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"}.`,
-          state,
-        };
-      }
-    }
     return handleUnitSearch(decision, state, deps);
   }
 
   if (decision.intent === "unit_list") {
+    ensurePendingForAwaitingUnit(state, deps.messageId);
     const listing = buildPaginatedListing({ units: deps.fleetUnits, page: 1, kind: "fleet_page" });
+    const parent = resolveParentIntentForUnitSelection(state);
     const message = formatPaginatedFleetMessage(listing, state.companyName);
-    deps.showListing(state, listing, message);
+    state.lastListing = listing;
+    state.lastAgentQuestion = message;
+    touchPendingSearch(state, { searchMode: "list" });
+    if (!parent) {
+      deps.showListing(state, listing, message);
+    } else if (parent === "certificate") {
+      state.activeTramite = "certificate_issue";
+    } else if (parent === "odometer" || parent === "horometer") {
+      state.activeTramite = "odometer_update";
+    } else if (parent === "maintenance") {
+      state.activeTramite = "maintenance_request";
+    } else if (parent === "ticket") {
+      state.activeTramite = "odoo_ticket";
+    } else if (parent === "gps") {
+      state.activeTramite = "search_unit";
+    }
     return { handler: "unit_list", message, state };
   }
 
@@ -885,16 +937,32 @@ export async function executeTurnDecision(
     }
     if (decision.intent === "gps") {
       applyDisposition(state, decision);
+      state.pendingEntityResolution = createPendingEntityResolution({
+        parentIntent: "gps",
+        returnToStep: "gps.await_unit",
+        sourceMessageId: deps.messageId,
+      });
       if (state.selectedUnit) {
         const unit = findUnitInFleetByRef(deps.fleetUnits, state.selectedUnit);
         if (unit) {
-          return { handler: "gps", message: deps.askGpsConfirmation(state, unit), state };
+          const cont = continueAfterUnitResolved(state, unit, { parentIntent: "gps" });
+          return { handler: cont.handler, message: cont.message, state };
         }
+      }
+      const fromEntity = resolveUnitFromDecisionOrText(decision, deps);
+      if (fromEntity) {
+        const cont = continueAfterUnitResolved(state, fromEntity, { parentIntent: "gps" });
+        return { handler: cont.handler, message: cont.message, state };
       }
       return { handler: "gps", message: "Decime la patente para el reporte GPS.", state };
     }
     if (decision.intent === "maintenance") {
       applyDisposition(state, decision);
+      state.pendingEntityResolution = createPendingEntityResolution({
+        parentIntent: "maintenance",
+        returnToStep: "maintenance.await_unit",
+        sourceMessageId: deps.messageId,
+      });
       const r = await tryResolveMaintenanceTurn({
         state,
         text: "solicitar mantenimiento",
@@ -906,6 +974,13 @@ export async function executeTurnDecision(
     }
     if (decision.intent === "ticket" || decision.intent === "human_handoff") {
       applyDisposition(state, decision);
+      if (!state.selectedUnit) {
+        state.pendingEntityResolution = createPendingEntityResolution({
+          parentIntent: "ticket",
+          returnToStep: "ticket.await_unit",
+          sourceMessageId: deps.messageId,
+        });
+      }
       const r = await tryResolveTicketTurn({
         state,
         text: decision.fields?.detail ?? "quiero hablar con un asesor",

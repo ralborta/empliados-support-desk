@@ -25,6 +25,7 @@ import type { OdometerDraft, OdometerOperationRecord } from "./odometer-types.js
 import type { CertificateDraft, CertificateOperationRecord } from "./certificate-types.js";
 import type { MaintenanceDraft, MaintenanceOperationRecord } from "./maintenance-types.js";
 import type { TicketDraft, TicketOperationRecord } from "./ticket-types.js";
+import type { PendingEntityResolution } from "./semantic/pending-entity-resolution.js";
 
 export type PilotTramiteType =
   | "none"
@@ -103,6 +104,8 @@ export type PilotConversationState = {
   certificateOperations: Record<string, CertificateOperationRecord>;
   ticketDraft: TicketDraft | null;
   ticketOperations: Record<string, TicketOperationRecord>;
+  /** Búsqueda/selección de unidad vinculada al trámite padre (no es cambio de intención). */
+  pendingEntityResolution: PendingEntityResolution | null;
   /** Últimos turnos sanitizados (user/assistant) para interpretTurn. */
   recentTurns?: Array<{
     role: "user" | "assistant";
@@ -171,6 +174,7 @@ export function createEmptyPilotState(input: {
     certificateOperations: {},
     ticketDraft: null,
     ticketOperations: {},
+    pendingEntityResolution: null,
     recentTurns: [],
   };
 }
@@ -235,6 +239,7 @@ function normalizeLoadedState(state: PilotConversationState): PilotConversationS
     certificateOperations: state.certificateOperations ?? {},
     ticketDraft: state.ticketDraft ?? null,
     ticketOperations: state.ticketOperations ?? {},
+    pendingEntityResolution: state.pendingEntityResolution ?? null,
     lastListingPickIndex: state.lastListingPickIndex ?? null,
     suspendedTramite: state.suspendedTramite
       ? {
@@ -394,6 +399,7 @@ export function softResetPilotConversation(
   state.maintenanceDraft = null;
   state.certificateDraft = null;
   state.ticketDraft = null;
+  state.pendingEntityResolution = null;
   state.recentTurns = [];
   state.confirmedFields = {};
   if (opts?.clearCompanyAndUnit) {
@@ -452,6 +458,7 @@ export function clearOperationalTramite(state: PilotConversationState): void {
   state.maintenanceDraft = null;
   state.certificateDraft = null;
   state.ticketDraft = null;
+  state.pendingEntityResolution = null;
 }
 
 export function suspendCurrentTramite(state: PilotConversationState): void {
@@ -625,6 +632,14 @@ export function sanitizeStateForLab(
     maintenanceStep: state.maintenanceDraft?.step ?? null,
     certificateStep: state.certificateDraft?.step ?? null,
     ticketStep: state.ticketDraft?.step ?? null,
+    pendingEntityResolution: state.pendingEntityResolution
+      ? {
+          parentIntent: state.pendingEntityResolution.parentIntent,
+          returnToStep: state.pendingEntityResolution.returnToStep,
+          searchMode: state.pendingEntityResolution.searchMode ?? null,
+          query: state.pendingEntityResolution.query ?? null,
+        }
+      : null,
   };
 }
 

@@ -147,14 +147,20 @@ describe("conversación de aceptación obligatoria", () => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("flujo completo: AD → GPS → certificado → cancelar → horómetro → domingo → 11:30", async () => {
+  it("flujo completo: AD → aclarar → GPS → certificado → cancelar → horómetro → domingo → 11:30", async () => {
     const list = await turn("la q empieza con AD");
     assert.match(list.message, /Encontré .*unidades/i);
     assert.match(list.message, /AD 307 VP|AD 356 UQ/i);
     assert.doesNotMatch(list.message, /No encontré/i);
 
+    // Sin trámite padre: no asumir GPS (PendingEntityResolution).
     const pick = await turn("AD307VP");
-    assert.match(pick.message, /AD 307 VP|reporte GPS/i);
+    assert.match(pick.message, /Seleccioné AD 307 VP/i);
+    assert.match(pick.message, /Qué querés consultar o gestionar/i);
+    assert.doesNotMatch(pick.message, /reporte GPS/i);
+
+    const gpsAsk = await turn("reporte GPS");
+    assert.match(gpsAsk.message, /reporte GPS.*AD 307 VP|AD 307 VP.*GPS/i);
 
     const yes = await turn("sí");
     assert.match(yes.message, /AD 307 VP|Funcionamiento|ignici[oó]n|M900-137/i);
@@ -194,7 +200,7 @@ describe("conversación de aceptación obligatoria", () => {
   });
 
   it("evidencia 1 — certificado no se busca como unidad", async () => {
-    await turn("AD307VP");
+    await turn("reporte GPS de AD307VP");
     await turn("sí");
     const cert = await turn("quiero un certificado");
     assert.doesNotMatch(cert.message, /No encontré «?un certificado/i);
@@ -202,7 +208,7 @@ describe("conversación de aceptación obligatoria", () => {
   });
 
   it("evidencia 2 — fecha y hora en mensajes separados", async () => {
-    await turn("AD307VP");
+    await turn("reporte GPS de AD307VP");
     await turn("sí");
     await turn("cambia el horómetro");
     await turn("55");
@@ -213,7 +219,7 @@ describe("conversación de aceptación obligatoria", () => {
   });
 
   it("hora primero, luego día", async () => {
-    await turn("AD307VP");
+    await turn("reporte GPS de AD307VP");
     await turn("cambia el horómetro");
     await turn("55");
     const t = await turn("a las 11:30");
