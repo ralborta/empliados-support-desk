@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13t", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13t/);
+  it("prompt version bump 13u", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13u/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1073,6 +1073,47 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.equal(applied.state.activeTask?.type, "hourmeter");
     assert.equal(applied.state.activeTask?.collected?.value, undefined);
     assert.equal(applied.state.suspendedTask?.task.type, "odometer");
+  });
+
+  it("CONFIRMO con certificate.issue sin confirm_write → se recupera", async () => {
+    const { enrichPlanForConfirmationOutcome } = await import(
+      "../enrich/confirmation-outcome.js"
+    );
+    const { validateTurnPlan } = await import("../validate/validate-plan.js");
+    const { getCapability } = await import("../capabilities/catalog.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "cert_1",
+      version: 1,
+      payloadHash: "h",
+      task: "certificate",
+      summary: {},
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_certificate",
+      expected: "confirmation",
+    };
+    // Plan típico del LLM que rompe el turno (issue sin confirm_write)
+    let plan = TurnPlanSchema.parse({
+      reasoning: "mal",
+      conversationalAct: "inform",
+      requestedCapabilities: [{ name: "certificate.issue", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.5,
+    });
+    assert.equal(validateTurnPlan(plan, s).ok, false);
+    plan = enrichPlanForConfirmationOutcome(plan, s, "Confirmo");
+    assert.equal(plan.conversationalAct, "confirm_write");
+    plan = {
+      ...plan,
+      requestedCapabilities: plan.requestedCapabilities.filter((c) => {
+        const def = getCapability(c.name);
+        return !def || def.kind !== "write_commit";
+      }),
+    };
+    assert.equal(validateTurnPlan(plan, s).ok, true);
   });
 
   it("hourmeter.prepare no hereda value de activeTask odometer", async () => {

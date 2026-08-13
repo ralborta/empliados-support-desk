@@ -19,7 +19,11 @@ import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
 import { enrichPlanForMeterUnitInMessage } from "./enrich/meter-unit-from-message.js";
 import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
-import { enrichPlanForConfirmationOutcome } from "./enrich/confirmation-outcome.js";
+import {
+  enrichPlanForConfirmationOutcome,
+  isConfirmationReject,
+  isUnequivocalWriteConfirm,
+} from "./enrich/confirmation-outcome.js";
 import {
   enrichPlanForTaskSwitch,
   isSwitchingTask,
@@ -39,6 +43,7 @@ import type { TurnTraceV3 } from "./observability/trace.js";
 import { COMMANDER_V3_PROMPT_VERSION } from "./flags.js";
 import type { TurnPlan } from "./types/turn-plan.js";
 import type { UnitRef } from "./types/refs.js";
+import { getCapability } from "./capabilities/catalog.js";
 import { DEFAULT_TENANT_TZ } from "../pilot/semantic/natural-datetime.js";
 import { DateTime } from "luxon";
 
@@ -105,6 +110,28 @@ export async function runCommanderTurn(
   });
 
   let plan = commander.plan;
+
+  // CONFIRMO/CANCELAR con pendingWrite: aplicar ANTES de validate.
+  // Si no, el LLM mete *.issue/*.update sin confirm_write → write_commit_without_confirm
+  // y nunca llega al enrich (loop eterno de "necesito confirmación explícita").
+  if (
+    plan &&
+    (state.pendingWrite || state.lastQuestion?.expected === "confirmation") &&
+    (isUnequivocalWriteConfirm(input.message) ||
+      isConfirmationReject(input.message))
+  ) {
+    plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+    if (plan.conversationalAct === "confirm_write") {
+      plan = {
+        ...plan,
+        requestedCapabilities: plan.requestedCapabilities.filter((c) => {
+          const def = getCapability(c.name);
+          return !def || def.kind !== "write_commit";
+        }),
+      };
+    }
+  }
+
   let validation = validateTurnPlan(plan, state);
   let repairCalled = false;
   let repairResult: unknown = null;
@@ -123,6 +150,23 @@ export async function runCommanderTurn(
     repairMs = Date.now() - rStart;
     repairResult = repaired.raw;
     plan = repaired.plan;
+    if (
+      plan &&
+      (state.pendingWrite || state.lastQuestion?.expected === "confirmation") &&
+      (isUnequivocalWriteConfirm(input.message) ||
+        isConfirmationReject(input.message))
+    ) {
+      plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+      if (plan.conversationalAct === "confirm_write") {
+        plan = {
+          ...plan,
+          requestedCapabilities: plan.requestedCapabilities.filter((c) => {
+            const def = getCapability(c.name);
+            return !def || def.kind !== "write_commit";
+          }),
+        };
+      }
+    }
     validation = validateTurnPlan(plan, state);
   }
 
@@ -133,6 +177,53 @@ export async function runCommanderTurn(
 
   // Si el plan LLM falla pero hay campo esperado capturable (ej. "129556" con expected=value),
   // recuperar sin pedir de nuevo el número.
+  if (!validation.ok || !plan) {
+    // CONFIRMO / CANCELAR pendientes: stub determinístico (no depender del LLM).
+    if (
+      state.pendingWrite ||
+      state.lastQuestion?.expected === "confirmation"
+    ) {
+      if (isUnequivocalWriteConfirm(input.message)) {
+        plan = {
+          reasoning: "CONFIRMO inequívoco con pendingWrite: confirm_write.",
+          conversationalAct: "confirm_write",
+          taskAction: "confirm",
+          requestedCapabilities: [],
+          stateIntent: {
+            preserveCompany: true,
+            preserveUnit: true,
+            preserveTask: true,
+          },
+          responseGoal: {
+            purpose: "confirm_write",
+            facts: [],
+            nextQuestion: null,
+          },
+          confidence: 1,
+        };
+        validation = validateTurnPlan(plan, state);
+      } else if (isConfirmationReject(input.message)) {
+        plan = enrichPlanForConfirmationOutcome(
+          {
+            reasoning: "Rechazo de confirmación: cancel_task.",
+            conversationalAct: "inform",
+            requestedCapabilities: [],
+            stateIntent: {
+              preserveCompany: true,
+              preserveUnit: true,
+              preserveTask: false,
+            },
+            responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
+            confidence: 1,
+          },
+          state,
+          input.message,
+        );
+        validation = validateTurnPlan(plan, state);
+      }
+    }
+  }
+
   if (!validation.ok || !plan) {
     const recovered = tryRecoverExpectedFieldPlan(
       state,
