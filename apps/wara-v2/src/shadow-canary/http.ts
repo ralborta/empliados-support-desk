@@ -6,7 +6,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { loadShadowCanaryConfig } from "./flags.js";
 import { processShadowCanaryCopy } from "./enqueue.js";
 import {
@@ -104,6 +104,15 @@ function parseMessageId(raw: Record<string, unknown>): string | null {
     (typeof raw.message_id === "string" && raw.message_id.trim()) ||
     "";
   return id || null;
+}
+
+/** BBC Inicio a veces no manda messageId: clave estable por teléfono+texto+ventana. */
+function stableBbcMessageId(phone: string, text: string): string {
+  const bucket = Math.floor(Date.now() / 45_000);
+  return createHash("sha256")
+    .update(`${phone.trim()}|${text.trim().toLowerCase()}|${bucket}`, "utf8")
+    .digest("hex")
+    .slice(0, 40);
 }
 
 export async function startShadowCanaryServer(opts?: {
@@ -359,11 +368,14 @@ export async function startShadowCanaryServer(opts?: {
 
       if (req.method === "POST" && url.pathname === "/api/whatsapp/turn") {
         const raw = await readJsonBody(req);
-        // BBC Inicio no manda messageId: generamos uno estable por turno.
-        const messageId = parseMessageId(raw) || randomUUID();
+        const phone = String(raw.phone ?? raw.from ?? "");
+        const text = String(raw.body ?? raw.rawText ?? raw.message ?? "");
+        // BBC Inicio no manda messageId: clave estable (reintentos no spamean).
+        const messageId =
+          parseMessageId(raw) || stableBbcMessageId(phone, text || "Hola");
         const result = await handlePilotWhatsAppTurn({
-          phone: String(raw.phone ?? raw.from ?? ""),
-          text: String(raw.body ?? raw.rawText ?? raw.message ?? ""),
+          phone,
+          text,
           messageId,
           apiKey: extractApiKey(req, raw),
         });

@@ -54,6 +54,38 @@ const FILTER_FILLER = new Set([
   "patente",
   "patentes",
   "marca",
+  // stopwords / frase de consulta (evitar que “que/en/se” gane a “saveiro”)
+  "y",
+  "en",
+  "que",
+  "qué",
+  "se",
+  "encuentra",
+  "encontrar",
+  "esta",
+  "está",
+  "este",
+  "esto",
+  "como",
+  "cómo",
+  "cual",
+  "cuál",
+  "donde",
+  "dónde",
+  "hay",
+  "tiene",
+  "tienen",
+  "con",
+  "para",
+  "sobre",
+  "ahora",
+  "hoy",
+  "necesito",
+  "puedo",
+  "podes",
+  "podés",
+  "decime",
+  "pasame",
 ]);
 
 function isGpsPlan(plan: TurnPlan): boolean {
@@ -105,7 +137,8 @@ export function enrichPlanPromoteGpsFromReasoning(plan: TurnPlan): TurnPlan {
   };
 }
 
-function extractFleetFilterHint(
+/** Extrae patente/código/marca del mensaje (y de collected.unitQuery si hace falta). */
+export function extractFleetFilterHint(
   message: string,
   state: ConversationStateV3,
 ): string | null {
@@ -127,6 +160,7 @@ function extractFleetFilterHint(
 
   const prefix = extractPlatePrefixFromMessage(t);
   if (prefix && isStructuredFleetQuery(prefix)) {
+    if (!state.fleetCache.length) return prefix;
     const hits = filterFleetCacheByQuery(state, prefix);
     if (hits.length > 0 && hits.length < Math.max(state.fleetCache.length, 1)) {
       return prefix;
@@ -134,7 +168,21 @@ function extractFleetFilterHint(
     if (hits.length > 0) return prefix;
   }
 
-  if (!state.fleetCache.length) return null;
+  // “reporte de la saveiro” / “estado de la nissan”
+  const deLa = t.match(
+    /\b(?:de\s+la|de\s+el|del|de)\s+([A-Za-zÁÉÍÓÚáéíóúÑñ0-9][A-Za-zÁÉÍÓÚáéíóúÑñ0-9\-]{1,20})\b/i,
+  );
+  if (deLa?.[1]) {
+    const cand = deLa[1]
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (cand && !FILTER_FILLER.has(cand) && isStructuredFleetQuery(cand)) {
+      if (!state.fleetCache.length) return cand;
+      const hits = filterFleetCacheByQuery(state, cand);
+      if (hits.length >= 1) return cand;
+    }
+  }
 
   const tokens = t
     .normalize("NFD")
@@ -145,11 +193,19 @@ function extractFleetFilterHint(
 
   for (const tok of tokens) {
     if (!isStructuredFleetQuery(tok)) continue;
+    if (!state.fleetCache.length) {
+      // Sin flota aún (empresa pendiente): conservar marca/prefijo para el próximo turno.
+      if (tok.length >= 3) return tok;
+      continue;
+    }
     const hits = filterFleetCacheByQuery(state, tok);
     if (hits.length >= 1 && hits.length < state.fleetCache.length) {
       return tok;
     }
   }
+
+  const pending = String(state.activeTask?.collected?.unitQuery ?? "").trim();
+  if (pending && isStructuredFleetQuery(pending)) return pending;
 
   return null;
 }

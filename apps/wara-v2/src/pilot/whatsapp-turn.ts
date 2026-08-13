@@ -30,6 +30,34 @@ import { resolveConductorEnabled } from "../commander-v3/lab/conductor-mode.js";
 const FALLBACK =
   "Disculpá, tuve un problema para procesar eso. ¿Me lo repetís en una línea?";
 
+/** BBC reintenta el mismo texto sin messageId estable → evita spam de replies. */
+const recentV3Inbound = new Map<string, number>();
+const V3_INBOUND_DEDUPE_MS = 90_000;
+
+function v3InboundDedupeKey(phone: string, text: string): string {
+  const p = toE164Guess(phone) || phone.trim();
+  return createHash("sha256")
+    .update(`${p}|${text.trim().toLowerCase()}`, "utf8")
+    .digest("hex");
+}
+
+function shouldSkipDuplicateV3Inbound(phone: string, text: string): boolean {
+  const key = v3InboundDedupeKey(phone, text);
+  const prev = recentV3Inbound.get(key);
+  const now = Date.now();
+  if (prev != null && now - prev < V3_INBOUND_DEDUPE_MS) {
+    return true;
+  }
+  recentV3Inbound.set(key, now);
+  // GC liviano
+  if (recentV3Inbound.size > 500) {
+    for (const [k, at] of recentV3Inbound) {
+      if (now - at > V3_INBOUND_DEDUPE_MS) recentV3Inbound.delete(k);
+    }
+  }
+  return false;
+}
+
 export type PilotTurnBody = {
   ok: boolean;
   ok_s: string;
@@ -271,6 +299,9 @@ export async function handlePilotWhatsAppTurn(input: {
 
   // Commander V3 — path aislado; V2 brain no interviene.
   if (resolveConductorEnabled(input.phone, env) || isConversationCommanderV3Enabled(env)) {
+    if (shouldSkipDuplicateV3Inbound(input.phone, text || "Hola")) {
+      return { status: 200, body: silent() };
+    }
     const ctx = await loadCommanderV3Context({
       phone: input.phone,
       tenantId: tenant,

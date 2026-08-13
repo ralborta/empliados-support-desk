@@ -12,6 +12,7 @@ import {
 } from "../../pilot/plates.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
+import { extractFleetFilterHint } from "./gps-unit-from-message.js";
 
 function ensureCap(
   plan: TurnPlan,
@@ -193,7 +194,19 @@ function enrichExpectedUnit(
   }
 
   // Marca / prefijo / nombre corto (“la nissan”, “AG”, “NISSAN”)
-  const hint = t.replace(/^(la|el|esa|ese|las|los)\s+/i, "").trim();
+  // También en frases largas (“reporte de la saveiro”).
+  let hint = t.replace(/^(la|el|esa|ese|las|los)\s+/i, "").trim();
+  if (
+    !(
+      hint &&
+      hint.length >= 2 &&
+      hint.length <= 24 &&
+      hint.split(/\s+/).length <= 3 &&
+      !/[?]/.test(hint)
+    )
+  ) {
+    hint = extractFleetFilterHint(t, state) ?? "";
+  }
   if (
     hint &&
     hint.length >= 2 &&

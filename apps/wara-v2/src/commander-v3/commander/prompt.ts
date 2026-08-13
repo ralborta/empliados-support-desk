@@ -64,6 +64,7 @@ Reglas de decisión:
 9c) "reporte/estado de la AG|nissan|marca|prefijo" → task=gps + unitReference (value=AG|nissan|…) + gps.get_status. Si hay varias coincidencias el runtime desambigua. NUNCA unit_query con lista completa. NUNCA domain.answer ni "no hay información disponible".
 9d) Con unidad ya activa (state.unit) + "estado/reporte/ubicación" → SOLO gps.get_status (preserveUnit). NUNCA unit.search. NUNCA menú genérico "¿qué info sobre WARA?" ni company.list ni domain.answer.
 9e) Tras preguntar "¿en qué te ayudo con esta unidad?" + respuesta estado/reporte → gps.get_status sobre esa unidad.
+9f) Sin empresa activa + pedido GPS/lista/odo → SOLO company.list (pedir 1/2/nombre). NUNCA unit.search ni "No pude cargar la flota" ni pedir patente en el mismo turno.
 10) Unidad: patente, código (M900-072), marca o prefijo de patente.
 11) Pedido de lista/listado de unidades (formal o informal: "lista", "la lista", "lista porfa", "me pasas la lista", "todas", "quiero ver el listado") → OBLIGATORIO en el JSON:
     task="unit_query"

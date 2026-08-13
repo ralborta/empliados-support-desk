@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13z", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13z/);
+  it("prompt version bump 13aa", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13aa/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1424,6 +1424,92 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.equal(enriched.task, "gps");
     assert.ok(
       enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+    );
+  });
+
+  it("sin empresa + GPS → solo company.list (no flota/GPS mezclado)", async () => {
+    const { enrichPlanForCompanyOpsGate } = await import(
+      "../enrich/company-ops-gate.js"
+    );
+    const { extractFleetFilterHint } = await import(
+      "../enrich/gps-unit-from-message.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "c1", name: "WARA", contactId: 1 },
+      { id: "c2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const hint = extractFleetFilterHint(
+      "¿Y en que estado se encuentra el reporte de la saveiro?",
+      s,
+    );
+    assert.equal(hint, "saveiro");
+    const plan = TurnPlanSchema.parse({
+      reasoning: "pide reporte saveiro",
+      conversationalAct: "start_task",
+      task: "gps",
+      taskAction: "start",
+      unitReference: {
+        kind: "unit",
+        mode: "named",
+        value: "saveiro",
+        reference: null,
+      },
+      requestedCapabilities: [
+        { name: "unit.search", params: { query: "saveiro", mode: "query" } },
+        { name: "gps.get_status", params: {} },
+        { name: "company.list", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const gated = enrichPlanForCompanyOpsGate(plan, s);
+    assert.equal(
+      gated.requestedCapabilities.some((c) => c.name === "company.list"),
+      true,
+    );
+    assert.equal(
+      gated.requestedCapabilities.some((c) => c.name === "unit.search"),
+      false,
+    );
+    assert.equal(
+      gated.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      false,
+    );
+    assert.equal(gated.suppliedFields?.unitQuery, "saveiro");
+  });
+
+  it("empresa activa + GPS plan con company.list → strip list", async () => {
+    const { enrichPlanForCompanyOpsGate } = await import(
+      "../enrich/company-ops-gate.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "WARA", contactId: 1 };
+    s.availableCompanies = [
+      { id: "c1", name: "WARA", contactId: 1 },
+      { id: "c2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "gps",
+      conversationalAct: "start_task",
+      task: "gps",
+      taskAction: "start",
+      requestedCapabilities: [
+        { name: "company.list", params: {} },
+        { name: "gps.get_status", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const gated = enrichPlanForCompanyOpsGate(plan, s);
+    assert.equal(
+      gated.requestedCapabilities.some((c) => c.name === "company.list"),
+      false,
+    );
+    assert.ok(
+      gated.requestedCapabilities.some((c) => c.name === "gps.get_status"),
     );
   });
 

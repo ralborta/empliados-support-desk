@@ -506,11 +506,31 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         fetchedAt: new Date().toISOString(),
       };
       if (!ctx.state.fleetCache.length) {
+        if (!ctx.state.company) {
+          return {
+            capability: req.name,
+            ok: false,
+            facts: [
+              "Para listar o buscar unidades necesito que elijas la empresa primero.",
+            ],
+            error: "no_company",
+            data: {
+              statePatch: {
+                lastListing: null,
+                lastQuestion: {
+                  id: randomUUID(),
+                  purpose: "select_company",
+                  expected: "company" as const,
+                },
+              },
+            },
+          };
+        }
         return {
           capability: req.name,
           ok: false,
           facts: [
-            "No pude cargar la flota de unidades ahora. Probá de nuevo en un momento.",
+            `No pude cargar la flota de ${ctx.state.company.name} ahora. Probá de nuevo en un momento.`,
           ],
           error: "no_fleet",
           data: {

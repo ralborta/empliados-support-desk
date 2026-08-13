@@ -15,6 +15,7 @@ import {
   enrichPlanForCompanyCapture,
   enrichPlanForGreetingCompanyGate,
 } from "./enrich/company-capture.js";
+import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
 import { enrichPlanForMeterUnitInMessage } from "./enrich/meter-unit-from-message.js";
@@ -22,6 +23,7 @@ import {
   enrichPlanForFleetSearchQuery,
   enrichPlanForGpsUnitInMessage,
   enrichPlanPromoteGpsFromReasoning,
+  extractFleetFilterHint,
 } from "./enrich/gps-unit-from-message.js";
 import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
 import {
@@ -242,6 +244,14 @@ export async function runCommanderTurn(
   }
 
   if (!validation.ok || !plan) {
+    const gpsRecovered = tryRecoverGpsPlan(state, input.message);
+    if (gpsRecovered) {
+      plan = gpsRecovered;
+      validation = validateTurnPlan(plan, state);
+    }
+  }
+
+  if (!validation.ok || !plan) {
     const clarify = buildConflictClarify(validation.errors, state);
     const { reply, latencyMs: redactMs } = await redactReply({
       plan: plan ?? {
@@ -408,10 +418,31 @@ export async function runCommanderTurn(
       ],
     };
   }
+  // unit.search solo con flota cargada; si no, gps.get_status pide unidad sin "no_fleet".
   if (
     plan.task === "gps" &&
     !state.unit &&
     !plan.unitReference &&
+    state.fleetCache.length > 0 &&
+    !plan.requestedCapabilities.some(
+      (c) => c.name === "unit.search" || c.name === "unit.select",
+    )
+  ) {
+    plan = {
+      ...plan,
+      requestedCapabilities: [
+        ...plan.requestedCapabilities,
+        { name: "unit.search", params: {} },
+      ],
+    };
+    plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
+  }
+  // Con filtro ya en el mensaje/ref y flota: buscar (no listar todo).
+  if (
+    plan.task === "gps" &&
+    plan.unitReference &&
+    !state.unit &&
+    state.fleetCache.length > 0 &&
     !plan.requestedCapabilities.some(
       (c) => c.name === "unit.search" || c.name === "unit.select",
     )
@@ -429,6 +460,19 @@ export async function runCommanderTurn(
   // Ensure company selected for ops if only one contact
   if (!state.company && state.availableCompanies.length === 1) {
     state = { ...state, company: state.availableCompanies[0]! };
+  }
+
+  // Sin empresa: solo menú empresas (nunca flota vacía + GPS + empresas juntos).
+  plan = enrichPlanForCompanyOpsGate(plan, state);
+
+  // Sin flota: no ejecutar unit.search (evita "No pude cargar la flota" inútil).
+  if (!state.fleetCache.length) {
+    plan = {
+      ...plan,
+      requestedCapabilities: plan.requestedCapabilities.filter(
+        (c) => c.name !== "unit.search",
+      ),
+    };
   }
 
   const unitRes = resolveUnitReference(plan.unitReference ?? null, state);
@@ -722,16 +766,80 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
   if (state.pendingWrite) {
     return `Hay una confirmación pendiente de ${state.pendingWrite.task}. ¿Confirmás con CONFIRMO o cancelamos con CANCELAR?`;
   }
-  if (state.pendingEntity?.type === "unit") {
-    return "Necesito la patente o el número de la unidad para seguir.";
+  if (state.pendingEntity?.type === "unit" || state.lastQuestion?.expected === "unit") {
+    return "Necesito la patente, el número de la lista o la marca/prefijo de la unidad para seguir.";
+  }
+  if (state.lastQuestion?.expected === "company" || !state.company) {
+    if (state.availableCompanies.length > 1) {
+      return "¿Con qué empresa seguimos? Decime el número o el nombre.";
+    }
   }
   if (state.lastQuestion?.expected === "value") {
     return "Pasame el valor numérico para continuar.";
+  }
+  if (
+    state.activeTask?.type === "gps" ||
+    String(state.lastQuestion?.purpose ?? "").includes("gps")
+  ) {
+    return "Para el reporte GPS necesito la patente, el número de la lista o la marca/prefijo de la unidad.";
   }
   if (!state.activeTask) {
     return "¿En qué te ayudo? Puedo con odómetro, certificado, GPS, o guías de la plataforma (Opciones / Unidades).";
   }
   return "Necesito una aclaración puntual: ¿qué querés hacer exactamente con el trámite actual?";
+}
+
+/** Si el LLM falla pero el mensaje pide GPS con marca/patente, recuperar sin spam genérico. */
+function tryRecoverGpsPlan(
+  state: ConversationStateV3,
+  message: string,
+): TurnPlan | null {
+  const hint = extractFleetFilterHint(message, state);
+  const wantsGps =
+    state.activeTask?.type === "gps" ||
+    String(state.lastQuestion?.purpose ?? "").includes("gps") ||
+    /\b(reporte|gps|ubicaci[oó]n|estado)\b/i.test(message);
+  if (!wantsGps) return null;
+  if (!hint && state.unit) {
+    return {
+      reasoning: "Recupero GPS con unidad activa tras plan inválido.",
+      conversationalAct: "continue_task",
+      task: "gps",
+      taskAction: "continue",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: {
+        preserveCompany: true,
+        preserveUnit: true,
+        preserveTask: true,
+      },
+      responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
+      confidence: 0.85,
+    };
+  }
+  if (!hint) return null;
+  return {
+    reasoning: `Recupero GPS con filtro «${hint}» tras plan inválido.`,
+    conversationalAct: "continue_task",
+    task: "gps",
+    taskAction: "continue",
+    unitReference: {
+      kind: "unit",
+      mode: "named",
+      value: hint,
+      reference: null,
+    },
+    requestedCapabilities: [
+      { name: "unit.search", params: { query: hint, mode: "query" } },
+      { name: "gps.get_status", params: {} },
+    ],
+    stateIntent: {
+      preserveCompany: true,
+      preserveUnit: true,
+      preserveTask: true,
+    },
+    responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
+    confidence: 0.85,
+  };
 }
 
 /** Stub + enrich de campo esperado cuando el TurnPlan LLM es null/inválido. */
