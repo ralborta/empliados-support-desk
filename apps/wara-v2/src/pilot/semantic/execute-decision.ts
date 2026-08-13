@@ -45,6 +45,11 @@ import { cancelActiveOrPendingTramite } from "./cancel-active-tramite.js";
 import { FECHA_LECTURA_QUESTION } from "./natural-datetime.js";
 import { softTimeQuestionForMessage } from "./natural-datetime.js";
 import {
+  planAskMissingField,
+  planOrchestrationClarify,
+  renderResponsePlan,
+} from "./response-plan.js";
+import {
   formatAnomalyQuestion,
   isAnomalousReading,
   looksLikeAnomalyAck,
@@ -278,16 +283,31 @@ function handleCorrectOdometerFields(
       draft.fechaDisplay = formatFechaDisplay(draft.fechaLecturaIso);
       const dia = formatFechaDiaLargo(draft.fechaLecturaIso, TZ);
       const soft = softTimeQuestionForMessage(deps.originalMessage);
+      const message =
+        soft ??
+        renderResponsePlan(
+          planAskMissingField({
+            received: `Perfecto, ya tengo la fecha (${dia}).`,
+            missing: "hora",
+            question: "¿A qué hora?",
+          }),
+        );
       return {
         handler: "odometer",
-        message: soft ?? `Perfecto, ${dia}. ¿A qué hora?`,
+        message,
         state,
       };
     } else if (time && !date) {
       draft.fechaTimePart = `${time.length === 5 ? time : time}:00`.slice(0, 8);
       return {
         handler: "odometer",
-        message: `Perfecto, ${time}. ¿De qué día es la lectura?`,
+        message: renderResponsePlan(
+          planAskMissingField({
+            received: `Perfecto, ya tengo la hora (${time}).`,
+            missing: "fecha",
+            question: "¿De qué día es la lectura?",
+          }),
+        ),
         state,
       };
     }
@@ -450,7 +470,13 @@ function handleProvideOdometerFields(
       draft.fechaTimePart = `${time.length === 5 ? time : time}:00`.slice(0, 8);
       return {
         handler: "odometer",
-        message: `Perfecto, ${time}. ¿De qué día es la lectura?`,
+        message: renderResponsePlan(
+          planAskMissingField({
+            received: `Perfecto, ya tengo la hora (${time}).`,
+            missing: "fecha",
+            question: "¿De qué día es la lectura?",
+          }),
+        ),
         state,
       };
     }
@@ -462,9 +488,18 @@ function handleProvideOdometerFields(
       draft.fechaDisplay = formatFechaDisplay(draft.fechaLecturaIso);
       const dia = formatFechaDiaLargo(draft.fechaLecturaIso, TZ);
       const soft = softTimeQuestionForMessage(deps.originalMessage);
+      const message =
+        soft ??
+        renderResponsePlan(
+          planAskMissingField({
+            received: `Perfecto, ya tengo la fecha (${dia}).`,
+            missing: "hora",
+            question: "¿A qué hora?",
+          }),
+        );
       return {
         handler: "odometer",
-        message: soft ?? `Perfecto, ${dia}. ¿A qué hora?`,
+        message,
         state,
       };
     }
@@ -1054,6 +1089,24 @@ export async function executeTurnDecision(
   }
 
   if (decision.action === "provide_fields" || decision.action === "correct_fields") {
+    // GPS pendiente heredado: no dejar que un provide_fields genérico secuestre el "sí"/reporte.
+    if (state.pendingConfirmation?.action === "gps_report") {
+      const msg = deps.originalMessage;
+      if (
+        decision.answer === "confirm" ||
+        decision.intent === "gps" ||
+        looksLikeUnitStatusOfActive(msg)
+      ) {
+        const unit = findUnitInFleetByRef(deps.fleetUnits, state.pendingConfirmation.unit);
+        if (unit) {
+          return {
+            handler: "gps",
+            message: deps.deliverGpsReport(state, unit),
+            state,
+          };
+        }
+      }
+    }
     if (decision.intent === "odometer" || decision.intent === "horometer" || state.odometerDraft) {
       const r = handleProvideOdometerFields(decision, state, deps);
       if (r) return r;
@@ -1068,9 +1121,24 @@ export async function executeTurnDecision(
       });
       if (r.kind === "reply") return { handler: "maintenance", message: r.message, state };
     }
+    console.error(
+      JSON.stringify({
+        event: "wara_v2_orchestration_error",
+        reason: "provide_fields_without_target",
+        intent: decision.intent,
+        activeTramite: state.activeTramite,
+        pending: state.pendingConfirmation?.action ?? null,
+      }),
+    );
     return {
       handler: "provide_fields",
-      message: "Recibí el dato. ¿Me confirmás o completás lo que falta?",
+      message: renderResponsePlan(
+        planOrchestrationClarify(
+          state.activeTramite !== "none"
+            ? `Hay un trámite activo (${state.activeTramite}). Decime el dato que falta o qué querés hacer.`
+            : "Decime qué trámite querés o qué dato completar.",
+        ),
+      ),
       state,
     };
   }

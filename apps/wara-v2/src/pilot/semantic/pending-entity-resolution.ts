@@ -8,6 +8,7 @@ import type { OdometerDraft } from "../odometer-types.js";
 import type { WaraUnidadEstado } from "../wara-types.js";
 import { toFleetUnitRef, type FleetUnitRef } from "../unit-fleet.js";
 import { commitSelectedUnit } from "./unit-context.js";
+import { buildGpsReportForUnit } from "../gps-core.js";
 
 export type ParentIntent =
   | "gps"
@@ -218,17 +219,13 @@ export function continueAfterUnitResolved(
   }
 
   if (parent === "gps") {
-    state.activeTramite = "await_confirm";
-    state.step = "confirm_gps";
-    const q = `¿Querés el reporte GPS de ${ref.label}?`;
-    state.pendingConfirmation = {
-      action: "gps_report",
-      unit: ref,
-      askedAt: new Date().toISOString(),
-      question: q,
-    };
-    state.lastAgentQuestion = q;
-    return { handler: "gps", message: q };
+    // Lectura sin efecto externo: entregar reporte ya, sin confirmación redundante.
+    state.activeTramite = "unit_gps_report";
+    state.step = "delivered";
+    state.pendingConfirmation = null;
+    state.lastAgentQuestion = null;
+    const msg = buildGpsReportForUnit(unit);
+    return { handler: "gps", message: msg };
   }
 
   // Sin trámite padre: no asumir GPS.

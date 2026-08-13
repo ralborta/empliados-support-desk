@@ -126,7 +126,7 @@ import {
   ensurePendingForAwaitingUnit,
   resolveParentIntentForUnitSelection,
 } from "./semantic/pending-entity-resolution.js";
-import { commitSelectedUnit, looksLikeUnitCorrection } from "./semantic/unit-context.js";
+import { commitSelectedUnit, looksLikeUnitCorrection, looksLikeUnitStatusOfActive } from "./semantic/unit-context.js";
 import { DateTime } from "luxon";
 import {
   buildCompanyMenuMessage,
@@ -410,6 +410,143 @@ function deliverGpsReport(state: PilotConversationState, unit: WaraUnidadEstado)
   return msg;
 }
 
+function ensureConversationMetadata(state: PilotConversationState): void {
+  if (!state.conversationMetadata) {
+    state.conversationMetadata = { greetedAt: null, introducedAtilio: false };
+  }
+}
+
+function buildFirstContactPresentation(state: PilotConversationState): string {
+  ensureConversationMetadata(state);
+  const now = new Date().toISOString();
+  state.conversationMetadata.greetedAt = state.conversationMetadata.greetedAt ?? now;
+  state.conversationMetadata.introducedAtilio = true;
+  const menu = buildCompanyMenuMessage(state.contacts);
+  return (
+    `Hola, soy Atilio, el asistente virtual de WARA. Puedo ayudarte con tus unidades, reportes y gestiones.\n\n` +
+    menu
+  );
+}
+
+function summarizePendingForGreeting(state: PilotConversationState): string | null {
+  if (state.pendingConfirmation?.action === "gps_report") {
+    return `el reporte GPS de ${state.pendingConfirmation.unit.label}`;
+  }
+  if (state.pendingConfirmation?.action === "certificate_issue") {
+    return `el certificado de ${state.pendingConfirmation.unit.label}`;
+  }
+  if (state.pendingConfirmation?.action === "odometer_write") {
+    return `la confirmación de odómetro de ${state.pendingConfirmation.unit.label}`;
+  }
+  if (state.activeTramite === "odometer_update") {
+    const u = state.odometerDraft?.unit?.label ?? state.selectedUnit?.label ?? "la unidad";
+    return `la actualización de odómetro/horómetro de ${u}`;
+  }
+  if (state.activeTramite === "certificate_issue") {
+    return `el certificado${state.selectedUnit ? ` de ${state.selectedUnit.label}` : ""}`;
+  }
+  if (state.suspendedTramite) {
+    return `un trámite suspendido (${state.suspendedTramite.tramite})`;
+  }
+  return null;
+}
+
+function buildGreetingReply(state: PilotConversationState): { handler: string; message: string } {
+  ensureConversationMetadata(state);
+  const now = new Date().toISOString();
+  const pending = summarizePendingForGreeting(state);
+  if (!state.conversationMetadata.introducedAtilio) {
+    state.conversationMetadata.introducedAtilio = true;
+    state.conversationMetadata.greetedAt = now;
+    if (pending) {
+      return {
+        handler: "greet",
+        message:
+          `Hola, soy Atilio, el asistente virtual de WARA.\n\n` +
+          `Teníamos pendiente ${pending}. ¿Querés continuar o necesitás otra cosa?`,
+      };
+    }
+    return {
+      handler: "greet",
+      message:
+        `Hola, soy Atilio, el asistente virtual de WARA. Puedo ayudarte con tus unidades, reportes y gestiones. ¿En qué te ayudo?`,
+    };
+  }
+  state.conversationMetadata.greetedAt = now;
+  if (pending) {
+    return {
+      handler: "greet",
+      message: `Hola. Teníamos pendiente ${pending}. ¿Querés continuar o necesitás otra cosa?`,
+    };
+  }
+  return { handler: "greet", message: "Hola, ¿en qué te ayudo?" };
+}
+
+async function resolveInheritedGpsPending(input: {
+  state: PilotConversationState;
+  text: string;
+  env: NodeJS.ProcessEnv;
+}): Promise<{
+  message: string;
+  handler: string;
+  action: "answer_pending" | "start_intent";
+  answer: "confirm" | "reject" | null;
+  reasoning: "ANSWER_TO_PENDING" | "NEW_EXPLICIT_INTENT";
+} | null> {
+  const { state, text, env } = input;
+  const pending = state.pendingConfirmation;
+  if (!pending || pending.action !== "gps_report") return null;
+
+  if (looksLikeBriefRejection(text)) {
+    state.pendingConfirmation = null;
+    state.activeTramite = "none";
+    state.step = "idle";
+    state.lastAgentQuestion = null;
+    return {
+      message: "Ok, cancelé la consulta GPS. ¿En qué más te ayudo?",
+      handler: "gps_cancel",
+      action: "answer_pending",
+      answer: "reject",
+      reasoning: "ANSWER_TO_PENDING",
+    };
+  }
+
+  const wantsConfirm =
+    looksLikeBriefConfirmation(text) ||
+    looksLikeGpsReportRequest(text) ||
+    looksLikeUnitStatusOfActive(text);
+  if (!wantsConfirm) return null;
+
+  const fleet = await fetchFleet(state, env);
+  if (!fleet.ok) {
+    return {
+      message: fleet.error,
+      handler: "gps",
+      action: "answer_pending",
+      answer: "confirm",
+      reasoning: "ANSWER_TO_PENDING",
+    };
+  }
+  const unit = findUnitInFleetByRef(fleet.units, pending.unit);
+  if (!unit) {
+    state.pendingConfirmation = null;
+    return {
+      message: "No pude encontrar esa unidad en WARA. Pedime la lista o la patente.",
+      handler: "gps",
+      action: "answer_pending",
+      answer: "confirm",
+      reasoning: "ANSWER_TO_PENDING",
+    };
+  }
+  return {
+    message: deliverGpsReport(state, unit),
+    handler: "gps",
+    action: looksLikeBriefConfirmation(text) ? "answer_pending" : "start_intent",
+    answer: looksLikeBriefConfirmation(text) ? "confirm" : null,
+    reasoning: looksLikeBriefConfirmation(text) ? "ANSWER_TO_PENDING" : "NEW_EXPLICIT_INTENT",
+  };
+}
+
 function showListing(
   state: PilotConversationState,
   listing: PaginatedFleetListing,
@@ -605,10 +742,11 @@ export async function resolveOperationalTurn(input: {
       savePilotConversationState(state);
       return { kind: "reply", message: msg, state };
     }
+    const intro = buildFirstContactPresentation(state);
     savePilotConversationState(state);
     return {
       kind: "reply",
-      message: buildCompanyMenuMessage(state.contacts),
+      message: intro,
       state,
     };
   }
@@ -618,6 +756,102 @@ export async function resolveOperationalTurn(input: {
   // ——— Cerebro semántico unificado (única autoridad cuando el flag está ON) ———
   if (isUnifiedSemanticBrainEnabled(env)) {
     appendUserTurn(state, text);
+
+    // Saludo / presentación Atilio (antes del LLM).
+    if (looksLikeGreetingOnly(text)) {
+      const greet = buildGreetingReply(state);
+      appendAssistantTurn(state, greet.message, null);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: "general",
+        intent: "none",
+        answer: null,
+        currentTramiteDisposition: "keep",
+        confidence: 1,
+        reasoningCode: "GENERAL_CONVERSATION",
+        handler: greet.handler,
+        latency_ms: null,
+        model: null,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: false,
+        error: null,
+      });
+      return { kind: "reply", message: greet.message, state };
+    }
+
+    // GPS pendiente heredado: sí/dale → ejecutar; no → cancelar consulta; re-pedido → ejecutar.
+    if (state.pendingConfirmation?.action === "gps_report") {
+      const gpsPending = await resolveInheritedGpsPending({
+        state,
+        text,
+        env,
+      });
+      if (gpsPending) {
+        appendAssistantTurn(state, gpsPending.message, null);
+        savePilotConversationState(state);
+        recordLabTurnDiagnosis({
+          at: new Date().toISOString(),
+          brain_version: "unified_v1",
+          action: gpsPending.action,
+          intent: "gps",
+          answer: gpsPending.answer,
+          currentTramiteDisposition: "keep",
+          confidence: 1,
+          reasoningCode: gpsPending.reasoning,
+          handler: gpsPending.handler,
+          latency_ms: null,
+          model: null,
+          clarification: false,
+          legacy_text_reclassification_attempted: false,
+          legacy_reclass_reasons: [],
+          llm_called: false,
+          error: null,
+        });
+        return { kind: "reply", message: gpsPending.message, state };
+      }
+    }
+
+    // Lectura GPS con unidad ya resuelta: invocar herramienta de inmediato (sin confirmación).
+    if (
+      state.selectedUnit &&
+      !state.pendingConfirmation &&
+      (looksLikeUnitStatusOfActive(text) || looksLikeGpsReportRequest(text)) &&
+      !looksLikeChangeUnit(text) &&
+      !/\b(odometro|odómetro|horometro|horómetro|certificado|mantenimiento|ticket)\b/i.test(text)
+    ) {
+      const fleet = await fetchFleet(state, env);
+      if (fleet.ok) {
+        const unit = findUnitInFleetByRef(fleet.units, state.selectedUnit);
+        if (unit) {
+          const msg = deliverGpsReport(state, unit);
+          appendAssistantTurn(state, msg, null);
+          savePilotConversationState(state);
+          recordLabTurnDiagnosis({
+            at: new Date().toISOString(),
+            brain_version: "unified_v1",
+            action: "start_intent",
+            intent: "gps",
+            answer: null,
+            currentTramiteDisposition: "keep",
+            confidence: 1,
+            reasoningCode: "NEW_EXPLICIT_INTENT",
+            handler: "gps",
+            latency_ms: null,
+            model: null,
+            clarification: false,
+            legacy_text_reclassification_attempted: false,
+            legacy_reclass_reasons: [],
+            llm_called: false,
+            error: null,
+          });
+          return { kind: "reply", message: msg, state };
+        }
+      }
+    }
 
     // Atajo: corrección de unidad («no era esa» / «la que tenía»).
     if (looksLikeUnitCorrection(text)) {

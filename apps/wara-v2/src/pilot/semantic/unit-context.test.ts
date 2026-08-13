@@ -286,8 +286,8 @@ describe("unit context — referencias y undo", () => {
       },
       "gps de la misma unidad",
     );
-    assert.match(r.message, /GPS|AD 307 VN/i);
-    assert.equal(getPilotConversationState(TENANT, PHONE)!.pendingConfirmation?.action, "gps_report");
+    assert.match(r.message, /GPS|AD 307 VN|Funcionamiento|posición|posicion|señal|senal/i);
+    assert.equal(getPilotConversationState(TENANT, PHONE)!.pendingConfirmation, null);
   });
 
   it("propuesta de cambio no pisa selectedUnit hasta confirmar", () => {

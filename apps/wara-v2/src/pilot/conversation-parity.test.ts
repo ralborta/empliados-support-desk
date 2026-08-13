@@ -131,10 +131,10 @@ describe("paridad conversacional V2 — bloque operativo", () => {
     assert.doesNotMatch(pick, /reporte GPS/i);
 
     const askGps = await turn("pasame el estado");
-    assert.match(askGps, /reporte GPS|AD |AA 122|M600-022/i);
-    const yes = await turn("sí");
-    assert.match(yes, /Funcionamiento normal|M600-022|AA122/);
-    assert.doesNotMatch(yes, /\[LLM/);
+    // Lectura: entrega directa (sin ¿Querés el reporte?).
+    assert.match(askGps, /Funcionamiento normal|M600-022|AA122|reporte|posición|posicion|señal|senal/i);
+    assert.doesNotMatch(askGps, /Querés el reporte GPS/i);
+    assert.doesNotMatch(askGps, /Recibí el dato/i);
   });
 
   it("siguiente con messageIds distintos avanza; repetir id no", async () => {
@@ -147,14 +147,14 @@ describe("paridad conversacional V2 — bloque operativo", () => {
     assert.match(dup, /messageId duplicado/i);
   });
 
-  it("dos sí en pasos diferentes se procesan", async () => {
-    await turn("reporte de MYQ", { messageId: "myq-1" });
-    const confirm = await turn("sí", { messageId: "yes-1" });
-    assert.match(confirm, /MYQ|AC 427 MY|Funcionamiento normal/i);
+  it("reporte MYQ entrega lectura sin confirmación redundante", async () => {
+    const report = await turn("reporte de MYQ", { messageId: "myq-1" });
+    assert.match(report, /MYQ|AC 427 MY|Funcionamiento normal/i);
+    assert.doesNotMatch(report, /Querés el reporte GPS/i);
 
-    await turn("reporte AC427MY", { messageId: "myq-2" });
-    const confirm2 = await turn("si", { messageId: "yes-2" });
-    assert.match(confirm2, /MYQ|AC 427 MY|Funcionamiento normal/i);
+    const report2 = await turn("reporte AC427MY", { messageId: "myq-2" });
+    assert.match(report2, /MYQ|AC 427 MY|Funcionamiento normal/i);
+    assert.doesNotMatch(report2, /Querés el reporte GPS|Recibí el dato/i);
   });
 
   it("reporte MYQ prioriza sobre unidad activa previa", async () => {

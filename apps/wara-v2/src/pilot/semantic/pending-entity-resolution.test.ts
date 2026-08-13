@@ -233,7 +233,7 @@ describe("pending entity resolution — no GPS default", () => {
     assert.doesNotMatch(pick.message, /GPS/i);
   });
 
-  it("GPS explícito → selección → ofrece reporte GPS", async () => {
+  it("GPS explícito → selección → entrega reporte sin confirmación", async () => {
     await exec(
       {
         action: "start_intent",
@@ -255,7 +255,8 @@ describe("pending entity resolution — no GPS default", () => {
       },
       "AD307VN",
     );
-    assert.match(pick.message, /reporte GPS/i);
+    assert.match(pick.message, /Funcionamiento|reporte|posición|posicion|señal|senal|ignici/i);
+    assert.doesNotMatch(pick.message, /Querés el reporte GPS/i);
   });
 
   it("búsqueda sin trámite padre → pregunta qué desea", () => {

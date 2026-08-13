@@ -118,6 +118,11 @@ export type PilotConversationState = {
   ticketOperations: Record<string, TicketOperationRecord>;
   /** Búsqueda/selección de unidad vinculada al trámite padre (no es cambio de intención). */
   pendingEntityResolution: PendingEntityResolution | null;
+  /** Saludo / presentación Atilio (lab). */
+  conversationMetadata: {
+    greetedAt: string | null;
+    introducedAtilio: boolean;
+  };
   /** Últimos turnos sanitizados (user/assistant) para interpretTurn. */
   recentTurns?: Array<{
     role: "user" | "assistant";
@@ -192,6 +197,10 @@ export function createEmptyPilotState(input: {
     ticketDraft: null,
     ticketOperations: {},
     pendingEntityResolution: null,
+    conversationMetadata: {
+      greetedAt: null,
+      introducedAtilio: false,
+    },
     recentTurns: [],
   };
 }
@@ -263,6 +272,10 @@ function normalizeLoadedState(state: PilotConversationState): PilotConversationS
     selectionSource: state.selectionSource ?? null,
     unitClarificationState: state.unitClarificationState ?? null,
     lastListingPickIndex: state.lastListingPickIndex ?? null,
+    conversationMetadata: state.conversationMetadata ?? {
+      greetedAt: null,
+      introducedAtilio: false,
+    },
     suspendedTramite: state.suspendedTramite
       ? {
           ...state.suspendedTramite,
@@ -436,6 +449,7 @@ export function softResetPilotConversation(
     state.unitClarificationState = null;
     state.fleetCache = null;
     state.fleetCacheAt = null;
+    state.conversationMetadata = { greetedAt: null, introducedAtilio: false };
   } else {
     // Soft reset: conserva selectedUnit y previous; limpia propuesta/aclaración.
     state.proposedUnit = null;

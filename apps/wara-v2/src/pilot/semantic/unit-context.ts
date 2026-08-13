@@ -146,7 +146,7 @@ export function looksLikeUnitStatusOfActive(text: string): boolean {
     return false;
   }
   if (
-    /\b(pasame\s+el\s+estado|fijate\s+si\s+reporta|mostrame\s+donde\s+esta|mostrame\s+d[oó]nde\s+est[aá]|decime\s+como\s+esta|decime\s+c[oó]mo\s+est[aá]|quiero\s+ver\s+esa)\b/.test(
+    /\b(pasame\s+el\s+estado|dame\s+(su\s+|el\s+)?estado|me\s+das\s+(su\s+|el\s+)?(estado|reporte)|fijate\s+si\s+reporta|mostrame\s+donde\s+esta|mostrame\s+d[oó]nde\s+est[aá]|decime\s+como\s+esta|decime\s+c[oó]mo\s+est[aá]|quiero\s+ver\s+esa|el\s+reporte(\s+de\s+la\s+unidad)?)\b/.test(
       t,
     )
   ) {
