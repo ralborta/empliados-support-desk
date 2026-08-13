@@ -47,15 +47,17 @@ export function enrichPlanForConfirmationOutcome(
 
   if (!awaitingConfirm) return plan;
 
-  // Nuevo trámite distinto → switch (el apply limpia pendingWrite)
+  // Nuevo trámite distinto (pending o active) → lo marca confirmation-outcome;
+  // el detalle (suspend + aviso + campos limpios) lo hace enrichPlanForTaskSwitch.
   if (
     (plan.conversationalAct === "start_task" ||
       plan.conversationalAct === "switch_task" ||
       plan.taskAction === "start" ||
       plan.taskAction === "switch") &&
     plan.task &&
-    state.pendingWrite &&
-    !String(state.pendingWrite.task).includes(String(plan.task))
+    ((state.pendingWrite &&
+      !String(state.pendingWrite.task).includes(String(plan.task))) ||
+      (state.activeTask && state.activeTask.type !== plan.task))
   ) {
     return {
       ...plan,
@@ -63,11 +65,11 @@ export function enrichPlanForConfirmationOutcome(
       taskAction: "switch",
       stateIntent: {
         ...plan.stateIntent,
-        preserveTask: false,
+        preserveTask: true,
       },
       reasoning:
         (plan.reasoning ? `${plan.reasoning} ` : "") +
-        "Hay pendingWrite de otro trámite: switch_task y limpio la confirmación anterior.",
+        "Hay trámite distinto en curso: switch_task (suspender anterior, no heredar campos).",
     };
   }
 

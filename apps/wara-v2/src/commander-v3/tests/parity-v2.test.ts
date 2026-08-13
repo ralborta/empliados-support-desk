@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13i", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13i/);
+  it("prompt version bump 13j", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13j/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -625,6 +625,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     const { enrichPlanForConfirmationOutcome } = await import(
       "../enrich/confirmation-outcome.js"
     );
+    const { enrichPlanForTaskSwitch } = await import("../enrich/task-switch.js");
     const { applyCommanderState } = await import("../state/apply-patch.js");
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     s.pendingWrite = {
@@ -637,7 +638,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     s.activeTask = {
       type: "odometer",
       status: "awaiting_confirmation",
-      collected: {},
+      collected: { value: 256111, date: "2026-08-12", time: "20:00" },
       missing: [],
     };
     s.lastQuestion = {
@@ -650,13 +651,17 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       conversationalAct: "start_task",
       task: "hourmeter",
       taskAction: "start",
+      suppliedFields: { value: 256111, date: "2026-08-12", time: "20:00" },
       requestedCapabilities: [{ name: "hourmeter.prepare", params: {} }],
       stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
       responseGoal: { purpose: "ask_missing", facts: [] },
       confidence: 0.9,
     });
-    const enriched = enrichPlanForConfirmationOutcome(plan, s, "cambio de horometro");
+    let enriched = enrichPlanForConfirmationOutcome(plan, s, "cambio de horometro");
     assert.equal(enriched.conversationalAct, "switch_task");
+    enriched = enrichPlanForTaskSwitch(enriched, s);
+    assert.match(enriched.responseGoal.facts.join(" "), /pendiente.*od[oó]metro/i);
+    assert.equal(enriched.suppliedFields?.value, undefined);
     const applied = applyCommanderState({
       state: s,
       plan: enriched,
@@ -667,5 +672,53 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.equal(applied.state.pendingWrite, null);
     assert.equal(applied.state.activeTask?.type, "hourmeter");
+    assert.equal(applied.state.activeTask?.collected?.value, undefined);
+    assert.equal(applied.state.suspendedTask?.task.type, "odometer");
+  });
+
+  it("hourmeter.prepare no hereda value de activeTask odometer", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 1,
+      plate: "AA454CS",
+      name: "M900-076",
+      label: "AA 454 CS (M900-076)",
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "awaiting_confirmation",
+      collected: { value: 256111, date: "2026-08-12", time: "20:00" },
+      missing: [],
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "horo",
+      conversationalAct: "switch_task",
+      task: "hourmeter",
+      taskAction: "switch",
+      requestedCapabilities: [{ name: "hourmeter.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: {
+        ...s,
+        activeTask: {
+          type: "hourmeter",
+          status: "collecting",
+          collected: {},
+          missing: [],
+        },
+        pendingWrite: null,
+      },
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: s.unit,
+      resolvedCompanyId: null,
+      message: "cambio de horometro",
+    });
+    assert.doesNotMatch(exec.facts.join(" "), /256111/);
+    assert.match(exec.facts.join(" "), /valor|hor[oó]metro/i);
   });
 });

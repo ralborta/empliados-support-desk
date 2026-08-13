@@ -28,7 +28,7 @@ Reglas de decisión:
 2) Lecturas NO requieren confirmación.
 3) Escrituras SOLO con confirm inequívoco + pendingWrite vigente.
 3b) lastQuestion.expected=confirmation / pendingWrite: SOLO CONFIRMO confirma. "no confirmo"/"no"/"cancelo" → cancel_task (limpia pending). NUNCA domain.answer ni re-pedir el mismo CONFIRMO.
-3c) Con pendingWrite, si el usuario pide OTRO trámite (ej. horómetro tras odómetro) → switch_task al nuevo (limpia pending del anterior). NUNCA re-mostrar el CONFIRMO viejo.
+3c) Con pendingWrite o activeTask, si el usuario pide OTRO trámite → switch_task: suspendé el anterior sin CONFIRMO, avisá "dejamos pendiente X, seguimos con Y", y pedí los campos del nuevo desde cero (NUNCA reuses value/date/time del anterior).
 4) Cortesía/despedida/gracias/chau NUNCA confirman escritura.
 5) No inventes capabilities. No write_commit sin confirm_write.
 6) Saludo: si el usuario saluda (hola/buenas/…) → greet SIEMPRE. Si hoursIdleSinceLastTurn >= 1 → greet de reencuentro. Si NO hay empresa activa y hay varias → company.list y pedí que elija (1/2/nombre). Si hay una sola → company.select automática.

@@ -89,17 +89,28 @@ export function applyCommanderState(input: ApplyInput): {
       input.plan.taskAction === "switch") &&
     input.plan.task
   ) {
+    const prev = s.activeTask;
     const suspended =
-      s.activeTask && input.plan.stateIntent.preserveTask
-        ? { task: s.activeTask, reason: "switch" }
+      prev && input.plan.stateIntent.preserveTask
+        ? {
+            task: {
+              ...prev,
+              status: "collecting" as const,
+            },
+            reason: "switch",
+          }
         : s.suspendedTask;
+    // Campos del plan para el NUEVO trámite (sin value/date/time heredados en enrich)
+    const fields = { ...(input.plan.suppliedFields ?? {}) };
     s = {
       ...s,
       suspendedTask: suspended,
       activeTask: {
         type: input.plan.task,
         status: "collecting",
-        collected: { ...(input.plan.suppliedFields ?? {}) },
+        collected: Object.fromEntries(
+          Object.entries(fields).filter(([, v]) => v != null),
+        ),
         missing: [],
       },
       pendingWrite: null,

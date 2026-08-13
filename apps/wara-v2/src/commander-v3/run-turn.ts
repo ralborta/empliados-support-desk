@@ -19,6 +19,11 @@ import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
 import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
 import { enrichPlanForConfirmationOutcome } from "./enrich/confirmation-outcome.js";
+import {
+  enrichPlanForTaskSwitch,
+  isSwitchingTask,
+  stateForSwitchedTask,
+} from "./enrich/task-switch.js";
 import { applyCommanderState } from "./state/apply-patch.js";
 import { redactReply } from "./reply/redact.js";
 import {
@@ -196,10 +201,16 @@ export async function runCommanderTurn(
   });
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
   plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+  plan = enrichPlanForTaskSwitch(plan, state);
   plan = enrichPlanForCancelGuard(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForExpectedFields(plan, state, input.message);
+
+  // Switch: ejecutar el nuevo trámite sobre estado limpio (sin collected ajeno)
+  if (isSwitchingTask(plan, state) && plan.task) {
+    state = stateForSwitchedTask(state, plan.task);
+  }
 
   // Medidor sin unidad: listar flota en el mismo turno (estructural, no semántico)
   const meterPrepare = plan.requestedCapabilities.some(

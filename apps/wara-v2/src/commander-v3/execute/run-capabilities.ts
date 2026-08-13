@@ -560,7 +560,9 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         };
       }
       const collected = {
-        ...(ctx.state.activeTask?.collected ?? {}),
+        ...(ctx.state.activeTask?.type === meter
+          ? (ctx.state.activeTask.collected ?? {})
+          : {}),
         ...(ctx.plan.suppliedFields ?? {}),
       };
 
