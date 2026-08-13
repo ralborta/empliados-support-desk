@@ -22,7 +22,7 @@ function looksLikeListingFact(f: string): boolean {
 
 function looksLikeOperationalFact(f: string): boolean {
   if (looksLikeListingFact(f)) return true;
-  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)/i.test(
+  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente/i.test(
     f,
   );
 }
@@ -76,6 +76,20 @@ export async function redactReply(input: {
 
   // Hechos operativos / listados: no pasar por LLM (evita "Hola" + inventos).
   if (input.facts.some(looksLikeOperationalFact)) {
+    return {
+      reply: fallbackFromFacts(input.facts, input.plan),
+      usedLlm: false,
+      latencyMs: 0,
+    };
+  }
+
+  // Cancel / switch: facts del contrato (no inventar "cerrar" / menús).
+  if (
+    input.plan.conversationalAct === "cancel_task" ||
+    input.plan.conversationalAct === "switch_task" ||
+    input.plan.taskAction === "cancel" ||
+    input.plan.taskAction === "switch"
+  ) {
     return {
       reply: fallbackFromFacts(input.facts, input.plan),
       usedLlm: false,

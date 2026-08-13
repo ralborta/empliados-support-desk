@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ConversationStateV3, ActiveTaskV3 } from "../types/state.js";
+import type { ConversationStateV3 } from "../types/state.js";
 import { assertExpectationXorV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
 import type { CompanyRef, UnitRef } from "../types/refs.js";
@@ -74,11 +74,11 @@ export function applyCommanderState(input: ApplyInput): {
     input.plan.conversationalAct === "cancel_task" ||
     input.plan.taskAction === "cancel"
   ) {
+    // Cancel = limpio total del trámite (no dejar activeTask "cancelled":
+    // ensucia el siguiente turno y puede reabrir confirmaciones fantasma).
     s = {
       ...s,
-      activeTask: s.activeTask
-        ? { ...s.activeTask, status: "cancelled" }
-        : null,
+      activeTask: null,
       pendingWrite: null,
       pendingEntity: null,
       lastQuestion: null,
@@ -208,9 +208,7 @@ export function applyCommanderState(input: ApplyInput): {
 export function softCancelActive(state: ConversationStateV3): ConversationStateV3 {
   return {
     ...state,
-    activeTask: state.activeTask
-      ? ({ ...state.activeTask, status: "cancelled" } as ActiveTaskV3)
-      : null,
+    activeTask: null,
     pendingWrite: null,
     pendingEntity: null,
     lastQuestion: null,

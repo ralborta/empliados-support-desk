@@ -120,7 +120,22 @@ export function enrichPlanForGreetingCompanyGate(
   plan: TurnPlan,
   state: ConversationStateV3,
 ): TurnPlan {
-  if (state.company) return plan;
+  // Empresa ya activa: NUNCA re-listar (evita "Empresas disponibles" mid-flujo).
+  if (state.company) {
+    const stripped = plan.requestedCapabilities.filter(
+      (c) => c.name !== "company.list",
+    );
+    if (stripped.length !== plan.requestedCapabilities.length) {
+      return {
+        ...plan,
+        requestedCapabilities: stripped,
+        reasoning:
+          (plan.reasoning ? `${plan.reasoning} ` : "") +
+          "Empresa ya activa: quité company.list.",
+      };
+    }
+    return plan;
+  }
   if (state.availableCompanies.length <= 1) return plan;
   if (plan.conversationalAct !== "greet" && plan.conversationalAct !== "inform") {
     return plan;

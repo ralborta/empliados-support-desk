@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13j", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13r/);
+  it("prompt version bump 13s", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13s/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -903,6 +903,73 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.equal(applied.state.pendingWrite, null);
     assert.equal(applied.state.lastQuestion, null);
+    assert.equal(applied.state.activeTask, null);
+  });
+
+  it("inform+odometer.prepare con pending certificate → switch_task", async () => {
+    const { enrichPlanForConfirmationOutcome } = await import(
+      "../enrich/confirmation-outcome.js"
+    );
+    const { enrichPlanForTaskSwitch } = await import("../enrich/task-switch.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "cert_1",
+      version: 1,
+      payloadHash: "h",
+      task: "certificate",
+      summary: {},
+    };
+    s.activeTask = {
+      type: "certificate",
+      status: "awaiting_confirmation",
+      collected: {},
+      missing: [],
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_certificate",
+      expected: "confirmation",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "quiere odo pero puso clarify",
+      conversationalAct: "inform",
+      task: "odometer",
+      taskAction: null,
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "clarify", facts: [] },
+      confidence: 0.6,
+    });
+    let enriched = enrichPlanForConfirmationOutcome(plan, s, "odometro 900073");
+    assert.equal(enriched.conversationalAct, "switch_task");
+    assert.equal(enriched.task, "odometer");
+    enriched = enrichPlanForTaskSwitch(enriched, s);
+    assert.match(enriched.responseGoal.facts.join(" "), /pendiente.*certificado/i);
+  });
+
+  it("empresa activa → strip company.list", async () => {
+    const { enrichPlanForGreetingCompanyGate } = await import(
+      "../enrich/company-capture.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "WARA" };
+    s.availableCompanies = [
+      { id: "c1", name: "WARA" },
+      { id: "c2", name: "El Cacique S.A." },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "greet mal",
+      conversationalAct: "greet",
+      requestedCapabilities: [{ name: "company.list", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.5,
+    });
+    const enriched = enrichPlanForGreetingCompanyGate(plan, s);
+    assert.equal(
+      enriched.requestedCapabilities.some((c) => c.name === "company.list"),
+      false,
+    );
   });
 
   it("start hourmeter con pending odometer → switch limpia pending", async () => {

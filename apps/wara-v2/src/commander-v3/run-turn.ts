@@ -504,19 +504,34 @@ export async function runCommanderTurn(
     reply,
   });
 
-  // Prefer execute state patches already on `state`; merge history from applied
-  const finalState: ConversationStateV3 = {
-    ...applied.state,
-    // keep execute patches for pendingWrite/activeTask if apply didn't wipe them wrongly
-    activeTask: state.activeTask ?? applied.state.activeTask,
-    pendingWrite: state.pendingWrite,
-    pendingEntity: state.pendingEntity ?? applied.state.pendingEntity,
-    lastQuestion: state.lastQuestion ?? applied.state.lastQuestion,
-    lastListing: state.lastListing ?? applied.state.lastListing,
-    unit: state.unit ?? applied.state.unit,
-    previousUnit: state.previousUnit ?? applied.state.previousUnit,
-    company: state.company ?? applied.state.company,
-  };
+  // Execute patches (pendingWrite de *.prepare) vs apply lifecycle (cancel/switch).
+  // Cancel/switch DEBEN ganar: antes se reescribía pendingWrite viejo y "cancelar" no limpiaba.
+  const lifecycleWins =
+    plan.conversationalAct === "cancel_task" ||
+    plan.taskAction === "cancel" ||
+    plan.conversationalAct === "switch_task" ||
+    plan.taskAction === "switch";
+
+  const finalState: ConversationStateV3 = lifecycleWins
+    ? {
+        ...applied.state,
+        unit: state.unit ?? applied.state.unit,
+        previousUnit: state.previousUnit ?? applied.state.previousUnit,
+        company: state.company ?? applied.state.company,
+        lastListing: state.lastListing ?? applied.state.lastListing,
+      }
+    : {
+        ...applied.state,
+        // keep execute patches for pendingWrite/activeTask if apply didn't wipe them wrongly
+        activeTask: state.activeTask ?? applied.state.activeTask,
+        pendingWrite: state.pendingWrite ?? applied.state.pendingWrite,
+        pendingEntity: state.pendingEntity ?? applied.state.pendingEntity,
+        lastQuestion: state.lastQuestion ?? applied.state.lastQuestion,
+        lastListing: state.lastListing ?? applied.state.lastListing,
+        unit: state.unit ?? applied.state.unit,
+        previousUnit: state.previousUnit ?? applied.state.previousUnit,
+        company: state.company ?? applied.state.company,
+      };
 
   saveConversationStateV3(finalState);
 

@@ -3,8 +3,21 @@
  * Solo aplica con pendingWrite / confirmación pedida: confirma o rechaza.
  * No elige trámite libre — es el complemento estructurado de CONFIRMO.
  */
-import type { ConversationStateV3 } from "../types/state.js";
+import type { ConversationStateV3, TaskTypeV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
+
+/** Task estructurado del plan (campo task o *.prepare). Sin mirar el mensaje. */
+function taskFromPlan(plan: TurnPlan): TaskTypeV3 | null {
+  if (plan.task) return plan.task;
+  for (const c of plan.requestedCapabilities) {
+    if (c.name === "odometer.prepare") return "odometer";
+    if (c.name === "hourmeter.prepare") return "hourmeter";
+    if (c.name === "certificate.prepare") return "certificate";
+    if (c.name === "maintenance.prepare") return "maintenance";
+    if (c.name === "handoff.prepare") return "human_handoff";
+  }
+  return null;
+}
 
 function norm(text: string): string {
   return text
@@ -47,21 +60,19 @@ export function enrichPlanForConfirmationOutcome(
 
   if (!awaitingConfirm) return plan;
 
-  // Nuevo trámite distinto (pending o active) → lo marca confirmation-outcome;
-  // el detalle (suspend + aviso + campos limpios) lo hace enrichPlanForTaskSwitch.
+  // Nuevo trámite distinto (pending o active) → switch aunque el LLM haya puesto
+  // inform/clarify/ask (antes solo start/switch y se quedaba trabado en el CONFIRMO).
+  const nextTask = taskFromPlan(plan);
   if (
-    (plan.conversationalAct === "start_task" ||
-      plan.conversationalAct === "switch_task" ||
-      plan.taskAction === "start" ||
-      plan.taskAction === "switch") &&
-    plan.task &&
+    nextTask &&
     ((state.pendingWrite &&
-      !String(state.pendingWrite.task).includes(String(plan.task))) ||
-      (state.activeTask && state.activeTask.type !== plan.task))
+      !String(state.pendingWrite.task).includes(String(nextTask))) ||
+      (state.activeTask && state.activeTask.type !== nextTask))
   ) {
     return {
       ...plan,
       conversationalAct: "switch_task",
+      task: nextTask,
       taskAction: "switch",
       stateIntent: {
         ...plan.stateIntent,
