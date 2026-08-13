@@ -22,10 +22,27 @@ export async function redactReply(input: {
   }
 
   if (input.plan.conversationalAct === "greet") {
-    if (!input.state.conversationMetadata.introducedAtilio) {
+    const intro = !input.state.conversationMetadata.introducedAtilio
+      ? "Hola, soy Atilio, el asistente virtual de WARA."
+      : "Hola.";
+    const companyFacts = input.facts.filter(
+      (f) => /empresa/i.test(f) || /^\d+\.\s/.test(f) || /eleg/i.test(f),
+    );
+    if (!input.state.company && input.state.availableCompanies.length > 1) {
+      const fromFacts = companyFacts.length
+        ? companyFacts.join("\n\n")
+        : `Antes de seguir, elegí la empresa:\n${input.state.availableCompanies
+            .map((c, i) => `${i + 1}. ${c.name}`)
+            .join("\n")}`;
       return {
-        reply:
-          "Hola, soy Atilio, el asistente virtual de WARA. ¿En qué te ayudo?",
+        reply: `${intro} ${fromFacts}`,
+        usedLlm: false,
+        latencyMs: 0,
+      };
+    }
+    if (!input.state.company && input.state.availableCompanies.length === 1) {
+      return {
+        reply: `${intro} Seguimos con ${input.state.availableCompanies[0]!.name}. ¿En qué te ayudo?`,
         usedLlm: false,
         latencyMs: 0,
       };
@@ -34,7 +51,7 @@ export async function redactReply(input: {
       ? ` Tenemos pendiente ${labelTask(input.state.activeTask.type)}.`
       : "";
     return {
-      reply: `Hola, ¿en qué te ayudo?${pending}`,
+      reply: `${intro} ¿En qué te ayudo?${pending}`,
       usedLlm: false,
       latencyMs: 0,
     };

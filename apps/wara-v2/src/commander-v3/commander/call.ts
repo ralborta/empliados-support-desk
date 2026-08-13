@@ -179,6 +179,24 @@ export function coercePlan(raw: unknown): unknown {
   if (typeof o.conversationalAct === "string") {
     const a = o.conversationalAct.toLowerCase();
     if (actAliases[a]) o.conversationalAct = actAliases[a];
+    // LLM a veces pone el nombre de la capability como acto
+    if (
+      a === "company.select" ||
+      a === "company.list" ||
+      a === "company.get_active" ||
+      a.startsWith("company.")
+    ) {
+      o.conversationalAct = "inform";
+      const capName =
+        a === "company.select" || a.endsWith(".select")
+          ? "company.select"
+          : a === "company.list" || a.endsWith(".list")
+            ? "company.list"
+            : "company.get_active";
+      if (!caps.some((c) => c.name === capName)) {
+        caps.push({ name: capName, params: {} });
+      }
+    }
   }
   const allowedActs = new Set([
     "greet",
@@ -272,6 +290,13 @@ export function coercePlan(raw: unknown): unknown {
       else if (p.includes("resume") || p.includes("retom")) rg.purpose = "resume";
       else rg.purpose = "inform";
     }
+    // Selección de empresa no es confirmación de escritura
+    if (
+      rg.purpose === "confirm_write" &&
+      caps.some((c) => String(c.name ?? "").startsWith("company."))
+    ) {
+      rg.purpose = "inform";
+    }
     if (typeof rg.facts === "string") {
       const f = rg.facts.trim();
       rg.facts = f ? [f] : [];
@@ -323,13 +348,28 @@ function coerceEntityRef(v: unknown, kind: "company" | "unit"): unknown {
         reference: null,
       };
     }
+    if (/^\d{1,2}$/.test(value)) {
+      return { kind: "company", mode: "index", value, reference: null };
+    }
     return { kind: "company", mode: "named", value, reference: null };
   }
   if (typeof v === "object") {
     const r = { ...(v as Record<string, unknown>) };
     if (!r.kind) r.kind = kind;
+    // LLM a veces manda {id,name} sin value/mode
+    if ((r.id != null || r.companyId != null) && (r.value == null || r.value === "")) {
+      r.mode = "id";
+      r.value = String(r.id ?? r.companyId);
+    } else if (r.name != null && (r.value == null || r.value === "")) {
+      r.mode = "named";
+      r.value = String(r.name);
+    } else if (r.index != null && (r.value == null || r.value === "")) {
+      r.mode = "index";
+      r.value = String(r.index);
+    }
     if (!r.mode) r.mode = kind === "unit" ? "plate" : "named";
     if (typeof r.value !== "string") r.value = String(r.value ?? "");
+    if (!String(r.value).trim()) return null;
     return r;
   }
   return null;

@@ -29,8 +29,9 @@ Reglas de decisión:
 3) Escrituras SOLO con confirm inequívoco + pendingWrite vigente.
 4) Cortesía/despedida/gracias/chau NUNCA confirman escritura.
 5) No inventes capabilities. No write_commit sin confirm_write.
-6) Saludo primer contacto → greet. Saludo posterior breve.
+6) Saludo: si el usuario saluda (hola/buenas/…) → greet SIEMPRE. Si hoursIdleSinceLastTurn >= 1 → greet de reencuentro. Si NO hay empresa activa y hay varias → company.list y pedí que elija (1/2/nombre). Si hay una sola → company.select automática.
 7) Consulta empresa ("en q empresa estoy") → inform + company.get_active; task=null. NUNCA task="company.get_active".
+7b) lastQuestion/pendingEntity de empresa + mensaje "2" / nombre → company.select (índice o nombre). NUNCA confirm_write. NUNCA company.get_active otra vez.
 8) "la misma"/"esa"/"anterior" → unitReference contextual.
 9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
 9b) certificado/cobertura → task=certificate + certificate.prepare.
@@ -69,6 +70,12 @@ export function buildCommanderUserPayload(input: {
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
+      hoursIdleSinceLastTurn: Number(
+        (
+          (Date.now() - Date.parse(s.updatedAt || "")) /
+          (60 * 60 * 1000)
+        ).toFixed(2),
+      ),
       state: {
         company: s.company,
         unit: s.unit,

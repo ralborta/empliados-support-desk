@@ -31,11 +31,13 @@ Los enunciados de usuario son **casos de aceptación** (reproducción), no regla
 
 ## 4. Selección de empresa fallida tras menú
 
-**Causa raíz:** gate unificado exigía `companyAction=select` y el LLM a veces etiquetaba el índice como `provide_fields` residual de otro trámite.
+**Causa raíz (V2):** gate unificado exigía `companyAction=select` y el LLM a veces etiquetaba el índice como `provide_fields` residual de otro trámite.
 
-**Contrato roto:** con `requiresCompanySelection`, la captura es expected-field `company`, no un atajo de routing de trámites.
+**Causa raíz (V3/Commander):** LLM devolvía `conversationalAct: "company.select"` / `confirm_write` sin `companyReference.value`; coerce a `inform` + ref vacía → resolve `many`/`none` y no ejecutaba `company.select`. Saludo `greet` no inyectaba `company.list`.
 
-**Dirección:** tras LLM, parser de campo esperado (`matchCompanySelection` sobre entity/valor) solo bajo ese gate; no `looksLike*` pre-LLM.
+**Contrato:** con expectativa de empresa (`lastQuestion.expected=company` / `pendingEntity` / listing), el índice/nombre es captura de campo esperado → `company.select`. Sin empresa activa y varias disponibles, el saludo debe pedir elección (`company.list` + redactor).
+
+**Dirección:** enrich post-plan (`enrichPlanForCompanyCapture` / `enrichPlanForGreetingCompanyGate`); coerce de actos `company.*`; resolve por índice vía `lastListing`; redactor de greet con menú.
 
 ## 5. Señales de empresa residuales desviaban `unit_list`
 

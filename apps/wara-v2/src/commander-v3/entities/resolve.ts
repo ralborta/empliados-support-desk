@@ -151,11 +151,25 @@ export function resolveCompanyReference(
   }
   if (ref.mode === "index") {
     const n = Number.parseInt(ref.value, 10);
+    if (!Number.isFinite(n) || n < 1) return { status: "not_found", query: ref.value };
+    if (state.lastListing?.kind === "companies") {
+      const item = state.lastListing.items.find((i) => i.index === n);
+      if (item?.companyId) {
+        const c = state.availableCompanies.find((x) => x.id === item.companyId);
+        if (c) return { status: "exact", company: c };
+      }
+    }
     const c = state.availableCompanies[n - 1];
     if (c) return { status: "exact", company: c };
     return { status: "not_found", query: String(n) };
   }
+  if (ref.mode === "id") {
+    const c = state.availableCompanies.find((x) => x.id === ref.value);
+    if (c) return { status: "exact", company: c };
+    return { status: "not_found", query: ref.value };
+  }
   const q = ref.value.trim().toLowerCase();
+  if (!q) return { status: "none" };
   const exact = state.availableCompanies.filter(
     (c) => c.name.toLowerCase() === q || c.id === ref.value,
   );

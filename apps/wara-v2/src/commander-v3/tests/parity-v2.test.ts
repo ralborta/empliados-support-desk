@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13c", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13d/);
+  it("prompt version bump 13f", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13f/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -156,6 +156,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.ok(
       parsed.data!.requestedCapabilities.some((c) => c.name === "company.get_active"),
     );
+    assert.ok(parsed.data!.reasoning.length > 0);
   });
 
   it("company.get_active sin empresa lista disponibles", async () => {
@@ -182,5 +183,136 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       message: "en q empresa estoy?",
     });
     assert.match(exec.facts.join(" "), /no hay empresa activa|elegir|WARA|Cacique/i);
+    assert.equal(exec.state.lastQuestion?.expected, "company");
+    assert.equal(exec.state.lastListing?.kind, "companies");
+    assert.equal(exec.state.pendingEntity, null);
+  });
+
+  it("hola sin empresa → greet + company.list", async () => {
+    const { enrichPlanForGreetingPolicy } = await import(
+      "../enrich/greeting-policy.js"
+    );
+    const { enrichPlanForGreetingCompanyGate } = await import(
+      "../enrich/company-capture.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "mal clarify",
+      conversationalAct: "ask",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: {
+        purpose: "clarify",
+        facts: [],
+        nextQuestion: "¿qué querés hacer?",
+      },
+      confidence: 0.5,
+    });
+    let enriched = enrichPlanForGreetingPolicy(plan, s, "hola");
+    assert.equal(enriched.conversationalAct, "greet");
+    enriched = enrichPlanForGreetingCompanyGate(enriched, s);
+    assert.ok(enriched.requestedCapabilities.some((c) => c.name === "company.list"));
+  });
+
+  it("índice 2 sin lastQuestion pero sin empresa → select", async () => {
+    const { enrichPlanForCompanyCapture } = await import("../enrich/company-capture.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "486546", name: "WARA", contactId: 486546 },
+      { id: "131776", name: "El Cacique S.A.", contactId: 131776 },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "repite get_active",
+      conversationalAct: "inform",
+      requestedCapabilities: [{ name: "company.get_active", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForCompanyCapture(plan, s, "2");
+    assert.ok(enriched.requestedCapabilities.some((c) => c.name === "company.select"));
+    assert.equal(enriched.requestedCapabilities[0]?.params?.companyId, "131776");
+  });
+
+  it("greet sin empresa → company.list en gate", async () => {
+    const { enrichPlanForGreetingCompanyGate } = await import(
+      "../enrich/company-capture.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "saludo",
+      conversationalAct: "greet",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.99,
+    });
+    const enriched = enrichPlanForGreetingCompanyGate(plan, s);
+    assert.ok(enriched.requestedCapabilities.some((c) => c.name === "company.list"));
+    assert.equal(enriched.responseGoal.purpose, "ask_missing");
+  });
+
+  it("enrich: mensaje 2 con pending company → company.select", async () => {
+    const { enrichPlanForCompanyCapture } = await import("../enrich/company-capture.js");
+    const { resolveCompanyReference } = await import("../entities/resolve.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "486546", name: "WARA", contactId: 486546 },
+      { id: "131776", name: "El Cacique S.A.", contactId: 131776 },
+    ];
+    s.lastQuestion = { id: "1", purpose: "select_company", expected: "company" };
+    s.pendingEntity = { type: "company", purpose: "select", candidates: s.availableCompanies };
+    s.lastListing = {
+      kind: "companies",
+      page: 1,
+      pageSize: 20,
+      totalCount: 2,
+      items: [
+        { index: 1, label: "WARA", companyId: "486546" },
+        { index: 2, label: "El Cacique S.A.", companyId: "131776" },
+      ],
+      fetchedAt: new Date().toISOString(),
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "elige 2",
+      conversationalAct: "inform",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: false, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "confirm_write", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForCompanyCapture(plan, s, "2");
+    assert.ok(enriched.requestedCapabilities.some((c) => c.name === "company.select"));
+    assert.equal(enriched.companyReference?.mode, "index");
+    assert.equal(enriched.companyReference?.value, "2");
+    const resolved = resolveCompanyReference(enriched.companyReference, s);
+    assert.equal(resolved.status, "exact");
+    if (resolved.status === "exact") {
+      assert.equal(resolved.company.name, "El Cacique S.A.");
+    }
+    const exec = await executeCapabilities({
+      state: s,
+      plan: {
+        ...enriched,
+        requestedCapabilities: [
+          { name: "company.select", params: { companyId: "131776" } },
+        ],
+      },
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: "131776",
+      message: "2",
+    });
+    assert.match(exec.facts.join(" "), /Cacique/i);
+    assert.equal(exec.state.company?.name, "El Cacique S.A.");
   });
 });

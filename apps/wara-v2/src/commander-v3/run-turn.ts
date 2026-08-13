@@ -11,6 +11,11 @@ import {
 } from "./entities/resolve.js";
 import { executeCapabilities } from "./execute/run-capabilities.js";
 import { enrichPlanWithNaturalDatetime } from "./enrich/natural-datetime-plan.js";
+import {
+  enrichPlanForCompanyCapture,
+  enrichPlanForGreetingCompanyGate,
+} from "./enrich/company-capture.js";
+import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { applyCommanderState } from "./state/apply-patch.js";
 import { redactReply } from "./reply/redact.js";
 import {
@@ -186,6 +191,9 @@ export async function runCommanderTurn(
     timezone: DEFAULT_TENANT_TZ,
     localNow,
   });
+  plan = enrichPlanForGreetingPolicy(plan, state, input.message);
+  plan = enrichPlanForGreetingCompanyGate(plan, state);
+  plan = enrichPlanForCompanyCapture(plan, state, input.message);
 
   // Ensure company selected for ops if only one contact
   if (!state.company && state.availableCompanies.length === 1) {
@@ -220,7 +228,11 @@ export async function runCommanderTurn(
     resolvedCompany &&
     !plan.requestedCapabilities.some((c) => c.name === "company.select")
   ) {
-    if (plan.companyReference || state.pendingEntity?.type === "company") {
+    if (
+      plan.companyReference ||
+      state.pendingEntity?.type === "company" ||
+      state.lastQuestion?.expected === "company"
+    ) {
       plan = {
         ...plan,
         requestedCapabilities: [
@@ -232,6 +244,16 @@ export async function runCommanderTurn(
         ],
       };
     }
+  } else if (resolvedCompany) {
+    // Asegurar companyId si el select ya vino vacío (capture por índice)
+    plan = {
+      ...plan,
+      requestedCapabilities: plan.requestedCapabilities.map((c) =>
+        c.name === "company.select" && !c.params?.companyId
+          ? { ...c, params: { ...c.params, companyId: resolvedCompany.id } }
+          : c,
+      ),
+    };
   }
 
   // Ambiguous → facts only, no tools that mutate write

@@ -95,6 +95,17 @@ function inferDefaultCapabilities(
 ): CapabilityRequest[] {
   switch (plan.conversationalAct) {
     case "greet":
+      if (!state.company && state.availableCompanies.length > 1) {
+        return [{ name: "company.list", params: {} }];
+      }
+      if (!state.company && state.availableCompanies.length === 1) {
+        return [
+          {
+            name: "company.select",
+            params: { companyId: state.availableCompanies[0]!.id },
+          },
+        ];
+      }
       return [];
     case "confirm_write":
       if (!state.pendingWrite) return [];
@@ -156,19 +167,51 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           };
         }
         if (names.length === 1) {
+          const only = ctx.state.availableCompanies[0]!;
           return {
             capability: req.name,
             ok: true,
-            facts: [`Todavía no fijamos empresa; la disponible es ${names[0]}.`],
+            facts: [`Seguimos con ${only.name}.`],
+            data: {
+              statePatch: {
+                company: only,
+                pendingEntity: null,
+                lastQuestion: null,
+              },
+            },
           };
         }
-        const lines = names.map((n, i) => `${i + 1}. ${n}`).join("\n");
+        const items = ctx.state.availableCompanies.map((c, i) => ({
+          index: i + 1,
+          label: c.name,
+          companyId: c.id,
+        }));
+        const lines = items.map((i) => `${i.index}. ${i.label}`).join("\n");
         return {
           capability: req.name,
           ok: true,
           facts: [
             `Todavía no hay empresa activa. Podés elegir una:\n${lines}`,
           ],
+          data: {
+            statePatch: {
+              lastListing: {
+                kind: "companies" as const,
+                page: 1,
+                pageSize: 20,
+                totalCount: items.length,
+                items,
+                fetchedAt: new Date().toISOString(),
+              },
+              lastQuestion: {
+                id: randomUUID(),
+                purpose: "select_company",
+                expected: "company" as const,
+              },
+              // Una sola expectativa dominante (XOR): campo company, no pendingEntity
+              pendingEntity: null,
+            },
+          },
         };
       }
       return {
@@ -204,11 +247,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               purpose: "select_company",
               expected: "company" as const,
             },
-            pendingEntity: {
-              type: "company" as const,
-              purpose: "select",
-              candidates: ctx.state.availableCompanies,
-            },
+            pendingEntity: null,
           },
         },
       };
