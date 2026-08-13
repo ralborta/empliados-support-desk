@@ -192,7 +192,43 @@ describe("certificate await unit capture", () => {
     assert.equal(r.handler, "unit_list");
     assert.match(r.message, /AA\s*175\s*BY|M900-071|patente|unidad/i);
     assert.doesNotMatch(r.message, /^¿Qué patente o unidad buscás\?$/i);
+    assert.match(st.lastAgentQuestion ?? "", /patente|unidad|certificado/i);
+    assert.doesNotMatch(st.lastAgentQuestion ?? "", /^Unidades en /i);
     assert.equal(st.activeTramite, "certificate_issue");
     assert.equal(st.pendingEntityResolution?.parentIntent, "certificate");
+  });
+
+  it("execute: cortesía tras unit_list re-pregunta corta (no re-emite listado)", async () => {
+    const st = seedAwaitUnit();
+    await exec(
+      st,
+      {
+        action: "query_context",
+        intent: "unit_list",
+        confidence: 0.97,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "QUERY_CONTEXT",
+        speechAct: "query_context",
+      },
+      "me pasas la lista?",
+    );
+    // Simula estado contaminado legacy: lastAgentQuestion = cuerpo del listado.
+    st.lastAgentQuestion = `Unidades en El Cacique S.A. (página 1/51, 408 en total):\n\n1. AA 175 BY (M900-071)\n2. AA 251 VD\n\nDecime el número.`;
+    const r = await exec(
+      st,
+      {
+        action: "general",
+        intent: "none",
+        confidence: 0.9,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "GENERAL_CONVERSATION",
+        speechAct: "courtesy",
+      },
+      "hola",
+    );
+    assert.equal(r.handler, "await_unit");
+    assert.match(r.message, /patente|unidad|certificado/i);
+    assert.doesNotMatch(r.message, /^Unidades en /i);
+    assert.doesNotMatch(r.message, /408 en total/i);
   });
 });

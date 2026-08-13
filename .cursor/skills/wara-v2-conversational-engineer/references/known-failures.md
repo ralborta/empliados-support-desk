@@ -67,6 +67,7 @@ Causas aún en investigación; no convertir en matchers:
 | Dual keep empresa + change unidad | un TurnDecision con `amend`+`keep` tipado; reply prioriza amend |
 | Patente con `pendingEntityResolution` cae a menú general / «dato falta» | LLM etiquetaba `amend`/`provide_fields`/`unit_name`; faltaba coerce a `select_entity` + parser de campo esperado |
 | «me pasas la lista?» con captura de unidad abierta solo re-pregunta patente | guard `awaitingUnitEarly` bloqueaba `intent=unit_list` (regresión del coerce de captura) |
+| Tras listar, «hola»/ruido re-emite las 408 unidades | `lastAgentQuestion` se pisaba con el cuerpo del listado; el re-ask de await_unit lo re-enviaba |
 
 Corregir por contrato/transición general; **prohibido** parchear con frases, regex de intención o `includes`.
 
@@ -77,6 +78,14 @@ Corregir por contrato/transición general; **prohibido** parchear con frases, re
 **Contrato:** con expectativa de unidad abierta, `intent=unit_list` es path válido: listar flota sin cerrar el trámite padre; no sustituir por re-pregunta vacía.
 
 **Dirección:** permitir `unit_list` (junto a `select_entity` / `unit_search` / provide) en el guard; el handler `unit_list` ya preserva `activeTramite` vía `parentIntent`.
+
+## 10. `lastAgentQuestion` no es el cuerpo del listado
+
+**Causa raíz:** tras `unit_list`, se guardaba el mensaje paginado completo en `lastAgentQuestion`; cualquier cortesía/general bajo captura re-emitía ese texto.
+
+**Contrato:** `lastAgentQuestion` / expectativa dominante = pregunta corta de captura (`unitAwaitAskMessage`); el listado vive en `lastListing` + respuesta del turno.
+
+**Dirección:** al listar, setear pregunta corta; al re-preguntar, ignorar cuerpos de listado residuales (`isFleetListingBody`).
 
 ## 8. Amend de slot pendiente
 

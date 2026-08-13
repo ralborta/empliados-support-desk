@@ -14,9 +14,11 @@ import {
   findUnitInFleetByRef,
   formatPaginatedFleetMessage,
   formatUnitLabel,
+  isFleetListingBody,
   resolveUnitByNameFromFleet,
   resolveUnitByPlateFromFleet,
   toFleetUnitRef,
+  unitAwaitAskMessage,
   type PaginatedFleetListing,
 } from "../unit-fleet.js";
 import { buildGpsReportForUnit } from "../gps-core.js";
@@ -107,6 +109,15 @@ export type ExecuteResult = {
 };
 
 const TZ = "America/Argentina/Buenos_Aires";
+
+function resolveAwaitUnitAsk(
+  state: PilotConversationState,
+  parent: ReturnType<typeof resolveParentIntentForUnitSelection>,
+): string {
+  const q = state.lastAgentQuestion?.trim();
+  if (q && !isFleetListingBody(q)) return q;
+  return unitAwaitAskMessage(parent);
+}
 
 function emptyOdoDraft(meterType: "odometro" | "horometro"): OdometerDraft {
   return {
@@ -1283,11 +1294,7 @@ export async function executeTurnDecision(
         const cont = continueAfterUnitResolved(state, unit, { parentIntent: parent });
         return { handler: cont.handler, message: cont.message, state };
       }
-      const ask =
-        state.lastAgentQuestion?.trim() ||
-        (parent === "certificate"
-          ? "¿De qué unidad querés el certificado de cobertura?"
-          : "¿Qué patente o unidad buscás?");
+      const ask = resolveAwaitUnitAsk(state, parent);
       return { handler: "await_unit", message: ask, state };
     }
   }
@@ -1411,11 +1418,7 @@ export async function executeTurnDecision(
           deps,
         );
       }
-      const ask =
-        state.lastAgentQuestion?.trim() ||
-        (parent === "certificate"
-          ? "¿De qué unidad querés el certificado de cobertura?"
-          : "¿Qué patente o unidad buscás?");
+      const ask = resolveAwaitUnitAsk(state, parent);
       return { handler: "await_unit", message: ask, state };
     }
     if (decision.intent === "maintenance" && decision.fields?.detail) {
@@ -1491,7 +1494,8 @@ export async function executeTurnDecision(
     const parent = resolveParentIntentForUnitSelection(state);
     const message = formatPaginatedFleetMessage(listing, state.companyName);
     state.lastListing = listing;
-    state.lastAgentQuestion = message;
+    // Expectativa dominante = captura de unidad; NUNCA el cuerpo del listado (evita re-emitir 408 filas).
+    state.lastAgentQuestion = unitAwaitAskMessage(parent);
     touchPendingSearch(state, { searchMode: "list" });
     if (!parent) {
       deps.showListing(state, listing, message);
@@ -1523,11 +1527,7 @@ export async function executeTurnDecision(
     if (decision.entity?.value) {
       return handleUnitSearch({ ...decision, action: "select_entity" }, state, deps);
     }
-    const ask =
-      state.lastAgentQuestion?.trim() ||
-      (parent === "certificate"
-        ? "¿De qué unidad querés el certificado de cobertura?"
-        : "¿Qué patente o unidad buscás?");
+    const ask = resolveAwaitUnitAsk(state, parent);
     return { handler: "await_unit", message: ask, state };
   }
 

@@ -258,6 +258,22 @@ export function formatPaginatedFleetMessage(
   return `${header}\n\n${lines.join("\n")}${nav}`;
 }
 
+/** Cuerpo de listado (no sirve como lastAgentQuestion / re-pregunta corta). */
+export function isFleetListingBody(text: string | null | undefined): boolean {
+  const t = text?.trim() ?? "";
+  if (!t) return false;
+  if (t.length > 280) return true;
+  return /^(Unidades en |Patentes de unidades en |Encontré \d+ unidades)/i.test(t);
+}
+
+/** Expectativa corta de captura de unidad (XOR; nunca el cuerpo del listado). */
+export function unitAwaitAskMessage(
+  parent: "certificate" | "odometer" | "horometer" | "maintenance" | "ticket" | "gps" | null,
+): string {
+  if (parent === "certificate") return "¿De qué unidad querés el certificado de cobertura?";
+  return "¿Qué patente o unidad buscás?";
+}
+
 export function formatPlatesOnlyMessage(
   listing: PaginatedFleetListing,
   companyName: string | null,

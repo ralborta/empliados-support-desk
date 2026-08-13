@@ -51,6 +51,7 @@ import {
   resolveUnitByPlateFromFleet,
   resolveUnitFromListing,
   toFleetUnitRef,
+  unitAwaitAskMessage,
   type PaginatedFleetListing,
 } from "./unit-fleet.js";
 import { buildGpsReportForUnit } from "./gps-core.js";
@@ -570,7 +571,7 @@ function showListing(
     else if (parent === "ticket") state.activeTramite = "odoo_ticket";
     else if (parent === "gps") state.activeTramite = "search_unit";
   }
-  state.lastAgentQuestion = message;
+  state.lastAgentQuestion = unitAwaitAskMessage(parent);
   return message;
 }
 
