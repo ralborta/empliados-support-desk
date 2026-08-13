@@ -168,9 +168,12 @@ function bindUnitToOdometerDraft(
 function resolveUnitFromDecisionOrText(
   decision: TurnDecision,
   deps: ExecuteDeps,
+  opts?: { allowMessageAsUnitField?: boolean },
 ): WaraUnidadEstado | null {
-  // Solo entity estructurada — no releer el mensaje del usuario.
-  const raw = decision.entity?.value?.trim();
+  // Preferir entity estructurada; si falta y estamos en expected unit, parsear patente del mensaje.
+  const raw =
+    decision.entity?.value?.trim() ||
+    (opts?.allowMessageAsUnitField ? deps.originalMessage.trim() : "");
   if (!raw) return null;
   const byPlate = resolveUnitByPlateFromFleet(deps.fleetUnits, raw);
   if (byPlate.kind === "one") return byPlate.unit;
@@ -371,18 +374,33 @@ function handleProvideOdometerFields(
   const meterType = draft.meterType ?? (decision.intent === "horometer" ? "horometro" : "odometro");
   draft.meterType = meterType;
 
-  // Patente / unidad mientras falta unidad en el draft.
+  // Patente / unidad mientras falta unidad en el draft (expected field unit).
   if (draft.step === "await_unit") {
-    const unit = resolveUnitFromDecisionOrText(decision, deps);
+    const unit = resolveUnitFromDecisionOrText(decision, deps, { allowMessageAsUnitField: true });
     if (unit) {
       bindUnitToOdometerDraft(draft, state, unit);
+      state.pendingEntityResolution = null;
       if (fields.numericValue == null) {
+        const ask = `Pasame el valor del ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"}.`;
+        setExpectedField(state, {
+          text: ask,
+          purpose: "ask_odometer_value",
+          expectedAnswerType: "numeric_value",
+        });
         return {
           handler: "odometer",
-          message: `Pasame el valor del ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"}.`,
+          message: ask,
           state,
         };
       }
+    } else {
+      const ask = `Decime la patente para el ${meterType === "horometro" ? "horómetro" : "odómetro"}.`;
+      setExpectedField(state, {
+        text: ask,
+        purpose: "ask_unit",
+        expectedAnswerType: "unit",
+      });
+      return { handler: "odometer", message: ask, state };
     }
   }
 
@@ -852,7 +870,9 @@ async function startMeter(
   }
   // Si el start ya trae patente/unidad, adjuntarla.
   if (draft.step === "await_unit") {
-    const fromEntity = resolveUnitFromDecisionOrText(decision, deps);
+    const fromEntity = resolveUnitFromDecisionOrText(decision, deps, {
+      allowMessageAsUnitField: true,
+    });
     if (fromEntity) bindUnitToOdometerDraft(draft, state, fromEntity);
   }
   if (draft.step === "await_unit") {
