@@ -35,7 +35,14 @@ function isBridgeEnabled(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+function isPilotOpen(env: NodeJS.ProcessEnv): boolean {
+  const t = (env.WARA_V2_PILOT_OPEN ?? "").trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "si";
+}
+
 function isPhoneAllowlisted(phone: string, env: NodeJS.ProcessEnv): boolean {
+  // Con piloto abierto, el bridge debe aceptar los mismos números que WhatsApp.
+  if (isPilotOpen(env)) return true;
   const raw = (env.WARA_V2_BRIDGE_PHONE_ALLOWLIST ?? env.WARA_V2_SHADOW_ALLOWLIST ?? "").trim();
   if (!raw) return false;
   const list = raw.split(/[,;\s]+/).map((p) => p.trim()).filter(Boolean);

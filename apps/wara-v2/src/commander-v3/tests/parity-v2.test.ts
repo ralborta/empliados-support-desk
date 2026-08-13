@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13x", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13x/);
+  it("prompt version bump 13y", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13y/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1402,5 +1402,37 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.ok(
       enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"),
     );
+  });
+
+  it("sync V3 frontend no tira con env lab (sin DB)", async () => {
+    const { syncV3PendingWriteToFrontend } = await import(
+      "../execute/frontend-sync.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+5491100009999" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 7,
+      plate: "AG562SP",
+      name: "NISSAN",
+      label: "AG 562 SP",
+    };
+    await syncV3PendingWriteToFrontend({
+      state: s,
+      pendingWrite: {
+        operationId: "odo_test_123",
+        version: 1,
+        payloadHash: "abc",
+        task: "odometer",
+        summary: { value: 100, date: "2026-08-13", time: "10:00" },
+      },
+      messageId: "msg-test",
+      phase: "committed",
+      simulated: true,
+      env: {
+        WARA_V2_PILOT_PERSISTENCE: "json",
+        WARA_V2_V1_TICKET_BRIDGE_ENABLED: "false",
+        WARA_V2_LAB_MODE: "true",
+      },
+    });
   });
 });

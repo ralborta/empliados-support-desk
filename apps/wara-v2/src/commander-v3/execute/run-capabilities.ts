@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { buildGpsReportForUnit } from "../../pilot/gps-core.js";
+import { syncV3PendingWriteToFrontend } from "./frontend-sync.js";
 import {
   isCertificateWriteEnabled,
   isOdometerWriteEnabled,
@@ -45,6 +46,8 @@ export type ExecuteContext = {
   resolvedCompanyId: string | null;
   /** Mensaje del turno (para guías platform_* ancladas al manual). */
   message?: string;
+  /** Idempotencia / ledger front (Prisma + bridge). */
+  messageId?: string;
 };
 
 function hashPayload(obj: unknown): string {
@@ -118,6 +121,7 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
     ) {
       continue;
     }
+    const pendingBefore = state.pendingWrite;
     const r = await runOne(req, {
       ...ctx,
       state,
@@ -127,6 +131,32 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
     toolFacts.push(...r.facts);
     if (r.data?.statePatch && typeof r.data.statePatch === "object") {
       state = { ...state, ...(r.data.statePatch as Partial<ConversationStateV3>) };
+    }
+
+    const messageId = ctx.messageId?.trim() || `v3_${randomUUID().slice(0, 12)}`;
+    // Prepare → awaiting en Prisma (paridad V2 ledger)
+    if (
+      state.pendingWrite &&
+      state.pendingWrite.operationId !== pendingBefore?.operationId
+    ) {
+      void syncV3PendingWriteToFrontend({
+        state,
+        pendingWrite: state.pendingWrite,
+        messageId,
+        phase: "awaiting",
+        env: ctx.env,
+      });
+    }
+    // Confirm → committed + bridge front-v2-lab
+    if (r.writeAttempt && pendingBefore && !state.pendingWrite) {
+      void syncV3PendingWriteToFrontend({
+        state,
+        pendingWrite: pendingBefore,
+        messageId,
+        phase: "committed",
+        simulated: r.writeExecuted === false,
+        env: ctx.env,
+      });
     }
   }
 

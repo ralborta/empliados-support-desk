@@ -621,6 +621,7 @@ export async function runCommanderTurn(
     resolvedUnit,
     resolvedCompanyId: resolvedCompany?.id ?? null,
     message: input.message,
+    messageId: input.messageId,
   });
 
   state = exec.state;
