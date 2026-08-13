@@ -6,6 +6,12 @@ import {
   isOdooWriteEnabled,
 } from "../../pilot/write-gates.js";
 import type { WaraUnidadEstado } from "../../pilot/wara-types.js";
+import {
+  answerFromPlatformKnowledge,
+  platformKindFromTopic,
+  platformStaticFallback,
+} from "../../pilot/semantic/platform-knowledge-ai.js";
+import { categoryLabel, inferTicketCategory } from "../../pilot/ticket-core.js";
 import { getCapability } from "../capabilities/catalog.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan, CapabilityRequest } from "../types/turn-plan.js";
@@ -28,6 +34,8 @@ export type ExecuteContext = {
   fleetUnits: WaraUnidadEstado[];
   resolvedUnit: UnitRef | null;
   resolvedCompanyId: string | null;
+  /** Mensaje del turno (para guías platform_* ancladas al manual). */
+  message?: string;
 };
 
 function hashPayload(obj: unknown): string {
@@ -55,11 +63,11 @@ function missingForMeter(state: ConversationStateV3, plan: TurnPlan): string[] {
   return miss;
 }
 
-export function executeCapabilities(ctx: ExecuteContext): {
+export async function executeCapabilities(ctx: ExecuteContext): Promise<{
   results: ToolResult[];
   state: ConversationStateV3;
   facts: string[];
-} {
+}> {
   const results: ToolResult[] = [];
   const facts: string[] = [...(ctx.plan.responseGoal.facts ?? [])];
   let state = ctx.state;
@@ -70,7 +78,7 @@ export function executeCapabilities(ctx: ExecuteContext): {
       : inferDefaultCapabilities(ctx.plan, state);
 
   for (const req of caps) {
-    const r = runOne(req, { ...ctx, state });
+    const r = await runOne(req, { ...ctx, state });
     results.push(r);
     facts.push(...r.facts);
     if (r.data?.statePatch && typeof r.data.statePatch === "object") {
@@ -130,7 +138,7 @@ function inferDefaultCapabilities(
   return [];
 }
 
-function runOne(req: CapabilityRequest, ctx: ExecuteContext): ToolResult {
+async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<ToolResult> {
   const def = getCapability(req.name);
   if (!def) {
     return { capability: req.name, ok: false, facts: [], error: "unknown_capability" };
@@ -589,8 +597,11 @@ function runOne(req: CapabilityRequest, ctx: ExecuteContext): ToolResult {
           },
         };
       }
+      const category = inferTicketCategory(detail);
       const payload = {
         task: "handoff",
+        category,
+        categoryLabel: categoryLabel(category),
         detail,
         unit: ctx.state.unit?.label ?? null,
         company: ctx.state.company?.name ?? null,
@@ -601,14 +612,14 @@ function runOne(req: CapabilityRequest, ctx: ExecuteContext): ToolResult {
         capability: req.name,
         ok: true,
         facts: [
-          `¿Confirmás generar el ticket? Motivo: ${detail}. Respondé CONFIRMO (no alcanza con gracias/chau).`,
+          `¿Confirmás generar el ticket (${categoryLabel(category)})? Motivo: ${detail}. Respondé CONFIRMO (no alcanza con gracias/chau).`,
         ],
         data: {
           statePatch: {
             activeTask: {
               type: "human_handoff" as const,
               status: "awaiting_confirmation" as const,
-              collected: { detail },
+              collected: { detail, category },
               missing: [],
             },
             pendingWrite: {
@@ -629,6 +640,21 @@ function runOne(req: CapabilityRequest, ctx: ExecuteContext): ToolResult {
     }
     case "domain.answer": {
       const topic = String(req.params?.topic ?? ctx.plan.lateralQuestion?.topic ?? "");
+      const platformKind = platformKindFromTopic(topic);
+      if (platformKind) {
+        const userQ =
+          ctx.message?.trim() ||
+          [...ctx.state.recentTurns].reverse().find((t) => t.role === "user")?.text ||
+          `Guía ${platformKind}`;
+        const ai = await answerFromPlatformKnowledge({
+          kind: platformKind,
+          question: userQ,
+          recentTurns: ctx.state.recentTurns,
+          env: ctx.env,
+        });
+        const answer = ai ?? platformStaticFallback(platformKind, userQ);
+        return { capability: req.name, ok: true, facts: [answer] };
+      }
       const answer = domainFact(topic);
       return { capability: req.name, ok: true, facts: [answer] };
     }
@@ -662,6 +688,60 @@ function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
           ? isOdooWriteEnabled(ctx.env)
           : false;
 
+  // Paridad V2: si la escritura de certificado está habilitada pero el gate
+  // indica fallo operativo (env WARA_V2_CERT_FORCE_FAIL), escalar a handoff.
+  if (
+    name.startsWith("certificate") &&
+    gateOk &&
+    ctx.env.WARA_V2_CERT_FORCE_FAIL === "true"
+  ) {
+    const detail =
+      `No se pudo generar el certificado` +
+      (ctx.state.unit?.label ? ` para ${ctx.state.unit.label}` : "");
+    const category = "certificate_escalation" as const;
+    const payload = {
+      task: "handoff",
+      category,
+      categoryLabel: categoryLabel(category),
+      detail,
+      unit: ctx.state.unit?.label ?? null,
+      company: ctx.state.company?.name ?? null,
+    };
+    const operationId = `ticket_${randomUUID().slice(0, 12)}`;
+    return {
+      capability: name,
+      ok: true,
+      facts: [
+        `${detail}. Te derivo con un asesor.`,
+        `¿Confirmás el ticket (${categoryLabel(category)})? Motivo: ${detail}. Respondé CONFIRMO.`,
+      ],
+      writeAttempt: true,
+      writeExecuted: false,
+      data: {
+        statePatch: {
+          pendingWrite: {
+            operationId,
+            version: 1,
+            payloadHash: hashPayload(payload),
+            task: "handoff",
+            summary: payload,
+          },
+          activeTask: {
+            type: "human_handoff" as const,
+            status: "awaiting_confirmation" as const,
+            collected: { detail, category },
+            missing: [],
+          },
+          lastQuestion: {
+            id: randomUUID(),
+            purpose: "confirm_handoff",
+            expected: "confirmation" as const,
+          },
+        },
+      },
+    };
+  }
+
   const simulated = !gateOk;
   const msg = simulated
     ? `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`
@@ -687,6 +767,12 @@ function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
 
 function domainFact(topic: string): string {
   const t = topic.toLowerCase();
+  if (t.includes("platform_unidades") || t.includes("chevron") || t.includes("atajo")) {
+    return platformStaticFallback("unidades", topic);
+  }
+  if (t.includes("platform_opciones") || t.includes("agenda") || t.includes("notific")) {
+    return platformStaticFallback("opciones", topic);
+  }
   if (t.includes("odom")) {
     return "El odómetro mide kilómetros recorridos. Sirve para control de uso y mantenimiento.";
   }
@@ -699,5 +785,11 @@ function domainFact(topic: string): string {
   if (t.includes("gps") || t.includes("reporte")) {
     return "El último reporte GPS indica cuándo la unidad comunicó posición/ignición a WARA.";
   }
-  return "Si me contás el tema (GPS, certificado, odómetro/horómetro, mantenimiento), te respondo con precisión.";
+  if (t.includes("wara") || t.includes("capacid")) {
+    return (
+      "Puedo ayudarte con GPS, odómetro/horómetro, certificado, mantenimiento, " +
+      "derivación a asesor y guías del panel (Unidades / Opciones)."
+    );
+  }
+  return "Si me contás el tema (GPS, certificado, odómetro/horómetro, mantenimiento, panel), te respondo con precisión.";
 }

@@ -1,0 +1,122 @@
+/**
+ * Paridad V2 → V3: fechas naturales + KB plataforma (sin LLM).
+ */
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { enrichPlanWithNaturalDatetime } from "../enrich/natural-datetime-plan.js";
+import { executeCapabilities } from "../execute/run-capabilities.js";
+import { createEmptyConversationStateV3 } from "../types/state.js";
+import { TurnPlanSchema } from "../types/turn-plan.js";
+import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
+
+describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
+  it("prompt version bump 13b", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13b/);
+  });
+
+  it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: { value: 100 },
+      missing: ["date", "time"],
+    };
+    s.lastQuestion = { id: "1", purpose: "fecha", expected: "date" };
+    const plan = TurnPlanSchema.parse({
+      conversationalAct: "continue_task",
+      task: "odometer",
+      taskAction: "continue",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanWithNaturalDatetime(plan, s, "esta mañana 5", {
+      timezone: "America/Argentina/Buenos_Aires",
+      localNow: "2026-08-13T14:00:00",
+    });
+    assert.equal(enriched.suppliedFields?.date, "2026-08-13");
+    assert.equal(enriched.suppliedFields?.time, "05:00");
+  });
+
+  it("mo hoy con pending odometer → amend_task no cancel", () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "op1",
+      version: 1,
+      payloadHash: "h",
+      task: "odometer",
+      summary: { date: "2026-08-05", time: "10:00" },
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "awaiting_confirmation",
+      collected: { value: 1, date: "2026-08-05", time: "10:00" },
+      missing: [],
+    };
+    const plan = TurnPlanSchema.parse({
+      conversationalAct: "cancel_task",
+      task: "odometer",
+      taskAction: "cancel",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+      responseGoal: { purpose: "close", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanWithNaturalDatetime(plan, s, "mo hoy", {
+      timezone: "America/Argentina/Buenos_Aires",
+      localNow: "2026-08-13T14:00:00",
+    });
+    assert.equal(enriched.conversationalAct, "amend_task");
+    assert.equal(enriched.suppliedFields?.date, "2026-08-13");
+  });
+
+  it("domain.answer platform_unidades usa fallback estático sin API", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    const plan = TurnPlanSchema.parse({
+      conversationalAct: "inform",
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "platform_unidades" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.95,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: { OPENAI_API_KEY: "" },
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "que es el chevron?",
+    });
+    assert.match(exec.facts.join(" "), /chevron|flecha|ficha|MIS ATAJOS/i);
+  });
+
+  it("handoff.prepare con detalle etiqueta categoría acceso", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    const plan = TurnPlanSchema.parse({
+      conversationalAct: "start_task",
+      task: "human_handoff",
+      taskAction: "start",
+      suppliedFields: { detail: "no puedo entrar a la plataforma" },
+      requestedCapabilities: [{ name: "handoff.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "confirm_write", facts: [] },
+      confidence: 0.95,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "no puedo entrar a la plataforma",
+    });
+    assert.match(exec.facts.join(" "), /Acceso|plataforma|CONFIRMO/i);
+    assert.equal(exec.state.pendingWrite?.task, "handoff");
+  });
+});

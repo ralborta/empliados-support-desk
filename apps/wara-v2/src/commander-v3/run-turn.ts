@@ -10,6 +10,7 @@ import {
   resolveUnitReference,
 } from "./entities/resolve.js";
 import { executeCapabilities } from "./execute/run-capabilities.js";
+import { enrichPlanWithNaturalDatetime } from "./enrich/natural-datetime-plan.js";
 import { applyCommanderState } from "./state/apply-patch.js";
 import { redactReply } from "./reply/redact.js";
 import {
@@ -24,6 +25,8 @@ import type { TurnTraceV3 } from "./observability/trace.js";
 import { COMMANDER_V3_PROMPT_VERSION } from "./flags.js";
 import type { TurnPlan } from "./types/turn-plan.js";
 import type { UnitRef } from "./types/refs.js";
+import { DEFAULT_TENANT_TZ } from "../pilot/semantic/natural-datetime.js";
+import { DateTime } from "luxon";
 
 export type RunCommanderTurnInput = {
   tenantId: string;
@@ -175,6 +178,14 @@ export async function runCommanderTurn(
     return { reply, state: after, trace };
   }
 
+  const localNow = DateTime.now()
+    .setZone(DEFAULT_TENANT_TZ)
+    .toFormat("yyyy-MM-dd'T'HH:mm:ss");
+  plan = enrichPlanWithNaturalDatetime(plan, state, input.message, {
+    timezone: DEFAULT_TENANT_TZ,
+    localNow,
+  });
+
   // Ensure company selected for ops if only one contact
   if (!state.company && state.availableCompanies.length === 1) {
     state = { ...state, company: state.availableCompanies[0]! };
@@ -276,13 +287,14 @@ export async function runCommanderTurn(
     return { reply, state: applied.state, trace };
   }
 
-  const exec = executeCapabilities({
+  const exec = await executeCapabilities({
     state,
     plan,
     env: input.env,
     fleetUnits,
     resolvedUnit,
     resolvedCompanyId: resolvedCompany?.id ?? null,
+    message: input.message,
   });
 
   state = exec.state;
