@@ -15,6 +15,7 @@ import { CAPABILITY_CATALOG } from "../capabilities/catalog.js";
 describe("commander-v3 contracts", () => {
   it("TurnPlan schema acepta plan mínimo", () => {
     const p = TurnPlanSchema.parse({
+      reasoning: "Saludo de primer contacto.",
       conversationalAct: "greet",
       requestedCapabilities: [],
       stateIntent: {
@@ -52,6 +53,7 @@ describe("commander-v3 contracts", () => {
       summary: {},
     };
     const plan = TurnPlanSchema.parse({
+      reasoning: "Intento de commit sin confirmación explícita.",
       conversationalAct: "inform",
       requestedCapabilities: [{ name: "certificate.issue", params: {} }],
       stateIntent: {

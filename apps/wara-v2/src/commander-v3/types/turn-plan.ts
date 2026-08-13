@@ -42,6 +42,8 @@ export const CapabilityRequestSchema = z.object({
 });
 
 export const TurnPlanSchema = z.object({
+  /** Razonamiento breve del turno (obligatorio). No se muestra al usuario. */
+  reasoning: z.string().min(1).max(800),
   conversationalAct: ConversationalActSchema,
   task: TaskTypeSchema.nullable().optional(),
   taskAction: z

@@ -116,6 +116,7 @@ export async function runCommanderTurn(
     const clarify = buildConflictClarify(validation.errors, state);
     const { reply, latencyMs: redactMs } = await redactReply({
       plan: plan ?? {
+        reasoning: "Validación falló; pido aclaración puntual.",
         conversationalAct: "ask",
         requestedCapabilities: [],
         stateIntent: {

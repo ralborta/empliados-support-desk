@@ -52,7 +52,7 @@ async function chatJson(input: {
       },
       body: JSON.stringify({
         model,
-        temperature: 0,
+        temperature: 0.2,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: input.system },
@@ -289,6 +289,14 @@ export function coercePlan(raw: unknown): unknown {
   // suppliedFields vacío u objeto raro
   if (o.suppliedFields != null && typeof o.suppliedFields !== "object") {
     o.suppliedFields = null;
+  }
+  // reasoning obligatorio para el schema; si falta, sintetizar mínimo
+  if (typeof o.reasoning !== "string" || !o.reasoning.trim()) {
+    const act = String(o.conversationalAct ?? "inform");
+    const task = o.task != null ? String(o.task) : "ninguna";
+    o.reasoning = `Acto ${act}; tarea ${task}; capabilities según mensaje y estado.`;
+  } else {
+    o.reasoning = o.reasoning.trim().slice(0, 800);
   }
   return o;
 }

@@ -12,7 +12,7 @@ import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("prompt version bump 13c", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13c/);
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13d/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -25,6 +25,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     };
     s.lastQuestion = { id: "1", purpose: "fecha", expected: "date" };
     const plan = TurnPlanSchema.parse({
+      reasoning: "test",
       conversationalAct: "continue_task",
       task: "odometer",
       taskAction: "continue",
@@ -57,6 +58,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       missing: [],
     };
     const plan = TurnPlanSchema.parse({
+      reasoning: "test",
       conversationalAct: "cancel_task",
       task: "odometer",
       taskAction: "cancel",
@@ -76,6 +78,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("domain.answer platform_unidades usa fallback estático sin API", async () => {
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     const plan = TurnPlanSchema.parse({
+      reasoning: "test",
       conversationalAct: "inform",
       requestedCapabilities: [
         { name: "domain.answer", params: { topic: "platform_unidades" } },
@@ -99,6 +102,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("handoff.prepare con detalle etiqueta categoría acceso", async () => {
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     const plan = TurnPlanSchema.parse({
+      reasoning: "test",
       conversationalAct: "start_task",
       task: "human_handoff",
       taskAction: "start",
@@ -161,6 +165,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       { id: "2", name: "El Cacique S.A.", contactId: 2 },
     ];
     const plan = TurnPlanSchema.parse({
+      reasoning: "test",
       conversationalAct: "inform",
       requestedCapabilities: [{ name: "company.get_active", params: {} }],
       stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
