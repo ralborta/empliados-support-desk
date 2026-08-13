@@ -4,11 +4,13 @@ import { commanderV3ModelName } from "../flags.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
 
-const REDACTOR_SYSTEM = `Sos el redactor de Atilio (WARA). Solo redactás la respuesta final.
-- Español claro, vos, frases breves para WhatsApp.
+const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
+- Español rioplatense natural: vos, cálido, breve, sin sonar a formulario.
+- Una o dos frases cortas + pregunta si hace falta. Como un colega que ayuda.
 - NO inventes hechos. NO agregues tools. NO cambies empresa/unidad.
 - NO menús genéricos. NO corrijas ortografía del usuario.
-- Usá SOLO los hechos validados y el responseGoal.`;
+- Usá SOLO los hechos validados y el responseGoal.
+- Evitá tono robótico ("Indique…", "Por favor proporcione…"). Preferí "¿Cuántos km?", "¿Qué unidad?", "Mandame CONFIRMO y lo grabo".`;
 
 export async function redactReply(input: {
   plan: TurnPlan;
@@ -57,24 +59,26 @@ export async function redactReply(input: {
     };
   }
 
-  if (input.facts.length === 1 && input.facts[0]!.length < 500) {
-    const f = input.facts[0]!;
-    if (
-      input.plan.responseGoal.nextQuestion &&
-      input.plan.responseGoal.purpose === "ask_missing"
-    ) {
-      return {
-        reply: `${f}\n\n${input.plan.responseGoal.nextQuestion}`,
-        usedLlm: false,
-        latencyMs: 0,
-      };
-    }
-    return { reply: f, usedLlm: false, latencyMs: 0 };
+  const purpose = input.plan.responseGoal.purpose;
+  const wantsNatural =
+    purpose === "ask_missing" ||
+    purpose === "clarify" ||
+    purpose === "resume" ||
+    purpose === "confirm_write" ||
+    Boolean(input.plan.responseGoal.nextQuestion);
+
+  // Datos puros cortos: sin LLM. Conversación (pedir dato, confirmar, aclarar): LLM.
+  if (!wantsNatural && input.facts.length === 1 && input.facts[0]!.length < 500) {
+    return { reply: input.facts[0]!, usedLlm: false, latencyMs: 0 };
   }
 
-  if (input.facts.length > 1) {
+  if (
+    !wantsNatural &&
+    input.facts.length > 1 &&
+    input.plan.confidence >= 0.7
+  ) {
     const joined = input.facts.filter(Boolean).join("\n\n");
-    if (joined.length < 900 && input.plan.confidence >= 0.7) {
+    if (joined.length < 900) {
       return { reply: joined, usedLlm: false, latencyMs: 0 };
     }
   }
@@ -98,18 +102,19 @@ export async function redactReply(input: {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.2,
+        temperature: 0.45,
         messages: [
           { role: "system", content: REDACTOR_SYSTEM },
           {
             role: "user",
             content: JSON.stringify({
-              purpose: input.plan.responseGoal.purpose,
+              purpose,
               facts: input.facts,
               nextQuestion: input.plan.responseGoal.nextQuestion ?? null,
               company: input.state.company?.name ?? null,
               unit: input.state.unit?.label ?? null,
               task: input.state.activeTask?.type ?? null,
+              act: input.plan.conversationalAct,
             }),
           },
         ],
@@ -145,10 +150,13 @@ export async function redactReply(input: {
 }
 
 function fallbackFromFacts(facts: string[], plan: TurnPlan): string {
+  if (facts.length && plan.responseGoal.nextQuestion) {
+    return `${facts.join("\n\n")}\n\n${plan.responseGoal.nextQuestion}`;
+  }
   if (facts.length) return facts.join("\n\n");
   if (plan.responseGoal.nextQuestion) return plan.responseGoal.nextQuestion;
   if (plan.responseGoal.facts.length) return plan.responseGoal.facts.join("\n");
-  return "No pude completar esa acción. ¿Me precisás un poco más?";
+  return "No pude completar eso. ¿Me contás un poco más?";
 }
 
 function labelTask(t: string): string {

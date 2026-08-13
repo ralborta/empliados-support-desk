@@ -52,7 +52,7 @@ async function chatJson(input: {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.2,
+        temperature: 0.28,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: input.system },

@@ -17,4 +17,4 @@ export function commanderV3ModelName(
   );
 }
 
-export const COMMANDER_V3_PROMPT_VERSION = "v3-commander-2026-08-13j";
+export const COMMANDER_V3_PROMPT_VERSION = "v3-commander-2026-08-13k";
