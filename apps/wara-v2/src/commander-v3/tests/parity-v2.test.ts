@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ag", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ag/);
+  it("prompt version bump 13ah", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ah/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1329,7 +1329,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.equal(enriched.conversationalAct, "confirm_write");
   });
 
-  it("confirm_write certificado sin gate → avisa y no dice simulado OK", async () => {
+  it("confirm_write certificado sin gate → simulado OK (paridad odómetro)", async () => {
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     s.company = { id: "1", name: "WARA", contactId: 1 };
     s.unit = {
@@ -1339,7 +1339,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       label: "AB 042 BG (M900-081)",
     };
     s.pendingWrite = {
-      operationId: "cert_x",
+      operationId: "11111111-2222-4333-8444-555555555555",
       version: 1,
       payloadHash: "h",
       task: "certificate",
@@ -1374,10 +1374,10 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       messageId: "m-cert-confirm",
     });
     const blob = exec.facts.join(" ");
-    assert.match(blob, /no puedo emitir el certificado/i);
-    assert.match(blob, /asesor|plataforma/i);
-    assert.doesNotMatch(blob, /simulado OK/i);
+    assert.match(blob, /Certificado simulado OK/i);
+    assert.doesNotMatch(blob, /no puedo emitir/i);
     assert.equal(exec.state.pendingWrite, null);
+    assert.equal(exec.state.activeTask?.status, "completed");
   });
 
   it("hourmeter.prepare no hereda value de activeTask odometer", async () => {

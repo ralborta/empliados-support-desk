@@ -1312,58 +1312,6 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
           ? isOdooWriteEnabled(ctx.env)
           : false;
 
-  // Certificado sin escritura real habilitada: decirlo y derivar a agente YA
-  // (el usuario ya dijo CONFIRMO; no pedir otro CONFIRMO del ticket).
-  if (name.startsWith("certificate") && !gateOk) {
-    const unitLabel = ctx.state.unit?.label;
-    const detail =
-      `En este momento no puedo emitir el certificado` +
-      (unitLabel ? ` para ${unitLabel}` : "") +
-      `. Te derivo con un asesor en la plataforma`;
-    const category = "certificate_escalation" as const;
-    const payload = {
-      task: "handoff",
-      category,
-      categoryLabel: categoryLabel(category),
-      detail,
-      unit: unitLabel ?? null,
-      company: ctx.state.company?.name ?? null,
-    };
-    const operationId = randomUUID();
-    const handoffPw = {
-      operationId,
-      version: 1,
-      payloadHash: hashPayload(payload),
-      task: "handoff",
-      summary: payload,
-    };
-    await syncV3PendingWriteToFrontend({
-      state: ctx.state,
-      pendingWrite: handoffPw,
-      messageId: ctx.messageId?.trim() || `v3_${randomUUID().slice(0, 12)}`,
-      phase: "committed",
-      simulated: true,
-      env: ctx.env,
-    });
-    return {
-      capability: name,
-      ok: true,
-      facts: [
-        `${detail}. Ya te pasé con un asesor; van a continuar por la plataforma.`,
-      ],
-      // writeAttempt false: no marcar el pendingWrite de certificado como "committed".
-      writeAttempt: false,
-      writeExecuted: false,
-      data: {
-        statePatch: {
-          pendingWrite: null,
-          lastQuestion: null,
-          activeTask: null,
-        },
-      },
-    };
-  }
-
   // Paridad V2: si la escritura de certificado está habilitada pero el gate
   // indica fallo operativo (env WARA_V2_CERT_FORCE_FAIL), escalar a handoff.
   if (
@@ -1419,9 +1367,14 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
   }
 
   const simulated = !gateOk;
+  const unitLabel = ctx.state.unit?.label ?? null;
   const msg = simulated
-    ? `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`
-    : `Escritura ejecutada (${pw.task}) operationId=${pw.operationId}.`;
+    ? name.startsWith("certificate")
+      ? `Certificado simulado OK${unitLabel ? ` para ${unitLabel}` : ""}. Sin emisión real en lab. operationId=${pw.operationId}.`
+      : `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`
+    : name.startsWith("certificate")
+      ? `Certificado emitido${unitLabel ? ` para ${unitLabel}` : ""}. operationId=${pw.operationId}.`
+      : `Escritura ejecutada (${pw.task}) operationId=${pw.operationId}.`;
 
   return {
     capability: name,
