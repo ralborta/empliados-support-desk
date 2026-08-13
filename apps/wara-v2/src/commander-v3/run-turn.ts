@@ -33,6 +33,10 @@ import {
   isUnequivocalWriteConfirm,
 } from "./enrich/confirmation-outcome.js";
 import {
+  alternateTaskWhileConfirmPending,
+  enrichPlanForPendingConfirmSwitch,
+} from "./enrich/pending-confirm-switch.js";
+import {
   enrichPlanForTaskSwitch,
   isSwitchingTask,
   stateForSwitchedTask,
@@ -152,16 +156,14 @@ export async function runCommanderTurn(
 
   let plan = commander.plan;
 
-  // CONFIRMO/CANCELAR con pendingWrite: aplicar ANTES de validate.
-  // Si no, el LLM mete *.issue/*.update sin confirm_write → write_commit_without_confirm
-  // y nunca llega al enrich (loop eterno de "necesito confirmación explícita").
+  // Confirmación pendiente: CONFIRMO / CANCELAR / switch a otro trámite ANTES de validate.
+  // Si no, el LLM re-pide certificate.prepare o mete issue → loop de CONFIRMO.
   if (
     plan &&
-    (state.pendingWrite || state.lastQuestion?.expected === "confirmation") &&
-    (isUnequivocalWriteConfirm(input.message) ||
-      isConfirmationReject(input.message))
+    (state.pendingWrite || state.lastQuestion?.expected === "confirmation")
   ) {
     plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+    plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
     if (plan.conversationalAct === "confirm_write") {
       plan = {
         ...plan,
@@ -193,11 +195,10 @@ export async function runCommanderTurn(
     plan = repaired.plan;
     if (
       plan &&
-      (state.pendingWrite || state.lastQuestion?.expected === "confirmation") &&
-      (isUnequivocalWriteConfirm(input.message) ||
-        isConfirmationReject(input.message))
+      (state.pendingWrite || state.lastQuestion?.expected === "confirmation")
     ) {
       plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+      plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
       if (plan.conversationalAct === "confirm_write") {
         plan = {
           ...plan,
@@ -261,6 +262,41 @@ export async function runCommanderTurn(
           input.message,
         );
         validation = validateTurnPlan(plan, state);
+      } else {
+        const alt = alternateTaskWhileConfirmPending(input.message, state);
+        if (alt) {
+          const prep =
+            alt === "odometer"
+              ? "odometer.prepare"
+              : alt === "hourmeter"
+                ? "hourmeter.prepare"
+                : alt === "certificate"
+                  ? "certificate.prepare"
+                  : alt === "maintenance"
+                    ? "maintenance.prepare"
+                    : alt === "gps"
+                      ? "gps.get_status"
+                      : null;
+          plan = {
+            reasoning: `Switch stub: confirmación pendiente y el usuario pidió ${alt}.`,
+            conversationalAct: "switch_task",
+            task: alt,
+            taskAction: "switch",
+            requestedCapabilities: prep ? [{ name: prep, params: {} }] : [],
+            stateIntent: {
+              preserveCompany: true,
+              preserveUnit: true,
+              preserveTask: true,
+            },
+            responseGoal: {
+              purpose: "ask_missing",
+              facts: [],
+              nextQuestion: null,
+            },
+            confidence: 1,
+          };
+          validation = validateTurnPlan(plan, state);
+        }
       }
     }
   }
@@ -359,6 +395,7 @@ export async function runCommanderTurn(
   plan = enrichPlanForCancelGuard(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
+  plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
   plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterUnitInMessage(plan, state, input.message);
   plan = enrichPlanPromoteGpsFromReasoning(plan);
@@ -798,7 +835,7 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
     return "No me quedó claro si querés corregir un dato o cancelar el trámite. ¿Cuál de las dos?";
   }
   if (state.pendingWrite) {
-    return `Hay una confirmación pendiente de ${state.pendingWrite.task}. ¿Confirmás con CONFIRMO o cancelamos con CANCELAR?`;
+    return `Hay una confirmación pendiente de ${state.pendingWrite.task}. Respondé CONFIRMO, CANCELAR, o pedime otro trámite (odómetro, GPS…).`;
   }
   if (state.pendingEntity?.type === "unit" || state.lastQuestion?.expected === "unit") {
     return "Necesito la patente, el número de la lista o la marca/prefijo de la unidad para seguir.";

@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ab", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ab/);
+  it("prompt version bump 13ac", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ac/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1015,6 +1015,63 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.equal(enriched.conversationalAct, "switch_task");
     assert.equal(enriched.task, "odometer");
     enriched = enrichPlanForTaskSwitch(enriched, s);
+    assert.match(enriched.responseGoal.facts.join(" "), /pendiente.*certificado/i);
+  });
+
+  it("pending cert + «Odometro 900078» sin prepare en plan → switch igual", async () => {
+    const { enrichPlanForPendingConfirmSwitch } = await import(
+      "../enrich/pending-confirm-switch.js"
+    );
+    const { enrichPlanForTaskSwitch, stateForSwitchedTask } = await import(
+      "../enrich/task-switch.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "cert_1",
+      version: 1,
+      payloadHash: "h",
+      task: "certificate",
+      summary: {},
+    };
+    s.activeTask = {
+      type: "certificate",
+      status: "awaiting_confirmation",
+      collected: {},
+      missing: [],
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_certificate",
+      expected: "confirmation",
+    };
+    // Plan típico que re-pide el mismo CONFIRMO (loop)
+    const plan = TurnPlanSchema.parse({
+      reasoning: "sigue el certificado",
+      conversationalAct: "inform",
+      task: "certificate",
+      requestedCapabilities: [{ name: "certificate.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "clarify", facts: [] },
+      confidence: 0.4,
+    });
+    let enriched = enrichPlanForPendingConfirmSwitch(
+      plan,
+      s,
+      "Odometro 900078",
+    );
+    assert.equal(enriched.conversationalAct, "switch_task");
+    assert.equal(enriched.task, "odometer");
+    assert.ok(
+      enriched.requestedCapabilities.some((c) => c.name === "odometer.prepare"),
+    );
+    assert.equal(
+      enriched.requestedCapabilities.some((c) => c.name === "certificate.prepare"),
+      false,
+    );
+    enriched = enrichPlanForTaskSwitch(enriched, s);
+    const nextState = stateForSwitchedTask(s, "odometer");
+    assert.equal(nextState.pendingWrite, null);
+    assert.equal(nextState.activeTask?.type, "odometer");
     assert.match(enriched.responseGoal.facts.join(" "), /pendiente.*certificado/i);
   });
 
