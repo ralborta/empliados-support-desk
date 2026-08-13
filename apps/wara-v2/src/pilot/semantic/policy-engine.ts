@@ -149,7 +149,11 @@ export function applySemanticPolicy(
   }
 
   // Sin rewrite lingüístico: solo companyAction / intents ya estructurados.
-  if (decision.companyAction === "keep") {
+  if (
+    decision.companyAction === "keep" &&
+    (decision.speechAct === "negate_intent" ||
+      (typeof decision.negatedAction === "string" && /company|empresa/.test(decision.negatedAction)))
+  ) {
     return {
       ok: true,
       decision: {
@@ -157,12 +161,16 @@ export function applySemanticPolicy(
         action: "general",
         intent: "query_active_company",
         currentTramiteDisposition: "keep",
-        speechAct: decision.speechAct ?? "negate_intent",
+        speechAct: "negate_intent",
         companyAction: "keep",
         answer: null,
         ambiguity: null,
       },
     };
+  }
+  // companyAction=keep espurio (sin negación): descartar para no hijackear unit_list/odómetro.
+  if (decision.companyAction === "keep") {
+    decision = { ...decision, companyAction: null };
   }
   if (decision.companyAction === "change") {
     return {

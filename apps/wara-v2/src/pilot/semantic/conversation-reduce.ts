@@ -138,9 +138,18 @@ export function setExpectedField(
 }
 
 export function companyActionFromDecision(decision: TurnDecision): "query_active" | "select" | "change" | "keep" | null {
-  // Solo keep de empresa si la decisión lo declara explícitamente.
-  // "no quiero cambiar el odómetro" NO debe mapearse a keep por substring.
-  if (decision.companyAction) return decision.companyAction;
+  // keep solo con negación explícita de cambio de empresa (nunca por companyAction residual).
+  if (decision.companyAction === "keep") {
+    if (
+      decision.speechAct === "negate_intent" ||
+      (typeof decision.negatedAction === "string" && /company|empresa/.test(decision.negatedAction))
+    ) {
+      return "keep";
+    }
+    // Ignorar keep espurio (p.ej. LLM en "listas de unidades").
+  } else if (decision.companyAction) {
+    return decision.companyAction;
+  }
   if (
     decision.speechAct === "negate_intent" &&
     typeof decision.negatedAction === "string" &&
