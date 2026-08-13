@@ -10,7 +10,8 @@ import {
 } from "./interpret-turn-prompt.js";
 import {
   safeClarifyDecision,
-  validateTurnDecision,
+  coerceTurnDecisionRaw,
+  TurnDecisionSchema,
   type TurnDecision,
 } from "./turn-decision-schema.js";
 import { semanticModelName, semanticTimeoutMs } from "./brain-flags.js";
@@ -60,12 +61,23 @@ function stripCodeFences(raw: string): string {
   return t;
 }
 
-function tryParseDecision(raw: string): TurnDecision | null {
+function tryParseDecision(raw: string): { decision: TurnDecision | null; zodError?: string } {
   try {
-    const json = JSON.parse(stripCodeFences(raw)) as unknown;
-    return validateTurnDecision(json);
-  } catch {
-    return null;
+    const json = coerceTurnDecisionRaw(JSON.parse(stripCodeFences(raw)) as unknown);
+    const parsed = TurnDecisionSchema.safeParse(json);
+    if (parsed.success) return { decision: parsed.data };
+    return {
+      decision: null,
+      zodError: parsed.error.issues
+        .slice(0, 4)
+        .map((i) => `${i.path.join(".")}:${i.message}`)
+        .join("; "),
+    };
+  } catch (e) {
+    return {
+      decision: null,
+      zodError: e instanceof Error ? e.message.slice(0, 120) : "json_parse_failed",
+    };
   }
 }
 
@@ -179,10 +191,12 @@ export async function interpretTurn(
       apiKey,
       timeoutMs,
     });
-    let decision = tryParseDecision(first.content);
+    let firstParse = tryParseDecision(first.content);
+    let decision = firstParse.decision;
     let repaired = false;
     let inputTokens = first.inputTokens;
     let outputTokens = first.outputTokens;
+    let lastZod = firstParse.zodError;
 
     if (!decision) {
       repaired = true;
@@ -192,23 +206,36 @@ export async function interpretTurn(
         model,
         apiKey,
         timeoutMs,
-        repairHint: `La salida anterior no validó el esquema. Salida previa: ${first.content.slice(0, 400)}`,
+        repairHint: `La salida anterior no validó el esquema (${firstParse.zodError ?? "unknown"}). Salida previa: ${first.content.slice(0, 400)}`,
       });
       inputTokens = (inputTokens ?? 0) + (second.inputTokens ?? 0);
       outputTokens = (outputTokens ?? 0) + (second.outputTokens ?? 0);
-      decision = tryParseDecision(second.content);
+      const secondParse = tryParseDecision(second.content);
+      decision = secondParse.decision;
+      lastZod = secondParse.zodError ?? lastZod;
+      if (!decision) {
+        console.info(
+          JSON.stringify({
+            event: "wara_v2_interpret_schema_fail",
+            zodError: lastZod ?? null,
+            rawPreview: second.content.slice(0, 500),
+          }),
+        );
+      }
     }
 
     if (!decision) {
       return {
-        decision: safeClarifyDecision(),
+        decision: safeClarifyDecision(
+          "No pude interpretar bien ese mensaje. ¿Podés decirme la patente o qué trámite querés hacer?",
+        ),
         model,
         latencyMs: Date.now() - started,
         inputTokens,
         outputTokens,
         promptVersion: INTERPRET_TURN_PROMPT_VERSION,
         repaired,
-        error: "schema_validation_failed",
+        error: lastZod ? `schema_validation_failed:${lastZod.slice(0, 80)}` : "schema_validation_failed",
       };
     }
 

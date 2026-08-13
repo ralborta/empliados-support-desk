@@ -129,8 +129,51 @@ export const TurnDecisionSchema = z.object({
 
 export type TurnDecision = z.infer<typeof TurnDecisionSchema>;
 
+/** Normaliza salidas frecuentes del LLM antes de validar. */
+export function coerceTurnDecisionRaw(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const o = { ...(raw as Record<string, unknown>) };
+  const nullish = (v: unknown) => (v === "" || v === undefined ? null : v);
+  if ("answer" in o) o.answer = nullish(o.answer);
+  if ("fields" in o) o.fields = nullish(o.fields);
+  if ("ambiguity" in o) o.ambiguity = nullish(o.ambiguity);
+  if ("fieldsToClear" in o) o.fieldsToClear = nullish(o.fieldsToClear);
+  if ("domainQuestion" in o) o.domainQuestion = nullish(o.domainQuestion);
+  if (o.entity && typeof o.entity === "object" && !Array.isArray(o.entity)) {
+    const e = { ...(o.entity as Record<string, unknown>) };
+    e.value = nullish(e.value);
+    e.matchMode = nullish(e.matchMode);
+    const ref = nullish(e.reference);
+    const allowedRef = new Set([
+      "selected_unit",
+      "previous_selected_unit",
+      "last_mentioned_unit",
+      "current_list_item",
+      "same_as_before",
+    ]);
+    e.reference =
+      typeof ref === "string" && allowedRef.has(ref) ? ref : null;
+    o.entity = e;
+  } else if ("entity" in o) {
+    o.entity = nullish(o.entity);
+  }
+  // Códigos cercanos que el modelo inventa a veces.
+  const reasonMap: Record<string, string> = {
+    PREFIX_SEARCH: "CONTEXTUAL_REFERENCE",
+    PLATE_PREFIX: "CONTEXTUAL_REFERENCE",
+    ENTITY_SEARCH: "CONTEXTUAL_REFERENCE",
+    SEARCH_UNIT: "CONTEXTUAL_REFERENCE",
+    NEW_INTENT: "NEW_EXPLICIT_INTENT",
+    EXPLICIT_INTENT: "NEW_EXPLICIT_INTENT",
+  };
+  if (typeof o.reasoningCode === "string" && reasonMap[o.reasoningCode]) {
+    o.reasoningCode = reasonMap[o.reasoningCode];
+  }
+  return o;
+}
+
 export function validateTurnDecision(raw: unknown): TurnDecision | null {
-  const parsed = TurnDecisionSchema.safeParse(raw);
+  const parsed = TurnDecisionSchema.safeParse(coerceTurnDecisionRaw(raw));
   return parsed.success ? parsed.data : null;
 }
 
@@ -145,7 +188,7 @@ export function safeClarifyDecision(question?: string): TurnDecision {
       candidates: ["no_entendido", "repetir"],
       question:
         question ??
-        "No pude interpretar bien eso. ¿Querés cancelar el trámite pendiente?",
+        "No pude interpretar bien ese mensaje. ¿Podés decirme la patente o qué trámite querés hacer?",
     },
     reasoningCode: "INSUFFICIENT_CONTEXT",
   };

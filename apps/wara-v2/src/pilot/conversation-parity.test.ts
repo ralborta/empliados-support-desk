@@ -126,8 +126,12 @@ describe("paridad conversacional V2 — bloque operativo", () => {
 
     const pick = await turn("22");
     assert.match(pick, /M600-022|AA 122 BC/);
-    assert.match(pick, /reporte GPS/i);
+    // Sin GPS por defecto: tras seleccionar, pregunta qué gestionar.
+    assert.match(pick, /Seleccioné|consultar o gestionar/i);
+    assert.doesNotMatch(pick, /reporte GPS/i);
 
+    const askGps = await turn("pasame el estado");
+    assert.match(askGps, /reporte GPS|AD |AA 122|M600-022/i);
     const yes = await turn("sí");
     assert.match(yes, /Funcionamiento normal|M600-022|AA122/);
     assert.doesNotMatch(yes, /\[LLM/);
@@ -180,7 +184,8 @@ describe("paridad conversacional V2 — bloque operativo", () => {
     await turn("siguiente");
     await turn("siguiente");
     const pick = await turn("la 22");
-    assert.match(pick, /reporte GPS/i);
+    assert.match(pick, /Seleccioné|consultar o gestionar|M600-022|AA 122/i);
+    assert.doesNotMatch(pick, /reporte GPS/i);
   });
 
   it("solo patentes — todas provienen del mock WARA", async () => {
@@ -229,7 +234,8 @@ describe("paridad conversacional V2 — bloque operativo", () => {
     assert.ok(st?.lastListing);
     assert.ok(st?.processedMessageIds?.["persist-list"]);
     const pick = await turn("22", { messageId: "persist-22" });
-    assert.match(pick, /reporte GPS/i);
+    assert.match(pick, /Seleccioné|consultar o gestionar|M600-022|AA 122/i);
+    assert.doesNotMatch(pick, /reporte GPS/i);
   });
 
   it("deduplicación messageId sobrevive reinicio", async () => {

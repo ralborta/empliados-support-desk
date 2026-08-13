@@ -121,7 +121,7 @@ describe("odómetro/horómetro V2 — lab", () => {
     await turn("listas de unidades");
     await turn("1", mid("pick"));
     assert.match((await turn("odometro", mid("s"))).message, /valor|km/i);
-    assert.match((await turn("130500 km", mid("v"))).message, /fecha/i);
+    assert.match((await turn("130500 km", mid("v"))).message, /d[ií]a|hora|lectura/i);
     assert.match((await turn("06/08/2026 15:50", mid("f"))).message, /CONFIRMO/i);
     const cid = mid("conf");
     const w1 = await turn("CONFIRMO", cid);
@@ -140,7 +140,7 @@ describe("odómetro/horómetro V2 — lab", () => {
     const ask = await turn("horometro", mid("h"));
     assert.match(ask.message, /horómetro|hs/i);
     const val = await turn("4600 hs", mid("hv"));
-    assert.match(val.message, /fecha/i);
+    assert.match(val.message, /d[ií]a|hora|lectura/i);
   });
 
   it("rechaza retroceso km", async () => {
