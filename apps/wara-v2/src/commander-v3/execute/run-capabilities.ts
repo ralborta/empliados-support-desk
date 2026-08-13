@@ -78,22 +78,36 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
   facts: string[];
 }> {
   const results: ToolResult[] = [];
-  const facts: string[] = [...(ctx.plan.responseGoal.facts ?? [])];
   let state = ctx.state;
 
   const caps =
     ctx.plan.requestedCapabilities.length > 0
-      ? ctx.plan.requestedCapabilities
+      ? [...ctx.plan.requestedCapabilities]
       : inferDefaultCapabilities(ctx.plan, state);
 
+  // Contrato: unit_query siempre ejecuta unit.search (el LLM no puede “prometer” la lista sin tool).
+  if (
+    ctx.plan.task === "unit_query" &&
+    !caps.some((c) => c.name === "unit.search")
+  ) {
+    caps.unshift({ name: "unit.search", params: {} });
+  }
+
+  const toolFacts: string[] = [];
   for (const req of caps) {
     const r = await runOne(req, { ...ctx, state });
     results.push(r);
-    facts.push(...r.facts);
+    toolFacts.push(...r.facts);
     if (r.data?.statePatch && typeof r.data.statePatch === "object") {
       state = { ...state, ...(r.data.statePatch as Partial<ConversationStateV3>) };
     }
   }
+
+  // Hechos de tools ganan: no mezclar unidades inventadas del responseGoal.
+  const facts =
+    toolFacts.length > 0
+      ? toolFacts
+      : [...(ctx.plan.responseGoal.facts ?? [])];
 
   return { results, state, facts };
 }
@@ -157,6 +171,10 @@ function inferDefaultCapabilities(
       return [{ name: "gps.get_status", params: {} }];
     }
   }
+  // Lectura de flota: cualquier acto con task=unit_query implica unit.search.
+  if (plan.task === "unit_query") {
+    return [{ name: "unit.search", params: {} }];
+  }
   if (
     plan.taskAction === "start" ||
     plan.taskAction === "switch" ||
@@ -185,7 +203,6 @@ function inferDefaultCapabilities(
     if (plan.task === "maintenance") return [{ name: "maintenance.prepare", params: {} }];
     if (plan.task === "human_handoff") return [{ name: "handoff.prepare", params: {} }];
     if (plan.task === "gps") return [{ name: "gps.get_status", params: {} }];
-    if (plan.task === "unit_query") return [{ name: "unit.search", params: {} }];
   }
   // Continuar medidor: re-prepare con campos nuevos
   if (
@@ -342,7 +359,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       };
     }
     case "unit.search": {
-      const pageSize = 8;
+      const pageSize = 20;
       // Solo query estructurada del TurnPlan — NUNCA el mensaje crudo (rompe "lista de unidades").
       const rawQuery = String(req.params?.query ?? "").trim();
       const query = isStructuredFleetQuery(rawQuery) ? rawQuery : "";

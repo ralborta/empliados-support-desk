@@ -12,7 +12,7 @@ import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
   it("prompt version bump 13j", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13n/);
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13o/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -512,6 +512,52 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.match(text, /listado completo|Unidades en/i);
     assert.match(text, /M900-071/);
     assert.match(text, /M600-095/);
+  });
+
+  it("unit_query inform sin caps ⇒ unit.search y facts de tool ganan", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.fleetCache = [
+      {
+        movilId: 1,
+        plate: "AA175BY",
+        name: "M900-071",
+        label: "AA 175 BY (M900-071)",
+      },
+      {
+        movilId: 2,
+        plate: "BB222BB",
+        name: "M900-072",
+        label: "BB 222 BB (M900-072)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "lista",
+      conversationalAct: "inform",
+      task: "unit_query",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: {
+        purpose: "inform",
+        facts: ["Dame un segundo, te paso la lista inventada de UNA unidad."],
+        nextQuestion: "¿Te sirve?",
+      },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "lista de unidades porfa",
+    });
+    const text = exec.facts.join("\n");
+    assert.match(text, /1\.\s*AA 175 BY/);
+    assert.match(text, /2\.\s*BB 222 BB/);
+    assert.doesNotMatch(text, /inventada|Dame un segundo/i);
+    assert.ok(exec.results.some((r) => r.capability === "unit.search"));
   });
 
   it("odometer.prepare rechaza fecha futura", async () => {

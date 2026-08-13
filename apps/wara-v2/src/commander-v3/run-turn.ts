@@ -252,6 +252,26 @@ export async function runCommanderTurn(
     };
   }
 
+  // unit_query ⇒ unit.search (contrato de ejecución; el LLM no puede omitir la tool)
+  if (
+    plan.task === "unit_query" &&
+    !plan.requestedCapabilities.some((c) => c.name === "unit.search")
+  ) {
+    plan = {
+      ...plan,
+      requestedCapabilities: [
+        { name: "unit.search", params: {} },
+        ...plan.requestedCapabilities,
+      ],
+    };
+  }
+  if (
+    plan.requestedCapabilities.some((c) => c.name === "unit.search") &&
+    plan.task == null
+  ) {
+    plan = { ...plan, task: "unit_query" };
+  }
+
   // Ensure company selected for ops if only one contact
   if (!state.company && state.availableCompanies.length === 1) {
     state = { ...state, company: state.availableCompanies[0]! };

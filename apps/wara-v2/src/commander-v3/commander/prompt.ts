@@ -57,7 +57,14 @@ Reglas de decisión:
 9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
 9b) certificado/cobertura → task=certificate + certificate.prepare.
 10) Unidad: patente, código (M900-072) o nombre.
-11) Pedido de lista/listado de unidades (formal o informal: "lista", "la lista", "lista porfa", "me pasas la lista", "todas", "quiero ver el listado") → task=unit_query + unit.search con params {} o mode=list (SIN query). purpose=inform. nextQuestion=null. NUNCA clarify ni "¿qué unidad querés ver?" en lugar del listado.
+11) Pedido de lista/listado de unidades (formal o informal: "lista", "la lista", "lista porfa", "me pasas la lista", "todas", "quiero ver el listado") → OBLIGATORIO en el JSON:
+    task="unit_query"
+    requestedCapabilities=[{name:"unit.search",params:{}}]  (params vacíos; mode=list implícito)
+    responseGoal.purpose="inform"
+    responseGoal.facts=[]  (VACÍO — las unidades las trae la tool, NUNCA las inventes)
+    nextQuestion=null
+    NUNCA digas "te paso la lista" / "dame un segundo" / "¿te sirve?" sin unit.search.
+    NUNCA inventes "hay una unidad X" sin el fact de unit.search.
 11b) "la unidad 900071" / código interno → unitReference + unit.select (o gps si pedían estado). NUNCA greet ni menú genérico.
 12) GPS lateral mid-trámite → answer_lateral + preserveTask + gps.get_status.
 13) responseGoal.purpose SOLO: inform|ask_missing|confirm_write|clarify|resume|close. facts = array de strings.
@@ -90,7 +97,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. nextQuestion en tono WhatsApp natural.",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,

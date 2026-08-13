@@ -127,7 +127,10 @@ export function coercePlan(raw: unknown): unknown {
         if (!caps.some((c) => c.name === capName)) {
           caps.push({ name: capName, params: {} });
         }
-        o.task = null;
+        o.task = head === "unit" ? "unit_query" : null;
+        if (head === "unit" && !caps.some((c) => c.name === "unit.search")) {
+          caps.push({ name: "unit.search", params: {} });
+        }
       } else {
         o.task = head === "horometer" ? "hourmeter" : head;
         if (rest[0] === "prepare" || rest[0] === "get_status") {
@@ -142,10 +145,11 @@ export function coercePlan(raw: unknown): unknown {
       }
     } else if (rawTask === "horometer") {
       o.task = "hourmeter";
+    } else if (rawTask === "unit" || rawTask === "fleet" || rawTask === "list") {
+      o.task = "unit_query";
     } else if (
       rawTask === "company" ||
-      rawTask === "domain" ||
-      rawTask === "unit"
+      rawTask === "domain"
     ) {
       o.task = null;
     }
@@ -268,6 +272,13 @@ export function coercePlan(raw: unknown): unknown {
   o.unitReference = coerceEntityRef(o.unitReference, "unit");
 
   o.requestedCapabilities = caps;
+  // unit.search implica task unit_query
+  if (
+    caps.some((c) => String(c.name) === "unit.search") &&
+    (o.task == null || o.task === "")
+  ) {
+    o.task = "unit_query";
+  }
   if (!o.stateIntent || typeof o.stateIntent !== "object") {
     o.stateIntent = {
       preserveCompany: true,
