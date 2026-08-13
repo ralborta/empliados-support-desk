@@ -49,6 +49,12 @@ Los enunciados de usuario son **casos de aceptación** (reproducción), no regla
 
 ## 6. Captura de unidad en odómetro sin `entity` en la decisión
 
+**Causa raíz (V2):** pending de unidad sin `entity` tipado en la decisión.
+
+**Causa raíz (V3):** (1) `company.select`/`unit.select` borraban `lastQuestion` de value/date; (2) código interno `300097` no matcheaba `M300-097` (guiones); (3) re-ejecución de `company.select` ya activa → eco “Seguimos con…”.
+
+**Contrato:** select solo limpia expectativa del mismo tipo; resolve de unidad normaliza códigos; expected-field post-LLM para `unit`/`value`; no re-select de empresa/unidad ya activa.
+
 **Causa raíz:** execute resolvía unidad solo desde `decision.entity` mientras el draft estaba en `await_unit` y la expectativa era `unit`.
 
 **Contrato roto:** expected-field parser ausente para `unit` (admisible: parse de patente del mensaje **solo** bajo esa expectativa).

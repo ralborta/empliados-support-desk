@@ -16,6 +16,7 @@ import {
   enrichPlanForGreetingCompanyGate,
 } from "./enrich/company-capture.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
+import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
 import { applyCommanderState } from "./state/apply-patch.js";
 import { redactReply } from "./reply/redact.js";
 import {
@@ -194,6 +195,34 @@ export async function runCommanderTurn(
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
+  plan = enrichPlanForExpectedFields(plan, state, input.message);
+
+  // Medidor sin unidad: listar flota en el mismo turno (estructural, no semántico)
+  const meterPrepare = plan.requestedCapabilities.some(
+    (c) => c.name === "odometer.prepare" || c.name === "hourmeter.prepare",
+  );
+  const startsMeter =
+    plan.task === "odometer" ||
+    plan.task === "hourmeter" ||
+    meterPrepare ||
+    ((plan.conversationalAct === "start_task" || plan.taskAction === "start") &&
+      (plan.task === "odometer" || plan.task === "hourmeter"));
+  if (
+    startsMeter &&
+    !state.unit &&
+    !plan.unitReference &&
+    !plan.requestedCapabilities.some(
+      (c) => c.name === "unit.search" || c.name === "unit.select",
+    )
+  ) {
+    plan = {
+      ...plan,
+      requestedCapabilities: [
+        ...plan.requestedCapabilities,
+        { name: "unit.search", params: {} },
+      ],
+    };
+  }
 
   // Ensure company selected for ops if only one contact
   if (!state.company && state.availableCompanies.length === 1) {
@@ -208,11 +237,16 @@ export async function runCommanderTurn(
     companyRes.status === "exact" ? companyRes.company : null;
   const unitMany = unitRes.status === "many" ? unitRes.candidates : undefined;
 
-  // Auto-inject unit.select / company.select when resolved
-  if (resolvedUnit && !plan.requestedCapabilities.some((c) => c.name === "unit.select")) {
+  // Auto-inject unit.select / company.select when resolved (solo si cambia)
+  if (
+    resolvedUnit &&
+    resolvedUnit.movilId !== state.unit?.movilId &&
+    !plan.requestedCapabilities.some((c) => c.name === "unit.select")
+  ) {
     if (
       plan.unitReference ||
       state.pendingEntity?.type === "unit" ||
+      state.lastQuestion?.expected === "unit" ||
       plan.conversationalAct === "continue_task"
     ) {
       plan = {
@@ -226,6 +260,7 @@ export async function runCommanderTurn(
   }
   if (
     resolvedCompany &&
+    resolvedCompany.id !== state.company?.id &&
     !plan.requestedCapabilities.some((c) => c.name === "company.select")
   ) {
     if (
@@ -245,7 +280,6 @@ export async function runCommanderTurn(
       };
     }
   } else if (resolvedCompany) {
-    // Asegurar companyId si el select ya vino vacío (capture por índice)
     plan = {
       ...plan,
       requestedCapabilities: plan.requestedCapabilities.map((c) =>
@@ -255,6 +289,30 @@ export async function runCommanderTurn(
       ),
     };
   }
+
+  // No re-ejecutar select de la misma empresa/unidad ya activa
+  plan = {
+    ...plan,
+    requestedCapabilities: plan.requestedCapabilities.filter((c) => {
+      if (
+        c.name === "company.select" &&
+        state.company &&
+        String(c.params?.companyId ?? resolvedCompany?.id ?? "") ===
+          state.company.id
+      ) {
+        return false;
+      }
+      if (
+        c.name === "unit.select" &&
+        state.unit &&
+        resolvedUnit &&
+        state.unit.movilId === resolvedUnit.movilId
+      ) {
+        return false;
+      }
+      return true;
+    }),
+  };
 
   // Ambiguous → facts only, no tools that mutate write
   if (unitMany) {

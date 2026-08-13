@@ -30,8 +30,12 @@ Reglas de decisión:
 4) Cortesía/despedida/gracias/chau NUNCA confirman escritura.
 5) No inventes capabilities. No write_commit sin confirm_write.
 6) Saludo: si el usuario saluda (hola/buenas/…) → greet SIEMPRE. Si hoursIdleSinceLastTurn >= 1 → greet de reencuentro. Si NO hay empresa activa y hay varias → company.list y pedí que elija (1/2/nombre). Si hay una sola → company.select automática.
+6b) Si YA hay empresa activa → NUNCA company.select / company.list / "Seguimos con…" salvo pedido explícito de cambio.
 7) Consulta empresa ("en q empresa estoy") → inform + company.get_active; task=null. NUNCA task="company.get_active".
 7b) lastQuestion/pendingEntity de empresa + mensaje "2" / nombre → company.select (índice o nombre). NUNCA confirm_write. NUNCA company.get_active otra vez.
+7c) Pedido de odómetro/horómetro (aunque con typo) → start_task + *.prepare en el PRIMER mensaje. Sin unidad → unit.search. NUNCA clarify genérico.
+7d) lastQuestion.expected=unit + patente/código/índice (ej. 300097 = M300-097) → unitReference + unit.select. NUNCA re-preguntar si resolviste exacto.
+7e) lastQuestion.expected=value + número → suppliedFields.value + continue_task. expected=date/time → suppliedFields. "si"/"ok" NUNCA confirman escritura (solo CONFIRMO).
 8) "la misma"/"esa"/"anterior" → unitReference contextual.
 9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
 9b) certificado/cobertura → task=certificate + certificate.prepare.

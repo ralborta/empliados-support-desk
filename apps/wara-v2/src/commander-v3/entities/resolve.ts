@@ -6,6 +6,10 @@ import {
   normalizeLoosePlate,
   isPlausibleVehiclePlate,
 } from "../../pilot/plates.js";
+import {
+  extractUnitNameCode,
+  filterUnitsByUnitName,
+} from "../../pilot/unit-fleet.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { EntityReference } from "../types/refs.js";
 import type { CompanyRef, UnitRef } from "../types/refs.js";
@@ -31,6 +35,13 @@ function fleetToUnitRef(
     name: u.name,
     label: u.label,
   };
+}
+
+function normUnitToken(value: string): string {
+  return value
+    .toUpperCase()
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/[\s-]+/g, "");
 }
 
 export function resolveUnitReference(
@@ -59,7 +70,6 @@ export function resolveUnitReference(
         if (fu) return { status: "exact", unit: fleetToUnitRef(fu) };
       }
     }
-    // fallback: page index into fleet
     const fu = state.fleetCache[n - 1];
     if (fu) return { status: "exact", unit: fleetToUnitRef(fu) };
     return { status: "not_found", query: String(n) };
@@ -83,10 +93,10 @@ export function resolveUnitReference(
     }
   }
 
-  const nameQ = raw.toLowerCase().replace(/\s+/g, "");
+  const nameQ = normUnitToken(raw);
   const byNameExact = state.fleetCache.filter((u) => {
-    const n = (u.name ?? "").toLowerCase().replace(/\s+/g, "");
-    return n && n === nameQ;
+    const n = normUnitToken(u.name ?? "");
+    return n && (n === nameQ || n === `M${nameQ}` || `M${n}` === nameQ);
   });
   if (byNameExact.length === 1) return { status: "exact", unit: fleetToUnitRef(byNameExact[0]!) };
   if (byNameExact.length > 1) {
@@ -97,32 +107,39 @@ export function resolveUnitReference(
     };
   }
 
-  // código interno tipo M900-072 / 900-072
-  const code = raw.toUpperCase().replace(/\s+/g, "");
-  const byCode = state.fleetCache.filter((u) => {
-    const n = (u.name ?? "").toUpperCase().replace(/\s+/g, "");
-    return n === code || n === `M${code}` || n.endsWith(code);
-  });
-  if (byCode.length === 1) return { status: "exact", unit: fleetToUnitRef(byCode[0]!) };
-  if (byCode.length > 1) {
-    return {
-      status: "many",
-      candidates: byCode.map(fleetToUnitRef),
-      labels: byCode.map((u) => u.label),
-    };
+  // código interno: M900-072 / 900072 / 300097 → M300-097
+  const code = extractUnitNameCode(raw) ?? nameQ;
+  if (code) {
+    const fleetLike = state.fleetCache.map((u) => ({
+      movil_id: u.movilId,
+      unidad: u.name,
+      patente: u.plate,
+    }));
+    const hits = filterUnitsByUnitName(fleetLike as never, code);
+    if (hits.length === 1) {
+      const fu = state.fleetCache.find((f) => f.movilId === hits[0]!.movil_id);
+      if (fu) return { status: "exact", unit: fleetToUnitRef(fu) };
+    }
+    if (hits.length > 1) {
+      const units = hits
+        .map((h) => state.fleetCache.find((f) => f.movilId === h.movil_id))
+        .filter(Boolean)
+        .map((u) => fleetToUnitRef(u!));
+      return {
+        status: "many",
+        candidates: units,
+        labels: units.map((u) => u.label),
+      };
+    }
   }
 
-  // parciales → many, nunca select silencioso
   const partial = state.fleetCache.filter((u) => {
-    const p = (u.plate ?? "").toUpperCase();
-    const n = (u.name ?? "").toUpperCase();
-    const q = raw.toUpperCase().replace(/\s+/g, "");
+    const p = normUnitToken(u.plate ?? "");
+    const n = normUnitToken(u.name ?? "");
+    const q = nameQ;
     return (p && p.includes(q)) || (n && n.includes(q));
   });
   if (partial.length === 1) {
-    // partial única aún se muestra como many policy? Spec: exact unique may select; partial never silent.
-    // Una sola parcial → treat as many with one option (ask confirm) OR exact if strong.
-    // Spec: "coincidencias parciales nunca se seleccionan silenciosamente"
     return {
       status: "many",
       candidates: partial.map(fleetToUnitRef),

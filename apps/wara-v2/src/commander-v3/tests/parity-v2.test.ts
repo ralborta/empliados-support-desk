@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13f", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13f/);
+  it("prompt version bump 13g", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13g/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -314,5 +314,101 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /Cacique/i);
     assert.equal(exec.state.company?.name, "El Cacique S.A.");
+  });
+
+  it("expected-field: 300097 con expected=unit → unit.select", async () => {
+    const { enrichPlanForExpectedFields } = await import(
+      "../enrich/expected-field-capture.js"
+    );
+    const { resolveUnitReference } = await import("../entities/resolve.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    s.lastQuestion = { id: "1", purpose: "unit_for_meter", expected: "unit" };
+    s.fleetCache = [
+      {
+        movilId: 97,
+        plate: "AA251VD",
+        name: "M300-097",
+        label: "AA 251 VD (M300-097)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "repite company",
+      conversationalAct: "inform",
+      requestedCapabilities: [
+        { name: "company.select", params: { companyId: "2" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const enriched = enrichPlanForExpectedFields(plan, s, "300097");
+    assert.ok(enriched.requestedCapabilities.some((c) => c.name === "unit.select"));
+    assert.ok(
+      enriched.requestedCapabilities.some((c) => c.name === "odometer.prepare"),
+    );
+    const resolved = resolveUnitReference(enriched.unitReference, s);
+    assert.equal(resolved.status, "exact");
+  });
+
+  it("expected-field: valor numérico con expected=value", async () => {
+    const { enrichPlanForExpectedFields } = await import(
+      "../enrich/expected-field-capture.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value", "date", "time"],
+    };
+    s.lastQuestion = { id: "1", purpose: "meter_value", expected: "value" };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "eco",
+      conversationalAct: "inform",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.7,
+    });
+    const enriched = enrichPlanForExpectedFields(plan, s, "156897");
+    assert.equal(enriched.suppliedFields?.value, 156897);
+    assert.ok(
+      enriched.requestedCapabilities.some((c) => c.name === "odometer.prepare"),
+    );
+  });
+
+  it("company.select ya activa no repite Seguimos con", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.availableCompanies = [s.company];
+    s.lastQuestion = { id: "1", purpose: "meter_value", expected: "value" };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "noop",
+      conversationalAct: "inform",
+      requestedCapabilities: [
+        { name: "company.select", params: { companyId: "2" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: "2",
+      message: "x",
+    });
+    assert.equal(exec.facts.some((f) => /Seguimos con/i.test(f)), false);
+    assert.equal(exec.state.lastQuestion?.expected, "value");
   });
 });

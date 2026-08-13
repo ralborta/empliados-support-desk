@@ -69,6 +69,24 @@ describe("commander-v3 contracts", () => {
     assert.ok(v.errors.some((e) => e.includes("write_commit_without_confirm")));
   });
 
+  it("resolver unidad: código sin guión 300097 → M300-097", () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.fleetCache = [
+      {
+        movilId: 97,
+        plate: "AA251VD",
+        name: "M300-097",
+        label: "AA 251 VD (M300-097)",
+      },
+    ];
+    const r = resolveUnitReference(
+      { kind: "unit", mode: "unit_name", value: "300097" },
+      s,
+    );
+    assert.equal(r.status, "exact");
+    if (r.status === "exact") assert.equal(r.unit.movilId, 97);
+  });
+
   it("resolver unidad: patente exacta", () => {
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     s.fleetCache = [

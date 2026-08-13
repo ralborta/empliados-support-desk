@@ -139,12 +139,42 @@ function inferDefaultCapabilities(
   }
   if (plan.taskAction === "start" || plan.conversationalAct === "start_task") {
     if (plan.task === "certificate") return [{ name: "certificate.prepare", params: {} }];
-    if (plan.task === "odometer") return [{ name: "odometer.prepare", params: {} }];
-    if (plan.task === "hourmeter") return [{ name: "hourmeter.prepare", params: {} }];
+    if (plan.task === "odometer") {
+      const caps: CapabilityRequest[] = [
+        { name: "odometer.prepare", params: {} },
+      ];
+      if (!state.unit && !plan.unitReference) {
+        caps.push({ name: "unit.search", params: {} });
+      }
+      return caps;
+    }
+    if (plan.task === "hourmeter") {
+      const caps: CapabilityRequest[] = [
+        { name: "hourmeter.prepare", params: {} },
+      ];
+      if (!state.unit && !plan.unitReference) {
+        caps.push({ name: "unit.search", params: {} });
+      }
+      return caps;
+    }
     if (plan.task === "maintenance") return [{ name: "maintenance.prepare", params: {} }];
     if (plan.task === "human_handoff") return [{ name: "handoff.prepare", params: {} }];
     if (plan.task === "gps") return [{ name: "gps.get_status", params: {} }];
     if (plan.task === "unit_query") return [{ name: "unit.search", params: {} }];
+  }
+  // Continuar medidor: re-prepare con campos nuevos
+  if (
+    (plan.conversationalAct === "continue_task" || plan.taskAction === "continue") &&
+    (plan.task === "odometer" ||
+      plan.task === "hourmeter" ||
+      state.activeTask?.type === "odometer" ||
+      state.activeTask?.type === "hourmeter")
+  ) {
+    const meter =
+      plan.task === "hourmeter" || state.activeTask?.type === "hourmeter"
+        ? "hourmeter"
+        : "odometer";
+    return [{ name: `${meter}.prepare`, params: {} }];
   }
   return [];
 }
@@ -262,16 +292,26 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       if (!company) {
         return { capability: req.name, ok: false, facts: [], error: "not_found" };
       }
+      const alreadyActive = ctx.state.company?.id === company.id;
       return {
         capability: req.name,
         ok: true,
-        facts: [`Seguimos con ${company.name}.`],
+        facts: alreadyActive ? [] : [`Seguimos con ${company.name}.`],
         data: {
           statePatch: {
             company,
-            pendingEntity: null,
-            lastQuestion: null,
-            lastListing: null,
+            pendingEntity:
+              ctx.state.pendingEntity?.type === "company"
+                ? null
+                : ctx.state.pendingEntity,
+            lastQuestion:
+              ctx.state.lastQuestion?.expected === "company"
+                ? null
+                : ctx.state.lastQuestion,
+            lastListing:
+              ctx.state.lastListing?.kind === "companies"
+                ? null
+                : ctx.state.lastListing,
           },
         },
       };
@@ -305,10 +345,8 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               purpose: "select_unit",
               expected: "unit" as const,
             },
-            pendingEntity: ctx.state.pendingEntity ?? {
-              type: "unit" as const,
-              purpose: ctx.state.activeTask?.type ?? "unit_query",
-            },
+            // XOR: expectativa de unidad = lastQuestion, no pendingEntity paralelo
+            pendingEntity: null,
           },
         },
       };
@@ -319,16 +357,27 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return { capability: req.name, ok: false, facts: [], error: "not_found" };
       }
       const previousUnit = ctx.state.unit;
+      const already =
+        ctx.state.unit?.movilId != null && ctx.state.unit.movilId === unit.movilId;
       return {
         capability: req.name,
         ok: true,
-        facts: [`Unidad: ${unit.label}.`],
+        facts: already ? [] : [`Unidad: ${unit.label}.`],
         data: {
           statePatch: {
-            previousUnit: previousUnit ?? ctx.state.previousUnit,
+            previousUnit:
+              previousUnit && previousUnit.movilId !== unit.movilId
+                ? previousUnit
+                : ctx.state.previousUnit,
             unit,
-            pendingEntity: null,
-            lastQuestion: null,
+            pendingEntity:
+              ctx.state.pendingEntity?.type === "unit"
+                ? null
+                : ctx.state.pendingEntity,
+            lastQuestion:
+              ctx.state.lastQuestion?.expected === "unit"
+                ? null
+                : ctx.state.lastQuestion,
           },
         },
       };
@@ -457,7 +506,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
                 collected: { ...(ctx.plan.suppliedFields ?? {}) },
                 missing: ["unit"],
               },
-              pendingEntity: { type: "unit" as const, purpose: meter },
+              pendingEntity: null,
               lastQuestion: {
                 id: randomUUID(),
                 purpose: "unit_for_meter",
