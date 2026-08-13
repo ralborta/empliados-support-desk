@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13y", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13y/);
+  it("prompt version bump 13z", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13z/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -95,6 +95,29 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     const enriched = enrichPlanForGreetingPolicy(plan, s, "el sabado 14:30");
     assert.equal(enriched.conversationalAct, "continue_task");
+  });
+
+  it("lista de unidades con empresa activa → no greet ni company.list", async () => {
+    const { enrichPlanForGreetingPolicy } = await import(
+      "../enrich/greeting-policy.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.conversationMetadata.introducedAtilio = true;
+    const plan = TurnPlanSchema.parse({
+      reasoning: "pide lista",
+      conversationalAct: "greet",
+      requestedCapabilities: [{ name: "company.list", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForGreetingPolicy(plan, s, "Lista de unidades");
+    assert.equal(enriched.conversationalAct, "inform");
+    assert.equal(
+      enriched.requestedCapabilities.some((c) => c.name === "company.list"),
+      false,
+    );
   });
 
   it("mo hoy con pending odometer → amend_task no cancel", () => {

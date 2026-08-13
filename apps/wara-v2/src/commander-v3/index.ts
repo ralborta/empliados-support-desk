@@ -7,6 +7,7 @@ export {
   resetConversationStateV3,
   getLastTraceV3,
   migrateSafeContextFromV2,
+  initCommanderV3PersistenceFromEnv,
 } from "./persistence/store.js";
 export type { ConversationStateV3 } from "./types/state.js";
 export type { TurnPlan } from "./types/turn-plan.js";

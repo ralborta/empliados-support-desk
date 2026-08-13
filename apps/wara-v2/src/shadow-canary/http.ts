@@ -35,6 +35,7 @@ import {
   getConversationStateV3,
   getLastTraceV3,
   resetConversationStateV3,
+  initCommanderV3PersistenceFromEnv,
 } from "../commander-v3/index.js";
 import {
   getLabConductorMode,
@@ -119,6 +120,7 @@ export async function startShadowCanaryServer(opts?: {
   }
 
   const persistenceBoot = initPilotStatePersistenceFromEnv(process.env);
+  initCommanderV3PersistenceFromEnv(process.env);
   const gitCommit =
     process.env.GIT_COMMIT_SHA?.trim() ||
     process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ||

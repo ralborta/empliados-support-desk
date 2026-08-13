@@ -28,25 +28,54 @@ export function enrichPlanForGreetingPolicy(
   message: string,
 ): TurnPlan {
   if (!isUserGreetingMessage(message)) {
-    // Mid-trámite el LLM a veces pone greet sin que el usuario haya saludado.
+    // El LLM inventa greet (y re-pide empresa) en pedidos operativos.
+    // Si el usuario NO saludó → nunca dejar conversationalAct=greet.
+    if (plan.conversationalAct === "greet") {
+      const midTask = Boolean(
+        state.activeTask ||
+          state.pendingWrite ||
+          state.lastQuestion?.expected === "value" ||
+          state.lastQuestion?.expected === "date" ||
+          state.lastQuestion?.expected === "time" ||
+          state.lastQuestion?.expected === "unit" ||
+          state.lastQuestion?.expected === "confirmation",
+      );
+      return {
+        ...plan,
+        conversationalAct: midTask
+          ? state.pendingWrite
+            ? "inform"
+            : "continue_task"
+          : state.company
+            ? "inform"
+            : "inform",
+        task: plan.task ?? state.activeTask?.type ?? null,
+        taskAction:
+          plan.taskAction ??
+          (midTask && !state.pendingWrite ? "continue" : plan.taskAction),
+        requestedCapabilities: plan.requestedCapabilities.filter(
+          (c) => c.name !== "company.list",
+        ),
+        reasoning:
+          (plan.reasoning ? `${plan.reasoning} ` : "") +
+          (state.company
+            ? "No hay saludo: mantengo empresa activa (no greet ni company.list)."
+            : "No hay saludo del usuario: no uso greet."),
+      };
+    }
+    // Empresa activa: nunca re-listar aunque el LLM la meta en inform
     if (
-      plan.conversationalAct === "greet" &&
-      (state.activeTask ||
-        state.pendingWrite ||
-        state.lastQuestion?.expected === "value" ||
-        state.lastQuestion?.expected === "date" ||
-        state.lastQuestion?.expected === "time" ||
-        state.lastQuestion?.expected === "unit" ||
-        state.lastQuestion?.expected === "confirmation")
+      state.company &&
+      plan.requestedCapabilities.some((c) => c.name === "company.list")
     ) {
       return {
         ...plan,
-        conversationalAct: state.pendingWrite ? "inform" : "continue_task",
-        task: plan.task ?? state.activeTask?.type ?? null,
-        taskAction: plan.taskAction ?? (state.pendingWrite ? null : "continue"),
+        requestedCapabilities: plan.requestedCapabilities.filter(
+          (c) => c.name !== "company.list",
+        ),
         reasoning:
           (plan.reasoning ? `${plan.reasoning} ` : "") +
-          "No hay saludo del usuario: continúo el trámite (no greet).",
+          "Empresa ya activa: quité company.list del plan.",
       };
     }
     return plan;
@@ -67,6 +96,28 @@ export function enrichPlanForGreetingPolicy(
     state.lastQuestion?.expected === "time"
   ) {
     return plan;
+  }
+
+  // Ya hay empresa: saludo corto SIN re-pedir empresa
+  if (state.company) {
+    return {
+      ...plan,
+      conversationalAct: "greet",
+      task: null,
+      taskAction: null,
+      requestedCapabilities: plan.requestedCapabilities.filter(
+        (c) => c.name !== "company.list" && c.name !== "company.select",
+      ),
+      reasoning:
+        (plan.reasoning ? `${plan.reasoning} ` : "") +
+        `El usuario saludó con empresa activa (${state.company.name}): greet sin re-listar.`,
+      responseGoal: {
+        purpose: "inform",
+        facts: plan.responseGoal.facts ?? [],
+        nextQuestion:
+          plan.responseGoal.nextQuestion ?? "¿En qué te ayudo?",
+      },
+    };
   }
 
   return {
