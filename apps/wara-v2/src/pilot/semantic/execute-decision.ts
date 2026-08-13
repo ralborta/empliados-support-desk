@@ -63,6 +63,16 @@ import {
   looksLikeDomainQuestion,
   looksLikeOutOfDomainQuestion,
 } from "./domain-knowledge.js";
+import {
+  applyResolvedUnit,
+  commitSelectedUnit,
+  confirmProposedUnit,
+  entityReferenceFromDecision,
+  looksLikeUnitCorrection,
+  looksLikeUnitStatusOfActive,
+  proposeUnit,
+  resolveContextualUnitReference,
+} from "./unit-context.js";
 
 export type ExecuteDeps = {
   messageId: string;
@@ -749,11 +759,112 @@ async function startCertificate(
 }
 
 function handleUnitSearch(decision: TurnDecision, state: PilotConversationState, deps: ExecuteDeps): ExecuteResult {
-  // Asegurar vínculo al trámite padre si estamos esperando unidad.
   ensurePendingForAwaitingUnit(state, deps.messageId);
-
+  const parent = resolveParentIntentForUnitSelection(state);
+  const message = deps.originalMessage;
   const entity = decision.entity;
+
+  // Corrección / undo contextual — nunca clarify genérico en loop.
+  if (looksLikeUnitCorrection(message) || entity?.reference === "previous_selected_unit") {
+    const resolved = resolveContextualUnitReference(state, deps.fleetUnits, {
+      reference: "previous_selected_unit",
+      message,
+    });
+    if (resolved.kind === "restore") {
+      return { handler: "unit_context_restore", message: resolved.message, state };
+    }
+    if (resolved.kind === "clarify") {
+      return { handler: "unit_context_clarify", message: resolved.message, state };
+    }
+    if (resolved.kind === "unit") {
+      const cont = continueAfterUnitResolved(state, resolved.unit, {
+        parentIntent: parent ?? (looksLikeUnitStatusOfActive(message) ? "gps" : null),
+      });
+      return { handler: cont.handler, message: cont.message, state };
+    }
+  }
+
+  // Confirmar proposedUnit
+  if (
+    state.proposedUnit &&
+    /^(si|sí|dale|ok|cambiar|usa\s+esa|esa)$/i.test(message.trim())
+  ) {
+    const confirmed = confirmProposedUnit(state, deps.fleetUnits);
+    if (confirmed.kind === "unit") {
+      const cont = continueAfterUnitResolved(state, confirmed.unit, { parentIntent: parent });
+      return { handler: cont.handler, message: cont.message, state };
+    }
+    if (confirmed.kind === "restore") {
+      return { handler: "unit_context_restore", message: confirmed.message, state };
+    }
+  }
+
+  // Referencia contextual (la misma / esa) — NUNCA índice 1 del listado.
+  const reference = entityReferenceFromDecision(decision, message);
+  const isContextual =
+    entity?.type === "contextual" ||
+    decision.reasoningCode === "CONTEXTUAL_REFERENCE" ||
+    Boolean(reference);
+
+  if (isContextual && (entity?.type === "contextual" || reference) && entity?.type !== "index" && entity?.type !== "plate") {
+    const resolved = resolveContextualUnitReference(state, deps.fleetUnits, {
+      reference: reference ?? "selected_unit",
+      message,
+    });
+    if (resolved.kind === "restore") {
+      if (looksLikeUnitStatusOfActive(message) || decision.intent === "gps") {
+        const fu = findUnitInFleetByRef(deps.fleetUnits, resolved.unit);
+        if (fu) {
+          const cont = continueAfterUnitResolved(state, fu, { parentIntent: "gps" });
+          return { handler: cont.handler, message: cont.message, state };
+        }
+      }
+      return { handler: "unit_context_restore", message: resolved.message, state };
+    }
+    if (resolved.kind === "clarify") {
+      return { handler: "unit_context_clarify", message: resolved.message, state };
+    }
+    if (resolved.kind === "unit") {
+      const intentParent =
+        parent ??
+        (looksLikeUnitStatusOfActive(message) || decision.intent === "gps" ? "gps" : null);
+      if (!intentParent && state.selectedUnit && resolved.unit.movil_id === state.selectedUnit.movil_id) {
+        commitSelectedUnit(state, resolved.unit, "contextual_reference");
+        if (looksLikeUnitStatusOfActive(message)) {
+          const cont = continueAfterUnitResolved(state, resolved.unit, { parentIntent: "gps" });
+          return { handler: cont.handler, message: cont.message, state };
+        }
+        return {
+          handler: "unit_context",
+          message: `Seguimos con ${state.selectedUnit.label}. ¿Qué querés consultar o gestionar?`,
+          state,
+        };
+      }
+      const applied = applyResolvedUnit(state, resolved.unit, "contextual_reference", {
+        parentIntent: intentParent,
+        forceCommit: Boolean(intentParent),
+      });
+      if (applied.kind === "propose") {
+        return {
+          handler: "unit_propose",
+          message: proposeUnit(state, applied.unit, applied.insteadOf),
+          state,
+        };
+      }
+      const cont = continueAfterUnitResolved(state, resolved.unit, { parentIntent: intentParent });
+      return { handler: cont.handler, message: cont.message, state };
+    }
+  }
+
   if (!entity) {
+    // Estado de «la unidad» con selectedUnit activa.
+    if (state.selectedUnit && (looksLikeUnitStatusOfActive(message) || decision.intent === "gps")) {
+      const fu = findUnitInFleetByRef(deps.fleetUnits, state.selectedUnit);
+      if (fu) {
+        const cont = continueAfterUnitResolved(state, fu, { parentIntent: "gps" });
+        return { handler: cont.handler, message: cont.message, state };
+      }
+    }
     return {
       handler: "unit_search",
       message: "¿Qué patente o unidad buscás?",
@@ -767,7 +878,18 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
     if (listing && idx > 0) {
       const unit = listing.units[idx - 1];
       if (unit) {
-        const cont = continueAfterUnitResolved(state, unit);
+        const applied = applyResolvedUnit(state, unit, "list_index", {
+          parentIntent: parent,
+          forceCommit: Boolean(parent),
+        });
+        if (applied.kind === "propose") {
+          return {
+            handler: "unit_propose",
+            message: proposeUnit(state, applied.unit, applied.insteadOf),
+            state,
+          };
+        }
+        const cont = continueAfterUnitResolved(state, unit, { parentIntent: parent });
         return { handler: cont.handler, message: cont.message, state };
       }
     }
@@ -781,6 +903,30 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
       ? entity.matchMode
       : "exact";
   const query = (entity.value ?? "").trim().toUpperCase();
+  if (!query) {
+    // Evitar búsqueda vacía → primer resultado.
+    const resolved = resolveContextualUnitReference(state, deps.fleetUnits, {
+      reference: reference ?? "selected_unit",
+      message,
+    });
+    if (resolved.kind === "unit") {
+      const cont = continueAfterUnitResolved(state, resolved.unit, {
+        parentIntent: parent ?? (decision.intent === "gps" ? "gps" : null),
+      });
+      return { handler: cont.handler, message: cont.message, state };
+    }
+    if (resolved.kind === "restore") {
+      return { handler: "unit_context_restore", message: resolved.message, state };
+    }
+    if (resolved.kind === "clarify") {
+      return { handler: "unit_context_clarify", message: resolved.message, state };
+    }
+    return {
+      handler: "unit_search",
+      message: "¿Qué patente o unidad buscás?",
+      state,
+    };
+  }
   touchPendingSearch(state, { searchMode: matchMode, query });
 
   const interpretation: UnitSearchInterpretation = {
@@ -799,7 +945,18 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
   });
 
   if (result.kind === "one") {
-    const cont = continueAfterUnitResolved(state, result.unit);
+    const applied = applyResolvedUnit(state, result.unit, "explicit_plate", {
+      parentIntent: parent,
+      forceCommit: Boolean(parent) || matchMode === "exact",
+    });
+    if (applied.kind === "propose") {
+      return {
+        handler: "unit_propose",
+        message: proposeUnit(state, applied.unit, applied.insteadOf),
+        state,
+      };
+    }
+    const cont = continueAfterUnitResolved(state, result.unit, { parentIntent: parent });
     return { handler: cont.handler, message: cont.message, state };
   }
   if (result.kind === "many") {
@@ -809,25 +966,24 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
       kind: "search_results",
       searchLabel: interpretation.query,
     });
-    const parent = resolveParentIntentForUnitSelection(state);
     const header = `Encontré ${result.units.length} unidades para «${interpretation.query}»${state.companyName ? ` en ${state.companyName}` : ""}:`;
-    const message = `${header}\n\n${listing.units
+    const msg = `${header}\n\n${listing.units
       .slice(0, listing.pageSize)
       .map((u, i) => `${i + 1}. ${formatUnitLabel(u)}`)
       .join("\n")}\n\nDecime el número o la patente/nombre de la unidad${parent ? " para continuar el trámite" : ""}.`;
-    // No pisar activeTramite del padre: solo actualizar listado.
+    // Listado NO cambia selectedUnit.
     state.lastListing = listing;
+    state.lastAgentQuestion = msg;
     if (!state.pendingEntityResolution && !parent) {
-      deps.showListing(state, listing, message);
+      deps.showListing(state, listing, msg);
     } else {
-      state.lastAgentQuestion = message;
       if (parent === "certificate") state.activeTramite = "certificate_issue";
       else if (parent === "odometer" || parent === "horometer") state.activeTramite = "odometer_update";
       else if (parent === "maintenance") state.activeTramite = "maintenance_request";
       else if (parent === "ticket") state.activeTramite = "odoo_ticket";
       else if (parent === "gps") state.activeTramite = "search_unit";
     }
-    return { handler: "unit_search", message, state };
+    return { handler: "unit_search", message: msg, state };
   }
 
   return {
@@ -938,6 +1094,18 @@ export async function executeTurnDecision(
   }
 
   if (decision.intent === "unit_list") {
+    // «estado de la unidad» con selectedUnit → GPS de la activa, no listar 408.
+    if (
+      state.selectedUnit &&
+      (looksLikeUnitStatusOfActive(deps.originalMessage) ||
+        decision.reasoningCode === "CONTEXTUAL_REFERENCE")
+    ) {
+      const fu = findUnitInFleetByRef(deps.fleetUnits, state.selectedUnit);
+      if (fu) {
+        const cont = continueAfterUnitResolved(state, fu, { parentIntent: "gps" });
+        return { handler: cont.handler, message: cont.message, state };
+      }
+    }
     ensurePendingForAwaitingUnit(state, deps.messageId);
     const listing = buildPaginatedListing({ units: deps.fleetUnits, page: 1, kind: "fleet_page" });
     const parent = resolveParentIntentForUnitSelection(state);

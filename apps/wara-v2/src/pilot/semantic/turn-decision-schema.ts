@@ -86,6 +86,16 @@ export const TurnDecisionSchema = z.object({
       type: z.enum(["plate", "unit_name", "index", "contextual"]),
       value: z.string().nullable().optional(),
       matchMode: z.enum(["exact", "prefix", "suffix", "contains"]).nullable().optional(),
+      reference: z
+        .enum([
+          "selected_unit",
+          "previous_selected_unit",
+          "last_mentioned_unit",
+          "current_list_item",
+          "same_as_before",
+        ])
+        .nullable()
+        .optional(),
     })
     .nullable()
     .optional(),

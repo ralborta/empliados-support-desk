@@ -16,6 +16,10 @@ import {
   reconcileLlmReadingFields,
 } from "./natural-datetime.js";
 import { maybeRewriteGeneralToDomain } from "./domain-knowledge.js";
+import {
+  looksLikeUnitCorrection,
+  looksLikeUnitStatusOfActive,
+} from "./unit-context.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -85,6 +89,70 @@ export function applySemanticPolicy(
 
   // Preguntas conceptuales: no deben caer en menú general.
   decision = maybeRewriteGeneralToDomain(decision, message, state);
+
+  // Estado de la unidad activa → GPS, no unit_list masivo.
+  if (
+    state.selectedUnit &&
+    looksLikeUnitStatusOfActive(message) &&
+    (decision.intent === "unit_list" ||
+      decision.action === "start_intent" ||
+      decision.action === "general")
+  ) {
+    decision = {
+      ...decision,
+      action: "start_intent",
+      intent: "gps",
+      currentTramiteDisposition: "keep",
+      reasoningCode: "CONTEXTUAL_REFERENCE",
+      entity: {
+        type: "contextual",
+        reference: "selected_unit",
+        value: null,
+        matchMode: null,
+      },
+    };
+  }
+
+  // Corrección de unidad → select_entity contextual previous.
+  if (looksLikeUnitCorrection(message) && decision.action !== "answer_pending") {
+    decision = {
+      ...decision,
+      action: "select_entity",
+      intent: decision.intent === "none" ? "unit_search" : decision.intent,
+      currentTramiteDisposition: "keep",
+      reasoningCode: "CONTEXTUAL_REFERENCE",
+      entity: {
+        type: "contextual",
+        reference: "previous_selected_unit",
+        value: null,
+        matchMode: null,
+      },
+      answer: null,
+      ambiguity: null,
+    };
+  }
+
+  // «la misma» mal tipada como index → contextual selected (nunca índice 1).
+  if (
+    decision.action === "select_entity" &&
+    decision.entity?.type === "index" &&
+    (/\b(misma|esa|seleccionada|anterior)\b/i.test(message) ||
+      decision.reasoningCode === "CONTEXTUAL_REFERENCE")
+  ) {
+    decision = {
+      ...decision,
+      entity: {
+        type: "contextual",
+        reference: /\b(anterior|tenia|tenía|de\s+antes)\b/i.test(message)
+          ? "previous_selected_unit"
+          : "selected_unit",
+        value: null,
+        matchMode: null,
+      },
+      reasoningCode: "CONTEXTUAL_REFERENCE",
+      currentTramiteDisposition: "keep",
+    };
+  }
 
   if (decision.action === "answer_domain_question" || decision.intent === "domain_knowledge") {
     return {

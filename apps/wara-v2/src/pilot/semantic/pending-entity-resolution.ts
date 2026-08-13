@@ -7,6 +7,7 @@ import type { PilotConversationState } from "../conversation-state.js";
 import type { OdometerDraft } from "../odometer-types.js";
 import type { WaraUnidadEstado } from "../wara-types.js";
 import { toFleetUnitRef, type FleetUnitRef } from "../unit-fleet.js";
+import { commitSelectedUnit } from "./unit-context.js";
 
 export type ParentIntent =
   | "gps"
@@ -108,10 +109,7 @@ export function ensurePendingForAwaitingUnit(
 }
 
 function setSelected(state: PilotConversationState, unit: WaraUnidadEstado): FleetUnitRef {
-  const ref = toFleetUnitRef(unit);
-  state.selectedUnit = ref;
-  state.confirmedFields.unit = ref.label;
-  return ref;
+  return commitSelectedUnit(state, unit, "active_context");
 }
 
 export type ContinueAfterUnitResult = {

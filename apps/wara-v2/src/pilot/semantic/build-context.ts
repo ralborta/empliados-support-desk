@@ -78,6 +78,20 @@ export function buildInterpretTurnInput(
           name: state.selectedUnit.unidad,
         }
       : undefined,
+    previousSelectedUnit: state.previousSelectedUnit
+      ? {
+          id: String(state.previousSelectedUnit.movil_id),
+          plate: state.previousSelectedUnit.patente,
+          name: state.previousSelectedUnit.unidad,
+        }
+      : undefined,
+    proposedUnit: state.proposedUnit
+      ? {
+          id: String(state.proposedUnit.movil_id),
+          plate: state.proposedUnit.patente,
+          label: state.proposedUnit.label,
+        }
+      : undefined,
     activeTramite: state.activeTramite,
     activeStep: state.step,
     pendingConfirmation: state.pendingConfirmation

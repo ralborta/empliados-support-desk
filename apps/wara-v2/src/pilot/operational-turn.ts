@@ -126,6 +126,7 @@ import {
   ensurePendingForAwaitingUnit,
   resolveParentIntentForUnitSelection,
 } from "./semantic/pending-entity-resolution.js";
+import { commitSelectedUnit, looksLikeUnitCorrection } from "./semantic/unit-context.js";
 import { DateTime } from "luxon";
 import {
   buildCompanyMenuMessage,
@@ -379,10 +380,7 @@ async function handleGpsSideQueryDuringTramite(input: {
 }
 
 function setSelectedUnit(state: PilotConversationState, unit: WaraUnidadEstado): PilotSelectedUnit {
-  const ref = toFleetUnitRef(unit);
-  state.selectedUnit = ref;
-  state.confirmedFields.unit = ref.label;
-  return ref;
+  return commitSelectedUnit(state, unit, "explicit_plate");
 }
 
 function askGpsConfirmation(state: PilotConversationState, unit: WaraUnidadEstado): string {
@@ -620,6 +618,65 @@ export async function resolveOperationalTurn(input: {
   // ——— Cerebro semántico unificado (única autoridad cuando el flag está ON) ———
   if (isUnifiedSemanticBrainEnabled(env)) {
     appendUserTurn(state, text);
+
+    // Atajo: corrección de unidad («no era esa» / «la que tenía»).
+    if (looksLikeUnitCorrection(text)) {
+      const fleet = await fetchFleet(state, env);
+      const fleetUnits = fleet.ok ? fleet.units : [];
+      const correctionDecision = {
+        action: "select_entity" as const,
+        intent: "unit_search" as const,
+        confidence: 1,
+        currentTramiteDisposition: "keep" as const,
+        reasoningCode: "CONTEXTUAL_REFERENCE" as const,
+        entity: {
+          type: "contextual" as const,
+          reference: "previous_selected_unit" as const,
+          value: null,
+          matchMode: null,
+        },
+        answer: null,
+        fields: null,
+        fieldsToClear: null,
+        ambiguity: null,
+      };
+      const exec = await executeTurnDecision(correctionDecision, state, {
+        messageId: input.messageId,
+        env,
+        fleetUnits,
+        originalMessage: text,
+        showListing: (s, l, m) => {
+          showListing(s, l, m);
+        },
+        askGpsConfirmation,
+        deliverGpsReport,
+        handleGpsSideQuery: async (sideInput) => {
+          const side = await handleGpsSideQueryDuringTramite(sideInput);
+          return { message: side.message, state: side.state };
+        },
+      });
+      appendAssistantTurn(state, exec.message, correctionDecision);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: "select_entity",
+        intent: "unit_search",
+        answer: null,
+        currentTramiteDisposition: "keep",
+        confidence: 1,
+        reasoningCode: "CONTEXTUAL_REFERENCE",
+        handler: exec.handler,
+        latency_ms: null,
+        model: null,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: false,
+        error: null,
+      });
+      return { kind: "reply", message: exec.message, state };
+    }
 
     // Atajo: cancelar inequívoco por estado (sin LLM). Frases mixtas → cerebro.
     if (shouldUseCancelShortcut(text, state)) {

@@ -21,6 +21,8 @@ export type InterpretTurnInput = {
   timezone: string;
   company?: { id: string; name: string };
   selectedUnit?: { id: string; plate?: string; name?: string };
+  previousSelectedUnit?: { id: string; plate?: string; name?: string };
+  proposedUnit?: { id: string; plate?: string; label?: string };
   activeTramite: string;
   activeStep: string;
   pendingConfirmation?: { action: string; question: string };
@@ -152,6 +154,8 @@ export async function interpretTurn(
     timezone: input.timezone,
     company: input.company ?? null,
     selectedUnit: input.selectedUnit ?? null,
+    previousSelectedUnit: input.previousSelectedUnit ?? null,
+    proposedUnit: input.proposedUnit ?? null,
     activeTramite: input.activeTramite,
     activeStep: input.activeStep,
     pendingConfirmation: input.pendingConfirmation ?? null,

@@ -26,6 +26,10 @@ import type { CertificateDraft, CertificateOperationRecord } from "./certificate
 import type { MaintenanceDraft, MaintenanceOperationRecord } from "./maintenance-types.js";
 import type { TicketDraft, TicketOperationRecord } from "./ticket-types.js";
 import type { PendingEntityResolution } from "./semantic/pending-entity-resolution.js";
+import type {
+  UnitClarificationState,
+  UnitSelectionSource,
+} from "./semantic/unit-context.js";
 
 export type PilotTramiteType =
   | "none"
@@ -84,6 +88,14 @@ export type PilotConversationState = {
   activeTramite: PilotTramiteType;
   step: string;
   selectedUnit: PilotSelectedUnit | null;
+  /** Unidad activa anterior (para undo / «la que tenía seleccionada»). */
+  previousSelectedUnit: PilotSelectedUnit | null;
+  /** Última unidad mencionada sin implicar selección confirmada. */
+  lastMentionedUnit: PilotSelectedUnit | null;
+  /** Candidata pendiente de confirmación de cambio. */
+  proposedUnit: PilotSelectedUnit | null;
+  selectionSource: UnitSelectionSource;
+  unitClarificationState: UnitClarificationState | null;
   lastListing: PaginatedFleetListing | null;
   /** Último índice elegido del listado (para «la siguiente» / «la anterior»). */
   lastListingPickIndex: number | null;
@@ -156,6 +168,11 @@ export function createEmptyPilotState(input: {
     activeTramite: "none",
     step: "idle",
     selectedUnit: null,
+    previousSelectedUnit: null,
+    lastMentionedUnit: null,
+    proposedUnit: null,
+    selectionSource: null,
+    unitClarificationState: null,
     lastListing: null,
     lastListingPickIndex: null,
     pendingConfirmation: null,
@@ -240,6 +257,11 @@ function normalizeLoadedState(state: PilotConversationState): PilotConversationS
     ticketDraft: state.ticketDraft ?? null,
     ticketOperations: state.ticketOperations ?? {},
     pendingEntityResolution: state.pendingEntityResolution ?? null,
+    previousSelectedUnit: state.previousSelectedUnit ?? null,
+    lastMentionedUnit: state.lastMentionedUnit ?? null,
+    proposedUnit: state.proposedUnit ?? null,
+    selectionSource: state.selectionSource ?? null,
+    unitClarificationState: state.unitClarificationState ?? null,
     lastListingPickIndex: state.lastListingPickIndex ?? null,
     suspendedTramite: state.suspendedTramite
       ? {
@@ -407,8 +429,17 @@ export function softResetPilotConversation(
     state.companyName = null;
     state.sessionToken = null;
     state.selectedUnit = null;
+    state.previousSelectedUnit = null;
+    state.lastMentionedUnit = null;
+    state.proposedUnit = null;
+    state.selectionSource = null;
+    state.unitClarificationState = null;
     state.fleetCache = null;
     state.fleetCacheAt = null;
+  } else {
+    // Soft reset: conserva selectedUnit y previous; limpia propuesta/aclaración.
+    state.proposedUnit = null;
+    state.unitClarificationState = null;
   }
   return touchPilotState(state);
 }
@@ -448,7 +479,9 @@ export function touchPilotState(state: PilotConversationState): PilotConversatio
 export function clearOperationalTramite(state: PilotConversationState): void {
   state.activeTramite = "none";
   state.step = "idle";
-  state.selectedUnit = null;
+  // Conservar selectedUnit / previous / lastMentioned — solo limpia trámite.
+  state.proposedUnit = null;
+  state.unitClarificationState = null;
   state.lastListing = null;
   state.pendingConfirmation = null;
   state.pendingFields = [];
@@ -612,6 +645,11 @@ export function sanitizeStateForLab(
     activeTramite: state.activeTramite,
     step: state.step,
     selectedUnit: state.selectedUnit,
+    previousSelectedUnit: state.previousSelectedUnit,
+    lastMentionedUnit: state.lastMentionedUnit,
+    proposedUnit: state.proposedUnit,
+    selectionSource: state.selectionSource,
+    unitClarificationAttempts: state.unitClarificationState?.attempts ?? 0,
     lastListing: state.lastListing
       ? {
           kind: state.lastListing.kind,
