@@ -29,13 +29,19 @@ export function buildCompanyResetMessage(contacts: WaraEmpresaContact[]): string
 export function buildCompanyStatusReply(
   activeCompany: string | null,
   contacts: WaraEmpresaContact[],
+  opts?: { minimal?: boolean },
 ): string {
-  const menu = formatContactsMenu(contacts);
+  const minimal = opts?.minimal === true;
   if (activeCompany) {
+    if (minimal) {
+      const name = activeCompany.replace(/\.\s*$/, "");
+      return `Estás operando con ${name}.`;
+    }
     return contacts.length > 1
-      ? `Estás operando con ${activeCompany}.\n\nEste número también está asociado a:\n\n${menu}\n\nPara cambiar, escribí "cambiar empresa".`
+      ? `Estás operando con ${activeCompany}.\n\nEste número también está asociado a:\n\n${formatContactsMenu(contacts)}\n\nPara cambiar, escribí "cambiar empresa".`
       : `Estás operando con ${activeCompany}. ¿En qué te puedo ayudar?`;
   }
+  const menu = formatContactsMenu(contacts);
   return contacts.length
     ? `Este número está asociado en Wara a:\n\n${menu}\n\nElegí con el número o el nombre.`
     : "No encontré empresas asociadas a tu número en Wara.";

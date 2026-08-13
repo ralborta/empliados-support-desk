@@ -53,10 +53,8 @@ export function buildCompanyContext(state: PilotConversationState) {
 
 export function replyActiveCompany(state: PilotConversationState): string {
   if (state.companyName) {
-    if (state.contacts.length > 1) {
-      return buildCompanyStatusReply(state.companyName, state.contacts);
-    }
-    return `Estás operando con ${state.companyName}.`;
+    const name = state.companyName.replace(/\.\s*$/, "");
+    return `Estás operando con ${name}.`;
   }
   if (state.contacts.length === 1) {
     const c = state.contacts[0]!;

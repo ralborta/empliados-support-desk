@@ -41,9 +41,8 @@ import {
   isBinaryCancelQuestion,
   isCompoundCancelContinueQuestion,
 } from "./cancel-command.js";
-import { cancelActiveOrPendingTramite } from "./cancel-active-tramite.js";
+import { cancelActiveOrPendingTramite, hasCancellableTramite } from "./cancel-active-tramite.js";
 import { FECHA_LECTURA_QUESTION } from "./natural-datetime.js";
-import { softTimeQuestionForMessage } from "./natural-datetime.js";
 import {
   planAskMissingField,
   planOrchestrationClarify,
@@ -55,16 +54,14 @@ import {
   clearLastAgentQuestion,
   DISCARD_OR_EDIT_QUESTION,
   inferExpectedAnswerTypeFromQuestion,
-  looksLikeFarewell,
-  looksLikeUnequivocalCancelRequest,
+  mustBlockWriteExecution,
   replyActiveCompany,
   setLastAgentQuestion,
 } from "./turn-precedence.js";
+import { setExpectedField } from "./conversation-reduce.js";
 import {
   formatAnomalyQuestion,
   isAnomalousReading,
-  looksLikeAnomalyAck,
-  looksLikeAnomalyReject,
 } from "./reading-anomaly.js";
 import type { ClearableField } from "./field-correction.js";
 import {
@@ -76,17 +73,11 @@ import {
 } from "./pending-entity-resolution.js";
 import {
   answerDomainQuestion,
-  looksLikeCapabilitiesQuestion,
-  looksLikeDomainQuestion,
-  looksLikeOutOfDomainQuestion,
 } from "./domain-knowledge.js";
 import {
   applyResolvedUnit,
   commitSelectedUnit,
   confirmProposedUnit,
-  entityReferenceFromDecision,
-  looksLikeUnitCorrection,
-  looksLikeUnitStatusOfActive,
   proposeUnit,
   resolveContextualUnitReference,
 } from "./unit-context.js";
@@ -178,16 +169,13 @@ function resolveUnitFromDecisionOrText(
   decision: TurnDecision,
   deps: ExecuteDeps,
 ): WaraUnidadEstado | null {
-  const candidates = [
-    decision.entity?.value?.trim(),
-    deps.originalMessage?.trim(),
-  ].filter(Boolean) as string[];
-  for (const raw of candidates) {
-    const byPlate = resolveUnitByPlateFromFleet(deps.fleetUnits, raw);
-    if (byPlate.kind === "one") return byPlate.unit;
-    const byName = resolveUnitByNameFromFleet(deps.fleetUnits, raw);
-    if (byName.kind === "one") return byName.unit;
-  }
+  // Solo entity estructurada — no releer el mensaje del usuario.
+  const raw = decision.entity?.value?.trim();
+  if (!raw) return null;
+  const byPlate = resolveUnitByPlateFromFleet(deps.fleetUnits, raw);
+  if (byPlate.kind === "one") return byPlate.unit;
+  const byName = resolveUnitByNameFromFleet(deps.fleetUnits, raw);
+  if (byName.kind === "one") return byName.unit;
   return null;
 }
 
@@ -294,17 +282,15 @@ function handleCorrectOdometerFields(
       draft.fechaDatePart = date;
       draft.fechaLecturaIso = `${date}T00:00:00`;
       draft.fechaDisplay = formatFechaDisplay(draft.fechaLecturaIso);
-      const dia = formatFechaDiaLargo(draft.fechaLecturaIso, TZ);
-      const soft = softTimeQuestionForMessage(deps.originalMessage);
-      const message =
-        soft ??
-        renderResponsePlan(
-          planAskMissingField({
-            received: `Perfecto, ya tengo la fecha (${dia}).`,
-            missing: "hora",
-            question: "¿A qué hora?",
-          }),
-        );
+      const dd = date.slice(8, 10);
+      const mm = date.slice(5, 7);
+      const yyyy = date.slice(0, 4);
+      const message = `Entendido: ${dd}/${mm}/${yyyy}. ¿A qué hora fue?`;
+      setExpectedField(state, {
+        text: message,
+        purpose: "ask_time",
+        expectedAnswerType: "time",
+      });
       return {
         handler: "odometer",
         message,
@@ -400,22 +386,32 @@ function handleProvideOdometerFields(
     }
   }
 
-  // Confirmación reforzada de valor anómalo.
+  // Confirmación reforzada de valor anómalo — solo decisión estructurada.
   if (draft.step === "await_anomaly_confirm") {
-    const text = deps?.originalMessage ?? "";
-    if (looksLikeAnomalyAck(text) || decision.answer === "confirm") {
+    if (decision.answer === "confirm") {
       draft.valueNew = draft.anomalyCandidate ?? draft.valueNew;
       draft.anomalyCandidate = null;
       draft.step = "await_fecha";
+      setExpectedField(state, {
+        text: FECHA_LECTURA_QUESTION,
+        purpose: "ask_datetime",
+        expectedAnswerType: "date",
+      });
       return { handler: "odometer", message: FECHA_LECTURA_QUESTION, state };
     }
-    if (looksLikeAnomalyReject(text) || decision.answer === "reject" || decision.answer === "cancel") {
+    if (decision.answer === "reject" || decision.answer === "cancel") {
       draft.anomalyCandidate = null;
       draft.valueNew = null;
       draft.step = "await_value";
+      const ask = `Ok, descarté ese valor. Pasame el ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"} correcto.`;
+      setExpectedField(state, {
+        text: ask,
+        purpose: "ask_odometer_value",
+        expectedAnswerType: "numeric_value",
+      });
       return {
         handler: "odometer",
-        message: `Ok, descarté ese valor. Pasame el ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"} correcto.`,
+        message: ask,
         state,
       };
     }
@@ -451,6 +447,11 @@ function handleProvideOdometerFields(
     draft.valueNew = fields.numericValue;
     draft.anomalyCandidate = null;
     draft.step = "await_fecha";
+    setExpectedField(state, {
+      text: FECHA_LECTURA_QUESTION,
+      purpose: "ask_datetime",
+      expectedAnswerType: "date",
+    });
     return {
       handler: "odometer",
       message: FECHA_LECTURA_QUESTION,
@@ -499,20 +500,18 @@ function handleProvideOdometerFields(
       draft.fechaDatePart = fields.date;
       draft.fechaLecturaIso = `${fields.date}T00:00:00`;
       draft.fechaDisplay = formatFechaDisplay(draft.fechaLecturaIso);
-      const dia = formatFechaDiaLargo(draft.fechaLecturaIso, TZ);
-      const soft = softTimeQuestionForMessage(deps.originalMessage);
-      const message =
-        soft ??
-        renderResponsePlan(
-          planAskMissingField({
-            received: `Perfecto, ya tengo la fecha (${dia}).`,
-            missing: "hora",
-            question: "¿A qué hora?",
-          }),
-        );
+      const dd = fields.date.slice(8, 10);
+      const mm = fields.date.slice(5, 7);
+      const yyyy = fields.date.slice(0, 4);
+      const finalMsg = `Entendido: ${dd}/${mm}/${yyyy}. ¿A qué hora fue?`;
+      setExpectedField(state, {
+        text: finalMsg,
+        purpose: "ask_time",
+        expectedAnswerType: "time",
+      });
       return {
         handler: "odometer",
-        message,
+        message: finalMsg,
         state,
       };
     }
@@ -548,6 +547,21 @@ async function handleAnswerPending(
   deps: ExecuteDeps,
 ): Promise<ExecuteResult> {
   const pending = state.pendingConfirmation;
+
+  // Cancelación estructurada: puede aplicar a draft activo sin pendingConfirmation.
+  const structuredCancel =
+    decision.answer === "cancel" ||
+    decision.currentTramiteDisposition === "cancel" ||
+    decision.speechAct === "cancel";
+  if (structuredCancel && !pending && hasCancellableTramite(state)) {
+    const r = cancelActiveOrPendingTramite(state);
+    return {
+      handler: r.cancelled === "none" ? "answer_pending" : r.cancelled,
+      message: r.message,
+      state,
+    };
+  }
+
   if (!pending) {
     return {
       handler: "answer_pending",
@@ -572,30 +586,20 @@ async function handleAnswerPending(
     isCompoundCancelContinueQuestion(pending.question) ||
     isCompoundCancelContinueQuestion(state.lastAgentQuestion);
 
-  // Texto inequívoco de cancelación: no depende del LLM.
-  if (looksLikeUnequivocalCancelRequest(deps.originalMessage)) {
-    const r = cancelActiveOrPendingTramite(state);
+  // Protección mínima de escritura: solo bloquea; nunca autoriza ni inicia cancel por texto.
+  if (
+    mustBlockWriteExecution(deps.originalMessage) &&
+    (decision.answer === "confirm" || decision.speechAct === "confirm")
+  ) {
     return {
-      handler: r.cancelled === "none" ? "answer_pending" : r.cancelled,
-      message: r.cancelled === "certificate" ? CANCEL_CERT_REPLY : r.message,
-      state,
-    };
-  }
-
-  // Despedida con escritura pendiente: cancelar sin ejecutar.
-  if (looksLikeFarewell(deps.originalMessage)) {
-    const r = cancelActiveOrPendingTramite(state);
-    return {
-      handler: r.cancelled === "none" ? "farewell" : r.cancelled,
+      handler: "answer_pending",
       message:
-        pending.action === "odoo_ticket_create"
-          ? "De acuerdo. No generé el ticket. Cuando quieras, seguimos."
-          : r.message,
+        "Para confirmar la operación respondé CONFIRMO. Si no querés seguir, decime cancelo.",
       state,
     };
   }
 
-  // Pregunta choice (descartar vs modificar): sí solo no alcanza.
+  // Pregunta choice (descartar vs modificar): sí/no solos no alcanzan.
   if (
     answeringCompound &&
     (decision.answer === "confirm" || decision.answer === "reject")
@@ -621,6 +625,7 @@ async function handleAnswerPending(
   const wantsCancel =
     decision.currentTramiteDisposition === "cancel" ||
     decision.answer === "cancel" ||
+    decision.speechAct === "cancel" ||
     (decision.answer === "reject" && !answeringBinaryCancel);
 
   if (wantsCancel) {
@@ -650,6 +655,18 @@ async function handleAnswerPending(
     return { handler: "certificate", message: reply, state };
   }
 
+  // Choice: modificar datos — solo action/speechAct estructurados.
+  if (
+    expected === "choice" &&
+    (decision.action === "correct_fields" || decision.speechAct === "provide_field")
+  ) {
+    return {
+      handler: "answer_pending",
+      message: "Ok, ¿qué dato querés corregir?",
+      state,
+    };
+  }
+
   if (decision.answer === "confirm") {
     // Pregunta binaria de cancelación: sí → cancelar.
     if (answeringBinaryCancel) {
@@ -661,27 +678,8 @@ async function handleAnswerPending(
       };
     }
 
-    // Choice descartar/modificar: solo cancelar si eligió descartar explícitamente.
+    // En choice, confirm solo no elige descartar/modificar.
     if (expected === "choice") {
-      const t = deps.originalMessage
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase();
-      if (/\b(descart|cancel)/.test(t)) {
-        const r = cancelActiveOrPendingTramite(state);
-        return {
-          handler: r.cancelled === "none" ? "answer_pending" : r.cancelled,
-          message: r.message,
-          state,
-        };
-      }
-      if (/\b(modific|correg|cambiar\s+dato)/.test(t)) {
-        return {
-          handler: "answer_pending",
-          message: "Ok, ¿qué dato querés corregir?",
-          state,
-        };
-      }
       setLastAgentQuestion(state, {
         text: DISCARD_OR_EDIT_QUESTION,
         purpose: "choose_discard_or_edit",
@@ -876,17 +874,34 @@ async function startMeter(
   }
   const label = meterType === "horometro" ? "horómetro" : "odómetro";
   const unitHint = state.selectedUnit?.label ? ` de ${state.selectedUnit.label}` : "";
-  const prefix =
-    decision.action === "suspend_and_start" || decision.action === "switch_intent"
-      ? `De acuerdo, dejo pendiente el trámite anterior y seguimos con el ${label}${unitHint}. `
+  // No inventar "trámite anterior" si no había nada activo que suspender.
+  const hadPrior =
+    decision.action === "suspend_and_start" ||
+    (decision.action === "switch_intent" && decision.currentTramiteDisposition === "suspend");
+  const prefix = hadPrior
+    ? `De acuerdo, dejo pendiente el trámite anterior y seguimos con el ${label}${unitHint}. `
+    : decision.action === "switch_intent"
+      ? `De acuerdo, seguimos con el ${label}${unitHint}. `
       : "";
+  const askValue = `Pasame el valor del ${label}${meterType === "horometro" ? " (hs)" : " (km)"}.`;
+  const askUnit = `Decime la patente para el ${label}.`;
+  const message = prefix + (draft.step === "await_unit" ? askUnit : askValue);
+  if (draft.step === "await_unit") {
+    setExpectedField(state, {
+      text: askUnit,
+      purpose: "ask_unit",
+      expectedAnswerType: "unit",
+    });
+  } else {
+    setExpectedField(state, {
+      text: askValue,
+      purpose: "ask_odometer_value",
+      expectedAnswerType: "numeric_value",
+    });
+  }
   return {
     handler: "odometer",
-    message:
-      prefix +
-      (draft.step === "await_unit"
-        ? `Decime la patente para el ${label}.`
-        : `Pasame el valor del ${label}${meterType === "horometro" ? " (hs)" : " (km)"}.`),
+    message,
     state,
   };
 }
@@ -950,17 +965,24 @@ async function startCertificate(
   return { handler: "certificate", message: prefix + q, state };
 }
 
+
+function isContextualEntity(decision: TurnDecision): boolean {
+  return (
+    decision.entity?.type === "contextual" ||
+    decision.reasoningCode === "CONTEXTUAL_REFERENCE" ||
+    Boolean(decision.entity?.reference)
+  );
+}
+
 function handleUnitSearch(decision: TurnDecision, state: PilotConversationState, deps: ExecuteDeps): ExecuteResult {
   ensurePendingForAwaitingUnit(state, deps.messageId);
   const parent = resolveParentIntentForUnitSelection(state);
-  const message = deps.originalMessage;
   const entity = decision.entity;
 
-  // Corrección / undo contextual — nunca clarify genérico en loop.
-  if (looksLikeUnitCorrection(message) || entity?.reference === "previous_selected_unit") {
+  // Corrección / undo contextual — solo entity.reference estructurada.
+  if (entity?.reference === "previous_selected_unit") {
     const resolved = resolveContextualUnitReference(state, deps.fleetUnits, {
       reference: "previous_selected_unit",
-      message,
     });
     if (resolved.kind === "restore") {
       return { handler: "unit_context_restore", message: resolved.message, state };
@@ -970,17 +992,14 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
     }
     if (resolved.kind === "unit") {
       const cont = continueAfterUnitResolved(state, resolved.unit, {
-        parentIntent: parent ?? (looksLikeUnitStatusOfActive(message) ? "gps" : null),
+        parentIntent: parent ?? (decision.intent === "gps" ? "gps" : null),
       });
       return { handler: cont.handler, message: cont.message, state };
     }
   }
 
-  // Confirmar proposedUnit
-  if (
-    state.proposedUnit &&
-    /^(si|sí|dale|ok|cambiar|usa\s+esa|esa)$/i.test(message.trim())
-  ) {
+  // Confirmar proposedUnit — solo answer=confirm.
+  if (state.proposedUnit && decision.answer === "confirm") {
     const confirmed = confirmProposedUnit(state, deps.fleetUnits);
     if (confirmed.kind === "unit") {
       const cont = continueAfterUnitResolved(state, confirmed.unit, { parentIntent: parent });
@@ -991,20 +1010,17 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
     }
   }
 
-  // Referencia contextual (la misma / esa) — NUNCA índice 1 del listado.
-  const reference = entityReferenceFromDecision(decision, message);
-  const isContextual =
-    entity?.type === "contextual" ||
-    decision.reasoningCode === "CONTEXTUAL_REFERENCE" ||
-    Boolean(reference);
+  const reference =
+    entity?.reference ??
+    (entity?.type === "contextual" ? "selected_unit" : null) ??
+    (decision.reasoningCode === "CONTEXTUAL_REFERENCE" ? "selected_unit" : null);
 
-  if (isContextual && (entity?.type === "contextual" || reference) && entity?.type !== "index" && entity?.type !== "plate") {
+  if (isContextualEntity(decision) && entity?.type !== "index" && entity?.type !== "plate") {
     const resolved = resolveContextualUnitReference(state, deps.fleetUnits, {
       reference: reference ?? "selected_unit",
-      message,
     });
     if (resolved.kind === "restore") {
-      if (looksLikeUnitStatusOfActive(message) || decision.intent === "gps") {
+      if (decision.intent === "gps") {
         const fu = findUnitInFleetByRef(deps.fleetUnits, resolved.unit);
         if (fu) {
           const cont = continueAfterUnitResolved(state, fu, { parentIntent: "gps" });
@@ -1017,12 +1033,10 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
       return { handler: "unit_context_clarify", message: resolved.message, state };
     }
     if (resolved.kind === "unit") {
-      const intentParent =
-        parent ??
-        (looksLikeUnitStatusOfActive(message) || decision.intent === "gps" ? "gps" : null);
+      const intentParent = parent ?? (decision.intent === "gps" ? "gps" : null);
       if (!intentParent && state.selectedUnit && resolved.unit.movil_id === state.selectedUnit.movil_id) {
         commitSelectedUnit(state, resolved.unit, "contextual_reference");
-        if (looksLikeUnitStatusOfActive(message)) {
+        if (decision.intent === "gps") {
           const cont = continueAfterUnitResolved(state, resolved.unit, { parentIntent: "gps" });
           return { handler: cont.handler, message: cont.message, state };
         }
@@ -1049,8 +1063,7 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
   }
 
   if (!entity) {
-    // Estado de «la unidad» con selectedUnit activa.
-    if (state.selectedUnit && (looksLikeUnitStatusOfActive(message) || decision.intent === "gps")) {
+    if (state.selectedUnit && decision.intent === "gps") {
       const fu = findUnitInFleetByRef(deps.fleetUnits, state.selectedUnit);
       if (fu) {
         const cont = continueAfterUnitResolved(state, fu, { parentIntent: "gps" });
@@ -1099,7 +1112,6 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
     // Evitar búsqueda vacía → primer resultado.
     const resolved = resolveContextualUnitReference(state, deps.fleetUnits, {
       reference: reference ?? "selected_unit",
-      message,
     });
     if (resolved.kind === "unit") {
       const cont = continueAfterUnitResolved(state, resolved.unit, {
@@ -1285,11 +1297,7 @@ export async function executeTurnDecision(
     // GPS pendiente heredado: no dejar que un provide_fields genérico secuestre el "sí"/reporte.
     if (state.pendingConfirmation?.action === "gps_report") {
       const msg = deps.originalMessage;
-      if (
-        decision.answer === "confirm" ||
-        decision.intent === "gps" ||
-        looksLikeUnitStatusOfActive(msg)
-      ) {
+      if (decision.answer === "confirm" || decision.intent === "gps") {
         const unit = findUnitInFleetByRef(deps.fleetUnits, state.pendingConfirmation.unit);
         if (unit) {
           return {
@@ -1362,8 +1370,9 @@ export async function executeTurnDecision(
     // «estado de la unidad» con selectedUnit → GPS de la activa, no listar 408.
     if (
       state.selectedUnit &&
-      (looksLikeUnitStatusOfActive(deps.originalMessage) ||
-        decision.reasoningCode === "CONTEXTUAL_REFERENCE")
+      (decision.reasoningCode === "CONTEXTUAL_REFERENCE" ||
+        decision.entity?.type === "contextual" ||
+        Boolean(decision.entity?.reference))
     ) {
       const fu = findUnitInFleetByRef(deps.fleetUnits, state.selectedUnit);
       if (fu) {
@@ -1457,16 +1466,6 @@ export async function executeTurnDecision(
       });
       if (r.kind === "reply") return { handler: "ticket", message: r.message, state };
     }
-  }
-
-  // Último recurso: pregunta conceptual no debe caer en menú fijo.
-  if (
-    looksLikeDomainQuestion(deps.originalMessage) ||
-    looksLikeCapabilitiesQuestion(deps.originalMessage) ||
-    looksLikeOutOfDomainQuestion(deps.originalMessage)
-  ) {
-    const ans = answerDomainQuestion(state, deps.originalMessage, null);
-    return { handler: ans.handler, message: ans.message, state };
   }
 
   return {

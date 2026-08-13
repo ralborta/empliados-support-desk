@@ -1,11 +1,14 @@
 /**
  * Policy engine determinístico post-LLM.
- * Acepta / pide aclaración / bloquea. NO reclasifica lenguaje.
+ * Trabaja solo sobre TurnDecision + estado.
+ * No clasifica intención por texto libre.
+ *
+ * Única excepción documentada: parsers de campo bajo expectedAnswerType
+ * (numeric_value / date / time) — completan fields, no eligen trámite.
  */
 import type { TurnDecision } from "./turn-decision-schema.js";
 import { safeClarifyDecision } from "./turn-decision-schema.js";
 import type { PilotConversationState } from "../conversation-state.js";
-import { isCompoundCancelContinueQuestion } from "./cancel-command.js";
 import {
   binaryClarifyForConflict,
   detectDecisionConflict,
@@ -15,18 +18,6 @@ import {
   DEFAULT_TENANT_TZ,
   reconcileLlmReadingFields,
 } from "./natural-datetime.js";
-import { maybeRewriteGeneralToDomain } from "./domain-knowledge.js";
-import {
-  looksLikeUnitCorrection,
-  looksLikeUnitStatusOfActive,
-} from "./unit-context.js";
-import {
-  DISCARD_OR_EDIT_QUESTION,
-  isAmbiguousCancelClarifyQuestion,
-  looksLikeFarewell,
-  looksLikeUnequivocalCancelRequest,
-} from "./turn-precedence.js";
-import { hasCancellableTramite } from "./cancel-active-tramite.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -49,6 +40,10 @@ export type PolicyResult =
 
 export type PolicyOptions = {
   timezone?: string;
+  /**
+   * Solo para parsers de expectedField / reconcile de fecha ya decidida.
+   * Nunca para inventar intent ni speechAct.
+   */
   message?: string;
   localNow?: string;
 };
@@ -79,6 +74,64 @@ function isMeterReadingContext(decision: TurnDecision, state: PilotConversationS
   );
 }
 
+function meterIntent(state: PilotConversationState): "odometer" | "horometer" {
+  return state.odometerDraft?.meterType === "horometro" ? "horometer" : "odometer";
+}
+
+/** Parser de campo: solo si el estado ya espera ese campo. */
+function fillExpectedFieldsFromMessage(
+  decision: TurnDecision,
+  state: PilotConversationState,
+  message: string,
+): TurnDecision {
+  const expected = state.lastAgentQuestionMeta?.expectedAnswerType;
+  if (!message.trim()) return decision;
+
+  if (expected === "numeric_value" && state.odometerDraft?.step === "await_value") {
+    const raw = message.trim();
+    if (/^\d+([.,]\d+)?$/.test(raw)) {
+      const n = Number(raw.replace(/\./g, "").replace(",", "."));
+      if (Number.isFinite(n)) {
+        return {
+          ...decision,
+          action: "provide_fields",
+          intent: meterIntent(state),
+          speechAct: "provide_field",
+          currentTramiteDisposition: "keep",
+          ambiguity: null,
+          reasoningCode: "PROVIDED_MISSING_FIELD",
+          fields: {
+            ...(decision.fields ?? {}),
+            numericValue: n,
+            value: n,
+          },
+        };
+      }
+    }
+  }
+
+  if (
+    (expected === "date" || expected === "time") &&
+    state.odometerDraft?.step === "await_fecha" &&
+    (decision.action === "clarify" ||
+      decision.speechAct === "clarify" ||
+      (!decision.fields?.date && !decision.fields?.time))
+  ) {
+    return {
+      ...decision,
+      action: "provide_fields",
+      intent: meterIntent(state),
+      speechAct: "provide_field",
+      currentTramiteDisposition: "keep",
+      ambiguity: null,
+      reasoningCode: "PROVIDED_MISSING_FIELD",
+      fields: decision.fields ?? { date: null, time: null, numericValue: null },
+    };
+  }
+
+  return decision;
+}
+
 export function applySemanticPolicy(
   decision: TurnDecision,
   state: PilotConversationState,
@@ -95,141 +148,132 @@ export function applySemanticPolicy(
     };
   }
 
-  // Preguntas conceptuales: no deben caer en menú general.
-  decision = maybeRewriteGeneralToDomain(decision, message, state);
-
-  // Consulta de empresa activa — nunca domain "unit" / definición de unidad.
-  if (decision.intent === "query_active_company" || decision.action === "query_context") {
-    decision = {
-      ...decision,
-      action: "query_context",
-      intent: "query_active_company",
-      currentTramiteDisposition: "keep",
-      reasoningCode: "QUERY_CONTEXT",
-      companyReference: decision.companyReference ?? "active",
-      answer: null,
-      domainQuestion: null,
-      ambiguity: null,
+  // Sin rewrite lingüístico: solo companyAction / intents ya estructurados.
+  if (decision.companyAction === "keep") {
+    return {
+      ok: true,
+      decision: {
+        ...decision,
+        action: "general",
+        intent: "query_active_company",
+        currentTramiteDisposition: "keep",
+        speechAct: decision.speechAct ?? "negate_intent",
+        companyAction: "keep",
+        answer: null,
+        ambiguity: null,
+      },
     };
-    return { ok: true, decision };
   }
+  if (decision.companyAction === "change") {
+    return {
+      ok: true,
+      decision: {
+        ...decision,
+        action: "general",
+        intent: "query_active_company",
+        currentTramiteDisposition: "keep",
+        speechAct: decision.speechAct ?? "change_intent",
+        companyAction: "change",
+        answer: null,
+        ambiguity: null,
+      },
+    };
+  }
+  if (decision.companyAction === "select") {
+    return {
+      ok: true,
+      decision: {
+        ...decision,
+        action: "general",
+        intent: "query_active_company",
+        currentTramiteDisposition: "keep",
+        companyAction: "select",
+        answer: null,
+        ambiguity: null,
+      },
+    };
+  }
+
   if (
-    /\bempresa\b/i.test(message) &&
-    (decision.action === "answer_domain_question" ||
-      decision.intent === "domain_knowledge" ||
-      decision.domainQuestion?.topic === "unit" ||
-      decision.action === "general")
+    decision.companyAction === "query_active" ||
+    decision.intent === "query_active_company" ||
+    decision.action === "query_context"
+  ) {
+    return {
+      ok: true,
+      decision: {
+        ...decision,
+        action: "query_context",
+        intent: "query_active_company",
+        currentTramiteDisposition: "keep",
+        reasoningCode: "QUERY_CONTEXT",
+        companyReference: decision.companyReference ?? "active",
+        companyAction: decision.companyAction ?? "query_active",
+        answer: null,
+        domainQuestion: null,
+        ambiguity: null,
+      },
+    };
+  }
+
+  // Parsers de expectedField (no routing de intención).
+  decision = fillExpectedFieldsFromMessage(decision, state, message);
+
+  // Draft esperando valor/fecha: si ya hay fields, forzar provide_fields.
+  if (
+    state.odometerDraft?.step === "await_value" &&
+    (decision.fields?.numericValue != null || decision.fields?.value != null)
   ) {
     decision = {
       ...decision,
-      action: "query_context",
-      intent: "query_active_company",
+      action: "provide_fields",
+      intent: meterIntent(state),
       currentTramiteDisposition: "keep",
-      reasoningCode: "QUERY_CONTEXT",
-      companyReference: "active",
-      answer: null,
-      domainQuestion: null,
       ambiguity: null,
+      reasoningCode: "PROVIDED_MISSING_FIELD",
+      fields: {
+        ...(decision.fields ?? {}),
+        numericValue: decision.fields?.numericValue ?? decision.fields?.value ?? null,
+      },
     };
-    return { ok: true, decision };
   }
-
-  // Cancelación inequívoca: la policy no puede promover confirm.
-  if (looksLikeUnequivocalCancelRequest(message) && hasCancellableTramite(state)) {
+  if (
+    state.odometerDraft?.step === "await_fecha" &&
+    (decision.fields?.date || decision.fields?.time)
+  ) {
     decision = {
       ...decision,
-      action: "answer_pending",
-      answer: "cancel",
-      currentTramiteDisposition: "cancel",
-      reasoningCode: "ANSWER_TO_PENDING",
+      action: "provide_fields",
+      intent: meterIntent(state),
+      currentTramiteDisposition: "keep",
       ambiguity: null,
+      reasoningCode: "PROVIDED_MISSING_FIELD",
     };
-    return { ok: true, decision };
   }
 
-  // Despedida / cierre: nunca confirmar escritura.
-  if (looksLikeFarewell(message) && state.pendingConfirmation) {
+  if (
+    (decision.speechAct === "farewell" || decision.speechAct === "courtesy") &&
+    state.pendingConfirmation
+  ) {
     const writePending =
       state.pendingConfirmation.action === "odoo_ticket_create" ||
       state.pendingConfirmation.action === "maintenance_write" ||
       state.pendingConfirmation.action === "odometer_write" ||
       state.pendingConfirmation.action === "certificate_issue";
     if (writePending) {
-      decision = {
-        ...decision,
-        action: "general",
-        intent: "none",
-        answer: null,
-        currentTramiteDisposition: "cancel",
-        reasoningCode: "GENERAL_CONVERSATION",
-        ambiguity: null,
+      return {
+        ok: true,
+        decision: {
+          ...decision,
+          action: "general",
+          intent: "none",
+          answer: null,
+          currentTramiteDisposition: "cancel",
+          reasoningCode: "GENERAL_CONVERSATION",
+          ambiguity: null,
+        },
       };
-      return { ok: true, decision };
     }
-  }
-
-  // Estado de la unidad activa → GPS, no unit_list masivo.
-  if (
-    state.selectedUnit &&
-    looksLikeUnitStatusOfActive(message) &&
-    (decision.intent === "unit_list" ||
-      decision.action === "start_intent" ||
-      decision.action === "general")
-  ) {
-    decision = {
-      ...decision,
-      action: "start_intent",
-      intent: "gps",
-      currentTramiteDisposition: "keep",
-      reasoningCode: "CONTEXTUAL_REFERENCE",
-      entity: {
-        type: "contextual",
-        reference: "selected_unit",
-        value: null,
-        matchMode: null,
-      },
-    };
-  }
-
-  // Corrección de unidad → select_entity contextual previous.
-  if (looksLikeUnitCorrection(message) && decision.action !== "answer_pending") {
-    decision = {
-      ...decision,
-      action: "select_entity",
-      intent: decision.intent === "none" ? "unit_search" : decision.intent,
-      currentTramiteDisposition: "keep",
-      reasoningCode: "CONTEXTUAL_REFERENCE",
-      entity: {
-        type: "contextual",
-        reference: "previous_selected_unit",
-        value: null,
-        matchMode: null,
-      },
-      answer: null,
-      ambiguity: null,
-    };
-  }
-
-  // «la misma» mal tipada como index → contextual selected (nunca índice 1).
-  if (
-    decision.action === "select_entity" &&
-    decision.entity?.type === "index" &&
-    (/\b(misma|esa|seleccionada|anterior)\b/i.test(message) ||
-      decision.reasoningCode === "CONTEXTUAL_REFERENCE")
-  ) {
-    decision = {
-      ...decision,
-      entity: {
-        type: "contextual",
-        reference: /\b(anterior|tenia|tenía|de\s+antes)\b/i.test(message)
-          ? "previous_selected_unit"
-          : "selected_unit",
-        value: null,
-        matchMode: null,
-      },
-      reasoningCode: "CONTEXTUAL_REFERENCE",
-      currentTramiteDisposition: "keep",
-    };
   }
 
   if (decision.action === "answer_domain_question" || decision.intent === "domain_knowledge") {
@@ -246,33 +290,49 @@ export function applySemanticPolicy(
     };
   }
 
-  // Conflictos contradictorios: no ejecutar / no confirmar / no modificar.
   const conflict = detectDecisionConflict(decision, state);
   if (conflict) {
     return conflictClarify(state, conflict.reason);
   }
 
+  const expected = state.lastAgentQuestionMeta?.expectedAnswerType;
   if (decision.action === "clarify") {
     if (!decision.ambiguity?.question?.trim()) {
       return { ok: false, reason: "clarify_without_question", decision: safeClarifyDecision() };
     }
-    let question = decision.ambiguity.question.trim();
-    // Nunca ofrecer pregunta compuesta cancelar/continuar: sí queda ambiguo.
-    if (isCompoundCancelContinueQuestion(question) || isAmbiguousCancelClarifyQuestion(question)) {
-      question = DISCARD_OR_EDIT_QUESTION;
+    if (
+      expected === "numeric_value" ||
+      expected === "date" ||
+      expected === "time" ||
+      expected === "unit"
+    ) {
+      return {
+        ok: false,
+        reason: "clarify_while_expecting_field",
+        decision: safeClarifyDecision(
+          expected === "numeric_value"
+            ? "Pasame el valor numérico de la lectura."
+            : expected === "unit"
+              ? "Decime la patente o el nombre de la unidad."
+              : "¿Me pasás la fecha y hora de la lectura?",
+        ),
+      };
     }
+    // Conservar la pregunta del LLM — sin reescribir a plantillas de descarte.
     return {
       ok: true,
       decision: {
         ...decision,
         answer: null,
         currentTramiteDisposition: "keep",
-        ambiguity: { ...decision.ambiguity, question },
+        ambiguity: {
+          ...decision.ambiguity,
+          question: decision.ambiguity.question.trim(),
+        },
       },
     };
   }
 
-  // Normalizar: disposition cancel + answer ausente ⇒ answer cancel.
   if (
     decision.action === "answer_pending" &&
     decision.currentTramiteDisposition === "cancel" &&
@@ -284,7 +344,6 @@ export function applySemanticPolicy(
     };
   }
 
-  // No reiniciar el mismo trámite pendiente vía switch/start.
   if (
     (decision.action === "switch_intent" ||
       decision.action === "suspend_and_start" ||
@@ -335,7 +394,7 @@ export function applySemanticPolicy(
         decision: safeClarifyDecision("¿Me pasás la patente o el nombre de la unidad?"),
       };
     }
-    if (/\s/.test(v) && v.split(/\s+/).length > 3) {
+    if (v.split(/\s+/).length > 3) {
       return {
         ok: false,
         reason: "entity_too_verbose",
@@ -344,80 +403,61 @@ export function applySemanticPolicy(
     }
   }
 
-  if (decision.fields?.date) {
-    if (!isValidDate(decision.fields.date)) {
-      return {
-        ok: false,
-        reason: "invalid_date",
-        decision: safeClarifyDecision("No pude validar esa fecha. ¿Me la decís de nuevo?"),
-      };
-    }
+  if (decision.fields?.date && !isValidDate(decision.fields.date)) {
+    return {
+      ok: false,
+      reason: "invalid_date",
+      decision: safeClarifyDecision("No pude validar esa fecha. ¿Me la decís de nuevo?"),
+    };
   }
-  if (decision.fields?.time) {
-    if (!isValidTime(decision.fields.time)) {
-      return {
-        ok: false,
-        reason: "invalid_time",
-        decision: safeClarifyDecision("No pude validar esa hora. Usá formato 11:30."),
-      };
-    }
+  if (decision.fields?.time && !isValidTime(decision.fields.time)) {
+    return {
+      ok: false,
+      reason: "invalid_time",
+      decision: safeClarifyDecision("No pude validar esa hora. Usá formato 11:30."),
+    };
   }
 
-  // Validación determinística de fechas naturales (weekday / futuro / ejemplo inducido).
+  // Reconciliar fecha/hora solo si el LLM ya aportó fields de fecha/hora.
   if (
     message &&
     isMeterReadingContext(decision, state) &&
-    (decision.action === "provide_fields" ||
-      decision.action === "correct_fields" ||
-      (decision.action === "answer_pending" && (decision.fields?.date || decision.fields?.time)))
+    (decision.action === "provide_fields" || decision.action === "correct_fields") &&
+    (decision.fields?.date || decision.fields?.time)
   ) {
-    const hasDateSignal =
-      Boolean(decision.fields?.date) ||
-      Boolean(decision.fields?.time) ||
-      /\b(hoy|ayer|anteayer|anoche|finde|tardecita|mediod[ií]a|domingo|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|\d{1,2}\/\d{1,2}\/\d{2,4}|tipo\s+\d)\b/i.test(
-        message,
-      );
-    if (hasDateSignal) {
-      const reconciled = reconcileLlmReadingFields({
-        message,
-        timezone: tz,
-        localNow: opts?.localNow,
-        llmDate: decision.fields?.date,
-        llmTime: decision.fields?.time,
-      });
-      if (!reconciled.ok) {
-        return {
-          ok: false,
-          reason:
-            reconciled.reason === "future_explicit"
-              ? "future_date"
-              : reconciled.reason === "needs_precision"
-                ? "needs_time_precision"
-                : "date_weekday_mismatch",
-          decision: safeClarifyDecision(reconciled.question),
-        };
-      }
-      const nextFields = {
-        ...(decision.fields ?? {}),
-        date: reconciled.date,
-        time: reconciled.time,
-        timezone: decision.fields?.timezone ?? tz,
-      };
-      // time_only: no inventar date; dejar null para que execute conserve draft.
-      if (reconciled.diagnosis.cause === "time_only") {
-        nextFields.date = null;
-      }
-      decision = {
-        ...decision,
-        fields: nextFields,
-        action:
-          decision.action === "answer_pending" && (reconciled.date || reconciled.time)
-            ? "provide_fields"
-            : decision.action,
+    const reconciled = reconcileLlmReadingFields({
+      message,
+      timezone: tz,
+      localNow: opts?.localNow,
+      llmDate: decision.fields?.date,
+      llmTime: decision.fields?.time,
+    });
+    if (!reconciled.ok) {
+      return {
+        ok: false,
+        reason:
+          reconciled.reason === "future_explicit"
+            ? "future_date"
+            : reconciled.reason === "needs_precision"
+              ? "needs_time_precision"
+              : "date_weekday_mismatch",
+        decision: safeClarifyDecision(reconciled.question),
       };
     }
+    const nextFields = {
+      ...(decision.fields ?? {}),
+      date: reconciled.date,
+      time: reconciled.time,
+      timezone: decision.fields?.timezone ?? tz,
+    };
+    if (reconciled.diagnosis.cause === "time_only") {
+      nextFields.date = null;
+    }
+    decision = {
+      ...decision,
+      fields: nextFields,
+    };
   } else if (decision.fields?.date && decision.action === "provide_fields") {
-    // Fallback legacy sin mensaje: solo snap futuro en lecturas.
     const today = new Date().toLocaleDateString("en-CA", { timeZone: tz });
     if (decision.fields.date > today && isMeterReadingContext(decision, state)) {
       const [y, m, d] = decision.fields.date.split("-").map(Number);

@@ -211,23 +211,36 @@ describe("sesión: empresa / cancel / farewell", () => {
     assert.doesNotMatch(msg, /móvil de la flota|Una unidad es/i);
   });
 
-  it("policy reescribe domain unit → query_active_company si habla de empresa", () => {
+  it("policy honra query_active_company estructurado", () => {
     const st = seedCompanyActive();
     const raw: TurnDecision = {
-      action: "answer_domain_question",
-      intent: "domain_knowledge",
-      confidence: 0.8,
+      action: "query_context",
+      intent: "query_active_company",
+      confidence: 0.9,
       currentTramiteDisposition: "keep",
-      reasoningCode: "DOMAIN_QUESTION",
-      domainQuestion: {
-        topic: "unit",
-        questionType: "definition",
-        resumeActiveTramite: false,
-      },
+      reasoningCode: "QUERY_CONTEXT",
+      companyAction: "query_active",
+      companyReference: "active",
     };
-    const pol = applySemanticPolicy(raw, st, { message: "en q empresa estoy ahora?" });
+    const pol = applySemanticPolicy(raw, st);
     assert.equal(pol.decision.action, "query_context");
     assert.equal(pol.decision.intent, "query_active_company");
+  });
+
+  it("policy companyAction=keep no cambia contexto", () => {
+    const st = seedCompanyActive();
+    const raw: TurnDecision = {
+      action: "general",
+      intent: "query_active_company",
+      confidence: 0.95,
+      currentTramiteDisposition: "keep",
+      reasoningCode: "GENERAL_CONVERSATION",
+      speechAct: "negate_intent",
+      companyAction: "keep",
+      negatedAction: "change_company",
+    };
+    const pol = applySemanticPolicy(raw, st);
+    assert.equal(pol.decision.companyAction, "keep");
   });
 
   it("execute query_context responde empresa y no unidad", async () => {
@@ -351,8 +364,9 @@ describe("sesión: empresa / cancel / farewell", () => {
       answer: "confirm",
       currentTramiteDisposition: "keep",
       reasoningCode: "ANSWER_TO_PENDING",
+      speechAct: "farewell",
     };
-    const pol = applySemanticPolicy(raw, st, { message: "gracias chau" });
+    const pol = applySemanticPolicy(raw, st);
     assert.notEqual(pol.decision.answer, "confirm");
     assert.equal(pol.decision.currentTramiteDisposition, "cancel");
   });
@@ -363,8 +377,48 @@ describe("sesión: empresa / cancel / farewell", () => {
     const st1 = getPilotConversationState(TENANT, PHONE)!;
     assert.equal(st1.pendingConfirmation, null);
     assert.ok(st1.selectedUnit);
-    const msg = msgOf(await turn("pasame el estado de la misma unidad"));
-    assert.match(msg, /AD 307 VQ|Funcionamiento|reporte|posición|posicion|señal|senal/i);
-    assert.doesNotMatch(msg, /mantenimiento|CONFIRMO|Recibí el dato/i);
+    // Sin atajo textual: ejecutar GPS con TurnDecision estructurada.
+    const { executeTurnDecision } = await import("./execute-decision.js");
+    const exec = await executeTurnDecision(
+      {
+        action: "start_intent",
+        intent: "gps",
+        confidence: 0.95,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "CONTEXTUAL_REFERENCE",
+        speechAct: "start_intent",
+        entity: {
+          type: "contextual",
+          reference: "selected_unit",
+          value: null,
+          matchMode: null,
+        },
+        answer: null,
+        fields: null,
+        ambiguity: null,
+      },
+      st1,
+      {
+        messageId: "gps-after-cancel",
+        env: process.env,
+        fleetUnits: [
+          {
+            movil_id: 501,
+            unidad: "M900-501",
+            patente: "AD307VQ",
+            odometro: 1000,
+            horometro: 10,
+            ultimo_reporte: { hace_segundos: 30 },
+          },
+        ],
+        originalMessage: "pasame el reporte GPS",
+        showListing: () => {},
+        askGpsConfirmation: () => "ask",
+        deliverGpsReport: (_s, u) => `Reporte GPS de ${u.patente}: Funcionamiento OK.`,
+        handleGpsSideQuery: async ({ state }) => ({ message: "side", state }),
+      },
+    );
+    assert.match(exec.message, /AD307VQ|Funcionamiento|GPS|reporte/i);
+    assert.doesNotMatch(exec.message, /mantenimiento|CONFIRMO|reinicié/i);
   });
 });

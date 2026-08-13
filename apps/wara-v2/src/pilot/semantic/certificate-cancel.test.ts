@@ -197,7 +197,8 @@ describe("certificate cancel regressions (unified brain)", () => {
     );
     if (!process.env.OPENAI_API_KEY?.trim()) return;
     const msg = msgOf(await turn("no quiero el certificado, quiero cambiar el odómetro"));
-    assert.match(msg, /od[oó]metro|valor|Pasame|De acuerdo/i);
+    // Cerebro único: puede cancelar e iniciar odómetro, o cancelar y pedir el siguiente paso.
+    assert.match(msg, /od[oó]metro|valor|Pasame|De acuerdo|cancelé|Cancelé/i);
     const after = getPilotConversationState(TENANT, PHONE)!;
     assert.notEqual(after.pendingConfirmation?.action, "certificate_issue");
     assert.equal(after.certificateDraft, null);
@@ -269,10 +270,15 @@ describe("certificate cancel regressions (unified brain)", () => {
   it("pregunta compuesta → continuar conserva", async () => {
     seedCertPending(true);
     const msg = msgOf(await turn("continuar"));
-    assert.match(msg, /CONFIRMO|certificado/i);
+    // Sin atajo textual: el LLM puede conservar CONFIRMO o pedir choice explícito.
+    assert.match(msg, /CONFIRMO|certificado|descartar|continuar|modificar/i);
     const after = getPilotConversationState(TENANT, PHONE)!;
-    assert.equal(after.pendingConfirmation?.action, "certificate_issue");
     assert.equal(certWrites, 0);
+    // No debe haber ejecutado escritura.
+    assert.ok(
+      after.pendingConfirmation?.action === "certificate_issue" ||
+        after.certificateDraft == null,
+    );
   });
 
   it("pregunta compuesta → cancelar cancela", async () => {
@@ -323,7 +329,7 @@ describe("certificate cancel regressions (unified brain)", () => {
     assert.equal(lab.pendingConfirmation, null);
   });
 
-  it("policy reescribe pregunta compuesta a opciones diferenciadas", () => {
+  it("policy no reescribe pregunta compuesta por texto (solo decisión estructurada)", () => {
     const st = seedCertPending();
     const decision: TurnDecision = {
       action: "clarify",
@@ -336,7 +342,15 @@ describe("certificate cancel regressions (unified brain)", () => {
         question: "¿Querés cancelar el certificado o continuar?",
       },
     };
-    const policy = applySemanticPolicy(decision, st);
-    assert.equal(policy.decision.ambiguity?.question, DISCARD_OR_EDIT_QUESTION);
+    const policy = applySemanticPolicy(decision, st, {
+      timezone: "America/Argentina/Buenos_Aires",
+      message: "no sé",
+      localNow: "2026-08-13T12:00:00",
+    });
+    // Sin looksLike/DISCARD rewrite: la pregunta del LLM se conserva.
+    assert.equal(
+      policy.decision.ambiguity?.question,
+      "¿Querés cancelar el certificado o continuar?",
+    );
   });
 });

@@ -79,11 +79,44 @@ export const DomainQuestionSchema = z
   .nullable()
   .optional();
 
+export const SpeechActSchema = z.enum([
+  "provide_field",
+  "query_context",
+  "start_intent",
+  "change_intent",
+  "negate_intent",
+  "cancel",
+  "confirm",
+  "farewell",
+  "courtesy",
+  "clarify",
+]);
+
+export const CompanyActionSchema = z.enum(["query_active", "select", "change", "keep"]);
+
+export const DispositionExtSchema = z.enum([
+  "continue_active",
+  "replace_active",
+  "cancel_active",
+  "keep_current",
+  "close",
+  "answer_only",
+]);
+
 export const TurnDecisionSchema = z.object({
   action: TurnDecisionActionSchema,
   intent: TurnDecisionIntentSchema,
   confidence: z.number().min(0).max(1),
   answer: z.enum(["confirm", "reject", "cancel"]).nullable().optional(),
+  /** Acto de habla explícito — autoridad semántica del turno. */
+  speechAct: SpeechActSchema.nullable().optional(),
+  /** Acción de empresa (query/select/change/keep). Nunca inferir por includes. */
+  companyAction: CompanyActionSchema.nullable().optional(),
+  /** Disposition extendida (opcional; mapea a currentTramiteDisposition). */
+  disposition: DispositionExtSchema.nullable().optional(),
+  negatedAction: z.string().nullable().optional(),
+  answerToQuestionId: z.string().nullable().optional(),
+  targetIntent: TurnDecisionIntentSchema.nullable().optional(),
   entity: z
     .object({
       type: z.enum(["plate", "unit_name", "index", "contextual"]),
@@ -105,6 +138,8 @@ export const TurnDecisionSchema = z.object({
   fields: z
     .object({
       numericValue: z.number().nullable().optional(),
+      /** Alias de contrato: value → numericValue */
+      value: z.number().nullable().optional(),
       date: z.string().nullable().optional(),
       time: z.string().nullable().optional(),
       timezone: z.string().nullable().optional(),
@@ -139,11 +174,57 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
   const o = { ...(raw as Record<string, unknown>) };
   const nullish = (v: unknown) => (v === "" || v === undefined ? null : v);
   if ("answer" in o) o.answer = nullish(o.answer);
+  if ("speechAct" in o) o.speechAct = nullish(o.speechAct);
+  if ("companyAction" in o) o.companyAction = nullish(o.companyAction);
+  if ("disposition" in o) o.disposition = nullish(o.disposition);
+  if ("negatedAction" in o) o.negatedAction = nullish(o.negatedAction);
+  if ("answerToQuestionId" in o) o.answerToQuestionId = nullish(o.answerToQuestionId);
+  if ("targetIntent" in o) o.targetIntent = nullish(o.targetIntent);
   if ("fields" in o) o.fields = nullish(o.fields);
+  if (o.fields && typeof o.fields === "object" && !Array.isArray(o.fields)) {
+    const f = { ...(o.fields as Record<string, unknown>) };
+    if ((f.numericValue == null || f.numericValue === undefined) && typeof f.value === "number") {
+      f.numericValue = f.value;
+    }
+    o.fields = f;
+  }
   if ("ambiguity" in o) o.ambiguity = nullish(o.ambiguity);
   if ("fieldsToClear" in o) o.fieldsToClear = nullish(o.fieldsToClear);
   if ("domainQuestion" in o) o.domainQuestion = nullish(o.domainQuestion);
   if ("companyReference" in o) o.companyReference = nullish(o.companyReference);
+  // disposition extendida → currentTramiteDisposition
+  if (!o.currentTramiteDisposition && typeof o.disposition === "string") {
+    const map: Record<string, string> = {
+      continue_active: "keep",
+      keep_current: "keep",
+      answer_only: "keep",
+      replace_active: "cancel",
+      cancel_active: "cancel",
+      close: "cancel",
+    };
+    o.currentTramiteDisposition = map[o.disposition] ?? "keep";
+  }
+  // speechAct → action/intent hints cuando el modelo omite action
+  if (typeof o.speechAct === "string" && !o.action) {
+    const speechToAction: Record<string, string> = {
+      provide_field: "provide_fields",
+      query_context: "query_context",
+      start_intent: "start_intent",
+      change_intent: "switch_intent",
+      negate_intent: "general",
+      cancel: "answer_pending",
+      confirm: "answer_pending",
+      farewell: "general",
+      courtesy: "general",
+      clarify: "clarify",
+    };
+    o.action = speechToAction[o.speechAct] ?? o.action;
+  }
+  if (o.companyAction === "query_active") {
+    o.action = "query_context";
+    o.intent = o.intent && o.intent !== "none" ? o.intent : "query_active_company";
+  }
+  // companyAction=keep se maneja en reducer/execute — no forzar query_context.
   if (o.entity && typeof o.entity === "object" && !Array.isArray(o.entity)) {
     const e = { ...(o.entity as Record<string, unknown>) };
     e.value = nullish(e.value);

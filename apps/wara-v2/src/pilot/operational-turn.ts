@@ -112,6 +112,10 @@ import {
   cancelActiveOrPendingTramite,
 } from "./semantic/cancel-active-tramite.js";
 import { looksLikeFarewell, bindPendingConfirmationQuestion } from "./semantic/turn-precedence.js";
+import {
+  applyCompanyChangeReset,
+  reduceConversationState,
+} from "./semantic/conversation-reduce.js";
 import { detectOdometerFieldCorrection } from "./semantic/field-correction.js";
 import {
   FECHA_LECTURA_QUESTION,
@@ -721,7 +725,7 @@ export async function resolveOperationalTurn(input: {
     };
   }
 
-  if (looksLikeChangeCompanyRequest(text)) {
+  if (!isUnifiedSemanticBrainEnabled(env) && looksLikeChangeCompanyRequest(text)) {
     deletePilotConversationState(tenantId, input.phone);
     state = createEmptyPilotState({
       tenantId,
@@ -737,7 +741,8 @@ export async function resolveOperationalTurn(input: {
     };
   }
 
-  if (requiresCompanySelection(state)) {
+  // Legacy: selección de empresa por heurística textual. Con cerebro unificado, va al LLM.
+  if (requiresCompanySelection(state) && !isUnifiedSemanticBrainEnabled(env)) {
     if (looksLikeCompanySelection(text)) {
       const msg = await selectCompany(state, text, env);
       savePilotConversationState(state);
@@ -758,565 +763,8 @@ export async function resolveOperationalTurn(input: {
   if (isUnifiedSemanticBrainEnabled(env)) {
     appendUserTurn(state, text);
 
-    // Saludo / presentación Atilio (antes del LLM).
-    if (looksLikeGreetingOnly(text)) {
-      const greet = buildGreetingReply(state);
-      appendAssistantTurn(state, greet.message, null);
-      savePilotConversationState(state);
-      recordLabTurnDiagnosis({
-        at: new Date().toISOString(),
-        brain_version: "unified_v1",
-        action: "general",
-        intent: "none",
-        answer: null,
-        currentTramiteDisposition: "keep",
-        confidence: 1,
-        reasoningCode: "GENERAL_CONVERSATION",
-        handler: greet.handler,
-        latency_ms: null,
-        model: null,
-        clarification: false,
-        legacy_text_reclassification_attempted: false,
-        legacy_reclass_reasons: [],
-        llm_called: false,
-        error: null,
-      });
-      return { kind: "reply", message: greet.message, state };
-    }
-
-    // GPS pendiente heredado: sí/dale → ejecutar; no → cancelar consulta; re-pedido → ejecutar.
-    if (state.pendingConfirmation?.action === "gps_report") {
-      const gpsPending = await resolveInheritedGpsPending({
-        state,
-        text,
-        env,
-      });
-      if (gpsPending) {
-        appendAssistantTurn(state, gpsPending.message, null);
-        savePilotConversationState(state);
-        recordLabTurnDiagnosis({
-          at: new Date().toISOString(),
-          brain_version: "unified_v1",
-          action: gpsPending.action,
-          intent: "gps",
-          answer: gpsPending.answer,
-          currentTramiteDisposition: "keep",
-          confidence: 1,
-          reasoningCode: gpsPending.reasoning,
-          handler: gpsPending.handler,
-          latency_ms: null,
-          model: null,
-          clarification: false,
-          legacy_text_reclassification_attempted: false,
-          legacy_reclass_reasons: [],
-          llm_called: false,
-          error: null,
-        });
-        return { kind: "reply", message: gpsPending.message, state };
-      }
-    }
-
-    // Lectura GPS con unidad ya resuelta: invocar herramienta de inmediato (sin confirmación).
-    if (
-      state.selectedUnit &&
-      !state.pendingConfirmation &&
-      (looksLikeUnitStatusOfActive(text) || looksLikeGpsReportRequest(text)) &&
-      !looksLikeChangeUnit(text) &&
-      !/\b(odometro|odómetro|horometro|horómetro|certificado|mantenimiento|ticket)\b/i.test(text)
-    ) {
-      const fleet = await fetchFleet(state, env);
-      if (fleet.ok) {
-        const unit = findUnitInFleetByRef(fleet.units, state.selectedUnit);
-        if (unit) {
-          const msg = deliverGpsReport(state, unit);
-          appendAssistantTurn(state, msg, null);
-          savePilotConversationState(state);
-          recordLabTurnDiagnosis({
-            at: new Date().toISOString(),
-            brain_version: "unified_v1",
-            action: "start_intent",
-            intent: "gps",
-            answer: null,
-            currentTramiteDisposition: "keep",
-            confidence: 1,
-            reasoningCode: "NEW_EXPLICIT_INTENT",
-            handler: "gps",
-            latency_ms: null,
-            model: null,
-            clarification: false,
-            legacy_text_reclassification_attempted: false,
-            legacy_reclass_reasons: [],
-            llm_called: false,
-            error: null,
-          });
-          return { kind: "reply", message: msg, state };
-        }
-      }
-    }
-
-    // Atajo: corrección de unidad («no era esa» / «la que tenía»).
-    if (looksLikeUnitCorrection(text)) {
-      const fleet = await fetchFleet(state, env);
-      const fleetUnits = fleet.ok ? fleet.units : [];
-      const correctionDecision = {
-        action: "select_entity" as const,
-        intent: "unit_search" as const,
-        confidence: 1,
-        currentTramiteDisposition: "keep" as const,
-        reasoningCode: "CONTEXTUAL_REFERENCE" as const,
-        entity: {
-          type: "contextual" as const,
-          reference: "previous_selected_unit" as const,
-          value: null,
-          matchMode: null,
-        },
-        answer: null,
-        fields: null,
-        fieldsToClear: null,
-        ambiguity: null,
-      };
-      const exec = await executeTurnDecision(correctionDecision, state, {
-        messageId: input.messageId,
-        env,
-        fleetUnits,
-        originalMessage: text,
-        showListing: (s, l, m) => {
-          showListing(s, l, m);
-        },
-        askGpsConfirmation,
-        deliverGpsReport,
-        handleGpsSideQuery: async (sideInput) => {
-          const side = await handleGpsSideQueryDuringTramite(sideInput);
-          return { message: side.message, state: side.state };
-        },
-      });
-      appendAssistantTurn(state, exec.message, correctionDecision);
-      savePilotConversationState(state);
-      recordLabTurnDiagnosis({
-        at: new Date().toISOString(),
-        brain_version: "unified_v1",
-        action: "select_entity",
-        intent: "unit_search",
-        answer: null,
-        currentTramiteDisposition: "keep",
-        confidence: 1,
-        reasoningCode: "CONTEXTUAL_REFERENCE",
-        handler: exec.handler,
-        latency_ms: null,
-        model: null,
-        clarification: false,
-        legacy_text_reclassification_attempted: false,
-        legacy_reclass_reasons: [],
-        llm_called: false,
-        error: null,
-      });
-      return { kind: "reply", message: exec.message, state };
-    }
-
-    // Atajo: cancelar inequívoco por estado (sin LLM). Frases mixtas → cerebro.
-    if (shouldUseCancelShortcut(text, state)) {
-      const cancelled = cancelActiveOrPendingTramite(state);
-      appendAssistantTurn(state, cancelled.message, null);
-      savePilotConversationState(state);
-      logBrainMetrics({
-        brain_version: "unified_v1",
-        model: null,
-        latency_ms: null,
-        decision_action: "answer_pending",
-        decision_intent:
-          cancelled.cancelled === "certificate"
-            ? "certificate"
-            : cancelled.cancelled === "odometer"
-              ? "odometer"
-              : cancelled.cancelled === "gps"
-                ? "gps"
-                : "none",
-        confidence: 1,
-        handler: "cancel_shortcut",
-        clarification: false,
-        input_tokens: null,
-        output_tokens: null,
-        error: null,
-      });
-      recordLabTurnDiagnosis({
-        at: new Date().toISOString(),
-        brain_version: "unified_v1",
-        action: "answer_pending",
-        intent:
-          cancelled.cancelled === "certificate"
-            ? "certificate"
-            : cancelled.cancelled === "odometer"
-              ? "odometer"
-              : cancelled.cancelled === "gps"
-                ? "gps"
-                : "none",
-        answer: "cancel",
-        currentTramiteDisposition: cancelled.cancelled === "none" ? "keep" : "cancel",
-        confidence: 1,
-        reasoningCode: "ANSWER_TO_PENDING",
-        handler: "cancel_shortcut",
-        latency_ms: null,
-        model: null,
-        clarification: false,
-        legacy_text_reclassification_attempted: false,
-        legacy_reclass_reasons: [],
-        llm_called: false,
-        error: null,
-      });
-      return { kind: "reply", message: cancelled.message, state };
-    }
-
-    // Despedida con escritura pendiente: NUNCA confirmar — cancelar/descartar.
-    if (
-      looksLikeFarewell(text) &&
-      state.pendingConfirmation &&
-      state.pendingConfirmation.action !== "gps_report"
-    ) {
-      const pendingAction = state.pendingConfirmation.action;
-      const cancelled = cancelActiveOrPendingTramite(state);
-      const msg =
-        pendingAction === "odoo_ticket_create"
-          ? "De acuerdo. No generé el ticket. Cuando quieras, seguimos."
-          : cancelled.message;
-      appendAssistantTurn(state, msg, null);
-      savePilotConversationState(state);
-      recordLabTurnDiagnosis({
-        at: new Date().toISOString(),
-        brain_version: "unified_v1",
-        action: "general",
-        intent: "none",
-        answer: null,
-        currentTramiteDisposition: "cancel",
-        confidence: 1,
-        reasoningCode: "GENERAL_CONVERSATION",
-        handler: "farewell_shortcut",
-        latency_ms: null,
-        model: null,
-        clarification: false,
-        legacy_text_reclassification_attempted: false,
-        legacy_reclass_reasons: [],
-        llm_called: false,
-        error: null,
-      });
-      return { kind: "reply", message: msg, state };
-    }
-
-    // Respuesta vinculada a cancel_confirmation: "sí" → cancelar (no reabrir formulario).
-    if (
-      state.pendingConfirmation &&
-      state.lastAgentQuestionMeta?.expectedAnswerType === "cancel_confirmation" &&
-      looksLikeBriefConfirmation(text) &&
-      !looksLikeFarewell(text)
-    ) {
-      const cancelled = cancelActiveOrPendingTramite(state);
-      appendAssistantTurn(state, cancelled.message, null);
-      savePilotConversationState(state);
-      recordLabTurnDiagnosis({
-        at: new Date().toISOString(),
-        brain_version: "unified_v1",
-        action: "answer_pending",
-        intent: "none",
-        answer: "confirm",
-        currentTramiteDisposition: "cancel",
-        confidence: 1,
-        reasoningCode: "ANSWER_TO_PENDING",
-        handler: "cancel_confirm_shortcut",
-        latency_ms: null,
-        model: null,
-        clarification: false,
-        legacy_text_reclassification_attempted: false,
-        legacy_reclass_reasons: [],
-        llm_called: false,
-        error: null,
-      });
-      return { kind: "reply", message: cancelled.message, state };
-    }
-
-    // Atajo: corrección de campos (fecha/hora/valor) — no cancelar.
-    {
-      const localNow = DateTime.now()
-        .setZone(DEFAULT_TENANT_TZ)
-        .toFormat("yyyy-MM-dd'T'HH:mm:ss");
-      const correction = detectOdometerFieldCorrection(text, state, {
-        timezone: DEFAULT_TENANT_TZ,
-        localNow,
-      });
-      if (correction) {
-        const fleet = await fetchFleet(state, env);
-        const fleetUnits = fleet.ok ? fleet.units : [];
-        let reclass = { attempted: false, reasons: [] as string[] };
-        const exec = await runWithUnifiedBrainContext(
-          {
-            originalMessage: text,
-            decisionAction: correction.action,
-            decisionIntent: correction.intent,
-          },
-          async () => {
-            const r = await executeTurnDecision(correction, state, {
-              messageId: input.messageId,
-              env,
-              fleetUnits,
-              originalMessage: text,
-              showListing: (s, l, m) => {
-                showListing(s, l, m);
-              },
-              askGpsConfirmation,
-              deliverGpsReport,
-              handleGpsSideQuery: async (sideInput) => {
-                const side = await handleGpsSideQueryDuringTramite(sideInput);
-                return { message: side.message, state: side.state };
-              },
-            });
-            reclass = getLegacyReclassAttempt();
-            return r;
-          },
-        );
-        appendAssistantTurn(state, exec.message, correction);
-        savePilotConversationState(state);
-        recordLabTurnDiagnosis({
-          at: new Date().toISOString(),
-          brain_version: "unified_v1",
-          action: correction.action,
-          intent: correction.intent,
-          answer: null,
-          currentTramiteDisposition: "keep",
-          confidence: correction.confidence,
-          reasoningCode: correction.reasoningCode,
-          handler: "field_correction_shortcut",
-          latency_ms: null,
-          model: null,
-          clarification: false,
-          legacy_text_reclassification_attempted: reclass.attempted,
-          legacy_reclass_reasons: reclass.reasons,
-          llm_called: false,
-          error: null,
-        });
-        return { kind: "reply", message: exec.message, state };
-      }
-    }
-
-    // Atajo: confirmación reforzada de valor anómalo.
-    if (state.odometerDraft?.step === "await_anomaly_confirm") {
-      const draft = state.odometerDraft;
-      const meterType = draft.meterType ?? "odometro";
-      if (looksLikeAnomalyAck(text)) {
-        draft.valueNew = draft.anomalyCandidate ?? draft.valueNew;
-        draft.anomalyCandidate = null;
-        draft.step = "await_fecha";
-        const msg = FECHA_LECTURA_QUESTION;
-        appendAssistantTurn(state, msg, null);
-        savePilotConversationState(state);
-        recordLabTurnDiagnosis({
-          at: new Date().toISOString(),
-          brain_version: "unified_v1",
-          action: "answer_pending",
-          intent: meterType === "horometro" ? "horometer" : "odometer",
-          answer: "confirm",
-          currentTramiteDisposition: "keep",
-          confidence: 1,
-          reasoningCode: "ANSWER_TO_PENDING",
-          handler: "anomaly_ack_shortcut",
-          latency_ms: null,
-          model: null,
-          clarification: false,
-          legacy_text_reclassification_attempted: false,
-          legacy_reclass_reasons: [],
-          llm_called: false,
-          error: null,
-        });
-        return { kind: "reply", message: msg, state };
-      }
-      if (looksLikeAnomalyReject(text)) {
-        draft.anomalyCandidate = null;
-        draft.valueNew = null;
-        draft.step = "await_value";
-        const msg = `Ok, descarté ese valor. Pasame el ${meterType === "horometro" ? "horómetro (hs)" : "odómetro (km)"} correcto.`;
-        appendAssistantTurn(state, msg, null);
-        savePilotConversationState(state);
-        return { kind: "reply", message: msg, state };
-      }
-      const msg = formatAnomalyQuestion(draft.anomalyCandidate ?? 0, meterType);
-      appendAssistantTurn(state, msg, null);
-      savePilotConversationState(state);
-      return { kind: "reply", message: msg, state };
-    }
-
-    // Atajo: continuar → reponer resumen/confirmación pendiente (no ejecutar).
-    if (isUnequivocalContinueCommand(text) && state.pendingConfirmation?.question) {
-      const pending = state.pendingConfirmation;
-      let reply = pending.question;
-      if (isCompoundCancelContinueQuestion(reply) && pending.action === "certificate_issue") {
-        reply =
-          `Puedo solicitar el certificado de cobertura de ${pending.unit.label}.\n` +
-          `¿Querés que lo genere?\n\n` +
-          `Si está correcto, respondé CONFIRMO.`;
-        state.pendingConfirmation = { ...pending, question: reply };
-      }
-      state.lastAgentQuestion = reply;
-      appendAssistantTurn(state, reply, null);
-      savePilotConversationState(state);
-      recordLabTurnDiagnosis({
-        at: new Date().toISOString(),
-        brain_version: "unified_v1",
-        action: "answer_pending",
-        intent: "none",
-        answer: null,
-        currentTramiteDisposition: "keep",
-        confidence: 1,
-        reasoningCode: "ANSWER_TO_PENDING",
-        handler: "continue_shortcut",
-        latency_ms: null,
-        model: null,
-        clarification: false,
-        legacy_text_reclassification_attempted: false,
-        legacy_reclass_reasons: [],
-        llm_called: false,
-        error: null,
-      });
-      return { kind: "reply", message: reply, state };
-    }
-
-    // Atajos inequívocos permitidos (sin LLM)
-    const listingFresh = isListingFresh(state.lastListing);
-    const numericIdx = parseNumericListSelection(text) ?? parseOrdinalListSelection(text);
-    if (numericIdx != null && listingFresh) {
-      const picked = resolveUnitFromListing(state.lastListing!, numericIdx);
-      if (picked) {
-        const fleet = await fetchFleet(state, env);
-        if (fleet.ok) {
-          const unit = findUnitInFleetByRef(fleet.units, picked);
-          if (unit) {
-            ensurePendingForAwaitingUnit(state, input.messageId);
-            const parentBefore = resolveParentIntentForUnitSelection(state);
-            const msg = continueAfterUnitResolved(state, unit, {
-              parentIntent: parentBefore,
-            }).message;
-            recordListingPick(state, numericIdx);
-            appendAssistantTurn(state, msg, null);
-            savePilotConversationState(state);
-            logBrainMetrics({
-              brain_version: "unified_v1",
-              model: null,
-              latency_ms: null,
-              decision_action: "select_entity",
-              decision_intent: parentBefore ?? "unit_search",
-              confidence: 1,
-              handler: "numeric_list_shortcut",
-              clarification: false,
-              input_tokens: null,
-              output_tokens: null,
-              error: null,
-            });
-            recordLabTurnDiagnosis({
-              at: new Date().toISOString(),
-              brain_version: "unified_v1",
-              action: "select_entity",
-              intent: parentBefore ?? "unit_search",
-              confidence: 1,
-              reasoningCode: "CONTEXTUAL_REFERENCE",
-              handler: "numeric_list_shortcut",
-              latency_ms: null,
-              model: null,
-              clarification: false,
-              legacy_text_reclassification_attempted: false,
-              legacy_reclass_reasons: [],
-              llm_called: false,
-              error: null,
-            });
-            return { kind: "reply", message: msg, state };
-          }
-        }
-      }
-    }
-
-    if (
-      state.pendingConfirmation &&
-      /^confirmo\b/i.test(text.trim()) &&
-      text.trim().length <= 24
-    ) {
-      // CONFIRMO del usuario con operación pendiente — atajo (texto real, no sintético).
-      if (
-        !state.lastAgentQuestionMeta ||
-        state.lastAgentQuestionMeta.expectedAnswerType !== "confirmation"
-      ) {
-        bindPendingConfirmationQuestion(
-          state,
-          state.pendingConfirmation.question,
-          "confirm_write",
-        );
-      }
-      const fleet = await fetchFleet(state, env);
-      const fleetUnits = fleet.ok ? fleet.units : [];
-      const confirmoDecision = {
-        action: "answer_pending" as const,
-        intent: "none" as const,
-        confidence: 1,
-        answer: "confirm" as const,
-        currentTramiteDisposition: "keep" as const,
-        reasoningCode: "ANSWER_TO_PENDING" as const,
-      };
-      let reclass = { attempted: false, reasons: [] as string[] };
-      const exec = await runWithUnifiedBrainContext(
-        {
-          originalMessage: text,
-          decisionAction: confirmoDecision.action,
-          decisionIntent: confirmoDecision.intent,
-        },
-        async () => {
-          const r = await executeTurnDecision(confirmoDecision, state, {
-            messageId: input.messageId,
-            env,
-            fleetUnits,
-            originalMessage: text,
-            showListing: (s, l, m) => {
-              showListing(s, l, m);
-            },
-            askGpsConfirmation,
-            deliverGpsReport,
-            handleGpsSideQuery: async (sideInput) => {
-              const side = await handleGpsSideQueryDuringTramite(sideInput);
-              return { message: side.message, state: side.state };
-            },
-          });
-          reclass = getLegacyReclassAttempt();
-          return r;
-        },
-      );
-      appendAssistantTurn(state, exec.message, null);
-      savePilotConversationState(state);
-      logBrainMetrics({
-        brain_version: "unified_v1",
-        model: null,
-        latency_ms: null,
-        decision_action: "answer_pending",
-        decision_intent: "none",
-        confidence: 1,
-        handler: "confirmo_shortcut",
-        clarification: false,
-        input_tokens: null,
-        output_tokens: null,
-        error: null,
-      });
-      recordLabTurnDiagnosis({
-        at: new Date().toISOString(),
-        brain_version: "unified_v1",
-        action: "answer_pending",
-        intent: "none",
-        answer: "confirm",
-        currentTramiteDisposition: "keep",
-        confidence: 1,
-        reasoningCode: "ANSWER_TO_PENDING",
-        handler: "confirmo_shortcut",
-        latency_ms: null,
-        model: null,
-        clarification: false,
-        legacy_text_reclassification_attempted: reclass.attempted,
-        legacy_reclass_reasons: reclass.reasons,
-        llm_called: false,
-        error: null,
-      });
-      return { kind: "reply", message: exec.message, state };
-    }
+    // Autoridad única: sin atajos textuales pre-LLM.
+    // mensaje + estado → interpretTurn → policy estructurada → reducer → execute.
 
     const interpreted = await interpretTurn(buildInterpretTurnInput(text, state), env);
     const localNow = DateTime.now()
@@ -1328,6 +776,90 @@ export async function resolveOperationalTurn(input: {
       localNow,
     });
     const decision = policy.decision;
+
+    // Sin empresa aún: no pedir flota; resolver select/query/keep vía decisión estructurada.
+    if (requiresCompanySelection(state)) {
+      const reducedEarly = reduceConversationState(state, decision);
+      if (reducedEarly.action.type === "select_company") {
+        const key =
+          decision.entity?.value != null && String(decision.entity.value).trim()
+            ? String(decision.entity.value).trim()
+            : null;
+        const msg = key
+          ? await selectCompany(state, key, env)
+          : `No reconocí esa opción.\n\n${buildCompanyMenuMessage(state.contacts)}`;
+        appendAssistantTurn(state, msg, decision);
+        savePilotConversationState(state);
+        recordLabTurnDiagnosis({
+          at: new Date().toISOString(),
+          brain_version: "unified_v1",
+          action: decision.action,
+          intent: decision.intent,
+          answer: decision.answer ?? null,
+          currentTramiteDisposition: decision.currentTramiteDisposition ?? null,
+          confidence: decision.confidence,
+          reasoningCode: decision.reasoningCode ?? null,
+          handler: "company_select",
+          latency_ms: interpreted.latencyMs,
+          model: interpreted.model,
+          clarification: false,
+          legacy_text_reclassification_attempted: false,
+          legacy_reclass_reasons: [],
+          llm_called: true,
+          error: null,
+        });
+        return { kind: "reply", message: msg, state };
+      }
+      if (reducedEarly.responsePlan.kind === "reply" && reducedEarly.responsePlan.message) {
+        appendAssistantTurn(state, reducedEarly.responsePlan.message, decision);
+        savePilotConversationState(state);
+        recordLabTurnDiagnosis({
+          at: new Date().toISOString(),
+          brain_version: "unified_v1",
+          action: decision.action,
+          intent: decision.intent,
+          answer: decision.answer ?? null,
+          currentTramiteDisposition: decision.currentTramiteDisposition ?? null,
+          confidence: decision.confidence,
+          reasoningCode: decision.reasoningCode ?? null,
+          handler: reducedEarly.action.type,
+          latency_ms: interpreted.latencyMs,
+          model: interpreted.model,
+          clarification: false,
+          legacy_text_reclassification_attempted: false,
+          legacy_reclass_reasons: [],
+          llm_called: true,
+          error: reducedEarly.invariantError,
+        });
+        return { kind: "reply", message: reducedEarly.responsePlan.message, state };
+      }
+      if (decision.action === "clarify" && decision.ambiguity?.question) {
+        const q = decision.ambiguity.question;
+        appendAssistantTurn(state, q, decision);
+        savePilotConversationState(state);
+        return { kind: "reply", message: q, state };
+      }
+      const intro = buildFirstContactPresentation(state);
+      appendAssistantTurn(state, intro, decision);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: decision.action,
+        intent: decision.intent,
+        confidence: decision.confidence,
+        reasoningCode: decision.reasoningCode ?? null,
+        handler: "company_intro",
+        latency_ms: interpreted.latencyMs,
+        model: interpreted.model,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: true,
+        error: null,
+      });
+      return { kind: "reply", message: intro, state };
+    }
 
     const fleet = await fetchFleet(state, env);
     if (!fleet.ok) {
@@ -1353,6 +885,59 @@ export async function resolveOperationalTurn(input: {
     }
 
     let reclass = { attempted: false, reasons: [] as string[] };
+
+    // Reducer estructurado: sin releer el texto libre.
+    const reduced = reduceConversationState(state, decision);
+    if (reduced.action.type === "change_company") {
+      deletePilotConversationState(tenantId, input.phone);
+      state = applyCompanyChangeReset(state);
+      const msg = buildCompanyResetMessage(state.contacts);
+      appendAssistantTurn(state, msg, decision);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: decision.action,
+        intent: decision.intent,
+        answer: decision.answer ?? null,
+        currentTramiteDisposition: decision.currentTramiteDisposition ?? null,
+        confidence: decision.confidence,
+        reasoningCode: decision.reasoningCode ?? null,
+        handler: "company_change",
+        latency_ms: interpreted.latencyMs,
+        model: interpreted.model,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: true,
+        error: null,
+      });
+      return { kind: "reply", message: msg, state };
+    }
+    if (reduced.responsePlan.kind === "reply" && reduced.responsePlan.message) {
+      appendAssistantTurn(state, reduced.responsePlan.message, decision);
+      savePilotConversationState(state);
+      recordLabTurnDiagnosis({
+        at: new Date().toISOString(),
+        brain_version: "unified_v1",
+        action: decision.action,
+        intent: decision.intent,
+        answer: decision.answer ?? null,
+        currentTramiteDisposition: decision.currentTramiteDisposition ?? null,
+        confidence: decision.confidence,
+        reasoningCode: decision.reasoningCode ?? null,
+        handler: reduced.action.type,
+        latency_ms: interpreted.latencyMs,
+        model: interpreted.model,
+        clarification: false,
+        legacy_text_reclassification_attempted: false,
+        legacy_reclass_reasons: [],
+        llm_called: true,
+        error: reduced.invariantError,
+      });
+      return { kind: "reply", message: reduced.responsePlan.message, state };
+    }
+
     const exec = await runWithUnifiedBrainContext(
       {
         originalMessage: text,
