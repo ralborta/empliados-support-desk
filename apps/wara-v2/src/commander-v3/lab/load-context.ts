@@ -74,12 +74,21 @@ export async function loadCommanderV3Context(input: {
         availableCompanies.length === 1 ? availableCompanies[0]! : null,
     });
   } else {
+    // Remapear contactId si hay aliases (ej. 486546 → 64866) para que la flota cargue.
+    const remappedCompany = state.company
+      ? availableCompanies.find(
+          (c) =>
+            c.contactId === state!.company!.contactId ||
+            c.name.trim().toLowerCase() ===
+              state!.company!.name.trim().toLowerCase(),
+        ) ?? state.company
+      : availableCompanies.length === 1
+        ? availableCompanies[0]!
+        : null;
     state = {
       ...state,
       availableCompanies,
-      company:
-        state.company ??
-        (availableCompanies.length === 1 ? availableCompanies[0]! : null),
+      company: remappedCompany,
     };
     saveConversationStateV3(state);
   }
