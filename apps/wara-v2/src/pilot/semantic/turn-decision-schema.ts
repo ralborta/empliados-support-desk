@@ -61,6 +61,8 @@ export const DomainQuestionSchema = z
       "ticket",
       "unit",
       "wara",
+      "platform_unidades",
+      "platform_opciones",
       "other_supported",
       "out_of_domain",
     ]),

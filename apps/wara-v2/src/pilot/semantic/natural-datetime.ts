@@ -123,6 +123,7 @@ function expandHourWords(n: string): string {
 
 function extractTime(n: string): string | null {
   const s = expandHourWords(n);
+  const morningCtx = /\b(esta\s+)?manana\b/.test(s) || /\b(am|a\.?\s*m\.?)\b/.test(s);
   // "tipo seis y media" / "tipo 6 y media"
   const tipoMedia = s.match(/\btipo\s+(\d{1,2})\s+y\s+media\b/);
   if (tipoMedia) {
@@ -146,21 +147,38 @@ function extractTime(n: string): string | null {
   if (approx) {
     let hh = Number(approx[1]);
     const mm = approx[2] ? Number(approx[2]) : 0;
-    if (hh <= 11 && !/\b(am|manana)\b/.test(s)) {
-      // Por defecto tarde/noche coloquial si ≤11 sin am.
+    if (hh <= 11 && !morningCtx) {
       if (hh >= 1 && hh <= 11) hh += 12;
     }
     if (hh > 23 || mm > 59) return null;
     return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
-  const m =
+  // "a las 5" / "las 5" / "a la 5" (con o sin minutos)
+  const aLas = s.match(/\b(?:a\s+las?|las)\s+(\d{1,2})(?::(\d{2}))?\b/);
+  if (aLas) {
+    let hh = Number(aLas[1]);
+    const mm = aLas[2] ? Number(aLas[2]) : 0;
+    if (hh > 23 || mm > 59) return null;
+    // Sin contexto de mañana, "a las 5" suelto queda 05:00 (AM literal).
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
+  const hm =
     s.match(/\b(?:a\s+las|hora|horas)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})\b/) ??
     s.match(/\b(\d{1,2}):(\d{2})\b/);
-  if (!m) return null;
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  if (hh > 23 || mm > 59) return null;
-  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  if (hm) {
+    const hh = Number(hm[1]);
+    const mm = Number(hm[2]);
+    if (hh > 23 || mm > 59) return null;
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
+  // "esta mañana 5" / "mañana 5" — hora suelta pegada a la banda
+  const mananaHour = s.match(/\b(?:esta\s+)?manana\s+(\d{1,2})\b/);
+  if (mananaHour) {
+    const hh = Number(mananaHour[1]);
+    if (hh < 0 || hh > 23) return null;
+    return `${String(hh).padStart(2, "0")}:00`;
+  }
+  return null;
 }
 
 /** Pregunta amable si el mensaje trae banda horaria imprecisa (tardecita, anoche, etc.). */
@@ -185,7 +203,7 @@ function detectImpreciseTimeBand(n: string): {
       question: "Entiendo que fue de noche. ¿Recordás aproximadamente a qué hora?",
     };
   }
-  if (/\b(a\s+la\s+mañana|por\s+la\s+mañana|a\s+primera\s+hora)\b/.test(n) && !extractTime(n)) {
+  if (/\b(a\s+la\s+manana|por\s+la\s+manana|a\s+primera\s+hora|esta\s+manana)\b/.test(n) && !extractTime(n)) {
     return {
       band: "morning",
       question: "Entiendo que fue a la mañana. ¿Recordás aproximadamente a qué hora?",
@@ -312,7 +330,7 @@ export function resolveNaturalReadingDatetime(
     };
   }
 
-  if (/\bhoy\b/.test(n)) {
+  if (/\bhoy\b/.test(n) || /\besta\s+manana\b/.test(n)) {
     if (imprecise && !time) {
       return {
         kind: "needs_precision",

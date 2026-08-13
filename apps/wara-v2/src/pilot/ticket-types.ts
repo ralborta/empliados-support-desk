@@ -7,6 +7,11 @@ import type { MaintenancePriority } from "./maintenance-types.js";
 export type TicketCategory =
   | "human_advisor"
   | "reclamo"
+  | "access_platform"
+  | "admin"
+  | "technical_support"
+  | "odometer_problem"
+  | "case_status"
   | "maintenance_escalation"
   | "certificate_escalation"
   | "general";

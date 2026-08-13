@@ -1365,7 +1365,10 @@ export async function executeTurnDecision(
       step: state.step,
       opId: state.pendingConfirmation?.operationId ?? null,
     };
-    const ans = answerDomainQuestion(state, deps.originalMessage, decision.domainQuestion);
+    const ans = await answerDomainQuestion(state, deps.originalMessage, decision.domainQuestion, {
+      env: deps.env,
+      recentTurns: state.recentTurns,
+    });
     // Garantizar continuidad (cero efectos).
     state.pendingConfirmation = snapshot.pending;
     state.odometerDraft = snapshot.draft;
@@ -1604,11 +1607,15 @@ export async function executeTurnDecision(
           sourceMessageId: deps.messageId,
         });
       }
+      const detail =
+        decision.fields?.detail?.trim() ||
+        (deps.originalMessage.trim().length >= 8 ? deps.originalMessage.trim() : "");
       const r = await tryResolveTicketTurn({
         state,
-        text: decision.fields?.detail ?? "quiero hablar con un asesor",
+        text: detail || "quiero hablar con un asesor",
         messageId: deps.messageId,
         env: deps.env,
+        structuredStart: true,
       });
       if (r.kind === "reply") return { handler: "ticket", message: r.message, state };
     }

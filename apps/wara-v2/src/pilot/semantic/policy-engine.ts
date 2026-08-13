@@ -21,7 +21,9 @@ import {
 import {
   DEFAULT_TENANT_TZ,
   reconcileLlmReadingFields,
+  resolveNaturalReadingDatetime,
 } from "./natural-datetime.js";
+import { shouldUseCancelShortcut } from "./cancel-command.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -190,6 +192,7 @@ function fillExpectedFieldsFromMessage(
   decision: TurnDecision,
   state: PilotConversationState,
   message: string,
+  opts?: { timezone?: string; localNow?: string },
 ): TurnDecision {
   const expected = state.lastAgentQuestionMeta?.expectedAnswerType;
   if (!message.trim()) return decision;
@@ -222,21 +225,149 @@ function fillExpectedFieldsFromMessage(
     state.odometerDraft?.step === "await_fecha" &&
     (decision.action === "clarify" ||
       decision.speechAct === "clarify" ||
+      decision.action === "provide_fields" ||
+      decision.action === "correct_fields" ||
       (!decision.fields?.date && !decision.fields?.time))
   ) {
-    return {
-      ...decision,
-      action: "provide_fields",
-      intent: meterIntent(state),
-      speechAct: "provide_field",
-      currentTramiteDisposition: "keep",
-      ambiguity: null,
-      reasoningCode: "PROVIDED_MISSING_FIELD",
-      fields: decision.fields ?? { date: null, time: null, numericValue: null },
-    };
+    const resolved = resolveNaturalReadingDatetime(message, {
+      timezone: opts?.timezone ?? DEFAULT_TENANT_TZ,
+      localNow: opts?.localNow,
+    });
+    if (resolved.kind === "resolved" && (resolved.date || resolved.time)) {
+      return {
+        ...decision,
+        action: "provide_fields",
+        intent: meterIntent(state),
+        speechAct: "provide_field",
+        currentTramiteDisposition: "keep",
+        ambiguity: null,
+        reasoningCode: "PROVIDED_MISSING_FIELD",
+        answer: null,
+        fields: {
+          ...(decision.fields ?? {}),
+          date: resolved.date ?? decision.fields?.date ?? null,
+          time: resolved.time ?? decision.fields?.time ?? null,
+          numericValue: decision.fields?.numericValue ?? null,
+        },
+      };
+    }
+    // expected=time + "5" / "5:30" sueltos
+    if (expected === "time") {
+      const raw = message.trim();
+      const bare = raw.match(/^(\d{1,2})(?::(\d{2}))?$/);
+      if (bare) {
+        const hh = Number(bare[1]);
+        const mm = bare[2] ? Number(bare[2]) : 0;
+        if (hh <= 23 && mm <= 59) {
+          return {
+            ...decision,
+            action: "provide_fields",
+            intent: meterIntent(state),
+            speechAct: "provide_field",
+            currentTramiteDisposition: "keep",
+            ambiguity: null,
+            reasoningCode: "PROVIDED_MISSING_FIELD",
+            answer: null,
+            fields: {
+              ...(decision.fields ?? {}),
+              date: decision.fields?.date ?? state.odometerDraft.fechaDatePart ?? null,
+              time: `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`,
+              numericValue: null,
+            },
+          };
+        }
+      }
+    }
+    if (
+      decision.action === "clarify" ||
+      decision.speechAct === "clarify" ||
+      (!decision.fields?.date && !decision.fields?.time)
+    ) {
+      return {
+        ...decision,
+        action: "provide_fields",
+        intent: meterIntent(state),
+        speechAct: "provide_field",
+        currentTramiteDisposition: "keep",
+        ambiguity: null,
+        reasoningCode: "PROVIDED_MISSING_FIELD",
+        fields: decision.fields ?? { date: null, time: null, numericValue: null },
+      };
+    }
   }
 
   return decision;
+}
+
+/**
+ * Cancel mal etiquetado cuando el mensaje es corrección de fecha/hora del resumen.
+ * No lee intención libre: solo si hay pending de escritura + resolución natural de fecha
+ * y NO es cancel inequívoco (veto de seguridad).
+ */
+function coerceCancelToOdometerFieldCorrection(
+  decision: TurnDecision,
+  state: PilotConversationState,
+  message: string,
+  opts?: { timezone?: string; localNow?: string },
+): TurnDecision {
+  const cancelSignal =
+    decision.answer === "cancel" ||
+    decision.speechAct === "cancel" ||
+    decision.currentTramiteDisposition === "cancel" ||
+    decision.disposition === "cancel_active";
+  if (!cancelSignal) return decision;
+  // Cancel inequívoco (veto de seguridad): no convertir en corrección.
+  if (shouldUseCancelShortcut(message, state)) return decision;
+  if (
+    state.pendingConfirmation?.action !== "odometer_write" ||
+    !state.odometerDraft ||
+    state.odometerDraft.step === "idle"
+  ) {
+    return decision;
+  }
+  // Solo con resumen ya armado (hay fecha a corregir) o confirmación pendiente.
+  const hasFecha =
+    Boolean(state.odometerDraft.fechaDatePart) ||
+    Boolean(state.odometerDraft.fechaLecturaIso) ||
+    state.odometerDraft.step === "await_confirm";
+  if (!hasFecha) return decision;
+
+  const resolved = resolveNaturalReadingDatetime(message, {
+    timezone: opts?.timezone ?? DEFAULT_TENANT_TZ,
+    localNow: opts?.localNow,
+  });
+  if (resolved.kind !== "resolved" || !resolved.date) return decision;
+  // Requiere ancla relativa/weekday/numérica (hoy, ayer, sábado, 13/08…)
+  if (
+    resolved.source !== "relative" &&
+    resolved.source !== "weekday" &&
+    resolved.source !== "numeric"
+  ) {
+    return decision;
+  }
+
+  const fieldsToClear: Array<"date" | "time"> = ["date"];
+  if (resolved.time) fieldsToClear.push("time");
+
+  return {
+    ...decision,
+    action: "correct_fields",
+    intent: meterIntent(state),
+    speechAct: "provide_field",
+    currentTramiteDisposition: "keep",
+    reasoningCode: "PROVIDED_MISSING_FIELD",
+    answer: null,
+    disposition: "keep_current",
+    ambiguity: null,
+    fields: {
+      ...(decision.fields ?? {}),
+      date: resolved.date,
+      time: resolved.time,
+      numericValue: null,
+      timezone: opts?.timezone ?? DEFAULT_TENANT_TZ,
+    },
+    fieldsToClear,
+  };
 }
 
 export function applySemanticPolicy(
@@ -257,6 +388,12 @@ export function applySemanticPolicy(
 
   // Intent de servicio con action=general → start/switch (antes de amend/company).
   decision = coerceGeneralServiceStart(decision, state);
+
+  // Cancel mal etiquetado + fecha relativa del resumen → correct_fields (antes de honor cancel).
+  decision = coerceCancelToOdometerFieldCorrection(decision, state, message, {
+    timezone: tz,
+    localNow: opts?.localNow,
+  });
 
   // Amend vs cancel: mutuamente excluyentes. Conflicto → clarify (NO “amend gana siempre”).
   // Debe ir ANTES de normalizar keep+amend (esa normalización limpia answer/disposition).
@@ -442,7 +579,10 @@ export function applySemanticPolicy(
   }
 
   // Parsers de expectedField (no routing de intención).
-  decision = fillExpectedFieldsFromMessage(decision, state, message);
+  decision = fillExpectedFieldsFromMessage(decision, state, message, {
+    timezone: tz,
+    localNow: opts?.localNow,
+  });
 
   // Draft esperando valor/fecha: si ya hay fields, forzar provide_fields.
   if (

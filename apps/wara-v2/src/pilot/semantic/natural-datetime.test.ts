@@ -303,7 +303,8 @@ describe("natural datetime + field correction + anomaly", () => {
 
     const msg2 = msgOf(await turn("era el domingo"));
     assert.match(msg2, /09\/08\/2026|Corregí la fecha|CONFIRMO/i);
-    assert.doesNotMatch(msg2, /06\/08\/2026/);
+    assert.match(msg2, /Ahora:\s*09\/08\/2026|Fecha:\s*09\/08\/2026/i);
+    assert.doesNotMatch(msg2, /Ahora:\s*06\/08\/2026|Fecha:\s*06\/08\/2026/i);
     assert.equal(odoWrites, 0);
   });
 
@@ -439,6 +440,42 @@ describe("natural datetime + field correction + anomaly", () => {
     if (r.kind === "needs_precision") {
       assert.equal(r.date, "2026-08-09");
       assert.match(r.question, /tarde/i);
+    }
+  });
+
+  it("esta mañana 5 → hoy 05:00 (no día 5 del mes)", () => {
+    const r = resolveNaturalReadingDatetime("esta mañana 5", {
+      localNow: "2026-08-13T08:30:00",
+      timezone: TZ,
+    });
+    assert.equal(r.kind, "resolved");
+    if (r.kind === "resolved") {
+      assert.equal(r.date, "2026-08-13");
+      assert.equal(r.time, "05:00");
+      assert.equal(r.source, "relative");
+    }
+  });
+
+  it("esta mañana a las 5 → hoy 05:00", () => {
+    const r = resolveNaturalReadingDatetime("esta mañana a las 5", {
+      localNow: "2026-08-13T08:30:00",
+      timezone: TZ,
+    });
+    assert.equal(r.kind, "resolved");
+    if (r.kind === "resolved") {
+      assert.equal(r.date, "2026-08-13");
+      assert.equal(r.time, "05:00");
+    }
+  });
+
+  it("mo hoy / no hoy resuelven a hoy", () => {
+    for (const m of ["mo hoy", "no hoy", "hoy"]) {
+      const r = resolveNaturalReadingDatetime(m, {
+        localNow: "2026-08-13T08:30:00",
+        timezone: TZ,
+      });
+      assert.equal(r.kind, "resolved", m);
+      if (r.kind === "resolved") assert.equal(r.date, "2026-08-13", m);
     }
   });
 });

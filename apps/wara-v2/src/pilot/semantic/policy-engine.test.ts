@@ -172,4 +172,76 @@ describe("semantic policy engine", () => {
     assert.equal(r.decision.action, "general");
     assert.equal(r.decision.speechAct, "negate_intent");
   });
+
+  it("cancel mal etiquetado + mo hoy → correct_fields fecha hoy", () => {
+    const st = createEmptyPilotState({ tenantId: "t", phone: "+54911" });
+    st.activeTramite = "odometer_update";
+    st.odometerDraft = {
+      meterType: "odometro",
+      step: "await_confirm",
+      unit: { movilId: 1, label: "AA496GJ", patente: "AA496GJ", unidad: "M900-077" },
+      valueNew: 155367,
+      valuePrevious: 100000,
+      fechaLecturaIso: "2026-08-05T05:00:00-03:00",
+      fechaDisplay: "05/08/2026 05:00",
+      fechaDatePart: "2026-08-05",
+      fechaTimePart: "05:00:00",
+    } as any;
+    st.pendingConfirmation = {
+      action: "odometer_write",
+      unit: st.odometerDraft!.unit!,
+      askedAt: new Date().toISOString(),
+      question: "Si está correcto, respondé CONFIRMO.",
+    };
+    const r = applySemanticPolicy(
+      baseDecision({
+        action: "general",
+        intent: "none",
+        currentTramiteDisposition: "cancel",
+        reasoningCode: "GENERAL_CONVERSATION",
+      }),
+      st,
+      { message: "mo hoy", localNow: "2026-08-13T08:30:00", timezone: "America/Argentina/Buenos_Aires" },
+    );
+    assert.equal(r.decision.action, "correct_fields");
+    assert.equal(r.decision.currentTramiteDisposition, "keep");
+    assert.equal(r.decision.fields?.date, "2026-08-13");
+    assert.ok(r.decision.fieldsToClear?.includes("date"));
+  });
+
+  it("cancelo inequívoco no se convierte en correct_fields", () => {
+    const st = createEmptyPilotState({ tenantId: "t", phone: "+54911" });
+    st.activeTramite = "odometer_update";
+    st.odometerDraft = {
+      meterType: "odometro",
+      step: "await_confirm",
+      unit: { movilId: 1, label: "AA496GJ", patente: "AA496GJ", unidad: "M900-077" },
+      valueNew: 155367,
+      valuePrevious: 100000,
+      fechaLecturaIso: "2026-08-05T05:00:00",
+      fechaDisplay: "05/08/2026 05:00",
+      fechaDatePart: "2026-08-05",
+      fechaTimePart: "05:00:00",
+    } as any;
+    st.pendingConfirmation = {
+      action: "odometer_write",
+      unit: st.odometerDraft!.unit!,
+      askedAt: new Date().toISOString(),
+      question: "CONFIRMO?",
+    };
+    const r = applySemanticPolicy(
+      baseDecision({
+        action: "answer_pending",
+        intent: "odometer",
+        answer: "cancel",
+        currentTramiteDisposition: "cancel",
+        speechAct: "cancel",
+        reasoningCode: "ANSWER_TO_PENDING",
+      }),
+      st,
+      { message: "cancelo", localNow: "2026-08-13T08:30:00" },
+    );
+    assert.equal(r.decision.answer, "cancel");
+    assert.equal(r.decision.currentTramiteDisposition, "cancel");
+  });
 });

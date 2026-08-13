@@ -28,6 +28,7 @@ import {
 } from "./certificate-operation.js";
 import { issueCertificadoCobertura } from "./certificate-wara.js";
 import { toFleetUnitRef } from "./unit-fleet.js";
+import { escalateToTicket } from "./ticket-turn.js";
 import type { WaraUnidadEstado } from "./wara-types.js";
 import { isPilotDryRun } from "./write-gates.js";
 import { syncPilotOperationToPrisma } from "./pilot-operation-sync.js";
@@ -142,6 +143,17 @@ async function executeIssue(
   state.step = "idle";
 
   if (!result.ok) {
+    // Paridad V1: fallo de negocio al emitir certificado → derivación automática.
+    const esc = await escalateToTicket({
+      state,
+      messageId: `${messageId}:cert-escalation`,
+      env,
+      category: "certificate_escalation",
+      reason:
+        result.error?.trim() ||
+        `No se pudo generar el certificado para ${draft.unit?.label ?? "la unidad"}`,
+    });
+    if (esc.kind === "reply") return esc;
     return {
       kind: "reply",
       message: result.error ?? "WARA no pudo generar el certificado. ¿Querés que derive a un operador?",

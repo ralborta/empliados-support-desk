@@ -154,7 +154,7 @@ describe("domain knowledge — preguntas conceptuales", () => {
     assert.equal(st.odometerDraft?.fechaTimePart, "01:30");
   });
 
-  it("policy reescribe general → domain_question (no menú)", () => {
+  it("policy no reescribe general→domain (autoridad = LLM)", () => {
     const st = getPilotConversationState(TENANT, PHONE)!;
     const general: TurnDecision = {
       action: "general",
@@ -167,9 +167,9 @@ describe("domain knowledge — preguntas conceptuales", () => {
       message: "quiero saber para q sirve el odometro",
     });
     assert.equal(policy.ok, true);
-    assert.equal(policy.decision.action, "answer_domain_question");
-    assert.equal(policy.decision.intent, "domain_knowledge");
-    assert.equal(policy.decision.reasoningCode, "DOMAIN_QUESTION");
+    // Sin looksLike* post-LLM: el intérprete debe emitir answer_domain_question.
+    assert.equal(policy.decision.action, "general");
+    assert.equal(policy.decision.reasoningCode, "GENERAL_CONVERSATION");
   });
 
   it("odómetro pendiente → por qué fecha", async () => {
@@ -343,9 +343,9 @@ describe("domain knowledge — preguntas conceptuales", () => {
     assert.match(r.message, /asesor|operador|deriv/i);
   });
 
-  it("sin trámite → qué es el horómetro", () => {
+  it("sin trámite → qué es el horómetro", async () => {
     const st = createEmptyPilotState({ tenantId: TENANT, phone: PHONE });
-    const ans = answerDomainQuestion(st, "qué es el horómetro?", {
+    const ans = await answerDomainQuestion(st, "qué es el horómetro?", {
       topic: "horometer",
       questionType: "definition",
       resumeActiveTramite: false,
@@ -354,25 +354,58 @@ describe("domain knowledge — preguntas conceptuales", () => {
     assert.match(ans.message, /trámite|ayud/i);
   });
 
-  it("sin trámite → qué podés hacer (capacidades)", () => {
+  it("sin trámite → qué podés hacer (capacidades)", async () => {
     const st = createEmptyPilotState({ tenantId: TENANT, phone: PHONE });
-    const ans = answerDomainQuestion(st, "qué podés hacer?", {
+    const ans = await answerDomainQuestion(st, "qué podés hacer?", {
       topic: "wara",
       questionType: "capabilities",
       resumeActiveTramite: false,
     });
-    assert.match(ans.message, /GPS|od[oó]metro|certificado/i);
+    assert.match(ans.message, /GPS|od[oó]metro|certificado|MIS ATAJOS|Agenda/i);
   });
 
-  it("fuera de dominio + pendiente → redirige y retoma", () => {
+  it("fuera de dominio + pendiente → redirige y retoma", async () => {
     const st = getPilotConversationState(TENANT, PHONE)!;
-    const ans = answerDomainQuestion(st, "quién ganó el Mundial?", {
+    const ans = await answerDomainQuestion(st, "quién ganó el Mundial?", {
       topic: "out_of_domain",
       questionType: "definition",
       resumeActiveTramite: true,
     });
     assert.match(ans.message, /unidades y servicios de WARA/i);
     assert.match(ans.message, /225663|pendiente/i);
+  });
+
+  it("platform_unidades: chevron usa fallback o IA anclada", async () => {
+    const st = createEmptyPilotState({ tenantId: TENANT, phone: PHONE });
+    const ans = await answerDomainQuestion(
+      st,
+      "que es el chevron?",
+      {
+        topic: "platform_unidades",
+        questionType: "definition",
+        resumeActiveTramite: false,
+      },
+      { env: { ...process.env, OPENAI_API_KEY: "" } },
+    );
+    assert.match(ans.message, /chevron|flecha|ficha/i);
+    assert.equal(ans.topic, "platform_unidades");
+  });
+
+  it("schema acepta platform_unidades / platform_opciones", () => {
+    const d = validateTurnDecision({
+      action: "answer_domain_question",
+      intent: "domain_knowledge",
+      confidence: 0.9,
+      currentTramiteDisposition: "keep",
+      reasoningCode: "DOMAIN_QUESTION",
+      domainQuestion: {
+        topic: "platform_unidades",
+        questionType: "how_it_works",
+        resumeActiveTramite: false,
+      },
+    });
+    assert.ok(d);
+    assert.equal(d!.domainQuestion?.topic, "platform_unidades");
   });
 
   it("looksLikeDomainQuestion es genérico (no solo una frase)", () => {
@@ -398,5 +431,103 @@ describe("domain knowledge — preguntas conceptuales", () => {
     );
     assert.equal(rewritten.action, "answer_domain_question");
     assert.equal(rewritten.domainQuestion?.topic, "odometer");
+  });
+
+  it("execute: platform_unidades no muta trámite pendiente", async () => {
+    seedOdoPending();
+    const st = getPilotConversationState(TENANT, PHONE)!;
+    const r = await executeTurnDecision(
+      {
+        action: "answer_domain_question",
+        intent: "domain_knowledge",
+        confidence: 0.95,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "DOMAIN_QUESTION",
+        domainQuestion: {
+          topic: "platform_unidades",
+          questionType: "how_it_works",
+          resumeActiveTramite: true,
+        },
+      },
+      st,
+      {
+        messageId: `m-${Math.random().toString(36).slice(2, 8)}`,
+        env: { ...process.env, OPENAI_API_KEY: "" },
+        fleetUnits: [UNIT],
+        originalMessage: "que es el chevron?",
+        showListing: (s, l, m) => {
+          s.lastListing = l;
+          s.lastAgentQuestion = m;
+        },
+        askGpsConfirmation: () => "GPS_SHOULD_NOT_APPEAR",
+        deliverGpsReport: () => "GPS_DELIVERED",
+        handleGpsSideQuery: async ({ state }) => ({ message: "side", state }),
+      },
+    );
+    assert.match(r.message, /chevron|flecha|ficha|MIS ATAJOS/i);
+    const after = getPilotConversationState(TENANT, PHONE)!;
+    assert.equal(after.pendingConfirmation?.action, "odometer_write");
+    assert.equal(after.odometerDraft?.valueNew, 225663);
+  });
+
+  it("execute: start_intent ticket pide motivo (structuredStart)", async () => {
+    const st = createEmptyPilotState({ tenantId: TENANT, phone: PHONE });
+    st.sessionToken = "tok";
+    st.selectedContactId = 1;
+    st.companyName = "El Cacique";
+    st.selectedUnit = {
+      patente: "AD307VN",
+      unidad: "M900-135",
+      movil_id: 135,
+      label: "AD 307 VN (M900-135)",
+    };
+    savePilotConversationState(st);
+    const r = await exec(
+      {
+        action: "start_intent",
+        intent: "ticket",
+        confidence: 0.95,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "NEW_EXPLICIT_INTENT",
+        speechAct: "start_intent",
+        fields: { detail: null },
+      },
+      "pasame con un asesor",
+    );
+    assert.match(r.message, /motivo|deriv/i);
+    assert.equal(getPilotConversationState(TENANT, PHONE)!.activeTramite, "odoo_ticket");
+  });
+
+  it("execute: human_handoff con detalle arma confirmación", async () => {
+    const st = createEmptyPilotState({ tenantId: TENANT, phone: PHONE });
+    st.sessionToken = "tok";
+    st.selectedContactId = 1;
+    st.companyName = "El Cacique";
+    st.selectedUnit = {
+      patente: "AD307VN",
+      unidad: "M900-135",
+      movil_id: 135,
+      label: "AD 307 VN (M900-135)",
+    };
+    savePilotConversationState(st);
+    const r = await exec(
+      {
+        action: "start_intent",
+        intent: "human_handoff",
+        confidence: 0.95,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "NEW_EXPLICIT_INTENT",
+        speechAct: "start_intent",
+        fields: {
+          detail: "Necesito tiempo de resolución del caso con la partner",
+        },
+      },
+      "tenes tiempo de resolucion de mi problema con la partner",
+    );
+    assert.match(r.message, /CONFIRMO|ticket|Motivo/i);
+    assert.equal(
+      getPilotConversationState(TENANT, PHONE)!.pendingConfirmation?.action,
+      "odoo_ticket_create",
+    );
   });
 });

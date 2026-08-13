@@ -270,6 +270,8 @@ export async function tryResolveTicketTurn(input: {
   messageId: string;
   env: NodeJS.ProcessEnv;
   structuredConfirm?: boolean;
+  /** Entrada desde executeTurnDecision (start/switch ticket) — no depende de looksLike*. */
+  structuredStart?: boolean;
 }): Promise<TicketTurnResult> {
   const { state, text, messageId, env } = input;
   const activeTicket =
@@ -277,8 +279,14 @@ export async function tryResolveTicketTurn(input: {
     (state.ticketDraft && state.ticketDraft.step !== "idle") ||
     state.pendingConfirmation?.action === "odoo_ticket_create";
 
-  if (!activeTicket && !looksLikeTicketIntent(text) && !input.structuredConfirm) return { kind: "none" };
-
+  if (
+    !activeTicket &&
+    !looksLikeTicketIntent(text) &&
+    !input.structuredConfirm &&
+    !input.structuredStart
+  ) {
+    return { kind: "none" };
+  }
   if (!state.ticketDraft) {
     state.ticketDraft = emptyDraft(inferTicketCategory(text));
   }
@@ -327,7 +335,12 @@ export async function tryResolveTicketTurn(input: {
     draft.category = inferTicketCategory(text, draft.category);
     draft.priority = inferTicketPriority(text);
     draft.unit = state.selectedUnit;
-    if (looksLikeTicketIntent(text) && text.trim().length >= 12) {
+    const hasDetail =
+      text.trim().length >= 12 &&
+      !/^(quiero hablar con un asesor|pasame con (un )?asesor|mandame con alguien)\.?$/i.test(
+        text.trim(),
+      );
+    if (hasDetail) {
       draft.reason = text.trim();
       draft.step = "await_confirm";
     } else {

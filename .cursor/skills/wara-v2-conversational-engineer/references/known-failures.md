@@ -69,6 +69,7 @@ Causas aún en investigación; no convertir en matchers:
 | «me pasas la lista?» con captura de unidad abierta solo re-pregunta patente | guard `awaitingUnitEarly` bloqueaba `intent=unit_list` (regresión del coerce de captura) |
 | Tras listar, «hola»/ruido re-emite las 408 unidades | `lastAgentQuestion` se pisaba con el cuerpo del listado; el re-ask de await_unit lo re-enviaba |
 | pending CONFIRMO + «no confirmo quiero certificado» → menú genérico | LLM devolvía `action=general`+`intent=certificate`; execute caía al fallback y **dejaba** el pending |
+| pending CONFIRMO + «mo hoy»/«no hoy» → cancelaba el odómetro | LLM etiquetaba cancel; debía ser `correct_fields` de fecha; «esta mañana 5» no resolvía hora |
 
 Corregir por contrato/transición general; **prohibido** parchear con frases, regex de intención o `includes`.
 
@@ -109,3 +110,11 @@ Distinto de `confirm` / `cancel`.
 3. No hay registro de invalidación en ledger: la operación real de certificado se crea recién al confirmar; amend solo borra `pendingConfirmation`.
 4. ResponsePlan de retoma E/F4 pendiente.
 5. Resolver general de unidad pendiente (incl. `unit_name`).
+
+## 11. Guías de plataforma y criterios de derivación (V1 → V2)
+
+**Causa raíz (antes):** V2 solo tenía conceptos operativos (odómetro/GPS/…) y derivación por pedido explícito de asesor; el manual Unidades/Opciones y los criterios V1 (acceso, admin, hardware, falla odómetro, caso/ETA) no estaban en el intérprete.
+
+**Contrato:** con flag unificado, el LLM elige `answer_domain_question` + `platform_*` (respuesta anclada al manual) o `ticket|human_handoff` según criterios de derivación del prompt. Policy no reescribe por `looksLike*`. Escalada automática: fallo mantenimiento y fallo certificado → `escalateToTicket`.
+
+**Dirección:** prompt `13m` + `platform-knowledge-*` + categorías de ticket enriquecidas post-decisión.

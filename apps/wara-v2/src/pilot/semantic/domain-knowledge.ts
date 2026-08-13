@@ -4,8 +4,13 @@
  */
 import type { PilotConversationState } from "../conversation-state.js";
 import type { TurnDecision } from "./turn-decision-schema.js";
+import {
+  answerFromPlatformKnowledge,
+  platformKindFromTopic,
+  platformStaticFallback,
+} from "./platform-knowledge-ai.js";
 
-export const DOMAIN_KNOWLEDGE_VERSION = "v1-2026-08-12";
+export const DOMAIN_KNOWLEDGE_VERSION = "v2-2026-08-13-platform";
 
 export type DomainTopic =
   | "odometer"
@@ -16,6 +21,8 @@ export type DomainTopic =
   | "ticket"
   | "unit"
   | "wara"
+  | "platform_unidades"
+  | "platform_opciones"
   | "other_supported"
   | "out_of_domain";
 
@@ -39,7 +46,10 @@ export type DomainConcept = {
 
 /** Catálogo aprobado — no afirmar políticas fuera de esto. */
 export const DOMAIN_KNOWLEDGE: Record<
-  Exclude<DomainTopic, "out_of_domain" | "other_supported">,
+  Exclude<
+    DomainTopic,
+    "out_of_domain" | "other_supported" | "platform_unidades" | "platform_opciones"
+  >,
   DomainConcept
 > = {
   odometer: {
@@ -110,8 +120,10 @@ export const DOMAIN_KNOWLEDGE: Record<
       "actualizar odómetro u horómetro",
       "certificado de cobertura",
       "solicitud de mantenimiento",
-      "derivación a asesor",
+      "derivación a asesor (ticket)",
       "buscar o listar unidades",
+      "guías del módulo Unidades (historial, MIS ATAJOS, chevron)",
+      "guías de Opciones (Agenda, Notificaciones, Perfiles)",
     ],
   },
 };
@@ -223,6 +235,22 @@ export function inferDomainTopic(
     return "gps";
   }
   if (/\bticket|asesor|deriv|reclamo\b/.test(t)) return "ticket";
+  // Guías de plataforma (manual): solo como fallback de topic si el LLM ya eligió dominio.
+  if (
+    /\b(mis\s+atajos|chevron|ficha\s+expandida|modulo\s+unidades|punto\s+(rojo|verde|azul)|compartir\s+posicion|orden\s+de\s+trabajo)\b/.test(
+      t,
+    ) ||
+    (/\b(como|donde|que\s+es|como\s+hago|pasos)\b/.test(t) &&
+      /\b(historial|mapa|grupo\s+de\s+unidades|panel)\b/.test(t))
+  ) {
+    return "platform_unidades";
+  }
+  if (
+    /\b(modulo\s+opciones|agenda|notificaciones|perfiles|perfil\s+de\s+permisos)\b/.test(t) ||
+    (/\b(como|donde|que\s+es)\b/.test(t) && /\b(contacto|alerta|permisos)\b/.test(t))
+  ) {
+    return "platform_opciones";
+  }
   if (/\bunidad|patente|flota\b/.test(t)) return "unit";
   if (/\bfecha|hora\b/.test(t) && state.odometerDraft) {
     return state.odometerDraft.meterType === "horometro" ? "horometer" : "odometer";
@@ -329,13 +357,18 @@ export type DomainAnswerResult = {
 };
 
 /**
- * Responde pregunta de dominio sin mutar el trámite (salvo historial vía caller).
+ * Responde pregunta de dominio sin mutar el trámite.
+ * Topics platform_* → IA anclada al manual (con fallback estático).
  */
-export function answerDomainQuestion(
+export async function answerDomainQuestion(
   state: PilotConversationState,
   text: string,
   domainQuestion?: TurnDecision["domainQuestion"] | null,
-): DomainAnswerResult {
+  opts?: {
+    env?: NodeJS.ProcessEnv;
+    recentTurns?: Array<{ role: string; text: string }>;
+  },
+): Promise<DomainAnswerResult> {
   const topic = domainQuestion?.topic ?? inferDomainTopic(text, state);
   const questionType =
     domainQuestion?.questionType ??
@@ -351,7 +384,20 @@ export function answerDomainQuestion(
         (state.maintenanceDraft && state.maintenanceDraft.step !== "idle"),
     );
 
-  const body = conceptBody(topic, questionType, text);
+  const platformKind = platformKindFromTopic(topic);
+  let body: string;
+  if (platformKind) {
+    const ai = await answerFromPlatformKnowledge({
+      kind: platformKind,
+      question: text,
+      recentTurns: opts?.recentTurns ?? state.recentTurns,
+      env: opts?.env,
+    });
+    body = ai ?? platformStaticFallback(platformKind, text);
+  } else {
+    body = conceptBody(topic, questionType, text);
+  }
+
   const pending = resume ? summarizePendingTramite(state) : null;
 
   let tail = "";
@@ -369,7 +415,11 @@ export function answerDomainQuestion(
 
   if (pending) {
     tail = `\n\n${pending} ¿Querés continuar o corregir algún dato?`;
-  } else if (questionType !== "capabilities" && topic !== "wara") {
+  } else if (
+    questionType !== "capabilities" &&
+    topic !== "wara" &&
+    !platformKind
+  ) {
     tail = "\n\n¿Querés que te ayude a realizar ese trámite?";
   }
 
