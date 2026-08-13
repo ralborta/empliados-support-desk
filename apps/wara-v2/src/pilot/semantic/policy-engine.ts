@@ -197,7 +197,15 @@ export function applySemanticPolicy(
   if (
     decision.companyAction === "query_active" ||
     decision.intent === "query_active_company" ||
-    decision.action === "query_context"
+    (decision.action === "query_context" &&
+      decision.intent !== "unit_list" &&
+      decision.intent !== "unit_search" &&
+      decision.intent !== "gps" &&
+      decision.intent !== "odometer" &&
+      decision.intent !== "horometer" &&
+      decision.intent !== "certificate" &&
+      decision.intent !== "maintenance" &&
+      decision.intent !== "ticket")
   ) {
     return {
       ok: true,

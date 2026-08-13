@@ -111,7 +111,7 @@ import {
 import {
   cancelActiveOrPendingTramite,
 } from "./semantic/cancel-active-tramite.js";
-import { looksLikeFarewell, bindPendingConfirmationQuestion } from "./semantic/turn-precedence.js";
+import { looksLikeFarewell, bindPendingConfirmationQuestion, setLastAgentQuestion } from "./semantic/turn-precedence.js";
 import {
   applyCompanyChangeReset,
   reduceConversationState,
@@ -778,16 +778,16 @@ export async function resolveOperationalTurn(input: {
     const decision = policy.decision;
 
     // Sin empresa aún: no pedir flota; resolver select/query/keep vía decisión estructurada.
+    // Parser de campo esperado (menú de empresa): si el texto/entity matchea un contacto,
+    // seleccionar — el LLM puede etiquetar mal "2" como provide_fields residual.
     if (requiresCompanySelection(state)) {
       const reducedEarly = reduceConversationState(state, decision);
-      if (reducedEarly.action.type === "select_company") {
+      if (reducedEarly.action.type === "select_company" || decision.companyAction === "select") {
         const key =
           decision.entity?.value != null && String(decision.entity.value).trim()
             ? String(decision.entity.value).trim()
-            : null;
-        const msg = key
-          ? await selectCompany(state, key, env)
-          : `No reconocí esa opción.\n\n${buildCompanyMenuMessage(state.contacts)}`;
+            : text;
+        const msg = await selectCompany(state, key, env);
         appendAssistantTurn(state, msg, decision);
         savePilotConversationState(state);
         recordLabTurnDiagnosis({
@@ -810,6 +810,44 @@ export async function resolveOperationalTurn(input: {
         });
         return { kind: "reply", message: msg, state };
       }
+
+      // Campo esperado del menú: índice/nombre válido → select (no routing de intención).
+      const matchedContact =
+        decision.companyAction !== "change" &&
+        decision.companyAction !== "keep" &&
+        matchCompanySelection(
+          decision.entity?.value != null ? String(decision.entity.value) : text,
+          state.contacts,
+        );
+      if (matchedContact) {
+        const msg = await selectCompany(
+          state,
+          decision.entity?.value != null ? String(decision.entity.value) : text,
+          env,
+        );
+        appendAssistantTurn(state, msg, decision);
+        savePilotConversationState(state);
+        recordLabTurnDiagnosis({
+          at: new Date().toISOString(),
+          brain_version: "unified_v1",
+          action: decision.action,
+          intent: decision.intent,
+          answer: decision.answer ?? null,
+          currentTramiteDisposition: decision.currentTramiteDisposition ?? null,
+          confidence: decision.confidence,
+          reasoningCode: decision.reasoningCode ?? null,
+          handler: "company_select_expected_field",
+          latency_ms: interpreted.latencyMs,
+          model: interpreted.model,
+          clarification: false,
+          legacy_text_reclassification_attempted: false,
+          legacy_reclass_reasons: [],
+          llm_called: true,
+          error: null,
+        });
+        return { kind: "reply", message: msg, state };
+      }
+
       if (reducedEarly.responsePlan.kind === "reply" && reducedEarly.responsePlan.message) {
         appendAssistantTurn(state, reducedEarly.responsePlan.message, decision);
         savePilotConversationState(state);
@@ -840,6 +878,12 @@ export async function resolveOperationalTurn(input: {
         return { kind: "reply", message: q, state };
       }
       const intro = buildFirstContactPresentation(state);
+      setLastAgentQuestion(state, {
+        text: intro,
+        purpose: "clarify",
+        expectedAnswerType: "company",
+        pendingAction: null,
+      });
       appendAssistantTurn(state, intro, decision);
       savePilotConversationState(state);
       recordLabTurnDiagnosis({
