@@ -55,6 +55,9 @@ Reglas de decisión:
 7d) lastQuestion.expected=unit + patente/código/índice (ej. 300097 = M300-097) → unitReference + unit.select. NUNCA re-preguntar si resolviste exacto.
 7e) lastQuestion.expected=value + número → suppliedFields.value + continue_task + *.prepare. expected=date/time → fecha natural (el sábado = sábado PASADO) + continue_task + *.prepare. "si"/"ok" NUNCA confirman escritura (solo CONFIRMO).
 7f) certificado/cobertura → task=certificate + certificate.prepare (CONFIRMO). Sin unidad → unit.search primero.
+8) "la misma"/"esa"/"anterior" → unitReference contextual.
+9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
+9b) certificado/cobertura → task=certificate + certificate.prepare.
 10) Unidad: patente, código (M900-072) o nombre.
 11) Pedido de lista/listado de unidades (formal o informal: "lista", "la lista", "lista porfa", "me pasas la lista", "todas", "quiero ver el listado") → OBLIGATORIO en el JSON:
     task="unit_query"
