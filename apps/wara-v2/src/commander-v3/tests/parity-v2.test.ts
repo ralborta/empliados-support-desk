@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13aa", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13aa/);
+  it("prompt version bump 13ab", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ab/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1137,6 +1137,93 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       }),
     };
     assert.equal(validateTurnPlan(plan, s).ok, true);
+  });
+
+  it("Confirmo el certificado cuenta como CONFIRMO", async () => {
+    const { isUnequivocalWriteConfirm, enrichPlanForConfirmationOutcome } =
+      await import("../enrich/confirmation-outcome.js");
+    assert.equal(isUnequivocalWriteConfirm("Confirmo el certificado"), true);
+    assert.equal(isUnequivocalWriteConfirm("Si"), false);
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "cert_1",
+      version: 1,
+      payloadHash: "h",
+      task: "certificate",
+      summary: {},
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_certificate",
+      expected: "confirmation",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "llm mete prepare de nuevo",
+      conversationalAct: "start_task",
+      task: "odometer",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.5,
+    });
+    const enriched = enrichPlanForConfirmationOutcome(
+      plan,
+      s,
+      "Confirmo el certificado",
+    );
+    assert.equal(enriched.conversationalAct, "confirm_write");
+  });
+
+  it("confirm_write certificado sin gate → avisa y no dice simulado OK", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 81,
+      plate: "AB042BG",
+      name: "M900-081",
+      label: "AB 042 BG (M900-081)",
+    };
+    s.pendingWrite = {
+      operationId: "cert_x",
+      version: 1,
+      payloadHash: "h",
+      task: "certificate",
+      summary: { movilId: 81 },
+    };
+    s.activeTask = {
+      type: "certificate",
+      status: "awaiting_confirmation",
+      collected: {},
+      missing: [],
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "confirm",
+      conversationalAct: "confirm_write",
+      taskAction: "confirm",
+      requestedCapabilities: [{ name: "domain.answer", params: { topic: "noise" } }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "confirm_write", facts: [] },
+      confidence: 1,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {
+        WARA_V2_CERTIFICATE_WRITE_ENABLED: "false",
+        WARA_V2_V1_TICKET_BRIDGE_ENABLED: "false",
+        WARA_V2_LAB_MODE: "true",
+      },
+      fleetUnits: [],
+      resolvedUnit: s.unit,
+      resolvedCompanyId: "1",
+      messageId: "m-cert-confirm",
+    });
+    const blob = exec.facts.join(" ");
+    assert.match(blob, /no puedo emitir el certificado/i);
+    assert.match(blob, /asesor|plataforma/i);
+    assert.doesNotMatch(blob, /simulado OK/i);
+    assert.equal(exec.state.pendingWrite, null);
   });
 
   it("hourmeter.prepare no hereda value de activeTask odometer", async () => {

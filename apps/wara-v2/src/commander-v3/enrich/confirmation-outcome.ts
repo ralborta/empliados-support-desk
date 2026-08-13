@@ -30,7 +30,19 @@ function norm(text: string): string {
 /** CONFIRMO inequívoco (escritura). */
 export function isUnequivocalWriteConfirm(message: string): boolean {
   const t = norm(message);
-  return /^(confirmo|confirmó|confirmado)[!?.]*$/.test(t);
+  if (!t) return false;
+  if (/^no\s+confirmo\b/.test(t)) return false;
+  // Exacto: CONFIRMO / confirmado
+  if (/^(confirmo|confirmó|confirmado)[!?.]*$/.test(t)) return true;
+  // "Confirmo el certificado" / "confirmo el trámite" (mismo pending)
+  if (
+    /^(confirmo|confirmó|confirmado)\b/.test(t) &&
+    t.length <= 80 &&
+    !/\b(no|cancel|otro|cambiar)\b/.test(t)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -60,6 +72,56 @@ export function enrichPlanForConfirmationOutcome(
 
   if (!awaitingConfirm) return plan;
 
+  // CONFIRMO gana sobre cualquier switch inventado por el LLM.
+  if (isUnequivocalWriteConfirm(message)) {
+    if (plan.conversationalAct === "confirm_write") {
+      return {
+        ...plan,
+        taskAction: "confirm",
+        requestedCapabilities: plan.requestedCapabilities.filter((c) => {
+          // Los write_commit los inyecta execute; no dejar basura del LLM.
+          return !c.name.endsWith(".issue") &&
+            !c.name.endsWith(".update") &&
+            c.name !== "maintenance.create" &&
+            c.name !== "handoff.create";
+        }),
+      };
+    }
+    return {
+      ...plan,
+      conversationalAct: "confirm_write",
+      taskAction: "confirm",
+      requestedCapabilities: [],
+      responseGoal: {
+        purpose: "confirm_write",
+        facts: [],
+        nextQuestion: null,
+      },
+      reasoning:
+        (plan.reasoning ? `${plan.reasoning} ` : "") +
+        "El usuario respondió CONFIRMO a la confirmación pedida.",
+    };
+  }
+
+  if (isConfirmationReject(message)) {
+    // Rechazo: cancelar escritura pendiente (no domain.answer, no re-pedir CONFIRMO)
+    return {
+      ...plan,
+      conversationalAct: "cancel_task",
+      taskAction: "cancel",
+      task: null,
+      requestedCapabilities: [],
+      responseGoal: {
+        purpose: "inform",
+        facts: ["Listo, no confirmo el cambio. ¿En qué te ayudo?"],
+        nextQuestion: null,
+      },
+      reasoning:
+        (plan.reasoning ? `${plan.reasoning} ` : "") +
+        "El usuario rechazó la confirmación de escritura: cancel_task y limpio pendingWrite.",
+    };
+  }
+
   // Nuevo trámite distinto (pending o active) → switch aunque el LLM haya puesto
   // inform/clarify/ask (antes solo start/switch y se quedaba trabado en el CONFIRMO).
   const nextTask = taskFromPlan(plan);
@@ -84,39 +146,5 @@ export function enrichPlanForConfirmationOutcome(
     };
   }
 
-  if (isUnequivocalWriteConfirm(message)) {
-    if (plan.conversationalAct === "confirm_write") return plan;
-    return {
-      ...plan,
-      conversationalAct: "confirm_write",
-      taskAction: "confirm",
-      responseGoal: {
-        purpose: "confirm_write",
-        facts: [],
-        nextQuestion: null,
-      },
-      reasoning:
-        (plan.reasoning ? `${plan.reasoning} ` : "") +
-        "El usuario respondió CONFIRMO a la confirmación pedida.",
-    };
-  }
-
-  if (!isConfirmationReject(message)) return plan;
-
-  // Rechazo: cancelar escritura pendiente (no domain.answer, no re-pedir CONFIRMO)
-  return {
-    ...plan,
-    conversationalAct: "cancel_task",
-    taskAction: "cancel",
-    task: null,
-    requestedCapabilities: [],
-    responseGoal: {
-      purpose: "inform",
-      facts: ["Listo, no confirmo el cambio. ¿En qué te ayudo?"],
-      nextQuestion: null,
-    },
-    reasoning:
-      (plan.reasoning ? `${plan.reasoning} ` : "") +
-      "El usuario rechazó la confirmación de escritura: cancel_task y limpio pendingWrite.",
-  };
+  return plan;
 }

@@ -1,6 +1,7 @@
 /**
  * Pipeline Commander V3 — aislado del path conversacional V2 (sin reutilizar ese conductor).
  */
+import { createHash } from "node:crypto";
 import type { WaraUnidadEstado } from "../pilot/wara-types.js";
 import { formatUnitLabel, toFleetUnitRef } from "../pilot/unit-fleet.js";
 import { callCommander, repairCommanderPlan } from "./commander/call.js";
@@ -87,6 +88,39 @@ export async function runCommanderTurn(
 
   if (availableCompanies.length && state.availableCompanies.length === 0) {
     state = { ...state, availableCompanies };
+  }
+
+  // Si se perdió pendingWrite pero seguimos en confirmación de certificado, reconstruir.
+  if (
+    !state.pendingWrite &&
+    state.lastQuestion?.expected === "confirmation" &&
+    state.activeTask?.type === "certificate" &&
+    state.unit &&
+    isUnequivocalWriteConfirm(input.message)
+  ) {
+    const payload = {
+      task: "certificate",
+      movilId: state.unit.movilId,
+      plate: state.unit.plate,
+      company: state.company?.name ?? null,
+    };
+    state = {
+      ...state,
+      pendingWrite: {
+        operationId: `cert_rec_${Date.now().toString(36)}`,
+        version: 1,
+        payloadHash: createHash("sha256")
+          .update(JSON.stringify(payload))
+          .digest("hex")
+          .slice(0, 32),
+        task: "certificate",
+        summary: payload,
+      },
+      activeTask: {
+        ...state.activeTask,
+        status: "awaiting_confirmation",
+      },
+    };
   }
 
   const fleetUnits = input.fleetUnits ?? [];

@@ -96,10 +96,34 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
   const results: ToolResult[] = [];
   let state = ctx.state;
 
-  const caps =
+  let caps =
     ctx.plan.requestedCapabilities.length > 0
       ? [...ctx.plan.requestedCapabilities]
       : inferDefaultCapabilities(ctx.plan, state);
+
+  // confirm_write: SIEMPRE asegurar el write_commit (el LLM deja caps basura y
+  // antes no se inyectaba certificate.issue → loop de "confirmación explícita").
+  if (
+    ctx.plan.conversationalAct === "confirm_write" ||
+    ctx.plan.taskAction === "confirm"
+  ) {
+    const inferred = inferDefaultCapabilities(
+      { ...ctx.plan, conversationalAct: "confirm_write", requestedCapabilities: [] },
+      state,
+    );
+    for (const c of inferred) {
+      if (!caps.some((x) => x.name === c.name)) caps.push(c);
+    }
+    // No mezclar prepare/list en el mismo confirm
+    caps = caps.filter(
+      (c) =>
+        c.name.endsWith(".issue") ||
+        c.name.endsWith(".update") ||
+        c.name === "maintenance.create" ||
+        c.name === "handoff.create",
+    );
+    if (caps.length === 0 && inferred.length) caps = [...inferred];
+  }
 
   // Contrato: unit_query lista flota SOLO si no estamos seleccionando una unidad.
   if (
@@ -1231,6 +1255,58 @@ function commitWrite(name: string, ctx: ExecuteContext): ToolResult {
         : name.startsWith("handoff") || name.startsWith("maintenance")
           ? isOdooWriteEnabled(ctx.env)
           : false;
+
+  // Certificado sin escritura real habilitada: decirlo y derivar a agente YA
+  // (el usuario ya dijo CONFIRMO; no pedir otro CONFIRMO del ticket).
+  if (name.startsWith("certificate") && !gateOk) {
+    const unitLabel = ctx.state.unit?.label;
+    const detail =
+      `En este momento no puedo emitir el certificado` +
+      (unitLabel ? ` para ${unitLabel}` : "") +
+      `. Te derivo con un asesor en la plataforma`;
+    const category = "certificate_escalation" as const;
+    const payload = {
+      task: "handoff",
+      category,
+      categoryLabel: categoryLabel(category),
+      detail,
+      unit: unitLabel ?? null,
+      company: ctx.state.company?.name ?? null,
+    };
+    const operationId = `ticket_${randomUUID().slice(0, 12)}`;
+    const handoffPw = {
+      operationId,
+      version: 1,
+      payloadHash: hashPayload(payload),
+      task: "handoff",
+      summary: payload,
+    };
+    void syncV3PendingWriteToFrontend({
+      state: ctx.state,
+      pendingWrite: handoffPw,
+      messageId: ctx.messageId?.trim() || `v3_${randomUUID().slice(0, 12)}`,
+      phase: "committed",
+      simulated: true,
+      env: ctx.env,
+    });
+    return {
+      capability: name,
+      ok: true,
+      facts: [
+        `${detail}. Ya te pasé con un asesor; van a continuar por la plataforma.`,
+      ],
+      // writeAttempt false: no marcar el pendingWrite de certificado como "committed".
+      writeAttempt: false,
+      writeExecuted: false,
+      data: {
+        statePatch: {
+          pendingWrite: null,
+          lastQuestion: null,
+          activeTask: null,
+        },
+      },
+    };
+  }
 
   // Paridad V2: si la escritura de certificado está habilitada pero el gate
   // indica fallo operativo (env WARA_V2_CERT_FORCE_FAIL), escalar a handoff.
