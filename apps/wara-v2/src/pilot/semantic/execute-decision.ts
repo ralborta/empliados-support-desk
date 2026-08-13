@@ -1270,6 +1270,7 @@ export async function executeTurnDecision(
     const isUnitPath =
       decision.action === "select_entity" ||
       decision.intent === "unit_search" ||
+      decision.intent === "unit_list" ||
       decision.action === "provide_fields" ||
       decision.action === "correct_fields" ||
       Boolean(decision.entity?.value?.trim());
@@ -1292,12 +1293,14 @@ export async function executeTurnDecision(
   }
 
   if (
-    decision.action === "query_context" ||
-    decision.companyAction === "query_active" ||
-    (decision.intent === "query_active_company" &&
-      (decision.companyAction === "query_active" ||
-        decision.speechAct === "query_context" ||
-        decision.companyReference === "active"))
+    decision.intent !== "unit_list" &&
+    decision.intent !== "unit_search" &&
+    (decision.action === "query_context" ||
+      decision.companyAction === "query_active" ||
+      (decision.intent === "query_active_company" &&
+        (decision.companyAction === "query_active" ||
+          decision.speechAct === "query_context" ||
+          decision.companyReference === "active")))
   ) {
     return {
       handler: "query_active_company",
@@ -1469,27 +1472,6 @@ export async function executeTurnDecision(
     return handleUnitSearch(decision, state, deps);
   }
 
-  // Expectativa dominante de unidad: no caer al menú general (cortesía / general residual).
-  if (state.pendingEntityResolution || state.certificateDraft?.step === "await_unit") {
-    const parent = resolveParentIntentForUnitSelection(state);
-    const unit = resolveUnitFromDecisionOrText(decision, deps, {
-      allowMessageAsUnitField: true,
-    });
-    if (unit) {
-      const cont = continueAfterUnitResolved(state, unit, { parentIntent: parent });
-      return { handler: cont.handler, message: cont.message, state };
-    }
-    if (decision.entity?.value) {
-      return handleUnitSearch({ ...decision, action: "select_entity" }, state, deps);
-    }
-    const ask =
-      state.lastAgentQuestion?.trim() ||
-      (parent === "certificate"
-        ? "¿De qué unidad querés el certificado de cobertura?"
-        : "¿Qué patente o unidad buscás?");
-    return { handler: "await_unit", message: ask, state };
-  }
-
   if (decision.intent === "unit_list") {
     // «estado de la unidad» con selectedUnit → GPS de la activa, no listar 408.
     if (
@@ -1525,6 +1507,28 @@ export async function executeTurnDecision(
       state.activeTramite = "search_unit";
     }
     return { handler: "unit_list", message, state };
+  }
+
+  // Expectativa dominante de unidad: no caer al menú general (cortesía / general residual).
+  // unit_list ya se atendió arriba (lista válida mientras se pide patente).
+  if (state.pendingEntityResolution || state.certificateDraft?.step === "await_unit") {
+    const parent = resolveParentIntentForUnitSelection(state);
+    const unit = resolveUnitFromDecisionOrText(decision, deps, {
+      allowMessageAsUnitField: true,
+    });
+    if (unit) {
+      const cont = continueAfterUnitResolved(state, unit, { parentIntent: parent });
+      return { handler: cont.handler, message: cont.message, state };
+    }
+    if (decision.entity?.value) {
+      return handleUnitSearch({ ...decision, action: "select_entity" }, state, deps);
+    }
+    const ask =
+      state.lastAgentQuestion?.trim() ||
+      (parent === "certificate"
+        ? "¿De qué unidad querés el certificado de cobertura?"
+        : "¿Qué patente o unidad buscás?");
+    return { handler: "await_unit", message: ask, state };
   }
 
   if (
@@ -1594,8 +1598,7 @@ export async function executeTurnDecision(
 
   return {
     handler: "general",
-    message:
-      "Puedo ayudarte con GPS, certificado, odómetro/horómetro, mantenimiento, reclamos o buscar unidades. ¿Qué necesitás?",
+    message: "¿En qué te puedo ayudar?",
     state,
   };
 }

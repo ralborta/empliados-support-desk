@@ -174,4 +174,25 @@ describe("certificate await unit capture", () => {
     assert.equal(r.handler, "certificate");
     assert.match(r.message, /CONFIRMO/i);
   });
+
+  it("execute: unit_list con pendingEntityResolution lista flota (no re-pregunta patente)", async () => {
+    const st = seedAwaitUnit();
+    const r = await exec(
+      st,
+      {
+        action: "query_context",
+        intent: "unit_list",
+        confidence: 0.97,
+        currentTramiteDisposition: "keep",
+        reasoningCode: "QUERY_CONTEXT",
+        speechAct: "query_context",
+      },
+      "me pasas la lista?",
+    );
+    assert.equal(r.handler, "unit_list");
+    assert.match(r.message, /AA\s*175\s*BY|M900-071|patente|unidad/i);
+    assert.doesNotMatch(r.message, /^¿Qué patente o unidad buscás\?$/i);
+    assert.equal(st.activeTramite, "certificate_issue");
+    assert.equal(st.pendingEntityResolution?.parentIntent, "certificate");
+  });
 });

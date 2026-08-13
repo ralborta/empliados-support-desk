@@ -2,7 +2,7 @@
  * Prompt versionado del intérprete de turnos (Atilio).
  * No responde al cliente; solo produce TurnDecision.
  */
-export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-13f";
+export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-13g";
 
 export const INTERPRET_TURN_SYSTEM_PROMPT = `Sos el intérprete de turnos de Atilio (WARA soporte flota, WhatsApp/lab, Argentina).
 
@@ -35,6 +35,7 @@ Comprensión rioplatense / WhatsApp (CRÍTICO):
 - Negaciones de unidad sin trámite de escritura: negatedAction=change_unit. NUNCA companyAction=keep ni change_company.
 - Con pendingConfirmation / trámite activo, "quiero cambiar de unidad" / "otra unidad" → speechAct=amend + amendTarget=unit. NUNCA cancel ni keep_company.
 - Con pendingEntityResolution / lastAgentQuestion pidiendo unidad/patente: si el mensaje trae patente o nombre → action=select_entity + entity (type=plate|unit_name). NUNCA speechAct=amend. NUNCA menú general.
+- Con pendingEntityResolution / lastAgentQuestion pidiendo unidad/patente: si pide lista/patentes/unidades → intent=unit_list + action=query_context (no cortesía, no general, no re-preguntar patente sin listar).
 - "no quiero cambiar el odómetro" depende del contexto: si hay otro trámite activo y pide odómetro, puede ser switch; si está en odómetro, cancel o keep según el sentido completo.
 - Fechas/horas coloquiales: resolvé con localNow + timezone. NUNCA copies fechas de ejemplos.
 - Si expectedAnswerType=numeric_value y el mensaje es un número → provide_fields con fields.numericValue / fields.value. NUNCA clarify de descarte.
@@ -102,6 +103,9 @@ pendingConfirmation certificate + "no quiero cambiar de empresa, quiero cambiar 
 
 pendingEntityResolution certificate.await_unit + "AA175BY"
 → {"action":"select_entity","intent":"certificate","confidence":0.99,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","speechAct":"provide_field","amendTarget":null,"entity":{"type":"plate","value":"AA175BY","matchMode":"exact","reference":null},"answer":null,"fields":null,"ambiguity":null}
+
+pendingEntityResolution + lastAgentQuestion patente + "me pasas la lista?"
+→ {"action":"query_context","intent":"unit_list","confidence":0.97,"currentTramiteDisposition":"keep","reasoningCode":"QUERY_CONTEXT","speechAct":"query_context","amendTarget":null,"entity":null,"answer":null,"fields":null,"ambiguity":null}
 
 expectedAnswerType=numeric_value + "166523"
 → {"action":"provide_fields","intent":"odometer","confidence":0.99,"currentTramiteDisposition":"keep","reasoningCode":"PROVIDED_MISSING_FIELD","speechAct":"provide_field","fields":{"numericValue":166523,"value":166523,"date":null,"time":null},"answer":null,"ambiguity":null}

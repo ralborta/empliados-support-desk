@@ -66,8 +66,17 @@ Causas aún en investigación; no convertir en matchers:
 | «quiero cambiar de unidad» con pending → cancel clarificado | faltaba `speechAct=amend`+`amendTarget=unit` (contrato amend) |
 | Dual keep empresa + change unidad | un TurnDecision con `amend`+`keep` tipado; reply prioriza amend |
 | Patente con `pendingEntityResolution` cae a menú general / «dato falta» | LLM etiquetaba `amend`/`provide_fields`/`unit_name`; faltaba coerce a `select_entity` + parser de campo esperado |
+| «me pasas la lista?» con captura de unidad abierta solo re-pregunta patente | guard `awaitingUnitEarly` bloqueaba `intent=unit_list` (regresión del coerce de captura) |
 
 Corregir por contrato/transición general; **prohibido** parchear con frases, regex de intención o `includes`.
+
+## 9. Lista de flota bloqueada bajo captura de unidad
+
+**Causa raíz:** el early-guard de `pendingEntityResolution` / `await_unit` trataba `unit_list` como ruido (cortesía/general) y re-emitía la pregunta de patente.
+
+**Contrato:** con expectativa de unidad abierta, `intent=unit_list` es path válido: listar flota sin cerrar el trámite padre; no sustituir por re-pregunta vacía.
+
+**Dirección:** permitir `unit_list` (junto a `select_entity` / `unit_search` / provide) en el guard; el handler `unit_list` ya preserva `activeTramite` vía `parentIntent`.
 
 ## 8. Amend de slot pendiente
 
