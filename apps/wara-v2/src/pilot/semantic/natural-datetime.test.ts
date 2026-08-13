@@ -24,6 +24,7 @@ import {
   diagnoseSaturdayBugExample,
   resolveNaturalReadingDatetime,
   reconcileLlmReadingFields,
+  softTimeQuestionForMessage,
   FECHA_LECTURA_QUESTION,
 } from "./natural-datetime.js";
 import { detectOdometerFieldCorrection } from "./field-correction.js";
@@ -377,6 +378,67 @@ describe("natural datetime + field correction + anomaly", () => {
     if (r.ok) {
       assert.equal(r.date, "2026-08-08");
       assert.equal(r.overridden, true);
+    }
+  });
+
+  it("fue a la tardecita pide precisión amable", () => {
+    const r = resolveNaturalReadingDatetime("fue a la tardecita", {
+      timezone: TZ,
+      localNow: LOCAL_NOW,
+    });
+    assert.equal(r.kind, "needs_precision");
+    if (r.kind === "needs_precision") {
+      assert.match(r.question, /tarde.*hora/i);
+    }
+    assert.match(
+      softTimeQuestionForMessage("fue a la tardecita") ?? "",
+      /Entiendo que fue por la tarde/,
+    );
+  });
+
+  it("tipo seis y media → 18:30", () => {
+    const r = resolveNaturalReadingDatetime("tipo seis y media", {
+      timezone: TZ,
+      localNow: LOCAL_NOW,
+    });
+    assert.equal(r.kind, "resolved");
+    if (r.kind === "resolved") {
+      assert.equal(r.time, "18:30");
+    }
+  });
+
+  it("anoche sin hora → needs_precision con fecha de ayer", () => {
+    const r = resolveNaturalReadingDatetime("anoche", {
+      timezone: TZ,
+      localNow: LOCAL_NOW,
+    });
+    assert.equal(r.kind, "needs_precision");
+    if (r.kind === "needs_precision") {
+      assert.equal(r.date, "2026-08-11");
+      assert.match(r.question, /noche|hora/i);
+    }
+  });
+
+  it("a eso de las ocho → 20:00", () => {
+    const r = resolveNaturalReadingDatetime("a eso de las ocho", {
+      timezone: TZ,
+      localNow: LOCAL_NOW,
+    });
+    assert.equal(r.kind, "resolved");
+    if (r.kind === "resolved") {
+      assert.equal(r.time, "20:00");
+    }
+  });
+
+  it("el domingo a la tardecita → fecha + pregunta de hora", () => {
+    const r = resolveNaturalReadingDatetime("el domingo a la tardecita", {
+      timezone: TZ,
+      localNow: LOCAL_NOW,
+    });
+    assert.equal(r.kind, "needs_precision");
+    if (r.kind === "needs_precision") {
+      assert.equal(r.date, "2026-08-09");
+      assert.match(r.question, /tarde/i);
     }
   });
 });

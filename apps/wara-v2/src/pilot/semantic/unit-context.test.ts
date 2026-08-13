@@ -19,6 +19,7 @@ import { cancelActiveOrPendingTramite } from "./cancel-active-tramite.js";
 import {
   applyResolvedUnit,
   commitSelectedUnit,
+  inferEntityReference,
   looksLikeUnitStatusOfActive,
   proposeUnit,
   resolveContextualUnitReference,
@@ -300,5 +301,16 @@ describe("unit context — referencias y undo", () => {
     }
     assert.equal(st.selectedUnit?.patente, "AD307VN");
     assert.equal(st.proposedUnit?.patente, "AA175BY");
+  });
+
+  it("inferEntityReference cobre typos y coloquial rioplatense", () => {
+    assert.equal(inferEntityReference("la q tenia"), "previous_selected_unit");
+    assert.equal(inferEntityReference("buelbe a la anterior"), "previous_selected_unit");
+    assert.equal(inferEntityReference("no no esa no"), "previous_selected_unit");
+    assert.equal(inferEntityReference("esa no, la otra"), "previous_selected_unit");
+    assert.equal(inferEntityReference("la misma"), "selected_unit");
+    assert.equal(inferEntityReference("quiero ver esa"), "selected_unit");
+    assert.equal(looksLikeUnitStatusOfActive("pasame el estado"), true);
+    assert.equal(looksLikeUnitStatusOfActive("fijate si reporta"), true);
   });
 });

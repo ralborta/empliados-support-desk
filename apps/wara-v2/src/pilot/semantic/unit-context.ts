@@ -112,17 +112,20 @@ export function inferEntityReference(text: string): UnitEntityReference | null {
 
   if (
     /\b(no\s+era\s+esa|no\s+es\s+esa|no\s+esa|esa\s+no|incorrecta|equivocad)\b/.test(t) ||
-    /\b(volve|volvé|volver)\s+(a\s+)?(la\s+)?(anterior|de\s+antes)\b/.test(t) ||
-    /\b(la\s+que\s+tenia|la\s+que\s+tenía|la\s+que\s+tenia\s+seleccionada|la\s+que\s+tenía\s+seleccionada)\b/.test(
+    /\b(volve|volvé|volver|buelbe|vuelve)\s+(a\s+)?(la\s+)?(anterior|de\s+antes)\b/.test(t) ||
+    /\b(la\s+q(ue)?\s+tenia|la\s+q(ue)?\s+tenía|la\s+que\s+estaba\s+usando|la\s+que\s+tenia\s+seleccionada|la\s+que\s+tenía\s+seleccionada)\b/.test(
       t,
     ) ||
-    /\b(la\s+anterior|la\s+de\s+antes|la\s+previa|same_as_before)\b/.test(t)
+    /\b(la\s+anterior|la\s+de\s+antes|la\s+previa|same_as_before|esa\s+no,?\s+la\s+otra|no\s+mejor\s+la\s+otra)\b/.test(
+      t,
+    ) ||
+    /\bno\s+no\s+esa\b/.test(t)
   ) {
     return "previous_selected_unit";
   }
 
   if (
-    /\b(la\s+misma(\s+unidad)?|de\s+la\s+misma(\s+unidad)?|esa\s+misma|esa\s+unidad|esa|ese|la\s+seleccionada|la\s+activa)\b/.test(
+    /\b(la\s+misma(\s+unidad)?|de\s+la\s+misma(\s+unidad)?|esa\s+misma|esa\s+unidad|de\s+esa\s+unidad|sobre\s+esa|con\s+esa|segui\s+con\s+esa|seguí\s+con\s+esa|deja\s+esa|dejá\s+esa|esa|ese|la\s+seleccionada|la\s+activa|quiero\s+ver\s+esa)\b/.test(
       t,
     )
   ) {
@@ -142,10 +145,17 @@ export function looksLikeUnitStatusOfActive(text: string): boolean {
   if (/\b(list(a|ame|ar)|todas|flota|mostrame\s+unidades|ver\s+unidades)\b/.test(t)) {
     return false;
   }
-  return (
-    /\b(estado|reporte|gps|ubicacion|ubicaci[oó]n|donde\s+esta|d[oó]nde\s+est[aá]|como\s+esta|c[oó]mo\s+est[aá])\b/.test(
+  if (
+    /\b(pasame\s+el\s+estado|fijate\s+si\s+reporta|mostrame\s+donde\s+esta|mostrame\s+d[oó]nde\s+est[aá]|decime\s+como\s+esta|decime\s+c[oó]mo\s+est[aá]|quiero\s+ver\s+esa)\b/.test(
       t,
-    ) && /\b(unidad|la\s+unidad|esa\s+unidad|el\s+movil|el\s+m[oó]vil)\b/.test(t)
+    )
+  ) {
+    return true;
+  }
+  return (
+    /\b(estado|reporte|gps|ubicacion|ubicaci[oó]n|donde\s+esta|d[oó]nde\s+est[aá]|como\s+esta|c[oó]mo\s+est[aá]|reporta)\b/.test(
+      t,
+    ) && /\b(unidad|la\s+unidad|esa\s+unidad|el\s+movil|el\s+m[oó]vil|esa)\b/.test(t)
   );
 }
 

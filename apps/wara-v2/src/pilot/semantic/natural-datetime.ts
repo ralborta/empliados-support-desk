@@ -48,6 +48,14 @@ export type NaturalDatetimeResolution =
       source: "weekday";
       futureExplicit: true;
     }
+  | {
+      kind: "needs_precision";
+      date: string | null;
+      time: string | null;
+      weekday: string | null;
+      band: "morning" | "afternoon" | "evening" | "midday" | "approx";
+      question: string;
+    }
   | { kind: "unresolved" };
 
 export type DateTurnDiagnosis = {
@@ -89,8 +97,42 @@ export function weekdayNameOfDate(isoDate: string, timezone: string): string {
   return WEEKDAY_NAME_BY_LUXON[dt.weekday] ?? "";
 }
 
+const HOUR_WORDS: Record<string, number> = {
+  una: 1,
+  uno: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  once: 11,
+  doce: 12,
+};
+
+/** "tipo seis" / "a eso de las ocho" → dígitos para extractTime. */
+function expandHourWords(n: string): string {
+  return n.replace(
+    /\b(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b/g,
+    (w) => String(HOUR_WORDS[w] ?? w),
+  );
+}
+
 function extractTime(n: string): string | null {
-  const tipo = n.match(/\btipo\s+(\d{1,2})\b/);
+  const s = expandHourWords(n);
+  // "tipo seis y media" / "tipo 6 y media"
+  const tipoMedia = s.match(/\btipo\s+(\d{1,2})\s+y\s+media\b/);
+  if (tipoMedia) {
+    let h = Number(tipoMedia[1]);
+    if (h < 0 || h > 23) return null;
+    if (h === 6) h = 18;
+    else if (h <= 11) h = h + 12;
+    return `${String(h).padStart(2, "0")}:30`;
+  }
+  const tipo = s.match(/\btipo\s+(\d{1,2})\b/);
   if (tipo) {
     const h = Number(tipo[1]);
     if (h < 0 || h > 23) return null;
@@ -99,14 +141,69 @@ function extractTime(n: string): string | null {
     if (h <= 11) return `${String(h + 12).padStart(2, "0")}:00`;
     return `${String(h).padStart(2, "0")}:00`;
   }
+  // "a eso de las ocho" / "cerca de las 8"
+  const approx = s.match(/\b(?:a\s+eso\s+de\s+las|cerca\s+de\s+las|tipo\s+las)\s+(\d{1,2})(?::(\d{2}))?\b/);
+  if (approx) {
+    let hh = Number(approx[1]);
+    const mm = approx[2] ? Number(approx[2]) : 0;
+    if (hh <= 11 && !/\b(am|manana)\b/.test(s)) {
+      // Por defecto tarde/noche coloquial si ≤11 sin am.
+      if (hh >= 1 && hh <= 11) hh += 12;
+    }
+    if (hh > 23 || mm > 59) return null;
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
   const m =
-    n.match(/\b(?:a\s+las|hora|horas)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})\b/) ??
-    n.match(/\b(\d{1,2}):(\d{2})\b/);
+    s.match(/\b(?:a\s+las|hora|horas)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})\b/) ??
+    s.match(/\b(\d{1,2}):(\d{2})\b/);
   if (!m) return null;
   const hh = Number(m[1]);
   const mm = Number(m[2]);
   if (hh > 23 || mm > 59) return null;
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+/** Pregunta amable si el mensaje trae banda horaria imprecisa (tardecita, anoche, etc.). */
+export function softTimeQuestionForMessage(message: string): string | null {
+  return detectImpreciseTimeBand(norm(message))?.question ?? null;
+}
+
+/** Bandas horarias imprecisas: se comprenden pero piden precisión para escritura. */
+function detectImpreciseTimeBand(n: string): {
+  band: "morning" | "afternoon" | "evening" | "midday" | "approx";
+  question: string;
+} | null {
+  if (/\b(tardecita|a\s+la\s+tarde|por\s+la\s+tarde)\b/.test(n) && !extractTime(n)) {
+    return {
+      band: "afternoon",
+      question: "Entiendo que fue por la tarde. ¿Recordás aproximadamente a qué hora?",
+    };
+  }
+  if (/\b(anoche|a\s+la\s+noche|por\s+la\s+noche)\b/.test(n) && !extractTime(n)) {
+    return {
+      band: "evening",
+      question: "Entiendo que fue de noche. ¿Recordás aproximadamente a qué hora?",
+    };
+  }
+  if (/\b(a\s+la\s+mañana|por\s+la\s+mañana|a\s+primera\s+hora)\b/.test(n) && !extractTime(n)) {
+    return {
+      band: "morning",
+      question: "Entiendo que fue a la mañana. ¿Recordás aproximadamente a qué hora?",
+    };
+  }
+  if (/\b(cerca\s+del\s+mediod[ií]a|mediod[ií]a)\b/.test(n) && !extractTime(n)) {
+    return {
+      band: "midday",
+      question: "Entiendo que fue cerca del mediodía. ¿Recordás la hora más o menos (ej. 12:30)?",
+    };
+  }
+  if (/\b(despues\s+del\s+mediod[ií]a|después\s+del\s+mediod[ií]a)\b/.test(n) && !extractTime(n)) {
+    return {
+      band: "afternoon",
+      question: "Entiendo que fue después del mediodía. ¿A qué hora aproximadamente?",
+    };
+  }
+  return null;
 }
 
 function lastOccurrenceOfWeekday(now: DateTime, luxonWeekday: number): DateTime {
@@ -156,6 +253,7 @@ export function resolveNaturalReadingDatetime(
   }
 
   const time = extractTime(n);
+  const imprecise = detectImpreciseTimeBand(n);
 
   const numeric = n.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
   if (numeric) {
@@ -166,6 +264,16 @@ export function resolveNaturalReadingDatetime(
       { zone: timezone },
     );
     if (!date.isValid) return { kind: "unresolved" };
+    if (imprecise && !time) {
+      return {
+        kind: "needs_precision",
+        date: date.toISODate()!,
+        time: null,
+        weekday: WEEKDAY_NAME_BY_LUXON[date.weekday] ?? null,
+        band: imprecise.band,
+        question: imprecise.question,
+      };
+    }
     return {
       kind: "resolved",
       date: date.toISODate()!,
@@ -181,7 +289,40 @@ export function resolveNaturalReadingDatetime(
     /\b(domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b/,
   );
 
+  // anoche = ayer (noche); si no hay hora exacta → pedir precisión.
+  if (/\banoche\b/.test(n)) {
+    const d = now.minus({ days: 1 });
+    if (!time) {
+      return {
+        kind: "needs_precision",
+        date: d.toISODate()!,
+        time: null,
+        weekday: WEEKDAY_NAME_BY_LUXON[d.weekday] ?? null,
+        band: "evening",
+        question: "Entiendo que fue anoche. ¿Recordás aproximadamente a qué hora?",
+      };
+    }
+    return {
+      kind: "resolved",
+      date: d.toISODate()!,
+      time,
+      weekday: WEEKDAY_NAME_BY_LUXON[d.weekday] ?? null,
+      source: "relative",
+      futureExplicit: false,
+    };
+  }
+
   if (/\bhoy\b/.test(n)) {
+    if (imprecise && !time) {
+      return {
+        kind: "needs_precision",
+        date: now.toISODate()!,
+        time: null,
+        weekday: WEEKDAY_NAME_BY_LUXON[now.weekday] ?? null,
+        band: imprecise.band,
+        question: imprecise.question,
+      };
+    }
     return {
       kind: "resolved",
       date: now.toISODate()!,
@@ -193,6 +334,16 @@ export function resolveNaturalReadingDatetime(
   }
   if (/\bayer\b/.test(n)) {
     const d = now.minus({ days: 1 });
+    if (imprecise && !time) {
+      return {
+        kind: "needs_precision",
+        date: d.toISODate()!,
+        time: null,
+        weekday: WEEKDAY_NAME_BY_LUXON[d.weekday] ?? null,
+        band: imprecise.band,
+        question: imprecise.question,
+      };
+    }
     return {
       kind: "resolved",
       date: d.toISODate()!,
@@ -214,6 +365,29 @@ export function resolveNaturalReadingDatetime(
     };
   }
 
+  // "el finde" → sábado más reciente ya transcurrido (lectura pasada).
+  if (/\b(el\s+)?finde\b/.test(n) || /\bfin\s+de\s+semana\b/.test(n)) {
+    const d = lastOccurrenceOfWeekday(now, 6);
+    if (imprecise && !time) {
+      return {
+        kind: "needs_precision",
+        date: d.toISODate()!,
+        time: null,
+        weekday: "sábado",
+        band: imprecise.band,
+        question: imprecise.question,
+      };
+    }
+    return {
+      kind: "resolved",
+      date: d.toISODate()!,
+      time,
+      weekday: "sábado",
+      source: "relative",
+      futureExplicit: false,
+    };
+  }
+
   if (weekdayMatch) {
     const luxonWd = WEEKDAY_ES[weekdayMatch[1]];
     if (!luxonWd) return { kind: "unresolved" };
@@ -229,6 +403,16 @@ export function resolveNaturalReadingDatetime(
       };
     }
     const d = lastOccurrenceOfWeekday(now, luxonWd);
+    if (imprecise && !time) {
+      return {
+        kind: "needs_precision",
+        date: d.toISODate()!,
+        time: null,
+        weekday: WEEKDAY_NAME_BY_LUXON[d.weekday] ?? null,
+        band: imprecise.band,
+        question: imprecise.question,
+      };
+    }
     return {
       kind: "resolved",
       date: d.toISODate()!,
@@ -239,7 +423,19 @@ export function resolveNaturalReadingDatetime(
     };
   }
 
-  if (time && !weekdayMatch && !/\b(hoy|ayer|anteayer)\b/.test(n) && !numeric) {
+  // Solo banda imprecisa sin día → pedir hora (conservar draft date vía policy).
+  if (imprecise && !time) {
+    return {
+      kind: "needs_precision",
+      date: null,
+      time: null,
+      weekday: null,
+      band: imprecise.band,
+      question: imprecise.question,
+    };
+  }
+
+  if (time && !weekdayMatch && !/\b(hoy|ayer|anteayer|anoche|finde)\b/.test(n) && !numeric) {
     return {
       kind: "resolved",
       date: now.toISODate()!,
@@ -284,10 +480,11 @@ export function reconcileLlmReadingFields(input: {
   time: string | null;
   overridden: boolean;
   futureNeedsConfirm: boolean;
+  softTimeQuestion?: string | null;
   diagnosis: Omit<DateTurnDiagnosis, "draftBefore" | "draftAfter" | "policyFields">;
 } | {
   ok: false;
-  reason: "future_explicit" | "unresolved";
+  reason: "future_explicit" | "unresolved" | "needs_precision";
   question: string;
   diagnosis: Omit<DateTurnDiagnosis, "draftBefore" | "draftAfter" | "policyFields">;
 } {
@@ -317,6 +514,37 @@ export function reconcileLlmReadingFields(input: {
         resolvedWeekday: resolved.weekday ?? "",
         resolvedDate: resolved.date,
         cause: "future_weekday_explicit",
+      },
+    };
+  }
+
+  if (resolved.kind === "needs_precision") {
+    // Día comprendido, hora imprecisa → aceptar date y pedir precisión amable.
+    if (resolved.date) {
+      return {
+        ok: true,
+        date: resolved.date,
+        time: null,
+        overridden: Boolean(input.llmDate && input.llmDate !== resolved.date),
+        futureNeedsConfirm: false,
+        softTimeQuestion: resolved.question,
+        diagnosis: {
+          ...baseDiag,
+          resolvedWeekday: resolved.weekday ?? weekdayNameOfDate(resolved.date, timezone),
+          resolvedDate: resolved.date,
+          cause: "imprecise_time_band",
+        },
+      };
+    }
+    return {
+      ok: false,
+      reason: "needs_precision",
+      question: resolved.question,
+      diagnosis: {
+        ...baseDiag,
+        resolvedWeekday: "",
+        resolvedDate: "",
+        cause: "imprecise_time_no_date",
       },
     };
   }

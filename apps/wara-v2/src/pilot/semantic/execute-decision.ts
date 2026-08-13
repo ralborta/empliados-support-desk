@@ -43,6 +43,7 @@ import {
 } from "./cancel-command.js";
 import { cancelActiveOrPendingTramite } from "./cancel-active-tramite.js";
 import { FECHA_LECTURA_QUESTION } from "./natural-datetime.js";
+import { softTimeQuestionForMessage } from "./natural-datetime.js";
 import {
   formatAnomalyQuestion,
   isAnomalousReading,
@@ -175,6 +176,7 @@ function resolveUnitFromDecisionOrText(
 function handleCorrectOdometerFields(
   decision: TurnDecision,
   state: PilotConversationState,
+  deps: ExecuteDeps,
 ): ExecuteResult | null {
   const draft = state.odometerDraft;
   if (!draft || draft.step === "idle") return null;
@@ -275,9 +277,10 @@ function handleCorrectOdometerFields(
       draft.fechaLecturaIso = `${date}T00:00:00`;
       draft.fechaDisplay = formatFechaDisplay(draft.fechaLecturaIso);
       const dia = formatFechaDiaLargo(draft.fechaLecturaIso, TZ);
+      const soft = softTimeQuestionForMessage(deps.originalMessage);
       return {
         handler: "odometer",
-        message: `Perfecto, ${dia}. ¿A qué hora?`,
+        message: soft ?? `Perfecto, ${dia}. ¿A qué hora?`,
         state,
       };
     } else if (time && !date) {
@@ -342,7 +345,7 @@ function handleProvideOdometerFields(
   if (!draft || draft.step === "idle") return null;
 
   if (decision.action === "correct_fields") {
-    return handleCorrectOdometerFields(decision, state);
+    return handleCorrectOdometerFields(decision, state, deps);
   }
 
   const fields = decision.fields ?? {};
@@ -458,9 +461,10 @@ function handleProvideOdometerFields(
       draft.fechaLecturaIso = `${fields.date}T00:00:00`;
       draft.fechaDisplay = formatFechaDisplay(draft.fechaLecturaIso);
       const dia = formatFechaDiaLargo(draft.fechaLecturaIso, TZ);
+      const soft = softTimeQuestionForMessage(deps.originalMessage);
       return {
         handler: "odometer",
-        message: `Perfecto, ${dia}. ¿A qué hora?`,
+        message: soft ?? `Perfecto, ${dia}. ¿A qué hora?`,
         state,
       };
     }

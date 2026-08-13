@@ -302,7 +302,7 @@ export function applySemanticPolicy(
     const hasDateSignal =
       Boolean(decision.fields?.date) ||
       Boolean(decision.fields?.time) ||
-      /\b(hoy|ayer|anteayer|domingo|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|\d{1,2}\/\d{1,2}\/\d{2,4}|tipo\s+\d)\b/i.test(
+      /\b(hoy|ayer|anteayer|anoche|finde|tardecita|mediod[ií]a|domingo|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|\d{1,2}\/\d{1,2}\/\d{2,4}|tipo\s+\d)\b/i.test(
         message,
       );
     if (hasDateSignal) {
@@ -317,7 +317,11 @@ export function applySemanticPolicy(
         return {
           ok: false,
           reason:
-            reconciled.reason === "future_explicit" ? "future_date" : "date_weekday_mismatch",
+            reconciled.reason === "future_explicit"
+              ? "future_date"
+              : reconciled.reason === "needs_precision"
+                ? "needs_time_precision"
+                : "date_weekday_mismatch",
           decision: safeClarifyDecision(reconciled.question),
         };
       }
