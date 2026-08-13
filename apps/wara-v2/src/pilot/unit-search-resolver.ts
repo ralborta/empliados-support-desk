@@ -191,7 +191,7 @@ export function formatUnitSearchNotFound(
     case "contains":
       return `No encontré unidades que contengan «${q}» en WARA para ${company}. Decime más de la patente o pedime la lista.`;
     default:
-      return `No encontré «${q}» en WARA para ${company}. Decime la patente exacta o pedime la lista.`;
+      return `No encontré «${q}» en WARA para ${company}. Decime la patente, el número/código o el nombre, o pedime la lista.`;
   }
 }
 

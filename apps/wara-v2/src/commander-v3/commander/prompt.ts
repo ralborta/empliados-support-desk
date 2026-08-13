@@ -20,10 +20,12 @@ Reglas:
 6) Saludo primer contacto → greet + introduced. Saludo posterior breve.
 7) Consulta empresa activa → company.get_active; NO ofrezcas cambio salvo pedido explícito.
 8) "la misma"/"esa"/"anterior" → unitReference contextual.
-9) Pedido explícito de lista → unit.search.
-10) Pregunta lateral (GPS mid-trámite) → answer_lateral + preserveTask + gps.get_status.
-11) responseGoal.facts = hechos a decir; nextQuestion solo si ask_missing/clarify/confirm_write.
-12) confidence 0..1.
+9) «estado» / «reporte» / «dónde está» / «ubicación» de unidad → task gps (lectura). Con unidad activa → contextual.
+10) Identificación de unidad: patente, número/código (M900-072 / 900-072) o nombre — el usuario NO solo manda patentes.
+11) Pedido explícito de lista → unit.search (listado con patente+código, no solo patentes sueltas).
+12) Pregunta lateral (GPS mid-trámite) → answer_lateral + preserveTask + gps.get_status.
+13) responseGoal.facts = hechos a decir; nextQuestion solo si ask_missing/clarify/confirm_write.
+14) confidence 0..1.
 
 Campos TurnPlan:
 conversationalAct, task, taskAction, companyReference, unitReference, suppliedFields,

@@ -181,11 +181,21 @@ function resolveUnitFromDecisionOrText(
   deps: ExecuteDeps,
   opts?: { allowMessageAsUnitField?: boolean },
 ): WaraUnidadEstado | null {
-  // Preferir entity estructurada; si falta y estamos en expected unit, parsear patente del mensaje.
+  // Preferir entity estructurada; si falta y estamos en expected unit, parsear del mensaje.
+  // Siempre probar patente Y nombre/código (el usuario no solo manda patentes).
   const raw =
     decision.entity?.value?.trim() ||
     (opts?.allowMessageAsUnitField ? deps.originalMessage.trim() : "");
   if (!raw) return null;
+  const preferName =
+    decision.entity?.type === "unit_name" || decision.entity?.type === "contextual";
+  if (preferName) {
+    const byName = resolveUnitByNameFromFleet(deps.fleetUnits, raw);
+    if (byName.kind === "one") return byName.unit;
+    const byPlate = resolveUnitByPlateFromFleet(deps.fleetUnits, raw);
+    if (byPlate.kind === "one") return byPlate.unit;
+    return null;
+  }
   const byPlate = resolveUnitByPlateFromFleet(deps.fleetUnits, raw);
   if (byPlate.kind === "one") return byPlate.unit;
   const byName = resolveUnitByNameFromFleet(deps.fleetUnits, raw);
@@ -1559,7 +1569,7 @@ export async function executeTurnDecision(
         const cont = continueAfterUnitResolved(state, fromEntity, { parentIntent: "gps" });
         return { handler: cont.handler, message: cont.message, state };
       }
-      return { handler: "gps", message: "Decime la patente para el reporte GPS.", state };
+      return { handler: "gps", message: unitAwaitAskMessage("gps"), state };
     }
     if (decision.intent === "maintenance") {
       applyDisposition(state, decision);

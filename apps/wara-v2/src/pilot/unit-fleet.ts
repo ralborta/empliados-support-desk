@@ -183,7 +183,13 @@ function normalizeUnitNameToken(value: string): string {
 
 export function extractUnitNameCode(text: string): string | null {
   const m = text.match(/\b(M?\d{3}-\d{2,3})\b/i);
-  return m?.[1] ? normalizeUnitNameToken(m[1]) : null;
+  if (m?.[1]) return normalizeUnitNameToken(m[1]);
+  // Número interno sin guión (ej. 900072 / M900072) — no confundir con odómetro largo.
+  const bare = text.match(/\b(M?\d{5,6})\b/i);
+  if (bare?.[1] && bare[1].replace(/^M/i, "").length <= 6) {
+    return normalizeUnitNameToken(bare[1]);
+  }
+  return null;
 }
 
 export function filterUnitsByUnitName(
@@ -253,8 +259,8 @@ export function formatPaginatedFleetMessage(
         : `Unidades en ${company} (página ${listing.page}/${totalPages}, ${listing.totalCount} en total):`;
   const nav =
     totalPages > 1
-      ? `\n\nDecime el número (ej. «22» o «la 22»), «siguiente»/«anterior» para otra página, o la patente/nombre para buscar.`
-      : `\n\nDecime el número o la patente/nombre de la unidad que querés consultar.`;
+      ? `\n\nDecime el número (ej. «22» o «la 22»), «siguiente»/«anterior» para otra página, o la patente/número/nombre para buscar.`
+      : `\n\nDecime el número de la lista, la patente, el código (ej. M900-072) o el nombre de la unidad.`;
   return `${header}\n\n${lines.join("\n")}${nav}`;
 }
 
@@ -270,8 +276,13 @@ export function isFleetListingBody(text: string | null | undefined): boolean {
 export function unitAwaitAskMessage(
   parent: "certificate" | "odometer" | "horometer" | "maintenance" | "ticket" | "gps" | null,
 ): string {
-  if (parent === "certificate") return "¿De qué unidad querés el certificado de cobertura?";
-  return "¿Qué patente o unidad buscás?";
+  if (parent === "certificate") {
+    return "¿De qué unidad querés el certificado? Decime patente, número (ej. M900-072) o nombre.";
+  }
+  if (parent === "gps") {
+    return "Decime la patente, el número de unidad o el nombre para el reporte GPS.";
+  }
+  return "¿Qué unidad buscás? Decime patente, número o nombre.";
 }
 
 export function formatPlatesOnlyMessage(

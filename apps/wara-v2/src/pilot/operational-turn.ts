@@ -1564,14 +1564,11 @@ export async function resolveOperationalTurn(input: {
   }
 
   if (looksLikePlatesOnlyRequest(text)) {
-    const fleet = await fetchFleet(state, env);
-    if (!fleet.ok) {
-      savePilotConversationState(state);
-      return { kind: "reply", message: fleet.error, state };
+    // Pedido de «patentes» → listado de unidades (patente + código/nombre), no solo placas sueltas.
+    if (state.activeTramite !== "none" && state.activeTramite !== "list_units") {
+      suspendCurrentTramite(state);
     }
-    const listing = buildPaginatedListing({ units: fleet.units, page: 1, kind: "plates_only" });
-    const msg = formatPlatesOnlyMessage(listing, state.companyName);
-    showListing(state, listing, msg);
+    const msg = await handleListUnits(state, env, 1);
     savePilotConversationState(state);
     return { kind: "reply", message: msg, state };
   }
