@@ -105,6 +105,30 @@ describe("commander-v3 contracts", () => {
     if (r.status === "exact") assert.equal(r.unit.movilId, 71);
   });
 
+  it("resolver: parcial único (marca) → exact", () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.fleetCache = [
+      {
+        movilId: 7,
+        plate: "AG562SP",
+        name: "NISSAN 2404",
+        label: "AG 562 SP (NISSAN 2404 - AG 562 SP)",
+      },
+      {
+        movilId: 8,
+        plate: "AA111AA",
+        name: "FORD 1",
+        label: "AA 111 AA (FORD 1)",
+      },
+    ];
+    const r = resolveUnitReference(
+      { kind: "unit", mode: "named", value: "nissan" },
+      s,
+    );
+    assert.equal(r.status, "exact");
+    if (r.status === "exact") assert.equal(r.unit.movilId, 7);
+  });
+
   it("resolver: parcial no selecciona silenciosamente", () => {
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     s.fleetCache = [

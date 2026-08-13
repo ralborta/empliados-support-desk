@@ -42,11 +42,31 @@ export function applyCommanderState(input: ApplyInput): {
 
   // Ambiguous units
   if (input.unitMany && input.unitMany.length > 0) {
+    const purpose =
+      (input.plan.task && input.plan.task !== "unit_query"
+        ? input.plan.task
+        : null) ??
+      s.activeTask?.type ??
+      "unit_query";
     s = {
       ...s,
+      activeTask:
+        purpose === "gps" ||
+        purpose === "odometer" ||
+        purpose === "hourmeter" ||
+        purpose === "certificate"
+          ? s.activeTask?.type === purpose
+            ? s.activeTask
+            : {
+                type: purpose,
+                status: "collecting",
+                collected: { ...(input.plan.suppliedFields ?? {}) },
+                missing: ["unit"],
+              }
+          : s.activeTask,
       pendingEntity: {
         type: "unit",
-        purpose: s.activeTask?.type ?? "unit_query",
+        purpose,
         candidates: input.unitMany,
       },
       lastQuestion: {

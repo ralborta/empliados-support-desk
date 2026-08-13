@@ -25,6 +25,40 @@ function ensureCap(
   };
 }
 
+function taskAfterUnitCapture(
+  plan: TurnPlan,
+  state: ConversationStateV3,
+): TurnPlan["task"] {
+  if (plan.task) return plan.task;
+  if (state.activeTask?.type) return state.activeTask.type;
+  const purpose = state.pendingEntity?.purpose;
+  if (
+    purpose === "gps" ||
+    purpose === "odometer" ||
+    purpose === "hourmeter" ||
+    purpose === "certificate"
+  ) {
+    return purpose;
+  }
+  return null;
+}
+
+function ensureTaskCapsAfterUnit(
+  plan: TurnPlan,
+  state: ConversationStateV3,
+): TurnPlan {
+  const task = plan.task ?? state.activeTask?.type ?? state.pendingEntity?.purpose;
+  let next = plan;
+  if (task === "odometer" || task === "hourmeter") {
+    next = ensureCap(next, `${task}.prepare`);
+  } else if (task === "certificate") {
+    next = ensureCap(next, "certificate.prepare");
+  } else if (task === "gps") {
+    next = ensureCap(next, "gps.get_status");
+  }
+  return next;
+}
+
 export function enrichPlanForExpectedFields(
   plan: TurnPlan,
   state: ConversationStateV3,
@@ -79,7 +113,7 @@ function enrichExpectedUnit(
       ...plan,
       conversationalAct:
         plan.conversationalAct === "greet" ? "continue_task" : plan.conversationalAct,
-      task: plan.task ?? state.activeTask?.type ?? null,
+      task: taskAfterUnitCapture(plan, state),
       taskAction: plan.taskAction ?? "continue",
       unitReference: {
         kind: "unit",
@@ -97,13 +131,7 @@ function enrichExpectedUnit(
       },
     };
     next = ensureCap(next, "unit.select");
-    if (
-      state.activeTask?.type === "odometer" ||
-      state.activeTask?.type === "hourmeter"
-    ) {
-      next = ensureCap(next, `${state.activeTask.type}.prepare`);
-    }
-    return next;
+    return ensureTaskCapsAfterUnit(next, state);
   }
 
   const plateNorm = normalizeLoosePlate(t);
@@ -111,7 +139,7 @@ function enrichExpectedUnit(
     let next: TurnPlan = {
       ...plan,
       conversationalAct: "continue_task",
-      task: plan.task ?? state.activeTask?.type ?? null,
+      task: taskAfterUnitCapture(plan, state),
       taskAction: "continue",
       unitReference: {
         kind: "unit",
@@ -127,13 +155,7 @@ function enrichExpectedUnit(
       },
     };
     next = ensureCap(next, "unit.select");
-    if (
-      state.activeTask?.type === "odometer" ||
-      state.activeTask?.type === "hourmeter"
-    ) {
-      next = ensureCap(next, `${state.activeTask.type}.prepare`);
-    }
-    return next;
+    return ensureTaskCapsAfterUnit(next, state);
   }
 
   const code = extractUnitNameCode(t) ?? (t.length >= 5 && t.length <= 7 ? t : null);
@@ -148,7 +170,7 @@ function enrichExpectedUnit(
       let next: TurnPlan = {
         ...plan,
         conversationalAct: "continue_task",
-        task: plan.task ?? state.activeTask?.type ?? null,
+        task: taskAfterUnitCapture(plan, state),
         taskAction: "continue",
         unitReference: {
           kind: "unit",
@@ -166,14 +188,41 @@ function enrichExpectedUnit(
         },
       };
       next = ensureCap(next, "unit.select");
-      if (
-        state.activeTask?.type === "odometer" ||
-        state.activeTask?.type === "hourmeter"
-      ) {
-        next = ensureCap(next, `${state.activeTask.type}.prepare`);
-      }
-      return next;
+      return ensureTaskCapsAfterUnit(next, state);
     }
+  }
+
+  // Marca / prefijo / nombre corto (“la nissan”, “AG”, “NISSAN”)
+  const hint = t.replace(/^(la|el|esa|ese|las|los)\s+/i, "").trim();
+  if (
+    hint &&
+    hint.length >= 2 &&
+    hint.length <= 24 &&
+    hint.split(/\s+/).length <= 3 &&
+    !/[?]/.test(hint)
+  ) {
+    let next: TurnPlan = {
+      ...plan,
+      conversationalAct: "continue_task",
+      task: taskAfterUnitCapture(plan, state),
+      taskAction: "continue",
+      unitReference: {
+        kind: "unit",
+        mode: "named",
+        value: hint,
+        reference: null,
+      },
+      reasoning:
+        plan.reasoning ||
+        `El usuario indicó la unidad por marca/nombre «${hint}».`,
+      responseGoal: {
+        purpose: "ask_missing",
+        facts: [],
+        nextQuestion: null,
+      },
+    };
+    next = ensureCap(next, "unit.select");
+    return ensureTaskCapsAfterUnit(next, state);
   }
 
   return plan;

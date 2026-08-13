@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13v", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13v/);
+  it("prompt version bump 13w", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13w/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1160,5 +1160,164 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.doesNotMatch(exec.facts.join(" "), /256111/);
     assert.match(exec.facts.join(" "), /valor|hor[oó]metro/i);
+  });
+
+  it("GPS enrich: reporte + prefijo AG → unitReference", async () => {
+    const { enrichPlanForGpsUnitInMessage } = await import(
+      "../enrich/gps-unit-from-message.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.fleetCache = [
+      {
+        movilId: 7,
+        plate: "AG562SP",
+        name: "NISSAN 2404",
+        label: "AG 562 SP (NISSAN 2404)",
+      },
+      {
+        movilId: 8,
+        plate: "AA111AA",
+        name: "FORD 1",
+        label: "AA 111 AA (FORD 1)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "pide reporte gps",
+      conversationalAct: "start_task",
+      task: "gps",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: false },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForGpsUnitInMessage(
+      plan,
+      s,
+      "Quiero saber el reporte de la ag",
+    );
+    assert.ok(enriched.unitReference);
+    assert.match(String(enriched.unitReference?.value ?? ""), /ag/i);
+  });
+
+  it("GPS enrich: marca nissan → unitReference", async () => {
+    const { enrichPlanForGpsUnitInMessage } = await import(
+      "../enrich/gps-unit-from-message.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.fleetCache = [
+      {
+        movilId: 7,
+        plate: "AG562SP",
+        name: "NISSAN 2404",
+        label: "AG 562 SP (NISSAN 2404)",
+      },
+      {
+        movilId: 8,
+        plate: "AA111AA",
+        name: "FORD 1",
+        label: "AA 111 AA (FORD 1)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "reporte nissan",
+      conversationalAct: "start_task",
+      task: "gps",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: false },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForGpsUnitInMessage(
+      plan,
+      s,
+      "Quiero saber el reporte de la nissan",
+    );
+    assert.ok(enriched.unitReference);
+    assert.match(String(enriched.unitReference?.value ?? ""), /nissan/i);
+  });
+
+  it("unit.search filtra por prefijo AG", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.fleetCache = [
+      {
+        movilId: 7,
+        plate: "AG562SP",
+        name: "NISSAN 2404",
+        label: "AG 562 SP (NISSAN 2404)",
+      },
+      {
+        movilId: 8,
+        plate: "AA111AA",
+        name: "FORD 1",
+        label: "AA 111 AA (FORD 1)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "filtro",
+      conversationalAct: "inform",
+      task: "unit_query",
+      requestedCapabilities: [
+        { name: "unit.search", params: { query: "AG", mode: "query" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "ag",
+    });
+    assert.match(exec.facts.join(" "), /AG 562|NISSAN/i);
+    assert.doesNotMatch(exec.facts.join(" "), /FORD 1|AA 111/i);
+  });
+
+  it("expected unit marca + purpose gps → gps.get_status", async () => {
+    const { enrichPlanForExpectedFields } = await import(
+      "../enrich/expected-field-capture.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingEntity = { type: "unit", purpose: "gps" };
+    s.activeTask = {
+      type: "gps",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    s.lastQuestion = {
+      id: "q1",
+      purpose: "disambiguate_unit",
+      expected: "unit",
+    };
+    s.fleetCache = [
+      {
+        movilId: 7,
+        plate: "AG562SP",
+        name: "NISSAN 2404",
+        label: "AG 562 SP (NISSAN 2404)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "elige nissan",
+      conversationalAct: "continue_task",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForExpectedFields(plan, s, "La NISSAN");
+    assert.equal(enriched.task, "gps");
+    assert.ok(enriched.unitReference);
+    assert.ok(
+      enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+    );
   });
 });

@@ -46,6 +46,19 @@ export function filterFleetCacheByQuery(
     if (hits.length) return hits;
   }
 
+  // Prefijo de patente (AG, AA82, …): matchea plate compacta aunque no esté tokenizada.
+  const compact = q.replace(/[\s\-_.]+/g, "").toUpperCase();
+  if (
+    /^[A-Z]{2,3}\d{0,4}$/.test(compact) &&
+    !isPlausibleVehiclePlate(compact)
+  ) {
+    const byPrefix = state.fleetCache.filter((u) => {
+      const p = normalizeLoosePlate(u.plate ?? "");
+      return Boolean(p && p.startsWith(compact));
+    });
+    if (byPrefix.length) return byPrefix;
+  }
+
   const code = extractUnitNameCode(q);
   if (code) {
     const byCode = filterUnitsByUnitName(fleetLike as never, code);

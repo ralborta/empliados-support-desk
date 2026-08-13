@@ -136,15 +136,17 @@ export function resolveUnitReference(
   const partial = state.fleetCache.filter((u) => {
     const p = normUnitToken(u.plate ?? "");
     const n = normUnitToken(u.name ?? "");
+    const l = normUnitToken(u.label ?? "");
     const q = nameQ;
-    return (p && p.includes(q)) || (n && n.includes(q));
+    return (
+      (p && p.includes(q)) ||
+      (n && n.includes(q)) ||
+      (l && l.includes(q))
+    );
   });
+  // Una sola coincidencia parcial (marca/prefijo) = exacta; varias = desambiguar.
   if (partial.length === 1) {
-    return {
-      status: "many",
-      candidates: partial.map(fleetToUnitRef),
-      labels: partial.map((u) => u.label),
-    };
+    return { status: "exact", unit: fleetToUnitRef(partial[0]!) };
   }
   if (partial.length > 1) {
     return {

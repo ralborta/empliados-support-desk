@@ -18,6 +18,10 @@ import {
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForExpectedFields } from "./enrich/expected-field-capture.js";
 import { enrichPlanForMeterUnitInMessage } from "./enrich/meter-unit-from-message.js";
+import {
+  enrichPlanForFleetSearchQuery,
+  enrichPlanForGpsUnitInMessage,
+} from "./enrich/gps-unit-from-message.js";
 import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
 import {
   enrichPlanForConfirmationOutcome,
@@ -312,6 +316,8 @@ export async function runCommanderTurn(
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterUnitInMessage(plan, state, input.message);
+  plan = enrichPlanForGpsUnitInMessage(plan, state, input.message);
+  plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
 
   // Switch: ejecutar el nuevo trámite sobre estado limpio (sin collected ajeno)
   if (isSwitchingTask(plan, state) && plan.task) {
@@ -386,6 +392,37 @@ export async function runCommanderTurn(
   ensurePrepareFor("odometer", "odometer.prepare");
   ensurePrepareFor("hourmeter", "hourmeter.prepare");
   ensurePrepareFor("certificate", "certificate.prepare");
+
+  // GPS: asegurar lectura + búsqueda si falta unidad (contrato, no semántica)
+  if (
+    plan.task === "gps" &&
+    !plan.requestedCapabilities.some((c) => c.name === "gps.get_status")
+  ) {
+    plan = {
+      ...plan,
+      requestedCapabilities: [
+        ...plan.requestedCapabilities,
+        { name: "gps.get_status", params: {} },
+      ],
+    };
+  }
+  if (
+    plan.task === "gps" &&
+    !state.unit &&
+    !plan.unitReference &&
+    !plan.requestedCapabilities.some(
+      (c) => c.name === "unit.search" || c.name === "unit.select",
+    )
+  ) {
+    plan = {
+      ...plan,
+      requestedCapabilities: [
+        ...plan.requestedCapabilities,
+        { name: "unit.search", params: {} },
+      ],
+    };
+    plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
+  }
 
   // Ensure company selected for ops if only one contact
   if (!state.company && state.availableCompanies.length === 1) {

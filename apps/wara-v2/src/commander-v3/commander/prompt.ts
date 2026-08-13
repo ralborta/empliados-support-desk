@@ -61,7 +61,9 @@ Reglas de decisión:
 8) "la misma"/"esa"/"anterior" → unitReference contextual.
 9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
 9b) certificado/cobertura → task=certificate + certificate.prepare.
-10) Unidad: patente, código (M900-072) o nombre.
+9c) "reporte/estado de la AG|nissan|marca|prefijo" → task=gps + unitReference (value=AG|nissan|…) + gps.get_status. Si hay varias coincidencias el runtime desambigua. NUNCA unit_query con lista completa. NUNCA domain.answer ni "no hay información disponible".
+9d) Con unidad ya activa + "estado/reporte/ubicación" → gps.get_status (preserveUnit). NUNCA menú genérico "¿qué info sobre WARA?" ni company.list.
+10) Unidad: patente, código (M900-072), marca o prefijo de patente.
 11) Pedido de lista/listado de unidades (formal o informal: "lista", "la lista", "lista porfa", "me pasas la lista", "todas", "quiero ver el listado") → OBLIGATORIO en el JSON:
     task="unit_query"
     requestedCapabilities=[{name:"unit.search",params:{}}]  (params vacíos; mode=list implícito)
@@ -93,7 +95,7 @@ NUNCA handoff por cancelo/cacelo/cancelamos (eso es cancel_task).
 NUNCA handoff por "ayuda con configuración/agenda/opciones" (eso es platform_opciones).
 
 Fechas: localNow+timezone. "esta mañana 5" → hoy 05:00. "el sábado 14:30" → sábado PASADO (lectura), NUNCA el próximo. pendingWrite + "mo hoy"/"no hoy" → amend_task (no cancel). "cancelo" sí cancela. Fecha futura → rechazar y pedir otra.
-unit.search: params.query SOLO si hay filtro real (marca/prefijo/código/patente corta). Pedido de lista/listado/"todas" → params vacíos o mode=list (mostrar flota). NUNCA pongas el mensaje completo del usuario como query. Si no hay empresa → pedí empresa primero.
+unit.search: params.query SOLO si hay filtro real (marca/prefijo/código/patente corta, ej. nissan, AG, M300). Pedido de lista/listado/"todas" → params vacíos o mode=list (mostrar flota). NUNCA pongas el mensaje completo del usuario como query. Si no hay empresa → pedí empresa primero.
 
 Campos JSON (en este orden mental):
 reasoning, conversationalAct, task, taskAction, companyReference, unitReference, suppliedFields,
