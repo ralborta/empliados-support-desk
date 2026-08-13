@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ac", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ac/);
+  it("prompt version bump 13ad", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ad/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -802,6 +802,103 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /futura/i);
     assert.equal(exec.state.pendingWrite, null);
+  });
+
+  it("odometer.prepare no usa código de unidad como km; pide km primero", async () => {
+    const { stripMeterValueConfusedWithUnit } = await import(
+      "../execute/run-capabilities.js"
+    );
+    const unit = {
+      movilId: 77,
+      plate: "AA496GJ",
+      name: "M900-077",
+      label: "AA 496 GJ (M900-077)",
+    };
+    assert.equal(
+      stripMeterValueConfusedWithUnit({
+        value: 900077,
+        unit,
+        message: "Cambiar odometro a la unidad 900077",
+        unitReferenceValue: "900077",
+      }),
+      null,
+    );
+    assert.equal(
+      stripMeterValueConfusedWithUnit({
+        value: 129556,
+        unit,
+        message: "129556",
+      }),
+      129556,
+    );
+
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = unit;
+    const plan = TurnPlanSchema.parse({
+      reasoning: "odo",
+      conversationalAct: "start_task",
+      task: "odometer",
+      taskAction: "start",
+      unitReference: {
+        kind: "unit",
+        mode: "unit_name",
+        value: "900077",
+        reference: null,
+      },
+      suppliedFields: { value: 900077 },
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: unit,
+      resolvedCompanyId: "1",
+      message: "Cambiar odometro a la unidad 900077",
+    });
+    const blob = exec.facts.join(" ");
+    assert.match(blob, /od[oó]metro \(km\)|Pasame el valor/i);
+    assert.doesNotMatch(blob, /Fecha y hora/i);
+    assert.equal(exec.state.lastQuestion?.expected, "value");
+  });
+
+  it("idle pending confirm + hola → ofrece cancelar o después", async () => {
+    const { enrichPlanForIdlePendingConfirm } = await import(
+      "../enrich/idle-pending-confirm.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "cert_1",
+      version: 1,
+      payloadHash: "h",
+      task: "certificate",
+      summary: {},
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_certificate",
+      expected: "confirmation",
+    };
+    s.updatedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const plan = TurnPlanSchema.parse({
+      reasoning: "saludo",
+      conversationalAct: "greet",
+      requestedCapabilities: [{ name: "certificate.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.5,
+    });
+    const enriched = enrichPlanForIdlePendingConfirm(plan, s, "Hola");
+    assert.match(
+      String(enriched.responseGoal.nextQuestion ?? ""),
+      /cancelo para seguir|dejamos para despu[eé]s/i,
+    );
+    assert.equal(enriched.requestedCapabilities.length, 0);
   });
 
   it("odometer.prepare confirma con fecha dd/mm/aa y CONFIRMO o CANCELAR", async () => {

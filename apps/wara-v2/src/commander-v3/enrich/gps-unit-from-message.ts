@@ -103,7 +103,17 @@ function reasoningImpliesGps(plan: TurnPlan): boolean {
 }
 
 /** Repara unit_query → gps cuando el reasoning del LLM ya dijo que es reporte. */
-export function enrichPlanPromoteGpsFromReasoning(plan: TurnPlan): TurnPlan {
+export function enrichPlanPromoteGpsFromReasoning(
+  plan: TurnPlan,
+  state?: ConversationStateV3,
+): TurnPlan {
+  // Mid odómetro/horómetro: nunca hijack a GPS (“¿y los kilómetros?”).
+  if (
+    state?.activeTask?.type === "odometer" ||
+    state?.activeTask?.type === "hourmeter"
+  ) {
+    return plan;
+  }
   if (isGpsPlan(plan)) return plan;
   if (
     plan.task === "odometer" ||

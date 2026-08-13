@@ -26,6 +26,7 @@ import {
   isStructuredFleetQuery,
 } from "./fleet-query.js";
 import { inferMaintenanceMeta } from "./maintenance-meta.js";
+import { extractUnitNameCode } from "../../pilot/unit-fleet.js";
 
 export type ToolResult = {
   capability: string;
@@ -82,10 +83,47 @@ function missingForMeter(state: ConversationStateV3, plan: TurnPlan): string[] {
   };
   const miss: string[] = [];
   if (!state.unit && !plan.unitReference) miss.push("unit");
-  if (collected.value == null && (plan.suppliedFields?.value == null)) miss.push("value");
+  if (collected.value == null && plan.suppliedFields?.value == null) miss.push("value");
   if (!collected.date && !plan.suppliedFields?.date) miss.push("date");
   if (!collected.time && !plan.suppliedFields?.time) miss.push("time");
   return miss;
+}
+
+/**
+ * El LLM a veces pone el código de unidad (900077) como suppliedFields.value (km).
+ * Eso hace saltar el pedido de km y pedir fecha primero — incorrecto.
+ */
+export function stripMeterValueConfusedWithUnit(input: {
+  value: unknown;
+  unit: { movilId: number; name: string | null; plate: string | null; label: string };
+  message?: string;
+  unitReferenceValue?: string | null;
+}): number | null {
+  if (input.value == null || input.value === "") return null;
+  const n = Number(input.value);
+  if (!Number.isFinite(n)) return null;
+
+  const candidates = new Set<string>();
+  const add = (raw: string | null | undefined) => {
+    if (!raw) return;
+    const digits = String(raw).replace(/\D/g, "");
+    if (digits) candidates.add(digits);
+    const code = extractUnitNameCode(String(raw));
+    if (code) candidates.add(code.replace(/\D/g, ""));
+  };
+  add(input.unit.name);
+  add(input.unit.plate);
+  add(input.unit.label);
+  add(String(input.unit.movilId));
+  add(input.unitReferenceValue ?? null);
+  // Solo del mensaje si trae contexto de unidad (no cuando el mensaje ES el km).
+  if (input.message && /\b(unidad|patente|m\d{3}|od[oó]metro|odometro|hor[oó]metro)\b/i.test(input.message)) {
+    add(extractUnitNameCode(input.message));
+  }
+
+  const valueDigits = String(Math.trunc(n));
+  if (candidates.has(valueDigits)) return null;
+  return n;
 }
 
 export async function executeCapabilities(ctx: ExecuteContext): Promise<{
@@ -811,12 +849,28 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           },
         };
       }
-      const collected = {
+      const collected: Record<string, unknown> = {
         ...(ctx.state.activeTask?.type === meter
           ? (ctx.state.activeTask.collected ?? {})
           : {}),
         ...(ctx.plan.suppliedFields ?? {}),
       };
+
+      // No tratar el código/patente de la unidad como km/hs.
+      const cleanedValue = stripMeterValueConfusedWithUnit({
+        value: collected.value,
+        unit,
+        message: ctx.message,
+        unitReferenceValue:
+          ctx.plan.unitReference?.kind === "unit"
+            ? String(ctx.plan.unitReference.value ?? "")
+            : null,
+      });
+      if (cleanedValue == null) {
+        delete collected.value;
+      } else {
+        collected.value = cleanedValue;
+      }
 
       // Anomalía ya pendiente + confirm_write → aceptar valor candidato
       if (
@@ -885,6 +939,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           }
         }
 
+        // Orden fijo: unidad → km/hs → fecha/hora (nunca fecha antes de km).
         const expected =
           still[0] === "value"
             ? "value"
@@ -893,14 +948,15 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               : still[0] === "date"
                 ? "date"
                 : "time";
+        const unitPrefix = `Unidad: ${unit.label}. `;
         const ask =
           expected === "value"
-            ? `Pasame el valor del ${meter === "hourmeter" ? "horómetro (hs)" : "odómetro (km)"}.`
+            ? `${unitPrefix}Pasame el valor del ${meter === "hourmeter" ? "horómetro (hs)" : "odómetro (km)"}.`
             : still.includes("date") && still.includes("time")
-              ? "¿Fecha y hora de la lectura? (ej. hoy 14:30)"
+              ? `${unitPrefix}¿Fecha y hora de la lectura? (ej. hoy 14:30)`
               : expected === "date"
-                ? "¿Qué fecha de lectura? (ej. hoy, 11/08/26)"
-                : "¿A qué hora? (ej. 14:30)";
+                ? `${unitPrefix}¿Qué fecha de lectura? (ej. hoy, 11/08/26)`
+                : `${unitPrefix}¿A qué hora? (ej. 14:30)`;
         return {
           capability: req.name,
           ok: true,

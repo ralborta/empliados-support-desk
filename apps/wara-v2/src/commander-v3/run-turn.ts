@@ -1,9 +1,9 @@
 /**
  * Pipeline Commander V3 — aislado del path conversacional V2 (sin reutilizar ese conductor).
  */
-import { createHash } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type { WaraUnidadEstado } from "../pilot/wara-types.js";
-import { formatUnitLabel, toFleetUnitRef } from "../pilot/unit-fleet.js";
+import { formatUnitLabel, toFleetUnitRef, extractUnitNameCode } from "../pilot/unit-fleet.js";
 import { callCommander, repairCommanderPlan } from "./commander/call.js";
 import { validateTurnPlan } from "./validate/validate-plan.js";
 import {
@@ -36,6 +36,10 @@ import {
   alternateTaskWhileConfirmPending,
   enrichPlanForPendingConfirmSwitch,
 } from "./enrich/pending-confirm-switch.js";
+import {
+  enrichPlanForIdlePendingClarifyAnswer,
+  enrichPlanForIdlePendingConfirm,
+} from "./enrich/idle-pending-confirm.js";
 import {
   enrichPlanForTaskSwitch,
   isSwitchingTask,
@@ -164,6 +168,8 @@ export async function runCommanderTurn(
   ) {
     plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
     plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
+    plan = enrichPlanForIdlePendingConfirm(plan, state, input.message);
+    plan = enrichPlanForIdlePendingClarifyAnswer(plan, state, input.message);
     if (plan.conversationalAct === "confirm_write") {
       plan = {
         ...plan,
@@ -199,6 +205,8 @@ export async function runCommanderTurn(
     ) {
       plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
       plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
+      plan = enrichPlanForIdlePendingConfirm(plan, state, input.message);
+      plan = enrichPlanForIdlePendingClarifyAnswer(plan, state, input.message);
       if (plan.conversationalAct === "confirm_write") {
         plan = {
           ...plan,
@@ -322,6 +330,14 @@ export async function runCommanderTurn(
   }
 
   if (!validation.ok || !plan) {
+    const meterRecovered = tryRecoverMeterStartPlan(state, input.message);
+    if (meterRecovered) {
+      plan = meterRecovered;
+      validation = validateTurnPlan(plan, state);
+    }
+  }
+
+  if (!validation.ok || !plan) {
     const clarify = buildConflictClarify(validation.errors, state);
     const { reply, latencyMs: redactMs } = await redactReply({
       plan: plan ?? {
@@ -396,11 +412,48 @@ export async function runCommanderTurn(
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
+  plan = enrichPlanForIdlePendingConfirm(plan, state, input.message);
+  plan = enrichPlanForIdlePendingClarifyAnswer(plan, state, input.message);
   plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterUnitInMessage(plan, state, input.message);
-  plan = enrichPlanPromoteGpsFromReasoning(plan);
+  plan = enrichPlanPromoteGpsFromReasoning(plan, state);
   plan = enrichPlanForGpsUnitInMessage(plan, state, input.message);
   plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
+
+  // Mid odómetro/horómetro: nunca GPS ni otro hijack; seguir pidiendo km/fecha.
+  if (
+    (state.activeTask?.type === "odometer" ||
+      state.activeTask?.type === "hourmeter") &&
+    state.activeTask.status === "collecting" &&
+    !state.pendingWrite
+  ) {
+    const meter = state.activeTask.type;
+    const prep = meter === "hourmeter" ? "hourmeter.prepare" : "odometer.prepare";
+    plan = {
+      ...plan,
+      task: meter,
+      conversationalAct:
+        plan.conversationalAct === "cancel_task" ||
+        plan.conversationalAct === "switch_task"
+          ? plan.conversationalAct
+          : "continue_task",
+      taskAction:
+        plan.taskAction === "cancel" || plan.taskAction === "switch"
+          ? plan.taskAction
+          : "continue",
+      requestedCapabilities: [
+        ...plan.requestedCapabilities.filter(
+          (c) =>
+            c.name !== "gps.get_status" &&
+            c.name !== "unit.search" &&
+            c.name !== "domain.answer",
+        ),
+        ...(plan.requestedCapabilities.some((c) => c.name === prep)
+          ? []
+          : [{ name: prep, params: {} }]),
+      ],
+    };
+  }
 
   // Switch: ejecutar el nuevo trámite sobre estado limpio (sin collected ajeno)
   if (isSwitchingTask(plan, state) && plan.task) {
@@ -765,7 +818,7 @@ export async function runCommanderTurn(
     plan.conversationalAct === "switch_task" ||
     plan.taskAction === "switch";
 
-  const finalState: ConversationStateV3 = lifecycleWins
+  let finalState: ConversationStateV3 = lifecycleWins
     ? {
         ...applied.state,
         unit: state.unit ?? applied.state.unit,
@@ -785,6 +838,20 @@ export async function runCommanderTurn(
         previousUnit: state.previousUnit ?? applied.state.previousUnit,
         company: state.company ?? applied.state.company,
       };
+
+  if (
+    String(plan.reasoning ?? "").includes("Confirmación idle") &&
+    finalState.pendingWrite
+  ) {
+    finalState = {
+      ...finalState,
+      lastQuestion: {
+        id: randomUUID(),
+        purpose: "idle_pending_confirm",
+        expected: "clarification",
+      },
+    };
+  }
 
   saveConversationStateV3(finalState);
 
@@ -910,6 +977,51 @@ function tryRecoverGpsPlan(
     },
     responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
     confidence: 0.85,
+  };
+}
+
+/** Si el LLM falla pero el mensaje pide odómetro/horómetro + unidad, arrancar trámite. */
+function tryRecoverMeterStartPlan(
+  state: ConversationStateV3,
+  message: string,
+): TurnPlan | null {
+  if (state.pendingWrite) return null;
+  if (
+    state.activeTask?.type === "odometer" ||
+    state.activeTask?.type === "hourmeter"
+  ) {
+    return null;
+  }
+  const t = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const meter: "odometer" | "hourmeter" | null = /\b(od[oó]metro|odometro|odo)\b/.test(
+    t,
+  )
+    ? "odometer"
+    : /\b(hor[oó]metro|horometro|horo)\b/.test(t)
+      ? "hourmeter"
+      : null;
+  if (!meter) return null;
+  const code = extractUnitNameCode(message);
+  const prep = meter === "hourmeter" ? "hourmeter.prepare" : "odometer.prepare";
+  return {
+    reasoning: `Recupero inicio de ${meter} tras plan inválido.`,
+    conversationalAct: "start_task",
+    task: meter,
+    taskAction: "start",
+    unitReference: code
+      ? { kind: "unit", mode: "unit_name", value: code, reference: null }
+      : null,
+    requestedCapabilities: [{ name: prep, params: {} }],
+    stateIntent: {
+      preserveCompany: true,
+      preserveUnit: true,
+      preserveTask: true,
+    },
+    responseGoal: { purpose: "ask_missing", facts: [], nextQuestion: null },
+    confidence: 0.9,
   };
 }
 
