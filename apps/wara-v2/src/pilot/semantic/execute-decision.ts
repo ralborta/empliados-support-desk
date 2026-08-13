@@ -1224,7 +1224,14 @@ export async function executeTurnDecision(
     };
   }
 
-  if (decision.action === "query_context" || decision.intent === "query_active_company") {
+  if (
+    decision.action === "query_context" ||
+    decision.companyAction === "query_active" ||
+    (decision.intent === "query_active_company" &&
+      (decision.companyAction === "query_active" ||
+        decision.speechAct === "query_context" ||
+        decision.companyReference === "active"))
+  ) {
     return {
       handler: "query_active_company",
       message: replyActiveCompany(state),

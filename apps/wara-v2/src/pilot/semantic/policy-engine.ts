@@ -196,7 +196,11 @@ export function applySemanticPolicy(
 
   if (
     decision.companyAction === "query_active" ||
-    decision.intent === "query_active_company" ||
+    (decision.intent === "query_active_company" &&
+      (decision.companyAction === "query_active" ||
+        decision.action === "query_context" ||
+        decision.speechAct === "query_context" ||
+        decision.companyReference === "active")) ||
     (decision.action === "query_context" &&
       decision.intent !== "unit_list" &&
       decision.intent !== "unit_search" &&

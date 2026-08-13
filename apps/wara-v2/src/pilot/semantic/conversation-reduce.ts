@@ -141,16 +141,21 @@ export function companyActionFromDecision(decision: TurnDecision): "query_active
   // Solo keep de empresa si la decisión lo declara explícitamente.
   // "no quiero cambiar el odómetro" NO debe mapearse a keep por substring.
   if (decision.companyAction) return decision.companyAction;
-  if (decision.action === "query_context" || decision.intent === "query_active_company") {
-    if (decision.speechAct === "negate_intent") return "keep";
-    return "query_active";
-  }
   if (
     decision.speechAct === "negate_intent" &&
     typeof decision.negatedAction === "string" &&
     /company|empresa/.test(decision.negatedAction)
   ) {
     return "keep";
+  }
+  // query_active solo con señales de empresa (no intent residual sobre unit_list).
+  if (
+    decision.action === "query_context" ||
+    decision.speechAct === "query_context" ||
+    (decision.intent === "query_active_company" &&
+      (decision.companyReference === "active" || decision.speechAct === "query_context"))
+  ) {
+    return "query_active";
   }
   return null;
 }
