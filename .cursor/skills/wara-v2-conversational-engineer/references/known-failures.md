@@ -65,6 +65,7 @@ Causas aún en investigación; no convertir en matchers:
 | Switch certificado→odómetro pide unidad de nuevo | unidad no preservada en transición de trámite |
 | «quiero cambiar de unidad» con pending → cancel clarificado | faltaba `speechAct=amend`+`amendTarget=unit` (contrato amend) |
 | Dual keep empresa + change unidad | un TurnDecision con `amend`+`keep` tipado; reply prioriza amend |
+| Patente con `pendingEntityResolution` cae a menú general / «dato falta» | LLM etiquetaba `amend`/`provide_fields`/`unit_name`; faltaba coerce a `select_entity` + parser de campo esperado |
 
 Corregir por contrato/transición general; **prohibido** parchear con frases, regex de intención o `includes`.
 

@@ -169,6 +169,49 @@ export function applySemanticPolicy(
     };
   }
 
+  // Captura de unidad ya abierta: entity / patente = completar slot, NO re-abrir amend.
+  const awaitingUnit =
+    Boolean(state.pendingEntityResolution) ||
+    state.certificateDraft?.step === "await_unit" ||
+    state.odometerDraft?.step === "await_unit" ||
+    state.maintenanceDraft?.step === "await_unit";
+  const entityValue =
+    decision.entity?.value != null && String(decision.entity.value).trim()
+      ? String(decision.entity.value).trim()
+      : null;
+  if (awaitingUnit && entityValue) {
+    return {
+      ok: true,
+      decision: {
+        ...decision,
+        action: "select_entity",
+        speechAct: "provide_field",
+        amendTarget: null,
+        answer: null,
+        currentTramiteDisposition: "keep",
+        ambiguity: null,
+        reasoningCode: "PROVIDED_MISSING_FIELD",
+        entity: decision.entity,
+      },
+    };
+  }
+  if (
+    awaitingUnit &&
+    decision.speechAct === "amend" &&
+    decision.amendTarget === "unit" &&
+    !entityValue
+  ) {
+    // Ya estamos pidiendo unidad: no invalidar de nuevo; repreguntar.
+    const ask =
+      state.lastAgentQuestion?.trim() ||
+      "¿Qué patente o unidad buscás?";
+    return {
+      ok: false,
+      reason: "amend_while_awaiting_unit",
+      decision: safeClarifyDecision(ask),
+    };
+  }
+
   // Keep de empresa tipado. Si viene junto con amend, no reescribir speechAct (F5).
   if (isStructuredCompanyKeep(decision) && decision.speechAct !== "amend") {
     return {

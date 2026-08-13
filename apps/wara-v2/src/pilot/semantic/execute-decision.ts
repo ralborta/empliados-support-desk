@@ -1162,11 +1162,24 @@ function handleUnitSearch(decision: TurnDecision, state: PilotConversationState,
     source: "rules",
   };
 
-  const result = executeUnitSearch(interpretation, deps.fleetUnits, {
+  let result = executeUnitSearch(interpretation, deps.fleetUnits, {
     lastListing: state.lastListing,
     selectedUnit: state.selectedUnit,
     lastSelectedIndex: state.lastListingPickIndex ?? null,
   });
+  // Entity type mal etiquetado (plate vs unit_name): probar el otro operador sobre el mismo query.
+  if (result.kind === "none") {
+    const altEntity = interpretation.entity === "unit_name" ? "license_plate" : "unit_name";
+    result = executeUnitSearch(
+      { ...interpretation, entity: altEntity },
+      deps.fleetUnits,
+      {
+        lastListing: state.lastListing,
+        selectedUnit: state.selectedUnit,
+        lastSelectedIndex: state.lastListingPickIndex ?? null,
+      },
+    );
+  }
 
   if (result.kind === "one") {
     const applied = applyResolvedUnit(state, result.unit, "explicit_plate", {
@@ -1242,6 +1255,40 @@ export async function executeTurnDecision(
       message: q,
       state,
     };
+  }
+
+  // Expectativa dominante de unidad: no dejar que query_context / general / cortesía la secuestren.
+  const awaitingUnitEarly =
+    Boolean(state.pendingEntityResolution) || state.certificateDraft?.step === "await_unit";
+  if (awaitingUnitEarly) {
+    const isCancel =
+      decision.answer === "cancel" ||
+      decision.speechAct === "cancel" ||
+      decision.disposition === "cancel_active" ||
+      (decision.currentTramiteDisposition === "cancel" &&
+        (decision.speechAct === "farewell" || decision.action === "answer_pending"));
+    const isUnitPath =
+      decision.action === "select_entity" ||
+      decision.intent === "unit_search" ||
+      decision.action === "provide_fields" ||
+      decision.action === "correct_fields" ||
+      Boolean(decision.entity?.value?.trim());
+    if (!isCancel && !isUnitPath && decision.action !== "answer_pending") {
+      const parent = resolveParentIntentForUnitSelection(state);
+      const unit = resolveUnitFromDecisionOrText(decision, deps, {
+        allowMessageAsUnitField: true,
+      });
+      if (unit) {
+        const cont = continueAfterUnitResolved(state, unit, { parentIntent: parent });
+        return { handler: cont.handler, message: cont.message, state };
+      }
+      const ask =
+        state.lastAgentQuestion?.trim() ||
+        (parent === "certificate"
+          ? "¿De qué unidad querés el certificado de cobertura?"
+          : "¿Qué patente o unidad buscás?");
+      return { handler: "await_unit", message: ask, state };
+    }
   }
 
   if (
@@ -1339,6 +1386,35 @@ export async function executeTurnDecision(
       const r = handleProvideOdometerFields(decision, state, deps);
       if (r) return r;
     }
+    // Captura de unidad abierta (certificado / pendingEntityResolution): expected-field unit.
+    const awaitingUnitCapture =
+      Boolean(state.pendingEntityResolution) ||
+      state.certificateDraft?.step === "await_unit" ||
+      state.maintenanceDraft?.step === "await_unit";
+    if (awaitingUnitCapture) {
+      const parent = resolveParentIntentForUnitSelection(state);
+      const unit = resolveUnitFromDecisionOrText(decision, deps, {
+        allowMessageAsUnitField: true,
+      });
+      if (unit) {
+        const cont = continueAfterUnitResolved(state, unit, { parentIntent: parent });
+        return { handler: cont.handler, message: cont.message, state };
+      }
+      // Si hay entity tipada, ir por búsqueda estructurada (select_entity).
+      if (decision.entity?.value) {
+        return handleUnitSearch(
+          { ...decision, action: "select_entity" },
+          state,
+          deps,
+        );
+      }
+      const ask =
+        state.lastAgentQuestion?.trim() ||
+        (parent === "certificate"
+          ? "¿De qué unidad querés el certificado de cobertura?"
+          : "¿Qué patente o unidad buscás?");
+      return { handler: "await_unit", message: ask, state };
+    }
     if (decision.intent === "maintenance" && decision.fields?.detail) {
       const r = await tryResolveMaintenanceTurn({
         state,
@@ -1391,6 +1467,27 @@ export async function executeTurnDecision(
 
   if (decision.action === "select_entity" || decision.intent === "unit_search") {
     return handleUnitSearch(decision, state, deps);
+  }
+
+  // Expectativa dominante de unidad: no caer al menú general (cortesía / general residual).
+  if (state.pendingEntityResolution || state.certificateDraft?.step === "await_unit") {
+    const parent = resolveParentIntentForUnitSelection(state);
+    const unit = resolveUnitFromDecisionOrText(decision, deps, {
+      allowMessageAsUnitField: true,
+    });
+    if (unit) {
+      const cont = continueAfterUnitResolved(state, unit, { parentIntent: parent });
+      return { handler: cont.handler, message: cont.message, state };
+    }
+    if (decision.entity?.value) {
+      return handleUnitSearch({ ...decision, action: "select_entity" }, state, deps);
+    }
+    const ask =
+      state.lastAgentQuestion?.trim() ||
+      (parent === "certificate"
+        ? "¿De qué unidad querés el certificado de cobertura?"
+        : "¿Qué patente o unidad buscás?");
+    return { handler: "await_unit", message: ask, state };
   }
 
   if (decision.intent === "unit_list") {
