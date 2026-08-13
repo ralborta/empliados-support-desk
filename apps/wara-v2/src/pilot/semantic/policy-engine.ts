@@ -7,7 +7,7 @@
  * (numeric_value / date / time) — completan fields, no eligen trámite.
  */
 import type { TurnDecision } from "./turn-decision-schema.js";
-import { safeClarifyDecision } from "./turn-decision-schema.js";
+import { isStructuredCompanyKeep, safeClarifyDecision } from "./turn-decision-schema.js";
 import type { PilotConversationState } from "../conversation-state.js";
 import {
   binaryClarifyForConflict,
@@ -148,12 +148,8 @@ export function applySemanticPolicy(
     };
   }
 
-  // Sin rewrite lingüístico: solo companyAction / intents ya estructurados.
-  if (
-    decision.companyAction === "keep" &&
-    (decision.speechAct === "negate_intent" ||
-      (typeof decision.negatedAction === "string" && /company|empresa/.test(decision.negatedAction)))
-  ) {
+  // Keep de empresa: solo triple estructurado (sin regex / includes sobre texto).
+  if (isStructuredCompanyKeep(decision)) {
     return {
       ok: true,
       decision: {
@@ -163,12 +159,13 @@ export function applySemanticPolicy(
         currentTramiteDisposition: "keep",
         speechAct: "negate_intent",
         companyAction: "keep",
+        negatedAction: "change_company",
         answer: null,
         ambiguity: null,
       },
     };
   }
-  // companyAction=keep espurio (sin negación): descartar para no hijackear unit_list/odómetro.
+  // keep espurio (p.ej. negate de unidad sin change_company): descartar.
   if (decision.companyAction === "keep") {
     decision = { ...decision, companyAction: null };
   }

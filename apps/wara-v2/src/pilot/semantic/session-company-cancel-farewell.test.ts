@@ -243,6 +243,39 @@ describe("sesión: empresa / cancel / farewell", () => {
     assert.equal(pol.decision.companyAction, "keep");
   });
 
+  it("policy keep sin change_company (p.ej. unidad) no honra keep de empresa", () => {
+    const st = seedCompanyActive();
+    const raw: TurnDecision = {
+      action: "general",
+      intent: "odometer",
+      confidence: 0.95,
+      currentTramiteDisposition: "keep",
+      reasoningCode: "GENERAL_CONVERSATION",
+      speechAct: "negate_intent",
+      companyAction: "keep",
+      negatedAction: "change_unit",
+    };
+    const pol = applySemanticPolicy(raw, st);
+    assert.equal(pol.decision.companyAction, null);
+    assert.equal(pol.decision.intent, "odometer");
+  });
+
+  it("policy keep + negate_intent sin negatedAction no honra keep", () => {
+    const st = seedCompanyActive();
+    const raw: TurnDecision = {
+      action: "general",
+      intent: "odometer",
+      confidence: 0.9,
+      currentTramiteDisposition: "keep",
+      reasoningCode: "GENERAL_CONVERSATION",
+      speechAct: "negate_intent",
+      companyAction: "keep",
+      negatedAction: null,
+    };
+    const pol = applySemanticPolicy(raw, st);
+    assert.equal(pol.decision.companyAction, null);
+  });
+
   it("execute query_context responde empresa y no unidad", async () => {
     const st = seedCompanyActive();
     const r = await executeTurnDecision(

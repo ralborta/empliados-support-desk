@@ -77,4 +77,32 @@ describe("semantic policy engine", () => {
     );
     assert.equal(r.ok, false);
   });
+
+  it("keep de empresa solo con triple estructurado", () => {
+    const st = createEmptyPilotState({ tenantId: "t", phone: "+54911" });
+    st.companyName = "El Cacique S.A.";
+    const ok = applySemanticPolicy(
+      baseDecision({
+        intent: "query_active_company",
+        speechAct: "negate_intent",
+        companyAction: "keep",
+        negatedAction: "change_company",
+      }),
+      st,
+    );
+    assert.equal(ok.decision.companyAction, "keep");
+    assert.equal(ok.decision.negatedAction, "change_company");
+
+    const unitNeg = applySemanticPolicy(
+      baseDecision({
+        intent: "odometer",
+        speechAct: "negate_intent",
+        companyAction: "keep",
+        negatedAction: "change_unit",
+      }),
+      st,
+    );
+    assert.equal(unitNeg.decision.companyAction, null);
+    assert.equal(unitNeg.decision.intent, "odometer");
+  });
 });

@@ -11,13 +11,15 @@ Los enunciados de usuario son **casos de aceptación** (reproducción), no regla
 
 **Dirección de corrección:** reducer al cambiar/iniciar intención; `setLastAgentQuestion` / `setExpectedField`; no rewrites de aclaración en policy por texto libre.
 
-## 2. Negación de cambio de empresa ejecutada como cambio
+## 2. Negación de cambio de empresa ejecutada como cambio / hijack a empresa
 
-**Causa raíz:** autoridad semántica cortocircuitada por matcher textual **antes** de `interpretTurn` (o `companyAction=keep` honrado sin `speechAct=negate_intent`).
+**Causa raíz:** `companyAction=keep` honrado con cualquier `negate_intent` (p.ej. negación de unidad) o matcher textual pre-LLM.
 
-**Contrato roto:** LLM única autoridad; empresa solo cambia por decisión estructurada.
+**Contrato:** keep de empresa solo con el triple estructurado:
+`speechAct=negate_intent` ∧ `companyAction=keep` ∧ `negatedAction=change_company`
+(`negatedAction` es enum cerrado: `change_company` | `change_unit`).
 
-**Dirección:** path unificado sin atajos pre-LLM; keep solo con negación explícita estructurada (`speechAct` + `negatedAction` de empresa).
+**Dirección:** path unificado sin atajos pre-LLM; policy/reducer usan `isStructuredCompanyKeep`; negación de unidad → `negatedAction=change_unit` sin `companyAction=keep`.
 
 ## 3. Consulta de contexto de empresa mutaba o sobre-ofrecía cambio
 

@@ -94,6 +94,9 @@ export const SpeechActSchema = z.enum([
 
 export const CompanyActionSchema = z.enum(["query_active", "select", "change", "keep"]);
 
+/** Qué intención/cambio niega el usuario. Enum cerrado — no inspeccionar texto libre. */
+export const NegatedActionSchema = z.enum(["change_company", "change_unit"]);
+
 export const DispositionExtSchema = z.enum([
   "continue_active",
   "replace_active",
@@ -102,6 +105,21 @@ export const DispositionExtSchema = z.enum([
   "close",
   "answer_only",
 ]);
+
+export type NegatedAction = z.infer<typeof NegatedActionSchema>;
+
+/** Keep de empresa: triple estructurado obligatorio. */
+export function isStructuredCompanyKeep(decision: {
+  speechAct?: string | null;
+  companyAction?: string | null;
+  negatedAction?: string | null;
+}): boolean {
+  return (
+    decision.speechAct === "negate_intent" &&
+    decision.companyAction === "keep" &&
+    decision.negatedAction === "change_company"
+  );
+}
 
 export const TurnDecisionSchema = z.object({
   action: TurnDecisionActionSchema,
@@ -114,7 +132,7 @@ export const TurnDecisionSchema = z.object({
   companyAction: CompanyActionSchema.nullable().optional(),
   /** Disposition extendida (opcional; mapea a currentTramiteDisposition). */
   disposition: DispositionExtSchema.nullable().optional(),
-  negatedAction: z.string().nullable().optional(),
+  negatedAction: NegatedActionSchema.nullable().optional(),
   answerToQuestionId: z.string().nullable().optional(),
   targetIntent: TurnDecisionIntentSchema.nullable().optional(),
   entity: z
@@ -177,7 +195,11 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
   if ("speechAct" in o) o.speechAct = nullish(o.speechAct);
   if ("companyAction" in o) o.companyAction = nullish(o.companyAction);
   if ("disposition" in o) o.disposition = nullish(o.disposition);
-  if ("negatedAction" in o) o.negatedAction = nullish(o.negatedAction);
+  if ("negatedAction" in o) {
+    const v = nullish(o.negatedAction);
+    const allowed = NegatedActionSchema.safeParse(v);
+    o.negatedAction = allowed.success ? allowed.data : null;
+  }
   if ("answerToQuestionId" in o) o.answerToQuestionId = nullish(o.answerToQuestionId);
   if ("targetIntent" in o) o.targetIntent = nullish(o.targetIntent);
   if ("fields" in o) o.fields = nullish(o.fields);

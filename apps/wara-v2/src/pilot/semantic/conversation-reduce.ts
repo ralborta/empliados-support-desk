@@ -4,6 +4,7 @@
  */
 import type { PilotConversationState } from "../conversation-state.js";
 import type { TurnDecision } from "./turn-decision-schema.js";
+import { isStructuredCompanyKeep } from "./turn-decision-schema.js";
 import { cancelActiveOrPendingTramite } from "./cancel-active-tramite.js";
 import {
   clearLastAgentQuestion,
@@ -138,24 +139,14 @@ export function setExpectedField(
 }
 
 export function companyActionFromDecision(decision: TurnDecision): "query_active" | "select" | "change" | "keep" | null {
-  // keep solo con negación explícita de cambio de empresa (nunca por companyAction residual).
+  // Keep de empresa: solo triple estructurado (negate_intent + keep + change_company).
+  if (isStructuredCompanyKeep(decision)) {
+    return "keep";
+  }
   if (decision.companyAction === "keep") {
-    if (
-      decision.speechAct === "negate_intent" ||
-      (typeof decision.negatedAction === "string" && /company|empresa/.test(decision.negatedAction))
-    ) {
-      return "keep";
-    }
-    // Ignorar keep espurio (p.ej. LLM en "listas de unidades").
+    // keep espurio (p.ej. negación de unidad) — ignorar.
   } else if (decision.companyAction) {
     return decision.companyAction;
-  }
-  if (
-    decision.speechAct === "negate_intent" &&
-    typeof decision.negatedAction === "string" &&
-    /company|empresa/.test(decision.negatedAction)
-  ) {
-    return "keep";
   }
   // query_active solo con señales de empresa (no intent residual sobre unit_list).
   if (
