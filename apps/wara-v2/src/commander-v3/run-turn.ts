@@ -681,6 +681,9 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
   if (state.lastQuestion?.expected === "value") {
     return "Pasame el valor numérico para continuar.";
   }
+  if (!state.activeTask) {
+    return "¿En qué te ayudo? Puedo con odómetro, certificado, GPS, o guías de la plataforma (Opciones / Unidades).";
+  }
   return "Necesito una aclaración puntual: ¿qué querés hacer exactamente con el trámite actual?";
 }
 

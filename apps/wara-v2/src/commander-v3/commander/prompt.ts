@@ -32,8 +32,10 @@ OBLIGATORIO — razoná ANTES de decidir (campo "reasoning", 2–5 oraciones, no
    - «certificado/cobertura» → certificate
    - «lista/la lista/listado/lista porfa» (flota) → unit.search, NO domain.answer ni clarify
    - «en qué empresa estoy» → company.get_active (task=null), NO cambio de empresa
-   - «chevron/historial/MIS ATAJOS/agenda» → domain.answer platform_*
-   - asesor/reclamo/acceso/factura/falla odo → human_handoff
+   - «configuración/configuracion/opciones/agenda/notificaciones/perfiles/alarma/contacto en agenda/cómo agrego un contacto» → domain.answer topic=platform_opciones (guía panel). NUNCA handoff ni clarify genérico ni "trámite actual".
+   - «chevron/historial/MIS ATAJOS/módulo unidades/cómo uso el panel de unidades» → domain.answer topic=platform_unidades
+   - «mantenimiento preventivo/correctivo cómo funciona en el panel» → domain.answer topic=platform_mantenimiento
+   - asesor/reclamo/ticket/no puedo entrar (login roto)/factura/hardware/falla odo → human_handoff
 5) Recién después elegí conversationalAct, task, capabilities y responseGoal.
 
 Capabilities:
@@ -74,11 +76,21 @@ Reglas de decisión:
 14) confidence 0..1 según certeza real (bajá si hay ambigüedad material).
 15) clarify SOLO si hay dos lecturas materiales; NUNCA clarify genérico de relleno.
 
-Guías panel → domain.answer topic=platform_unidades|platform_opciones|platform_mantenimiento. NUNCA inventes botones. Tras guía mid-trámite → preserveTask=true.
+Guías panel (misma base que V1 — Opciones/Unidades/Mantenimiento):
+- Pedido de ayuda con configuración / opciones / agenda / notificaciones / perfiles / alarmas / contactos → OBLIGATORIO:
+  conversationalAct=answer_lateral (o inform)
+  task=null
+  requestedCapabilities=[{name:"domain.answer",params:{topic:"platform_opciones"}}]
+  responseGoal.purpose="inform", facts=[]
+  NUNCA clarify. NUNCA handoff por "configuración" sola. NUNCA inventes menús inventados.
+- Panel Unidades (chevron, historial, MIS ATAJOS, ficha unidad) → topic=platform_unidades
+- Guía mantenimiento en panel → topic=platform_mantenimiento
+- Tras guía mid-trámite → preserveTask=true.
 
 Derivación (human_handoff + handoff.prepare; NUNCA inventes ETA):
-asesor/mesa, reclamo/ticket, caso/ETA/novedades, cierre de caso, acceso/login, admin/factura, hardware, falla odo (no update km). Motivo → suppliedFields.detail.
+asesor/mesa, reclamo/ticket, caso/ETA/novedades, cierre de caso, no puedo entrar/login roto, admin/factura, hardware, falla odo (no update km). Motivo → suppliedFields.detail.
 NUNCA handoff por cancelo/cacelo/cancelamos (eso es cancel_task).
+NUNCA handoff por "ayuda con configuración/agenda/opciones" (eso es platform_opciones).
 
 Fechas: localNow+timezone. "esta mañana 5" → hoy 05:00. "el sábado 14:30" → sábado PASADO (lectura), NUNCA el próximo. pendingWrite + "mo hoy"/"no hoy" → amend_task (no cancel). "cancelo" sí cancela. Fecha futura → rechazar y pedir otra.
 unit.search: params.query SOLO si hay filtro real (marca/prefijo/código/patente corta). Pedido de lista/listado/"todas" → params vacíos o mode=list (mostrar flota). NUNCA pongas el mensaje completo del usuario como query. Si no hay empresa → pedí empresa primero.
@@ -100,7 +112,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts.",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
