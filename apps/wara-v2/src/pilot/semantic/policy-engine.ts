@@ -15,6 +15,7 @@ import {
   DEFAULT_TENANT_TZ,
   reconcileLlmReadingFields,
 } from "./natural-datetime.js";
+import { maybeRewriteGeneralToDomain } from "./domain-knowledge.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -26,6 +27,7 @@ const CAPABILITIES = new Set([
   "certificate",
   "ticket",
   "human_handoff",
+  "domain_knowledge",
   "none",
 ]);
 
@@ -78,6 +80,23 @@ export function applySemanticPolicy(
       ok: false,
       reason: "unknown_capability",
       decision: safeClarifyDecision("Ese servicio no está disponible. ¿Qué necesitás?"),
+    };
+  }
+
+  // Preguntas conceptuales: no deben caer en menú general.
+  decision = maybeRewriteGeneralToDomain(decision, message, state);
+
+  if (decision.action === "answer_domain_question" || decision.intent === "domain_knowledge") {
+    return {
+      ok: true,
+      decision: {
+        ...decision,
+        action: "answer_domain_question",
+        intent: "domain_knowledge",
+        currentTramiteDisposition: "keep",
+        reasoningCode: "DOMAIN_QUESTION",
+        answer: null,
+      },
     };
   }
 

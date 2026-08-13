@@ -90,8 +90,10 @@ export function looksLikeResumePausedTramite(text: string | undefined | null): b
   const n = norm(String(text ?? ""));
   if (!n || n.length > 80) return false;
   if (/\b(con|en|para)\s+(el|la)?\s*(cacique|wara|empresa)\b/.test(n)) return false;
-  return /^(continuamos|seguimos|dale\s+seguimos|bueno\s+seguimos|retomemos|volvamos)$/i.test(n.trim()) ||
-    /\b(continuemos|sigamos\s+con\s+el\s+tramite)\b/.test(n);
+  return /^(continuamos|seguimos|dale\s+seguimos|bueno\s+seguimos|bueno\s*,?\s*sigamos|bueno\s*,?\s*seguimos|sigamos|retomemos|volvamos)$/i.test(
+    n.trim(),
+  ) ||
+    /\b(continuemos|sigamos(\s+con\s+el\s+tramite)?|seguimos)\b/.test(n);
 }
 
 export function looksLikePendingConfirmComprehensionAck(text: string | undefined | null): boolean {

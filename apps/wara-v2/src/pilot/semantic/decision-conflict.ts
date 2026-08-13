@@ -117,7 +117,9 @@ export function detectDecisionConflict(
     decision.action !== "start_intent" &&
     decision.action !== "lateral_query" &&
     decision.action !== "clarify" &&
-    decision.action !== "general"
+    decision.action !== "general" &&
+    decision.action !== "answer_domain_question" &&
+    decision.intent !== "domain_knowledge"
   ) {
     // Odómetro/horómetro son el mismo trámite de lectura.
     const meterPair =

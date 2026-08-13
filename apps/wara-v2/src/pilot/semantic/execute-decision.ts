@@ -57,6 +57,12 @@ import {
   resolveParentIntentForUnitSelection,
   touchPendingSearch,
 } from "./pending-entity-resolution.js";
+import {
+  answerDomainQuestion,
+  looksLikeCapabilitiesQuestion,
+  looksLikeDomainQuestion,
+  looksLikeOutOfDomainQuestion,
+} from "./domain-knowledge.js";
 
 export type ExecuteDeps = {
   messageId: string;
@@ -844,6 +850,35 @@ export async function executeTurnDecision(
     };
   }
 
+  if (decision.action === "answer_domain_question" || decision.intent === "domain_knowledge") {
+    // Consulta lateral: no mutar draft / pending / operationId.
+    const snapshot = {
+      pending: state.pendingConfirmation,
+      draft: state.odometerDraft,
+      cert: state.certificateDraft,
+      maint: state.maintenanceDraft,
+      ticket: state.ticketDraft,
+      unit: state.selectedUnit,
+      active: state.activeTramite,
+      step: state.step,
+      opId: state.pendingConfirmation?.operationId ?? null,
+    };
+    const ans = answerDomainQuestion(state, deps.originalMessage, decision.domainQuestion);
+    // Garantizar continuidad (cero efectos).
+    state.pendingConfirmation = snapshot.pending;
+    state.odometerDraft = snapshot.draft;
+    state.certificateDraft = snapshot.cert;
+    state.maintenanceDraft = snapshot.maint;
+    state.ticketDraft = snapshot.ticket;
+    state.selectedUnit = snapshot.unit;
+    state.activeTramite = snapshot.active;
+    state.step = snapshot.step;
+    if (snapshot.pending && snapshot.opId) {
+      state.pendingConfirmation = { ...snapshot.pending, operationId: snapshot.opId };
+    }
+    return { handler: ans.handler, message: ans.message, state };
+  }
+
   if (decision.action === "resume") {
     resumeSuspendedTramite(state);
     const msg =
@@ -989,6 +1024,16 @@ export async function executeTurnDecision(
       });
       if (r.kind === "reply") return { handler: "ticket", message: r.message, state };
     }
+  }
+
+  // Último recurso: pregunta conceptual no debe caer en menú fijo.
+  if (
+    looksLikeDomainQuestion(deps.originalMessage) ||
+    looksLikeCapabilitiesQuestion(deps.originalMessage) ||
+    looksLikeOutOfDomainQuestion(deps.originalMessage)
+  ) {
+    const ans = answerDomainQuestion(state, deps.originalMessage, null);
+    return { handler: ans.handler, message: ans.message, state };
   }
 
   return {

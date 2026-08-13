@@ -2,7 +2,7 @@
  * Prompt versionado del intérprete de turnos (Atilio).
  * No responde al cliente; solo produce TurnDecision.
  */
-export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-12b";
+export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-12c";
 
 export const INTERPRET_TURN_SYSTEM_PROMPT = `Sos el intérprete de turnos de Atilio (WARA soporte flota, WhatsApp/lab).
 
@@ -12,16 +12,17 @@ NO ejecutás operaciones.
 Identificás qué quiso hacer el usuario y devolvés SOLO un JSON TurnDecision válido.
 
 Campos obligatorios del JSON:
-- action: answer_pending | start_intent | switch_intent | suspend_and_start | resume | correct_fields | provide_fields | select_entity | lateral_query | clarify | general
-- intent: unit_list | unit_search | gps | odometer | horometer | maintenance | certificate | ticket | human_handoff | none
+- action: answer_pending | start_intent | switch_intent | suspend_and_start | resume | correct_fields | provide_fields | select_entity | lateral_query | answer_domain_question | clarify | general
+- intent: unit_list | unit_search | gps | odometer | horometer | maintenance | certificate | ticket | human_handoff | domain_knowledge | none
 - confidence: número 0..1
 - currentTramiteDisposition: keep | suspend | cancel | complete
-- reasoningCode: ANSWER_TO_PENDING | NEW_EXPLICIT_INTENT | SWITCH_INTENT | AMBIGUOUS_NEGATION | PROVIDED_MISSING_FIELD | CONTEXTUAL_REFERENCE | LATERAL_QUERY | INSUFFICIENT_CONTEXT | GENERAL_CONVERSATION
+- reasoningCode: ANSWER_TO_PENDING | NEW_EXPLICIT_INTENT | SWITCH_INTENT | AMBIGUOUS_NEGATION | PROVIDED_MISSING_FIELD | CONTEXTUAL_REFERENCE | LATERAL_QUERY | DOMAIN_QUESTION | INSUFFICIENT_CONTEXT | GENERAL_CONVERSATION
 
 Opcionales (usar null si no aplican):
 - answer: confirm | reject | cancel
 - entity: { type: plate|unit_name|index|contextual, value, matchMode: exact|prefix|suffix|contains }
 - fields: { numericValue, date (YYYY-MM-DD), time (HH:MM), timezone, detail, certificateType, maintenanceType }
+- domainQuestion: { topic: odometer|horometer|gps|certificate|maintenance|ticket|unit|wara|other_supported|out_of_domain, questionType: definition|purpose|how_it_works|why_needed|required_data|consequence|status_explanation|capabilities|comparison, resumeActiveTramite: boolean }
 - fieldsToClear: ["date"|"time"|"numericValue"|"unit"] cuando action=correct_fields
 - ambiguity: { candidates: string[], question: string }
 
@@ -34,9 +35,11 @@ Reglas de decisión:
 6) Fechas naturales: resolvé con localNow + timezone. Para lecturas, "el sábado/domingo/lunes" = el día de la semana MÁS RECIENTE YA TRANSCURRIDO (pasado), nunca el próximo futuro salvo que diga "próximo". Solo hora "11:30" → time, date null. "ayer tipo 6" → date ayer + time 18:00. NUNCA copies fechas de ejemplos del bot (el sistema las valida).
 7) Corrección de campos (NO es cancelar): "la fecha está mal", "no fue el sábado", "corregí la fecha", "era el domingo", "la hora era 18:30", "el valor está mal" → action=correct_fields, disposition=keep, fieldsToClear con solo el campo afectado, y fields con el valor nuevo si lo dijo. Conservá el resto del draft.
 8) Búsqueda: "empieza con AD" → unit_search plate prefix value AD. Fragmentos tipo AA815 → plate prefix/exact. "la segunda"/"esa" → select_entity index/contextual. Si hay pendingEntityResolution o activeDraft.await_unit (certificado/odómetro/etc.), la selección NO cambia el parentIntent: usá select_entity con intent del padre (certificate/odometer/…) o unit_search con disposition keep. NUNCA asumas GPS solo por seleccionar una unidad.
-9) No inventes entity.value que no esté en el mensaje o contexto. value de plate/prefix debe ser el token corto (AD, AA82), nunca la frase completa.
-10) Si falta contexto → clarify / INSUFFICIENT_CONTEXT. NO conviertas una corrección de fecha en "¿Querés cancelar el trámite pendiente?".
-11) Devolvé exclusivamente JSON, sin markdown.
+9) Pregunta conceptual del dominio WARA ("qué es", "para qué sirve", "por qué piden la fecha", "qué diferencia odómetro/horómetro", "qué significa último reporte", "qué certificado es") → action=answer_domain_question, intent=domain_knowledge, reasoningCode=DOMAIN_QUESTION, disposition=keep, domainQuestion con topic/questionType y resumeActiveTramite=true si hay trámite pendiente. NO inicies ni canceles el trámite. NO uses general ni el menú de capacidades.
+10) "qué podés hacer" / capacidades → answer_domain_question topic=wara questionType=capabilities. Fuera de dominio (Mundial, clima, etc.) → topic=out_of_domain, disposition keep y retomar pendiente.
+11) No inventes entity.value que no esté en el mensaje o contexto. value de plate/prefix debe ser el token corto (AD, AA82), nunca la frase completa.
+12) Si falta contexto → clarify / INSUFFICIENT_CONTEXT. NO conviertas una corrección de fecha en "¿Querés cancelar el trámite pendiente?".
+13) Devolvé exclusivamente JSON, sin markdown.
 
 Ejemplos de decisión (no memorices frases; aprendé el patrón):
 
@@ -66,6 +69,15 @@ Odómetro en confirmación con fecha incorrecta + "la fecha está mal"
 
 "la que empieza con AD"
 → {"action":"select_entity","intent":"unit_search","confidence":0.9,"currentTramiteDisposition":"keep","reasoningCode":"CONTEXTUAL_REFERENCE","entity":{"type":"plate","value":"AD","matchMode":"prefix"},"answer":null,"fields":null,"ambiguity":null,"fieldsToClear":null}
+
+Odómetro pendiente de CONFIRMO + "para q sirve el odometro"
+→ {"action":"answer_domain_question","intent":"domain_knowledge","confidence":0.92,"currentTramiteDisposition":"keep","reasoningCode":"DOMAIN_QUESTION","domainQuestion":{"topic":"odometer","questionType":"purpose","resumeActiveTramite":true},"answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"qué es el horómetro" (sin trámite)
+→ {"action":"answer_domain_question","intent":"domain_knowledge","confidence":0.9,"currentTramiteDisposition":"keep","reasoningCode":"DOMAIN_QUESTION","domainQuestion":{"topic":"horometer","questionType":"definition","resumeActiveTramite":false},"answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"quién ganó el Mundial" con trámite pendiente
+→ {"action":"answer_domain_question","intent":"domain_knowledge","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"DOMAIN_QUESTION","domainQuestion":{"topic":"out_of_domain","questionType":"definition","resumeActiveTramite":true},"answer":null,"entity":null,"fields":null,"ambiguity":null}
 `;
 
 export function buildInterpretTurnUserPayload(input: Record<string, unknown>): string {

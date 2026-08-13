@@ -17,6 +17,7 @@ const CAPABILITIES = [
   "certificate",
   "ticket",
   "human_handoff",
+  "domain_knowledge",
 ];
 
 const REQUIRED: Record<string, string[]> = {

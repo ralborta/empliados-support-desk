@@ -120,7 +120,9 @@ export function isUnequivocalCancelCommand(text: string): boolean {
 
 export function isUnequivocalContinueCommand(text: string): boolean {
   const t = norm(text);
-  return /^(continuar|continua|seguimos|seguir|dale)$/.test(t);
+  return /^(continuar|continua|continuemos|seguimos|seguir|sigamos|dale|ok|listo|bueno\s*,?\s*(sigamos|seguimos|continuar|continuemos))$/.test(
+    t,
+  );
 }
 
 /** Pregunta compuesta cancelar/continuar — sí/no no son seguros. */

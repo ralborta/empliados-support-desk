@@ -14,6 +14,7 @@ export const TurnDecisionActionSchema = z.enum([
   "provide_fields",
   "select_entity",
   "lateral_query",
+  "answer_domain_question",
   "clarify",
   "general",
 ]);
@@ -28,6 +29,7 @@ export const TurnDecisionIntentSchema = z.enum([
   "certificate",
   "ticket",
   "human_handoff",
+  "domain_knowledge",
   "none",
 ]);
 
@@ -39,9 +41,40 @@ export const ReasoningCodeSchema = z.enum([
   "PROVIDED_MISSING_FIELD",
   "CONTEXTUAL_REFERENCE",
   "LATERAL_QUERY",
+  "DOMAIN_QUESTION",
   "INSUFFICIENT_CONTEXT",
   "GENERAL_CONVERSATION",
 ]);
+
+export const DomainQuestionSchema = z
+  .object({
+    topic: z.enum([
+      "odometer",
+      "horometer",
+      "gps",
+      "certificate",
+      "maintenance",
+      "ticket",
+      "unit",
+      "wara",
+      "other_supported",
+      "out_of_domain",
+    ]),
+    questionType: z.enum([
+      "definition",
+      "purpose",
+      "how_it_works",
+      "why_needed",
+      "required_data",
+      "consequence",
+      "status_explanation",
+      "capabilities",
+      "comparison",
+    ]),
+    resumeActiveTramite: z.boolean(),
+  })
+  .nullable()
+  .optional();
 
 export const TurnDecisionSchema = z.object({
   action: TurnDecisionActionSchema,
@@ -68,6 +101,7 @@ export const TurnDecisionSchema = z.object({
     })
     .nullable()
     .optional(),
+  domainQuestion: DomainQuestionSchema,
   currentTramiteDisposition: z.enum(["keep", "suspend", "cancel", "complete"]),
   fieldsToClear: z
     .array(z.enum(["date", "time", "numericValue", "unit"]))
