@@ -8,6 +8,7 @@ import type {
   WaraEmpresaLookupResult,
   WaraUnidadEstado,
 } from "./wara-types.js";
+import { applyTestContactAliasesToContacts } from "./contact-aliases.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -113,9 +114,13 @@ async function obtenerEmpresaPorNumeroOnce(
       ? [json.contacto]
       : [];
 
-  const contactos = contactosRaw
-    .map(normalizeContact)
-    .filter((c): c is WaraEmpresaContact => c != null);
+  const contactos = applyTestContactAliasesToContacts(
+    telefono,
+    contactosRaw
+      .map(normalizeContact)
+      .filter((c): c is WaraEmpresaContact => c != null),
+    env,
+  );
 
   const sessionToken =
     typeof json?.SessionToken === "string"
@@ -129,7 +134,7 @@ async function obtenerEmpresaPorNumeroOnce(
     ok: true,
     encontrado: json?.encontrado === true || contactos.length > 0,
     contactos,
-    sessionToken,
+    sessionToken: contactos.length > 1 ? undefined : sessionToken,
     customerName:
       typeof json?.CustomerName === "string"
         ? json.CustomerName
