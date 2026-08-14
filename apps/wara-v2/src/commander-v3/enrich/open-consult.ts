@@ -91,6 +91,16 @@ function looksLikeExplicitGpsRequest(message: string): boolean {
   );
 }
 
+function looksLikeExplicitPlatformGuide(message: string): boolean {
+  const t = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(opciones|configuracion|agenda|notificacion|perfil|alarma|chevron|atajos|panel|mantenimiento preventivo|mantenimiento correctivo)\b/.test(
+    t,
+  );
+}
+
 function looksLikeExplicitFleetList(message: string): boolean {
   const t = message
     .normalize("NFD")
@@ -194,18 +204,26 @@ export function enrichPlanForOpenConsult(
     (plan.task === "gps" ||
       plan.requestedCapabilities.some((c) => c.name === "gps.get_status"));
 
-  // Pedido concreto real: no tocar, salvo "sin info" / flota/GPS fantasma post-cierre.
+  // Tras cierre: domain.answer de guía de panel sin pedido explícito → menú.
+  const phonyPlatformAfterClose =
+    afterClose &&
+    !looksLikeExplicitPlatformGuide(message) &&
+    plan.requestedCapabilities.some((c) => c.name === "domain.answer");
+
+  // Pedido concreto real: no tocar, salvo fantasmas post-cierre.
   if (
     hasConcreteOps(plan) &&
     !noInfo &&
     !hasBareOrPhonySearch &&
-    !phonyGpsAfterClose
+    !phonyGpsAfterClose &&
+    !phonyPlatformAfterClose
   ) {
     return plan;
   }
   if (
     hasBareOrPhonySearch ||
     phonyGpsAfterClose ||
+    phonyPlatformAfterClose ||
     bareFleetDump ||
     noInfo ||
     weakDomain ||
