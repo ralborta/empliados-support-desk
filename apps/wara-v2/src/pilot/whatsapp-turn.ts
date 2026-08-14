@@ -26,7 +26,6 @@ import {
 import { loadCommanderV3Context } from "../commander-v3/lab/load-context.js";
 import { saveConversationStateV3 } from "../commander-v3/persistence/store.js";
 import { resolveConductorEnabled } from "../commander-v3/lab/conductor-mode.js";
-import { persistPilotTurnToV1Panel } from "./panel-persist.js";
 
 const FALLBACK =
   "Disculpá, tuve un problema para procesar eso. ¿Me lo repetís en una línea?";
@@ -124,26 +123,14 @@ function silent(extra?: Partial<PilotTurnBody>): PilotTurnBody {
   };
 }
 
-async function replyAndPersist(
-  input: {
-    phone: string;
-    inboundText: string;
-    messageId: string;
-    env: NodeJS.ProcessEnv;
-  },
+async function replyResult(
   message: string,
   extra?: Partial<PilotTurnBody>,
 ): Promise<PilotTurnResult> {
   const body = reply(message, extra);
-  if (body.skipResponse_s !== "true" && body.message.trim()) {
-    await persistPilotTurnToV1Panel({
-      phone: input.phone,
-      inboundText: input.inboundText,
-      outboundText: body.message,
-      messageId: input.messageId,
-      env: input.env,
-    });
-  }
+  // BuilderBot ya publica message.incoming/message.outgoing al webhook del panel.
+  // Persistir también desde V3 genera otra fila con IDs v3-in/v3-out distintos
+  // del wamid real. El webhook es la única fuente de verdad del hilo visible.
   return { status: 200, body };
 }
 
@@ -343,13 +330,6 @@ export async function handlePilotWhatsAppTurn(input: {
 
   const text = input.text.trim();
   const tenant = (env.WARA_V2_SHADOW_TENANT ?? "tenant_internal_ops").trim();
-  const persist = {
-    phone: input.phone,
-    inboundText: text || "Hola",
-    messageId: input.messageId,
-    env,
-  };
-
   // Commander V3 — path aislado; V2 brain no interviene.
   if (resolveConductorEnabled(input.phone, env) || isConversationCommanderV3Enabled(env)) {
     if (shouldSkipDuplicateV3Inbound(input.phone, text || "Hola", input.messageId)) {
@@ -361,7 +341,7 @@ export async function handlePilotWhatsAppTurn(input: {
       env,
     });
     if (!ctx.ok) {
-      return replyAndPersist(persist, ctx.message);
+      return replyResult(ctx.message);
     }
     saveConversationStateV3(ctx.state);
     try {
@@ -376,11 +356,11 @@ export async function handlePilotWhatsAppTurn(input: {
         customerName: ctx.customerName,
       });
       if (!result.reply.trim()) {
-        return replyAndPersist(persist, FALLBACK);
+        return replyResult(FALLBACK);
       }
-      return replyAndPersist(persist, result.reply);
+      return replyResult(result.reply);
     } catch {
-      return replyAndPersist(persist, FALLBACK);
+      return replyResult(FALLBACK);
     }
   }
 
@@ -395,7 +375,7 @@ export async function handlePilotWhatsAppTurn(input: {
     if (!waraResolution.message.trim()) {
       return { status: 200, body: silent({ skipResponse_s: "true" }) };
     }
-    return replyAndPersist(persist, waraResolution.message);
+    return replyResult(waraResolution.message);
   }
 
   const ctx = buildPilotTurnContext({
@@ -412,8 +392,8 @@ export async function handlePilotWhatsAppTurn(input: {
       ((c: TurnContext) =>
         createPilotModelAdapter(env, undefined, waraResolution.snapshot).decide(c));
     const decision = await decide(ctx);
-    return replyAndPersist(persist, extractReply(decision));
+    return replyResult(extractReply(decision));
   } catch {
-    return replyAndPersist(persist, FALLBACK);
+    return replyResult(FALLBACK);
   }
 }
