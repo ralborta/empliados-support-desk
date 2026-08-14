@@ -49,10 +49,12 @@ function shouldSkipDuplicateV3Inbound(
   const normalized = text.trim().toLowerCase();
   // CONFIRMO/CANCELAR: no deduplicar por texto. Tras un fallo WARA el usuario
   // reintenta el mismo literal y el dedupe de 90s lo silenciaba.
+  // Números sueltos (km/hs): mismo problema mid-odo / mid-horo.
   if (
     /^(confirmo|confirmó|confirmar|cancelar|cancelo|cancelado|cacelo)$/i.test(
       normalized,
-    )
+    ) ||
+    /^\d+(?:[.,]\d+)?$/.test(normalized)
   ) {
     if (!messageId?.trim()) return false;
     const key = `v3mid:${messageId.trim()}`;
