@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13aq", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13aq/);
+  it("prompt version bump 13ar", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ar/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -1083,7 +1083,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     const fact = exec.facts.join(" ");
     assert.match(fact, /11\/08\/26/);
     assert.doesNotMatch(fact, /2026-08-11/);
-    assert.match(fact, /CONFIRMO o CANCELAR/i);
+    assert.match(fact, /CONFIRMO.*CANCELAR/i);
     assert.equal(exec.state.pendingWrite?.summary?.date, "2026-08-11");
   });
 
@@ -1194,7 +1194,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       resolvedCompanyId: "1",
       message: "Del GPS",
     });
-    assert.match(exec.facts.join(" "), /Confirmás el pedido de mantenimiento/i);
+    assert.match(exec.facts.join(" "), /Confirmás el pedido|Confirmar mantenimiento/i);
     assert.match(exec.facts.join(" "), /Del GPS/i);
     assert.doesNotMatch(exec.facts.join(" "), /detenida|Ubicaci[oó]n|reporte hace/i);
   });
@@ -1614,7 +1614,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       messageId: "m-cert-confirm",
     });
     const blob = exec.facts.join(" ");
-    assert.match(blob, /Certificado simulado OK/i);
+    assert.match(blob, /Certificado.*simulado|simulado.*lab/i);
     assert.doesNotMatch(blob, /no puedo emitir/i);
     assert.equal(exec.state.pendingWrite, null);
     assert.equal(exec.state.activeTask?.status, "completed");

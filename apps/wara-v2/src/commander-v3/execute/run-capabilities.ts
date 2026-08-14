@@ -31,6 +31,26 @@ import {
 } from "./fleet-query.js";
 import { inferMaintenanceMeta } from "./maintenance-meta.js";
 import { extractUnitNameCode } from "../../pilot/unit-fleet.js";
+import {
+  confirmFooter,
+  formatCertificateConfirm,
+  formatCompanyActive,
+  formatCompanyList,
+  formatGpsReport,
+  formatHandoffAskDetail,
+  formatHandoffConfirm,
+  formatMaintenanceAskDetail,
+  formatMaintenanceConfirm,
+  formatMeterAnomaly,
+  formatMeterAsk,
+  formatMeterConfirm,
+  formatMeterFutureDate,
+  formatSuccessCertificate,
+  formatSuccessMeter,
+  formatSuccessTicket,
+  formatUnitActive,
+  formatUnitMenu,
+} from "../reply/format-wa.js";
 
 export type ToolResult = {
   capability: string;
@@ -76,7 +96,7 @@ export function normalizeMeterDateIso(raw: unknown): string | null {
 
 /** Pie de confirmación de escritura (CONFIRMO o CANCELAR). */
 function confirmOrCancelHint(): string {
-  return "Respondé CONFIRMO o CANCELAR.";
+  return confirmFooter();
 }
 
 function unitFromRef(
@@ -418,9 +438,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: true,
-          facts: [
-            `Todavía no hay empresa activa. Podés elegir una:\n${lines}`,
-          ],
+          facts: [formatCompanyList(lines)],
           data: {
             statePatch: {
               lastListing: {
@@ -445,7 +463,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       return {
         capability: req.name,
         ok: true,
-        facts: [`Empresa activa: ${ctx.state.company.name}.`],
+        facts: [formatCompanyActive(ctx.state.company.name)],
       };
     }
     case "company.list": {
@@ -560,14 +578,12 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         ctx.plan.task !== "certificate" &&
         ctx.plan.task !== "maintenance" &&
         ctx.plan.task !== "human_handoff"
-          ? "¿En qué te ayudo con esta unidad? (estado/reporte, odómetro, certificado…)"
+          ? formatUnitMenu(unit.label)
           : null;
         return {
           capability: req.name,
           ok: true,
-          facts: askWhat
-            ? [`Unidad: ${unit.label}.`, askWhat]
-            : [`Unidad: ${unit.label}.`],
+          facts: askWhat ? [askWhat] : [`🚗 Unidad: *${unit.label}*.`],
           data: {
             statePatch: {
               previousUnit:
@@ -698,7 +714,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         ctx.plan.task !== "maintenance" &&
         ctx.plan.task !== "human_handoff" &&
         ctx.plan.task !== "gps"
-          ? "¿En qué te ayudo con esta unidad? (estado/reporte, odómetro, certificado…)"
+          ? formatUnitMenu(unit.label)
           : null;
       return {
         capability: req.name,
@@ -708,8 +724,8 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
             ? [askWhat]
             : []
           : askWhat
-            ? [`Unidad: ${unit.label}.`, askWhat]
-            : [`Unidad: ${unit.label}.`],
+            ? [askWhat]
+            : [`🚗 Unidad: *${unit.label}*.`],
         data: {
           statePatch: {
             previousUnit:
@@ -741,7 +757,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       return {
         capability: req.name,
         ok: true,
-        facts: [`Unidad activa: ${ctx.state.unit.label}.`],
+        facts: [formatUnitActive(ctx.state.unit.label)],
       };
     }
     case "unit.get_previous": {
@@ -784,7 +800,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           },
         };
       }
-      const report = buildGpsReportForUnit(unit);
+      const report = formatGpsReport(buildGpsReportForUnit(unit));
       return { capability: req.name, ok: true, facts: [report] };
     }
     case "certificate.prepare": {
@@ -822,7 +838,10 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       const operationId = randomUUID();
       const payloadHash = hashPayload(payload);
       const version = 1;
-      const q = `¿Confirmás el certificado de cobertura para ${unit.label}? ${confirmOrCancelHint()}`;
+      const q = formatCertificateConfirm({
+        unitLabel: unit.label,
+        companyName: ctx.state.company?.name ?? null,
+      });
       return {
         capability: req.name,
         ok: true,
@@ -962,7 +981,12 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               capability: req.name,
               ok: true,
               facts: [
-                `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} ${confirmOrCancelHint()}`,
+                formatMeterAnomaly(
+                  formatAnomalyQuestion(
+                    Number(collected.value),
+                    meter === "hourmeter" ? "horometro" : "odometro",
+                  ),
+                ),
               ],
               data: {
                 statePatch: {
@@ -999,15 +1023,30 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               : still[0] === "date"
                 ? "date"
                 : "time";
-        const unitPrefix = `Unidad: ${unit.label}. `;
         const ask =
           expected === "value"
-            ? `${unitPrefix}Pasame el valor del ${meter === "hourmeter" ? "horómetro (hs)" : "odómetro (km)"}.`
+            ? formatMeterAsk({
+                meter,
+                unitLabel: unit.label,
+                expected: "value",
+              })
             : still.includes("date") && still.includes("time")
-              ? `${unitPrefix}¿Fecha y hora de la lectura? (ej. hoy 14:30)`
+              ? formatMeterAsk({
+                  meter,
+                  unitLabel: unit.label,
+                  expected: "datetime",
+                })
               : expected === "date"
-                ? `${unitPrefix}¿Qué fecha de lectura? (ej. hoy, 11/08/26)`
-                : `${unitPrefix}¿A qué hora? (ej. 14:30)`;
+                ? formatMeterAsk({
+                    meter,
+                    unitLabel: unit.label,
+                    expected: "date",
+                  })
+                : formatMeterAsk({
+                    meter,
+                    unitLabel: unit.label,
+                    expected: "time",
+                  });
         return {
           capability: req.name,
           ok: true,
@@ -1044,9 +1083,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: true,
-          facts: [
-            `La fecha ${formatDateDdMmYy(collected.date)} es futura. Pasame una fecha de lectura de hoy o anterior (ej. hoy, 11/08/26).`,
-          ],
+          facts: [formatMeterFutureDate(formatDateDdMmYy(collected.date))],
           data: {
             statePatch: {
               unit,
@@ -1087,7 +1124,12 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           capability: req.name,
           ok: true,
           facts: [
-            `${formatAnomalyQuestion(Number(collected.value), meter === "hourmeter" ? "horometro" : "odometro")} ${confirmOrCancelHint()}`,
+            formatMeterAnomaly(
+              formatAnomalyQuestion(
+                Number(collected.value),
+                meter === "hourmeter" ? "horometro" : "odometro",
+              ),
+            ),
           ],
           data: {
             statePatch: {
@@ -1123,7 +1165,13 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       const operationId = randomUUID();
       const payloadHash = hashPayload(payload);
       const dateDisp = formatDateDdMmYy(collected.date);
-      const q = `¿Confirmás ${meter === "hourmeter" ? "horómetro" : "odómetro"} ${collected.value} el ${dateDisp} a las ${collected.time} en ${unit.label}? ${confirmOrCancelHint()}`;
+      const q = formatMeterConfirm({
+        meter,
+        unitLabel: unit.label,
+        value: collected.value as string | number,
+        dateDisp,
+        time: String(collected.time),
+      });
       return {
         capability: req.name,
         ok: true,
@@ -1186,7 +1234,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: true,
-          facts: ["Contame el detalle del mantenimiento que necesitás."],
+          facts: [formatMaintenanceAskDetail(unit.label)],
           data: {
             statePatch: {
               unit,
@@ -1219,7 +1267,12 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         capability: req.name,
         ok: true,
         facts: [
-          `¿Confirmás el pedido de mantenimiento (${meta.kindLabel}, prioridad ${meta.priority}) para ${unit.label}? Detalle: ${detail}. ${confirmOrCancelHint()}`,
+          formatMaintenanceConfirm({
+            unitLabel: unit.label,
+            kindLabel: meta.kindLabel,
+            priority: meta.priority,
+            detail,
+          }),
         ],
         data: {
           statePatch: {
@@ -1254,7 +1307,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: true,
-          facts: ["Contame el motivo para derivarte con un asesor."],
+          facts: [formatHandoffAskDetail()],
           data: {
             statePatch: {
               activeTask: {
@@ -1287,7 +1340,11 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         capability: req.name,
         ok: true,
         facts: [
-          `¿Confirmás generar el ticket (${categoryLabel(category)})? Motivo: ${detail}. ${confirmOrCancelHint()} (no alcanza con gracias/chau).`,
+          formatHandoffConfirm({
+            categoryLabel: categoryLabel(category),
+            detail,
+            strict: true,
+          }),
         ],
         data: {
           statePatch: {
@@ -1388,7 +1445,10 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
       ok: true,
       facts: [
         `${detail}. Te derivo con un asesor.`,
-        `¿Confirmás el ticket (${categoryLabel(category)})? Motivo: ${detail}. ${confirmOrCancelHint()}`,
+        formatHandoffConfirm({
+          categoryLabel: categoryLabel(category),
+          detail,
+        }),
       ],
       writeAttempt: true,
       writeExecuted: false,
@@ -1473,7 +1533,10 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
           capability: name,
           ok: true,
           facts: [
-            `Certificado simulado OK${unitLabel ? ` para ${unitLabel}` : ""}. Sin emisión real en lab. operationId=${pw.operationId}.`,
+            formatSuccessCertificate({
+              unitLabel,
+              simulated: true,
+            }),
           ],
           writeAttempt: true,
           writeExecuted: false,
@@ -1488,12 +1551,14 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
           },
         };
       }
-      const urlBit = issued.url ? ` Link: ${issued.url}` : "";
       return {
         capability: name,
         ok: true,
         facts: [
-          `Certificado emitido${unitLabel ? ` para ${unitLabel}` : ""}.${urlBit} operationId=${pw.operationId}.`,
+          formatSuccessCertificate({
+            unitLabel,
+            url: issued.url ?? null,
+          }),
         ],
         writeAttempt: true,
         writeExecuted: true,
@@ -1605,9 +1670,9 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
         return {
           capability: name,
           ok: true,
-          facts: [
-            `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`,
-          ],
+        facts: [
+          `✅ *Registro simulado* (${pw.task}).\n_Sin escritura real._`,
+        ],
           writeAttempt: true,
           writeExecuted: false,
           data: {
@@ -1625,7 +1690,13 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
         capability: name,
         ok: true,
         facts: [
-          `Listo, registré el ${meterType} ${value}${unitLabel ? ` en ${unitLabel}` : ""} (${formatDateDdMmYy(date)} ${timeNorm}). operationId=${pw.operationId}.`,
+          formatSuccessMeter({
+            meterLabel: meterType === "horometro" ? "Horómetro" : "Odómetro",
+            value,
+            unitLabel,
+            dateDisp: formatDateDdMmYy(date),
+            time: timeNorm,
+          }),
         ],
         writeAttempt: true,
         writeExecuted: true,
@@ -1733,9 +1804,7 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
       return {
         capability: name,
         ok: true,
-        facts: [
-          `Listo, generé el ticket en Odoo (${ref}). Un asesor te va a contactar por este medio. operationId=${pw.operationId}.`,
-        ],
+        facts: [formatSuccessTicket(ref)],
         writeAttempt: true,
         writeExecuted: true,
         data: {
@@ -1765,11 +1834,11 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
 
   const msg = simulated
     ? name.startsWith("certificate")
-      ? `Certificado simulado OK${unitLabel ? ` para ${unitLabel}` : ""}. Sin emisión real en lab. operationId=${pw.operationId}.`
+      ? formatSuccessCertificate({ unitLabel, simulated: true })
       : name.startsWith("handoff") || name.startsWith("maintenance")
-        ? `Ticket simulado OK (${pw.task}). Sin escritura real en Odoo. operationId=${pw.operationId}.`
-        : `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`
-    : `Escritura ejecutada (${pw.task}) operationId=${pw.operationId}.`;
+        ? `✅ *Ticket simulado* (${pw.task}).\n_Sin escritura real en Odoo._`
+        : `✅ *Registro simulado* (${pw.task}).\n_Sin escritura real._`
+    : `✅ Escritura ejecutada (*${pw.task}*).`;
 
   return {
     capability: name,

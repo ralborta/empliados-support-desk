@@ -3,12 +3,14 @@ import { FIXED_OPENAI_ENDPOINT } from "../../llm/flags.js";
 import { commanderV3ModelName } from "../flags.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
+import { formatGreeting } from "./format-wa.js";
 
 const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
 - Español rioplatense natural: vos, cálido, humano. Como un colega que ayuda, no un formulario.
 - PROHIBIDO saludar en cada mensaje. NUNCA empieces con "Hola", "Hola ¿cómo estás?", "Buenas" salvo que purpose/act sea saludo explícito.
 - NO inventes hechos. NO agregues tools. NO cambies empresa/unidad.
 - Usá SOLO los hechos validados (facts) y el responseGoal. Si hay un fact operativo (pedir km, fecha, CONFIRMO, listado, GPS), priorizalo y acortá sin vaciarlo.
+- Si los facts ya traen iconos/negrita (*…*) de WhatsApp, conservalos tal cual (no los aplanes a prosa).
 - LISTADOS: si hay un listado numerado en facts, copialo COMPLETO tal cual. PROHIBIDO resumir como "tengo el listado" sin ítems.
 - Si el usuario preguntó algo fuera del trámite, respondé con los facts; no digas "no tengo información" si hay facts.
 - Si no hay facts, una sola pregunta concreta. NO inventes menús.
@@ -22,7 +24,7 @@ function looksLikeListingFact(f: string): boolean {
 
 function looksLikeOperationalFact(f: string): boolean {
   if (looksLikeListingFact(f)) return true;
-  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente|Último reporte|no tiene reporte|detenida|falla de ignición|Decime el número|reporte GPS/i.test(
+  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente|Último reporte|no tiene reporte|detenida|falla de ignición|Decime el número|reporte GPS|🛣|⏱|📋|📍|🔧|📅|🔢|➡️|✅/i.test(
     f,
   );
 }
@@ -39,36 +41,42 @@ export async function redactReply(input: {
   }
 
   if (input.plan.conversationalAct === "greet") {
-    const intro = !input.state.conversationMetadata.introducedAtilio
-      ? "Hola, soy Atilio, el asistente virtual de WARA."
-      : "Hola.";
     const companyFacts = input.facts.filter(
       (f) => /empresa/i.test(f) || /^\d+\.\s/.test(f) || /eleg/i.test(f),
     );
     if (!input.state.company && input.state.availableCompanies.length > 1) {
       const fromFacts = companyFacts.length
         ? companyFacts.join("\n\n")
-        : `Antes de seguir, elegí la empresa:\n${input.state.availableCompanies
+        : input.state.availableCompanies
             .map((c, i) => `${i + 1}. ${c.name}`)
-            .join("\n")}`;
+            .join("\n");
       return {
-        reply: `${intro} ${fromFacts}`,
+        reply: formatGreeting({
+          introduced: Boolean(input.state.conversationMetadata.introducedAtilio),
+          companyListBlock: fromFacts,
+        }),
         usedLlm: false,
         latencyMs: 0,
       };
     }
     if (!input.state.company && input.state.availableCompanies.length === 1) {
       return {
-        reply: `${intro} Seguimos con ${input.state.availableCompanies[0]!.name}. ¿En qué te ayudo?`,
+        reply: formatGreeting({
+          introduced: Boolean(input.state.conversationMetadata.introducedAtilio),
+          companyName: input.state.availableCompanies[0]!.name,
+        }),
         usedLlm: false,
         latencyMs: 0,
       };
     }
-    const pending = input.state.activeTask
-      ? ` Tenemos pendiente ${labelTask(input.state.activeTask.type)}.`
-      : "";
     return {
-      reply: `${intro} ¿En qué te ayudo?${pending}`,
+      reply: formatGreeting({
+        introduced: Boolean(input.state.conversationMetadata.introducedAtilio),
+        companyName: input.state.company?.name ?? null,
+        pendingTaskLabel: input.state.activeTask
+          ? labelTask(input.state.activeTask.type)
+          : null,
+      }),
       usedLlm: false,
       latencyMs: 0,
     };

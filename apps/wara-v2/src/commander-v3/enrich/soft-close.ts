@@ -5,6 +5,7 @@
  */
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
+import { formatSoftClose } from "../reply/format-wa.js";
 
 function normToken(message: string): string {
   return message
@@ -66,15 +67,15 @@ export function isSoftCloseColloquial(message: string): boolean {
 function softCloseReply(message: string): string {
   const t = normToken(message);
   if (/gracias/.test(t) || /^no(\s|$)/.test(t) || /nada|eso es todo/.test(t)) {
-    return "De nada. Cualquier cosa avisame.";
+    return formatSoftClose("thanks");
   }
   if (/genial|joya|excelente|buenisimo|bueni|barbaro|perfecto/.test(t)) {
-    return "¡Gracias a vos! Cualquier otra cosa, acá estoy.";
+    return formatSoftClose("thanks");
   }
   if (/chau|nos vemos|hasta luego/.test(t)) {
-    return "¡Chau! Cualquier cosa avisame.";
+    return formatSoftClose("bye");
   }
-  return "Dale, cualquier cosa avisame.";
+  return formatSoftClose("ack");
 }
 
 function blocksSoftClose(state: ConversationStateV3): boolean {
