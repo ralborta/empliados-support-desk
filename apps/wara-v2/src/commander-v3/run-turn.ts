@@ -426,6 +426,7 @@ export async function runCommanderTurn(
   plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
 
   // Mid odómetro/horómetro: nunca GPS/unit_query hijack; seguir pidiendo km/fecha.
+  // Excepciones: cancel, switch real a otro trámite, pregunta lateral (empresa), cambio de unidad.
   if (
     (state.activeTask?.type === "odometer" ||
       state.activeTask?.type === "hourmeter") &&
@@ -452,46 +453,64 @@ export async function runCommanderTurn(
       state.lastQuestion?.expected === "date" ||
       state.lastQuestion?.expected === "time" ||
       /^\d+(?:[.,]\d+)?$/.test(input.message.trim());
+    const unitOverride = Boolean(plan.unitReference);
+    const lateralOk =
+      plan.conversationalAct === "answer_lateral" ||
+      plan.conversationalAct === "farewell" ||
+      (plan.conversationalAct === "inform" &&
+        !plan.requestedCapabilities.some(
+          (c) =>
+            c.name.startsWith("odometer") ||
+            c.name.startsWith("hourmeter") ||
+            c.name === "unit.search",
+        ) &&
+        !answeringField &&
+        !unitOverride);
     const keepSwitch = Boolean(realOpsSwitch) && !answeringField;
     const scrubbedFacts = (plan.responseGoal.facts ?? []).filter(
       (f) => !/Dejamos pendiente/i.test(f),
     );
-    plan = {
-      ...plan,
-      task: keepSwitch ? switchTarget! : meter,
-      conversationalAct:
-        plan.conversationalAct === "cancel_task"
-          ? "cancel_task"
-          : keepSwitch
-            ? "switch_task"
+
+    // Cambio explícito de unidad mid-odo: soltar la unidad vieja para resolver la nueva.
+    if (unitOverride && state.unit) {
+      state = { ...state, previousUnit: state.unit, unit: null };
+    }
+
+    if (!keepSwitch && !lateralOk) {
+      plan = {
+        ...plan,
+        task: meter,
+        conversationalAct:
+          plan.conversationalAct === "cancel_task"
+            ? "cancel_task"
             : "continue_task",
-      taskAction:
-        plan.taskAction === "cancel"
-          ? "cancel"
-          : keepSwitch
-            ? "switch"
-            : "continue",
-      responseGoal: keepSwitch
-        ? plan.responseGoal
-        : {
-            ...plan.responseGoal,
-            purpose: "ask_missing",
-            facts: scrubbedFacts,
-          },
-      requestedCapabilities: keepSwitch
-        ? plan.requestedCapabilities
-        : [
-            ...plan.requestedCapabilities.filter(
-              (c) =>
-                c.name !== "gps.get_status" &&
-                c.name !== "unit.search" &&
-                c.name !== "domain.answer",
-            ),
-            ...(plan.requestedCapabilities.some((c) => c.name === prep)
-              ? []
-              : [{ name: prep, params: {} }]),
-          ],
-    };
+        taskAction:
+          plan.taskAction === "cancel" ? "cancel" : "continue",
+        responseGoal: {
+          ...plan.responseGoal,
+          purpose: "ask_missing",
+          facts: scrubbedFacts,
+        },
+        requestedCapabilities: [
+          ...plan.requestedCapabilities.filter(
+            (c) =>
+              c.name !== "gps.get_status" &&
+              c.name !== "unit.search" &&
+              c.name !== "domain.answer",
+          ),
+          ...(plan.requestedCapabilities.some((c) => c.name === prep)
+            ? []
+            : [{ name: prep, params: {} }]),
+        ],
+      };
+    } else if (keepSwitch) {
+      plan = {
+        ...plan,
+        task: switchTarget!,
+        conversationalAct: "switch_task",
+        taskAction: "switch",
+      };
+    }
   }
 
   // Switch: ejecutar el nuevo trámite sobre estado limpio (sin collected ajeno)

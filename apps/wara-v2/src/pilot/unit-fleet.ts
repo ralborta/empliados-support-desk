@@ -184,10 +184,20 @@ function normalizeUnitNameToken(value: string): string {
 export function extractUnitNameCode(text: string): string | null {
   const m = text.match(/\b(M?\d{3}-\d{2,3})\b/i);
   if (m?.[1]) return normalizeUnitNameToken(m[1]);
-  // Número interno sin guión (ej. 900072 / M900072) — no confundir con odómetro largo.
-  const bare = text.match(/\b(M?\d{5,6})\b/i);
-  if (bare?.[1] && bare[1].replace(/^M/i, "").length <= 6) {
-    return normalizeUnitNameToken(bare[1]);
+  // Número interno sin guión (ej. 900072 / M900072 / 9000071).
+  // Hasta 7 dígitos si el mensaje habla de unidad (no confundir con km puro).
+  const bare = text.match(/\b(M?\d{5,7})\b/i);
+  if (bare?.[1]) {
+    const digits = bare[1].replace(/^M/i, "");
+    if (digits.length <= 6) return normalizeUnitNameToken(bare[1]);
+    if (
+      digits.length === 7 &&
+      /\b(unidad|patente|movil|m[oó]vil|od[oó]metro|hor[oó]metro|certificado)\b/i.test(
+        text,
+      )
+    ) {
+      return normalizeUnitNameToken(bare[1]);
+    }
   }
   return null;
 }

@@ -56,8 +56,17 @@ export function isConfirmationReject(message: string): boolean {
   // Con confirmación pedida, cualquier "no ..." es rechazo (campo esperado)
   if (/^no\b/.test(t)) return true;
   if (/^(nop|nah)[!?.]*$/.test(t)) return true;
-  if (/^(cancelo|cacelo|cancelar|cancela)\b/.test(t)) return true;
+  if (/^(cancelo|cacelo|cancelar|cancela|cancelado|cancelada)\b/.test(t)) {
+    return true;
+  }
   if (/\b(mejor\s+no|dejalo|dejalo\s+asi)\b/.test(t)) return true;
+  // "Ya NO quiero el certificado" / "no quiero ese trámite"
+  if (
+    /\b(ya\s+)?no\s+quiero\b/.test(t) &&
+    /\b(certificado|tramite|odometro|horometro|confirmar|eso|nada)\b/.test(t)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -113,7 +122,7 @@ export function enrichPlanForConfirmationOutcome(
       requestedCapabilities: [],
       responseGoal: {
         purpose: "inform",
-        facts: ["Listo, no confirmo el cambio. ¿En qué te ayudo?"],
+        facts: ["Listo, cancelé el trámite pendiente. ¿En qué te ayudo?"],
         nextQuestion: null,
       },
       reasoning:
@@ -143,6 +152,43 @@ export function enrichPlanForConfirmationOutcome(
       reasoning:
         (plan.reasoning ? `${plan.reasoning} ` : "") +
         "Hay trámite distinto en curso: switch_task (suspender anterior, no heredar campos).",
+    };
+  }
+
+  // Pregunta sobre el pendiente (¿de qué unidad?) → informar desde estado, no KB.
+  // Solo si NO hay switch a otro trámite (ya evaluado arriba).
+  const tAsk = norm(message);
+  if (
+    /\b(unidad|patente)\b/.test(tAsk) &&
+    /\b(cual|que|de\s+que|de\s+cual|es)\b/.test(tAsk) &&
+    !/\b(odometro|horometro|cambio\s+de|cargar)\b/.test(tAsk) &&
+    (state.unit || state.pendingWrite)
+  ) {
+    const label =
+      state.unit?.label ||
+      String(
+        (state.pendingWrite?.summary as Record<string, unknown> | undefined)
+          ?.plate ??
+          (state.pendingWrite?.summary as Record<string, unknown> | undefined)
+            ?.movilId ??
+          "la unidad del trámite pendiente",
+      );
+    const tramite = state.pendingWrite?.task ?? state.activeTask?.type ?? "trámite";
+    return {
+      ...plan,
+      conversationalAct: "inform",
+      taskAction: null,
+      requestedCapabilities: [],
+      responseGoal: {
+        purpose: "inform",
+        facts: [
+          `El ${tramite} pendiente es de ${label}. Si está bien, respondé CONFIRMO; si no, CANCELAR.`,
+        ],
+        nextQuestion: null,
+      },
+      reasoning:
+        (plan.reasoning ? `${plan.reasoning} ` : "") +
+        "Pregunta sobre la unidad del pendingWrite: informo desde estado.",
     };
   }
 

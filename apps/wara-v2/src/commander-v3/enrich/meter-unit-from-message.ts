@@ -34,26 +34,42 @@ export function enrichPlanForMeterUnitInMessage(
   message: string,
 ): TurnPlan {
   if (!isMeterOrCertPlan(plan)) return plan;
-  if (plan.unitReference || state.unit) return plan;
 
   const t = message.trim();
   if (!t) return plan;
 
   const code = extractUnitNameCode(t);
+  // Si el mensaje trae otra unidad explícita, override aunque ya haya unit activa.
   if (code) {
-    return {
-      ...plan,
-      unitReference: {
-        kind: "unit",
-        mode: "unit_name",
-        value: code,
-        reference: null,
-      },
-      reasoning:
-        plan.reasoning ||
-        `El mensaje ya trae el código de unidad ${code} para el trámite.`,
-    };
+    const currentDigits = String(state.unit?.name ?? state.unit?.label ?? "")
+      .replace(/\D/g, "");
+    const codeDigits = code.replace(/\D/g, "");
+    const sameAsActive =
+      Boolean(state.unit) &&
+      codeDigits.length >= 5 &&
+      currentDigits.length >= 5 &&
+      (currentDigits.includes(codeDigits) || codeDigits.includes(currentDigits));
+    if (!plan.unitReference && (!state.unit || !sameAsActive)) {
+      return {
+        ...plan,
+        unitReference: {
+          kind: "unit",
+          mode: "unit_name",
+          value: code,
+          reference: null,
+        },
+        stateIntent: {
+          ...plan.stateIntent,
+          preserveUnit: false,
+        },
+        reasoning:
+          plan.reasoning ||
+          `El mensaje pide la unidad ${code} (override de unidad activa).`,
+      };
+    }
   }
+
+  if (plan.unitReference || state.unit) return plan;
 
   const plateNorm = normalizeLoosePlate(t);
   // Solo si el mensaje es casi solo la patente, o la patente está clara en el texto.

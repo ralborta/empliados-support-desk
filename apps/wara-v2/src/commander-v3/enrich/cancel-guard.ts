@@ -15,9 +15,28 @@ function norm(text: string): string {
 
 export function isUnequivocalCancelMessage(message: string): boolean {
   const t = norm(message);
-  return /^(cancelo|cacelo|cancelar|cancela|cancelamos|dejalo|dejalo|olvidalo|olvidalo|basta)\b/.test(
-    t,
-  );
+  if (!t) return false;
+  if (
+    /^(cancelo|cacelo|cancelar|cancela|cancelamos|cancelado|cancelada|anulado|anulada|dejalo|olvidalo|basta)[!?.]*$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(cancelo|cacelo|cancelar|cancela|cancelamos|cancelado|cancelada)\b/.test(t)
+  ) {
+    return true;
+  }
+  // "ya no quiero el certificado/trámite/odómetro"
+  if (
+    /\b(ya\s+)?no\s+quiero\b/.test(t) &&
+    /\b(certificado|tramite|odometro|horometro|mantenimiento|eso|nada)\b/.test(t)
+  ) {
+    return true;
+  }
+  if (/\b(no\s+quiero\s+(hacer|seguir|continuar)\b)/.test(t)) return true;
+  return false;
 }
 
 export function enrichPlanForCancelGuard(

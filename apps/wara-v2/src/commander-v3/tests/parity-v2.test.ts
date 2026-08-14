@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ah", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ah/);
+  it("prompt version bump 13ai", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ai/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1830,5 +1830,83 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       (plan.responseGoal.facts ?? []).some((f) => /Dejamos pendiente/i.test(f)),
       false,
     );
+  });
+
+  it("Cancelado y ya no quiero certificado cancelan pendingWrite", async () => {
+    const { isUnequivocalCancelMessage, enrichPlanForCancelGuard } = await import(
+      "../enrich/cancel-guard.js"
+    );
+    const { isConfirmationReject, enrichPlanForConfirmationOutcome } =
+      await import("../enrich/confirmation-outcome.js");
+    assert.equal(isUnequivocalCancelMessage("Cancelado"), true);
+    assert.equal(isConfirmationReject("Ya NO quiero el certificado"), true);
+
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "11111111-2222-4333-8444-555555555555",
+      version: 1,
+      payloadHash: "h",
+      task: "certificate",
+      summary: { plate: "AG562SP" },
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "confirm_certificate",
+      expected: "confirmation",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "llm domain",
+      conversationalAct: "answer_lateral",
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "certificate" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.5,
+    });
+    let enriched = enrichPlanForConfirmationOutcome(
+      plan,
+      s,
+      "Ya NO quiero el certificado",
+    );
+    assert.equal(enriched.conversationalAct, "cancel_task");
+    enriched = enrichPlanForCancelGuard(plan, s, "Cancelado");
+    assert.equal(enriched.conversationalAct, "cancel_task");
+  });
+
+  it("mid-odo con otra unidad en mensaje → unitReference override", async () => {
+    const { enrichPlanForMeterUnitInMessage } = await import(
+      "../enrich/meter-unit-from-message.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 1,
+      plate: "AG562SP",
+      name: "NISSAN",
+      label: "AG 562 SP",
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value"],
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "odo otra unidad",
+      conversationalAct: "continue_task",
+      task: "odometer",
+      taskAction: "continue",
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.8,
+    });
+    const enriched = enrichPlanForMeterUnitInMessage(
+      plan,
+      s,
+      "Cambio de odometro de la unidad 9000071",
+    );
+    assert.equal(enriched.unitReference?.value, "9000071");
+    assert.equal(enriched.stateIntent.preserveUnit, false);
   });
 });
