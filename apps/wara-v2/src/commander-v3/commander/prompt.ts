@@ -16,8 +16,9 @@ COMPRENSIÓN HUMANA (prioridad — interpretá intención, no literalidad):
 - "odometro M900-071" / "odo 900071" / "cert AA175BY" en UN mensaje → trámite + unitReference juntos. NUNCA listar flota ni volver a pedir la unidad si ya la resolviste.
 - Diálogo abierto: si pregunta algo fuera del trámite (o cambia de tema), respondé eso (answer_lateral / inform + caps que correspondan) sin castigarlo ni forzar el flujo. Si no entendés o no estás seguro → clarify con una pregunta concreta (confidence baja).
 - Modismos/afirmaciones blandas mid-trámite: "dale", "va", "listo", "ok", "sip", "sep", "claro", "perfecto" = seguimiento del campo pedido (continue/supplied), NUNCA confirman escritura (solo CONFIRMO). "listo" ≠ "lista".
-- Cierre coloquial (sin pendingWrite ni campo esperado value/date/time/unit/confirmation): "dale", "genial", "joya", "bárbaro", "perfecto", "gracias", "ok", "listo", "chau" → farewell + purpose=close. NUNCA domain.answer ni "no hay información disponible" ni reabrir mantenimiento/GPS.
-- Negaciones/cancelas informales: "nah", "nop", "dejá", "mejor no", "olvida", "cancelo", "cacelo" → cancel_task si hay pendingWrite/confirmación; si no, aclará sin inventar. "no quiero q me pases la lista" con typo suele ser "quiero que me pases la lista" si el contexto es pedir listado — interpretá por contexto.
+- DESPEDIDA (prioridad semántica): sin pendingWrite ni captura value/date/time/unit/confirmation, interpretá ACK/declinación/cierre — "dale", "genial", "gracias", "no gracias", "no, gracias", "nada", "nada más", "eso es todo", "listo", "chau", "bárbaro", "joya", "perfecto", "de una" — como conversationalAct=farewell + purpose=close + facts de despedida corta ("Dale, cualquier cosa avisame." / "De nada. Acá estoy."). NUNCA domain.answer. NUNCA inventes "No hay información disponible sobre el mantenimiento/unidad…". NUNCA repreguntés "¿necesitás algo más específico?".
+- Si tu último mensaje ofreció más ayuda ("¿Necesitás algo más?", "¿algo específico?") y el usuario declina o agradece → SIEMPRE farewell (aprendé a despedirte).
+- Negaciones/cancelas informales: "nah", "nop", "dejá", "mejor no", "olvida", "cancelo", "cacelo" → cancel_task si hay pendingWrite/confirmación; si no hay trámite abierto y es cierre → farewell. "no quiero q me pases la lista" con typo suele ser "quiero que me pases la lista" si el contexto es pedir listado — interpretá por contexto.
 - Referencias: "la misma", "esa", "la de antes", "la otra", "esa und", "el camión" → unitReference contextual.
 - Números sueltos: si lastQuestion pide empresa → índice/nombre; si pide unidad → patente/código/índice; si pide value → km/hs; si pide date/time → fecha/hora. No pedís otra cosa.
 - Si el sentido es claro pese al typo → actuá con confidence alta. Clarify SOLO si hay dos lecturas materiales distintas o realmente no entendés.
@@ -49,7 +50,7 @@ Reglas de decisión:
 3b) lastQuestion.expected=confirmation / pendingWrite: SOLO CONFIRMO confirma. "no confirmo"/"no"/"cancelo"/"cancelar" → cancel_task (limpia pendingWrite + activeTask). NUNCA domain.answer ni re-pedir el mismo CONFIRMO. NUNCA purpose=close ni "no hay información disponible para cerrar".
 3c) Con pendingWrite o activeTask, si el usuario pide OTRO trámite (aunque diga "odometro 900073" sin "cambiar") → switch_task SIEMPRE (no clarify): suspendé el anterior sin CONFIRMO, avisá "dejamos pendiente X, seguimos con Y", y pedí los campos del nuevo desde cero (NUNCA reuses value/date/time del anterior). conversationalAct=switch_task + task del nuevo + *.prepare.
 3d) pendingWrite + idle/saludo sin CONFIRMO ni otro trámite → preguntá si cancelás para seguir o lo dejan para después (no re-pedir el mismo CONFIRMO en loop).
-4) Cortesía/despedida/gracias/chau NUNCA confirman escritura.
+4) Cortesía/despedida/gracias/chau/"no gracias" NUNCA confirman escritura. Idle u oferta "¿algo más?" + cierre coloquial → farewell (despedite; no reabrir consultas).
 5) No inventes capabilities. No write_commit sin confirm_write.
 6) Saludo: si el usuario saluda (hola/buenas/…) → greet SIEMPRE. Si hoursIdleSinceLastTurn >= 1 → greet de reencuentro. Si NO hay empresa activa y hay varias → company.list y pedí que elija (1/2/nombre). Si hay una sola → company.select automática.
 6b) Si YA hay empresa activa → NUNCA company.select / company.list / "Seguimos con…" / re-presentación "Hola soy Atilio" salvo pedido explícito de cambio de empresa. Pedidos como lista/reporte/odo/agenda con empresa activa → inform/start_task SIN greet.
@@ -117,10 +118,26 @@ export function buildCommanderUserPayload(input: {
   state: ConversationStateV3;
 }): string {
   const s = input.state;
+  const lastAssistant = [...s.recentTurns]
+    .reverse()
+    .find((t) => t.role === "assistant");
+  const offeredMoreHelp = Boolean(
+    lastAssistant &&
+      /necesit[aá]s?\s+algo|algo\s+m[aá]s|algo\s+espec[ií]fico|en\s+qu[eé]\s+te\s+ayudo|cualquier\s+cosa/i.test(
+        lastAssistant.text,
+      ),
+  );
+  const canFarewellIdle =
+    !s.pendingWrite &&
+    s.activeTask?.status !== "collecting" &&
+    !["confirmation", "value", "date", "time", "unit", "company"].includes(
+      String(s.lastQuestion?.expected ?? ""),
+    );
+
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
@@ -130,6 +147,16 @@ export function buildCommanderUserPayload(input: {
           (60 * 60 * 1000)
         ).toFixed(2),
       ),
+      speechActHints: {
+        lastAssistantOfferedMoreHelp: offeredMoreHelp,
+        canFarewellIdle,
+        likelyFarewellClose:
+          canFarewellIdle &&
+          offeredMoreHelp &&
+          /^(dale|genial|gracias|no\s*gracias|nada|listo|chau|perfecto|barbaro|bárbaro|joya|ok|de una)\b/i.test(
+            input.message.trim(),
+          ),
+      },
       state: {
         company: s.company,
         unit: s.unit,

@@ -1,7 +1,7 @@
 /**
- * Cierre / ack coloquial rioplatense (speech-act):
- * Tras un trámite listo, "dale" / "genial" / "gracias" cierran — no consultan.
- * Nunca confirman escritura (solo CONFIRMO).
+ * Safety-net de despedida (speech-act), post-Commander:
+ * Si el LLM no eligió farewell ante un cierre coloquial idle, lo forzamos.
+ * Nunca confirma escritura (solo CONFIRMO).
  */
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
@@ -11,41 +11,70 @@ function normToken(message: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[!¡?.…,]+/g, " ")
+    .replace(/[!¡?.…,;:]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** Mensajes cortos de cierre / conformidad (no son campos ni CONFIRMO). */
+/**
+ * Cierre / ack / declinación de "¿algo más?" (rioplatense corto).
+ * No es captura de campo ni CONFIRMO.
+ */
 export function isSoftCloseColloquial(message: string): boolean {
   const t = normToken(message);
-  if (!t || t.length > 40) return false;
+  if (!t || t.length > 48) return false;
+
+  // Acks / gracias / despedidas sueltas
   if (
-    /^(dale|da+le+|genial|joya|barbaro|bueni|buenisimo|excelente|perfecto|copado|de una|deuna|va|oka|okey|ok|listo|gracias|graciass+|mil gracias|gracias total|chau|chauu+|nos vemos|hasta luego|buenisima)$/.test(
+    /^(dale|da+le+|genial|joya|barbaro|bueni|buenisimo|buenisima|excelente|perfecto|copado|de una|deuna|va|oka|okey|ok|listo|gracias|graciass+|mil gracias|gracias total(es)?|chau|chauu+|nos vemos|hasta luego)$/.test(
       t,
     )
   ) {
     return true;
   }
-  // "dale gracias", "genial gracias", "ok gracias", "listo gracias"
+
+  // "dale gracias", "genial gracias", …
   if (
-    /^(dale|genial|joya|barbaro|perfecto|ok|oka|okey|listo|va)\s+gracias$/.test(t)
+    /^(dale|genial|joya|barbaro|perfecto|ok|oka|okey|listo|va)\s+gracias$/.test(
+      t,
+    )
   ) {
     return true;
   }
-  if (/^gracias(\s+(chau|adios|total|mil))?$/.test(t)) return true;
+
+  // Declina oferta de más ayuda / cierra: "no gracias", "no, gracias", "gracias no"
+  if (
+    /^(no\s+)?gracias(\s+(chau|adios|total|mil))?$/.test(t) ||
+    /^gracias\s+no$/.test(t) ||
+    /^no(\s+gracias)?$/.test(t)
+  ) {
+    return true;
+  }
+
+  // "nada", "nada mas", "eso es todo", "no hace falta", "por ahora no"
+  if (
+    /^(nada|nada mas|no nada|eso es todo|asi esta bien|ta bien|todo bien|no hace falta|por ahora no|mejor no|no por ahora)$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
   return false;
 }
 
 function softCloseReply(message: string): string {
   const t = normToken(message);
-  if (/gracias|genial|joya|excelente|buenisimo|bueni/.test(t)) {
+  if (/gracias/.test(t) || /^no(\s|$)/.test(t) || /nada|eso es todo/.test(t)) {
+    return "De nada. Cualquier cosa avisame.";
+  }
+  if (/genial|joya|excelente|buenisimo|bueni|barbaro|perfecto/.test(t)) {
     return "¡Gracias a vos! Cualquier otra cosa, acá estoy.";
   }
   if (/chau|nos vemos|hasta luego/.test(t)) {
     return "¡Chau! Cualquier cosa avisame.";
   }
-  return "¡Dale! Cualquier otra cosa, avisame.";
+  return "Dale, cualquier cosa avisame.";
 }
 
 function blocksSoftClose(state: ConversationStateV3): boolean {
@@ -53,18 +82,27 @@ function blocksSoftClose(state: ConversationStateV3): boolean {
   if (state.pendingWrite) return true;
   if (state.activeTask?.status === "collecting") return true;
   const expected = state.lastQuestion?.expected;
+  // free_text solo bloquea mid-collecting (arriba). Tras "¿algo más?" no debe
+  // impedir despedida.
   if (
     expected === "confirmation" ||
     expected === "value" ||
     expected === "date" ||
     expected === "time" ||
     expected === "unit" ||
-    expected === "company" ||
-    expected === "free_text"
+    expected === "company"
   ) {
     return true;
   }
   return false;
+}
+
+/** Si el Commander ya eligió farewell/close, no tocamos. */
+function alreadyFarewell(plan: TurnPlan): boolean {
+  return (
+    plan.conversationalAct === "farewell" ||
+    plan.responseGoal.purpose === "close"
+  );
 }
 
 export function enrichPlanForSoftClose(
@@ -72,6 +110,29 @@ export function enrichPlanForSoftClose(
   state: ConversationStateV3,
   message: string,
 ): TurnPlan {
+  if (alreadyFarewell(plan)) {
+    // Asegurar facts de despedida si el LLM olvidó el texto.
+    if (
+      plan.responseGoal.purpose === "close" &&
+      (!plan.responseGoal.facts || plan.responseGoal.facts.length === 0)
+    ) {
+      return {
+        ...plan,
+        requestedCapabilities: [],
+        responseGoal: {
+          ...plan.responseGoal,
+          purpose: "close",
+          facts: [softCloseReply(message)],
+          nextQuestion: null,
+        },
+      };
+    }
+    return {
+      ...plan,
+      requestedCapabilities: [],
+    };
+  }
+
   if (!isSoftCloseColloquial(message)) return plan;
   if (blocksSoftClose(state)) return plan;
 
@@ -97,7 +158,7 @@ export function enrichPlanForSoftClose(
     },
     reasoning:
       (plan.reasoning ? `${plan.reasoning} ` : "") +
-      "Ack/cierre coloquial (dale/genial/gracias): farewell sin tools ni consultas.",
+      "Despedida/cierre coloquial (dale/genial/no gracias): farewell sin tools ni consultas.",
     confidence: Math.max(plan.confidence, 0.92),
   };
 }

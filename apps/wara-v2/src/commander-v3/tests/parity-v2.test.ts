@@ -11,12 +11,18 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ap", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ap/);
+  it("prompt version bump 13aq", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13aq/);
   });
 
-  it("Dale / Genial idle post-trámite → farewell close (no domain.answer)", async () => {
-    const { enrichPlanForSoftClose } = await import("../enrich/soft-close.js");
+  it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
+    const { enrichPlanForSoftClose, isSoftCloseColloquial } = await import(
+      "../enrich/soft-close.js"
+    );
+    assert.equal(isSoftCloseColloquial("No gracias"), true);
+    assert.equal(isSoftCloseColloquial("no, gracias"), true);
+    assert.equal(isSoftCloseColloquial("nada más"), true);
+
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     s.company = { id: "c1", name: "El Cacique S.A." };
     s.unit = {
@@ -31,6 +37,12 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       collected: { detail: "Del GPS" },
       missing: [],
     };
+    // Tras "¿Necesitás algo más específico?" el estado suele dejar free_text.
+    s.lastQuestion = {
+      id: "q1",
+      purpose: "follow_up",
+      expected: "free_text",
+    };
     const badPlan = TurnPlanSchema.parse({
       reasoning: "llm inventó consulta",
       conversationalAct: "inform",
@@ -44,13 +56,17 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       },
       confidence: 0.4,
     });
-    for (const msg of ["Dale", "Genial", "gracias", "bárbaro"]) {
+    for (const msg of ["Dale", "Genial", "gracias", "bárbaro", "No gracias", "nada"]) {
       const enriched = enrichPlanForSoftClose(badPlan, s, msg);
       assert.equal(enriched.conversationalAct, "farewell", msg);
       assert.equal(enriched.responseGoal.purpose, "close", msg);
       assert.equal(enriched.requestedCapabilities.length, 0, msg);
       assert.equal(enriched.task, null, msg);
-      assert.match(enriched.responseGoal.facts[0] ?? "", /Dale|Gracias|Chau/i, msg);
+      assert.match(
+        enriched.responseGoal.facts[0] ?? "",
+        /Dale|Gracias|Chau|De nada|avisame/i,
+        msg,
+      );
     }
   });
 
