@@ -3,7 +3,7 @@
  */
 import type { MeterType, OdometerWaraPayload } from "./odometer-types.js";
 import { fechaLocalNaiveToWaraUtc } from "./odometer-core.js";
-import { formatPlateWithSpaces, normalizeLoosePlate } from "./plates.js";
+import { plateCandidatesForWaraApi } from "./plates.js";
 import { isOdometerWriteEnabled } from "./write-gates.js";
 
 function waraMaintenanceApiBaseUrl(env: NodeJS.ProcessEnv): string {
@@ -22,11 +22,12 @@ export function buildOdometerWaraPayload(input: {
   fechaLocalIso: string;
   timezone?: string;
 }): OdometerWaraPayload {
-  const fecha = fechaLocalNaiveToWaraUtc(input.fechaLocalIso, input.timezone ?? "America/Argentina/Buenos_Aires");
-  // Misma regla que certificado: Visionblo suele exigir patente con espacios.
-  const patente =
-    formatPlateWithSpaces(normalizeLoosePlate(input.patente)) ||
-    input.patente.trim();
+  const fecha = fechaLocalNaiveToWaraUtc(
+    input.fechaLocalIso,
+    input.timezone ?? "America/Argentina/Buenos_Aires",
+  );
+  // Usá la patente tal cual (flota). No forzar espacios: Visionblo busca exacto.
+  const patente = input.patente.trim();
   const body: OdometerWaraPayload = {
     token: input.sessionToken,
     patente,
@@ -42,38 +43,28 @@ export type RegisterOdometerResult =
   | { ok: true; dryRun: false; payload: OdometerWaraPayload; summary: string }
   | { ok: false; error: string; payload: OdometerWaraPayload };
 
-export async function registerOdometerHorometro(
-  input: {
-    sessionToken: string;
-    patente: string;
-    meterType: MeterType;
-    value: number;
-    fechaLocalIso: string;
-  },
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<RegisterOdometerResult> {
-  const payload = buildOdometerWaraPayload(input);
-  const gateEnabled = isOdometerWriteEnabled(env);
+function looksLikePlateNotFound(err: string): boolean {
+  return /no se encontr|no encontr|veh[ií]culo|patente|unidad/i.test(err);
+}
 
-  if (!gateEnabled) {
-    return {
-      ok: true,
-      dryRun: true,
-      payload,
-      summary: `dry-run: payload listo para RegistrarCambioOdometroHorometro`,
-    };
-  }
-
-  const res = await fetch(`${waraMaintenanceApiBaseUrl(env)}/RegistrarCambioOdometroHorometro`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${input.sessionToken}`,
+async function postRegister(
+  payload: OdometerWaraPayload,
+  sessionToken: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const res = await fetch(
+    `${waraMaintenanceApiBaseUrl(env)}/RegistrarCambioOdometroHorometro`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+      signal: AbortSignal.timeout(Number(env.WARA_API_TIMEOUT_MS ?? 15_000)),
     },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-    signal: AbortSignal.timeout(Number(env.WARA_API_TIMEOUT_MS ?? 15_000)),
-  }).catch((e: unknown) => {
+  ).catch((e: unknown) => {
     const err = e instanceof Error ? e.message : String(e);
     if (/abort|timeout/i.test(err)) {
       throw new Error(`timeout_after_send:${err}`);
@@ -87,7 +78,63 @@ export async function registerOdometerHorometro(
       (typeof json?.error === "string" && json.error) ||
       (typeof json?.message === "string" && json.message) ||
       `WARA HTTP ${res.status}`;
-    return { ok: false, error: err, payload };
+    return { ok: false, error: err, status: res.status };
   }
-  return { ok: true, dryRun: false, payload, summary: "registrado en WARA" };
+  return { ok: true };
+}
+
+export async function registerOdometerHorometro(
+  input: {
+    sessionToken: string;
+    patente: string;
+    /** Patente cruda de flota WARA (preferida). */
+    fleetPatente?: string | null;
+    meterType: MeterType;
+    value: number;
+    fechaLocalIso: string;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<RegisterOdometerResult> {
+  const gateEnabled = isOdometerWriteEnabled(env);
+  const candidates = plateCandidatesForWaraApi(
+    input.patente,
+    input.fleetPatente ?? null,
+  );
+  const primary = buildOdometerWaraPayload({
+    ...input,
+    patente: candidates[0] ?? input.patente,
+  });
+
+  if (!gateEnabled) {
+    return {
+      ok: true,
+      dryRun: true,
+      payload: primary,
+      summary: `dry-run: payload listo para RegistrarCambioOdometroHorometro`,
+    };
+  }
+
+  let lastError = "WARA no registró el cambio";
+  let lastPayload = primary;
+
+  for (const patente of candidates) {
+    const payload = buildOdometerWaraPayload({ ...input, patente });
+    lastPayload = payload;
+    const res = await postRegister(payload, input.sessionToken, env);
+    if (res.ok) {
+      return {
+        ok: true,
+        dryRun: false,
+        payload,
+        summary: "registrado en WARA",
+      };
+    }
+    lastError = res.error;
+    // Solo reintentar con otro formato de patente si parece "no encontrada".
+    if (!looksLikePlateNotFound(res.error)) {
+      return { ok: false, error: lastError, payload };
+    }
+  }
+
+  return { ok: false, error: lastError, payload: lastPayload };
 }

@@ -1158,6 +1158,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       const payload = {
         task: meter,
         movilId: unit.movilId,
+        plate: unit.plate,
         value: collected.value,
         date: collected.date,
         time: collected.time,
@@ -1589,7 +1590,22 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
 
   // Odómetro / horómetro real
   if ((name.startsWith("odometer") || name.startsWith("hourmeter")) && gateOk) {
+    const movilId =
+      ctx.state.unit?.movilId ??
+      (typeof pw.summary?.movilId === "number" ? pw.summary.movilId : null);
+    const fleetHit =
+      (movilId != null
+        ? ctx.state.fleetCache.find((u) => u.movilId === movilId)
+        : null) ??
+      (ctx.state.unit?.plate
+        ? ctx.state.fleetCache.find(
+            (u) =>
+              (u.plate || "").replace(/\s+/g, "").toUpperCase() ===
+              ctx.state.unit!.plate!.replace(/\s+/g, "").toUpperCase(),
+          )
+        : null);
     const plate =
+      fleetHit?.plate ??
       ctx.state.unit?.plate ??
       (typeof pw.summary?.plate === "string" ? pw.summary.plate : null);
     const contactId = ctx.state.company?.contactId ?? null;
@@ -1648,6 +1664,7 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
         {
           sessionToken: tok.sessionToken,
           patente: plate,
+          fleetPatente: fleetHit?.plate ?? plate,
           meterType,
           value,
           fechaLocalIso,

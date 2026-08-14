@@ -354,6 +354,15 @@ describe("odómetro/horómetro V2 — lab", () => {
     assert.equal(payload.odometro, 130500);
     assert.ok(payload.fecha.includes("T"));
     assert.equal(payload.token, "sess");
+    const spaced = buildOdometerWaraPayload({
+      sessionToken: "sess",
+      patente: "AH 881 VD",
+      meterType: "odometro",
+      value: 1,
+      fechaLocalIso: "2026-08-12T18:00:00",
+    });
+    // No reformatear: se respeta la patente de flota tal cual.
+    assert.equal(spaced.patente, "AH 881 VD");
     const hp = buildOdometerWaraPayload({
       sessionToken: "sess",
       patente: "BB200BB",

@@ -60,3 +60,53 @@ export function formatPlateWithSpaces(plate: string): string {
   }
   return plate.trim().toUpperCase();
 }
+
+/**
+ * Patente para APIs WARA: preferí la matrícula tal como viene en flota.
+ * (V1 `resolveWaraPatenteForApi` — reformatear a ciegas provoca "No se encontró el vehículo".)
+ */
+export function resolveWaraPatenteForApi(
+  clientInput: string,
+  fleetUnit?: { patente?: string | null; unidad?: string | null } | null,
+): string {
+  const fromFleet = fleetUnit?.patente?.trim();
+  if (fromFleet) return fromFleet;
+
+  const wanted = normalizeLoosePlate(clientInput);
+  const unitName = fleetUnit?.unidad?.trim();
+  if (unitName && wanted) {
+    const unitNorm = normalizeLoosePlate(unitName);
+    if (
+      unitNorm &&
+      (unitNorm === wanted ||
+        unitNorm.includes(wanted) ||
+        wanted.includes(unitNorm))
+    ) {
+      return unitName;
+    }
+  }
+
+  const client = clientInput.trim();
+  if (client) return client;
+  return normalizeLoosePlate(clientInput) || clientInput;
+}
+
+/** Candidatos a probar ante "unidad no encontrada" (flota → espacios → compacta). */
+export function plateCandidatesForWaraApi(
+  clientInput: string,
+  fleetPatente?: string | null,
+): string[] {
+  const out: string[] = [];
+  const add = (p?: string | null) => {
+    const t = (p ?? "").trim();
+    if (t && !out.some((x) => normalizeLoosePlate(x) === normalizeLoosePlate(t) && x === t)) {
+      // Prefer exact string match uniqueness (AH881VD ≠ "AH 881 VD")
+      if (!out.includes(t)) out.push(t);
+    }
+  };
+  add(fleetPatente);
+  add(resolveWaraPatenteForApi(clientInput, { patente: fleetPatente }));
+  add(formatPlateWithSpaces(normalizeLoosePlate(clientInput || fleetPatente || "")));
+  add(normalizeLoosePlate(clientInput || fleetPatente || ""));
+  return out.filter(Boolean);
+}
