@@ -36,7 +36,7 @@ OBLIGATORIO — razoná ANTES de decidir (campo "reasoning", 2–5 oraciones, no
    - «en qué empresa estoy» → company.get_active (task=null), NO cambio de empresa
    - «configuración/configuracion/opciones/agenda/notificaciones/perfiles/alarma/contacto en agenda/cómo agrego un contacto» → domain.answer topic=platform_opciones (guía panel). NUNCA handoff ni clarify genérico ni "trámite actual".
    - «chevron/historial/MIS ATAJOS/módulo unidades/cómo uso el panel de unidades» → domain.answer topic=platform_unidades
-   - «mantenimiento preventivo/correctivo cómo funciona en el panel» → domain.answer topic=platform_mantenimiento
+   - «mantenimiento preventivo/correctivo/cómo en el panel/cómo con una unidad» → domain.answer topic=platform_mantenimiento (la base incluye el módulo + ficha Unidades/MIS ATAJOS). Seguimiento de esa guía SIGUE siendo platform_mantenimiento. NUNCA facts de "no hay información sobre el módulo".
    - asesor/reclamo/ticket/no puedo entrar (login roto)/factura/hardware/falla odo → human_handoff
 5) Recién después elegí conversationalAct, task, capabilities y responseGoal.
 
@@ -94,7 +94,7 @@ Guías panel (misma base que V1 — Opciones/Unidades/Mantenimiento):
   responseGoal.purpose="inform", facts=[]
   NUNCA clarify. NUNCA handoff por "configuración" sola. NUNCA inventes menús inventados.
 - Panel Unidades (chevron, historial, MIS ATAJOS, ficha unidad) → topic=platform_unidades
-- Guía mantenimiento en panel → topic=platform_mantenimiento
+- Guía mantenimiento en panel (y seguimiento: cómo con una unidad, paso a paso) → topic=platform_mantenimiento. NUNCA "no hay información del módulo".
 - Tras guía mid-trámite → preserveTask=true.
 
 Derivación (human_handoff + handoff.prepare; NUNCA inventes ETA):
@@ -140,7 +140,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify). Guía de mantenimiento en panel / cómo con una unidad: domain.answer topic=platform_mantenimiento.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,

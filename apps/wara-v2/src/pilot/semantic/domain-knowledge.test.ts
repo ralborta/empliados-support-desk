@@ -391,7 +391,7 @@ describe("domain knowledge — preguntas conceptuales", () => {
     assert.equal(ans.topic, "platform_unidades");
   });
 
-  it("schema acepta platform_unidades / platform_opciones", () => {
+  it("schema acepta platform_unidades / platform_opciones / platform_mantenimiento", () => {
     const d = validateTurnDecision({
       action: "answer_domain_question",
       intent: "domain_knowledge",
@@ -406,6 +406,19 @@ describe("domain knowledge — preguntas conceptuales", () => {
     });
     assert.ok(d);
     assert.equal(d!.domainQuestion?.topic, "platform_unidades");
+    const m = validateTurnDecision({
+      action: "answer_domain_question",
+      intent: "domain_knowledge",
+      confidence: 0.9,
+      currentTramiteDisposition: "keep",
+      reasoningCode: "DOMAIN_QUESTION",
+      domainQuestion: {
+        topic: "platform_mantenimiento",
+        questionType: "how_it_works",
+        resumeActiveTramite: false,
+      },
+    });
+    assert.equal(m!.domainQuestion?.topic, "platform_mantenimiento");
   });
 
   it("looksLikeDomainQuestion es genérico (no solo una frase)", () => {

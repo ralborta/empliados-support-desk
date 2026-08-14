@@ -38,7 +38,7 @@ Comprensión rioplatense / WhatsApp (CRÍTICO):
 - Con pendingEntityResolution / lastAgentQuestion pidiendo unidad/patente: solo pedido explícito de listado («pasame la lista», «lista de patentes») → intent=unit_list + action=query_context. Saludo/cortesía/«reiniciar» NO es unit_list.
 - «estado», «reporte», «dónde está», «ubicación», «último reporte», «si reporta» (de una unidad) → intent=gps (lectura). Con unidad activa → entity contextual. Sin unidad → pedir identificación. NUNCA unit_list solo por decir «estado».
 - Identificación de unidad: patente (AA175BY), número/código (M900-072, 900-072) o nombre comercial → entity type=plate|unit_name. El usuario NO solo manda patentes.
-- Guías de la plataforma (cómo usar el panel): chevron, MIS ATAJOS, historial en mapa, módulo Unidades, Agenda, Notificaciones, Perfiles → action=answer_domain_question + intent=domain_knowledge + domainQuestion.topic=platform_unidades|platform_opciones. NUNCA inventes botones fuera del manual. NUNCA unit_list.
+- Guías de la plataforma (cómo usar el panel): chevron, MIS ATAJOS, historial en mapa, módulo Unidades, Agenda, Notificaciones, Perfiles, módulo Mantenimiento (preventivo/correctivo/cómo con una unidad) → action=answer_domain_question + intent=domain_knowledge + domainQuestion.topic=platform_unidades|platform_opciones|platform_mantenimiento. NUNCA inventes botones fuera del manual. NUNCA unit_list. NUNCA digas que no hay información del módulo de mantenimiento.
 - Derivación humana (criterios — SIEMPRE ticket|human_handoff, NUNCA inventes ETA ni inventes plazos):
   • Pedido explícito de asesor/operador/humano/mesa de ayuda/soporte técnico / «pasame con…» / «mandame con alguien».
   • Reclamo, queja, abrir/crear ticket o caso, insatisfacción.
@@ -49,7 +49,7 @@ Comprensión rioplatense / WhatsApp (CRÍTICO):
   • Hardware fuera de alcance (pantalla, tablet, antena, teclado, táctil, garantía de equipo) → ticket.
   • Falla de odómetro/horómetro (no marca, desfasado, roto) — NO es update de km/hs → ticket. Si pide «actualizar/cargar km» → odometer/horometer.
   • Problema/falla/avería genérica que el bot no puede resolver operativamente → ticket (si es GPS/lectura/certificado/mantenimiento operativo claros → esos intents).
-  • Guía de panel (chevron/historial/agenda) → domain_knowledge platform_*; si el manual no alcanza y pide humano → ticket.
+  • Guía de panel (chevron/historial/agenda/mantenimiento) → domain_knowledge platform_*. El manual V1 cubre Opciones, Unidades y Mantenimiento; no niegues el módulo. Ticket solo si pide humano o el tema está fuera (precios/admin/hardware).
   Si trae motivo → fields.detail. action=start_intent|switch_intent. NUNCA domain_knowledge para ETA/asesor/reclamo.
 - "no quiero cambiar el odómetro" depende del contexto: si hay otro trámite activo y pide odómetro, puede ser switch; si está en odómetro, cancel o keep según el sentido completo.
 - Fechas/horas coloquiales: resolvé con localNow + timezone. "esta mañana 5" / "esta mañana a las 5" → date=hoy + time=05:00. NUNCA tomes el "5" como día del mes.
@@ -97,7 +97,7 @@ Reglas de decisión:
 - Pedido explícito de servicio (certificado/odómetro/GPS/…) aunque haya typos ("quiro", "cerifificado") → start_intent o switch_intent. NEW_EXPLICIT_INTENT o SWITCH_INTENT nunca van con action general.
 7) Cambio explícito de empresa ("cambiar empresa", "otra empresa") → companyAction=change.
 8) Pregunta conceptual de dominio (qué es odómetro/GPS/certificado) → answer_domain_question. Empresa ≠ unidad ≠ patente.
-8b) Cómo usar la plataforma WARA (panel Unidades/Opciones, chevron, historial, agenda) → answer_domain_question + domainQuestion.topic platform_unidades|platform_opciones + questionType how_it_works|definition.
+8b) Cómo usar la plataforma WARA (panel Unidades/Opciones/Mantenimiento, chevron, historial, agenda, preventivo/correctivo) → answer_domain_question + domainQuestion.topic platform_unidades|platform_opciones|platform_mantenimiento + questionType how_it_works|definition. NUNCA "no hay información del módulo".
 8c) Criterios de derivación (arriba) → start_intent|switch_intent ticket|human_handoff (fields.detail si hay motivo). NUNCA inventes plazos.
 9) Cambio claro de servicio → switch_intent / suspend_and_start (si hay pending/activo) o start_intent (si no). NUNCA general+intent de servicio.
 10) Corrección de campos ("no, el valor era X") → correct_fields keep. NO cancel.
@@ -168,6 +168,9 @@ expectedAnswerType=date + "esta mañana 5" / "esta mañana a las 5"
 
 "como cargo un contacto en la agenda" / "como configuro notificaciones"
 → {"action":"answer_domain_question","intent":"domain_knowledge","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"DOMAIN_QUESTION","domainQuestion":{"topic":"platform_opciones","questionType":"how_it_works","resumeActiveTramite":false},"answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"como hago un preventivo" / "como lo hago con una unidad en especifico"
+→ {"action":"answer_domain_question","intent":"domain_knowledge","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"DOMAIN_QUESTION","domainQuestion":{"topic":"platform_mantenimiento","questionType":"how_it_works","resumeActiveTramite":false},"answer":null,"entity":null,"fields":null,"ambiguity":null}
 
 "pasame con un asesor" / "tenes tiempo de resolucion de mi problema con la partner"
 → {"action":"start_intent","intent":"ticket","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","fields":{"detail":null},"answer":null,"entity":null,"ambiguity":null}

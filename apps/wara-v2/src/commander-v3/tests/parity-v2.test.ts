@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 14ay", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14ay/);
+  it("prompt version bump 14ba", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14ba/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -1358,6 +1358,33 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       message: "como hago un preventivo",
     });
     assert.match(exec.facts.join(" "), /preventivo|Mantenimiento/i);
+  });
+
+  it("guía mantenimiento con una unidad usa la base (no 'no tengo información')", async () => {
+    const plan = TurnPlanSchema.parse({
+      reasoning: "seguimiento guia",
+      conversationalAct: "answer_lateral",
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "platform_mantenimiento" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message:
+        "¿Y podes guiarme para indicarme como hacerlo con una unidad en especifico?",
+    });
+    const text = exec.facts.join("\n");
+    assert.doesNotMatch(text, /No tengo informaci[oó]n/i);
+    assert.match(text, /chevron|MIS ATAJOS|orden de trabajo|Mantenimiento/i);
   });
 
   it("no confirmo con pendingWrite → cancel_task", async () => {

@@ -15,7 +15,13 @@ import {
   answerFromPlatformKnowledge,
   platformKindFromTopic,
   platformStaticFallback,
+  resolvePlatformGuideAnswer,
 } from "../../pilot/semantic/platform-knowledge-ai.js";
+import {
+  V1_HOROMETER_GUIDE,
+  V1_ODOMETER_GUIDE,
+  V1_TICKET_CREATION_GUIDE,
+} from "../../pilot/semantic/v1-info-guides.js";
 import {
   categoryLabel,
   inferTicketCategory,
@@ -1594,7 +1600,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           recentTurns: ctx.state.recentTurns,
           env: ctx.env,
         });
-        const answer = ai ?? platformStaticFallback(platformKind, userQ);
+        const answer = resolvePlatformGuideAnswer(ai, platformKind, userQ);
         return { capability: req.name, ok: true, facts: [answer] };
       }
       const answer = domainFact(topic);
@@ -2119,11 +2125,14 @@ function domainFact(topic: string): string {
   if (t.includes("platform_opciones") || t.includes("agenda") || t.includes("notific")) {
     return platformStaticFallback("opciones", topic);
   }
+  if (t.includes("platform_mantenimiento") || t.includes("mantenim")) {
+    return platformStaticFallback("mantenimiento", topic);
+  }
   if (t.includes("odom")) {
-    return "El odómetro mide kilómetros recorridos. Sirve para control de uso y mantenimiento.";
+    return V1_ODOMETER_GUIDE;
   }
   if (t.includes("horo")) {
-    return "El horómetro mide horas de motor. Es distinto del odómetro (km).";
+    return V1_HOROMETER_GUIDE;
   }
   if (t.includes("cert")) {
     return "El certificado de cobertura acredita la unidad ante controles. Se emite sobre una patente concreta.";
@@ -2131,10 +2140,13 @@ function domainFact(topic: string): string {
   if (t.includes("gps") || t.includes("reporte")) {
     return "El último reporte GPS indica cuándo la unidad comunicó posición/ignición a WARA.";
   }
+  if (t.includes("ticket") || t.includes("asesor") || t.includes("caso")) {
+    return V1_TICKET_CREATION_GUIDE;
+  }
   if (t.includes("wara") || t.includes("capacid")) {
     return (
       "Puedo ayudarte con GPS, odómetro/horómetro, certificado, mantenimiento, " +
-      "derivación a asesor y guías del panel (Unidades / Opciones)."
+      "derivación a asesor y guías del panel (Unidades / Opciones / Mantenimiento)."
     );
   }
   return "Si me contás el tema (GPS, certificado, odómetro/horómetro, mantenimiento, panel), te respondo con precisión.";

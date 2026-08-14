@@ -2,8 +2,14 @@
  * Base de conocimiento de plataforma Wara (manuales Unidades + Opciones).
  * Portada a V2 — el intérprete elige answer_domain_question; el contenido se ancla acá.
  * Fuente: docs/Modulo_Opciones_Wara.pdf, docs/Modulo_Unidades_Wara.pdf
- * (mismo contenido que V1 knowledgeBase.ts). Sin routing looksLike*.
+ * (mismo contenido que V1 knowledgeBase.ts) + plantillas V1 infoGuideReplies.
+ * Sin routing looksLike*.
  */
+import {
+  V1_MANTENIMIENTO_GUIDES,
+  V1_OPCIONES_GUIDES,
+  V1_UNIDADES_GUIDES,
+} from "./v1-info-guides.js";
 
 export const OPCIONES_KNOWLEDGE_BASE = `
 Módulo Opciones: Agenda, Notificaciones y Perfiles — Plataforma Wara
@@ -188,19 +194,39 @@ Módulo de Mantenimiento — Plataforma Wara (guía informativa)
 
 ¿Qué es? Permite gestionar planes preventivos, tareas y mantenimientos correctivos de la flota.
 No confundir con registrar un odómetro/horómetro (eso es otro trámite).
+No se abre un ticket/reclamo solo por preguntar cómo usar el módulo.
 
-Tipos frecuentes:
-- Preventivo / service: trabajo programado por km u horas.
-- Correctivo: reparación por falla o avería.
-- Plan: agenda de tareas recurrentes.
-- RFID / periféricos: temas de tags o accesorios (suele requerir asesor).
+Acceso: Utilidades → Mantenimiento.
 
-En la plataforma (resumen):
-- Se crean o consultan planes preventivos y tareas.
-- Las órdenes correctivas listan reparaciones pendientes.
-- El odómetro/horómetro de la unidad alimenta alertas y planes (actualizar lecturas ayuda al plan).
-
-Por WhatsApp:
-- Si querés que yo REGISTRE un pedido operativo: patente/unidad + detalle (y prioridad si la sabés) → confirmás con CONFIRMO.
-- Si solo querés el paso a paso del módulo, preguntá preventivo o correctivo y te oriento con esta guía.
+RFID / periféricos: si preguntan tags o accesorios y no está en estas guías, derivar a un asesor.
 `.trim();
+
+/**
+ * Paridad V1: PDF Opciones/Unidades + plantillas infoGuideReplies + how-to
+ * mantenimiento-operativo + ficha Unidades (MIS ATAJOS).
+ */
+export function knowledgeForPlatformGuide(
+  kind: "opciones" | "unidades" | "mantenimiento",
+): string {
+  if (kind === "opciones") {
+    return [OPCIONES_KNOWLEDGE_BASE, "", V1_OPCIONES_GUIDES].join("\n");
+  }
+  if (kind === "unidades") {
+    return [UNIDADES_KNOWLEDGE_BASE, "", V1_UNIDADES_GUIDES].join("\n");
+  }
+  return [
+    MANTENIMIENTO_KNOWLEDGE_BASE,
+    "",
+    V1_MANTENIMIENTO_GUIDES,
+    "",
+    "== Del módulo Unidades: cómo hacerlo en UNA unidad concreta ==",
+    "El manual de Unidades cubre la operación sobre una unidad específica:",
+    "- Módulo Unidades (ícono del auto) → buscá la unidad → chevron → ficha expandida.",
+    "- MIS ATAJOS → TAREAS CORRECTIVAS: reparaciones o mantenimientos correctivos pendientes de ESA unidad.",
+    "- MIS ATAJOS → AGREGAR ORDEN DE TRABAJO: crea orden (reparación, inspección o servicio) al detectar un problema mecánico.",
+    "- El odómetro/horómetro de la ficha alimenta planes preventivos.",
+    UNIDADES_KNOWLEDGE_BASE,
+    "",
+    V1_UNIDADES_GUIDES,
+  ].join("\n");
+}

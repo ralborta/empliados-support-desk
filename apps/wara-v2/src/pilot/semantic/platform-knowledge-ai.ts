@@ -6,25 +6,25 @@
 import { FIXED_OPENAI_ENDPOINT } from "../../llm/flags.js";
 import { authorizedOpenAiFetch } from "../../llm/network.js";
 import { semanticModelName, semanticTimeoutMs } from "./brain-flags.js";
+import { knowledgeForPlatformGuide } from "./platform-knowledge-base.js";
 import {
-  MANTENIMIENTO_KNOWLEDGE_BASE,
-  OPCIONES_KNOWLEDGE_BASE,
-  UNIDADES_KNOWLEDGE_BASE,
-} from "./platform-knowledge-base.js";
+  v1MantenimientoFallback,
+  v1OpcionesFallback,
+  v1UnidadesFallback,
+} from "./v1-info-guides.js";
 
 export type PlatformGuideKind = "opciones" | "unidades" | "mantenimiento";
-
-const KB: Record<PlatformGuideKind, string> = {
-  opciones: OPCIONES_KNOWLEDGE_BASE,
-  unidades: UNIDADES_KNOWLEDGE_BASE,
-  mantenimiento: MANTENIMIENTO_KNOWLEDGE_BASE,
-};
 
 const SYSTEM_RULES = `Sos Atilio, soporte WARA por WhatsApp/lab (Argentina).
 Respondé SOLO con información de la BASE DE CONOCIMIENTO abajo.
 NO inventes botones, pantallas, pasos ni funciones que no estén en el manual.
-Español rioplatense, cordial, mensaje corto de chat (máx ~8 líneas). Si hay pasos, numeralos.
-Si el manual no cubre la pregunta, decilo y ofrecé derivar a un asesor.
+Español rioplatense, cordial. Un único bloque: 1 línea de intro + lista numerada (máx 8 pasos).
+La base incluye TODO lo de V1: PDF Opciones, PDF Unidades, plantillas de Opciones/Unidades/Mantenimiento y how-to operativo (preventivo, correctivo, consumo/rendimiento, ficha de una unidad).
+El módulo de Mantenimiento ESTÁ en esta base. NUNCA digas que no tenés información sobre ese módulo.
+Si preguntan cómo hacerlo con una unidad específica: chevron de esa unidad → MIS ATAJOS → Tareas correctivas o Agregar orden de trabajo (y/o asociar esa unidad en Mantenimiento).
+Respondé ÚNICAMENTE lo preguntado; no mezcles otros módulos.
+NO pidas patente ni abras ticket por una duda de cómo usar el panel.
+Solo derivá a un asesor si piden algo claramente fuera de esta base (precios, admin, hardware).
 Nunca escribas metacomentarios ni la palabra FIN.`;
 
 export async function answerFromPlatformKnowledge(input: {
@@ -36,7 +36,7 @@ export async function answerFromPlatformKnowledge(input: {
   const env = input.env ?? process.env;
   const apiKey = env.OPENAI_API_KEY?.trim() ?? "";
   if (!apiKey || !input.question.trim()) return null;
-  const knowledge = KB[input.kind];
+  const knowledge = knowledgeForPlatformGuide(input.kind);
   if (!knowledge) return null;
 
   const model = semanticModelName(env);
@@ -103,62 +103,32 @@ export function platformKindFromTopic(
   return null;
 }
 
-/** Fallback estático si la IA no responde — solo hechos del manual. */
-export function platformStaticFallback(kind: PlatformGuideKind, question: string): string {
-  const q = question
+/** La IA a veces niega el módulo aunque la base sí lo cubre. */
+export function isPlatformKnowledgeRefusal(text: string): boolean {
+  const t = text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  if (kind === "unidades") {
-    if (/\bchevron\b/.test(q)) {
-      return (
-        "El chevron es la flecha a la derecha de cada fila de unidad en el módulo Unidades. " +
-        "Al tocarlo se abre la ficha expandida con datos en tiempo real y MIS ATAJOS (Historial, Compartir, etc.)."
-      );
-    }
-    if (/\bhistorial\b/.test(q)) {
-      return (
-        "Para ver el historial de una unidad: módulo Unidades (ícono del auto) → abrí la ficha con el chevron → MIS ATAJOS → HISTORIAL. " +
-        "Ahí ves el recorrido en el mapa por fecha y hora."
-      );
-    }
-    return (
-      "El módulo Unidades (ícono del auto en la barra lateral) es el centro de la flota: grupos, puntos de estado (verde/azul/rojo), ficha expandida y MIS ATAJOS. " +
-      "Decime qué querés hacer (historial, compartir posición, certificado, orden de trabajo) y te guío con los pasos."
-    );
-  }
-  if (kind === "mantenimiento") {
-    if (/\bpreventiv/.test(q)) {
-      return (
-        "Preventivo/service: se programa por km u horas según el plan en el módulo Mantenimiento. " +
-        "Si querés que yo registre un pedido por WhatsApp, dame unidad + detalle y confirmás con CONFIRMO."
-      );
-    }
-    if (/\bcorrectiv|repar|falla/.test(q)) {
-      return (
-        "Correctivo: registra una reparación por falla. En plataforma va como tarea/orden correctiva. " +
-        "Por WhatsApp: unidad + qué falló → CONFIRMO."
-      );
-    }
-    return (
-      "El módulo Mantenimiento cubre planes preventivos, correctivos y tareas. " +
-      "Si es solo guía, pedime preventivo o correctivo. Si es pedido operativo, dame unidad y detalle."
-    );
-  }
-  if (/\bagenda|contacto\b/.test(q)) {
-    return (
-      "La Agenda está en Utilidades → Opciones → Agenda. Ahí cargás contactos (mail/teléfono) y les asignás un Perfil. " +
-      "Eso alimenta Notificaciones para saber a quién avisar."
-    );
-  }
-  if (/\bnotific|alerta\b/.test(q)) {
-    return (
-      "Notificaciones (Opciones → Notificaciones) define: cuando una unidad hace X, avisale a Y por mail/app/Telegram. " +
-      "Sin reglas configuradas el sistema registra eventos pero no alerta a nadie."
-    );
-  }
+  if (/\d+\.\s/.test(text) && text.length > 160) return false;
   return (
-    "En Opciones tenés Agenda (contactos), Notificaciones (avisos automáticos) y Perfiles (permisos). " +
-    "Decime cuál de los tres necesitás y te indico los pasos."
+    /no tengo informacion/.test(t) ||
+    /no (hay|encontre|encuentro) informacion/.test(t) ||
+    (/puedo derivarte a un asesor/.test(t) && !/chevron|atajo|mantenimiento cubre/i.test(text))
   );
+}
+
+export function resolvePlatformGuideAnswer(
+  ai: string | null,
+  kind: PlatformGuideKind,
+  question: string,
+): string {
+  if (ai && !isPlatformKnowledgeRefusal(ai)) return ai;
+  return platformStaticFallback(kind, question);
+}
+
+/** Fallback estático V1 si la IA no responde — nunca deja al cliente sin guía. */
+export function platformStaticFallback(kind: PlatformGuideKind, question: string): string {
+  if (kind === "unidades") return v1UnidadesFallback(question);
+  if (kind === "mantenimiento") return v1MantenimientoFallback(question);
+  return v1OpcionesFallback(question);
 }

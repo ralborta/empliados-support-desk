@@ -63,6 +63,7 @@ export const DomainQuestionSchema = z
       "wara",
       "platform_unidades",
       "platform_opciones",
+      "platform_mantenimiento",
       "other_supported",
       "out_of_domain",
     ]),

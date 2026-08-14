@@ -7,10 +7,10 @@ import type { TurnDecision } from "./turn-decision-schema.js";
 import {
   answerFromPlatformKnowledge,
   platformKindFromTopic,
-  platformStaticFallback,
+  resolvePlatformGuideAnswer,
 } from "./platform-knowledge-ai.js";
 
-export const DOMAIN_KNOWLEDGE_VERSION = "v2-2026-08-13-platform";
+export const DOMAIN_KNOWLEDGE_VERSION = "v2-2026-08-14-v1-guides";
 
 export type DomainTopic =
   | "odometer"
@@ -23,6 +23,7 @@ export type DomainTopic =
   | "wara"
   | "platform_unidades"
   | "platform_opciones"
+  | "platform_mantenimiento"
   | "other_supported"
   | "out_of_domain";
 
@@ -48,7 +49,11 @@ export type DomainConcept = {
 export const DOMAIN_KNOWLEDGE: Record<
   Exclude<
     DomainTopic,
-    "out_of_domain" | "other_supported" | "platform_unidades" | "platform_opciones"
+    | "out_of_domain"
+    | "other_supported"
+    | "platform_unidades"
+    | "platform_opciones"
+    | "platform_mantenimiento"
   >,
   DomainConcept
 > = {
@@ -63,8 +68,9 @@ export const DOMAIN_KNOWLEDGE: Record<
       "corregir desvíos respecto del valor del GPS",
     ],
     notes: [
-      "En WARA se usa para registrar el kilometraje real cuando no coincide con el del equipo.",
-      "No es un mantenimiento en sí: es una actualización del dato operativo.",
+      "El cambio de odómetro registra el kilometraje real cuando el GPS no coincide (service, cambio de odómetro físico o corrección).",
+      "No es un mantenimiento en sí: actualiza el dato para alertas, planes preventivos y reportes.",
+      "Por WhatsApp: patente y odómetro nuevo en km.",
     ],
   },
   horometer: {
@@ -75,6 +81,10 @@ export const DOMAIN_KNOWLEDGE: Record<
       "actualizar horas de motor cuando el GPS no coincide",
       "alinear planes de mantenimiento por horas",
       "reportes operativos",
+    ],
+    notes: [
+      "Tras un service o cambio de equipo, actualizar horas alinea planes por horas y reportes.",
+      "Por WhatsApp: patente y horómetro nuevo.",
     ],
   },
   gps: {
@@ -87,6 +97,8 @@ export const DOMAIN_KNOWLEDGE: Record<
     ],
     notes: [
       "«Último reporte» indica hace cuánto la unidad envió datos al sistema.",
+      "Suele generarse un caso cuando falta reporte, hay pérdida de señal con reporte reciente, o la ignición no acompaña al resto de los datos.",
+      "Si la unidad está detenida con ignición apagada y todo alineado, normalmente no hace falta ticket.",
     ],
   },
   certificate: {
@@ -105,6 +117,7 @@ export const DOMAIN_KNOWLEDGE: Record<
     uses: ["reclamos", "casos que el bot no puede cerrar", "escalamiento"],
     notes: [
       "Al derivarte, un operador retoma el hilo con el motivo que cargaste; el bot no ejecuta el caso solo.",
+      "Para acceso, facturación u otros temas que no se resuelven acá, pedí hablar con un asesor.",
     ],
   },
   unit: {
@@ -124,6 +137,7 @@ export const DOMAIN_KNOWLEDGE: Record<
       "buscar o listar unidades",
       "guías del módulo Unidades (historial, MIS ATAJOS, chevron)",
       "guías de Opciones (Agenda, Notificaciones, Perfiles)",
+      "guías del módulo Mantenimiento (preventivo, correctivo, una unidad)",
     ],
   },
 };
@@ -393,7 +407,7 @@ export async function answerDomainQuestion(
       recentTurns: opts?.recentTurns ?? state.recentTurns,
       env: opts?.env,
     });
-    body = ai ?? platformStaticFallback(platformKind, text);
+    body = resolvePlatformGuideAnswer(ai, platformKind, text);
   } else {
     body = conceptBody(topic, questionType, text);
   }
