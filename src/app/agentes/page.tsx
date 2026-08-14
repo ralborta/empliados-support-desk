@@ -1,10 +1,12 @@
 import { prisma } from "@/lib/db";
 import { requireAdminSession } from "@/lib/auth";
-import { isAdvisorPresentlyOnline } from "@/lib/advisorDistribution";
+import { ADVISOR_ACTIVE_TICKET_STATUSES, isAdvisorPresentlyOnline } from "@/lib/advisorDistribution";
 import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { CreateAgentForm } from "@/components/agentes/CreateAgentForm";
 import { AgentsList } from "@/components/agentes/AgentsList";
 import { AgentsPageHeader } from "@/components/agentes/AgentsPageHeader";
+import type { ReactNode } from "react";
+import { Ticket, UserCheck, Users } from "lucide-react";
 
 export default async function AgentesPage() {
   await requireAdminSession();
@@ -22,13 +24,16 @@ export default async function AgentesPage() {
       sessionActive: true,
       lastSeenAt: true,
       _count: {
-        select: { tickets: true },
+        select: {
+          tickets: { where: { status: { in: ADVISOR_ACTIVE_TICKET_STATUSES } } },
+        },
       },
     },
   });
 
   const totalAgentes = agentes.length;
-  const agentesActivos = agentes.filter((a) => a._count.tickets > 0).length;
+  const conTickets = agentes.filter((a) => a._count.tickets > 0).length;
+  const disponibles = totalAgentes - conTickets;
 
   return (
     <TicketsLayout showHeader={false}>
@@ -36,9 +41,24 @@ export default async function AgentesPage() {
         <AgentsPageHeader />
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <StatCard label="Total Agentes" value={totalAgentes} />
-          <StatCard label="Con Tickets Asignados" value={agentesActivos} accent="text-emerald-600" />
-          <StatCard label="Disponibles" value={totalAgentes - agentesActivos} accent="text-violet-600" />
+          <StatCard
+            label="agentes"
+            value={totalAgentes}
+            icon={<Users className="h-4 w-4" />}
+            iconClass="bg-violet-100 text-violet-700"
+          />
+          <StatCard
+            label="disponibles"
+            value={disponibles}
+            icon={<UserCheck className="h-4 w-4" />}
+            iconClass="bg-emerald-100 text-emerald-700"
+          />
+          <StatCard
+            label="con tickets asignados"
+            value={conTickets}
+            icon={<Ticket className="h-4 w-4" />}
+            iconClass="bg-blue-100 text-blue-700"
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -51,6 +71,7 @@ export default async function AgentesPage() {
                 phone: a.phone,
                 role: a.role,
                 createdAt: a.createdAt.toISOString(),
+                lastSeenAt: a.lastSeenAt?.toISOString() ?? null,
                 hasPassword: !!a.passwordHash,
                 sessionActive: isAdvisorPresentlyOnline({
                   sessionActive: a.sessionActive,
@@ -72,16 +93,20 @@ export default async function AgentesPage() {
 function StatCard({
   label,
   value,
-  accent = "text-slate-900",
+  icon,
+  iconClass,
 }: {
   label: string;
   value: number;
-  accent?: string;
+  icon: ReactNode;
+  iconClass: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className={`mt-1 text-3xl font-bold ${accent}`}>{value}</p>
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${iconClass}`}>{icon}</span>
+      <p className="text-sm text-slate-700">
+        <span className="font-bold text-slate-900">{value}</span> {label}
+      </p>
     </div>
   );
 }
