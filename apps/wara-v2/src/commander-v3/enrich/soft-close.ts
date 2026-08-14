@@ -112,6 +112,22 @@ export function enrichPlanForSoftClose(
   message: string,
 ): TurnPlan {
   if (alreadyFarewell(plan)) {
+    // Si el mensaje es ack/despedida corta, no dejar que el LLM ponga
+    // el texto oficial de "cerré tu consulta" (eso es otro speech-act).
+    if (isSoftCloseColloquial(message) && !blocksSoftClose(state)) {
+      return {
+        ...plan,
+        conversationalAct: "farewell",
+        task: null,
+        taskAction: null,
+        requestedCapabilities: [],
+        responseGoal: {
+          purpose: "close",
+          facts: [softCloseReply(message)],
+          nextQuestion: null,
+        },
+      };
+    }
     // Asegurar facts de despedida si el LLM olvidó el texto.
     if (
       plan.responseGoal.purpose === "close" &&

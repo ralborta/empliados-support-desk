@@ -56,7 +56,6 @@ function hasConcreteOps(plan: TurnPlan): boolean {
       n.startsWith("hourmeter.") ||
       n.startsWith("maintenance.") ||
       n.startsWith("handoff.") ||
-      n === "unit.search" ||
       n === "unit.select" ||
       n === "company.list" ||
       n === "company.select" ||
@@ -64,11 +63,27 @@ function hasConcreteOps(plan: TurnPlan): boolean {
     ) {
       return true;
     }
+    // unit.search solo cuenta si hay filtro real (no listado completo “de relleno”).
+    if (n === "unit.search") {
+      const q = String(c.params?.query ?? "").trim();
+      const mode = String(c.params?.mode ?? "").trim().toLowerCase();
+      return Boolean(q) || mode === "filter";
+    }
     if (n === "domain.answer") {
       return isPlatformOrGuideTopic(c.params?.topic);
     }
     return false;
   });
+}
+
+function looksLikeExplicitFleetList(message: string): boolean {
+  const t = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(lista|listado|todas( las)? unidades|pasame la lista|dame las unidades|mostrame las unidades)\b/.test(
+    t,
+  );
 }
 
 function blocksOpenConsult(state: ConversationStateV3): boolean {
@@ -145,11 +160,18 @@ export function enrichPlanForOpenConsult(
   const weakDomain = plan.requestedCapabilities.some(
     (c) => c.name === "domain.answer" && !isPlatformOrGuideTopic(c.params?.topic),
   );
+  const bareFleetDump =
+    afterClose &&
+    !looksLikeExplicitFleetList(message) &&
+    plan.requestedCapabilities.some((c) => c.name === "unit.search") &&
+    !hasConcreteOps(plan);
 
-  // Pedido concreto (GPS/cert/odo/…): no tocar, salvo que invente "sin info".
+  // Pedido concreto (GPS/cert/odo/…): no tocar, salvo que invente "sin info"
+  // o sea un listado completo inventado tras despedida.
   if (hasConcreteOps(plan) && !noInfo) return plan;
+  if (bareFleetDump || noInfo || weakDomain || (afterClose && !hasConcreteOps(plan))) {
+    return openConsultPlan(plan, state);
+  }
 
-  if (!afterClose && !noInfo && !weakDomain) return plan;
-
-  return openConsultPlan(plan, state);
+  return plan;
 }
