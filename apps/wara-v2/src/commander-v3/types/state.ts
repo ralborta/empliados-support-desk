@@ -24,6 +24,16 @@ export type ActiveTaskV3 = {
   missing: string[];
 };
 
+export type GpsIncidentRecord = {
+  movilId: number;
+  plate: string;
+  status: string;
+  titleSuffix: string;
+  odooRef: string | null;
+  reused: boolean;
+  at: string;
+};
+
 export type ConversationStateV3 = {
   schemaVersion: 3;
   tenantId: string;
@@ -94,6 +104,8 @@ export type ConversationStateV3 = {
   conversationMetadata: {
     introducedAtilio: boolean;
     greetedAt: string | null;
+    /** Caso GPS abierto en este hilo (paridad V1: no duplicar ni mezclar unidad). */
+    lastGpsIncident?: GpsIncidentRecord | null;
   };
 
   updatedAt: string;

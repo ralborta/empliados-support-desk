@@ -219,17 +219,28 @@ export function buildGpsLabSummary(unit: WaraUnidadEstado, assessment: GpsAssess
       .join("\n");
   }
   if (assessment.status === "ignition_failure") {
-    return (
-      `⚠️ La unidad *${label}* muestra posible falla de ignición: reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, ` +
-      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}. En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.` +
-      (maps ? ` ${maps}` : "")
-    );
+    return [
+      "⚠️ *Falla de ignición*",
+      `🚗 Unidad: *${label}*`,
+      `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      `🔑 Última ignición: hace ${formatMinutesAgo(assessment.ignitionElapsed)} (${ignitionLabel(unit)})`,
+      "El reporte y la posición van al día, pero la ignición no acompaña.",
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
-  return (
-    `⚠️ La unidad *${label}* presenta ${assessment.reason}. ` +
-    `En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.` +
-    (maps ? ` ${maps}` : "")
-  );
+  return [
+    "⚠️ *Pérdida de señal satelital*",
+    `🚗 Unidad: *${label}*`,
+    `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+    `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+    assessment.reason,
+    mapsLine.trim() ? mapsLine.trimStart() : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
@@ -238,6 +249,76 @@ function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
   if (typeof lat !== "number" || typeof lon !== "number") return null;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   return `https://maps.google.com/?q=${lat},${lon}`;
+}
+
+export type GpsTicketStatus =
+  | "missing_report"
+  | "ignition_failure"
+  | "stale_position"
+  | "no_equipment";
+
+export type GpsTicketPolicy =
+  | { action: "observation"; status: "ok" | "coherent_pause" }
+  | {
+      action: "ticket";
+      status: GpsTicketStatus;
+      titleSuffix: string;
+      issueDetail: string;
+    };
+
+function hasTelemetry(unit: WaraUnidadEstado): boolean {
+  return (
+    unit.ultimo_reporte != null ||
+    unit.ultima_posicion != null ||
+    unit.ultima_ignicion != null
+  );
+}
+
+/**
+ * Contrato V1 unidades: ok/detenida = observación; falta de reporte /
+ * ignición / señal / sin equipo = abrir caso Odoo en el mismo turno.
+ * Sale del assessment estructurado, no del texto del usuario.
+ */
+export function gpsTicketPolicy(unit: WaraUnidadEstado): GpsTicketPolicy | null {
+  if (!hasTelemetry(unit)) {
+    return {
+      action: "ticket",
+      status: "no_equipment",
+      titleSuffix: "Sin equipo instalado",
+      issueDetail: "sin equipo GPS instalado (no genera telemetría)",
+    };
+  }
+  const assessment = assessUnitReporting(unit);
+  if (!assessment) return null;
+  if (assessment.status === "ok" || assessment.status === "coherent_pause") {
+    return { action: "observation", status: assessment.status };
+  }
+  if (assessment.status === "missing_report") {
+    return {
+      action: "ticket",
+      status: "missing_report",
+      titleSuffix: "Falta de reporte",
+      issueDetail: `falta de reporte: el GPS no envía datos hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+    };
+  }
+  if (assessment.status === "ignition_failure") {
+    const ignText =
+      assessment.ignitionElapsed != null
+        ? `hace ${formatMinutesAgo(assessment.ignitionElapsed)}`
+        : "sin dato reciente";
+    return {
+      action: "ticket",
+      status: "ignition_failure",
+      titleSuffix: "Falla de ignición",
+      issueDetail: `falla de ignición: reporte y posición al día pero la ignición no acompaña (última ignición ${ignText}, ${ignitionLabel(unit)})`,
+    };
+  }
+  return {
+    action: "ticket",
+    status: "stale_position",
+    titleSuffix: "Pérdida de señal satelital",
+    issueDetail: assessment.reason,
+  };
 }
 
 export function buildGpsReportForUnit(unit: WaraUnidadEstado): string {
@@ -249,8 +330,7 @@ export function buildGpsReportForUnit(unit: WaraUnidadEstado): string {
   if (!hasAnyTelemetry) {
     return (
       `La unidad ${formatUnitLabel(unit)} no tiene equipo GPS / telemetría cargada en WARA ` +
-      `(sin reporte, posición ni ignición). No puedo afirmar ubicación. ` +
-      `Si necesitás seguimiento, pedime derivar a un asesor.`
+      `(sin reporte, posición ni ignición). No puedo afirmar ubicación.`
     );
   }
 

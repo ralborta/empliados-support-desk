@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 14ax", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14ax/);
+  it("prompt version bump 14ay", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14ay/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -2009,6 +2009,189 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /NKL 961|NKL961|M300-091/i);
     assert.doesNotMatch(exec.facts.join(" "), /AH 745|M300-090/i);
+  });
+
+  it("gps.get_status falta de reporte abre caso (dry-run) con esa unidad, no la anterior", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+54261111" });
+    s.company = { id: "1", name: "WARA" };
+    s.unit = {
+      movilId: 1,
+      plate: "AG396ZA",
+      name: "M300-001",
+      label: "AG 396 ZA (M300-001)",
+    };
+    const fleet = [
+      {
+        movil_id: 99,
+        unidad: "M300-099",
+        patente: "M300-099",
+        ultimo_reporte: { hace_segundos: 57 * 60 },
+        ultima_posicion: { hace_segundos: 57 * 60, lat: -32.9, lon: -68.8 },
+        ultima_ignicion: { estado: true, hace_segundos: 57 * 60 },
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "reporte gps M300-099",
+      conversationalAct: "start_task",
+      task: "gps",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: false },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.95,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: fleet,
+      resolvedUnit: {
+        movilId: 99,
+        plate: "M300-099",
+        name: "M300-099",
+        label: "M300-099",
+      },
+      resolvedCompanyId: null,
+      message: "reporte de M300-099",
+    });
+    const text = exec.facts.join("\n");
+    assert.match(text, /Falta de reporte/i);
+    assert.match(text, /Generé el caso/i);
+    assert.doesNotMatch(text, /AG 396 ZA/i);
+    assert.equal(exec.state.unit?.movilId, 99);
+    assert.equal(
+      exec.state.conversationMetadata.lastGpsIncident?.titleSuffix,
+      "Falta de reporte",
+    );
+    assert.ok(exec.state.conversationMetadata.lastGpsIncident?.odooRef);
+    assert.equal(
+      exec.results.some((r) => r.writeAttempt && r.writeExecuted === true),
+      false,
+    );
+  });
+
+  it("gps.get_status funcionamiento normal no abre caso", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    const fleet = [
+      {
+        movil_id: 7,
+        unidad: "NISSAN 2404",
+        patente: "AG562SP",
+        ultimo_reporte: { hace_segundos: 40 },
+        ultima_posicion: { hace_segundos: 40, lat: -34.6, lon: -58.4 },
+        ultima_ignicion: { estado: true, hace_segundos: 40 },
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "reporte",
+      conversationalAct: "start_task",
+      task: "gps",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: false },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: fleet,
+      resolvedUnit: {
+        movilId: 7,
+        plate: "AG562SP",
+        name: "NISSAN 2404",
+        label: "AG 562 SP (NISSAN 2404)",
+      },
+      resolvedCompanyId: null,
+      message: "reporte de la nissan",
+    });
+    assert.match(exec.facts.join(" "), /Funcionamiento normal/i);
+    assert.doesNotMatch(exec.facts.join(" "), /Generé el caso/i);
+    assert.equal(exec.state.conversationMetadata.lastGpsIncident, undefined);
+  });
+
+  it("handoff.prepare reusa caso GPS y no arma acceso/plataforma", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 99,
+      plate: "M300-099",
+      name: "M300-099",
+      label: "M300-099",
+    };
+    s.conversationMetadata.lastGpsIncident = {
+      movilId: 99,
+      plate: "M300-099",
+      status: "missing_report",
+      titleSuffix: "Falta de reporte",
+      odooRef: "DRY-900001",
+      reused: false,
+      at: new Date().toISOString(),
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "derivar",
+      conversationalAct: "start_task",
+      task: "human_handoff",
+      taskAction: "start",
+      suppliedFields: {
+        detail:
+          "Usuario solicita derivación a un asesor debido a la falta de reporte reciente de la unidad M300-099.",
+      },
+      requestedCapabilities: [{ name: "handoff.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "confirm_write", facts: [] },
+      confidence: 0.95,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "confirmo",
+    });
+    const text = exec.facts.join(" ");
+    assert.match(text, /ya estaba abierto/i);
+    assert.doesNotMatch(text, /Acceso|CONFIRMO/i);
+    assert.equal(exec.state.pendingWrite, null);
+  });
+
+  it("handoff.prepare usa la unidad resuelta en el payload, no la anterior", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 1,
+      plate: "AG396ZA",
+      name: "M300-001",
+      label: "AG 396 ZA (M300-001)",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "no puedo entrar",
+      conversationalAct: "start_task",
+      task: "human_handoff",
+      taskAction: "start",
+      suppliedFields: { detail: "no puedo entrar a la plataforma" },
+      requestedCapabilities: [{ name: "handoff.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "confirm_write", facts: [] },
+      confidence: 0.95,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: {
+        movilId: 99,
+        plate: "M300-099",
+        name: "M300-099",
+        label: "M300-099",
+      },
+      resolvedCompanyId: null,
+      message: "no puedo entrar a la plataforma",
+    });
+    assert.match(exec.facts.join(" "), /Acceso|plataforma|CONFIRMO/i);
+    assert.equal(exec.state.pendingWrite?.summary?.plate, "M300-099");
+    assert.notEqual(exec.state.pendingWrite?.summary?.plate, "AG396ZA");
   });
 
   it("GPS execute: patente nueva no encontrada no reusa la unidad anterior", async () => {

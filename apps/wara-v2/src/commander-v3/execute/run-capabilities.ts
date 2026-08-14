@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { buildGpsReportForUnit } from "../../pilot/gps-core.js";
+import { buildGpsReportForUnit, gpsTicketPolicy } from "../../pilot/gps-core.js";
 import { syncV3PendingWriteToFrontend } from "./frontend-sync.js";
 import {
   isCertificateWriteEnabled,
@@ -16,13 +16,17 @@ import {
   platformKindFromTopic,
   platformStaticFallback,
 } from "../../pilot/semantic/platform-knowledge-ai.js";
-import { categoryLabel, inferTicketCategory } from "../../pilot/ticket-core.js";
+import {
+  categoryLabel,
+  inferTicketCategory,
+  isGpsIncidentReuseCategory,
+} from "../../pilot/ticket-core.js";
 import {
   formatAnomalyQuestion,
   isAnomalousReading,
 } from "../../pilot/semantic/reading-anomaly.js";
 import { getCapability } from "../capabilities/catalog.js";
-import type { ConversationStateV3 } from "../types/state.js";
+import type { ConversationStateV3, GpsIncidentRecord } from "../types/state.js";
 import type { TurnPlan, CapabilityRequest } from "../types/turn-plan.js";
 import type { UnitRef } from "../types/refs.js";
 import { isExplicitUnitReference } from "../entities/resolve.js";
@@ -31,12 +35,13 @@ import {
   isStructuredFleetQuery,
 } from "./fleet-query.js";
 import { inferMaintenanceMeta } from "./maintenance-meta.js";
-import { extractUnitNameCode } from "../../pilot/unit-fleet.js";
+import { extractUnitNameCode, formatUnitLabel } from "../../pilot/unit-fleet.js";
 import {
   confirmFooter,
   formatCertificateConfirm,
   formatCompanyActive,
   formatCompanyList,
+  formatGpsIncidentCase,
   formatGpsReport,
   formatHandoffAskDetail,
   formatHandoffConfirm,
@@ -106,6 +111,127 @@ function unitFromRef(
 ): WaraUnidadEstado | null {
   if (!ref) return null;
   return fleet.find((u) => u.movil_id === ref.movilId) ?? null;
+}
+
+function unitRefFromWara(unit: WaraUnidadEstado): UnitRef {
+  return {
+    movilId: unit.movil_id,
+    plate: unit.patente || null,
+    name: unit.unidad || null,
+    label: formatUnitLabel(unit),
+  };
+}
+
+function gpsUnitStatePatch(
+  ctx: ExecuteContext,
+  unit: WaraUnidadEstado,
+  incident?: GpsIncidentRecord | null,
+): Partial<ConversationStateV3> {
+  const unitRef = unitRefFromWara(unit);
+  const previousUnit =
+    ctx.state.unit && ctx.state.unit.movilId !== unitRef.movilId
+      ? ctx.state.unit
+      : ctx.state.previousUnit;
+  return {
+    unit: unitRef,
+    previousUnit,
+    conversationMetadata: {
+      ...ctx.state.conversationMetadata,
+      ...(incident ? { lastGpsIncident: incident } : {}),
+    },
+  };
+}
+
+async function openGpsIncidentIfNeeded(
+  ctx: ExecuteContext,
+  unit: WaraUnidadEstado,
+): Promise<{
+  fact: string | null;
+  incident: GpsIncidentRecord | null;
+  writeAttempt: boolean;
+  writeExecuted: boolean;
+}> {
+  const policy = gpsTicketPolicy(unit);
+  if (!policy || policy.action !== "ticket") {
+    return { fact: null, incident: null, writeAttempt: false, writeExecuted: false };
+  }
+  const plate = (unit.patente || unit.unidad || "").trim();
+  const prev = ctx.state.conversationMetadata.lastGpsIncident;
+  if (
+    prev?.odooRef &&
+    prev.movilId === unit.movil_id &&
+    prev.titleSuffix === policy.titleSuffix
+  ) {
+    return {
+      fact: formatGpsIncidentCase({
+        issueDetail: policy.issueDetail,
+        ref: prev.odooRef,
+        reused: true,
+        dryRun: prev.odooRef.startsWith("DRY"),
+      }),
+      incident: { ...prev, reused: true },
+      writeAttempt: false,
+      writeExecuted: false,
+    };
+  }
+
+  const odoo = await createOdooHelpdeskTicketDryRun(
+    {
+      subject: `${plate} - ${policy.titleSuffix}`,
+      description: [
+        `Consulta/reclamo detectado por Atilio / WhatsApp (Commander V3).`,
+        `Empresa Wara: ${ctx.state.company?.name ?? "—"}`,
+        `Patente: ${plate}`,
+        unit.unidad ? `Nombre unidad: ${unit.unidad}` : "",
+        `Motivo: ${policy.issueDetail}`,
+        `WhatsApp: ${ctx.state.phone}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      customerPhone: ctx.state.phone,
+      companyName: ctx.state.company?.name ?? undefined,
+      priority: "HIGH",
+      category: "technical_support",
+      dedupeKey: `v3_gps:${unit.movil_id}:${policy.titleSuffix}`,
+    },
+    ctx.env,
+  );
+
+  if (!odoo.ok) {
+    return {
+      fact: formatGpsIncidentCase({
+        issueDetail: policy.issueDetail,
+        ref: null,
+        reused: false,
+        dryRun: false,
+      }),
+      incident: null,
+      writeAttempt: true,
+      writeExecuted: false,
+    };
+  }
+
+  const ref = odoo.dryRun ? odoo.simulatedRef : (odoo.ref ?? String(odoo.ticketId));
+  const incident: GpsIncidentRecord = {
+    movilId: unit.movil_id,
+    plate,
+    status: policy.status,
+    titleSuffix: policy.titleSuffix,
+    odooRef: ref,
+    reused: false,
+    at: new Date().toISOString(),
+  };
+  return {
+    fact: formatGpsIncidentCase({
+      issueDetail: policy.issueDetail,
+      ref,
+      reused: false,
+      dryRun: odoo.dryRun,
+    }),
+    incident,
+    writeAttempt: true,
+    writeExecuted: !odoo.dryRun,
+  };
 }
 
 function missingForMeter(state: ConversationStateV3, plan: TurnPlan): string[] {
@@ -842,7 +968,17 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         };
       }
       const report = formatGpsReport(buildGpsReportForUnit(unit));
-      return { capability: req.name, ok: true, facts: [report] };
+      const opened = await openGpsIncidentIfNeeded(ctx, unit);
+      return {
+        capability: req.name,
+        ok: true,
+        facts: opened.fact ? [report, opened.fact] : [report],
+        writeAttempt: opened.writeAttempt,
+        writeExecuted: opened.writeExecuted,
+        data: {
+          statePatch: gpsUnitStatePatch(ctx, unit, opened.incident),
+        },
+      };
     }
     case "certificate.prepare": {
       const unit = ctx.resolvedUnit ?? ctx.state.unit;
@@ -1345,6 +1481,36 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       const detail =
         ctx.plan.suppliedFields?.detail ??
         (ctx.state.activeTask?.collected?.detail as string | undefined);
+      const incident = ctx.state.conversationMetadata.lastGpsIncident;
+      const category = inferTicketCategory(detail ?? "");
+      if (incident?.odooRef && isGpsIncidentReuseCategory(category)) {
+        return {
+          capability: req.name,
+          ok: true,
+          facts: [
+            formatGpsIncidentCase({
+              issueDetail: incident.titleSuffix.toLowerCase(),
+              ref: incident.odooRef,
+              reused: true,
+              dryRun: incident.odooRef.startsWith("DRY"),
+            }),
+          ],
+          data: {
+            statePatch: {
+              pendingWrite: null,
+              lastQuestion: null,
+              activeTask: ctx.state.activeTask
+                ? { ...ctx.state.activeTask, status: "completed" as const }
+                : {
+                    type: "human_handoff" as const,
+                    status: "completed" as const,
+                    collected: { detail: detail ?? incident.titleSuffix },
+                    missing: [],
+                  },
+            },
+          },
+        };
+      }
       if (!detail) {
         return {
           capability: req.name,
@@ -1367,13 +1533,15 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           },
         };
       }
-      const category = inferTicketCategory(detail);
+      const handoffUnit = ctx.resolvedUnit ?? ctx.state.unit;
       const payload = {
         task: "handoff",
         category,
         categoryLabel: categoryLabel(category),
         detail,
-        unit: ctx.state.unit?.label ?? null,
+        unit: handoffUnit?.label ?? null,
+        plate: handoffUnit?.plate ?? null,
+        movilId: handoffUnit?.movilId ?? null,
         company: ctx.state.company?.name ?? null,
       };
       const operationId = randomUUID();
@@ -1819,12 +1987,20 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
       (typeof pw.summary?.categoryLabel === "string"
         ? pw.summary.categoryLabel
         : null) ?? categoryLabel(category as never);
-    const subject = `${catLabel} · ${ctx.state.unit?.plate ?? ctx.state.phone}`;
+    const unitPlate =
+      (typeof pw.summary?.plate === "string" && pw.summary.plate.trim()) ||
+      ctx.state.unit?.plate ||
+      ctx.state.phone;
+    const unitLabel =
+      (typeof pw.summary?.unit === "string" && pw.summary.unit.trim()) ||
+      ctx.state.unit?.label ||
+      null;
+    const subject = `${catLabel} · ${unitPlate}`;
     const description = [
       `Ticket desde Commander V3 / lab.`,
       `Categoría: ${catLabel}`,
       `Empresa: ${ctx.state.company?.name ?? "—"}`,
-      ctx.state.unit ? `Unidad: ${ctx.state.unit.label}` : "",
+      unitLabel ? `Unidad: ${unitLabel}` : "",
       `Motivo: ${detail}`,
       `Teléfono: ${ctx.state.phone}`,
       `operationId: ${pw.operationId}`,

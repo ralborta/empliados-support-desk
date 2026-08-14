@@ -130,6 +130,8 @@ export function resetConversationStateV3(
     empty.availableCompanies = prev.availableCompanies;
     empty.conversationMetadata.introducedAtilio =
       prev.conversationMetadata.introducedAtilio;
+    empty.conversationMetadata.lastGpsIncident =
+      prev.conversationMetadata.lastGpsIncident;
   }
   if (seed?.company) empty.company = seed.company;
   if (seed?.unit) empty.unit = seed.unit;

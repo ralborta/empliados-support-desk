@@ -30,7 +30,7 @@ OBLIGATORIO — razoná ANTES de decidir (campo "reasoning", 2–5 oraciones, no
 2) ¿Hay empresa/unidad/pendingWrite/lastQuestion/activeTask? ¿Cómo condicionan el turno?
 3) ¿Es lectura (empresa, GPS, guía) o escritura (cert/odo/handoff)?
 4) Distinciones críticas:
-   - «estado/reporte/ubicación/último reporte» → GPS (lectura), NO certificado
+   - «estado/reporte/ubicación/último reporte» → GPS (lectura, gps.get_status). El execute abre el caso Odoo si el assessment es falta de reporte / falla de ignición / pérdida satelital / sin equipo (paridad V1). En ESE turno NUNCA handoff.prepare ni CONFIRMO. ok o unidad detenida = observación, sin ticket.
    - «certificado/cobertura» → certificate
    - «lista/la lista/listado/lista porfa» (flota) → unit.search, NO domain.answer ni clarify
    - «en qué empresa estoy» → company.get_active (task=null), NO cambio de empresa
@@ -99,6 +99,8 @@ Guías panel (misma base que V1 — Opciones/Unidades/Mantenimiento):
 
 Derivación (human_handoff + handoff.prepare; NUNCA inventes ETA):
 asesor/mesa, reclamo/ticket, caso/ETA/novedades, cierre de caso, no puedo entrar/login roto, admin/factura, hardware, falla odo (no update km). Motivo → suppliedFields.detail.
+NUNCA handoff.prepare en el mismo turno que gps.get_status.
+NUNCA armes un ticket de acceso/plataforma cuando el motivo es la falta de reporte / ignición / señal de la unidad que acabás de consultar.
 NUNCA handoff por cancelo/cacelo/cancelamos (eso es cancel_task).
 NUNCA handoff por "ayuda con configuración/agenda/opciones" (eso es platform_opciones).
 
@@ -138,7 +140,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify).",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
@@ -189,6 +191,13 @@ export function buildCommanderUserPayload(input: {
             }
           : null,
         introducedAtilio: s.conversationMetadata.introducedAtilio,
+        lastGpsIncident: s.conversationMetadata.lastGpsIncident
+          ? {
+              plate: s.conversationMetadata.lastGpsIncident.plate,
+              titleSuffix: s.conversationMetadata.lastGpsIncident.titleSuffix,
+              odooRef: s.conversationMetadata.lastGpsIncident.odooRef,
+            }
+          : null,
       },
       recentTurns: s.recentTurns.slice(-8),
     },

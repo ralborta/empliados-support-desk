@@ -40,7 +40,14 @@ export function inferTicketCategory(text: string, fallback: TicketCategory = "ge
   const t = norm(text);
   if (!t) return fallback;
   if (
-    /\b(no\s+puedo\s+entrar|login|loguear|usuario|contrase[nñ]a|acceso|plataforma\s+(ca[ií]da|no\s+anda|no\s+funciona))\b/.test(
+    /\b(falta\s+de\s+reporte|sin\s+reporte|perdida\s+de\s+senal|falla\s+de\s+ignicion|sin\s+equipo\s+instalado)\b/.test(
+      t,
+    )
+  ) {
+    return "technical_support";
+  }
+  if (
+    /\b(no\s+puedo\s+entrar|login|loguear|contrase[nñ]a|acceso(\s+a\s+(la\s+)?plataforma)?|plataforma\s+(ca[ií]da|no\s+anda|no\s+funciona))\b/.test(
       t,
     )
   ) {
@@ -82,6 +89,16 @@ export function inferTicketCategory(text: string, fallback: TicketCategory = "ge
 
 export function inferTicketPriority(text: string): MaintenancePriority {
   return inferMaintenancePriority(text);
+}
+
+/** Tras un caso GPS abierto, estas categorías son el mismo incidente (no un ticket nuevo). */
+export function isGpsIncidentReuseCategory(category: TicketCategory): boolean {
+  return (
+    category === "human_advisor" ||
+    category === "general" ||
+    category === "reclamo" ||
+    category === "technical_support"
+  );
 }
 
 export function looksLikeCancelTicket(text: string | undefined | null): boolean {

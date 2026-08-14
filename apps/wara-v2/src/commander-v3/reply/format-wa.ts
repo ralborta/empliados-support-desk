@@ -250,3 +250,27 @@ export function formatSuccessTicket(ref: string): string {
     "Un asesor te va a contactar por este medio.",
   ].join("\n");
 }
+
+export function formatGpsIncidentCase(input: {
+  issueDetail: string;
+  ref: string | null;
+  reused: boolean;
+  dryRun: boolean;
+}): string {
+  const display = input.ref
+    ? input.ref.startsWith("#") || input.ref.startsWith("DRY")
+      ? input.ref
+      : `#${input.ref}`
+    : null;
+  if (input.dryRun && display) {
+    return input.reused
+      ? `Ese caso ya estaba abierto (*${display}*, simulado); no generé uno nuevo.`
+      : `Generé el caso *${display}* (simulado) en Atención al cliente por ${input.issueDetail}.\n_Sin escritura real en Odoo._`;
+  }
+  if (display) {
+    return input.reused
+      ? `Ese caso ya estaba abierto (*${display}*); no generé uno nuevo. Un asesor de Atención al cliente lo sigue revisando.`
+      : `Generé el caso *${display}* en Atención al cliente por ${input.issueDetail}. Un asesor lo va a revisar.`;
+  }
+  return `La unidad presenta ${input.issueDetail}. No pude registrar el caso automáticamente.`;
+}

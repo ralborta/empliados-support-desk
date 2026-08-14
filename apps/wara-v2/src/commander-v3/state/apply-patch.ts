@@ -200,6 +200,7 @@ export function applyCommanderState(input: ApplyInput): {
     s = {
       ...s,
       conversationMetadata: {
+        ...s.conversationMetadata,
         introducedAtilio: true,
         greetedAt: s.conversationMetadata.greetedAt ?? new Date().toISOString(),
       },

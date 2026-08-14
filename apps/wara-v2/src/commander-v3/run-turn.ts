@@ -1041,6 +1041,8 @@ export async function runCommanderTurn(
         unit: state.unit ?? applied.state.unit,
         previousUnit: state.previousUnit ?? applied.state.previousUnit,
         company: state.company ?? applied.state.company,
+        conversationMetadata:
+          state.conversationMetadata ?? applied.state.conversationMetadata,
       };
 
   if (
