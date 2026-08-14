@@ -25,6 +25,7 @@ import { getCapability } from "../capabilities/catalog.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan, CapabilityRequest } from "../types/turn-plan.js";
 import type { UnitRef } from "../types/refs.js";
+import { isExplicitUnitReference } from "../entities/resolve.js";
 import {
   filterFleetCacheByQuery,
   isStructuredFleetQuery,
@@ -238,10 +239,17 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
       continue;
     }
     const pendingBefore = state.pendingWrite;
+    const switchedThisTurn =
+      Boolean(state.unit) && state.unit?.movilId !== ctx.state.unit?.movilId;
+    const resolvedForCap =
+      ctx.resolvedUnit ??
+      (isExplicitUnitReference(ctx.plan.unitReference) && !switchedThisTurn
+        ? null
+        : state.unit);
     const r = await runOne(req, {
       ...ctx,
       state,
-      resolvedUnit: ctx.resolvedUnit ?? state.unit,
+      resolvedUnit: resolvedForCap,
     });
     results.push(r);
     toolFacts.push(...r.facts);
@@ -801,9 +809,12 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       };
     }
     case "gps.get_status": {
+      const preferredUnit =
+        ctx.resolvedUnit ??
+        (isExplicitUnitReference(ctx.plan.unitReference) ? null : ctx.state.unit);
       const unit =
-        unitFromRef(ctx.resolvedUnit ?? ctx.state.unit, ctx.fleetUnits) ??
-        ctx.fleetUnits.find((u) => u.movil_id === ctx.state.unit?.movilId);
+        unitFromRef(preferredUnit, ctx.fleetUnits) ??
+        ctx.fleetUnits.find((u) => u.movil_id === preferredUnit?.movilId);
       if (!unit) {
         return {
           capability: req.name,

@@ -1,6 +1,7 @@
 /**
- * Tras decidir GPS: si el mensaje ya trae prefijo/marca/código/patente y no hay
- * unitReference, rellena la entidad. No elige el trámite (eso ya vino del TurnPlan).
+ * Tras decidir GPS: si el mensaje trae prefijo/marca/código/patente, rellena
+ * unitReference. Si esa identidad no es la unidad activa, cierra el hilo anterior
+ * (preserveUnit false). No elige el trámite (eso ya vino del TurnPlan).
  */
 import {
   extractUnitNameCode,
@@ -18,6 +19,7 @@ import {
 } from "../execute/fleet-query.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
+import type { UnitRef } from "../types/refs.js";
 
 const FILTER_FILLER = new Set([
   "quiero",
@@ -232,16 +234,64 @@ export function extractFleetFilterHint(
   return null;
 }
 
+function compactUnitToken(value: string | null | undefined): string {
+  return normalizeLoosePlate(value) ?? "";
+}
+
+/** True si el token del mensaje apunta a la unidad ya activa (misma patente/código/marca). */
+export function hintRefersToActiveUnit(
+  hint: string,
+  unit: UnitRef | null | undefined,
+): boolean {
+  if (!unit) return false;
+  const h = compactUnitToken(hint);
+  if (!h) return false;
+  const plate = compactUnitToken(unit.plate);
+  const name = compactUnitToken(unit.name);
+  const label = compactUnitToken(unit.label);
+
+  if (plate && (h === plate || (h.length >= 2 && plate.startsWith(h)))) return true;
+  if (name && h.length >= 3 && (name === h || name.includes(h) || h.includes(name))) {
+    return true;
+  }
+  if (label && h.length >= 3 && label.includes(h)) return true;
+
+  const hintDigits = hint.replace(/\D/g, "");
+  const nameDigits = String(unit.name ?? unit.label ?? "").replace(/\D/g, "");
+  if (
+    hintDigits.length >= 5 &&
+    nameDigits.length >= 5 &&
+    (nameDigits.includes(hintDigits) || hintDigits.includes(nameDigits))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function unitReferenceAlreadyHasHint(plan: TurnPlan, hint: string): boolean {
+  const ref = plan.unitReference;
+  if (!ref || ref.kind !== "unit") return false;
+  if (ref.mode === "contextual" || ref.reference === "active") return false;
+  const a = compactUnitToken(String(ref.value ?? ""));
+  const b = compactUnitToken(hint);
+  return Boolean(a && b && a === b);
+}
+
 export function enrichPlanForGpsUnitInMessage(
   plan: TurnPlan,
   state: ConversationStateV3,
   message: string,
 ): TurnPlan {
   if (!isGpsPlan(plan)) return plan;
-  if (plan.unitReference || state.unit) return plan;
 
   const hint = extractFleetFilterHint(message, state);
   if (!hint) return plan;
+  // Follow-up de la misma unidad: no pisar el hilo.
+  if (hintRefersToActiveUnit(hint, state.unit)) return plan;
+
+  if (unitReferenceAlreadyHasHint(plan, hint) && plan.stateIntent.preserveUnit === false) {
+    return plan;
+  }
 
   const plateNorm = normalizeLoosePlate(hint);
   const mode =
@@ -259,9 +309,13 @@ export function enrichPlanForGpsUnitInMessage(
       value: hint,
       reference: null,
     },
+    stateIntent: {
+      ...plan.stateIntent,
+      preserveUnit: false,
+    },
     reasoning:
       plan.reasoning ||
-      `El mensaje ya trae filtro de unidad «${hint}» para el reporte GPS.`,
+      `El mensaje pide la unidad «${hint}»; se cierra el hilo de la unidad anterior.`,
   };
 }
 

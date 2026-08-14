@@ -7,6 +7,7 @@ import { formatUnitLabel, toFleetUnitRef, extractUnitNameCode } from "../pilot/u
 import { callCommander, repairCommanderPlan } from "./commander/call.js";
 import { validateTurnPlan } from "./validate/validate-plan.js";
 import {
+  isExplicitUnitReference,
   resolveCompanyReference,
   resolveUnitReference,
 } from "./entities/resolve.js";
@@ -20,6 +21,7 @@ import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForSoftClose } from "./enrich/soft-close.js";
+import { enrichPlanForConversationClose } from "./enrich/conversation-close.js";
 import {
   enrichPlanForExpectedFields,
   enrichPlanForMeterValueFallback,
@@ -412,6 +414,7 @@ export async function runCommanderTurn(
   plan = enrichPlanWithNaturalDatetime(plan, state, input.message, dtOpts);
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
   plan = enrichPlanForSoftClose(plan, state, input.message);
+  plan = enrichPlanForConversationClose(plan, state, input.message);
   plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
   // Campos esperados ANTES del switch: un "900078" es el km, no un trámite nuevo.
   plan = enrichPlanForExpectedFields(plan, state, input.message);
@@ -752,10 +755,10 @@ export async function runCommanderTurn(
     plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
   }
   // Con filtro ya en el mensaje/ref y flota: buscar (no listar todo).
+  // También con unidad activa: otra patente/código cierra el hilo anterior.
   if (
     plan.task === "gps" &&
-    plan.unitReference &&
-    !state.unit &&
+    isExplicitUnitReference(plan.unitReference) &&
     state.fleetCache.length > 0 &&
     !plan.requestedCapabilities.some(
       (c) => c.name === "unit.search" || c.name === "unit.select",
@@ -833,11 +836,15 @@ export async function runCommanderTurn(
 
   // Contrato: si este turno SELECCIONA o ya RESUELVE una unidad exacta,
   // no listar flota (evita "¿En qué te ayudo?" + listado completo).
-  // Con unidad YA activa + GPS/trámite de lectura/escritura: tampoco listar.
+  // Con unidad YA activa + GPS/trámite de lectura/escritura: tampoco listar,
+  // salvo pedido explícito de OTRA unidad que todavía no resolvió.
+  const explicitUnitUnresolved =
+    isExplicitUnitReference(plan.unitReference) && !resolvedUnit;
   const unitAlreadyKnown = Boolean(
     resolvedUnit ||
       plan.requestedCapabilities.some((c) => c.name === "unit.select") ||
       (state.unit &&
+        !explicitUnitUnresolved &&
         (plan.task === "gps" ||
           plan.task === "odometer" ||
           plan.task === "hourmeter" ||

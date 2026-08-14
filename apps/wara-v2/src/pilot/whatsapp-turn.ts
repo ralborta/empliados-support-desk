@@ -26,6 +26,10 @@ import {
 import { loadCommanderV3Context } from "../commander-v3/lab/load-context.js";
 import { saveConversationStateV3 } from "../commander-v3/persistence/store.js";
 import { resolveConductorEnabled } from "../commander-v3/lab/conductor-mode.js";
+import {
+  CUSTOMER_CLOSE_SUCCESS_MESSAGE,
+  looksLikeCustomerConversationCloseRequest,
+} from "./customer-conversation-close.js";
 
 const FALLBACK =
   "Disculpá, tuve un problema para procesar eso. ¿Me lo repetís en una línea?";
@@ -188,6 +192,13 @@ function expectedApiKey(env: NodeJS.ProcessEnv): string {
 
 function looksLikeInternalFieldToken(s: string): boolean {
   return /^[a-z][a-z0-9_]*$/i.test(s) && s.includes("_");
+}
+
+function replyForCustomerClose(text: string, fallback: string): string {
+  if (looksLikeCustomerConversationCloseRequest(text)) {
+    return CUSTOMER_CLOSE_SUCCESS_MESSAGE;
+  }
+  return fallback;
 }
 
 function extractReply(decision: unknown): string {
@@ -356,11 +367,11 @@ export async function handlePilotWhatsAppTurn(input: {
         customerName: ctx.customerName,
       });
       if (!result.reply.trim()) {
-        return replyResult(FALLBACK);
+        return replyResult(replyForCustomerClose(text, FALLBACK));
       }
-      return replyResult(result.reply);
+      return replyResult(replyForCustomerClose(text, result.reply));
     } catch {
-      return replyResult(FALLBACK);
+      return replyResult(replyForCustomerClose(text, FALLBACK));
     }
   }
 
@@ -392,8 +403,8 @@ export async function handlePilotWhatsAppTurn(input: {
       ((c: TurnContext) =>
         createPilotModelAdapter(env, undefined, waraResolution.snapshot).decide(c));
     const decision = await decide(ctx);
-    return replyResult(extractReply(decision));
+    return replyResult(replyForCustomerClose(text, extractReply(decision)));
   } catch {
-    return replyResult(FALLBACK);
+    return replyResult(replyForCustomerClose(text, FALLBACK));
   }
 }

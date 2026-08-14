@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 14av", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14av/);
+  it("prompt version bump 14ax", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14ax/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -1852,6 +1852,207 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     );
     assert.ok(enriched.unitReference);
     assert.match(String(enriched.unitReference?.value ?? ""), /nissan/i);
+  });
+
+  it("GPS enrich: otra patente cierra el hilo de la unidad activa", async () => {
+    const { enrichPlanForGpsUnitInMessage } = await import(
+      "../enrich/gps-unit-from-message.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 90,
+      plate: "AH745PS",
+      name: "M300-090",
+      label: "AH 745 PS (M300-090)",
+    };
+    s.fleetCache = [
+      s.unit,
+      {
+        movilId: 91,
+        plate: "NKL961",
+        name: "M300-091",
+        label: "NKL 961 (M300-091)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "estado con unidad activa; preserveUnit",
+      conversationalAct: "inform",
+      task: "gps",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForGpsUnitInMessage(
+      plan,
+      s,
+      "Quiero saber el reprote de la unidad NKL 961",
+    );
+    assert.equal(enriched.unitReference?.mode, "plate");
+    assert.match(String(enriched.unitReference?.value ?? ""), /NKL961/i);
+    assert.equal(enriched.stateIntent.preserveUnit, false);
+  });
+
+  it("GPS enrich: follow-up sin otra patente conserva la unidad activa", async () => {
+    const { enrichPlanForGpsUnitInMessage } = await import(
+      "../enrich/gps-unit-from-message.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 90,
+      plate: "AH745PS",
+      name: "M300-090",
+      label: "AH 745 PS (M300-090)",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "pide el reporte de la misma",
+      conversationalAct: "inform",
+      task: "gps",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForGpsUnitInMessage(plan, s, "estado de reporte");
+    assert.equal(enriched.unitReference, undefined);
+    assert.equal(enriched.stateIntent.preserveUnit, true);
+  });
+
+  it("cierre de conversación: confirmación oficial, no despedida genérica", async () => {
+    const { enrichPlanForConversationClose } = await import(
+      "../enrich/conversation-close.js"
+    );
+    const { CUSTOMER_CLOSE_SUCCESS_MESSAGE } = await import(
+      "../../pilot/customer-conversation-close.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "WARA" };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "despedida genérica",
+      conversationalAct: "farewell",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+      responseGoal: {
+        purpose: "close",
+        facts: ["👍 Dale, cualquier cosa avisame."],
+      },
+      confidence: 0.9,
+    });
+    const enriched = enrichPlanForConversationClose(
+      plan,
+      s,
+      "Quiero resolver la conversación",
+    );
+    assert.equal(enriched.responseGoal.facts?.[0], CUSTOMER_CLOSE_SUCCESS_MESSAGE);
+    assert.doesNotMatch(
+      enriched.responseGoal.facts?.join(" ") ?? "",
+      /cualquier cosa avisame/i,
+    );
+
+    const thanks = enrichPlanForConversationClose(plan, s, "Gracias");
+    assert.match(thanks.responseGoal.facts?.join(" ") ?? "", /cualquier cosa avisame/i);
+  });
+
+  it("GPS execute: otra patente resuelta no reporta la unidad anterior", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 90,
+      plate: "AH745PS",
+      name: "M300-090",
+      label: "AH 745 PS (M300-090)",
+    };
+    const nkl = {
+      movil_id: 91,
+      unidad: "M300-091",
+      patente: "NKL961",
+      ultimo_reporte: { hace_segundos: 40 },
+      ultima_posicion: { hace_segundos: 40, lat: -34.6, lon: -58.4 },
+      ultima_ignicion: { hace_segundos: 40, estado: false },
+    };
+    const ah = {
+      movil_id: 90,
+      unidad: "M300-090",
+      patente: "AH745PS",
+      ultimo_reporte: { hace_segundos: 40 },
+      ultima_posicion: { hace_segundos: 40, lat: -32.8, lon: -68.8 },
+      ultima_ignicion: { hace_segundos: 40, estado: true },
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "reporte NKL 961",
+      conversationalAct: "start_task",
+      task: "gps",
+      unitReference: {
+        kind: "unit",
+        mode: "plate",
+        value: "NKL961",
+        reference: null,
+      },
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: false },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [ah, nkl] as never,
+      resolvedUnit: {
+        movilId: 91,
+        plate: "NKL961",
+        name: "M300-091",
+        label: "NKL 961 (M300-091)",
+      },
+      resolvedCompanyId: null,
+      message: "Quiero saber el reporte de la unidad NKL 961",
+    });
+    assert.match(exec.facts.join(" "), /NKL 961|NKL961|M300-091/i);
+    assert.doesNotMatch(exec.facts.join(" "), /AH 745|M300-090/i);
+  });
+
+  it("GPS execute: patente nueva no encontrada no reusa la unidad anterior", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.unit = {
+      movilId: 90,
+      plate: "AH745PS",
+      name: "M300-090",
+      label: "AH 745 PS (M300-090)",
+    };
+    const ah = {
+      movil_id: 90,
+      unidad: "M300-090",
+      patente: "AH745PS",
+      ultimo_reporte: { hace_segundos: 40 },
+      ultima_posicion: { hace_segundos: 40, lat: -32.8, lon: -68.8 },
+      ultima_ignicion: { hace_segundos: 40, estado: true },
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "reporte NKL 961",
+      conversationalAct: "start_task",
+      task: "gps",
+      unitReference: {
+        kind: "unit",
+        mode: "plate",
+        value: "NKL961",
+        reference: null,
+      },
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: false },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [ah] as never,
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "Quiero saber el reporte de la unidad NKL 961",
+    });
+    assert.doesNotMatch(exec.facts.join(" "), /AH 745|M300-090|Funcionamiento/i);
+    assert.match(exec.facts.join(" "), /patente|unidad|número|marca/i);
   });
 
   it("unit.search filtra por prefijo AG", async () => {

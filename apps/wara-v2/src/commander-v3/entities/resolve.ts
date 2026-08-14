@@ -44,6 +44,16 @@ function normUnitToken(value: string): string {
     .replace(/[\s-]+/g, "");
 }
 
+/** Patente/código/nombre en el plan — no “la misma” ni la unidad ya activa. */
+export function isExplicitUnitReference(
+  ref: EntityReference | null | undefined,
+): boolean {
+  if (!ref || ref.kind !== "unit") return false;
+  if (ref.mode === "contextual") return false;
+  if (ref.reference === "active" || ref.reference === "previous") return false;
+  return Boolean(String(ref.value ?? "").trim());
+}
+
 export function resolveUnitReference(
   ref: EntityReference | null | undefined,
   state: ConversationStateV3,

@@ -1,11 +1,11 @@
 import type { WaraUnidadEstado } from "@/lib/waraApi";
 
-/** Margen: posición o ignición desalineadas respecto al reporte. */
-export const POSITION_REPORT_DRIFT_SECONDS = 20 * 60;
-/** Reporte reciente (< 1 h) = actualizado (paso 1). */
-export const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 60 * 60;
+/** Margen: posición o ignición desalineadas respecto al reporte (mismo ciclo GPRS). */
+export const POSITION_REPORT_DRIFT_SECONDS = 10 * 60;
+/** Ciclo GPRS ~10 min: sin reporte/posición = falta de reporte. */
+export const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 10 * 60;
 /** Reporte, posición e ignición “van juntos” (Mesa de Ayuda Wara). */
-export const TELEMETRY_BUNDLE_ALIGN_SECONDS = 30 * 60;
+export const TELEMETRY_BUNDLE_ALIGN_SECONDS = 10 * 60;
 /** Con paquete alineado e ignición apagada: ticket solo después de 24 h. */
 export const COHERENT_PAUSE_TICKET_THRESHOLD_SECONDS = 24 * 60 * 60;
 
@@ -105,16 +105,17 @@ function allTelemetryAligned(
 }
 
 /**
- * Flujograma Mesa de Ayuda Wara + cruces de timestamps:
- * 1. Reporte ≥ 1h → Caso 1, salvo paquete alineado + ignición OFF (< 24h) → observación
- * 2. Reporte < 1h y posición vieja vs reporte:
- *    a) Ignición clavada mucho antes que posición → Caso 3 (prioridad sobre Caso 2)
- *    b) Ignición OFF y posición alineada con ignición → unidad detenida, sin ticket
- *    c) Sino → Caso 2 pérdida de señal
- * 3. Reporte y posición OK:
- *    - Ignición ON → normal (operando; el timestamp no tiene que “moverse”)
- *    - Ignición OFF/sin dato desalineada vs reporte/posición → Caso 3
- * 4. Todo OK → normal
+ * Flujograma operativo (GPRS/SIM ~10 min) + cruces de timestamps:
+ * 1. Ignición ON + reporte o posición ≥ 10 min → falta de reporte
+ * 2. Reporte ≥ 10 min + paquete alineado + ignición OFF (< 24h) → detenida
+ * 3. Reporte < 10 min y posición vieja vs reporte:
+ *    a) Ignición ON → falta de reporte (van juntos)
+ *    b) Ignición clavada mucho antes que posición → Caso 3
+ *    c) Ignición OFF y posición alineada con ignición → unidad detenida
+ *    d) Sino → pérdida de señal
+ * 4. Reporte y posición OK:
+ *    - Ignición ON → normal
+ *    - Ignición OFF/sin dato desalineada vs reporte/posición → falla de ignición
  */
 export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | null {
   const reportElapsed = reportElapsedSeconds(unit);
@@ -127,6 +128,14 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
   const ignitionOff = ignitionParsed === false;
 
   if (!isReportUpdated(reportElapsed)) {
+    if (ignitionOn) {
+      return {
+        status: "missing_report",
+        reportElapsed,
+        positionElapsed,
+        ignitionElapsed,
+      };
+    }
     if (
       positionElapsed != null &&
       ignitionElapsed != null &&
@@ -151,6 +160,15 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
 
   if (!isPositionUpdating(reportElapsed, positionElapsed)) {
     const posElapsed = positionElapsed;
+
+    if (ignitionOn) {
+      return {
+        status: "missing_report",
+        reportElapsed,
+        positionElapsed,
+        ignitionElapsed,
+      };
+    }
 
     if (
       posElapsed != null &&

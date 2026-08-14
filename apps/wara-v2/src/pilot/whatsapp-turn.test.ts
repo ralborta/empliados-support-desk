@@ -147,4 +147,29 @@ describe("piloto WhatsApp V2", () => {
     assert.equal(r.body.message, "¿Con qué empresa querés seguir?");
     assert.doesNotMatch(r.body.message, /^company_id$/);
   });
+
+  it("pedido de cerrar conversación envía confirmación oficial", async () => {
+    const { CUSTOMER_CLOSE_SUCCESS_MESSAGE } = await import(
+      "./customer-conversation-close.js"
+    );
+    const r = await handlePilotWhatsAppTurn({
+      phone: PHONE,
+      text: "Quiero resolver la conversación",
+      messageId: "test-close-1",
+      apiKey: KEY,
+      env: env({
+        WARA_CONVERSATION_COMMANDER_V3: "false",
+        WARA_OBTENER_EMPRESA_TOKEN: "",
+      }),
+      decide: async () => ({
+        schemaVersion: 2,
+        interpretationSummary: "👍 Dale, cualquier cosa avisame.",
+        proposedGoal: "clarify",
+        acts: [],
+      }),
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.message, CUSTOMER_CLOSE_SUCCESS_MESSAGE);
+    assert.equal(r.body.skipResponse_s, "false");
+  });
 });

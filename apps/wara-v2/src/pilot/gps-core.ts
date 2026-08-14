@@ -1,12 +1,18 @@
 /**
  * Assessment GPS determinístico (portado puro de V1 waraGpsAssessment.ts + template lab).
+ *
+ * Criterio operativo (GPRS/SIM ~10 min): si ignición está encendida y no hay
+ * reporte+posición dentro de ese ciclo → falta de reporte. No usar 1 h.
  */
 import type { WaraUnidadEstado } from "./wara-types.js";
 import { formatUnitLabel } from "./unit-fleet.js";
 
-export const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 60 * 60;
-export const POSITION_REPORT_DRIFT_SECONDS = 20 * 60;
-export const TELEMETRY_BUNDLE_ALIGN_SECONDS = 30 * 60;
+/** Ciclo GPRS: sin reporte/posición dentro de 10 min = falta de reporte. */
+export const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 10 * 60;
+/** Reporte y posición tienen que ir juntos (mismo ciclo). */
+export const POSITION_REPORT_DRIFT_SECONDS = 10 * 60;
+/** Paquete reporte/posición/ignición alineado (unidad detenida). */
+export const TELEMETRY_BUNDLE_ALIGN_SECONDS = 10 * 60;
 export const COHERENT_PAUSE_TICKET_THRESHOLD_SECONDS = 24 * 60 * 60;
 
 export type GpsAssessment =
@@ -97,6 +103,9 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
   const ignitionOff = ignitionParsed === false;
 
   if (!isReportUpdated(reportElapsed)) {
+    if (ignitionOn) {
+      return { status: "missing_report", reportElapsed, positionElapsed, ignitionElapsed };
+    }
     if (
       positionElapsed != null &&
       ignitionElapsed != null &&
@@ -110,6 +119,10 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
   }
 
   if (!isPositionUpdating(reportElapsed, positionElapsed)) {
+    // Ignición ON: reporte sin posición al día = falta de reporte (van juntos).
+    if (ignitionOn) {
+      return { status: "missing_report", reportElapsed, positionElapsed, ignitionElapsed };
+    }
     const posElapsed = positionElapsed;
     if (
       posElapsed != null &&
@@ -186,10 +199,24 @@ export function buildGpsLabSummary(unit: WaraUnidadEstado, assessment: GpsAssess
       .join("\n");
   }
   if (assessment.status === "missing_report") {
-    return (
-      `⚠️ La unidad *${label}* no tiene reporte reciente (último hace ${formatMinutesAgo(assessment.reportElapsed)}). ` +
-      `En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.`
-    );
+    const ign = ignitionLabel(unit);
+    const ignLine =
+      ign === "encendida"
+        ? "🔑 Ignición: *encendida*"
+        : ign === "apagada"
+          ? "🔑 Ignición: *apagada*"
+          : "🔑 Ignición: sin dato claro";
+    return [
+      "⚠️ *Falta de reporte*",
+      `🚗 Unidad: *${label}*`,
+      ignLine,
+      `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      "No está enviando reporte y posición al día.",
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   if (assessment.status === "ignition_failure") {
     return (
