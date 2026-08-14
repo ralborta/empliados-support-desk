@@ -83,12 +83,14 @@ export async function redactReply(input: {
     };
   }
 
-  // Cancel / switch: facts del contrato (no inventar "cerrar" / menús).
+  // Cancel / switch / farewell: facts del contrato (no inventar menús).
   if (
     input.plan.conversationalAct === "cancel_task" ||
     input.plan.conversationalAct === "switch_task" ||
+    input.plan.conversationalAct === "farewell" ||
     input.plan.taskAction === "cancel" ||
-    input.plan.taskAction === "switch"
+    input.plan.taskAction === "switch" ||
+    input.plan.responseGoal.purpose === "close"
   ) {
     return {
       reply: fallbackFromFacts(input.facts, input.plan),

@@ -11,8 +11,72 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ao", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ao/);
+  it("prompt version bump 13ap", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ap/);
+  });
+
+  it("Dale / Genial idle post-trámite → farewell close (no domain.answer)", async () => {
+    const { enrichPlanForSoftClose } = await import("../enrich/soft-close.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "El Cacique S.A." };
+    s.unit = {
+      movilId: 900075,
+      plate: "AA 454 CR",
+      name: "AA 454 CR",
+      label: "AA 454 CR (M900-075)",
+    };
+    s.activeTask = {
+      type: "maintenance",
+      status: "completed",
+      collected: { detail: "Del GPS" },
+      missing: [],
+    };
+    const badPlan = TurnPlanSchema.parse({
+      reasoning: "llm inventó consulta",
+      conversationalAct: "inform",
+      task: "maintenance",
+      taskAction: "continue",
+      requestedCapabilities: [{ name: "domain.answer", params: { q: "mant" } }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: {
+        purpose: "inform",
+        facts: ["No hay información disponible sobre el mantenimiento"],
+      },
+      confidence: 0.4,
+    });
+    for (const msg of ["Dale", "Genial", "gracias", "bárbaro"]) {
+      const enriched = enrichPlanForSoftClose(badPlan, s, msg);
+      assert.equal(enriched.conversationalAct, "farewell", msg);
+      assert.equal(enriched.responseGoal.purpose, "close", msg);
+      assert.equal(enriched.requestedCapabilities.length, 0, msg);
+      assert.equal(enriched.task, null, msg);
+      assert.match(enriched.responseGoal.facts[0] ?? "", /Dale|Gracias|Chau/i, msg);
+    }
+  });
+
+  it("Dale con pendingWrite NO cierra ni confirma", async () => {
+    const { enrichPlanForSoftClose } = await import("../enrich/soft-close.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.pendingWrite = {
+      operationId: "op1",
+      version: 1,
+      payloadHash: "h",
+      task: "maintenance",
+      summary: { detail: "ticket" },
+    };
+    s.lastQuestion = { id: "1", purpose: "confirm", expected: "confirmation" };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "test",
+      conversationalAct: "inform",
+      task: "maintenance",
+      requestedCapabilities: [],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "confirm_write", facts: ["CONFIRMO?"] },
+      confidence: 0.5,
+    });
+    const enriched = enrichPlanForSoftClose(plan, s, "Dale");
+    assert.equal(enriched.conversationalAct, "inform");
+    assert.notEqual(enriched.responseGoal.purpose, "close");
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {

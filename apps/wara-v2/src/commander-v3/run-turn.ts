@@ -18,6 +18,7 @@ import {
 } from "./enrich/company-capture.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
+import { enrichPlanForSoftClose } from "./enrich/soft-close.js";
 import {
   enrichPlanForExpectedFields,
   enrichPlanForMeterValueFallback,
@@ -409,6 +410,7 @@ export async function runCommanderTurn(
 
   plan = enrichPlanWithNaturalDatetime(plan, state, input.message, dtOpts);
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
+  plan = enrichPlanForSoftClose(plan, state, input.message);
   plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
   // Campos esperados ANTES del switch: un "900078" es el km, no un trámite nuevo.
   plan = enrichPlanForExpectedFields(plan, state, input.message);
@@ -541,8 +543,11 @@ export async function runCommanderTurn(
       Boolean(realOpsSwitch) &&
       !answeringDetail &&
       state.lastQuestion?.expected !== "free_text";
+    const lateralOk =
+      plan.conversationalAct === "farewell" ||
+      plan.conversationalAct === "cancel_task";
 
-    if (!keepSwitch) {
+    if (!keepSwitch && !lateralOk) {
       const detail =
         (typeof plan.suppliedFields?.detail === "string"
           ? plan.suppliedFields.detail
