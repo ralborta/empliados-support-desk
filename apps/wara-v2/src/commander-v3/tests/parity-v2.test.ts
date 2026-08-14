@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 14au", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14au/);
+  it("prompt version bump 14av", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14av/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -1663,6 +1663,21 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       "Confirmo el certificado",
     );
     assert.equal(enriched.conversationalAct, "confirm_write");
+  });
+
+  it("certificate payload respeta patente de flota (no fuerza espacios)", async () => {
+    const { buildCertificateWaraPayload } = await import(
+      "../../pilot/certificate-wara.js"
+    );
+    const { plateCandidatesForWaraApi } = await import("../../pilot/plates.js");
+    const p = buildCertificateWaraPayload({
+      sessionToken: "t",
+      patente: "AH745PS",
+    });
+    assert.equal(p.patente, "AH745PS");
+    const cands = plateCandidatesForWaraApi("AH 745 PS", "AH745PS");
+    assert.equal(cands[0], "AH745PS");
+    assert.ok(cands.includes("AH 745 PS"));
   });
 
   it("confirm_write certificado sin gate → simulado OK (paridad odómetro)", async () => {

@@ -98,7 +98,11 @@ async function executeIssue(
     });
   } else {
     const wara = await issueCertificadoCobertura(
-      { sessionToken: state.sessionToken, patente: draft.unit.patente },
+      {
+        sessionToken: state.sessionToken,
+        patente: draft.unit.patente,
+        fleetPatente: draft.unit.patente,
+      },
       env,
     );
     result = wara.ok

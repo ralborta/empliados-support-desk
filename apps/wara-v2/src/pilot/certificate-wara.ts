@@ -2,7 +2,7 @@
  * Cliente WARA certificado de cobertura V2 — mismo endpoint que V1.
  */
 import type { CertificateWaraPayload } from "./certificate-types.js";
-import { formatPlateWithSpaces, normalizeLoosePlate } from "./plates.js";
+import { plateCandidatesForWaraApi } from "./plates.js";
 import { isCertificateWriteEnabled } from "./write-gates.js";
 
 function waraMaintenanceApiBaseUrl(env: NodeJS.ProcessEnv): string {
@@ -17,19 +17,22 @@ export function buildCertificateWaraPayload(input: {
   sessionToken: string;
   patente: string;
 }): CertificateWaraPayload {
-  // Visionblo exige patente con espacios (ej. "AA 496 GN"); sin espacios → "Unidad no encontrada".
-  const spaced =
-    formatPlateWithSpaces(normalizeLoosePlate(input.patente)) ||
-    input.patente.trim();
+  // Patente tal cual (flota). No forzar espacios: algunas unidades fallan con "Unidad no encontrada".
   return {
     token: input.sessionToken,
-    patente: spaced,
+    patente: input.patente.trim(),
   };
 }
 
 export type IssueCertificateResult =
   | { ok: true; dryRun: true; payload: CertificateWaraPayload; summary: string }
-  | { ok: true; dryRun: false; payload: CertificateWaraPayload; url?: string; summary: string }
+  | {
+      ok: true;
+      dryRun: false;
+      payload: CertificateWaraPayload;
+      url?: string;
+      summary: string;
+    }
   | { ok: false; error: string; payload: CertificateWaraPayload };
 
 function firstString(data: Record<string, unknown>, keys: string[]): string | undefined {
@@ -40,29 +43,23 @@ function firstString(data: Record<string, unknown>, keys: string[]): string | un
   return undefined;
 }
 
-export async function issueCertificadoCobertura(
-  input: { sessionToken: string; patente: string },
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<IssueCertificateResult> {
-  const payload = buildCertificateWaraPayload(input);
-  const gateEnabled = isCertificateWriteEnabled(env);
+function looksLikeUnitNotFound(err: string): boolean {
+  return /no se encontr|no encontr|veh[ií]culo|patente|unidad/i.test(err);
+}
 
-  // Gate específico controla la escritura. No exigir ALLOW_EXTERNAL_MUTATIONS
-  // (shadow lab lo tiene en false a propósito; el flag de certificado basta).
-  if (!gateEnabled) {
-    return {
-      ok: true,
-      dryRun: true,
-      payload,
-      summary: "dry-run: payload listo para Certificadocobertura",
-    };
-  }
-
+async function postCertificate(
+  payload: CertificateWaraPayload,
+  sessionToken: string,
+  env: NodeJS.ProcessEnv,
+): Promise<
+  | { ok: true; url?: string }
+  | { ok: false; error: string }
+> {
   const res = await fetch(`${waraMaintenanceApiBaseUrl(env)}/Certificadocobertura`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${input.sessionToken}`,
+      Authorization: `Bearer ${sessionToken}`,
     },
     body: JSON.stringify(payload),
     cache: "no-store",
@@ -81,19 +78,78 @@ export async function issueCertificadoCobertura(
       (typeof json?.error === "string" && json.error) ||
       (typeof json?.message === "string" && json.message) ||
       `WARA HTTP ${res.status}`;
-    return { ok: false, error: err, payload };
+    return { ok: false, error: err };
   }
 
   const data =
     json && typeof json.data === "object" && json.data !== null
       ? (json.data as Record<string, unknown>)
       : (json ?? {});
-  const url = firstString(data, ["url", "URL", "link", "Link", "certificado_url", "certificadoUrl"]);
-  return {
-    ok: true,
-    dryRun: false,
-    payload,
-    url,
-    summary: url ? "certificado generado" : "certificado generado sin URL",
-  };
+  const url = firstString(data, [
+    "url",
+    "URL",
+    "link",
+    "Link",
+    "certificado_url",
+    "certificadoUrl",
+  ]);
+  return { ok: true, url };
+}
+
+export async function issueCertificadoCobertura(
+  input: {
+    sessionToken: string;
+    patente: string;
+    /** Patente cruda de flota WARA (preferida, igual que odómetro). */
+    fleetPatente?: string | null;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<IssueCertificateResult> {
+  const gateEnabled = isCertificateWriteEnabled(env);
+  const candidates = plateCandidatesForWaraApi(
+    input.patente,
+    input.fleetPatente ?? null,
+  );
+  const primary = buildCertificateWaraPayload({
+    sessionToken: input.sessionToken,
+    patente: candidates[0] ?? input.patente,
+  });
+
+  // Gate específico controla la escritura. No exigir ALLOW_EXTERNAL_MUTATIONS
+  // (shadow lab lo tiene en false a propósito; el flag de certificado basta).
+  if (!gateEnabled) {
+    return {
+      ok: true,
+      dryRun: true,
+      payload: primary,
+      summary: "dry-run: payload listo para Certificadocobertura",
+    };
+  }
+
+  let lastError = "WARA no generó el certificado";
+  let lastPayload = primary;
+
+  for (const patente of candidates) {
+    const payload = buildCertificateWaraPayload({
+      sessionToken: input.sessionToken,
+      patente,
+    });
+    lastPayload = payload;
+    const res = await postCertificate(payload, input.sessionToken, env);
+    if (res.ok) {
+      return {
+        ok: true,
+        dryRun: false,
+        payload,
+        url: res.url,
+        summary: res.url ? "certificado generado" : "certificado generado sin URL",
+      };
+    }
+    lastError = res.error;
+    if (!looksLikeUnitNotFound(res.error)) {
+      return { ok: false, error: lastError, payload };
+    }
+  }
+
+  return { ok: false, error: lastError, payload: lastPayload };
 }
