@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { ArrowLeft, FileText } from "lucide-react";
 import { statusLabels, priorityLabels, fromLabels, categoryLabels } from "@/lib/tickets";
@@ -97,6 +97,7 @@ export function TicketDetailView({
       direction: m.direction,
     })),
   );
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const refreshMessages = useCallback(async () => {
     try {
@@ -112,6 +113,12 @@ export function TicketDetailView({
   }, [ticket.id]);
 
   usePollWhenVisible(refreshMessages, 5000, tab === "conversacion");
+
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [conversation.length, tab]);
 
   const attachments = useMemo(() => collectAttachments(conversation), [conversation]);
 
@@ -202,8 +209,8 @@ export function TicketDetailView({
 
       {tab === "conversacion" ? (
         <div className="grid gap-3 xl:grid-cols-[1fr_17.5rem]">
-          <div className="flex min-h-[min(560px,calc(100vh-13rem))] flex-col overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm">
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+          <div className="flex h-[min(560px,calc(100vh-13rem))] max-h-[min(560px,calc(100vh-13rem))] flex-col overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm">
+            <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
               <ConversationThread messages={conversation} />
             </div>
             <div className="shrink-0 border-t border-slate-200/80 bg-slate-50/30">

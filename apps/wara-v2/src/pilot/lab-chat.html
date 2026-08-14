@@ -30,9 +30,10 @@
       border: 1px solid #e2e8f0;
       border-radius: 8px;
       padding: 0.75rem;
-      min-height: 300px;
-      max-height: 52vh;
-      overflow: auto;
+      height: min(420px, 52vh);
+      max-height: min(420px, 52vh);
+      overflow-y: auto;
+      overscroll-behavior: contain;
       white-space: pre-wrap;
       background: #fff;
     }
