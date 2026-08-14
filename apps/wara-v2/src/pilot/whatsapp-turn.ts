@@ -26,6 +26,7 @@ import {
 import { loadCommanderV3Context } from "../commander-v3/lab/load-context.js";
 import { saveConversationStateV3 } from "../commander-v3/persistence/store.js";
 import { resolveConductorEnabled } from "../commander-v3/lab/conductor-mode.js";
+import { persistPilotTurnToV1Panel } from "./panel-persist.js";
 
 const FALLBACK =
   "Disculpá, tuve un problema para procesar eso. ¿Me lo repetís en una línea?";
@@ -121,6 +122,29 @@ function silent(extra?: Partial<PilotTurnBody>): PilotTurnBody {
     engine: "wara-v2",
     ...extra,
   };
+}
+
+async function replyAndPersist(
+  input: {
+    phone: string;
+    inboundText: string;
+    messageId: string;
+    env: NodeJS.ProcessEnv;
+  },
+  message: string,
+  extra?: Partial<PilotTurnBody>,
+): Promise<PilotTurnResult> {
+  const body = reply(message, extra);
+  if (body.skipResponse_s !== "true" && body.message.trim()) {
+    await persistPilotTurnToV1Panel({
+      phone: input.phone,
+      inboundText: input.inboundText,
+      outboundText: body.message,
+      messageId: input.messageId,
+      env: input.env,
+    });
+  }
+  return { status: 200, body };
 }
 
 function reply(message: string, extra?: Partial<PilotTurnBody>): PilotTurnBody {
@@ -319,6 +343,12 @@ export async function handlePilotWhatsAppTurn(input: {
 
   const text = input.text.trim();
   const tenant = (env.WARA_V2_SHADOW_TENANT ?? "tenant_internal_ops").trim();
+  const persist = {
+    phone: input.phone,
+    inboundText: text || "Hola",
+    messageId: input.messageId,
+    env,
+  };
 
   // Commander V3 — path aislado; V2 brain no interviene.
   if (resolveConductorEnabled(input.phone, env) || isConversationCommanderV3Enabled(env)) {
@@ -331,7 +361,7 @@ export async function handlePilotWhatsAppTurn(input: {
       env,
     });
     if (!ctx.ok) {
-      return { status: 200, body: reply(ctx.message) };
+      return replyAndPersist(persist, ctx.message);
     }
     saveConversationStateV3(ctx.state);
     try {
@@ -346,11 +376,11 @@ export async function handlePilotWhatsAppTurn(input: {
         customerName: ctx.customerName,
       });
       if (!result.reply.trim()) {
-        return { status: 200, body: reply(FALLBACK) };
+        return replyAndPersist(persist, FALLBACK);
       }
-      return { status: 200, body: reply(result.reply) };
+      return replyAndPersist(persist, result.reply);
     } catch {
-      return { status: 200, body: reply(FALLBACK) };
+      return replyAndPersist(persist, FALLBACK);
     }
   }
 
@@ -365,7 +395,7 @@ export async function handlePilotWhatsAppTurn(input: {
     if (!waraResolution.message.trim()) {
       return { status: 200, body: silent({ skipResponse_s: "true" }) };
     }
-    return { status: 200, body: reply(waraResolution.message) };
+    return replyAndPersist(persist, waraResolution.message);
   }
 
   const ctx = buildPilotTurnContext({
@@ -382,8 +412,8 @@ export async function handlePilotWhatsAppTurn(input: {
       ((c: TurnContext) =>
         createPilotModelAdapter(env, undefined, waraResolution.snapshot).decide(c));
     const decision = await decide(ctx);
-    return { status: 200, body: reply(extractReply(decision)) };
+    return replyAndPersist(persist, extractReply(decision));
   } catch {
-    return { status: 200, body: reply(FALLBACK) };
+    return replyAndPersist(persist, FALLBACK);
   }
 }

@@ -717,7 +717,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
   }
   const customer = chosen.customer;
 
-  const targetTicket =
+  let targetTicket =
     chosen.openTicketId
       ? {
           id: chosen.openTicketId,
@@ -733,10 +733,27 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
         : null;
 
   if (!targetTicket) {
+    const code = await allocateTicketCode(prisma);
+    const created = await prisma.ticket.create({
+      data: {
+        code,
+        customerId: customer.id,
+        contactName: customer.name || "WhatsApp",
+        title: "Conversación WhatsApp",
+        status: "OPEN",
+        priority: "NORMAL",
+        category: "OTHER",
+        channel: "WHATSAPP",
+      },
+    });
+    targetTicket = {
+      id: created.id,
+      code: created.code,
+      status: created.status,
+    };
     console.log(
-      `ℹ️ Cliente encontrado (${customer.phone}) por candidato ${chosen.candidate}, pero sin ticket asociado`
+      `🎫 Ticket creado para salida sin hilo (${customer.phone}): ${created.code}`,
     );
-    return NextResponse.json({ ok: true, message: "No hay ticket" });
   }
 
   // Generar messageId estable (reintentos / stress)
