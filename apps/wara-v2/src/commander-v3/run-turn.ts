@@ -993,6 +993,9 @@ export async function runCommanderTurn(
     return { reply, state: applied.state, trace };
   }
 
+  // Último cinturón: post-enrich GPS/flota fantasma tras despedida → menú.
+  plan = enrichPlanForOpenConsult(plan, state, input.message);
+
   const exec = await executeCapabilities({
     state,
     plan,

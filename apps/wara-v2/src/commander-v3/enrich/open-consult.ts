@@ -81,6 +81,16 @@ function hasConcreteOps(plan: TurnPlan): boolean {
   });
 }
 
+function looksLikeExplicitGpsRequest(message: string): boolean {
+  const t = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(gps|reporte|ubicacion|localizaci|donde est|ultimo reporte|estado( de (la )?unidad)?)\b/.test(
+    t,
+  );
+}
+
 function looksLikeExplicitFleetList(message: string): boolean {
   const t = message
     .normalize("NFD")
@@ -171,17 +181,31 @@ export function enrichPlanForOpenConsult(
     plan.requestedCapabilities.some((c) => c.name === "unit.search") &&
     !hasConcreteOps(plan);
 
-  // Tras cierre: cualquier unit.search sin filtro corto explícito de listado
-  // (o query=frase del usuario) se reemplaza por menú abierto.
+  // Tras cierre: cualquier unit.search sin pedido explícito de listado → menú.
   const hasBareOrPhonySearch =
     afterClose &&
     !looksLikeExplicitFleetList(message) &&
     plan.requestedCapabilities.some((c) => c.name === "unit.search");
 
-  // Pedido concreto (GPS/cert/odo/filtro corto): no tocar, salvo "sin info".
-  if (hasConcreteOps(plan) && !noInfo && !hasBareOrPhonySearch) return plan;
+  // Tras cierre: GPS inventado sin pedido GPS en el mensaje → menú.
+  const phonyGpsAfterClose =
+    afterClose &&
+    !looksLikeExplicitGpsRequest(message) &&
+    (plan.task === "gps" ||
+      plan.requestedCapabilities.some((c) => c.name === "gps.get_status"));
+
+  // Pedido concreto real: no tocar, salvo "sin info" / flota/GPS fantasma post-cierre.
+  if (
+    hasConcreteOps(plan) &&
+    !noInfo &&
+    !hasBareOrPhonySearch &&
+    !phonyGpsAfterClose
+  ) {
+    return plan;
+  }
   if (
     hasBareOrPhonySearch ||
+    phonyGpsAfterClose ||
     bareFleetDump ||
     noInfo ||
     weakDomain ||
