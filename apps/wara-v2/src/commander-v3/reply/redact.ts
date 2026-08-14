@@ -13,7 +13,8 @@ const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
 - Si los facts ya traen iconos/negrita (*…*) de WhatsApp, conservalos tal cual (no los aplanes a prosa).
 - LISTADOS: si hay un listado numerado en facts, copialo COMPLETO tal cual. PROHIBIDO resumir como "tengo el listado" sin ítems.
 - Si el usuario preguntó algo fuera del trámite, respondé con los facts; no digas "no tengo información" si hay facts.
-- Si no hay facts, una sola pregunta concreta. NO inventes menús.
+- PROHIBIDO inventar "No tengo información disponible" / "no hay información". Si purpose=ask_missing y hay menú en facts, copiá el menú.
+- Si no hay facts, una sola pregunta abierta ("¿Qué necesitás?") — nunca digas que no tenés información.
 - NO corrijas ortografía del usuario.`;
 
 function looksLikeListingFact(f: string): boolean {
@@ -24,7 +25,7 @@ function looksLikeListingFact(f: string): boolean {
 
 function looksLikeOperationalFact(f: string): boolean {
   if (looksLikeListingFact(f)) return true;
-  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente|Último reporte|no tiene reporte|detenida|falla de ignición|Decime el número|reporte GPS|🛣|⏱|📋|📍|🔧|📅|🔢|➡️|✅/i.test(
+  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente|Último reporte|no tiene reporte|detenida|falla de ignición|Decime el número|reporte GPS|¿Qué necesitás\?|Dale, seguimos|🛣|⏱|📋|📍|🔧|📅|🔢|➡️|✅/i.test(
     f,
   );
 }

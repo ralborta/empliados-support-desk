@@ -21,6 +21,7 @@ import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForSoftClose } from "./enrich/soft-close.js";
+import { enrichPlanForOpenConsult } from "./enrich/open-consult.js";
 import { enrichPlanForConversationClose } from "./enrich/conversation-close.js";
 import {
   enrichPlanForExpectedFields,
@@ -414,6 +415,7 @@ export async function runCommanderTurn(
   plan = enrichPlanWithNaturalDatetime(plan, state, input.message, dtOpts);
   plan = enrichPlanForGreetingPolicy(plan, state, input.message);
   plan = enrichPlanForSoftClose(plan, state, input.message);
+  plan = enrichPlanForOpenConsult(plan, state, input.message);
   plan = enrichPlanForConversationClose(plan, state, input.message);
   plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
   // Campos esperados ANTES del switch: un "900078" es el km, no un trámite nuevo.

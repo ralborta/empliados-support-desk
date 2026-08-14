@@ -215,6 +215,30 @@ export function formatSoftClose(kind: "thanks" | "bye" | "ack"): string {
   return "👍 Dale, cualquier cosa avisame.";
 }
 
+/** Tras despedida o “otra consulta”: menú abierto (espera el pedido, no inventa “sin info”). */
+export function formatContinueConsult(input: {
+  companyName?: string | null;
+  unitLabel?: string | null;
+}): string {
+  const lines: string[] = ["Dale, seguimos."];
+  if (input.companyName) {
+    lines.push(`🏢 Empresa: *${input.companyName}*`);
+  }
+  if (input.unitLabel) {
+    lines.push(`🚗 Unidad: *${input.unitLabel}*`);
+  }
+  lines.push(
+    "",
+    "¿Qué necesitás?",
+    "• 🛣 Odómetro / ⏱ horómetro",
+    "• 📋 Certificado",
+    "• 📍 GPS / reporte",
+    "• 🔧 Mantenimiento",
+    "• 👨‍💼 Hablar con un asesor",
+  );
+  return lines.join("\n");
+}
+
 export function formatSuccessMeter(input: {
   meterLabel: string;
   value: string | number;

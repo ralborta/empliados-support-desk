@@ -6,6 +6,7 @@
  */
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
+import { formatContinueConsult } from "../reply/format-wa.js";
 
 const GREETING_RE =
   /^(hola+|holis|buen[oa]s(?:\s+(d[ií]as?|tardes|noches))?|buenas|hey|hello|hi)\b/i;
@@ -40,15 +41,38 @@ export function enrichPlanForGreetingPolicy(
           state.lastQuestion?.expected === "unit" ||
           state.lastQuestion?.expected === "confirmation",
       );
+      // Idle + empresa: el LLM a veces elige greet ante "otra consulta".
+      // No dejar inform vacío (el redactor inventaba "no tengo información").
+      if (!midTask && state.company) {
+        const fact = formatContinueConsult({
+          companyName: state.company.name,
+          unitLabel: state.unit?.label ?? null,
+        });
+        return {
+          ...plan,
+          conversationalAct: "inform",
+          task: null,
+          taskAction: null,
+          requestedCapabilities: plan.requestedCapabilities.filter(
+            (c) => c.name !== "company.list" && c.name !== "company.select",
+          ),
+          responseGoal: {
+            purpose: "ask_missing",
+            facts: [fact],
+            nextQuestion: "¿Qué necesitás?",
+          },
+          reasoning:
+            (plan.reasoning ? `${plan.reasoning} ` : "") +
+            "Sin saludo literal: menú abierto de continuación (no greet ni 'sin información').",
+        };
+      }
       return {
         ...plan,
         conversationalAct: midTask
           ? state.pendingWrite
             ? "inform"
             : "continue_task"
-          : state.company
-            ? "inform"
-            : "inform",
+          : "inform",
         task: plan.task ?? state.activeTask?.type ?? null,
         taskAction:
           plan.taskAction ??

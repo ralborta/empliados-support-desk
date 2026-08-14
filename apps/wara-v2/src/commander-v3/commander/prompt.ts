@@ -18,6 +18,7 @@ COMPRENSIÓN HUMANA (prioridad — interpretá intención, no literalidad):
 - Modismos/afirmaciones blandas mid-trámite: "dale", "va", "listo", "ok", "sip", "sep", "claro", "perfecto" = seguimiento del campo pedido (continue/supplied), NUNCA confirman escritura (solo CONFIRMO). "listo" ≠ "lista".
 - DESPEDIDA (prioridad semántica): sin pendingWrite ni captura value/date/time/unit/confirmation, interpretá ACK/declinación/cierre — "dale", "genial", "gracias", "no gracias", "no, gracias", "nada", "nada más", "eso es todo", "listo", "chau", "bárbaro", "joya", "perfecto", "de una" — como conversationalAct=farewell + purpose=close + facts de despedida corta ("Dale, cualquier cosa avisame." / "De nada. Acá estoy."). Pedido de CERRAR/RESOLVER la conversación, consulta, ticket o caso → farewell + purpose=close + fact EXACTO: "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio." NUNCA sustituyas eso por "Dale, cualquier cosa avisame." NUNCA domain.answer. NUNCA inventes "No hay información disponible sobre el mantenimiento/unidad…". NUNCA repreguntés "¿necesitás algo más específico?".
 - Si tu último mensaje ofreció más ayuda ("¿Necesitás algo más?", "¿algo específico?") y el usuario declina o agradece → SIEMPRE farewell (aprendé a despedirte).
+- REAPERTURA (prioridad): si te despediste ("cualquier cosa avisame") o el usuario quiere seguir / otra consulta / otra cosa / necesito ayuda SIN trámite concreto → conversationalAct=inform + purpose=ask_missing + facts con menú abierto ("¿Qué necesitás?" + odómetro/certificado/GPS/mantenimiento/asesor). NUNCA domain.answer. NUNCA inventes "No tengo información disponible…". Esperá el pedido; no cierres la conversación.
 - Negaciones/cancelas informales: "nah", "nop", "dejá", "mejor no", "olvida", "cancelo", "cacelo" → cancel_task si hay pendingWrite/confirmación; si no hay trámite abierto y es cierre → farewell. "no quiero q me pases la lista" con typo suele ser "quiero que me pases la lista" si el contexto es pedir listado — interpretá por contexto.
 - Referencias: "la misma", "esa", "la de antes", "la otra", "esa und", "el camión" → unitReference contextual.
 - Números sueltos: si lastQuestion pide empresa → índice/nombre; si pide unidad → patente/código/índice; si pide value → km/hs; si pide date/time → fecha/hora. No pedís otra cosa.
@@ -130,6 +131,12 @@ export function buildCommanderUserPayload(input: {
         lastAssistant.text,
       ),
   );
+  const lastAssistantWasClose = Boolean(
+    lastAssistant &&
+      /cualquier cosa avisame|cerr[eé] tu consulta|de nada\.|¡?chau!|quedo a disposici[oó]n/i.test(
+        lastAssistant.text,
+      ),
+  );
   const canFarewellIdle =
     !s.pendingWrite &&
     s.activeTask?.status !== "collecting" &&
@@ -140,7 +147,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify). Guía de mantenimiento en panel / cómo con una unidad: domain.answer topic=platform_mantenimiento.",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si speechActHints.lastAssistantWasClose=true y el usuario reabre (otra consulta / seguir / ayuda sin trámite concreto) → inform + ask_missing con menú abierto; NUNCA 'No tengo información disponible'. Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify). Guía de mantenimiento en panel / cómo con una unidad: domain.answer topic=platform_mantenimiento.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
@@ -152,6 +159,7 @@ export function buildCommanderUserPayload(input: {
       ),
       speechActHints: {
         lastAssistantOfferedMoreHelp: offeredMoreHelp,
+        lastAssistantWasClose,
         canFarewellIdle,
         likelyFarewellClose:
           canFarewellIdle &&
