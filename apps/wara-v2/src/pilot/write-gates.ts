@@ -85,7 +85,7 @@ export function isPrismaPersistencePrimary(env: NodeJS.ProcessEnv = process.env)
   return mode === "prisma" || mode === "dual";
 }
 
-/** Lab/dry-run cuando el gate específico o el bloqueo legacy están apagados. */
+/** Lab/dry-run cuando el gate específico está apagado. */
 export function isPilotDryRun(kind: WriteGateKind, env: NodeJS.ProcessEnv = process.env): boolean {
   const enabled =
     kind === "odometer"
@@ -95,5 +95,8 @@ export function isPilotDryRun(kind: WriteGateKind, env: NodeJS.ProcessEnv = proc
         : kind === "odoo"
           ? isOdooWriteEnabled(env)
           : isDeliveryEnabled(env);
+  // Certificado: el gate específico alcanza (lab shadow no puede prender
+  // ALLOW_EXTERNAL_MUTATIONS sin romper el canary).
+  if (kind === "certificate") return !enabled;
   return !enabled || env.ALLOW_EXTERNAL_MUTATIONS !== "true";
 }

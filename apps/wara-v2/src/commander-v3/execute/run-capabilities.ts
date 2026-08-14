@@ -6,6 +6,8 @@ import {
   isOdometerWriteEnabled,
   isOdooWriteEnabled,
 } from "../../pilot/write-gates.js";
+import { issueCertificadoCobertura } from "../../pilot/certificate-wara.js";
+import { createChatBotToken } from "../../pilot/wara-client.js";
 import type { WaraUnidadEstado } from "../../pilot/wara-types.js";
 import {
   answerFromPlatformKnowledge,
@@ -1407,13 +1409,114 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
 
   const simulated = !gateOk;
   const unitLabel = ctx.state.unit?.label ?? null;
+
+  // Certificado real: gate ON → POST Certificadocobertura (no mentir "emitido").
+  if (name.startsWith("certificate") && gateOk) {
+    const plate =
+      ctx.state.unit?.plate ??
+      (typeof pw.summary?.plate === "string" ? pw.summary.plate : null);
+    const contactId = ctx.state.company?.contactId ?? null;
+    if (!plate || contactId == null) {
+      return {
+        capability: name,
+        ok: false,
+        facts: [
+          "No pude emitir el certificado: falta empresa o patente. Probá de nuevo o pedime un asesor.",
+        ],
+        error: "missing_company_or_plate",
+        writeAttempt: true,
+        writeExecuted: false,
+      };
+    }
+    const tok = await createChatBotToken(contactId, ctx.env);
+    if (!tok.ok || !tok.sessionToken) {
+      return {
+        capability: name,
+        ok: false,
+        facts: [
+          `No pude abrir sesión WARA para emitir el certificado${unitLabel ? ` de ${unitLabel}` : ""}. ${tok.error ?? "Reintentá en un momento."}`,
+        ],
+        error: tok.error ?? "no_session",
+        writeAttempt: true,
+        writeExecuted: false,
+      };
+    }
+    try {
+      const issued = await issueCertificadoCobertura(
+        { sessionToken: tok.sessionToken, patente: plate },
+        ctx.env,
+      );
+      if (!issued.ok) {
+        return {
+          capability: name,
+          ok: false,
+          facts: [
+            `No se pudo generar el certificado${unitLabel ? ` para ${unitLabel}` : ""}: ${issued.error}. ¿Querés que derive a un asesor?`,
+          ],
+          error: issued.error,
+          writeAttempt: true,
+          writeExecuted: false,
+        };
+      }
+      if (issued.dryRun) {
+        return {
+          capability: name,
+          ok: true,
+          facts: [
+            `Certificado simulado OK${unitLabel ? ` para ${unitLabel}` : ""}. Sin emisión real en lab. operationId=${pw.operationId}.`,
+          ],
+          writeAttempt: true,
+          writeExecuted: false,
+          data: {
+            statePatch: {
+              pendingWrite: null,
+              lastQuestion: null,
+              activeTask: ctx.state.activeTask
+                ? { ...ctx.state.activeTask, status: "completed" as const }
+                : null,
+            },
+          },
+        };
+      }
+      const urlBit = issued.url ? ` Link: ${issued.url}` : "";
+      return {
+        capability: name,
+        ok: true,
+        facts: [
+          `Certificado emitido${unitLabel ? ` para ${unitLabel}` : ""}.${urlBit} operationId=${pw.operationId}.`,
+        ],
+        writeAttempt: true,
+        writeExecuted: true,
+        data: {
+          statePatch: {
+            pendingWrite: null,
+            lastQuestion: null,
+            activeTask: ctx.state.activeTask
+              ? { ...ctx.state.activeTask, status: "completed" as const }
+              : null,
+          },
+        },
+      };
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      return {
+        capability: name,
+        ok: false,
+        facts: [
+          `Falló la emisión del certificado${unitLabel ? ` para ${unitLabel}` : ""} (${err.slice(0, 120)}). ¿Querés que derive a un asesor?`,
+        ],
+        error: err,
+        writeAttempt: true,
+        writeExecuted: false,
+      };
+    }
+  }
+
   const msg = simulated
     ? name.startsWith("certificate")
       ? `Certificado simulado OK${unitLabel ? ` para ${unitLabel}` : ""}. Sin emisión real en lab. operationId=${pw.operationId}.`
       : `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`
-    : name.startsWith("certificate")
-      ? `Certificado emitido${unitLabel ? ` para ${unitLabel}` : ""}. operationId=${pw.operationId}.`
-      : `Escritura ejecutada (${pw.task}) operationId=${pw.operationId}.`;
+    : `Escritura ejecutada (${pw.task}) operationId=${pw.operationId}.`;
 
   return {
     capability: name,

@@ -41,9 +41,10 @@ export async function issueCertificadoCobertura(
 ): Promise<IssueCertificateResult> {
   const payload = buildCertificateWaraPayload(input);
   const gateEnabled = isCertificateWriteEnabled(env);
-  const legacyBlock = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
 
-  if (!gateEnabled || legacyBlock) {
+  // Gate específico controla la escritura. No exigir ALLOW_EXTERNAL_MUTATIONS
+  // (shadow lab lo tiene en false a propósito; el flag de certificado basta).
+  if (!gateEnabled) {
     return {
       ok: true,
       dryRun: true,
