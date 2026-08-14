@@ -33,7 +33,9 @@ import {
 } from "@/lib/customerOdooCaseRef";
 import { buildWebhookMessageId, hasStableWebhookMessageId } from "@/lib/webhookMessageId";
 import {
+  decidePanelContentDedup,
   findPlatformPresavedOutboundDuplicate,
+  findRecentSameContentMessage,
   mergeWebhookIntoPlatformOutbound,
   normalizeOutboundDedupText,
 } from "@/lib/outboundMessageDedup";
@@ -369,6 +371,43 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   });
 
   const rawPayload = { eventName, data };
+  const inboundText = actualMessage || "[Archivo adjunto]";
+  const recentInbound = await findRecentSameContentMessage(prisma, {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: inboundText,
+  });
+  if (recentInbound) {
+    const { action } = decidePanelContentDedup({
+      existingExternalMessageId: recentInbound.externalMessageId,
+      incomingExternalMessageId: messageId,
+    });
+    if (action === "idempotent" || action === "skip") {
+      console.log(`ℹ️ Incoming duplicado (${action}) — ${recentInbound.id}`);
+      return NextResponse.json({
+        ok: true,
+        ticketId: ticket.id,
+        idempotent: true,
+        ...builderBotRegistrationFields(registeredInPanel),
+      });
+    }
+    if (action === "merge") {
+      await mergeWebhookIntoPlatformOutbound(prisma, {
+        messageId: recentInbound.id,
+        externalMessageId: messageId,
+        webhookRawPayload: rawPayload as Prisma.InputJsonObject,
+      });
+      console.log(`ℹ️ Incoming fusionado con ${recentInbound.id}`);
+      return NextResponse.json({
+        ok: true,
+        ticketId: ticket.id,
+        merged: true,
+        existingMessageId: recentInbound.id,
+        ...builderBotRegistrationFields(registeredInPanel),
+      });
+    }
+  }
 
   try {
     await prisma.ticketMessage.create({
@@ -376,7 +415,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         ticketId: ticket.id,
         direction: "INBOUND",
         from: "CUSTOMER",
-        text: actualMessage || "[Archivo adjunto]",
+        text: inboundText,
         attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
         rawPayload: {
           ...rawPayload,
@@ -793,21 +832,37 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     text: normalizedOutboundText,
   });
   if (platformPresave) {
-    await mergeWebhookIntoPlatformOutbound(prisma, {
-      messageId: platformPresave.id,
-      externalMessageId: messageId,
-      webhookRawPayload: { eventName, data } as Prisma.InputJsonObject,
+    const { action } = decidePanelContentDedup({
+      existingExternalMessageId: platformPresave.externalMessageId,
+      incomingExternalMessageId: messageId,
     });
-    console.log(
-      `ℹ️ Mensaje saliente fusionado con pre-guardado del backend (${platformPresave.id})`,
-    );
-    return NextResponse.json({
-      ok: true,
-      ticketId: targetTicket.id,
-      ticketCode: targetTicket.code,
-      merged: true,
-      existingMessageId: platformPresave.id,
-    });
+    if (action === "idempotent" || action === "skip") {
+      console.log(`ℹ️ Mensaje saliente duplicado (${action}) — ${platformPresave.id}`);
+      return NextResponse.json({
+        ok: true,
+        ticketId: targetTicket.id,
+        ticketCode: targetTicket.code,
+        duplicate: true,
+        existingMessageId: platformPresave.id,
+      });
+    }
+    if (action === "merge") {
+      await mergeWebhookIntoPlatformOutbound(prisma, {
+        messageId: platformPresave.id,
+        externalMessageId: messageId,
+        webhookRawPayload: { eventName, data } as Prisma.InputJsonObject,
+      });
+      console.log(
+        `ℹ️ Mensaje saliente fusionado con pre-guardado del backend (${platformPresave.id})`,
+      );
+      return NextResponse.json({
+        ok: true,
+        ticketId: targetTicket.id,
+        ticketCode: targetTicket.code,
+        merged: true,
+        existingMessageId: platformPresave.id,
+      });
+    }
   }
 
   // Respaldo por contenido: SOLO cuando el payload no trae ningún id estable del

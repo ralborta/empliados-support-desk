@@ -23,11 +23,23 @@ type ThreadItem =
   | { kind: "date"; key: string; label: string }
   | { kind: "group"; key: string; from: string; isInternal: boolean; messages: ThreadMessage[] };
 
+function collapseConsecutiveDuplicates(messages: ThreadMessage[]): ThreadMessage[] {
+  const out: ThreadMessage[] = [];
+  for (const msg of messages) {
+    const prev = out[out.length - 1];
+    if (prev && prev.from === msg.from && (prev.text || "").trim() === (msg.text || "").trim()) {
+      continue;
+    }
+    out.push(msg);
+  }
+  return out;
+}
+
 function buildThreadItems(messages: ThreadMessage[]): ThreadItem[] {
   const items: ThreadItem[] = [];
   let lastDateKey = "";
 
-  for (const msg of messages) {
+  for (const msg of collapseConsecutiveDuplicates(messages)) {
     const d = new Date(msg.createdAt);
     const dateKey = d.toLocaleDateString("es-AR");
     if (dateKey !== lastDateKey) {

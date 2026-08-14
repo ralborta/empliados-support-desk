@@ -20,8 +20,11 @@
  */
 import { buildWebhookMessageId, hasStableWebhookMessageId } from "../src/lib/webhookMessageId.ts";
 import {
+  decidePanelContentDedup,
   findPlatformPresavedOutboundDuplicate,
   mergeWebhookIntoPlatformOutbound,
+  panelMessageIdKind,
+  preferExternalMessageId,
 } from "../src/lib/outboundMessageDedup.ts";
 
 let failed = 0;
@@ -77,6 +80,46 @@ assert(idRetry === id1, "el mismo wamid genera el mismo id (reintentos siguen si
 console.log("\n— Payload sin ningún id de proveedor cae al respaldo por hash (y se marca como no-estable) —");
 const noIdPayload = { answer: "Hola", from: phone, body: "Hola" };
 assert(!hasStableWebhookMessageId(noIdPayload), "sin ids reconocidos, hasStableWebhookMessageId es false");
+
+console.log("\n— Clases de id del panel —");
+assert(panelMessageIdKind("outbound:5491:wamid.HBgNNTQ5") === "wamid", "wamid detectado");
+assert(panelMessageIdKind("inbound:5491:v3-in-66badaa9") === "v3", "v3-in detectado");
+assert(panelMessageIdKind("outbound:5491:v3-out-66badaa9") === "v3", "v3-out detectado");
+assert(panelMessageIdKind(null) === "empty", "sin id = empty");
+
+console.log("\n— BBC wamid + persist V3 del mismo turno se fusionan; dos wamid no —");
+assert(
+  decidePanelContentDedup({
+    existingExternalMessageId: "inbound:1:v3-in-aa",
+    incomingExternalMessageId: "inbound:1:wamid.HBg",
+  }).action === "merge",
+  "v3 luego wamid → merge",
+);
+assert(
+  decidePanelContentDedup({
+    existingExternalMessageId: "inbound:1:wamid.HBg",
+    incomingExternalMessageId: "inbound:1:v3-in-aa",
+  }).action === "skip",
+  "wamid luego v3 → skip",
+);
+assert(
+  decidePanelContentDedup({
+    existingExternalMessageId: "outbound:1:wamid.A",
+    incomingExternalMessageId: "outbound:1:wamid.B",
+  }).action === "create",
+  "dos wamid distintos → create",
+);
+assert(
+  decidePanelContentDedup({
+    existingExternalMessageId: null,
+    incomingExternalMessageId: "outbound:1:wamid.HBg",
+  }).action === "merge",
+  "pre-guardado sin id + wamid → merge",
+);
+assert(
+  preferExternalMessageId("outbound:1:v3-out-aa", "outbound:1:wamid.HBg").includes("wamid"),
+  "al fusionar gana el wamid",
+);
 
 console.log("\n— Webhook con wamid debe fusionar pre-guardado del backend (no duplicar) —");
 assert(
