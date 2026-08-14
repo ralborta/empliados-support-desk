@@ -44,27 +44,46 @@ function btnClass(variant: (typeof quickActionItems)[number]["variant"]): string
   }
 }
 
-export function QuickActionsPanel({ ticketId }: { ticketId: string }) {
+export function QuickActionsPanel({
+  ticketId,
+  labMode = false,
+}: {
+  ticketId: string;
+  labMode?: boolean;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<QuickAction | null>(null);
 
   const runQuickAction = (action: QuickAction) => {
     setActionError(null);
+    setActionWarning(null);
     startTransition(async () => {
-      const res = await fetch(`/api/tickets/${ticketId}/quick-action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setActionError(err?.error || "No se pudo completar la acción");
-        return;
+      try {
+        const res = await fetch(`/api/tickets/${ticketId}/quick-action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setActionError(
+            res.status === 401
+              ? "Sesión vencida. Recargá la página e intentá de nuevo."
+              : payload?.error || "No se pudo completar la acción",
+          );
+          return;
+        }
+        setPendingAction(null);
+        if (typeof payload?.warning === "string" && payload.warning) {
+          setActionWarning(payload.warning);
+        }
+        router.refresh();
+      } catch {
+        setActionError("Error de red. Intentá de nuevo.");
       }
-      setPendingAction(null);
-      router.refresh();
     });
   };
 
@@ -79,7 +98,9 @@ export function QuickActionsPanel({ ticketId }: { ticketId: string }) {
   const confirmMeta: Record<string, { title: string; description: string; label: string }> = {
     resolve: {
       title: "Resolver ticket",
-      description: "El ticket quedará marcado como resuelto y se enviará un mensaje al cliente (simulado en lab).",
+      description: labMode
+        ? "El ticket quedará marcado como resuelto (lab: sin WhatsApp real)."
+        : "El ticket quedará marcado como resuelto y se enviará un mensaje al cliente por WhatsApp.",
       label: "Resolver",
     },
     close: {
@@ -93,11 +114,18 @@ export function QuickActionsPanel({ ticketId }: { ticketId: string }) {
     <div className="rounded-lg border border-slate-200/90 bg-white p-3 shadow-sm">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Acciones rápidas</p>
       <p className="mb-2.5 text-[11px] leading-snug text-slate-500">
-        Actualizan el estado y registran mensaje (lab: sin WhatsApp real).
+        {labMode
+          ? "Actualizan el estado y registran mensaje (lab: sin WhatsApp real)."
+          : "Actualizan el estado y envían el mensaje al cliente por WhatsApp."}
       </p>
       {actionError ? (
         <div className="mb-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
           {actionError}
+        </div>
+      ) : null}
+      {actionWarning ? (
+        <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+          {actionWarning}
         </div>
       ) : null}
       <div className="grid grid-cols-2 gap-1.5">

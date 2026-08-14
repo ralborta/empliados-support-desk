@@ -14,7 +14,11 @@ export interface SendWhatsAppOptions {
  * Envía un mensaje de WhatsApp vía BuilderBot Cloud (API v2).
  */
 export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
-  const { number, message, mediaUrl, checkIfExists = false } = options;
+  const { message, mediaUrl, checkIfExists = false } = options;
+  const number = String(options.number ?? "").replace(/\D/g, "");
+  if (number.length < 8) {
+    throw new Error("Número de WhatsApp inválido");
+  }
 
   const BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
   const API_KEY = process.env.BUILDERBOT_API_KEY || '';

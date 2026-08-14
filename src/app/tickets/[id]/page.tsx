@@ -95,6 +95,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
         agentes={agentes}
         wara={wara ?? null}
         incidentTypeLabel={incidentTypeLabel}
+        labMode={process.env.WARA_V2_LAB_MODE === "true"}
       />
     </TicketsLayout>
   );

@@ -62,6 +62,7 @@ interface TicketDetailViewProps {
   wara: Record<string, unknown> | null;
   incidentTypeLabel: string;
   isAdmin?: boolean;
+  labMode?: boolean;
 }
 
 function collectAttachments(
@@ -89,6 +90,7 @@ export function TicketDetailView({
   wara,
   incidentTypeLabel,
   isAdmin = false,
+  labMode = false,
 }: TicketDetailViewProps) {
   const [tab, setTab] = useState<TabId>("conversacion");
   const [conversation, setConversation] = useState<ThreadMessage[]>(
@@ -256,7 +258,7 @@ export function TicketDetailView({
               company={companyName}
               priority={ticket.priority}
             />
-            <QuickActionsPanel ticketId={ticket.id} />
+            <QuickActionsPanel ticketId={ticket.id} labMode={labMode} />
             <TicketPriorityPanel
               ticketId={ticket.id}
               currentPriority={ticket.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT"}
