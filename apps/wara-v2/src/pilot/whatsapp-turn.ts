@@ -41,7 +41,28 @@ function v3InboundDedupeKey(phone: string, text: string): string {
     .digest("hex");
 }
 
-function shouldSkipDuplicateV3Inbound(phone: string, text: string): boolean {
+function shouldSkipDuplicateV3Inbound(
+  phone: string,
+  text: string,
+  messageId?: string,
+): boolean {
+  const normalized = text.trim().toLowerCase();
+  // CONFIRMO/CANCELAR: no deduplicar por texto. Tras un fallo WARA el usuario
+  // reintenta el mismo literal y el dedupe de 90s lo silenciaba.
+  if (
+    /^(confirmo|confirmó|confirmar|cancelar|cancelo|cancelado|cacelo)$/i.test(
+      normalized,
+    )
+  ) {
+    if (!messageId?.trim()) return false;
+    const key = `v3mid:${messageId.trim()}`;
+    const prev = recentV3Inbound.get(key);
+    const now = Date.now();
+    if (prev != null && now - prev < V3_INBOUND_DEDUPE_MS) return true;
+    recentV3Inbound.set(key, now);
+    return false;
+  }
+
   const key = v3InboundDedupeKey(phone, text);
   const prev = recentV3Inbound.get(key);
   const now = Date.now();
@@ -299,7 +320,7 @@ export async function handlePilotWhatsAppTurn(input: {
 
   // Commander V3 — path aislado; V2 brain no interviene.
   if (resolveConductorEnabled(input.phone, env) || isConversationCommanderV3Enabled(env)) {
-    if (shouldSkipDuplicateV3Inbound(input.phone, text || "Hola")) {
+    if (shouldSkipDuplicateV3Inbound(input.phone, text || "Hola", input.messageId)) {
       return { status: 200, body: silent() };
     }
     const ctx = await loadCommanderV3Context({
