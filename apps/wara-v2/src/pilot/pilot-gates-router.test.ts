@@ -44,7 +44,9 @@ describe("write gates + version router (unit)", () => {
     const env = { ...baseEnv, WARA_V2_ODOMETER_WRITE_ENABLED: "true" };
     assert.equal(isOdometerWriteEnabled(env), true);
     assert.equal(isOdooWriteEnabled(env), false);
-    assert.equal(isPilotDryRun("odometer", env), true);
+    // Gate específico alcanza (sin ALLOW_EXTERNAL_MUTATIONS) para lab shadow.
+    assert.equal(isPilotDryRun("odometer", env), false);
+    assert.equal(isPilotDryRun("odoo", env), true);
   });
 
   it("router allowlist solo con flag explícito", () => {

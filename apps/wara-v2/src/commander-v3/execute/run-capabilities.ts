@@ -7,6 +7,8 @@ import {
   isOdooWriteEnabled,
 } from "../../pilot/write-gates.js";
 import { issueCertificadoCobertura } from "../../pilot/certificate-wara.js";
+import { registerOdometerHorometro } from "../../pilot/odometer-wara.js";
+import { createOdooHelpdeskTicketDryRun } from "../../pilot/odoo-ticket-client.js";
 import { createChatBotToken } from "../../pilot/wara-client.js";
 import type { WaraUnidadEstado } from "../../pilot/wara-types.js";
 import {
@@ -1512,10 +1514,253 @@ async function commitWrite(name: string, ctx: ExecuteContext): Promise<ToolResul
     }
   }
 
+  // Odómetro / horómetro real
+  if ((name.startsWith("odometer") || name.startsWith("hourmeter")) && gateOk) {
+    const plate =
+      ctx.state.unit?.plate ??
+      (typeof pw.summary?.plate === "string" ? pw.summary.plate : null);
+    const contactId = ctx.state.company?.contactId ?? null;
+    const value = Number(pw.summary?.value ?? ctx.state.activeTask?.collected?.value);
+    const dateRaw =
+      (typeof pw.summary?.date === "string" ? pw.summary.date : null) ??
+      (typeof ctx.state.activeTask?.collected?.date === "string"
+        ? ctx.state.activeTask.collected.date
+        : null);
+    const timeRaw =
+      (typeof pw.summary?.time === "string" ? pw.summary.time : null) ??
+      (typeof ctx.state.activeTask?.collected?.time === "string"
+        ? ctx.state.activeTask.collected.time
+        : null);
+    const date = normalizeMeterDateIso(dateRaw) ?? dateRaw;
+    const timeNorm =
+      typeof timeRaw === "string"
+        ? (() => {
+            const m = timeRaw.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+            if (!m) return null;
+            return `${m[1]!.padStart(2, "0")}:${m[2]}`;
+          })()
+        : null;
+
+    if (!plate || contactId == null || !Number.isFinite(value) || !date || !timeNorm) {
+      return {
+        capability: name,
+        ok: false,
+        facts: [
+          "No pude registrar el cambio: faltan patente, empresa, valor o fecha/hora. Probá de nuevo.",
+        ],
+        error: "missing_meter_fields",
+        writeAttempt: true,
+        writeExecuted: false,
+      };
+    }
+
+    const meterType =
+      name.startsWith("hour") || pw.task === "hourmeter" ? "horometro" : "odometro";
+    const fechaLocalIso = `${date}T${timeNorm}:00`;
+    const tok = await createChatBotToken(contactId, ctx.env);
+    if (!tok.ok || !tok.sessionToken) {
+      return {
+        capability: name,
+        ok: false,
+        facts: [
+          `No pude abrir sesión WARA para registrar el ${meterType}${unitLabel ? ` de ${unitLabel}` : ""}. ${tok.error ?? "Reintentá en un momento."}`,
+        ],
+        error: tok.error ?? "no_session",
+        writeAttempt: true,
+        writeExecuted: false,
+      };
+    }
+    try {
+      const reg = await registerOdometerHorometro(
+        {
+          sessionToken: tok.sessionToken,
+          patente: plate,
+          meterType,
+          value,
+          fechaLocalIso,
+        },
+        ctx.env,
+      );
+      if (!reg.ok) {
+        return {
+          capability: name,
+          ok: false,
+          facts: [
+            `No se pudo registrar el ${meterType}${unitLabel ? ` de ${unitLabel}` : ""}: ${reg.error}. ¿Querés que derive a un asesor?`,
+          ],
+          error: reg.error,
+          writeAttempt: true,
+          writeExecuted: false,
+        };
+      }
+      if (reg.dryRun) {
+        return {
+          capability: name,
+          ok: true,
+          facts: [
+            `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`,
+          ],
+          writeAttempt: true,
+          writeExecuted: false,
+          data: {
+            statePatch: {
+              pendingWrite: null,
+              lastQuestion: null,
+              activeTask: ctx.state.activeTask
+                ? { ...ctx.state.activeTask, status: "completed" as const }
+                : null,
+            },
+          },
+        };
+      }
+      return {
+        capability: name,
+        ok: true,
+        facts: [
+          `Listo, registré el ${meterType} ${value}${unitLabel ? ` en ${unitLabel}` : ""} (${formatDateDdMmYy(date)} ${timeNorm}). operationId=${pw.operationId}.`,
+        ],
+        writeAttempt: true,
+        writeExecuted: true,
+        data: {
+          statePatch: {
+            pendingWrite: null,
+            lastQuestion: null,
+            activeTask: ctx.state.activeTask
+              ? { ...ctx.state.activeTask, status: "completed" as const }
+              : null,
+          },
+        },
+      };
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      return {
+        capability: name,
+        ok: false,
+        facts: [
+          `Falló el registro del ${meterType}${unitLabel ? ` de ${unitLabel}` : ""} (${err.slice(0, 120)}). ¿Querés que derive a un asesor?`,
+        ],
+        error: err,
+        writeAttempt: true,
+        writeExecuted: false,
+      };
+    }
+  }
+
+  // Ticket / derivación real en Odoo
+  if ((name.startsWith("handoff") || name.startsWith("maintenance")) && gateOk) {
+    const detail =
+      (typeof pw.summary?.detail === "string" ? pw.summary.detail : null) ??
+      (typeof ctx.state.activeTask?.collected?.detail === "string"
+        ? ctx.state.activeTask.collected.detail
+        : null) ??
+      "Derivación desde Atilio V3";
+    const category =
+      (typeof pw.summary?.category === "string" ? pw.summary.category : null) ??
+      (typeof ctx.state.activeTask?.collected?.category === "string"
+        ? ctx.state.activeTask.collected.category
+        : "other");
+    const catLabel =
+      (typeof pw.summary?.categoryLabel === "string"
+        ? pw.summary.categoryLabel
+        : null) ?? categoryLabel(category as never);
+    const subject = `${catLabel} · ${ctx.state.unit?.plate ?? ctx.state.phone}`;
+    const description = [
+      `Ticket desde Commander V3 / lab.`,
+      `Categoría: ${catLabel}`,
+      `Empresa: ${ctx.state.company?.name ?? "—"}`,
+      ctx.state.unit ? `Unidad: ${ctx.state.unit.label}` : "",
+      `Motivo: ${detail}`,
+      `Teléfono: ${ctx.state.phone}`,
+      `operationId: ${pw.operationId}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      const odoo = await createOdooHelpdeskTicketDryRun(
+        {
+          subject,
+          description,
+          customerPhone: ctx.state.phone,
+          companyName: ctx.state.company?.name ?? undefined,
+          priority: name.startsWith("maintenance") ? "NORMAL" : "NORMAL",
+          category: category as never,
+          dedupeKey: `v3_${pw.task}:${pw.payloadHash.slice(0, 16)}`,
+        },
+        ctx.env,
+      );
+      if (!odoo.ok) {
+        return {
+          capability: name,
+          ok: false,
+          facts: [
+            `No pude crear el ticket en Odoo: ${odoo.error}. Reintentá o pedime otro canal.`,
+          ],
+          error: odoo.error,
+          writeAttempt: true,
+          writeExecuted: false,
+        };
+      }
+      if (odoo.dryRun) {
+        return {
+          capability: name,
+          ok: true,
+          facts: [
+            `Ticket simulado OK (${odoo.simulatedRef}). Sin escritura real en Odoo. operationId=${pw.operationId}.`,
+          ],
+          writeAttempt: true,
+          writeExecuted: false,
+          data: {
+            statePatch: {
+              pendingWrite: null,
+              lastQuestion: null,
+              activeTask: ctx.state.activeTask
+                ? { ...ctx.state.activeTask, status: "completed" as const }
+                : null,
+            },
+          },
+        };
+      }
+      const ref = odoo.ref ?? String(odoo.ticketId);
+      return {
+        capability: name,
+        ok: true,
+        facts: [
+          `Listo, generé el ticket en Odoo (${ref}). Un asesor te va a contactar por este medio. operationId=${pw.operationId}.`,
+        ],
+        writeAttempt: true,
+        writeExecuted: true,
+        data: {
+          statePatch: {
+            pendingWrite: null,
+            lastQuestion: null,
+            activeTask: ctx.state.activeTask
+              ? { ...ctx.state.activeTask, status: "completed" as const }
+              : null,
+          },
+        },
+      };
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      return {
+        capability: name,
+        ok: false,
+        facts: [
+          `Falló la creación del ticket en Odoo (${err.slice(0, 120)}). Reintentá en un momento.`,
+        ],
+        error: err,
+        writeAttempt: true,
+        writeExecuted: false,
+      };
+    }
+  }
+
   const msg = simulated
     ? name.startsWith("certificate")
       ? `Certificado simulado OK${unitLabel ? ` para ${unitLabel}` : ""}. Sin emisión real en lab. operationId=${pw.operationId}.`
-      : `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`
+      : name.startsWith("handoff") || name.startsWith("maintenance")
+        ? `Ticket simulado OK (${pw.task}). Sin escritura real en Odoo. operationId=${pw.operationId}.`
+        : `Registro simulado OK (${pw.task}). Sin escritura real. operationId=${pw.operationId}.`
     : `Escritura ejecutada (${pw.task}) operationId=${pw.operationId}.`;
 
   return {

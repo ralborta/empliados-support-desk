@@ -95,8 +95,14 @@ export function isPilotDryRun(kind: WriteGateKind, env: NodeJS.ProcessEnv = proc
         : kind === "odoo"
           ? isOdooWriteEnabled(env)
           : isDeliveryEnabled(env);
-  // Certificado: el gate específico alcanza (lab shadow no puede prender
-  // ALLOW_EXTERNAL_MUTATIONS sin romper el canary).
-  if (kind === "certificate") return !enabled;
+  // Shadow no puede prender ALLOW_EXTERNAL_MUTATIONS (rompe canary).
+  // Los gates específicos controlan escrituras reales en lab abierto.
+  if (
+    kind === "certificate" ||
+    kind === "odometer" ||
+    kind === "odoo"
+  ) {
+    return !enabled;
+  }
   return !enabled || env.ALLOW_EXTERNAL_MUTATIONS !== "true";
 }

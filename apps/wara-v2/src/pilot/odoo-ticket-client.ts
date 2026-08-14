@@ -60,9 +60,8 @@ export async function createOdooHelpdeskTicketDryRun(
 ): Promise<CreateOdooTicketDryRunResult> {
   const payload = input;
   const gateEnabled = isOdooWriteEnabled(env);
-  const legacyBlock = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
 
-  if (!gateEnabled || legacyBlock) {
+  if (!gateEnabled) {
     ticketIdSeq += 1;
     const simulatedRef = `DRY-${ticketIdSeq}`;
     return {

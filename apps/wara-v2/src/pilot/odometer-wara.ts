@@ -1,9 +1,9 @@
 /**
  * Cliente WARA odómetro/horómetro V2 — mismo endpoint y payload que V1.
- * Escrituras bloqueadas salvo ALLOW_EXTERNAL_MUTATIONS=true.
  */
 import type { MeterType, OdometerWaraPayload } from "./odometer-types.js";
 import { fechaLocalNaiveToWaraUtc } from "./odometer-core.js";
+import { formatPlateWithSpaces, normalizeLoosePlate } from "./plates.js";
 import { isOdometerWriteEnabled } from "./write-gates.js";
 
 function waraMaintenanceApiBaseUrl(env: NodeJS.ProcessEnv): string {
@@ -23,9 +23,13 @@ export function buildOdometerWaraPayload(input: {
   timezone?: string;
 }): OdometerWaraPayload {
   const fecha = fechaLocalNaiveToWaraUtc(input.fechaLocalIso, input.timezone ?? "America/Argentina/Buenos_Aires");
+  // Misma regla que certificado: Visionblo suele exigir patente con espacios.
+  const patente =
+    formatPlateWithSpaces(normalizeLoosePlate(input.patente)) ||
+    input.patente.trim();
   const body: OdometerWaraPayload = {
     token: input.sessionToken,
-    patente: input.patente.replace(/\s+/g, "").toUpperCase(),
+    patente,
     fecha,
   };
   if (input.meterType === "horometro") body.horometro = input.value;
@@ -50,9 +54,8 @@ export async function registerOdometerHorometro(
 ): Promise<RegisterOdometerResult> {
   const payload = buildOdometerWaraPayload(input);
   const gateEnabled = isOdometerWriteEnabled(env);
-  const legacyBlock = env.ALLOW_EXTERNAL_MUTATIONS !== "true";
 
-  if (!gateEnabled || legacyBlock) {
+  if (!gateEnabled) {
     return {
       ok: true,
       dryRun: true,
