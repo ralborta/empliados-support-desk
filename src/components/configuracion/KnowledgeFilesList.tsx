@@ -11,7 +11,13 @@ interface BuilderbotFile {
   uploadedAt: string;
 }
 
-export default function KnowledgeFilesList() {
+export default function KnowledgeFilesList({
+  embedded = false,
+  onCountChange,
+}: {
+  embedded?: boolean;
+  onCountChange?: (count: number) => void;
+}) {
   const [files, setFiles] = useState<BuilderbotFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
@@ -31,7 +37,9 @@ export default function KnowledgeFilesList() {
     try {
       const response = await fetch("/api/builderbot/files");
       const data = await response.json();
-      setFiles(data.files || []);
+      const next = data.files || [];
+      setFiles(next);
+      onCountChange?.(next.length);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar los archivos");
     } finally {
@@ -94,7 +102,11 @@ export default function KnowledgeFilesList() {
         throw new Error("No se pudo eliminar el archivo");
       }
 
-      setFiles((prev) => prev.filter((f) => f.id !== id));
+      setFiles((prev) => {
+        const next = prev.filter((f) => f.id !== id);
+        onCountChange?.(next.length);
+        return next;
+      });
       setDeleteTarget(null);
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "No se pudo eliminar el archivo");
@@ -127,31 +139,16 @@ export default function KnowledgeFilesList() {
     }
   };
 
-  return (
-    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-          <FolderOpen className="w-5 h-5 text-indigo-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Documentos de ayuda</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Subí PDFs de guía para los módulos informativos de Atilio (ChatPDF): Mantenimiento,
-            Opciones, Unidades, etc. Convención:{" "}
-            <span className="font-medium text-slate-600">unidades-modulo-flota.pdf</span>
-          </p>
-        </div>
-      </div>
-
+  const body = (
+    <>
       {error && (
-        <div className="mb-6 p-4 rounded-xl bg-red-50 text-red-700 border border-red-200 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
           <span className="text-sm font-semibold">{error}</span>
         </div>
       )}
 
-      {/* Botón de Subir Archivo */}
-      <div className="mb-6">
+      <div className={embedded ? "mb-4" : "mb-6"}>
         <input
           ref={fileInputRef}
           type="file"
@@ -163,30 +160,39 @@ export default function KnowledgeFilesList() {
         />
         <label
           htmlFor="file-upload"
-          className={`group flex items-center justify-center gap-3 w-full border-2 border-dashed rounded-xl p-6 cursor-pointer transition-all ${
+          className={`group flex w-full cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed p-6 transition-all ${
             isUploading
-              ? "border-slate-300 bg-slate-50 cursor-not-allowed"
+              ? "cursor-not-allowed border-slate-300 bg-slate-50"
               : "border-indigo-300 bg-indigo-50 hover:border-indigo-500 hover:bg-indigo-100"
           }`}
         >
           {isUploading ? (
             <>
-              <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
-              <span className="text-slate-700 font-semibold">Subiendo archivo...</span>
+              <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+              <span className="font-semibold text-slate-700">Subiendo archivo...</span>
             </>
           ) : (
             <>
-              <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center">
-                <Upload className="w-5 h-5 text-white" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600">
+                <Upload className="h-5 w-5 text-white" />
               </div>
               <div className="text-center">
-                <span className="text-slate-700 font-semibold block">Subir Archivo</span>
-                <span className="text-xs text-slate-500 mt-1">PDF, TXT, DOC, DOCX, MD (máx. 10MB)</span>
+                <span className="block font-semibold text-slate-700">Subir PDF</span>
+                <span className="mt-1 text-xs text-slate-500">PDF, TXT, DOC, DOCX, MD (máx. 10MB)</span>
               </div>
             </>
           )}
         </label>
       </div>
+
+      {embedded && (
+        <p className="mb-4 text-sm text-slate-500">
+          Base de conocimiento:{" "}
+          <span className="font-semibold text-slate-700">
+            {files.length} {files.length === 1 ? "documento" : "documentos"}
+          </span>
+        </p>
+      )}
 
       {/* Lista de Archivos */}
       <div className="space-y-3">
@@ -196,11 +202,13 @@ export default function KnowledgeFilesList() {
             <span className="ml-3 text-slate-600">Cargando archivos...</span>
           </div>
         ) : files.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center">
-              <FileText className="w-8 h-8 text-slate-400" />
-            </div>
-            <p className="text-slate-600 font-medium mb-1">No hay archivos subidos</p>
+          <div className={embedded ? "py-4 text-center" : "py-12 text-center"}>
+            {!embedded && (
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+                <FileText className="h-8 w-8 text-slate-400" />
+              </div>
+            )}
+            <p className="mb-1 font-medium text-slate-600">No hay archivos subidos</p>
             <p className="text-sm text-slate-500">Sube archivos para alimentar la base de conocimiento</p>
           </div>
         ) : (
@@ -266,6 +274,27 @@ export default function KnowledgeFilesList() {
           }
         }}
       />
+    </>
+  );
+
+  if (embedded) return <div>{body}</div>;
+
+  return (
+    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+      <div className="mb-6 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100">
+          <FolderOpen className="h-5 w-5 text-indigo-600" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Documentos de ayuda</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Subí PDFs de guía para los módulos informativos de Atilio (ChatPDF): Mantenimiento,
+            Opciones, Unidades, etc. Convención:{" "}
+            <span className="font-medium text-slate-600">unidades-modulo-flota.pdf</span>
+          </p>
+        </div>
+      </div>
+      {body}
     </div>
   );
 }
