@@ -150,39 +150,58 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
 export function buildGpsLabSummary(unit: WaraUnidadEstado, assessment: GpsAssessment): string {
   const label = formatUnitLabel(unit);
   const maps = mapsLinkForUnit(unit);
-  const mapsSuffix = maps ? ` Ubicación aprox.: ${maps}` : "";
+  const mapsLine = maps ? `\n🗺️ ${maps}` : "";
 
   if (assessment.status === "ok") {
     const ign = ignitionLabel(unit);
-    return (
-      `Funcionamiento normal: la unidad ${label} envía reporte y posición actualizados` +
-      (ign === "encendida"
-        ? "; la ignición está encendida (puede llevar rato en ON sin cambiar de estado). "
-        : " y la ignición acompaña. ") +
-      `Último reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, posición hace ${formatMinutesAgo(assessment.positionElapsed)}.${mapsSuffix}`
-    );
+    const ignLine =
+      ign === "encendida"
+        ? "🔑 Ignición: *encendida*"
+        : ign === "apagada"
+          ? "🔑 Ignición: *apagada*"
+          : "🔑 Ignición: sin dato claro";
+    return [
+      "✅ *Funcionamiento normal*",
+      `🚗 Unidad: *${label}*`,
+      "📡 Envía reporte y posición actualizados.",
+      ignLine,
+      `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   if (assessment.status === "coherent_pause") {
-    return (
-      `La unidad ${label} está detenida. Reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, ` +
-      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}, ignición apagada. Es normal que no actualice posición mientras está parada.${mapsSuffix}`
-    );
+    return [
+      "⏸ *Unidad detenida*",
+      `🚗 Unidad: *${label}*`,
+      "🔑 Ignición: *apagada*",
+      `⏱ Reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      "Es normal que no actualice posición mientras está parada.",
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   if (assessment.status === "missing_report") {
     return (
-      `La unidad ${label} no tiene reporte reciente (último hace ${formatMinutesAgo(assessment.reportElapsed)}). ` +
+      `⚠️ La unidad *${label}* no tiene reporte reciente (último hace ${formatMinutesAgo(assessment.reportElapsed)}). ` +
       `En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.`
     );
   }
   if (assessment.status === "ignition_failure") {
     return (
-      `La unidad ${label} muestra posible falla de ignición: reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, ` +
-      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}. En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.${mapsSuffix}`
+      `⚠️ La unidad *${label}* muestra posible falla de ignición: reporte hace ${formatMinutesAgo(assessment.reportElapsed)}, ` +
+      `posición hace ${formatMinutesAgo(assessment.positionElapsed)}. En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.` +
+      (maps ? ` ${maps}` : "")
     );
   }
   return (
-    `La unidad ${label} presenta ${assessment.reason}. ` +
-    `En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.${mapsSuffix}`
+    `⚠️ La unidad *${label}* presenta ${assessment.reason}. ` +
+    `En laboratorio no abro el ticket solo: si querés un caso, pedime derivar a un asesor.` +
+    (maps ? ` ${maps}` : "")
   );
 }
 

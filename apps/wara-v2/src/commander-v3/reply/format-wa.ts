@@ -202,7 +202,10 @@ export function formatUnitMenu(label: string): string {
 }
 
 export function formatGpsReport(report: string): string {
-  if (/^📍/.test(report.trim())) return report;
+  // buildGpsLabSummary ya trae encabezado con iconos.
+  if (/^📍/.test(report.trim()) || /^✅/.test(report.trim()) || /^⏸/.test(report.trim()) || /^⚠️/.test(report.trim())) {
+    return report;
+  }
   return `📍 *Reporte GPS*\n\n${report}`;
 }
 

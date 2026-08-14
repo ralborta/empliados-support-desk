@@ -485,7 +485,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       };
       const lines = items.map((i) => `${i.index}. ${i.label}`).join("\n");
       const header = reset
-        ? "🏢 *Cambio de empresa*\nElegí con cuál seguimos (nombre del API):"
+        ? "🏢 *Cambio de empresa*\nElegí con cuál seguimos:"
         : "🏢 *Empresas disponibles*";
       return {
         capability: req.name,

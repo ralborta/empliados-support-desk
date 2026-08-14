@@ -34,7 +34,7 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
     return (
       `Funcionamiento normal: la unidad ${unitLabel} envía reporte y posición actualizados` +
       (facts.ignicionEstado === "encendida"
-        ? `; la ignición está encendida (puede llevar rato en ON sin cambiar de estado). `
+        ? `; la ignición está encendida. `
         : ` y la ignición acompaña. `) +
       `No genero ticket. Si algo cambia, volvé a consultar.`
     );
