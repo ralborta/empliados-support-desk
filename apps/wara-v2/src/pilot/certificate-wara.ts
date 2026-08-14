@@ -2,6 +2,7 @@
  * Cliente WARA certificado de cobertura V2 — mismo endpoint que V1.
  */
 import type { CertificateWaraPayload } from "./certificate-types.js";
+import { formatPlateWithSpaces, normalizeLoosePlate } from "./plates.js";
 import { isCertificateWriteEnabled } from "./write-gates.js";
 
 function waraMaintenanceApiBaseUrl(env: NodeJS.ProcessEnv): string {
@@ -16,9 +17,13 @@ export function buildCertificateWaraPayload(input: {
   sessionToken: string;
   patente: string;
 }): CertificateWaraPayload {
+  // Visionblo exige patente con espacios (ej. "AA 496 GN"); sin espacios → "Unidad no encontrada".
+  const spaced =
+    formatPlateWithSpaces(normalizeLoosePlate(input.patente)) ||
+    input.patente.trim();
   return {
     token: input.sessionToken,
-    patente: input.patente.replace(/\s+/g, "").toUpperCase(),
+    patente: spaced,
   };
 }
 

@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13al", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13al/);
+  it("prompt version bump 13am", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13am/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
