@@ -63,11 +63,16 @@ function hasConcreteOps(plan: TurnPlan): boolean {
     ) {
       return true;
     }
-    // unit.search solo cuenta si hay filtro real (no listado completo “de relleno”).
+    // unit.search solo cuenta si hay filtro real (marca/prefijo/código).
+    // No cuenta query=mensaje completo ni listado vacío de relleno.
     if (n === "unit.search") {
       const q = String(c.params?.query ?? "").trim();
       const mode = String(c.params?.mode ?? "").trim().toLowerCase();
-      return Boolean(q) || mode === "filter";
+      if (!q) return false;
+      if (mode === "list") return false;
+      // Query demasiado larga / frase → no es filtro de flota.
+      if (q.length > 24 || /\s/.test(q)) return false;
+      return true;
     }
     if (n === "domain.answer") {
       return isPlatformOrGuideTopic(c.params?.topic);
@@ -166,10 +171,22 @@ export function enrichPlanForOpenConsult(
     plan.requestedCapabilities.some((c) => c.name === "unit.search") &&
     !hasConcreteOps(plan);
 
-  // Pedido concreto (GPS/cert/odo/…): no tocar, salvo que invente "sin info"
-  // o sea un listado completo inventado tras despedida.
-  if (hasConcreteOps(plan) && !noInfo) return plan;
-  if (bareFleetDump || noInfo || weakDomain || (afterClose && !hasConcreteOps(plan))) {
+  // Tras cierre: cualquier unit.search sin filtro corto explícito de listado
+  // (o query=frase del usuario) se reemplaza por menú abierto.
+  const hasBareOrPhonySearch =
+    afterClose &&
+    !looksLikeExplicitFleetList(message) &&
+    plan.requestedCapabilities.some((c) => c.name === "unit.search");
+
+  // Pedido concreto (GPS/cert/odo/filtro corto): no tocar, salvo "sin info".
+  if (hasConcreteOps(plan) && !noInfo && !hasBareOrPhonySearch) return plan;
+  if (
+    hasBareOrPhonySearch ||
+    bareFleetDump ||
+    noInfo ||
+    weakDomain ||
+    (afterClose && !hasConcreteOps(plan))
+  ) {
     return openConsultPlan(plan, state);
   }
 

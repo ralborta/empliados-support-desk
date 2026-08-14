@@ -702,6 +702,9 @@ export async function runCommanderTurn(
     plan = { ...plan, task: "unit_query" };
   }
 
+  // Tras reinyectar unit.search: si era reapertura idle, preferir menú abierto.
+  plan = enrichPlanForOpenConsult(plan, state, input.message);
+
   // Trámites de escritura: si el LLM eligió el task, asegurar *.prepare
   const ensurePrepareFor = (
     task: "odometer" | "hourmeter" | "certificate",

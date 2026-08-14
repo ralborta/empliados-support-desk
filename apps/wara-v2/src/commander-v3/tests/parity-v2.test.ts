@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 14bc", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14bc/);
+  it("prompt version bump 14bd", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14bd/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -141,6 +141,21 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     const noDump = enrichPlanForOpenConsult(fleetDump, s, "Hacer otra consulta");
     assert.equal(noDump.requestedCapabilities.length, 0);
     assert.match(noDump.responseGoal.facts[0] ?? "", /Qué necesitás/i);
+
+    const phonyQuery = TurnPlanSchema.parse({
+      reasoning: "metió el mensaje como query",
+      conversationalAct: "inform",
+      task: "unit_query",
+      requestedCapabilities: [
+        { name: "unit.search", params: { query: "Hacer otra consulta", mode: "query" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.55,
+    });
+    const noPhony = enrichPlanForOpenConsult(phonyQuery, s, "Hacer otra consulta");
+    assert.equal(noPhony.requestedCapabilities.length, 0);
+    assert.match(noPhony.responseGoal.facts[0] ?? "", /Qué necesitás/i);
   });
 
   it("Dale con pendingWrite NO cierra ni confirma", async () => {
