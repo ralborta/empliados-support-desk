@@ -142,24 +142,22 @@ export function applyCommanderState(input: ApplyInput): {
       input.plan.taskAction === "start") &&
     input.plan.task
   ) {
-    // Si ya hay trámite/pending de OTRO tipo, start = reemplazo (limpia confirm)
+    // start_task siempre reinicia collected (no arrastrar km de un odo previo).
     const replacing =
       Boolean(s.pendingWrite) ||
       (s.activeTask != null && s.activeTask.type !== input.plan.task);
-    if (!s.activeTask || replacing) {
-      s = {
-        ...s,
-        activeTask: {
-          type: input.plan.task,
-          status: "collecting",
-          collected: { ...(input.plan.suppliedFields ?? {}) },
-          missing: [],
-        },
-        pendingWrite: replacing ? null : s.pendingWrite,
-        lastQuestion: replacing ? null : s.lastQuestion,
-        pendingEntity: replacing ? null : s.pendingEntity,
-      };
-    }
+    s = {
+      ...s,
+      activeTask: {
+        type: input.plan.task,
+        status: "collecting",
+        collected: { ...(input.plan.suppliedFields ?? {}) },
+        missing: [],
+      },
+      pendingWrite: replacing ? null : s.pendingWrite,
+      lastQuestion: replacing ? null : s.lastQuestion,
+      pendingEntity: replacing ? null : s.pendingEntity,
+    };
   } else if (
     input.plan.conversationalAct === "amend_task" &&
     input.plan.amendment?.target === "unit"

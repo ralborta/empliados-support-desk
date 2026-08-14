@@ -10,7 +10,7 @@ import {
   resolveCompanyReference,
   resolveUnitReference,
 } from "./entities/resolve.js";
-import { executeCapabilities } from "./execute/run-capabilities.js";
+import { executeCapabilities, stripMeterValueConfusedWithUnit } from "./execute/run-capabilities.js";
 import { enrichPlanWithNaturalDatetime } from "./enrich/natural-datetime-plan.js";
 import {
   enrichPlanForCompanyCapture,
@@ -513,9 +513,51 @@ export async function runCommanderTurn(
     }
   }
 
+  // LLM a veces marca switch_task sin trámite previo → no debe pisar el prepare.
+  if (
+    (plan.conversationalAct === "switch_task" || plan.taskAction === "switch") &&
+    !isSwitchingTask(plan, state)
+  ) {
+    plan = {
+      ...plan,
+      conversationalAct: "start_task",
+      taskAction: "start",
+      reasoning:
+        (plan.reasoning ? `${plan.reasoning} ` : "") +
+        "No había trámite previo que suspender: switch_task → start_task.",
+    };
+  }
+
   // Switch: ejecutar el nuevo trámite sobre estado limpio (sin collected ajeno)
   if (isSwitchingTask(plan, state) && plan.task) {
     state = stateForSwitchedTask(state, plan.task);
+  }
+
+  // Nunca tomar el código de unidad como km/hs antes de execute.
+  if (
+    (plan.task === "odometer" || plan.task === "hourmeter") &&
+    plan.suppliedFields?.value != null
+  ) {
+    const cleaned = stripMeterValueConfusedWithUnit({
+      value: plan.suppliedFields.value,
+      unit: state.unit,
+      message: input.message,
+      unitReferenceValue:
+        plan.unitReference?.kind === "unit"
+          ? String(plan.unitReference.value ?? "")
+          : null,
+    });
+    if (cleaned == null) {
+      const fields = { ...(plan.suppliedFields ?? {}) };
+      delete fields.value;
+      plan = {
+        ...plan,
+        suppliedFields: fields,
+        reasoning:
+          (plan.reasoning ? `${plan.reasoning} ` : "") +
+          "Quité suppliedFields.value: era el código/ref de unidad, no el medidor.",
+      };
+    }
   }
 
   // Medidor sin unidad: listar flota en el mismo turno (estructural, no semántico)
@@ -868,15 +910,13 @@ export async function runCommanderTurn(
     reply,
   });
 
-  // Execute patches (pendingWrite de *.prepare) vs apply lifecycle (cancel/switch).
-  // Cancel/switch DEBEN ganar: antes se reescribía pendingWrite viejo y "cancelar" no limpiaba.
-  const lifecycleWins =
-    plan.conversationalAct === "cancel_task" ||
-    plan.taskAction === "cancel" ||
-    plan.conversationalAct === "switch_task" ||
-    plan.taskAction === "switch";
+  // Cancel DEBE ganar sobre patches de execute (pendingWrite residual).
+  // Switch/start: el prepare de execute ya armó activeTask/lastQuestion — no pisarlos
+  // con un rebuild desde suppliedFields (reinyectaba el código de unidad como km).
+  const cancelWins =
+    plan.conversationalAct === "cancel_task" || plan.taskAction === "cancel";
 
-  let finalState: ConversationStateV3 = lifecycleWins
+  let finalState: ConversationStateV3 = cancelWins
     ? {
         ...applied.state,
         unit: state.unit ?? applied.state.unit,
@@ -886,7 +926,6 @@ export async function runCommanderTurn(
       }
     : {
         ...applied.state,
-        // keep execute patches for pendingWrite/activeTask if apply didn't wipe them wrongly
         activeTask: state.activeTask ?? applied.state.activeTask,
         pendingWrite: state.pendingWrite ?? applied.state.pendingWrite,
         pendingEntity: state.pendingEntity ?? applied.state.pendingEntity,

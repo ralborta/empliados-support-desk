@@ -95,7 +95,12 @@ function missingForMeter(state: ConversationStateV3, plan: TurnPlan): string[] {
  */
 export function stripMeterValueConfusedWithUnit(input: {
   value: unknown;
-  unit: { movilId: number; name: string | null; plate: string | null; label: string };
+  unit?: {
+    movilId: number;
+    name: string | null;
+    plate: string | null;
+    label: string;
+  } | null;
   message?: string;
   unitReferenceValue?: string | null;
 }): number | null {
@@ -107,18 +112,36 @@ export function stripMeterValueConfusedWithUnit(input: {
   const add = (raw: string | null | undefined) => {
     if (!raw) return;
     const digits = String(raw).replace(/\D/g, "");
-    if (digits) candidates.add(digits);
+    if (digits.length >= 5) candidates.add(digits);
     const code = extractUnitNameCode(String(raw));
-    if (code) candidates.add(code.replace(/\D/g, ""));
+    if (code) {
+      const codeDigits = code.replace(/\D/g, "");
+      if (codeDigits.length >= 5) candidates.add(codeDigits);
+      if (/^m\d/i.test(code)) {
+        const withoutM = code.replace(/^m/i, "").replace(/\D/g, "");
+        if (withoutM.length >= 5) candidates.add(withoutM);
+      }
+    }
   };
-  add(input.unit.name);
-  add(input.unit.plate);
-  add(input.unit.label);
-  add(String(input.unit.movilId));
+  if (input.unit) {
+    add(input.unit.name);
+    add(input.unit.plate);
+    add(input.unit.label);
+    add(String(input.unit.movilId));
+  }
   add(input.unitReferenceValue ?? null);
   // Solo del mensaje si trae contexto de unidad (no cuando el mensaje ES el km).
-  if (input.message && /\b(unidad|patente|m\d{3}|od[oó]metro|odometro|hor[oó]metro)\b/i.test(input.message)) {
+  if (
+    input.message &&
+    /\b(unidad|patente|m\d{3}|od[oó]metro|odometro|hor[oó]metro|cambio)\b/i.test(
+      input.message,
+    )
+  ) {
     add(extractUnitNameCode(input.message));
+    const nearUnit = input.message.match(
+      /\b(?:unidad|patente|m[oó]vil|movil)\s*[:=]?\s*(M?\d{5,7})\b/i,
+    );
+    if (nearUnit?.[1]) add(nearUnit[1]);
   }
 
   const valueDigits = String(Math.trunc(n));
@@ -849,8 +872,14 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           },
         };
       }
+      // start/switch = trámite nuevo: no heredar km/fecha de un odo anterior contaminado.
+      const freshMeterStart =
+        ctx.plan.conversationalAct === "start_task" ||
+        ctx.plan.conversationalAct === "switch_task" ||
+        ctx.plan.taskAction === "start" ||
+        ctx.plan.taskAction === "switch";
       const collected: Record<string, unknown> = {
-        ...(ctx.state.activeTask?.type === meter
+        ...(!freshMeterStart && ctx.state.activeTask?.type === meter
           ? (ctx.state.activeTask.collected ?? {})
           : {}),
         ...(ctx.plan.suppliedFields ?? {}),

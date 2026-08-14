@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13ai", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ai/);
+  it("prompt version bump 13aj", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13aj/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -825,6 +825,15 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     );
     assert.equal(
       stripMeterValueConfusedWithUnit({
+        value: 900071,
+        unit: null,
+        message: "Cambio de odometro a la Unidad 900071",
+        unitReferenceValue: "900071",
+      }),
+      null,
+    );
+    assert.equal(
+      stripMeterValueConfusedWithUnit({
         value: 129556,
         unit,
         message: "129556",
@@ -865,6 +874,46 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.match(blob, /od[oó]metro \(km\)|Pasame el valor/i);
     assert.doesNotMatch(blob, /Fecha y hora/i);
     assert.equal(exec.state.lastQuestion?.expected, "value");
+
+    // start_task no hereda km fantasma de un odo anterior
+    const sContaminated = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    sContaminated.company = { id: "1", name: "WARA", contactId: 1 };
+    sContaminated.unit = unit;
+    sContaminated.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: { value: 999999 },
+      missing: ["date", "time"],
+    };
+    const planFresh = TurnPlanSchema.parse({
+      reasoning: "odo fresh",
+      conversationalAct: "start_task",
+      task: "odometer",
+      taskAction: "start",
+      unitReference: {
+        kind: "unit",
+        mode: "unit_name",
+        value: "900077",
+        reference: null,
+      },
+      suppliedFields: {},
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const execFresh = await executeCapabilities({
+      state: sContaminated,
+      plan: planFresh,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: unit,
+      resolvedCompanyId: "1",
+      message: "Cambio de odometro a la unidad 900077",
+    });
+    assert.equal(execFresh.state.activeTask?.collected?.value, undefined);
+    assert.match(execFresh.facts.join(" "), /od[oó]metro \(km\)|Pasame el valor/i);
+    assert.doesNotMatch(execFresh.facts.join(" "), /Fecha y hora/i);
   });
 
   it("idle pending confirm + hola → ofrece cancelar o después", async () => {
