@@ -64,19 +64,28 @@ export function enrichPlanForGreetingPolicy(
       };
     }
     // Empresa activa: nunca re-listar aunque el LLM la meta en inform
+    // (salvo reinicio/cambio explícito con reset).
     if (
       state.company &&
       plan.requestedCapabilities.some((c) => c.name === "company.list")
     ) {
-      return {
-        ...plan,
-        requestedCapabilities: plan.requestedCapabilities.filter(
-          (c) => c.name !== "company.list",
-        ),
-        reasoning:
-          (plan.reasoning ? `${plan.reasoning} ` : "") +
-          "Empresa ya activa: quité company.list del plan.",
-      };
+      const keepReset = plan.requestedCapabilities.some(
+        (c) =>
+          c.name === "company.list" &&
+          (c.params?.reset === true ||
+            plan.stateIntent?.preserveCompany === false),
+      );
+      if (!keepReset) {
+        return {
+          ...plan,
+          requestedCapabilities: plan.requestedCapabilities.filter(
+            (c) => c.name !== "company.list",
+          ),
+          reasoning:
+            (plan.reasoning ? `${plan.reasoning} ` : "") +
+            "Empresa ya activa: quité company.list del plan.",
+        };
+      }
     }
     return plan;
   }

@@ -16,6 +16,7 @@ import {
   enrichPlanForCompanyCapture,
   enrichPlanForGreetingCompanyGate,
 } from "./enrich/company-capture.js";
+import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanForSoftClose } from "./enrich/soft-close.js";
@@ -417,6 +418,7 @@ export async function runCommanderTurn(
   plan = enrichPlanForMeterValueFallback(plan, state, input.message);
   plan = enrichPlanForTaskSwitch(plan, state);
   plan = enrichPlanForCancelGuard(plan, state, input.message);
+  plan = enrichPlanForCompanyChange(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
@@ -770,7 +772,17 @@ export async function runCommanderTurn(
   }
 
   // Ensure company selected for ops if only one contact
-  if (!state.company && state.availableCompanies.length === 1) {
+  // (no auto-seleccionar si el usuario pidió reiniciar/cambiar empresa).
+  const companyResetPending = plan.requestedCapabilities.some(
+    (c) =>
+      c.name === "company.list" &&
+      (c.params?.reset === true || plan.stateIntent?.preserveCompany === false),
+  );
+  if (
+    !state.company &&
+    state.availableCompanies.length === 1 &&
+    !companyResetPending
+  ) {
     state = { ...state, company: state.availableCompanies[0]! };
   }
 

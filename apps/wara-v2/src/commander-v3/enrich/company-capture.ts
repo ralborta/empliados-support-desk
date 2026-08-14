@@ -120,8 +120,15 @@ export function enrichPlanForGreetingCompanyGate(
   plan: TurnPlan,
   state: ConversationStateV3,
 ): TurnPlan {
-  // Empresa ya activa: NUNCA re-listar (evita "Empresas disponibles" mid-flujo).
+  // Empresa ya activa: NUNCA re-listar (evita "Empresas disponibles" mid-flujo),
+  // salvo reinicio/cambio explícito (params.reset / preserveCompany=false).
   if (state.company) {
+    const isReset = plan.requestedCapabilities.some(
+      (c) =>
+        c.name === "company.list" &&
+        (c.params?.reset === true || plan.stateIntent?.preserveCompany === false),
+    );
+    if (isReset) return plan;
     const stripped = plan.requestedCapabilities.filter(
       (c) => c.name !== "company.list",
     );

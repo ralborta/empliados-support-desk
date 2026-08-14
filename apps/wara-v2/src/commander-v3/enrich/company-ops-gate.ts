@@ -15,6 +15,14 @@ const OPS_CAPS = new Set([
   "maintenance.prepare",
 ]);
 
+function isCompanyResetList(plan: TurnPlan): boolean {
+  return plan.requestedCapabilities.some(
+    (c) =>
+      c.name === "company.list" &&
+      (c.params?.reset === true || plan.stateIntent?.preserveCompany === false),
+  );
+}
+
 function needsCompanyForOps(plan: TurnPlan): boolean {
   if (
     plan.task === "gps" ||
@@ -33,6 +41,9 @@ export function enrichPlanForCompanyOpsGate(
   plan: TurnPlan,
   state: ConversationStateV3,
 ): TurnPlan {
+  // Reinicio/cambio explícito: NUNCA strippear company.list.
+  if (isCompanyResetList(plan)) return plan;
+
   if (state.company) {
     if (!plan.requestedCapabilities.some((c) => c.name === "company.list")) {
       return plan;
@@ -78,11 +89,11 @@ export function enrichPlanForCompanyOpsGate(
       nextQuestion:
         plan.task === "gps" ||
         plan.requestedCapabilities.some((c) => c.name === "gps.get_status")
-          ? "¿Con qué empresa seguimos para el reporte?"
-          : "¿Con qué empresa seguimos?",
+          ? "Elegí la empresa (1/2/nombre) y después te doy el reporte."
+          : "¿Con qué empresa seguimos? (número o nombre)",
     },
     reasoning:
       (plan.reasoning ? `${plan.reasoning} ` : "") +
-      "Sin empresa activa: primero elegir empresa (no flota/GPS todavía).",
+      "Sin empresa: primero company.list, después la operación.",
   };
 }

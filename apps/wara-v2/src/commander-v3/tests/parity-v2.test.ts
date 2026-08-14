@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13as", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13as/);
+  it("prompt version bump 14at", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14at/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -93,6 +93,102 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     const enriched = enrichPlanForSoftClose(plan, s, "Dale");
     assert.equal(enriched.conversationalAct, "inform");
     assert.notEqual(enriched.responseGoal.purpose, "close");
+  });
+
+  it("reiniciar empresa limpia y lista nombres del API (no queda pegado Cacique)", async () => {
+    const { enrichPlanForCompanyChange } = await import(
+      "../enrich/company-change.js"
+    );
+    const { enrichPlanForCompanyOpsGate } = await import(
+      "../enrich/company-ops-gate.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.unit = {
+      movilId: 90,
+      plate: "AE483VE",
+      name: "SAVEIRO",
+      label: "AE 483 VE (SAVEIRO)",
+    };
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "llm inventó get_active",
+      conversationalAct: "inform",
+      task: null,
+      requestedCapabilities: [{ name: "company.get_active", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.5,
+    });
+    const enriched = enrichPlanForCompanyChange(plan, s, "reiniciar empresa");
+    assert.equal(enriched.stateIntent.preserveCompany, false);
+    assert.ok(
+      enriched.requestedCapabilities.some(
+        (c) => c.name === "company.list" && c.params?.reset === true,
+      ),
+    );
+    const gated = enrichPlanForCompanyOpsGate(enriched, s);
+    assert.ok(
+      gated.requestedCapabilities.some((c) => c.name === "company.list"),
+      "ops-gate no debe strippear reset",
+    );
+
+    const exec = await executeCapabilities({
+      plan: gated,
+      state: s,
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: null,
+      message: "reiniciar empresa",
+    });
+    assert.equal(exec.state.company, null);
+    assert.equal(exec.state.unit, null);
+    assert.match(exec.facts.join("\n"), /WARA/i);
+    assert.match(exec.facts.join("\n"), /Cacique/i);
+    assert.match(exec.facts.join("\n"), /Cambio de empresa|Empresas/i);
+  });
+
+  it("company.select cambia empresa y suelta la unidad anterior", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.unit = {
+      movilId: 90,
+      plate: "AE483VE",
+      name: "SAVEIRO",
+      label: "AE 483 VE",
+    };
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "elige WARA",
+      conversationalAct: "inform",
+      requestedCapabilities: [
+        { name: "company.select", params: { companyId: "1" } },
+      ],
+      stateIntent: {
+        preserveCompany: false,
+        preserveUnit: false,
+        preserveTask: false,
+      },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      plan,
+      state: s,
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: "1",
+      message: "WARA",
+    });
+    assert.equal(exec.state.company?.name, "WARA");
+    assert.equal(exec.state.unit, null);
+    assert.match(exec.facts.join(" "), /WARA/i);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {

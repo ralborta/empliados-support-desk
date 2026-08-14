@@ -123,19 +123,22 @@ export async function loadCommanderV3Context(input: {
     });
   } else {
     // Remapear contactId si hay aliases (ej. 486546 → 64866) para que la flota cargue.
+    // Siempre refrescar el nombre desde el API (no dejar "El Cacique" stale).
     const remappedCompany = state.company
       ? availableCompanies.find(
           (c) =>
             c.contactId === state!.company!.contactId ||
+            c.id === state!.company!.id ||
             c.name.trim().toLowerCase() ===
               state!.company!.name.trim().toLowerCase(),
-        ) ?? state.company
+        ) ?? null
       : availableCompanies.length === 1
         ? availableCompanies[0]!
         : null;
     state = {
       ...state,
       availableCompanies,
+      // Si el contactId ya no está en el API, soltar empresa (evitar fantasma).
       company: remappedCompany,
     };
     saveConversationStateV3(state);

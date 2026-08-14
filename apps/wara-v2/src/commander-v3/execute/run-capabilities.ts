@@ -467,6 +467,9 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       };
     }
     case "company.list": {
+      const reset =
+        req.params?.reset === true ||
+        ctx.plan.stateIntent?.preserveCompany === false;
       const items = ctx.state.availableCompanies.map((c, i) => ({
         index: i + 1,
         label: c.name,
@@ -481,12 +484,26 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         fetchedAt: new Date().toISOString(),
       };
       const lines = items.map((i) => `${i.index}. ${i.label}`).join("\n");
+      const header = reset
+        ? "🏢 *Cambio de empresa*\nElegí con cuál seguimos (nombre del API):"
+        : "🏢 *Empresas disponibles*";
       return {
         capability: req.name,
         ok: true,
-        facts: [`Empresas disponibles:\n${lines}`],
+        facts: [`${header}\n${lines}`],
         data: {
           statePatch: {
+            ...(reset
+              ? {
+                  company: null,
+                  unit: null,
+                  previousUnit: null,
+                  fleetCache: [],
+                  pendingWrite: null,
+                  activeTask: null,
+                  pendingEntity: null,
+                }
+              : {}),
             lastListing: listing,
             lastQuestion: {
               id: randomUUID(),
@@ -509,13 +526,26 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return { capability: req.name, ok: false, facts: [], error: "not_found" };
       }
       const alreadyActive = ctx.state.company?.id === company.id;
+      const switched = Boolean(ctx.state.company && !alreadyActive);
       return {
         capability: req.name,
         ok: true,
-        facts: alreadyActive ? [] : [`Seguimos con ${company.name}.`],
+        facts: alreadyActive
+          ? []
+          : [`🏢 Seguimos con *${company.name}*.`],
         data: {
           statePatch: {
             company,
+            // Al cambiar de empresa: soltar unidad/flota/trámites de la anterior.
+            ...(switched || !ctx.state.company
+              ? {
+                  unit: null,
+                  previousUnit: switched ? ctx.state.unit : ctx.state.previousUnit,
+                  fleetCache: [],
+                  pendingWrite: null,
+                  activeTask: null,
+                }
+              : {}),
             pendingEntity:
               ctx.state.pendingEntity?.type === "company"
                 ? null
