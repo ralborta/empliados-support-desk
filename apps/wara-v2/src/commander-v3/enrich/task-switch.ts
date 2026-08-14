@@ -49,7 +49,12 @@ export function isSwitchingTask(
 
   // Si estamos pidiendo un campo concreto, el mensaje es la respuesta — no un switch.
   const expected = state.lastQuestion?.expected;
-  if (expected === "value" || expected === "date" || expected === "time") {
+  if (
+    expected === "value" ||
+    expected === "date" ||
+    expected === "time" ||
+    expected === "free_text"
+  ) {
     return false;
   }
 

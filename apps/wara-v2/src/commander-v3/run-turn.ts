@@ -513,6 +513,89 @@ export async function runCommanderTurn(
     }
   }
 
+  // Mid mantenimiento: el detalle (ej. "Del GPS") NUNCA es gps.get_status.
+  if (
+    state.activeTask?.type === "maintenance" &&
+    state.activeTask.status === "collecting" &&
+    !state.pendingWrite
+  ) {
+    const answeringDetail =
+      state.lastQuestion?.expected === "free_text" ||
+      state.lastQuestion?.purpose === "maintenance_detail" ||
+      state.lastQuestion?.expected === "unit" ||
+      Boolean(plan.suppliedFields?.detail);
+    const switchTarget = plan.task;
+    const realOpsSwitch =
+      (plan.conversationalAct === "switch_task" ||
+        plan.taskAction === "switch" ||
+        plan.conversationalAct === "start_task") &&
+      switchTarget &&
+      switchTarget !== "maintenance" &&
+      (switchTarget === "certificate" ||
+        switchTarget === "gps" ||
+        switchTarget === "odometer" ||
+        switchTarget === "hourmeter" ||
+        switchTarget === "human_handoff");
+    // "Del GPS" / texto corto mientras pedimos detalle ≠ switch a GPS.
+    const keepSwitch =
+      Boolean(realOpsSwitch) &&
+      !answeringDetail &&
+      state.lastQuestion?.expected !== "free_text";
+
+    if (!keepSwitch) {
+      const detail =
+        (typeof plan.suppliedFields?.detail === "string"
+          ? plan.suppliedFields.detail
+          : null) ??
+        (answeringDetail &&
+        state.lastQuestion?.expected === "free_text" &&
+        input.message.trim()
+          ? input.message.trim()
+          : null);
+      plan = {
+        ...plan,
+        task: "maintenance",
+        conversationalAct:
+          plan.conversationalAct === "cancel_task"
+            ? "cancel_task"
+            : "continue_task",
+        taskAction:
+          plan.taskAction === "cancel" ? "cancel" : "continue",
+        suppliedFields: {
+          ...(plan.suppliedFields ?? {}),
+          ...(detail ? { detail } : {}),
+        },
+        responseGoal: {
+          purpose: "ask_missing",
+          facts: (plan.responseGoal.facts ?? []).filter(
+            (f) =>
+              !/Dejamos pendiente|aclaraci[oó]n puntual|tr[aá]mite actual/i.test(
+                f,
+              ),
+          ),
+          nextQuestion: null,
+        },
+        requestedCapabilities: [
+          ...plan.requestedCapabilities.filter(
+            (c) =>
+              c.name !== "gps.get_status" &&
+              c.name !== "unit.search" &&
+              c.name !== "domain.answer" &&
+              c.name !== "certificate.prepare",
+          ),
+          ...(plan.requestedCapabilities.some(
+            (c) => c.name === "maintenance.prepare",
+          )
+            ? []
+            : [{ name: "maintenance.prepare", params: {} }]),
+        ],
+        reasoning:
+          (plan.reasoning ? `${plan.reasoning} ` : "") +
+          "Mid-mantenimiento: mantengo maintenance.prepare (no GPS).",
+      };
+    }
+  }
+
   // LLM a veces marca switch_task sin trámite previo → no debe pisar el prepare.
   if (
     (plan.conversationalAct === "switch_task" || plan.taskAction === "switch") &&

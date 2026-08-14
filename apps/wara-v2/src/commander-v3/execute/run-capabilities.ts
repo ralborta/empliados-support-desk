@@ -544,20 +544,24 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
           name: only.name,
           label: only.label,
         };
-        const writingNow = ctx.plan.requestedCapabilities.some(
-          (c) =>
-            c.name === "odometer.prepare" ||
-            c.name === "hourmeter.prepare" ||
-            c.name === "certificate.prepare",
-        );
-        const askWhat =
-          !wantsGps &&
-          !writingNow &&
-          ctx.plan.task !== "odometer" &&
-          ctx.plan.task !== "hourmeter" &&
-          ctx.plan.task !== "certificate"
-            ? "¿En qué te ayudo con esta unidad? (estado/reporte, odómetro, certificado…)"
-            : null;
+      const writingNow = ctx.plan.requestedCapabilities.some(
+        (c) =>
+          c.name === "odometer.prepare" ||
+          c.name === "hourmeter.prepare" ||
+          c.name === "certificate.prepare" ||
+          c.name === "maintenance.prepare" ||
+          c.name === "handoff.prepare",
+      );
+      const askWhat =
+        !wantsGps &&
+        !writingNow &&
+        ctx.plan.task !== "odometer" &&
+        ctx.plan.task !== "hourmeter" &&
+        ctx.plan.task !== "certificate" &&
+        ctx.plan.task !== "maintenance" &&
+        ctx.plan.task !== "human_handoff"
+          ? "¿En qué te ayudo con esta unidad? (estado/reporte, odómetro, certificado…)"
+          : null;
         return {
           capability: req.name,
           ok: true,
@@ -682,13 +686,17 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         (c) =>
           c.name === "odometer.prepare" ||
           c.name === "hourmeter.prepare" ||
-          c.name === "certificate.prepare",
+          c.name === "certificate.prepare" ||
+          c.name === "maintenance.prepare" ||
+          c.name === "handoff.prepare",
       );
       const askWhat =
         !writingNow &&
         ctx.plan.task !== "odometer" &&
         ctx.plan.task !== "hourmeter" &&
         ctx.plan.task !== "certificate" &&
+        ctx.plan.task !== "maintenance" &&
+        ctx.plan.task !== "human_handoff" &&
         ctx.plan.task !== "gps"
           ? "¿En qué te ayudo con esta unidad? (estado/reporte, odómetro, certificado…)"
           : null;

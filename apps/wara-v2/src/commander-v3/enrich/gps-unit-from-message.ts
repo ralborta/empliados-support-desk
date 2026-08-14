@@ -107,10 +107,13 @@ export function enrichPlanPromoteGpsFromReasoning(
   plan: TurnPlan,
   state?: ConversationStateV3,
 ): TurnPlan {
-  // Mid odómetro/horómetro: nunca hijack a GPS (“¿y los kilómetros?”).
+  // Mid trámite de escritura: nunca hijack a GPS.
   if (
     state?.activeTask?.type === "odometer" ||
-    state?.activeTask?.type === "hourmeter"
+    state?.activeTask?.type === "hourmeter" ||
+    state?.activeTask?.type === "maintenance" ||
+    state?.activeTask?.type === "human_handoff" ||
+    state?.activeTask?.type === "certificate"
   ) {
     return plan;
   }
@@ -118,7 +121,16 @@ export function enrichPlanPromoteGpsFromReasoning(
   if (
     plan.task === "odometer" ||
     plan.task === "hourmeter" ||
-    plan.task === "certificate"
+    plan.task === "certificate" ||
+    plan.task === "maintenance" ||
+    plan.task === "human_handoff"
+  ) {
+    return plan;
+  }
+  if (
+    state?.lastQuestion?.expected === "free_text" &&
+    (state.lastQuestion.purpose === "maintenance_detail" ||
+      state.lastQuestion.purpose === "handoff_detail")
   ) {
     return plan;
   }

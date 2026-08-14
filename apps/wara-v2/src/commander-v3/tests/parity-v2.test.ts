@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 13an", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13an/);
+  it("prompt version bump 13ao", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-13ao/);
   });
 
   it("esta mañana 5 → date hoy + 05:00 en continue_task", () => {
@@ -1056,6 +1056,108 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /correctivo/i);
     assert.match(exec.facts.join(" "), /URGENT/);
+  });
+
+  it("mid-mant: Del GPS es detalle, no gps.get_status", async () => {
+    const { enrichPlanForExpectedFields } = await import(
+      "../enrich/expected-field-capture.js"
+    );
+    const { enrichPlanPromoteGpsFromReasoning } = await import(
+      "../enrich/gps-unit-from-message.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 75,
+      plate: "AA454CR",
+      name: "M900-075",
+      label: "AA 454 CR (M900-075)",
+    };
+    s.activeTask = {
+      type: "maintenance",
+      status: "collecting",
+      collected: {},
+      missing: ["detail"],
+    };
+    s.lastQuestion = {
+      id: "1",
+      purpose: "maintenance_detail",
+      expected: "free_text",
+    };
+    let plan = TurnPlanSchema.parse({
+      reasoning: "El usuario menciona GPS, parece un reporte de ubicación",
+      conversationalAct: "start_task",
+      task: "gps",
+      taskAction: "start",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.7,
+    });
+    plan = enrichPlanForExpectedFields(plan, s, "Del GPS");
+    plan = enrichPlanPromoteGpsFromReasoning(plan, s);
+    assert.equal(plan.task, "maintenance");
+    assert.equal(plan.suppliedFields?.detail, "Del GPS");
+    assert.ok(
+      plan.requestedCapabilities.some((c) => c.name === "maintenance.prepare"),
+    );
+    assert.ok(
+      !plan.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+    );
+
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: s.unit,
+      resolvedCompanyId: "1",
+      message: "Del GPS",
+    });
+    assert.match(exec.facts.join(" "), /Confirmás el pedido de mantenimiento/i);
+    assert.match(exec.facts.join(" "), /Del GPS/i);
+    assert.doesNotMatch(exec.facts.join(" "), /detenida|Ubicaci[oó]n|reporte hace/i);
+  });
+
+  it("unit.select mid-mant no pregunta menú genérico", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.activeTask = {
+      type: "maintenance",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    const unit = {
+      movilId: 75,
+      plate: "AA454CR",
+      name: "M900-075",
+      label: "AA 454 CR (M900-075)",
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning: "mant + unidad",
+      conversationalAct: "start_task",
+      task: "maintenance",
+      taskAction: "start",
+      requestedCapabilities: [
+        { name: "unit.select", params: { movilId: 75 } },
+        { name: "maintenance.prepare", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: unit,
+      resolvedCompanyId: null,
+      message: "mantenimiento 900075",
+    });
+    const blob = exec.facts.join(" ");
+    assert.doesNotMatch(blob, /En qu[eé] te ayudo con esta unidad/i);
+    assert.match(blob, /detalle del mantenimiento|Confirmás el pedido/i);
   });
 
   it("domain.answer platform_mantenimiento fallback", async () => {

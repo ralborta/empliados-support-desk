@@ -54,6 +54,10 @@ function ensureTaskCapsAfterUnit(
     next = ensureCap(next, `${task}.prepare`);
   } else if (task === "certificate") {
     next = ensureCap(next, "certificate.prepare");
+  } else if (task === "maintenance") {
+    next = ensureCap(next, "maintenance.prepare");
+  } else if (task === "human_handoff") {
+    next = ensureCap(next, "handoff.prepare");
   } else if (task === "gps") {
     next = ensureCap(next, "gps.get_status");
   }
@@ -100,6 +104,67 @@ export function enrichPlanForExpectedFields(
     };
     next = ensureCap(next, `${meter}.prepare`);
     return next;
+  }
+
+  // Detalle libre pedido (mantenimiento / handoff): el mensaje ES el campo.
+  if (expected === "free_text") {
+    const purpose = state.lastQuestion?.purpose ?? "";
+    if (
+      purpose === "maintenance_detail" ||
+      (state.activeTask?.type === "maintenance" &&
+        state.activeTask.status === "collecting" &&
+        state.activeTask.collected?.detail == null)
+    ) {
+      let next: TurnPlan = {
+        ...plan,
+        conversationalAct: "continue_task",
+        task: "maintenance",
+        taskAction: "continue",
+        suppliedFields: { ...(plan.suppliedFields ?? {}), detail: t },
+        requestedCapabilities: plan.requestedCapabilities.filter(
+          (c) => c.name !== "gps.get_status" && c.name !== "unit.search",
+        ),
+        responseGoal: {
+          purpose: "ask_missing",
+          facts: (plan.responseGoal.facts ?? []).filter(
+            (f) => !/Dejamos pendiente|aclaraci[oó]n puntual/i.test(f),
+          ),
+          nextQuestion: null,
+        },
+        reasoning:
+          plan.reasoning ||
+          "El usuario aportó el detalle pedido para el mantenimiento.",
+      };
+      next = ensureCap(next, "maintenance.prepare");
+      return next;
+    }
+    if (
+      purpose === "handoff_detail" ||
+      (state.activeTask?.type === "human_handoff" &&
+        state.activeTask.status === "collecting" &&
+        state.activeTask.collected?.detail == null)
+    ) {
+      let next: TurnPlan = {
+        ...plan,
+        conversationalAct: "continue_task",
+        task: "human_handoff",
+        taskAction: "continue",
+        suppliedFields: { ...(plan.suppliedFields ?? {}), detail: t },
+        requestedCapabilities: plan.requestedCapabilities.filter(
+          (c) => c.name !== "gps.get_status",
+        ),
+        responseGoal: {
+          purpose: "ask_missing",
+          facts: [],
+          nextQuestion: null,
+        },
+        reasoning:
+          plan.reasoning ||
+          "El usuario aportó el motivo pedido para la derivación.",
+      };
+      next = ensureCap(next, "handoff.prepare");
+      return next;
+    }
   }
 
   return plan;

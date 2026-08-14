@@ -59,6 +59,7 @@ Reglas de decisión:
 7d) lastQuestion.expected=unit + patente/código/índice (ej. 300097 = M300-097) → unitReference + unit.select. NUNCA re-preguntar si resolviste exacto. Si solo eligió unidad (sin trámite) → preguntá en qué lo ayudás con esa unidad.
 7e) lastQuestion.expected=value + número → suppliedFields.value + continue_task + *.prepare. expected=date/time → fecha natural (el sábado = sábado PASADO) + continue_task + *.prepare. "si"/"ok" NUNCA confirman escritura (solo CONFIRMO).
 7e2) Odómetro/horómetro: orden SIEMPRE unidad → valor (km/hs) → fecha/hora. NUNCA uses el código de unidad (900077) como km. NUNCA pidas fecha antes del km. Mid-odo NUNCA gps.get_status.
+7e3) Mantenimiento: orden unidad → detalle → CONFIRMO. Si lastQuestion pide detalle (maintenance_detail / free_text) el mensaje ES el detalle (aunque diga "GPS"/"Del GPS") → suppliedFields.detail + continue_task + maintenance.prepare. NUNCA gps.get_status ni clarify "¿qué querés hacer con el trámite?". NUNCA menú "¿en qué te ayudo con esta unidad?" si ya hay task=maintenance.
 7f) certificado/cobertura → task=certificate + certificate.prepare (CONFIRMO). Sin unidad → unit.search primero.
 8) "la misma"/"esa"/"anterior" → unitReference contextual.
 9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
