@@ -55,12 +55,19 @@ function hashPayload(obj: unknown): string {
   return createHash("sha256").update(JSON.stringify(obj)).digest("hex").slice(0, 32);
 }
 
-/** Fecha interna YYYY-MM-DD → display dd/mm/aa (WhatsApp). */
+/** Fecha interna YYYY-MM-DD (o ISO con hora) → display dd/mm/aa (WhatsApp). */
 export function formatDateDdMmYy(isoDate: unknown): string {
   if (typeof isoDate !== "string") return String(isoDate ?? "");
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/.exec(isoDate.trim());
   if (!m) return isoDate;
   return `${m[3]}/${m[2]}/${m[1]!.slice(2)}`;
+}
+
+/** Normaliza date de collected a YYYY-MM-DD (sin hora ISO cruda). */
+export function normalizeMeterDateIso(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/.exec(raw.trim());
+  return m?.[1] ?? null;
 }
 
 /** Pie de confirmación de escritura (CONFIRMO o CANCELAR). */
@@ -900,6 +907,9 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
       } else {
         collected.value = cleanedValue;
       }
+
+      const dateIso = normalizeMeterDateIso(collected.date);
+      if (dateIso) collected.date = dateIso;
 
       // Anomalía ya pendiente + confirm_write → aceptar valor candidato
       if (
