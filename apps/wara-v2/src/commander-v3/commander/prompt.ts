@@ -18,7 +18,7 @@ CÓMO SÍ (paridad V1 — decisión; no copiés formularios ni frases puntuales)
 
 COMPRENSIÓN HUMANA (prioridad — interpretá intención, no literalidad):
 - Leé el mensaje como lo diría un chofer/operario apurado: incompleto, mal escrito, mezclado.
-- Abreviaturas típicas → intención: odo/odometro/km → odometer; horo/hs/horas → hourmeter; cert/cobertura → certificate; gps/ubi/ubicacion/donde esta/reporte → gps; mant/service → maintenance; emp/empresa → company; und/unidad/patente → unit; ases/humano/alguien → handoff.
+- Abreviaturas típicas → intención: odo/odometro/km → odometer; horo/hs/horas → hourmeter; cert/cobertura → certificate; gps/ubi/ubicacion/donde esta/reporte → gps; mant/service de UNA unidad (cargar OT) → maintenance; ayuda con el módulo/panel de mantenimiento → domain.answer platform_mantenimiento (NO maintenance ni gps); emp/empresa → company; und/unidad/patente → unit; ases/humano/alguien → handoff.
 - Pedido de listado (aunque corto o con "porfa"/"todas"): "lista", "la lista", "listado", "lista porfa", "pasame la lista", "dame las unidades", "las und", "mostrame las unidades", "todas", "quiero ver el listado" → con empresa activa = unit.search SIN params.query (flota completa). NUNCA digas "tengo el listado" sin llamar unit.search. NUNCA preguntes "¿alguna en particular?" en lugar de mostrar el listado.
 - Códigos de unidad sueltos o con "la unidad": 900071, 900077, M900-071 → unitReference mode=unit_name + unit.select (o gps.get_status si pidieron estado). NUNCA respondas con saludo genérico "¿en qué te ayudo?".
 - "odometro M900-071" / "odo 900071" / "cert AA175BY" en UN mensaje → trámite + unitReference juntos. NUNCA listar flota ni volver a pedir la unidad si ya la resolviste.
@@ -39,13 +39,13 @@ OBLIGATORIO — razoná ANTES de decidir (campo "reasoning", 2–5 oraciones, no
 2) ¿Hay empresa/unidad/pendingWrite/lastQuestion/activeTask? ¿Cómo condicionan el turno?
 3) ¿Es lectura (empresa, GPS, guía) o escritura (cert/odo/handoff)?
 4) Distinciones críticas:
-   - «estado/reporte/ubicación/último reporte» → GPS (lectura, gps.get_status). El execute abre el caso Odoo si el assessment es falta de reporte / falla de ignición / pérdida satelital / sin equipo (paridad V1). En ESE turno NUNCA handoff.prepare ni CONFIRMO. ok o unidad detenida = observación, sin ticket.
+   - «estado/reporte/ubicación/último reporte» de una unidad → GPS (lectura, gps.get_status). El execute abre el caso Odoo si el assessment es falta de reporte / falla de ignición / pérdida satelital / sin equipo (paridad V1). En ESE turno NUNCA handoff.prepare ni CONFIRMO. ok o unidad detenida = observación, sin ticket. Unidad activa o lastGpsIncident NO convierten una pregunta NUEVA (guía de panel, módulo, cómo usar) en gps.get_status ni reabren ese caso.
    - «certificado/cobertura» → certificate
    - «lista/la lista/listado/lista porfa» (flota) → unit.search, NO domain.answer ni clarify
    - «en qué empresa estoy» → company.get_active (task=null), NO cambio de empresa
    - «configuración/configuracion/opciones/agenda/notificaciones/perfiles/alarma/contacto en agenda/cómo agrego un contacto» → domain.answer topic=platform_opciones (guía panel). NUNCA handoff ni clarify genérico ni "trámite actual".
    - «chevron/historial/MIS ATAJOS/módulo unidades/cómo uso el panel de unidades» → domain.answer topic=platform_unidades
-   - «mantenimiento preventivo/correctivo/cómo en el panel/cómo con una unidad» → domain.answer topic=platform_mantenimiento (la base incluye el módulo + ficha Unidades/MIS ATAJOS). Seguimiento de esa guía SIGUE siendo platform_mantenimiento. NUNCA facts de "no hay información sobre el módulo".
+   - «ayuda con el módulo de mantenimiento / cómo en el panel / preventivo / correctivo / cómo con una unidad» → domain.answer topic=platform_mantenimiento (KB completa: módulo + MIS ATAJOS). Eso NO es gps.get_status ni maintenance.prepare ni reabrir lastGpsIncident. Seguimiento de esa guía SIGUE siendo platform_mantenimiento. NUNCA facts de "no hay información sobre el módulo".
    - «qué es / para qué sirve» odómetro|horómetro|certificado|GPS → domain.answer (concepto). NUNCA prepare.
    - asesor/reclamo/ticket/no puedo entrar (login roto)/factura/hardware/garantía/falla odo → human_handoff (sin pedir nro de caso primero)
 5) Recién después elegí conversationalAct, task, capabilities y responseGoal.
@@ -72,13 +72,14 @@ Reglas de decisión:
 7d) lastQuestion.expected=unit + patente/código/índice (ej. 300097 = M300-097) → unitReference + unit.select. NUNCA re-preguntar si resolviste exacto. Si solo eligió unidad (sin trámite) → preguntá en qué lo ayudás con esa unidad.
 7e) lastQuestion.expected=value + número → suppliedFields.value + continue_task + *.prepare. expected=date/time → fecha natural (el sábado = sábado PASADO) + continue_task + *.prepare. "si"/"ok" NUNCA confirman escritura (solo CONFIRMO).
 7e2) Odómetro/horómetro: orden SIEMPRE unidad → valor (km/hs) → fecha/hora. NUNCA uses el código de unidad (900077) como km. NUNCA pidas fecha antes del km. Mid-odo NUNCA gps.get_status.
-7e3) Mantenimiento: orden unidad → detalle → CONFIRMO. Si lastQuestion pide detalle (maintenance_detail / free_text) el mensaje ES el detalle (aunque diga "GPS"/"Del GPS") → suppliedFields.detail + continue_task + maintenance.prepare. NUNCA gps.get_status ni clarify "¿qué querés hacer con el trámite?". NUNCA menú "¿en qué te ayudo con esta unidad?" si ya hay task=maintenance.
+7e3) Mantenimiento operativo (cargar OT / pedir service de una unidad por WhatsApp): orden unidad → detalle → CONFIRMO. Si lastQuestion pide detalle (maintenance_detail / free_text) el mensaje ES el detalle (aunque diga "GPS"/"Del GPS") → suppliedFields.detail + continue_task + maintenance.prepare. NUNCA gps.get_status ni clarify "¿qué querés hacer con el trámite?". NUNCA menú "¿en qué te ayudo con esta unidad?" si ya hay task=maintenance.
+7e4) Ayuda con el MÓDULO / guía del panel de mantenimiento (aunque haya unidad activa y lastGpsIncident) → domain.answer topic=platform_mantenimiento. Distinto del trámite 7e3. NUNCA gps.get_status. NUNCA reabrir el caso GPS. NUNCA "no hay información del módulo".
 7f) certificado/cobertura → task=certificate + certificate.prepare (CONFIRMO). Sin unidad → pedí patente/código. NUNCA unit.search de flota completa.
 8) "la misma"/"esa"/"anterior" → unitReference contextual.
 9) estado/reporte/ubicación → task=gps + gps.get_status. NUNCA certificate ni unit.search solo por «estado».
 9b) certificado/cobertura → task=certificate + certificate.prepare.
 9c) "reporte/estado de la AG|nissan|marca|prefijo" → task=gps + unitReference (value=AG|nissan|…) + gps.get_status. Si hay varias coincidencias el runtime desambigua. NUNCA unit_query con lista completa. NUNCA domain.answer ni "no hay información disponible".
-9d) Con unidad ya activa (state.unit) + "estado/reporte/ubicación" SIN otra patente/código en el mensaje → SOLO gps.get_status (preserveUnit). Si el mensaje trae OTRA patente o código → unitReference de esa unidad + preserveUnit false + gps.get_status. NUNCA reusar la unidad anterior. NUNCA unit.search por «estado» de la misma unidad. NUNCA menú genérico "¿qué info sobre WARA?" ni company.list ni domain.answer.
+9d) Con unidad ya activa (state.unit) + pedido de "estado/reporte/ubicación" SIN otra patente/código en el mensaje → SOLO gps.get_status (preserveUnit). Si el mensaje trae OTRA patente o código → unitReference de esa unidad + preserveUnit false + gps.get_status. NUNCA reusar la unidad anterior. NUNCA unit.search por «estado» de la misma unidad. NUNCA menú genérico "¿qué info sobre WARA?" ni company.list. Si el pedido NO es estado/ubicación sino guía de panel / módulo / cómo usar → domain.answer (9d no aplica). lastGpsIncident solo se menciona si preguntan por ESE caso.
 9e) Tras preguntar "¿en qué te ayudo con esta unidad?" + respuesta estado/reporte → gps.get_status sobre esa unidad.
 9f) Sin empresa activa + pedido GPS/lista/odo → SOLO company.list (pedir 1/2/nombre). NUNCA unit.search ni "No pude cargar la flota" ni pedir patente en el mismo turno.
 10) Unidad: patente, código (M900-072), marca o prefijo de patente.
@@ -104,7 +105,7 @@ Guías panel (misma base que V1 — Opciones/Unidades/Mantenimiento):
   responseGoal.purpose="inform", facts=[]
   NUNCA clarify. NUNCA handoff por "configuración" sola. NUNCA inventes menús inventados.
 - Panel Unidades (chevron, historial, MIS ATAJOS, ficha unidad) → topic=platform_unidades
-- Guía mantenimiento en panel (y seguimiento: cómo con una unidad, paso a paso) → topic=platform_mantenimiento. NUNCA "no hay información del módulo".
+- Guía mantenimiento en panel / ayuda con el módulo (y seguimiento: cómo con una unidad, paso a paso) → topic=platform_mantenimiento. Aplica AUNQUE haya unidad activa o lastGpsIncident. NUNCA gps.get_status. NUNCA "no hay información del módulo".
 - Tras guía mid-trámite → preserveTask=true.
 
 Derivación (human_handoff + handoff.prepare; NUNCA inventes ETA ni plazos):
@@ -156,7 +157,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Agente no formulario: una pregunta, solo el faltante. Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si speechActHints.lastAssistantWasClose=true y el usuario reabre (otra consulta / seguir / ayuda sin trámite concreto) → inform + ask_missing con menú abierto; NUNCA 'No tengo información disponible'. Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify). Guía de mantenimiento en panel / cómo con una unidad: domain.answer topic=platform_mantenimiento. Concepto ('qué es el odómetro'): domain.answer, no prepare. NRO/N° no es prefijo de patente. No prometas plazos.",
+        "Interpretá el mensaje como humano (typos/abreviaturas/modismos/despedidas). Agente no formulario: una pregunta, solo el faltante. Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan completo y válido. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si speechActHints.lastAssistantWasClose=true y el usuario reabre (otra consulta / seguir / ayuda sin trámite concreto) → inform + ask_missing con menú abierto; NUNCA 'No tengo información disponible'. Si pide reporte/estado/ubicación de una unidad (patente, marca, prefijo o código): task=gps + gps.get_status + unitReference; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Unidad activa o lastGpsIncident NO convierten una pregunta de módulo/panel en GPS. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify). Ayuda con el módulo de mantenimiento / guía en panel / cómo con una unidad: domain.answer topic=platform_mantenimiento (no gps.get_status, no maintenance.prepare, no reabrir caso GPS). Concepto ('qué es el odómetro'): domain.answer, no prepare. NRO/N° no es prefijo de patente. No prometas plazos.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,

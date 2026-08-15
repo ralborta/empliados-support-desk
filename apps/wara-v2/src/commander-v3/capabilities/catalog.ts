@@ -196,7 +196,7 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   {
     name: "domain.answer",
     purpose:
-      "Guía panel o concepto WARA (topic: platform_opciones|platform_unidades|platform_mantenimiento|odometer|horometer|gps|certificate|wara). Opciones/agenda/notificaciones/perfiles → platform_opciones; chevron/historial → platform_unidades; preventivo/correctivo/cómo con una unidad → platform_mantenimiento (KB V1 completa).",
+      "Guía panel o concepto WARA (topic: platform_opciones|platform_unidades|platform_mantenimiento|odometer|horometer|gps|certificate|wara). Opciones/agenda/notificaciones/perfiles → platform_opciones; chevron/historial → platform_unidades; módulo de mantenimiento / preventivo / correctivo / cómo con una unidad → platform_mantenimiento (KB V1 completa). Con unidad activa o lastGpsIncident, una pregunta de módulo SIGUE siendo domain.answer, no gps.get_status.",
     params: ["topic"],
     kind: "domain",
     requiredFields: [],

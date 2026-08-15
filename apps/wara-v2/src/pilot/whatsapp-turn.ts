@@ -45,43 +45,49 @@ function v3InboundDedupeKey(phone: string, text: string): string {
     .digest("hex");
 }
 
-function shouldSkipDuplicateV3Inbound(
+function gcRecentV3Inbound(now: number): void {
+  if (recentV3Inbound.size <= 500) return;
+  for (const [k, at] of recentV3Inbound) {
+    if (now - at > V3_INBOUND_DEDUPE_MS) recentV3Inbound.delete(k);
+  }
+}
+
+/**
+ * Con messageId de WhatsApp, cada mensaje es un turno (el usuario puede repetir
+ * el mismo texto si la respuesta anterior fue incorrecta).
+ * Sin messageId (reintento BBC): ventana de 90s por teléfono+texto.
+ */
+export function shouldSkipDuplicateV3Inbound(
   phone: string,
   text: string,
   messageId?: string,
 ): boolean {
+  const now = Date.now();
+  gcRecentV3Inbound(now);
+
+  if (messageId?.trim()) {
+    const key = `v3mid:${messageId.trim()}`;
+    const prev = recentV3Inbound.get(key);
+    if (prev != null && now - prev < V3_INBOUND_DEDUPE_MS) return true;
+    recentV3Inbound.set(key, now);
+    return false;
+  }
+
   const normalized = text.trim().toLowerCase();
-  // CONFIRMO/CANCELAR: no deduplicar por texto. Tras un fallo WARA el usuario
-  // reintenta el mismo literal y el dedupe de 90s lo silenciaba.
-  // Números sueltos (km/hs): mismo problema mid-odo / mid-horo.
+  // CONFIRMO/CANCELAR/números sueltos: no deduplicar por texto (reintento mid-trámite).
   if (
     /^(confirmo|confirmó|confirmar|cancelar|cancelo|cancelado|cacelo)$/i.test(
       normalized,
     ) ||
     /^\d+(?:[.,]\d+)?$/.test(normalized)
   ) {
-    if (!messageId?.trim()) return false;
-    const key = `v3mid:${messageId.trim()}`;
-    const prev = recentV3Inbound.get(key);
-    const now = Date.now();
-    if (prev != null && now - prev < V3_INBOUND_DEDUPE_MS) return true;
-    recentV3Inbound.set(key, now);
     return false;
   }
 
   const key = v3InboundDedupeKey(phone, text);
   const prev = recentV3Inbound.get(key);
-  const now = Date.now();
-  if (prev != null && now - prev < V3_INBOUND_DEDUPE_MS) {
-    return true;
-  }
+  if (prev != null && now - prev < V3_INBOUND_DEDUPE_MS) return true;
   recentV3Inbound.set(key, now);
-  // GC liviano
-  if (recentV3Inbound.size > 500) {
-    for (const [k, at] of recentV3Inbound) {
-      if (now - at > V3_INBOUND_DEDUPE_MS) recentV3Inbound.delete(k);
-    }
-  }
   return false;
 }
 

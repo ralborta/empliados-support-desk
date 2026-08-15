@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 15a", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15a/);
+  it("prompt version bump 15b", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15b/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -2584,6 +2584,76 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /reporte|Funcionamiento|detenida|NISSAN|AG 562/i);
     assert.doesNotMatch(exec.facts.join(" "), /listado completo|Decime el número/i);
+  });
+
+  it("domain.answer de guía no se hijackea a GPS por lastGps / reasoning de reporte", async () => {
+    const {
+      enrichPlanPromoteGpsFromReasoning,
+      enrichPlanKeepDomainAnswerOverGps,
+    } = await import("../enrich/gps-unit-from-message.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 99,
+      plate: "AA815XP",
+      name: "M900-099",
+      label: "AA 815 XP (M900-099)",
+    };
+    s.conversationMetadata.lastGpsIncident = {
+      movilId: 99,
+      plate: "AA815XP",
+      status: "ignition_fail",
+      titleSuffix: "Falla de ignición",
+      odooRef: "37156",
+      reused: true,
+      at: new Date().toISOString(),
+    };
+    const plan = TurnPlanSchema.parse({
+      reasoning:
+        "Hay unidad activa y un reporte GPS previo (#37156). El usuario pide ayuda con el módulo de mantenimiento del panel, no un nuevo reporte.",
+      conversationalAct: "answer_lateral",
+      task: null,
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "platform_mantenimiento" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.9,
+    });
+    const mixed = TurnPlanSchema.parse({
+      ...plan,
+      task: "gps",
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "platform_mantenimiento" } },
+        { name: "gps.get_status", params: {} },
+      ],
+    });
+    const kept = enrichPlanKeepDomainAnswerOverGps(mixed);
+    assert.equal(kept.task, null);
+    assert.ok(kept.requestedCapabilities.some((c) => c.name === "domain.answer"));
+    assert.ok(!kept.requestedCapabilities.some((c) => c.name === "gps.get_status"));
+
+    const promoted = enrichPlanPromoteGpsFromReasoning(plan, s);
+    assert.notEqual(promoted.task, "gps");
+    assert.ok(
+      promoted.requestedCapabilities.some((c) => c.name === "domain.answer"),
+    );
+    assert.ok(
+      !promoted.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+    );
+
+    const exec = await executeCapabilities({
+      state: s,
+      plan: promoted,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: s.unit,
+      resolvedCompanyId: "1",
+      message: "Quiero ayuda con el módulo de mantenimiento",
+    });
+    const blob = exec.facts.join(" ");
+    assert.match(blob, /Mantenimiento|preventivo|MIS ATAJOS|Utilidades/i);
+    assert.doesNotMatch(blob, /Falla de ignici[oó]n|#37156/i);
   });
 
   it("promote GPS desde reasoning del LLM", async () => {

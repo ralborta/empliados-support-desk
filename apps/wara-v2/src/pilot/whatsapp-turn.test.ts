@@ -4,6 +4,7 @@ import { isAllowlistedPhone, phonesMatch, toE164Guess } from "./phone.js";
 import {
   handlePilotWhatsAppTurn,
   isPilotWhatsAppEnabled,
+  shouldSkipDuplicateV3Inbound,
 } from "./whatsapp-turn.js";
 
 const PHONE = "+5491133788190";
@@ -171,5 +172,20 @@ describe("piloto WhatsApp V2", () => {
     assert.equal(r.status, 200);
     assert.equal(r.body.message, CUSTOMER_CLOSE_SUCCESS_MESSAGE);
     assert.equal(r.body.skipResponse_s, "false");
+  });
+
+  it("mismo texto con messageId distinto no se silencia (reintento del usuario)", () => {
+    const phone = "+5491100000099";
+    const text = "Quiero ayuda con el módulo de mantenimiento";
+    assert.equal(shouldSkipDuplicateV3Inbound(phone, text, "wa-1"), false);
+    assert.equal(shouldSkipDuplicateV3Inbound(phone, text, "wa-2"), false);
+    assert.equal(shouldSkipDuplicateV3Inbound(phone, text, "wa-1"), true);
+  });
+
+  it("sin messageId, el mismo texto en 90s sí se considera reintento BBC", () => {
+    const phone = "+5491100000100";
+    const text = "texto bbc sin id";
+    assert.equal(shouldSkipDuplicateV3Inbound(phone, text), false);
+    assert.equal(shouldSkipDuplicateV3Inbound(phone, text), true);
   });
 });

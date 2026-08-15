@@ -723,9 +723,11 @@ export async function runCommanderTurn(
   ensurePrepareFor("hourmeter", "hourmeter.prepare");
   ensurePrepareFor("certificate", "certificate.prepare");
 
-  // GPS: asegurar lectura + búsqueda si falta unidad (contrato, no semántica)
+  // GPS: asegurar lectura + búsqueda si falta unidad (contrato, no semántica).
+  // Si ya hay domain.answer, no inyectar GPS (guía de panel ≠ reporte).
   if (
     plan.task === "gps" &&
+    !plan.requestedCapabilities.some((c) => c.name === "domain.answer") &&
     !plan.requestedCapabilities.some((c) => c.name === "gps.get_status")
   ) {
     plan = {

@@ -95,6 +95,30 @@ function isGpsPlan(plan: TurnPlan): boolean {
   return plan.requestedCapabilities.some((c) => c.name === "gps.get_status");
 }
 
+function hasDomainAnswer(plan: TurnPlan): boolean {
+  return plan.requestedCapabilities.some((c) => c.name === "domain.answer");
+}
+
+/**
+ * Guía de panel (KB) XOR lectura GPS en el mismo turno.
+ * Si el Commander ya pidió domain.answer, no se inyecta ni se deja gps.get_status:
+ * lastGpsIncident / unidad activa no convierten una pregunta de módulo en reporte.
+ */
+export function enrichPlanKeepDomainAnswerOverGps(plan: TurnPlan): TurnPlan {
+  if (!hasDomainAnswer(plan)) return plan;
+  const caps = plan.requestedCapabilities.filter(
+    (c) => c.name !== "gps.get_status",
+  );
+  if (caps.length === plan.requestedCapabilities.length && plan.task !== "gps") {
+    return plan;
+  }
+  return {
+    ...plan,
+    task: plan.task === "gps" ? null : plan.task,
+    requestedCapabilities: caps,
+  };
+}
+
 function reasoningImpliesGps(plan: TurnPlan): boolean {
   const blob = `${plan.reasoning ?? ""} ${plan.responseGoal?.nextQuestion ?? ""} ${
     plan.lateralQuestion?.topic ?? ""
@@ -109,6 +133,9 @@ export function enrichPlanPromoteGpsFromReasoning(
   plan: TurnPlan,
   state?: ConversationStateV3,
 ): TurnPlan {
+  plan = enrichPlanKeepDomainAnswerOverGps(plan);
+  // Guía KB ya decidida: no hijack a GPS aunque el reasoning mencione el reporte previo.
+  if (hasDomainAnswer(plan)) return plan;
   // Mid trámite de escritura: nunca hijack a GPS.
   if (
     state?.activeTask?.type === "odometer" ||
