@@ -201,6 +201,24 @@ export function formatUnitMenu(label: string): string {
   ].join("\n");
 }
 
+export function formatAskUnit(
+  kind: "odometer" | "hourmeter" | "certificate" | "maintenance",
+): string {
+  const title =
+    kind === "hourmeter"
+      ? "⏱ *Horómetro*"
+      : kind === "certificate"
+        ? "📋 *Certificado*"
+        : kind === "maintenance"
+          ? "🔧 *Mantenimiento*"
+          : "🛣 *Odómetro*";
+  return [
+    title,
+    "",
+    "¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+  ].join("\n");
+}
+
 export function formatGpsReport(report: string): string {
   // buildGpsLabSummary ya trae encabezado con iconos.
   if (/^📍/.test(report.trim()) || /^✅/.test(report.trim()) || /^⏸/.test(report.trim()) || /^⚠️/.test(report.trim())) {

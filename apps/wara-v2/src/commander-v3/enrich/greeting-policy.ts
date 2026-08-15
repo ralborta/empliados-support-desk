@@ -17,6 +17,13 @@ export function isUserGreetingMessage(message: string): boolean {
   return GREETING_RE.test(message.trim());
 }
 
+/** El mensaje entero es un saludo (sin pedido). "hola pasame la lista" no cuenta. */
+export function isPureGreetingMessage(message: string): boolean {
+  return /^(hola+|holis|buen[oa]s(?:\s+(d[ií]as?|tardes|noches))?|buenas|hey|hello|hi)[\s!.]*$/i.test(
+    message.trim(),
+  );
+}
+
 export function hoursIdleSince(state: ConversationStateV3, nowMs = Date.now()): number {
   const t = Date.parse(state.updatedAt);
   if (!Number.isFinite(t)) return 0;
@@ -130,25 +137,43 @@ export function enrichPlanForGreetingPolicy(
   ) {
     return plan;
   }
+  const awaitingTaskUnit =
+    state.lastQuestion?.expected === "unit" &&
+    String(state.lastQuestion.purpose ?? "").startsWith("unit_for_");
+  if (awaitingTaskUnit) {
+    return plan;
+  }
 
-  // Ya hay empresa: saludo corto SIN re-pedir empresa
+  // Ya hay empresa
   if (state.company) {
+    const withoutCompanyCaps = plan.requestedCapabilities.filter(
+      (c) => c.name !== "company.list" && c.name !== "company.select",
+    );
+    // Saludo + pedido ("hola, cambio de odómetro"): no forzar greet ni matar el trámite.
+    if (!isPureGreetingMessage(message)) {
+      return {
+        ...plan,
+        conversationalAct:
+          plan.conversationalAct === "greet" ? "start_task" : plan.conversationalAct,
+        requestedCapabilities: withoutCompanyCaps,
+        reasoning:
+          (plan.reasoning ? `${plan.reasoning} ` : "") +
+          "Saludo + pedido: no dejo greet; sigo el trámite (empresa ya activa).",
+      };
+    }
     return {
       ...plan,
       conversationalAct: "greet",
       task: null,
       taskAction: null,
-      requestedCapabilities: plan.requestedCapabilities.filter(
-        (c) => c.name !== "company.list" && c.name !== "company.select",
-      ),
+      requestedCapabilities: withoutCompanyCaps.filter((c) => c.name !== "unit.search"),
       reasoning:
         (plan.reasoning ? `${plan.reasoning} ` : "") +
-        `El usuario saludó con empresa activa (${state.company.name}): greet sin re-listar.`,
+        `El usuario saludó con empresa activa (${state.company.name}): greet sin listar flota.`,
       responseGoal: {
         purpose: "inform",
-        facts: plan.responseGoal.facts ?? [],
-        nextQuestion:
-          plan.responseGoal.nextQuestion ?? "¿En qué te ayudo?",
+        facts: [],
+        nextQuestion: "¿En qué te ayudo?",
       },
     };
   }

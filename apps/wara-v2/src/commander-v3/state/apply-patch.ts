@@ -195,8 +195,9 @@ export function applyCommanderState(input: ApplyInput): {
     };
   }
 
-  // Greet metadata
+  // Greet metadata. Un saludo reemplaza la expectativa de elegir del listado.
   if (input.plan.conversationalAct === "greet") {
+    const listingAsk = input.state.lastQuestion?.purpose === "select_unit";
     s = {
       ...s,
       conversationMetadata: {
@@ -204,6 +205,7 @@ export function applyCommanderState(input: ApplyInput): {
         introducedAtilio: true,
         greetedAt: s.conversationMetadata.greetedAt ?? new Date().toISOString(),
       },
+      ...(listingAsk ? { lastQuestion: null } : {}),
     };
   }
 

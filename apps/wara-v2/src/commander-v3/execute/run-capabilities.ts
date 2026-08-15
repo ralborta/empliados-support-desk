@@ -47,6 +47,7 @@ import {
   formatCertificateConfirm,
   formatCompanyActive,
   formatCompanyList,
+  formatAskUnit,
   formatGpsIncidentCase,
   formatGpsReport,
   formatHandoffAskDetail,
@@ -326,6 +327,15 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
       ? [...ctx.plan.requestedCapabilities]
       : inferDefaultCapabilities(ctx.plan, state);
 
+  if (ctx.plan.conversationalAct === "greet") {
+    caps = caps.filter((c) => c.name !== "unit.search");
+  } else if (ctx.plan.task !== "unit_query") {
+    caps = caps.filter((c) => {
+      if (c.name !== "unit.search") return true;
+      return Boolean(String(c.params?.query ?? "").trim());
+    });
+  }
+
   // confirm_write: SIEMPRE asegurar el write_commit (el LLM deja caps basura y
   // antes no se inyectaba certificate.issue → loop de "confirmación explícita").
   if (
@@ -490,22 +500,10 @@ function inferDefaultCapabilities(
   }
   // Medidor/certificado: también con inform/continue (no solo start_task).
   if (plan.task === "odometer") {
-    const caps: CapabilityRequest[] = [
-      { name: "odometer.prepare", params: {} },
-    ];
-    if (!state.unit && !plan.unitReference) {
-      caps.push({ name: "unit.search", params: {} });
-    }
-    return caps;
+    return [{ name: "odometer.prepare", params: {} }];
   }
   if (plan.task === "hourmeter") {
-    const caps: CapabilityRequest[] = [
-      { name: "hourmeter.prepare", params: {} },
-    ];
-    if (!state.unit && !plan.unitReference) {
-      caps.push({ name: "unit.search", params: {} });
-    }
-    return caps;
+    return [{ name: "hourmeter.prepare", params: {} }];
   }
   if (plan.task === "certificate") {
     return [{ name: "certificate.prepare", params: {} }];
@@ -992,7 +990,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: false,
-          facts: [],
+          facts: [formatAskUnit("certificate")],
           error: "no_unit",
           data: {
             statePatch: {
@@ -1073,7 +1071,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: false,
-          facts: [],
+          facts: [formatAskUnit(meter)],
           error: "no_unit",
           data: {
             statePatch: {
@@ -1394,7 +1392,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: false,
-          facts: [],
+          facts: [formatAskUnit("maintenance")],
           error: "no_unit",
           data: {
             statePatch: {

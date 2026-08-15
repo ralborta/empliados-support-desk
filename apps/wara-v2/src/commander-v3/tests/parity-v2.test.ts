@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 14bf", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-14bf/);
+  it("prompt version bump 15a", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15a/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -173,6 +173,80 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.equal(noGps.task, null);
     assert.equal(noGps.requestedCapabilities.length, 0);
     assert.match(noGps.responseGoal.facts[0] ?? "", /Qué necesitás/i);
+  });
+
+  it("Hola con empresa no vuelca la flota", async () => {
+    const { enrichPlanForGreetingPolicy } = await import(
+      "../enrich/greeting-policy.js"
+    );
+    const { enrichPlanStripBareFleetDump } = await import(
+      "../enrich/bare-fleet-dump.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "El Cacique S.A." };
+    s.lastQuestion = { id: "1", purpose: "select_unit", expected: "unit" };
+    const dump = TurnPlanSchema.parse({
+      reasoning: "listó flota ante hola",
+      conversationalAct: "inform",
+      task: "unit_query",
+      requestedCapabilities: [{ name: "unit.search", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.7,
+    });
+    const greeted = enrichPlanForGreetingPolicy(dump, s, "Hola");
+    assert.equal(greeted.conversationalAct, "greet");
+    assert.equal(greeted.task, null);
+    assert.equal(
+      greeted.requestedCapabilities.some((c) => c.name === "unit.search"),
+      false,
+    );
+    const stripped = enrichPlanStripBareFleetDump(greeted);
+    assert.equal(
+      stripped.requestedCapabilities.some((c) => c.name === "unit.search"),
+      false,
+    );
+  });
+
+  it("odómetro sin unidad pide patente, no listado completo", async () => {
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.fleetCache = [
+      {
+        movilId: 1,
+        plate: "AA175BY",
+        name: "M900-071",
+        label: "AA 175 BY (M900-071)",
+      },
+    ];
+    const plan = TurnPlanSchema.parse({
+      reasoning: "cambio de odometro",
+      conversationalAct: "start_task",
+      task: "odometer",
+      requestedCapabilities: [
+        { name: "odometer.prepare", params: {} },
+        { name: "unit.search", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.9,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: "2",
+      message: "Quiero hacer un cambio de odometro",
+    });
+    const text = exec.facts.join("\n");
+    assert.doesNotMatch(text, /listado completo|Unidades en/i);
+    assert.match(text, /patente|unidad/i);
+    assert.equal(
+      exec.results.some((r) => r.capability === "unit.search"),
+      false,
+    );
   });
 
   it("Dale con pendingWrite NO cierra ni confirma", async () => {

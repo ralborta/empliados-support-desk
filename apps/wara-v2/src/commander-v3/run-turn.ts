@@ -20,6 +20,7 @@ import {
 import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
+import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
 import { enrichPlanForSoftClose } from "./enrich/soft-close.js";
 import { enrichPlanForOpenConsult } from "./enrich/open-consult.js";
 import { enrichPlanForConversationClose } from "./enrich/conversation-close.js";
@@ -655,7 +656,7 @@ export async function runCommanderTurn(
     }
   }
 
-  // Medidor sin unidad: listar flota en el mismo turno (estructural, no semántico)
+  // Medidor/certificado sin unidad: pedir patente (no volcar las 408 unidades).
   const meterPrepare = plan.requestedCapabilities.some(
     (c) => c.name === "odometer.prepare" || c.name === "hourmeter.prepare",
   );
@@ -665,26 +666,20 @@ export async function runCommanderTurn(
     meterPrepare ||
     ((plan.conversationalAct === "start_task" || plan.taskAction === "start") &&
       (plan.task === "odometer" || plan.task === "hourmeter"));
-  if (
-    startsMeter &&
-    !state.unit &&
-    !plan.unitReference &&
-    !plan.requestedCapabilities.some(
-      (c) => c.name === "unit.search" || c.name === "unit.select",
-    )
-  ) {
+  if (startsMeter && !state.unit && !plan.unitReference) {
     plan = {
       ...plan,
-      requestedCapabilities: [
-        ...plan.requestedCapabilities,
-        { name: "unit.search", params: {} },
-      ],
+      requestedCapabilities: plan.requestedCapabilities.filter((c) => {
+        if (c.name !== "unit.search") return true;
+        return Boolean(String(c.params?.query ?? "").trim());
+      }),
     };
   }
 
   // unit_query ⇒ unit.search (contrato de ejecución; el LLM no puede omitir la tool)
   if (
     plan.task === "unit_query" &&
+    plan.conversationalAct !== "greet" &&
     !plan.requestedCapabilities.some((c) => c.name === "unit.search")
   ) {
     plan = {
@@ -697,7 +692,8 @@ export async function runCommanderTurn(
   }
   if (
     plan.requestedCapabilities.some((c) => c.name === "unit.search") &&
-    plan.task == null
+    plan.task == null &&
+    plan.conversationalAct !== "greet"
   ) {
     plan = { ...plan, task: "unit_query" };
   }
@@ -995,6 +991,7 @@ export async function runCommanderTurn(
 
   // Último cinturón: post-enrich GPS/flota fantasma tras despedida → menú.
   plan = enrichPlanForOpenConsult(plan, state, input.message);
+  plan = enrichPlanStripBareFleetDump(plan);
 
   const exec = await executeCapabilities({
     state,
