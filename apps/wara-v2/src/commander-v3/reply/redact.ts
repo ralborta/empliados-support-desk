@@ -7,17 +7,18 @@ import { formatGreeting } from "./format-wa.js";
 
 const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
 - Español rioplatense natural: vos, cálido, humano. Como un colega que ayuda, no un formulario ("completá estos campos").
-- Te llega el MENSAJE DEL USUARIO. CONTESTALO con los facts. Primera oración = respuesta a lo que preguntó.
+- Te llega interpretation (userQuestion + answerKind + priorReply) y el MENSAJE DEL USUARIO. CONTESTÁ userQuestion con los facts. Primera oración = respuesta a lo que preguntó.
+- Si priorReply.relevant, tu respuesta anterior importa: no la ignores ni la reemplaces por un listado.
 - Si preguntó algo puntual sobre GPS (si la posición es correcta, si está al día, por qué la ignición), respondé ESO con los tiempos de reporte/posición; no ignores la pregunta ni la reemplaces por un listado.
-- NUNCA reemplaces una pregunta con un listado de unidades que no pidió.
+- NUNCA reemplaces una pregunta (yes_no/status/how_to) con un listado de unidades que no pidió.
 - UNA pregunta por turno. No apiles km + fecha + CONFIRMO en el mismo mensaje si los facts piden una sola cosa.
 - No repitas el mismo párrafo del turno anterior. No prometas plazos ni "ya te llamamos".
 - Si facts traen nro de caso (#…), conservalo tal cual; no inventes otro.
 - PROHIBIDO saludar en cada mensaje. NUNCA empieces con "Hola", "Hola ¿cómo estás?", "Buenas" salvo que purpose/act sea saludo explícito.
 - NO inventes hechos. NO agregues tools. NO cambies empresa/unidad.
-- Usá SOLO los hechos validados (facts) y el responseGoal. Si hay un fact operativo (pedir km, fecha, CONFIRMO, listado, GPS), priorizalo y acortá sin vaciarlo.
+- Usá SOLO los hechos validados (facts) y el responseGoal. Si hay un fact operativo (pedir km, fecha, CONFIRMO, listado, GPS), priorizalo y acortá sin vaciarlo — salvo que answerKind sea una pregunta: entonces la pregunta gana.
 - Si los facts ya traen iconos/negrita (*…*) de WhatsApp, conservalos tal cual (no los aplanes a prosa).
-- LISTADOS: si hay un listado numerado en facts, copialo COMPLETO tal cual. PROHIBIDO resumir como "tengo el listado" sin ítems.
+- LISTADOS: si answerKind=list y hay un listado numerado en facts, copialo COMPLETO tal cual. PROHIBIDO resumir como "tengo el listado" sin ítems.
 - Si el usuario preguntó algo fuera del trámite, respondé con los facts; no digas "no tengo información" si hay facts.
 - PROHIBIDO inventar "No tengo información disponible" / "no hay información". Si purpose=ask_missing y hay menú en facts, copiá el menú.
 - Si no hay facts, una sola pregunta abierta ("¿Qué necesitás?") — nunca digas que no tenés información.
@@ -44,8 +45,14 @@ function looksLikeOperationalFact(f: string): boolean {
   );
 }
 
-/** Listados y formularios se copian tal cual. Un reporte GPS no: hay que contestar la pregunta. */
-export function shouldDumpFactsWithoutLlm(facts: string[]): boolean {
+/** Listados y formularios se copian tal cual. Una pregunta (yes_no/status/how_to) nunca se volca. */
+export function shouldDumpFactsWithoutLlm(
+  facts: string[],
+  plan?: TurnPlan,
+): boolean {
+  const kind = plan?.interpretation?.answerKind;
+  if (kind === "yes_no" || kind === "status" || kind === "how_to") return false;
+  if (kind === "list") return facts.some(looksLikeListingFact);
   return facts.some(looksLikeListingFact) || facts.some(looksLikeLockedFormFact);
 }
 
@@ -55,6 +62,7 @@ export async function redactReply(input: {
   state: ConversationStateV3;
   env: NodeJS.ProcessEnv;
   userMessage?: string;
+  lastAssistantReply?: string | null;
   conflictClarify?: string | null;
 }): Promise<{ reply: string; usedLlm: boolean; latencyMs: number }> {
   if (input.conflictClarify) {
@@ -104,7 +112,7 @@ export async function redactReply(input: {
   }
 
   // Listados y formularios de escritura: no pasar por LLM (evita resumir/inventar).
-  if (shouldDumpFactsWithoutLlm(input.facts)) {
+  if (shouldDumpFactsWithoutLlm(input.facts, input.plan)) {
     return {
       reply: fallbackFromFacts(input.facts, input.plan),
       usedLlm: false,
@@ -129,11 +137,15 @@ export async function redactReply(input: {
   }
 
   const purpose = input.plan.responseGoal.purpose;
+  const questionKind = input.plan.interpretation?.answerKind;
   const wantsNatural =
     purpose === "ask_missing" ||
     purpose === "clarify" ||
     purpose === "resume" ||
     purpose === "confirm_write" ||
+    questionKind === "yes_no" ||
+    questionKind === "status" ||
+    questionKind === "how_to" ||
     Boolean(input.plan.responseGoal.nextQuestion) ||
     Boolean(input.userMessage?.trim());
 
@@ -182,6 +194,8 @@ export async function redactReply(input: {
             role: "user",
             content: JSON.stringify({
               userMessage: input.userMessage ?? "",
+              lastAssistantReply: input.lastAssistantReply ?? null,
+              interpretation: input.plan.interpretation ?? null,
               purpose,
               facts: input.facts,
               nextQuestion: input.plan.responseGoal.nextQuestion ?? null,
@@ -190,7 +204,7 @@ export async function redactReply(input: {
               task: input.state.activeTask?.type ?? null,
               act: input.plan.conversationalAct,
               rules:
-                "Contestá el userMessage con los facts. Sin saludo. Sin inventar. Si preguntó algo puntual, la primera oración es esa respuesta.",
+                "Contestá interpretation.userQuestion (o userMessage) con los facts. Si priorReply.relevant, tené en cuenta lastAssistantReply. Sin saludo. Sin inventar. Primera oración = esa respuesta.",
             }),
           },
         ],

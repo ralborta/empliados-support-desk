@@ -41,7 +41,47 @@ export const CapabilityRequestSchema = z.object({
   params: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
+/** Qué tipo de respuesta espera el cliente este turno. */
+export const AnswerKindSchema = z.enum([
+  "yes_no",
+  "status",
+  "how_to",
+  "list",
+  "start_task",
+  "continue_task",
+  "clarify",
+  "close",
+  "greet",
+  "other",
+]);
+
+export const PriorReplyRefersToSchema = z.enum([
+  "none",
+  "last_facts",
+  "last_question",
+  "active_entity",
+]);
+
+/**
+ * Contrato de interpretación del turno.
+ * Las tools y el redactor sirven a userQuestion; no sustituyen la pregunta.
+ * priorReply: si el mensaje solo se entiende con la respuesta anterior de Atilio.
+ */
+export const InterpretationSchema = z.object({
+  userQuestion: z.string().min(1).max(400),
+  answerKind: AnswerKindSchema,
+  priorReply: z
+    .object({
+      relevant: z.boolean(),
+      summary: z.string().max(400),
+      refersTo: PriorReplyRefersToSchema,
+    })
+    .nullable()
+    .optional(),
+});
+
 export const TurnPlanSchema = z.object({
+  interpretation: InterpretationSchema.optional(),
   /** Razonamiento breve del turno (obligatorio). No se muestra al usuario. */
   reasoning: z.string().min(1).max(800),
   conversationalAct: ConversationalActSchema,
@@ -107,4 +147,6 @@ export const TurnPlanSchema = z.object({
 
 export type TurnPlan = z.infer<typeof TurnPlanSchema>;
 export type CapabilityRequest = z.infer<typeof CapabilityRequestSchema>;
+export type AnswerKind = z.infer<typeof AnswerKindSchema>;
+export type TurnInterpretation = z.infer<typeof InterpretationSchema>;
 export type TaskType = TaskTypeV3;

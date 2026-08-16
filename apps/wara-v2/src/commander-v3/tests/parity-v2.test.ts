@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 15e", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15e/);
+  it("prompt version bump 15f", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15f/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -2667,6 +2667,84 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       ]),
       false,
     );
+  });
+
+  it("interpretation: yes_no no vuelca listado; priorReply + lastAssistant van al payload", async () => {
+    const { shouldDumpFactsWithoutLlm } = await import("../reply/redact.js");
+    const {
+      enrichPlanForQuestionContract,
+      capabilitiesConflictWithQuestion,
+    } = await import("../enrich/question-contract.js");
+    const { buildCommanderUserPayload } = await import("../commander/prompt.js");
+    const listing =
+      "Encontré varias unidades:\n1. CAMARATEST066\n2. CAMARATEST069\n\nDecime el número o la patente exacta.";
+    const questionPlan = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "¿La última posición de AA 815 XP es la correcta?",
+        answerKind: "yes_no",
+        priorReply: {
+          relevant: true,
+          summary: "Atilio reportó GPS de AA 815 XP con posición de hace 2 horas.",
+          refersTo: "last_facts",
+        },
+      },
+      reasoning: "Pregunta sí/no sobre la posición del reporte anterior.",
+      conversationalAct: "inform",
+      task: "unit_query",
+      requestedCapabilities: [{ name: "unit.search", params: { query: "es" } }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    assert.equal(shouldDumpFactsWithoutLlm([listing], questionPlan), false);
+    assert.ok(
+      capabilitiesConflictWithQuestion(questionPlan).some((e) =>
+        e.includes("unit.search"),
+      ),
+    );
+
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 99,
+      plate: "AA815XP",
+      name: "M900-099",
+      label: "AA 815 XP (M900-099)",
+    };
+    s.recentTurns = [
+      {
+        role: "assistant",
+        text: "⚠️ Falla de ignición\n🚗 Unidad: AA 815 XP\n📍 Posición: hace 2 horas",
+        at: new Date().toISOString(),
+      },
+    ];
+    s.conversationMetadata.lastTurn = {
+      userQuestion: "estado de AA 815 XP",
+      answerKind: "status",
+      priorReplyRelevant: false,
+      assistantReplyPreview: "Falla de ignición AA 815 XP",
+      at: new Date().toISOString(),
+    };
+    const enriched = enrichPlanForQuestionContract(questionPlan, s);
+    assert.ok(!enriched.requestedCapabilities.some((c) => c.name === "unit.search"));
+    assert.ok(enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"));
+    assert.equal(enriched.task, "gps");
+    assert.equal(enriched.unitReference?.reference, "active");
+    assert.equal(capabilitiesConflictWithQuestion(enriched).length, 0);
+
+    const payload = JSON.parse(
+      buildCommanderUserPayload({
+        message: "su ultima posicion es la correcta?",
+        localNow: "2026-08-15T21:00:00",
+        timezone: "America/Argentina/Buenos_Aires",
+        state: s,
+      }),
+    ) as {
+      lastAssistantReply: string | null;
+      state: { lastTurn: { answerKind: string } | null };
+    };
+    assert.match(payload.lastAssistantReply ?? "", /AA 815 XP/);
+    assert.equal(payload.state.lastTurn?.answerKind, "status");
   });
 
   it("domain.answer de guía no se hijackea a GPS por lastGps / reasoning de reporte", async () => {

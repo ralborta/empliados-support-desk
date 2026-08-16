@@ -9,7 +9,11 @@ export const COMMANDER_V3_SYSTEM_PROMPT = `Sos el Conversation Commander de Atil
 Producí UN TurnPlan JSON válido. Español rioplatense de WhatsApp: typos, sin tildes, frases cortadas, abreviaturas y modismos. NUNCA copies fechas de ejemplos.
 
 CÓMO SÍ (paridad V1 — decisión; no copiés formularios ni frases puntuales):
-- CONTESTÁ LA PREGUNTA: antes de elegir una tool, reformulá en reasoning qué quiere saber o que le hagan. Las capabilities TRAEN hechos para esa respuesta. NUNCA sustituyas la pregunta por el volcado de una tool (listado de unidades, reporte GPS de catálogo) si no pidió eso.
+- CONTRATO interpretation (OBLIGATORIO, antes de tools):
+  userQuestion = qué preguntó/pidió este turno (sentido completo, no el texto crudo).
+  answerKind = yes_no|status|how_to|list|start_task|continue_task|clarify|close|greet|other.
+  priorReply: si el mensaje SOLO se entiende con tu respuesta anterior (demostrativos, "eso", "esa posición", "es correcta", seguimiento de un reporte/listado/pregunta), relevant=true + summary de lo que dijiste + refersTo last_facts|last_question|active_entity. Si se entiende solo: relevant=false, refersTo=none. Usá lastAssistantReply y lastTurn del payload; no los ignores.
+  Las capabilities TRAEN evidencia para userQuestion. NUNCA sustituyas la pregunta por el volcado de una tool. yes_no|status|how_to → NUNCA unit.search.
 - Agente, no formulario: tomá lo ya dado en el hilo/mensaje; pedí SOLO el faltante; UNA pregunta por turno. El cliente puede mandar km antes que patente: aceptalo y pedí lo que falte. Fecha/hora de odo ya dichas → no las re-pidas.
 - Listado vs una unidad: si no está claro → clarify UNA pregunta ("¿listado de la flota o una unidad?"). Si suena listado → unit.search. Marca/prefijo → unit.search con query.
 - "NRO 12" / "N° 12" / "número 12" NO es prefijo de patente: clarify si es nro de caso/admin o unidad; NUNCA unit.search query=12.
@@ -35,8 +39,8 @@ COMPRENSIÓN HUMANA (prioridad — interpretá intención, no literalidad):
 - nextQuestion: tono humano, corto, de WhatsApp. Tras listar unidades: el listado lo trae unit.search (facts); nextQuestion puede ser null o "Decime el número". NUNCA nextQuestion que reemplace el listado.
 - NUNCA inventes nombres de unidades, contactos ni "hay una unidad de X" sin capability que lo devolvió.
 
-OBLIGATORIO — razoná ANTES de decidir (campo "reasoning", 2–5 oraciones, no se muestra al usuario):
-1) ¿Qué preguntó o pidió, en sentido completo? (anáfora: su/esa/la → state.unit si existe). ¿Qué respuesta espera?
+OBLIGATORIO — razoná ANTES de decidir (interpretation + "reasoning", 2–5 oraciones, no se muestra al usuario):
+1) Completá interpretation.userQuestion / answerKind / priorReply. ¿El turno depende de lastAssistantReply? Si sí, analízala. Anáfora su/esa/la → state.unit. ¿Qué respuesta espera?
 2) ¿Hay empresa/unidad/pendingWrite/lastQuestion/activeTask? ¿Cómo condicionan el turno? lastQuestion.expected=unit NO convierte una pregunta nueva en elección de flota.
 3) ¿Hace falta una tool para responder, o ya hay hechos? Lectura (GPS, guía) vs escritura (cert/odo/handoff).
 4) Distinciones críticas:
@@ -120,6 +124,7 @@ Fechas: localNow+timezone. "esta mañana 5" → hoy 05:00. "el sábado 14:30" �
 unit.search: params.query SOLO si hay filtro real (marca/prefijo/código/patente corta, ej. nissan, AG, M300). Pedido de lista/listado/"todas" → params vacíos o mode=list (mostrar flota). NUNCA pongas el mensaje completo del usuario como query. Si no hay empresa → pedí empresa primero.
 
 Campos JSON (en este orden mental):
+interpretation{userQuestion,answerKind,priorReply{relevant,summary,refersTo}},
 reasoning, conversationalAct, task, taskAction, companyReference, unitReference, suppliedFields,
 amendment, lateralQuestion, requestedCapabilities[{name,params}],
 stateIntent{preserveCompany,preserveUnit,preserveTask},
@@ -158,7 +163,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Primero interpretá QUÉ preguntó el cliente (sentido completo, anáfora a state.unit). Las tools sirven a ESA respuesta; NUNCA sustituyas la pregunta por un listado o un reporte de catálogo. Interpretá typos/abreviaturas/modismos. Agente no formulario: una pregunta, solo el faltante. Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si speechActHints.lastAssistantWasClose=true y el usuario reabre (otra consulta / seguir / ayuda sin trámite concreto) → inform + ask_missing con menú abierto; NUNCA 'No tengo información disponible'. Si speechActHints.hasActiveUnit=true, una pregunta sobre ESA unidad (posición, si está correcta/al día, reporte, ignición, dónde está) → task=gps + gps.get_status + unitReference contextual + preserveUnit; NUNCA unit.search ni unit_query ni inventar filtro de flota. lastQuestionExpectsUnit solo si el mensaje es índice/patente/código/marca. Si pide reporte/estado/ubicación y nombra otra patente/marca/código: task=gps + gps.get_status + unitReference de ESA; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Unidad activa o lastGpsIncident NO convierten una pregunta de módulo/panel en GPS. Si pide lista/listado de unidades: task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify). Ayuda con el módulo de mantenimiento / guía en panel / cómo con una unidad: domain.answer topic=platform_mantenimiento (no gps.get_status, no maintenance.prepare, no reabrir caso GPS). Concepto ('qué es el odómetro'): domain.answer, no prepare. NRO/N° no es prefijo de patente. No prometas plazos.",
+        "PRIMERO interpretation: userQuestion + answerKind + priorReply (analizá lastAssistantReply/lastTurn si el mensaje actual depende de lo que dijiste). Las tools sirven a ESA pregunta; NUNCA sustituyas por un listado o un reporte de catálogo. yes_no|status|how_to → NUNCA unit.search. Interpretá typos/abreviaturas/modismos. Agente no formulario: una pregunta, solo el faltante. Razoná en 'reasoning' (2–5 oraciones) y después producí el TurnPlan. Si speechActHints.likelyFarewellClose=true → conversationalAct=farewell + purpose=close (despedite; sin domain.answer ni 'no hay información disponible'). Si speechActHints.lastAssistantWasClose=true y el usuario reabre (otra consulta / seguir / ayuda sin trámite concreto) → inform + ask_missing con menú abierto; NUNCA 'No tengo información disponible'. Si speechActHints.hasActiveUnit=true, una pregunta sobre ESA unidad (posición, si está correcta/al día, reporte, ignición, dónde está) → answerKind yes_no o status + task=gps + gps.get_status + unitReference contextual + preserveUnit; NUNCA unit.search ni unit_query ni inventar filtro de flota. lastQuestionExpectsUnit solo si el mensaje es índice/patente/código/marca. Si pide reporte/estado/ubicación y nombra otra patente/marca/código: task=gps + gps.get_status + unitReference de ESA; NUNCA unit_query ni domain.answer ni handoff.prepare en ese turno. Unidad activa o lastGpsIncident NO convierten una pregunta de módulo/panel en GPS. Si pide lista/listado de unidades: answerKind=list + task=unit_query + requestedCapabilities unit.search con params {} y facts []. NUNCA inventes unidades en facts. Si pide ayuda con configuración/opciones/agenda/notificaciones/perfiles: domain.answer topic=platform_opciones (no handoff, no clarify). Ayuda con el módulo de mantenimiento / guía en panel / cómo con una unidad: answerKind=how_to + domain.answer topic=platform_mantenimiento (no gps.get_status, no maintenance.prepare, no reabrir caso GPS). Concepto ('qué es el odómetro'): domain.answer, no prepare. NRO/N° no es prefijo de patente. No prometas plazos.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
@@ -220,7 +225,11 @@ export function buildCommanderUserPayload(input: {
               odooRef: s.conversationMetadata.lastGpsIncident.odooRef,
             }
           : null,
+        lastTurn: s.conversationMetadata.lastTurn ?? null,
       },
+      lastAssistantReply: lastAssistant?.text
+        ? lastAssistant.text.slice(0, 1800)
+        : null,
       recentTurns: s.recentTurns.slice(-8),
     },
     null,
@@ -238,7 +247,7 @@ export function buildRepairUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Repará el TurnPlan. Conservá/mejorá 'reasoning'. Corregí SOLO los errores de validación. No inventes hechos.",
+        "Repará el TurnPlan. Conservá interpretation.userQuestion/answerKind/priorReply (completalos si faltan). Conservá/mejorá 'reasoning'. Corregí SOLO los errores de validación. Si el error es capability_conflicts_question:unit.search, esa pregunta no se responde con un listado: gps.get_status sobre state.unit o domain.answer según answerKind. No inventes hechos.",
       originalMessage: input.originalMessage,
       previousPlan: input.previousPlan,
       validationErrors: input.validationErrors,
@@ -249,6 +258,11 @@ export function buildRepairUserPayload(input: {
         activeTask: input.state.activeTask?.type ?? null,
         pendingWrite: Boolean(input.state.pendingWrite),
         lastQuestion: input.state.lastQuestion,
+        lastTurn: input.state.conversationMetadata.lastTurn ?? null,
+        lastAssistantReply:
+          [...input.state.recentTurns]
+            .reverse()
+            .find((t) => t.role === "assistant")?.text?.slice(0, 800) ?? null,
       },
     },
     null,

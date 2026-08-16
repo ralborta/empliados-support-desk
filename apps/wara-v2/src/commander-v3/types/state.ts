@@ -106,6 +106,14 @@ export type ConversationStateV3 = {
     greetedAt: string | null;
     /** Caso GPS abierto en este hilo (paridad V1: no duplicar ni mezclar unidad). */
     lastGpsIncident?: GpsIncidentRecord | null;
+    /** Interpretación del turno anterior (pregunta + tipo). No es expectativa XOR. */
+    lastTurn?: {
+      userQuestion: string;
+      answerKind: string;
+      priorReplyRelevant: boolean;
+      assistantReplyPreview: string;
+      at: string;
+    } | null;
   };
 
   updatedAt: string;

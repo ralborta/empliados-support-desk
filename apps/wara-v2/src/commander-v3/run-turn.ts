@@ -21,6 +21,7 @@ import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
+import { enrichPlanForQuestionContract } from "./enrich/question-contract.js";
 import { enrichPlanForSoftClose } from "./enrich/soft-close.js";
 import { enrichPlanForOpenConsult } from "./enrich/open-consult.js";
 import { enrichPlanForConversationClose } from "./enrich/conversation-close.js";
@@ -160,6 +161,9 @@ export async function runCommanderTurn(
   }
 
   const stateBefore = structuredClone(state);
+  const lastAssistantReply =
+    [...state.recentTurns].reverse().find((t) => t.role === "assistant")?.text ??
+    null;
 
   const commander = await callCommander({
     message: input.message,
@@ -168,6 +172,9 @@ export async function runCommanderTurn(
   });
 
   let plan = commander.plan;
+  if (plan) {
+    plan = enrichPlanForQuestionContract(plan, state);
+  }
 
   // Confirmación pendiente: CONFIRMO / CANCELAR / switch a otro trámite ANTES de validate.
   // Si no, el LLM re-pide certificate.prepare o mete issue → loop de CONFIRMO.
@@ -208,6 +215,9 @@ export async function runCommanderTurn(
     repairMs = Date.now() - rStart;
     repairResult = repaired.raw;
     plan = repaired.plan;
+    if (plan) {
+      plan = enrichPlanForQuestionContract(plan, state);
+    }
     if (
       plan &&
       (state.pendingWrite || state.lastQuestion?.expected === "confirmation")
@@ -369,6 +379,7 @@ export async function runCommanderTurn(
       state,
       env: input.env,
       userMessage: input.message,
+      lastAssistantReply,
       conflictClarify: clarify,
     });
     const after = {
@@ -435,6 +446,7 @@ export async function runCommanderTurn(
   plan = enrichPlanPromoteGpsFromReasoning(plan, state);
   plan = enrichPlanForGpsUnitInMessage(plan, state, input.message);
   plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
+  plan = enrichPlanForQuestionContract(plan, state);
 
   // Mid odómetro/horómetro: nunca GPS/unit_query hijack; seguir pidiendo km/fecha.
   // Excepciones: cancel, switch real a otro trámite, pregunta lateral (empresa), cambio de unidad.
@@ -949,6 +961,7 @@ export async function runCommanderTurn(
       state,
       env: input.env,
       userMessage: input.message,
+      lastAssistantReply,
     });
     const applied = applyCommanderState({
       state,
@@ -1016,6 +1029,7 @@ export async function runCommanderTurn(
     state,
     env: input.env,
     userMessage: input.message,
+    lastAssistantReply,
   });
 
   const applied = applyCommanderState({

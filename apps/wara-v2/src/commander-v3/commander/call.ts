@@ -346,6 +346,7 @@ export function coercePlan(raw: unknown): unknown {
   } else {
     o.reasoning = o.reasoning.trim().slice(0, 800);
   }
+  o.interpretation = coerceInterpretation(o);
   return o;
 }
 
@@ -357,6 +358,109 @@ const PURPOSE = new Set([
   "resume",
   "close",
 ]);
+
+const ANSWER_KINDS = new Set([
+  "yes_no",
+  "status",
+  "how_to",
+  "list",
+  "start_task",
+  "continue_task",
+  "clarify",
+  "close",
+  "greet",
+  "other",
+]);
+
+const ANSWER_KIND_ALIASES: Record<string, string> = {
+  yesno: "yes_no",
+  "yes-no": "yes_no",
+  boolean: "yes_no",
+  gps: "status",
+  reporte: "status",
+  howto: "how_to",
+  "how-to": "how_to",
+  guia: "how_to",
+  listado: "list",
+  fleet: "list",
+  start: "start_task",
+  continue: "continue_task",
+  farewell: "close",
+  goodbye: "close",
+  greeting: "greet",
+};
+
+const PRIOR_REFERS = new Set(["none", "last_facts", "last_question", "active_entity"]);
+
+function answerKindFromAct(act: string): string {
+  if (act === "greet") return "greet";
+  if (act === "farewell") return "close";
+  if (act === "start_task") return "start_task";
+  if (act === "continue_task" || act === "amend_task") return "continue_task";
+  if (act === "ask") return "clarify";
+  return "other";
+}
+
+function coerceInterpretation(o: Record<string, unknown>): {
+  userQuestion: string;
+  answerKind: string;
+  priorReply: {
+    relevant: boolean;
+    summary: string;
+    refersTo: string;
+  } | null;
+} {
+  const raw = o.interpretation;
+  const act = String(o.conversationalAct ?? "inform");
+  let userQuestion = "";
+  let answerKind = "";
+  let priorReply: {
+    relevant: boolean;
+    summary: string;
+    refersTo: string;
+  } | null = null;
+
+  if (raw && typeof raw === "object") {
+    const i = raw as Record<string, unknown>;
+    if (typeof i.userQuestion === "string") userQuestion = i.userQuestion.trim();
+    else if (typeof i.question === "string") userQuestion = i.question.trim();
+    const kindRaw = String(i.answerKind ?? i.kind ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+    answerKind = ANSWER_KINDS.has(kindRaw)
+      ? kindRaw
+      : (ANSWER_KIND_ALIASES[kindRaw] ?? "");
+    const pr = i.priorReply ?? i.previousReply;
+    if (typeof pr === "string" && pr.trim()) {
+      priorReply = {
+        relevant: true,
+        summary: pr.trim().slice(0, 400),
+        refersTo: "last_facts",
+      };
+    } else if (pr && typeof pr === "object") {
+      const p = pr as Record<string, unknown>;
+      const refersRaw = String(p.refersTo ?? p.refers_to ?? "none");
+      priorReply = {
+        relevant: Boolean(p.relevant),
+        summary: String(p.summary ?? "").slice(0, 400),
+        refersTo: PRIOR_REFERS.has(refersRaw) ? refersRaw : "none",
+      };
+    }
+  }
+
+  if (!userQuestion) {
+    const r = String(o.reasoning ?? "").trim();
+    const first = r.split(/[.!?]/)[0]?.trim() || r;
+    userQuestion = (first || "pedido del turno").slice(0, 400);
+  } else {
+    userQuestion = userQuestion.slice(0, 400);
+  }
+  if (!ANSWER_KINDS.has(answerKind)) {
+    answerKind = answerKindFromAct(act);
+  }
+  return { userQuestion, answerKind, priorReply };
+}
 
 function coerceEntityRef(v: unknown, kind: "company" | "unit"): unknown {
   if (v == null) return null;

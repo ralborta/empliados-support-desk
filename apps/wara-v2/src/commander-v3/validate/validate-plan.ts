@@ -1,4 +1,5 @@
 import { getCapability } from "../capabilities/catalog.js";
+import { capabilitiesConflictWithQuestion } from "../enrich/question-contract.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
 
@@ -74,6 +75,8 @@ export function validateTurnPlan(
   if (plan.unitReference && plan.unitReference.kind === "company") {
     errors.push("unit_reference_wrong_kind");
   }
+
+  errors.push(...capabilitiesConflictWithQuestion(plan));
 
   return { ok: errors.length === 0, errors, plan };
 }

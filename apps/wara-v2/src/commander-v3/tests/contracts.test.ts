@@ -11,6 +11,7 @@ import {
 import { validateTurnPlan } from "../validate/validate-plan.js";
 import { resolveUnitReference } from "../entities/resolve.js";
 import { CAPABILITY_CATALOG } from "../capabilities/catalog.js";
+import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 contracts", () => {
   it("TurnPlan schema acepta plan mínimo", () => {
@@ -156,5 +157,42 @@ describe("commander-v3 contracts", () => {
     const writes = CAPABILITY_CATALOG.filter((c) => c.kind === "write_commit");
     assert.ok(writes.length >= 4);
     assert.ok(writes.every((c) => c.requiresConfirmation));
+  });
+
+  it("interpretation yes_no + unit.search no valida; coerce completa interpretation", () => {
+    const raw = coercePlan({
+      conversationalAct: "inform",
+      requestedCapabilities: [{ name: "unit.search", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.7,
+      reasoning: "El cliente pregunta si la posición reportada es la correcta.",
+      interpretation: {
+        userQuestion: "¿La posición es la correcta?",
+        answerKind: "yes_no",
+        priorReply: {
+          relevant: true,
+          summary: "Reporte GPS previo",
+          refersTo: "last_facts",
+        },
+      },
+    });
+    const plan = TurnPlanSchema.parse(raw);
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    const v = validateTurnPlan(plan, s);
+    assert.equal(v.ok, false);
+    assert.ok(v.errors.some((e) => e.includes("capability_conflicts_question")));
+
+    const coercedMissing = TurnPlanSchema.parse(
+      coercePlan({
+        conversationalAct: "greet",
+        requestedCapabilities: [],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: ["hola"] },
+        confidence: 0.9,
+      }),
+    );
+    assert.equal(coercedMissing.interpretation?.answerKind, "greet");
+    assert.ok(coercedMissing.interpretation?.userQuestion);
   });
 });

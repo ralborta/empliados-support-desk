@@ -217,6 +217,24 @@ export function applyCommanderState(input: ApplyInput): {
   ].slice(-20);
   s = { ...s, recentTurns: turns };
 
+  if (input.plan.interpretation) {
+    s = {
+      ...s,
+      conversationMetadata: {
+        ...s.conversationMetadata,
+        lastTurn: {
+          userQuestion: input.plan.interpretation.userQuestion,
+          answerKind: input.plan.interpretation.answerKind,
+          priorReplyRelevant: Boolean(
+            input.plan.interpretation.priorReply?.relevant,
+          ),
+          assistantReplyPreview: input.reply.slice(0, 400),
+          at: new Date().toISOString(),
+        },
+      },
+    };
+  }
+
   // Clear competing expectations for confirmations handled
   if (input.plan.conversationalAct === "confirm_write") {
     // execute layer patches pendingWrite; ensure XOR
