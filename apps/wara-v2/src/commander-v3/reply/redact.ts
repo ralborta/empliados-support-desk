@@ -6,7 +6,13 @@ import type { TurnPlan } from "../types/turn-plan.js";
 import { formatGreeting } from "./format-wa.js";
 
 const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
-- Español rioplatense natural: vos, cálido, humano. Como un colega que ayuda, no un formulario.
+- Español rioplatense natural: vos, cálido, humano. Como un colega que ayuda, no un formulario ("completá estos campos").
+- Te llega el MENSAJE DEL USUARIO. CONTESTALO con los facts. Primera oración = respuesta a lo que preguntó.
+- Si preguntó algo puntual sobre GPS (si la posición es correcta, si está al día, por qué la ignición), respondé ESO con los tiempos de reporte/posición; no ignores la pregunta ni la reemplaces por un listado.
+- NUNCA reemplaces una pregunta con un listado de unidades que no pidió.
+- UNA pregunta por turno. No apiles km + fecha + CONFIRMO en el mismo mensaje si los facts piden una sola cosa.
+- No repitas el mismo párrafo del turno anterior. No prometas plazos ni "ya te llamamos".
+- Si facts traen nro de caso (#…), conservalo tal cual; no inventes otro.
 - PROHIBIDO saludar en cada mensaje. NUNCA empieces con "Hola", "Hola ¿cómo estás?", "Buenas" salvo que purpose/act sea saludo explícito.
 - NO inventes hechos. NO agregues tools. NO cambies empresa/unidad.
 - Usá SOLO los hechos validados (facts) y el responseGoal. Si hay un fact operativo (pedir km, fecha, CONFIRMO, listado, GPS), priorizalo y acortá sin vaciarlo.
@@ -23,11 +29,24 @@ function looksLikeListingFact(f: string): boolean {
   return numbered >= 2 || (/Unidades en/i.test(f) && numbered >= 1);
 }
 
-function looksLikeOperationalFact(f: string): boolean {
-  if (looksLikeListingFact(f)) return true;
-  return /Pasame el valor|od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Cancelé el trámite|Dejamos pendiente|Último reporte|no tiene reporte|detenida|falla de ignición|Decime el número|reporte GPS|¿Qué necesitás\?|Dale, seguimos|🛣|⏱|📋|📍|🔧|📅|🔢|➡️|✅/i.test(
+/** Formularios que no puede reescribir el LLM (CONFIRMO, captura de km, menú). */
+function looksLikeLockedFormFact(f: string): boolean {
+  return /Pasame el valor|Respondé \*CONFIRMO|\*CONFIRMO\* o \*CANCELAR\*|¿Confirmás|Cancelé el trámite|Dejamos pendiente|¿Qué necesitás\?|Dale, seguimos/i.test(
     f,
   );
+}
+
+function looksLikeOperationalFact(f: string): boolean {
+  if (looksLikeListingFact(f)) return true;
+  if (looksLikeLockedFormFact(f)) return true;
+  return /od[oó]metro|hor[oó]metro|CONFIRMO|certificado|fecha|hora de la lectura|futura|Unidad:|Funcionamiento|Google Maps|km\)|hs\)|Último reporte|no tiene reporte|detenida|falla de ignición|Decime el número|reporte GPS|🛣|⏱|📋|📍|🔧|📅|🔢|➡️|✅/i.test(
+    f,
+  );
+}
+
+/** Listados y formularios se copian tal cual. Un reporte GPS no: hay que contestar la pregunta. */
+export function shouldDumpFactsWithoutLlm(facts: string[]): boolean {
+  return facts.some(looksLikeListingFact) || facts.some(looksLikeLockedFormFact);
 }
 
 export async function redactReply(input: {
@@ -35,6 +54,7 @@ export async function redactReply(input: {
   facts: string[];
   state: ConversationStateV3;
   env: NodeJS.ProcessEnv;
+  userMessage?: string;
   conflictClarify?: string | null;
 }): Promise<{ reply: string; usedLlm: boolean; latencyMs: number }> {
   if (input.conflictClarify) {
@@ -83,8 +103,8 @@ export async function redactReply(input: {
     };
   }
 
-  // Hechos operativos / listados: no pasar por LLM (evita "Hola" + inventos).
-  if (input.facts.some(looksLikeOperationalFact)) {
+  // Listados y formularios de escritura: no pasar por LLM (evita resumir/inventar).
+  if (shouldDumpFactsWithoutLlm(input.facts)) {
     return {
       reply: fallbackFromFacts(input.facts, input.plan),
       usedLlm: false,
@@ -114,9 +134,14 @@ export async function redactReply(input: {
     purpose === "clarify" ||
     purpose === "resume" ||
     purpose === "confirm_write" ||
-    Boolean(input.plan.responseGoal.nextQuestion);
+    Boolean(input.plan.responseGoal.nextQuestion) ||
+    Boolean(input.userMessage?.trim());
 
-  if (!wantsNatural && input.facts.length === 1 && input.facts[0]!.length < 500) {
+  if (
+    !wantsNatural &&
+    input.facts.length === 1 &&
+    input.facts[0]!.length < 500
+  ) {
     return { reply: input.facts[0]!, usedLlm: false, latencyMs: 0 };
   }
 
@@ -156,6 +181,7 @@ export async function redactReply(input: {
           {
             role: "user",
             content: JSON.stringify({
+              userMessage: input.userMessage ?? "",
               purpose,
               facts: input.facts,
               nextQuestion: input.plan.responseGoal.nextQuestion ?? null,
@@ -163,7 +189,8 @@ export async function redactReply(input: {
               unit: input.state.unit?.label ?? null,
               task: input.state.activeTask?.type ?? null,
               act: input.plan.conversationalAct,
-              rules: "Sin saludo. Sin inventar. Solo facts.",
+              rules:
+                "Contestá el userMessage con los facts. Sin saludo. Sin inventar. Si preguntó algo puntual, la primera oración es esa respuesta.",
             }),
           },
         ],
@@ -181,7 +208,6 @@ export async function redactReply(input: {
       choices?: Array<{ message?: { content?: string } }>;
     };
     let text = body.choices?.[0]?.message?.content?.trim() ?? "";
-    // Cinturón: sacar saludos residuales del redactor
     text = text.replace(/^(hola[^.!?]*[.!?]\s*)+/i, "").trim();
     if (!text) {
       return {

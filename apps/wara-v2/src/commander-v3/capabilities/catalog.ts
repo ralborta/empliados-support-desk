@@ -85,7 +85,7 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   },
   {
     name: "gps.get_status",
-    purpose: "Lectura GPS de unidad activa o referida",
+    purpose: "Lectura GPS de la unidad activa o referida. Follow-up sobre posición/reporte/si está al día: esta cap sobre state.unit, nunca unit.search.",
     params: ["movilId"],
     kind: "read",
     requiredFields: ["unit"],

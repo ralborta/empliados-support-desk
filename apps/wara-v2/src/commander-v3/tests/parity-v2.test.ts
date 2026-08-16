@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 15b", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15b/);
+  it("prompt version bump 15e", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15e/);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {
@@ -2121,7 +2121,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       confidence: 0.9,
     });
     const enriched = enrichPlanForGpsUnitInMessage(plan, s, "estado de reporte");
-    assert.equal(enriched.unitReference, undefined);
+    assert.equal(enriched.unitReference?.reference, "active");
     assert.equal(enriched.stateIntent.preserveUnit, true);
   });
 
@@ -2584,6 +2584,89 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     assert.match(exec.facts.join(" "), /reporte|Funcionamiento|detenida|NISSAN|AG 562/i);
     assert.doesNotMatch(exec.facts.join(" "), /listado completo|Decime el número/i);
+  });
+
+  it("follow-up de posición se ata a la unidad activa, no busca flota", async () => {
+    const {
+      extractFleetFilterHint,
+      enrichPlanForGpsUnitInMessage,
+      enrichPlanPromoteGpsFromReasoning,
+      bindGpsFollowUpToActiveUnit,
+    } = await import("../enrich/gps-unit-from-message.js");
+    const { resolveUnitReference } = await import("../entities/resolve.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 99,
+      plate: "AA815XP",
+      name: "M900-099",
+      label: "AA 815 XP (M900-099)",
+    };
+    s.lastQuestion = {
+      id: "q-unit",
+      purpose: "select_unit",
+      expected: "unit",
+    };
+    s.fleetCache = [
+      s.unit,
+      ...[66, 69, 70].map((n) => ({
+        movilId: 1000 + n,
+        plate: `CT${n}AA`,
+        name: `CAMARATEST${String(n).padStart(3, "0")}`,
+        label: `CAMARATEST${String(n).padStart(3, "0")}`,
+      })),
+    ];
+    const msg = "Su última posición es la correcta?";
+    assert.equal(extractFleetFilterHint(msg, s), null);
+
+    let plan = TurnPlanSchema.parse({
+      reasoning:
+        "El usuario pregunta si la última posición de la unidad del hilo es correcta.",
+      conversationalAct: "inform",
+      task: "unit_query",
+      unitReference: { kind: "unit", mode: "named", value: "es" },
+      requestedCapabilities: [
+        { name: "unit.search", params: { query: "es" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: false, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    plan = enrichPlanPromoteGpsFromReasoning(plan, s);
+    plan = enrichPlanForGpsUnitInMessage(plan, s, msg);
+    plan = bindGpsFollowUpToActiveUnit(plan, s);
+    assert.equal(plan.task, "gps");
+    assert.ok(plan.requestedCapabilities.some((c) => c.name === "gps.get_status"));
+    assert.ok(!plan.requestedCapabilities.some((c) => c.name === "unit.search"));
+    assert.equal(plan.unitReference?.reference, "active");
+    assert.equal(plan.stateIntent.preserveUnit, true);
+    const resolved = resolveUnitReference(plan.unitReference ?? null, s);
+    assert.equal(resolved.status, "exact");
+    if (resolved.status === "exact") {
+      assert.equal(resolved.unit.movilId, 99);
+    }
+  });
+
+  it("redactor: listado se volca; un reporte GPS no se trata como formulario cerrado", async () => {
+    const { shouldDumpFactsWithoutLlm } = await import("../reply/redact.js");
+    assert.equal(
+      shouldDumpFactsWithoutLlm([
+        "Encontré varias unidades:\n1. CAMARATEST066\n2. CAMARATEST069\n\nDecime el número o la patente exacta.",
+      ]),
+      true,
+    );
+    assert.equal(
+      shouldDumpFactsWithoutLlm([
+        "➡️ Respondé *CONFIRMO* o *CANCELAR*.",
+      ]),
+      true,
+    );
+    assert.equal(
+      shouldDumpFactsWithoutLlm([
+        "⚠️ Falla de ignición\n🚗 Unidad: AA 815 XP\n⏱️ Último reporte: hace 5 minutos\n📍 Posición: hace 2 horas",
+      ]),
+      false,
+    );
   });
 
   it("domain.answer de guía no se hijackea a GPS por lastGps / reasoning de reporte", async () => {

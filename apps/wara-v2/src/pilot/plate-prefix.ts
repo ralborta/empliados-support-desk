@@ -8,6 +8,7 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "que", "los", "por", "con", "una", "uno", "eso", "esa", "ese", "el", "la", "las",
   "unos", "unas", "de", "del", "al", "en", "para", "a", "no", "nop", "nope", "nel", "nah", "veo",
   "si", "sii", "sip", "dale", "ok", "okey", "listo", "yes",
+  "es", "su", "sus", "ha", "he", "mi", "ya", "va", "da",
 ]);
 
 const EMPIEZA_RE = "emp(?:ie|i|e)za(?:n)?";

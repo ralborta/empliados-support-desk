@@ -368,6 +368,7 @@ export async function runCommanderTurn(
       facts: [],
       state,
       env: input.env,
+      userMessage: input.message,
       conflictClarify: clarify,
     });
     const after = {
@@ -947,6 +948,7 @@ export async function runCommanderTurn(
       ],
       state,
       env: input.env,
+      userMessage: input.message,
     });
     const applied = applyCommanderState({
       state,
@@ -1013,6 +1015,7 @@ export async function runCommanderTurn(
     facts: exec.facts,
     state,
     env: input.env,
+    userMessage: input.message,
   });
 
   const applied = applyCommanderState({

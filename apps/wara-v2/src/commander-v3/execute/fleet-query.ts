@@ -12,11 +12,61 @@ import {
 } from "../../pilot/plates.js";
 import type { ConversationStateV3 } from "../types/state.js";
 
+/**
+ * Palabras de la frase, no identidad de unidad.
+ * “es” matcheaba CAMARATEST por substring; “posición/correcta” no son marca.
+ */
+const FLEET_QUERY_NOISE = new Set([
+  "es",
+  "su",
+  "sus",
+  "si",
+  "no",
+  "ha",
+  "he",
+  "mi",
+  "ya",
+  "va",
+  "da",
+  "ok",
+  "posicion",
+  "ubicacion",
+  "localizacion",
+  "correcta",
+  "correcto",
+  "correctas",
+  "bien",
+  "mal",
+  "esa",
+  "ese",
+  "eso",
+  "esta",
+  "este",
+  "esto",
+  "misma",
+  "mismo",
+  "ultima",
+  "ultimo",
+  "reporte",
+  "estado",
+  "gps",
+]);
+
+export function isFleetQueryNoise(query: string): boolean {
+  const q = query
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return FLEET_QUERY_NOISE.has(q);
+}
+
 /** Query válida de filtro (patente/código/marca corta). Frases conversacionales no son query. */
 export function isStructuredFleetQuery(query: string): boolean {
   const q = query.trim();
   if (!q || q.length > 40) return false;
   if (/[?]/.test(q)) return false;
+  if (isFleetQueryNoise(q)) return false;
   if (extractUnitNameCode(q)) return true;
   const plate = normalizeLoosePlate(q);
   if (plate && isPlausibleVehiclePlate(plate)) return true;
@@ -80,6 +130,8 @@ export function filterFleetCacheByQuery(
     }
   }
 
+  // Substring corto (“es” ⊂ CAMARATEST) no es filtro. Marca ≥4 (saveiro, nissan).
+  if (isFleetQueryNoise(q) || q.length < 4) return [];
   const soft = q.toLowerCase();
   return state.fleetCache.filter((u) => {
     const label = u.label.toLowerCase();

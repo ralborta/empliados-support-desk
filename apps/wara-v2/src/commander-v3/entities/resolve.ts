@@ -10,6 +10,7 @@ import {
   extractUnitNameCode,
   filterUnitsByUnitName,
 } from "../../pilot/unit-fleet.js";
+import { isFleetQueryNoise } from "../execute/fleet-query.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { EntityReference } from "../types/refs.js";
 import type { CompanyRef, UnitRef } from "../types/refs.js";
@@ -97,6 +98,7 @@ export function resolveUnitReference(
 
   const raw = ref.value.trim();
   if (!raw) return { status: "none" };
+  if (isFleetQueryNoise(raw)) return { status: "not_found", query: raw };
 
   if (/^\d{1,8}$/.test(raw)) {
     const asMovil = Number.parseInt(raw, 10);
@@ -171,6 +173,10 @@ export function resolveUnitReference(
     const n = normUnitToken(u.name ?? "");
     const l = normUnitToken(u.label ?? "");
     const q = nameQ;
+    if (q.length <= 3) {
+      // Prefijo de patente (AG, AA), no substring de nombre (ES ⊂ CAMARATEST).
+      return Boolean(p && p.startsWith(q));
+    }
     return (
       (p && p.includes(q)) ||
       (n && n.includes(q)) ||

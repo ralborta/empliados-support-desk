@@ -15,8 +15,13 @@ import {
 } from "../../pilot/plates.js";
 import {
   filterFleetCacheByQuery,
+  isFleetQueryNoise,
   isStructuredFleetQuery,
 } from "../execute/fleet-query.js";
+import {
+  isExplicitUnitReference,
+  resolveUnitReference,
+} from "../entities/resolve.js";
 import type { ConversationStateV3 } from "../types/state.js";
 import type { TurnPlan } from "../types/turn-plan.js";
 import type { UnitRef } from "../types/refs.js";
@@ -88,6 +93,31 @@ const FILTER_FILLER = new Set([
   "podés",
   "decime",
   "pasame",
+  "su",
+  "sus",
+  "es",
+  "son",
+  "si",
+  "no",
+  "ha",
+  "he",
+  "mi",
+  "ya",
+  "va",
+  "da",
+  "ok",
+  "posicion",
+  "localizacion",
+  "correcta",
+  "correcto",
+  "correctas",
+  "bien",
+  "mal",
+  "esa",
+  "ese",
+  "eso",
+  "misma",
+  "mismo",
 ]);
 
 function isGpsPlan(plan: TurnPlan): boolean {
@@ -123,7 +153,7 @@ function reasoningImpliesGps(plan: TurnPlan): boolean {
   const blob = `${plan.reasoning ?? ""} ${plan.responseGoal?.nextQuestion ?? ""} ${
     plan.lateralQuestion?.topic ?? ""
   }`.toLowerCase();
-  return /\b(reporte|gps|ubicaci[oó]n|localizaci|donde est|último reporte|ultimo reporte|estado de (la )?unidad|estado\/reporte)\b/.test(
+  return /\b(reporte|gps|ubicaci[oó]n|posici[oó]n|localizaci|donde est|último reporte|ultimo reporte|estado de (la )?unidad|estado\/reporte)\b/.test(
     blob,
   );
 }
@@ -228,7 +258,12 @@ export function extractFleetFilterHint(
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
-    if (cand && !FILTER_FILLER.has(cand) && isStructuredFleetQuery(cand)) {
+    if (
+      cand &&
+      !FILTER_FILLER.has(cand) &&
+      !isFleetQueryNoise(cand) &&
+      isStructuredFleetQuery(cand)
+    ) {
       if (!state.fleetCache.length) return cand;
       const hits = filterFleetCacheByQuery(state, cand);
       if (hits.length >= 1) return cand;
@@ -243,6 +278,7 @@ export function extractFleetFilterHint(
     .filter((w) => w.length >= 2 && !FILTER_FILLER.has(w));
 
   for (const tok of tokens) {
+    if (isFleetQueryNoise(tok)) continue;
     if (!isStructuredFleetQuery(tok)) continue;
     if (!state.fleetCache.length) {
       // Sin flota aún (empresa pendiente): conservar marca/prefijo para el próximo turno.
@@ -304,15 +340,76 @@ function unitReferenceAlreadyHasHint(plan: TurnPlan, hint: string): boolean {
   return Boolean(a && b && a === b);
 }
 
+function contextualActiveUnitRef(): TurnPlan["unitReference"] {
+  return {
+    kind: "unit",
+    mode: "contextual",
+    value: "active",
+    reference: "active",
+  };
+}
+
+/**
+ * Principio 8: la unidad activa no cambia si el plan no resolvió OTRA identidad.
+ * Follow-up (pronombre / pregunta sobre posición) no es búsqueda de flota.
+ */
+export function bindGpsFollowUpToActiveUnit(
+  plan: TurnPlan,
+  state: ConversationStateV3,
+): TurnPlan {
+  if (!isGpsPlan(plan) || !state.unit) return plan;
+  const ref = plan.unitReference;
+  if (!isExplicitUnitReference(ref)) {
+    return {
+      ...plan,
+      unitReference: contextualActiveUnitRef(),
+      stateIntent: { ...plan.stateIntent, preserveUnit: true },
+      requestedCapabilities: plan.requestedCapabilities.filter(
+        (c) => c.name !== "unit.search",
+      ),
+    };
+  }
+  const resolved = resolveUnitReference(ref, state);
+  if (resolved.status === "exact" && resolved.unit.movilId !== state.unit.movilId) {
+    return plan;
+  }
+  if (resolved.status === "exact") {
+    return {
+      ...plan,
+      unitReference: contextualActiveUnitRef(),
+      stateIntent: { ...plan.stateIntent, preserveUnit: true },
+      requestedCapabilities: plan.requestedCapabilities.filter(
+        (c) => c.name !== "unit.search",
+      ),
+    };
+  }
+  const raw = String(ref.value ?? "").trim();
+  const namedIdentity =
+    resolved.status === "many" &&
+    !isFleetQueryNoise(raw) &&
+    raw.length >= 4 &&
+    isStructuredFleetQuery(raw);
+  if (namedIdentity) return plan;
+  return {
+    ...plan,
+    unitReference: contextualActiveUnitRef(),
+    stateIntent: { ...plan.stateIntent, preserveUnit: true },
+    requestedCapabilities: plan.requestedCapabilities.filter(
+      (c) => c.name !== "unit.search",
+    ),
+  };
+}
+
 export function enrichPlanForGpsUnitInMessage(
   plan: TurnPlan,
   state: ConversationStateV3,
   message: string,
 ): TurnPlan {
   if (!isGpsPlan(plan)) return plan;
+  plan = bindGpsFollowUpToActiveUnit(plan, state);
 
   const hint = extractFleetFilterHint(message, state);
-  if (!hint) return plan;
+  if (!hint || isFleetQueryNoise(hint)) return plan;
   // Follow-up de la misma unidad: no pisar el hilo.
   if (hintRefersToActiveUnit(hint, state.unit)) return plan;
 
