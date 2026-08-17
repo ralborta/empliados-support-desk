@@ -213,18 +213,21 @@ export function applyCommanderState(input: ApplyInput): {
     };
   }
 
-  if (
-    input.plan.parkedTurn &&
-    input.plan.responseGoal.purpose === "clarify" &&
-    input.plan.conversationalAct === "ask"
-  ) {
+  if (input.plan.parkedTurn) {
+    const keepOrClose =
+      input.plan.responseGoal.purpose === "clarify" &&
+      input.plan.conversationalAct === "ask";
     s = {
       ...s,
-      lastQuestion: {
-        id: randomUUID(),
-        purpose: "keep_or_close_task",
-        expected: "clarification",
-      },
+      ...(keepOrClose
+        ? {
+            lastQuestion: {
+              id: randomUUID(),
+              purpose: "keep_or_close_task" as const,
+              expected: "clarification" as const,
+            },
+          }
+        : {}),
       conversationMetadata: {
         ...s.conversationMetadata,
         parkedTurn: {
@@ -236,6 +239,14 @@ export function applyCommanderState(input: ApplyInput): {
             params: c.params ?? {},
           })),
         },
+      },
+    };
+  } else if (input.plan.parkedTurn === null) {
+    s = {
+      ...s,
+      conversationMetadata: {
+        ...s.conversationMetadata,
+        parkedTurn: null,
       },
     };
   } else if (

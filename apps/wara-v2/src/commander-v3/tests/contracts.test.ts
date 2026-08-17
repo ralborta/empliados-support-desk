@@ -559,4 +559,181 @@ describe("commander-v3 contracts", () => {
     assert.equal(coerced.interpretation?.answerKind, "start_task");
     assert.equal(coerced.conversationalAct, "start_task");
   });
+
+  it("sin empresa + GPS → parkedTurn, no ejecuta GPS", async () => {
+    const { enrichPlanForCompanyOpsGate } = await import(
+      "../enrich/company-ops-gate.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    s.lastQuestion = { id: "q", purpose: "select_company", expected: "company" };
+    s.lastListing = {
+      kind: "companies",
+      page: 1,
+      pageSize: 20,
+      totalCount: 2,
+      items: [
+        { index: 1, label: "WARA", companyId: "1" },
+        { index: 2, label: "El Cacique S.A.", companyId: "2" },
+      ],
+      fetchedAt: new Date().toISOString(),
+    };
+    const gated = enrichPlanForCompanyOpsGate(
+      TurnPlanSchema.parse({
+        interpretation: {
+          userQuestion: "estado de la unidad",
+          answerKind: "status",
+        },
+        reasoning: "pide estado",
+        conversationalAct: "start_task",
+        task: "gps",
+        taskAction: "start",
+        requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.8,
+      }),
+      s,
+    );
+    assert.equal(gated.task, null);
+    assert.equal(gated.conversationalAct, "ask");
+    assert.equal(
+      gated.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      false,
+    );
+    assert.equal(gated.parkedTurn?.task, "gps");
+    assert.equal(
+      gated.parkedTurn?.capabilities?.some((c) => c.name === "gps.get_status"),
+      true,
+    );
+  });
+
+  it("elegir cacique con estado estacionado → select + GPS", async () => {
+    const { enrichPlanForCompanyCapture } = await import(
+      "../enrich/company-capture.js"
+    );
+    const { applyCommanderState } = await import("../state/apply-patch.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    s.lastQuestion = { id: "q", purpose: "select_company", expected: "company" };
+    s.lastListing = {
+      kind: "companies",
+      page: 1,
+      pageSize: 20,
+      totalCount: 2,
+      items: [
+        { index: 1, label: "WARA", companyId: "1" },
+        { index: 2, label: "El Cacique S.A.", companyId: "2" },
+      ],
+      fetchedAt: new Date().toISOString(),
+    };
+    s.conversationMetadata.parkedTurn = {
+      answerKind: "status",
+      userQuestion: "estado de la unidad",
+      task: "gps",
+      capabilities: [{ name: "gps.get_status", params: {} }],
+    };
+    const captured = enrichPlanForCompanyCapture(
+      TurnPlanSchema.parse({
+        interpretation: {
+          userQuestion: "vamos con cacique",
+          answerKind: "other",
+        },
+        reasoning: "elige empresa",
+        conversationalAct: "ask",
+        requestedCapabilities: [],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: {
+          purpose: "ask_missing",
+          facts: [],
+          nextQuestion: "¿querés el estado?",
+        },
+        confidence: 0.7,
+      }),
+      s,
+      "vamos con cacique",
+    );
+    assert.equal(captured.companyReference?.mode, "named");
+    assert.ok(
+      captured.requestedCapabilities.some(
+        (c) => c.name === "company.select" && c.params?.companyId === "2",
+      ),
+    );
+    assert.ok(
+      captured.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+    );
+    assert.equal(captured.task, "gps");
+    assert.equal(captured.parkedTurn ?? null, null);
+    assert.equal(captured.responseGoal.nextQuestion ?? null, null);
+
+    const parkedPlan = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "estado de la unidad",
+        answerKind: "status",
+      },
+      reasoning: "sin empresa",
+      conversationalAct: "ask",
+      parkedTurn: {
+        answerKind: "status",
+        userQuestion: "estado de la unidad",
+        task: "gps",
+        capabilities: [{ name: "gps.get_status", params: {} }],
+      },
+      requestedCapabilities: [{ name: "company.list", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: {
+        purpose: "ask_missing",
+        facts: [],
+        nextQuestion: "Elegí la empresa",
+      },
+      confidence: 0.8,
+    });
+    const applied = applyCommanderState({
+      state: s,
+      plan: parkedPlan,
+      resolvedUnit: null,
+      resolvedCompany: null,
+      message: "estado de la unidad",
+      reply: "elegí empresa",
+    });
+    assert.equal(applied.state.conversationMetadata.parkedTurn?.task, "gps");
+    assert.equal(applied.state.lastQuestion?.purpose, "select_company");
+  });
+
+  it("ops-gate no strippea GPS si este turno selecciona empresa", async () => {
+    const { enrichPlanForCompanyOpsGate } = await import(
+      "../enrich/company-ops-gate.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    const gated = enrichPlanForCompanyOpsGate(
+      TurnPlanSchema.parse({
+        reasoning: "elige y gps",
+        conversationalAct: "start_task",
+        task: "gps",
+        taskAction: "start",
+        requestedCapabilities: [
+          { name: "company.select", params: { companyId: "2" } },
+          { name: "gps.get_status", params: {} },
+        ],
+        stateIntent: { preserveCompany: false, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.8,
+      }),
+      s,
+    );
+    assert.equal(
+      gated.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      true,
+    );
+  });
 });

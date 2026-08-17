@@ -15,7 +15,7 @@ const OPS_CAPS = new Set([
   "maintenance.prepare",
 ]);
 
-function isCompanyResetList(plan: TurnPlan): boolean {
+export function isCompanyResetList(plan: TurnPlan): boolean {
   return plan.requestedCapabilities.some(
     (c) =>
       c.name === "company.list" &&
@@ -59,6 +59,11 @@ export function enrichPlanForCompanyOpsGate(
     };
   }
 
+  // Este turno ya elige empresa: no strippear GPS/ops (se ejecutan después del select).
+  if (plan.requestedCapabilities.some((c) => c.name === "company.select")) {
+    return plan;
+  }
+
   if (!needsCompanyForOps(plan)) return plan;
   if (state.availableCompanies.length <= 1) return plan;
 
@@ -69,16 +74,51 @@ export function enrichPlanForCompanyOpsGate(
       ? String(plan.unitReference.value ?? "").trim()
       : "";
 
+  const strippedOps = plan.requestedCapabilities.filter((c) => OPS_CAPS.has(c.name));
   const kept = plan.requestedCapabilities.filter(
     (c) => !OPS_CAPS.has(c.name) && c.name !== "company.list",
   );
+  const parkedCaps =
+    strippedOps.length > 0
+      ? strippedOps
+      : plan.task === "gps" || plan.interpretation?.answerKind === "status"
+        ? [{ name: "gps.get_status", params: {} }]
+        : plan.task === "odometer"
+          ? [{ name: "odometer.prepare", params: {} }]
+          : plan.task === "hourmeter"
+            ? [{ name: "hourmeter.prepare", params: {} }]
+            : strippedOps;
+
+  const parkedTask =
+    plan.task && plan.task !== "unit_query"
+      ? plan.task
+      : parkedCaps.some((c) => c.name === "gps.get_status")
+        ? ("gps" as const)
+        : plan.task ?? null;
+
+  const parkedTurn = {
+    answerKind: plan.interpretation?.answerKind ?? "status",
+    userQuestion: plan.interpretation?.userQuestion ?? "pedido operativo",
+    task: parkedTask,
+    capabilities: parkedCaps.map((c) => ({
+      name: c.name,
+      params: c.params ?? {},
+    })),
+  };
+
+  const alreadyAskingCompany =
+    state.lastQuestion?.expected === "company" &&
+    state.lastListing?.kind === "companies";
 
   return {
     ...plan,
-    taskAction: plan.taskAction ?? "start",
-    conversationalAct:
-      plan.conversationalAct === "greet" ? "start_task" : plan.conversationalAct,
-    requestedCapabilities: [{ name: "company.list", params: {} }, ...kept],
+    conversationalAct: "ask",
+    taskAction: null,
+    task: null,
+    parkedTurn,
+    requestedCapabilities: alreadyAskingCompany
+      ? kept
+      : [{ name: "company.list", params: {} }, ...kept],
     suppliedFields: {
       ...(plan.suppliedFields ?? {}),
       ...(unitHint ? { unitQuery: unitHint } : {}),
@@ -87,13 +127,13 @@ export function enrichPlanForCompanyOpsGate(
       purpose: "ask_missing",
       facts: [],
       nextQuestion:
-        plan.task === "gps" ||
-        plan.requestedCapabilities.some((c) => c.name === "gps.get_status")
-          ? "Elegí la empresa (1/2/nombre) y después te doy el reporte."
+        parkedTask === "gps" ||
+        parkedCaps.some((c) => c.name === "gps.get_status")
+          ? "Elegí la empresa (1/2/nombre) y te paso el estado."
           : "¿Con qué empresa seguimos? (número o nombre)",
     },
     reasoning:
       (plan.reasoning ? `${plan.reasoning} ` : "") +
-      "Sin empresa: primero company.list, después la operación.",
+      "Sin empresa: estaciono la operación, primero la empresa.",
   };
 }

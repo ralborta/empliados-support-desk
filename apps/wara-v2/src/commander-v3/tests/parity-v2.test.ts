@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 16g", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16g/);
+  it("prompt version bump 16h", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16h/);
   });
 
   it("prompt Commander no copia el árbol de decisión V1", async () => {
@@ -25,6 +25,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /Saludo PURO|saludo o pedido|how_to/i);
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /reinicio de empresa|company.list/i);
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /horómetro|hourmeter|start_task \+ \*\.prepare/i);
+    assert.match(COMMANDER_V3_SYSTEM_PROMPT, /Al elegir empresa|EJECUTALA/i);
     assert.ok(COMMANDER_V3_SYSTEM_PROMPT.length < 4500);
   });
 
@@ -2932,6 +2933,11 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
       false,
     );
     assert.equal(gated.suppliedFields?.unitQuery, "saveiro");
+    assert.ok(gated.parkedTurn);
+    assert.equal(
+      gated.parkedTurn?.capabilities?.some((c) => c.name === "gps.get_status"),
+      true,
+    );
   });
 
   it("empresa activa + GPS plan con company.list → strip list", async () => {

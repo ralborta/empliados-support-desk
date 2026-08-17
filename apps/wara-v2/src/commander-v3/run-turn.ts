@@ -14,10 +14,14 @@ import {
 import { executeCapabilities, stripMeterValueConfusedWithUnit } from "./execute/run-capabilities.js";
 import { enrichPlanWithNaturalDatetime } from "./enrich/natural-datetime-plan.js";
 import {
+  attachParkedOpsAfterCompanySelect,
   enrichPlanForCompanyCapture,
   enrichPlanForGreetingCompanyGate,
 } from "./enrich/company-capture.js";
-import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
+import {
+  enrichPlanForCompanyOpsGate,
+  isCompanyResetList,
+} from "./enrich/company-ops-gate.js";
 import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
@@ -451,7 +455,9 @@ export async function runCommanderTurn(
 
   plan = enrichPlanForOpenTaskHold(plan, state);
   plan = enrichPlanForCompanyChange(plan, state, input.message);
-  if (plan.stateIntent.preserveCompany === false) {
+  // Solo un reset de empresa descarta el pedido estacionado.
+  // Elegir empresa (preserveCompany=false + company.select) debe EJECUTARLO.
+  if (isCompanyResetList(plan)) {
     state = {
       ...state,
       conversationMetadata: {
@@ -555,7 +561,7 @@ export async function runCommanderTurn(
     Boolean(plan.parkedTurn) ||
     plan.conversationalAct === "greet" ||
     plan.responseGoal.purpose === "clarify" ||
-    plan.stateIntent.preserveCompany === false;
+    isCompanyResetList(plan);
   const ensurePrepareFor = (
     task: "odometer" | "hourmeter" | "certificate",
     cap: string,
@@ -681,21 +687,29 @@ export async function runCommanderTurn(
     };
   }
 
-  // Orden estable: select → search (si falta unidad) → prepare → resto
+  // Orden estable: empresa → unidad → search → prepare → resto
   {
     const caps = plan.requestedCapabilities;
+    const companySelect = caps.filter((c) => c.name === "company.select");
     const select = caps.filter((c) => c.name === "unit.select");
     const prepare = caps.filter((c) => String(c.name).endsWith(".prepare"));
     const search = caps.filter((c) => c.name === "unit.search");
     const rest = caps.filter(
       (c) =>
+        c.name !== "company.select" &&
         c.name !== "unit.select" &&
         c.name !== "unit.search" &&
         !String(c.name).endsWith(".prepare"),
     );
     plan = {
       ...plan,
-      requestedCapabilities: [...select, ...search, ...prepare, ...rest],
+      requestedCapabilities: [
+        ...companySelect,
+        ...select,
+        ...search,
+        ...prepare,
+        ...rest,
+      ],
     };
   }
   if (
@@ -729,6 +743,8 @@ export async function runCommanderTurn(
       ),
     };
   }
+
+  plan = attachParkedOpsAfterCompanySelect(plan, state);
 
   // No re-ejecutar select de la misma empresa/unidad ya activa
   plan = {

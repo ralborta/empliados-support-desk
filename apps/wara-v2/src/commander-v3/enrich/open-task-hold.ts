@@ -71,6 +71,13 @@ function contributedExpectedField(
     return true;
   }
   if (expected === "unit" && plan.unitReference) return true;
+  if (
+    expected === "company" &&
+    (plan.companyReference ||
+      plan.requestedCapabilities.some((c) => c.name === "company.select"))
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -93,6 +100,8 @@ function hasForeignEvidence(
 function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boolean {
   const kind = plan.interpretation?.answerKind;
   const act = plan.conversationalAct;
+  // Parser de campo esperado: elegir empresa no es un pedido nuevo.
+  if (state.lastQuestion?.expected === "company") return false;
   if (contributedExpectedField(plan, state)) return false;
   if (isGreetingTurn(plan)) return true;
   if (
