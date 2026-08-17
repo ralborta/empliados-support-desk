@@ -81,7 +81,7 @@ export function enrichPlanForCompanyOpsGate(
   const parkedCaps =
     strippedOps.length > 0
       ? strippedOps
-      : plan.task === "gps" || plan.interpretation?.answerKind === "status"
+      : plan.task === "gps"
         ? [{ name: "gps.get_status", params: {} }]
         : plan.task === "odometer"
           ? [{ name: "odometer.prepare", params: {} }]

@@ -602,6 +602,11 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         capability: req.name,
         ok: true,
         facts: [formatCompanyActive(ctx.state.company.name)],
+        data: {
+          statePatch: {
+            lastQuestion: null,
+          },
+        },
       };
     }
     case "company.list": {

@@ -52,9 +52,14 @@ export function shouldDumpFactsWithoutLlm(
   const kind = plan?.interpretation?.answerKind;
   if (kind === "greet") return false;
   if (plan?.parkedTurn || plan?.responseGoal.purpose === "clarify") return false;
-  if (facts.some(looksLikeAskUnitFact)) return true;
-  if (plan?.responseGoal.purpose === "ask_missing" && facts.some(looksLikeAskUnitFact)) {
-    return true;
+  if (facts.some(looksLikeAskUnitFact)) {
+    const otherQuestion = plan?.requestedCapabilities.some(
+      (c) =>
+        c.name === "company.get_active" ||
+        c.name === "company.list" ||
+        c.name === "domain.answer",
+    );
+    if (!otherQuestion) return true;
   }
   if (kind === "yes_no" || kind === "status" || kind === "how_to") return false;
   if (kind === "list") return facts.some(looksLikeListingFact);

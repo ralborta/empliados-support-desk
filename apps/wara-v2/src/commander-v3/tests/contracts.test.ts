@@ -812,4 +812,79 @@ describe("commander-v3 contracts", () => {
     );
     assert.match(formatAskUnit("gps"), /¿De qué unidad\?/);
   });
+
+  it("pregunta nueva con slot de unidad no re-ejecuta GPS", async () => {
+    const { enrichPlanForCurrentQuestion } = await import(
+      "../enrich/current-question.js"
+    );
+    const { enrichPlanForQuestionContract } = await import(
+      "../enrich/question-contract.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.lastQuestion = { id: "q", purpose: "unit_for_gps", expected: "unit" };
+    s.activeTask = {
+      type: "gps",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    const incoming = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "en qué empresa estamos",
+        answerKind: "status",
+        priorReply: { relevant: false, summary: "", refersTo: "none" },
+      },
+      reasoning: "pregunta la empresa",
+      conversationalAct: "inform",
+      task: "gps",
+      requestedCapabilities: [
+        { name: "company.get_active", params: {} },
+        { name: "gps.get_status", params: {} },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const contracted = enrichPlanForQuestionContract(incoming, s);
+    const next = enrichPlanForCurrentQuestion(contracted, s);
+    assert.ok(next.requestedCapabilities.some((c) => c.name === "company.get_active"));
+    assert.equal(
+      next.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      false,
+    );
+    assert.notEqual(next.task, "gps");
+  });
+
+  it("status sin task gps no se convierte en GPS", async () => {
+    const { enrichPlanForQuestionContract } = await import(
+      "../enrich/question-contract.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.unit = {
+      movilId: 1,
+      plate: "AA 111 AA",
+      name: "AA 111 AA",
+      label: "AA 111 AA",
+    };
+    const plan = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "en qué empresa estamos",
+        answerKind: "status",
+      },
+      reasoning: "empresa",
+      conversationalAct: "inform",
+      requestedCapabilities: [{ name: "company.get_active", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const next = enrichPlanForQuestionContract(plan, s);
+    assert.equal(
+      next.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      false,
+    );
+    assert.ok(next.requestedCapabilities.some((c) => c.name === "company.get_active"));
+  });
 });

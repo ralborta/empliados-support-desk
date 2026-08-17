@@ -26,6 +26,7 @@ import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
 import { enrichPlanForQuestionContract } from "./enrich/question-contract.js";
+import { enrichPlanForCurrentQuestion } from "./enrich/current-question.js";
 import {
   enrichPlanForExpectedFields,
   enrichPlanForMeterValueFallback,
@@ -401,6 +402,7 @@ export async function runCommanderTurn(
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForQuestionContract(plan, state);
+  plan = enrichPlanForCurrentQuestion(plan, state);
 
   plan = enrichPlanForKeepOrCloseAnswer(plan, state);
   if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) {
@@ -423,6 +425,7 @@ export async function runCommanderTurn(
       if (parked) {
         plan = planFromParkedTurn(parked, plan);
         plan = enrichPlanForQuestionContract(plan, state);
+        plan = enrichPlanForCurrentQuestion(plan, state);
       }
     } else if (
       plan.conversationalAct === "continue_task" ||
@@ -584,32 +587,26 @@ export async function runCommanderTurn(
   ensurePrepareFor("hourmeter", "hourmeter.prepare");
   ensurePrepareFor("certificate", "certificate.prepare");
 
-  // GPS: asegurar lectura si el Commander pidió estado/GPS (contrato, no semántica).
-  // Si ya hay domain.answer, no inyectar GPS (guía de panel ≠ reporte).
-  // keep-or-close: no reinyectar (parkedTurn / clarify).
-  const statusWantsGps =
-    plan.interpretation?.answerKind === "status" &&
-    plan.task !== "odometer" &&
-    plan.task !== "hourmeter" &&
-    plan.task !== "certificate" &&
-    plan.task !== "maintenance" &&
-    plan.task !== "human_handoff";
+  // GPS: si el Commander declaró task=gps, asegurar la tool. No inferir GPS
+  // desde answerKind=status (empresa activa también es status).
   if (
     !plan.parkedTurn &&
     plan.responseGoal.purpose !== "clarify" &&
-    (plan.task === "gps" || statusWantsGps) &&
+    plan.task === "gps" &&
     !plan.requestedCapabilities.some((c) => c.name === "domain.answer") &&
+    !plan.requestedCapabilities.some((c) => c.name === "company.get_active") &&
     !plan.requestedCapabilities.some((c) => c.name === "gps.get_status")
   ) {
     plan = {
       ...plan,
-      task: plan.task ?? "gps",
       requestedCapabilities: [
         ...plan.requestedCapabilities,
         { name: "gps.get_status", params: {} },
       ],
     };
   }
+
+  plan = enrichPlanForCurrentQuestion(plan, state);
 
   // Ensure company selected for ops if only one contact
   // (no auto-seleccionar si el usuario pidió reiniciar/cambiar empresa).

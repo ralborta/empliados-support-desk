@@ -48,7 +48,11 @@ export function enrichPlanForQuestionContract(
   }
 
   const hasEvidence = caps.some(
-    (c) => c.name === "gps.get_status" || c.name === "domain.answer",
+    (c) =>
+      c.name === "gps.get_status" ||
+      c.name === "domain.answer" ||
+      c.name === "company.get_active" ||
+      c.name === "company.list",
   );
   const meterTask =
     task === "odometer" ||
@@ -62,7 +66,8 @@ export function enrichPlanForQuestionContract(
   const needsGpsEvidence =
     (kind === "status" || (kind === "yes_no" && !meterTask && !openMeter)) &&
     Boolean(state.unit) &&
-    !hasEvidence;
+    !hasEvidence &&
+    (task === "gps" || caps.some((c) => c.name === "gps.get_status"));
   const needsDomainEvidence = kind === "how_to" && !hasEvidence;
 
   if (needsGpsEvidence) {
