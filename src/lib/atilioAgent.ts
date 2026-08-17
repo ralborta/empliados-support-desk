@@ -31,6 +31,7 @@ import {
   looksLikeStructuredOdometerUpdateRequest,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
+  looksLikeAnotherUnitConsultRequest,
 } from "@/lib/wara";
 import { shouldRouteTurnToOdometerExecutor, shouldRouteTurnToFleetListExecutor, shouldRouteTurnToUnidadesExecutor } from "@/lib/waraUnitIntent";
 import { looksLikePossibleFleetListRequest } from "@/lib/fleetListIntentAI";
@@ -202,6 +203,10 @@ function shouldRequireToolCall(params: {
     return false;
   }
 
+  if (looksLikeAnotherUnitConsultRequest(selectionText)) {
+    return false;
+  }
+
   if (looksLikeStructuredOdometerUpdateRequest(selectionText)) {
     return true;
   }
@@ -244,6 +249,7 @@ function shouldRequireToolCall(params: {
   if (odometerFlowActive) return false;
 
   if (session.activeUnit?.plate) {
+    if (looksLikeAnotherUnitConsultRequest(selectionText)) return false;
     if (looksLikeUnitConsultFollowUp(selectionText)) return true;
     if (looksLikeSubstantiveCustomerMessage(selectionText)) return true;
   }

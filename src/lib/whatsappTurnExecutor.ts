@@ -81,7 +81,13 @@ import {
   looksLikeStructuredOdometerUpdateRequest,
   looksLikeUnitRejection,
   looksLikeBareNegativeResponse,
+  looksLikeAnotherUnitConsultRequest,
 } from "@/lib/wara";
+import {
+  getActiveUnit,
+  shouldUseActiveUnitFallback,
+  clearActiveUnit,
+} from "@/lib/activeUnit";
 import {
   isMaintenancePlateSelectionMessage,
   isOdometerPlateSelectionMessage,
@@ -98,7 +104,6 @@ import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
-import { getActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
@@ -540,6 +545,16 @@ export async function runTurnExecutorPhase(params: {
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
   );
+  // Pivot a otra unidad: limpiar contexto y pedir cuál — nunca repetir GPS de la activa.
+  if (looksLikeAnotherUnitConsultRequest(selectionText)) {
+    await clearActiveUnit(prisma, rawPhone).catch(() => {});
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "unidades", ok: execOk };
+    }
+  }
   if (shouldInterpretAmbiguousUtterance(selectionText, threadCtx.classificationThread)) {
     const understanding = await understandUserUtterance(
       selectionText,
@@ -631,6 +646,7 @@ export async function runTurnExecutorPhase(params: {
     }
     const keepActiveUnitThread =
       !!activeUnitForNl?.plate &&
+      !looksLikeAnotherUnitConsultRequest(selectionText) &&
       (threadAwaitingUnitProblem ||
         looksLikeUnitConsultFollowUp(selectionText) ||
         looksLikeUnitReportingStatusCue(selectionText) ||
@@ -822,6 +838,7 @@ export async function runTurnExecutorPhase(params: {
   if (
     !skipSchematicUnitRoute &&
     activeUnit?.plate &&
+    !looksLikeAnotherUnitConsultRequest(selectionText) &&
     !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
     !looksLikeHorometerOnlyIntent(selectionText) &&
     !threadHasActiveOdometerFlow(threadForFollowUp) &&
