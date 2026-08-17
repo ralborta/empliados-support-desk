@@ -1050,15 +1050,20 @@ async function main() {
     DELIVERY_ENABLED: "false",
   };
 
+  const filterNames = process.env.LIVE_SMOKE_SCENARIOS?.split(",").map((s) => s.trim()).filter(Boolean);
+  const selectedScenarios = filterNames?.length
+    ? scenarios.filter((s) => filterNames.includes(s.name))
+    : scenarios;
+
   console.log(`live-smoke: modo=${hasKey && !dryMode ? "llm" : "dry"}`);
-  console.log(`escenarios: ${scenarios.length}`);
+  console.log(`escenarios: ${selectedScenarios.length}`);
 
   const allTraces: unknown[] = [];
   const globalErrors: string[] = [];
 
   const useOverrides = dryMode || !hasKey;
 
-  for (const scenario of scenarios) {
+  for (const scenario of selectedScenarios) {
     console.log(`\n=== ${scenario.name} ===`);
     const { traces, errors } = await runScenario(scenario, env, useOverrides);
     allTraces.push(...traces);
