@@ -63,6 +63,12 @@ import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, loo
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
+import {
+  formatAskUnit,
+  formatFleetUnitLabel,
+  formatMeterAsk,
+  formatMeterAskWithReading,
+} from "@/lib/waraWhatsAppFormat";
 import { composeOdometerDialogueReply } from "@/lib/odometerDialogueAI";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
 import {
@@ -768,6 +774,48 @@ export async function POST(req: NextRequest) {
     activeUnitPlate: activeUnitRecordEarly?.plate,
   });
 
+  if (looksLikeGreeting(rawText) && !shouldContinueOdometerFlow(rawText, threadText)) {
+    const pendingPayload =
+      dbPendingOdoAction?.type === "odometro" ? dbPendingOdoAction.payload : undefined;
+    const resumePlateRaw =
+      (pendingPayload?.patente ? String(pendingPayload.patente) : null) || contextUnitPlate;
+    const awaitingKmOnly =
+      threadAwaitingOdometerKmValue(flowThreadText) ||
+      threadAwaitingHorometerKmValue(flowThreadText);
+    const awaitingOdometerInput =
+      awaitingKmOnly ||
+      threadAwaitingOdometerPlate(flowThreadText) ||
+      threadAwaitingHorometerPlate(flowThreadText) ||
+      (hasLiveOdometerPendingAction &&
+        !!resumePlateRaw &&
+        typeof pendingPayload?.odometro !== "number" &&
+        typeof pendingPayload?.horometro !== "number" &&
+        !hasThreadPendingConfirm);
+    if (resumePlateRaw && awaitingOdometerInput && !hasThreadPendingConfirm) {
+      const wantsHorometroResume =
+        horometerFlowActive ||
+        horometerOnlyIntent ||
+        pendingPayload?.meterType === "horometro";
+      const unitLabel = formatFleetUnitLabel(
+        formatPlateWithSpaces(resumePlateRaw) ?? resumePlateRaw,
+        pendingPayload?.unidad ? String(pendingPayload.unidad) : null,
+      );
+      const message = formatMeterAsk({
+        meter: wantsHorometroResume ? "hourmeter" : "odometer",
+        unitLabel,
+        expected: "value",
+      });
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "greeting_resume_meter_ask",
+      });
+      return NextResponse.json(
+        { ok: false, ok_s: "false", error: "Falta odómetro u horómetro", message },
+        { status: BB_STATUS },
+      );
+    }
+  }
+
   if (
     !odometerFlowStart &&
     !isConfirmed(rawText) &&
@@ -1230,8 +1278,8 @@ export async function POST(req: NextRequest) {
       patente = normalizePlate(contextUnitPlate);
     } else if (treatAsBlankFlowStart) {
       const fallbackTemplate = horometerOnlyIntent
-        ? "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)"
-        : "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
+        ? formatAskUnit("hourmeter")
+        : formatAskUnit("odometer");
       const message = await composeOdometerDialogueReply({
         situation: "missing_plate",
         history: flowThreadText,
@@ -1329,8 +1377,8 @@ export async function POST(req: NextRequest) {
     }
     if (!patente) {
       const fallbackTemplate = horometerOnlyIntent
-        ? "Para registrar el cambio de horómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)"
-        : "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
+        ? formatAskUnit("hourmeter")
+        : formatAskUnit("odometer");
       const message = await composeOdometerDialogueReply({
         situation: "missing_plate",
         history: flowThreadText,
@@ -1435,20 +1483,22 @@ export async function POST(req: NextRequest) {
     // y con prioridad a una mención explícita del campo en el mensaje actual) — no se
     // repite acá el chequeo suelto sobre flowThreadText (esa era la fuente del bug real
     // de producción 2026-07-29 documentado más arriba).
-    const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
+    const plateDisplay = formatFleetUnitLabel(formatPlateWithSpaces(patente) ?? patente);
     const earlyFechaNaive = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
     const earlyFechaDisplay = earlyFechaNaive
       ? formatFechaDisplay(fechaWara(earlyFechaNaive, "America/Argentina/Buenos_Aires"))
       : null;
-    // Pedido Emma/Wara 2026-08-06: al tomar la unidad, pedir km + fecha + hora juntos
-    // (no solo el kilometraje y después la fecha en otro paso).
     const fallbackTemplate = patente
       ? wantsHorometro
         ? earlyFechaDisplay
-          ? `Tomé la fecha ${earlyFechaDisplay}. ¿Cuántas horas de motor tiene ${plateDisplay} ahora?`
-          : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo horómetro en horas y la fecha y hora de la lectura (ej. 350 hs — 05/08/26 a las 14:30).`
-        : `Perfecto, tomo ${plateDisplay}. Pasame el nuevo odómetro en km y la fecha y hora de la lectura (ej. 10500 km — 05/08/26 a las 14:30).`
-      : "Pasame el valor de odómetro (km) o horómetro (horas) y la fecha y hora de la lectura.";
+          ? formatMeterAsk({
+              meter: "hourmeter",
+              unitLabel: plateDisplay,
+              expected: "value",
+            })
+          : formatMeterAskWithReading({ meter: "hourmeter", unitLabel: plateDisplay })
+        : formatMeterAskWithReading({ meter: "odometer", unitLabel: plateDisplay })
+      : formatMeterAskWithReading({ meter: "odometer", unitLabel: "la unidad" });
     const message = patente
       ? await composeOdometerDialogueReply({
           situation: "missing_value",
