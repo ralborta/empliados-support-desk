@@ -9,7 +9,7 @@ import { planFromDecision } from "../controller/plan-from-decision.js";
 import { applyStructuralExtensions, assertBridgeInvariants } from "../controller/bridge-guard.js";
 import { resolveInterpretationReferences } from "../controller/resolve-references.js";
 import { migrateV3ToVNext, createEmptyVNext } from "../state/migrate.js";
-import { composeReply } from "../compose/composer.js";
+import { composeReplyDeterministic } from "../compose/composer.js";
 import { SERVICE_REGISTRY, capabilityForServiceId } from "../registry/service-registry.js";
 import type { TurnInterpretation } from "../types/interpretation.js";
 
@@ -162,7 +162,7 @@ describe("runtime-next multi-turn", () => {
     assert.equal(decision.action, "respond");
     assert.equal(decision.conversationalAct, "greet");
     const vnext = migrateV3ToVNext(state);
-    const reply = composeReply({
+    const reply = composeReplyDeterministic({
       decision,
       interpretation: interp,
       facts: [],
@@ -173,19 +173,19 @@ describe("runtime-next multi-turn", () => {
     assert.doesNotMatch(reply, /¿Seguimos|patente/i);
   });
 
-  it("switch incompatible → keep_or_close", () => {
+  it("solicitud incompatible sin abandono → keep_or_close", () => {
     const state = gpsState();
     const interp: TurnInterpretation = {
       userAct: "request",
-      relation: "switch",
-      normalizedMeaning: "Quiere certificado",
+      relation: "standalone",
+      normalizedMeaning: "Quiere certificado sin abandonar GPS.",
       requests: [
         { serviceId: "certificate.prepare", domain: "certificate", goal: "cert", entities: {} },
       ],
       references: [],
       corrections: [],
       answersExpectedField: false,
-      confidence: 0.9,
+      confidence: 0.7,
     };
     const decision = decideTurn({
       interpretation: interp,
@@ -193,6 +193,28 @@ describe("runtime-next multi-turn", () => {
       message: "quiero certificado",
     });
     assert.equal(decision.action, "keep_or_close");
+  });
+
+  it("switch explícito odómetro → execute sin keep_or_close", () => {
+    const state = gpsState();
+    const interp: TurnInterpretation = {
+      userAct: "cancellation",
+      relation: "switch",
+      normalizedMeaning: "Abandona GPS, carga odómetro.",
+      requests: [{ serviceId: "odometer.prepare", domain: "odometer", goal: "km", entities: {} }],
+      references: [],
+      corrections: [],
+      answersExpectedField: false,
+      confidence: 0.95,
+    };
+    const decision = decideTurn({
+      interpretation: interp,
+      state,
+      message: "Dejá eso, mejor carguemos el kilometraje.",
+    });
+    assert.equal(decision.action, "execute");
+    assert.equal(decision.task, "odometer");
+    assert.notEqual(decision.action, "keep_or_close");
   });
 
   it("pregunta lateral empresa preserva trámite", () => {

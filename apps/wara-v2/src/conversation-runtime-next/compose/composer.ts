@@ -10,6 +10,7 @@ import type { TurnInterpretation } from "../types/interpretation.js";
 import type { CapabilityResult } from "../types/capability-result.js";
 import type { ConversationStateVNext } from "../state/vnext-types.js";
 import { pendingTaskLabel } from "../state/reduce.js";
+import { composeReplyWithLlm } from "./llm-composer.js";
 
 function looksLikeListingFact(f: string): boolean {
   const lines = f.split("\n").filter((l) => l.trim());
@@ -27,6 +28,17 @@ function looksLikeAskUnitFact(f: string): boolean {
   return /¿De qué unidad\?|necesito la patente|Pasame la \*patente\*/i.test(f);
 }
 
+export function extractProtectedBlocks(facts: string[]): string[] {
+  return facts.filter(
+    (f) =>
+      f.trim() &&
+      (looksLikeListingFact(f) ||
+        looksLikeLockedFormFact(f) ||
+        looksLikeAskUnitFact(f) ||
+        /Google Maps|#\d{5,}|CONFIRMO|CANCELAR|➡️/i.test(f)),
+  );
+}
+
 export type ComposeInput = {
   decision: TurnDecision;
   interpretation: TurnInterpretation;
@@ -36,7 +48,7 @@ export type ComposeInput = {
   customerName?: string | null;
 };
 
-export function composeReply(input: ComposeInput): string {
+export function composeReplyDeterministic(input: ComposeInput): string {
   const { decision: d, facts, state } = input;
 
   if (d.action === "clarify" || d.action === "keep_or_close") {
@@ -70,35 +82,9 @@ export function composeReply(input: ComposeInput): string {
     if (locked.length) return locked.join("\n\n");
   }
 
-  if (facts.some(looksLikeAskUnitFact) && d.action !== "execute") {
-    return facts.filter((f) => f.trim()).join("\n\n");
-  }
-
-  const listingFacts = facts.filter(looksLikeListingFact);
-  if (listingFacts.length) {
-    return listingFacts.join("\n\n");
-  }
-
-  const lockedFacts = facts.filter(looksLikeLockedFormFact);
-  if (lockedFacts.length) {
-    return lockedFacts.join("\n\n");
-  }
-
-  const operational = facts.filter(
-    (f) =>
-      f.trim() &&
-      !looksLikeListingFact(f) &&
-      (looksLikeLockedFormFact(f) ||
-        /od[oó]metro|hor[oó]metro|CONFIRMO|certificado|Unidad:|GPS|Google Maps|km\)|hs\)|reporte|📍|🛣|⏱|📋|🔧|✅|🏢|🚗/i.test(
-          f,
-        )),
-  );
-  if (operational.length) {
-    let body = operational.join("\n\n");
-    if (d.conversationalAct === "answer_lateral" && pendingTaskLabel(state)) {
-      body += `\n\n_(Seguimos con ${pendingTaskLabel(state)} cuando quieras.)_`;
-    }
-    return body;
+  const protectedBlocks = extractProtectedBlocks(facts);
+  if (protectedBlocks.length) {
+    return protectedBlocks.join("\n\n");
   }
 
   if (d.authorizedCapabilities.some((c) => c.name === "company.get_active") && state.company) {
@@ -120,6 +106,16 @@ export function composeReply(input: ComposeInput): string {
   return "¿En qué te ayudo?";
 }
 
+export async function composeReply(
+  input: ComposeInput & {
+    env: NodeJS.ProcessEnv;
+    userMessage: string;
+    lastAssistantReply?: string | null;
+  },
+): Promise<{ reply: string; usedLlm: boolean; latencyMs: number }> {
+  return composeReplyWithLlm(input);
+}
+
 export function composeConfirmReminder(): string {
   return confirmFooter();
 }
@@ -127,4 +123,17 @@ export function composeConfirmReminder(): string {
 export function composeCompanyList(state: ConversationStateVNext): string {
   const lines = state.availableCompanies.map((c, i) => `${i + 1}. ${c.name}`).join("\n");
   return formatCompanyList(lines);
+}
+
+/** Solo filtra caps: no modifica intención ni reasoning del plan. */
+export function stripBareFleetSearchCaps(
+  caps: TurnDecision["authorizedCapabilities"],
+  task: TurnDecision["task"],
+): TurnDecision["authorizedCapabilities"] {
+  return caps.filter((c) => {
+    if (c.name !== "unit.search") return true;
+    const q = String(c.params?.query ?? "").trim();
+    if (q) return true;
+    return task === "unit_query";
+  });
 }

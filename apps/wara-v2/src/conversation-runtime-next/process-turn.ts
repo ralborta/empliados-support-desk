@@ -6,16 +6,15 @@ import {
   resolveUnitReference,
 } from "../commander-v3/entities/resolve.js";
 import {
-  executeCapabilities,
   stripMeterValueConfusedWithUnit,
 } from "../commander-v3/execute/run-capabilities.js";
 import { enrichPlanWithNaturalDatetime } from "../commander-v3/enrich/natural-datetime-plan.js";
-import { enrichPlanStripBareFleetDump } from "../commander-v3/enrich/bare-fleet-dump.js";
 import {
   KEEP_OR_CLOSE_PURPOSE,
   planFromParkedTurn,
 } from "../commander-v3/enrich/open-task-hold.js";
-import { composeReply } from "./compose/composer.js";
+import { composeReply, stripBareFleetSearchCaps } from "./compose/composer.js";
+import { executeAuthorizedCapabilities } from "./execute/execute-authorized.js";
 import { migrateV3ToVNext } from "./state/migrate.js";
 import { vnextToV3 } from "./state/to-v3.js";
 import { reconcileVNextAfterExecute } from "./state/reconcile.js";
@@ -316,14 +315,18 @@ export async function processConversationTurn(
   if (unitRes.status === "many") {
     const labels = unitRes.candidates!.map((u, i) => `${i + 1}. ${u.label}`).join("\n");
     const facts = [`Encontré varias unidades:\n${labels}\n\nDecime el número o la patente exacta.`];
-    const reply = composeReply({
+    const composed = await composeReply({
       decision,
       interpretation,
       facts,
       capabilityResults: [],
       state: vnext,
       customerName: input.customerName,
+      env: input.env,
+      userMessage: input.message,
+      lastAssistantReply,
     });
+    const reply = composed.reply;
     vnext = reduceState({
       state: vnext,
       decision,
@@ -352,7 +355,7 @@ export async function processConversationTurn(
       interpretMs,
       interpretRaw,
       interpretModel,
-      redactMs: 0,
+      redactMs: composed.latencyMs,
       totalStart,
       inventory,
       interpretation,
@@ -371,14 +374,18 @@ export async function processConversationTurn(
     decision.action === "keep_or_close" ||
     (decision.action === "cancel" && decision.authorizedCapabilities.length === 0)
   ) {
-    const reply = composeReply({
+    const composed = await composeReply({
       decision,
       interpretation,
       facts: decision.responseGoal.facts ?? [],
       capabilityResults: [],
       state: vnext,
       customerName: input.customerName,
+      env: input.env,
+      userMessage: input.message,
+      lastAssistantReply,
     });
+    const reply = composed.reply;
     vnext = reduceState({
       state: vnext,
       decision,
@@ -406,7 +413,7 @@ export async function processConversationTurn(
       interpretMs,
       interpretRaw,
       interpretModel,
-      redactMs: 0,
+      redactMs: composed.latencyMs,
       totalStart,
       inventory,
       interpretation,
@@ -418,11 +425,19 @@ export async function processConversationTurn(
     return { reply, state: after, trace };
   }
 
-  plan = enrichPlanStripBareFleetDump(plan);
+  plan = {
+    ...plan,
+    requestedCapabilities: stripBareFleetSearchCaps(
+      plan.requestedCapabilities,
+      plan.task ?? decision.task ?? null,
+    ),
+  };
 
-  const exec = await executeCapabilities({
+  const authorizedNames = plan.requestedCapabilities.map((c) => c.name);
+  const exec = await executeAuthorizedCapabilities({
     state,
     plan,
+    authorizedCapabilityNames: authorizedNames,
     env: input.env,
     fleetUnits,
     resolvedUnit,
@@ -431,17 +446,55 @@ export async function processConversationTurn(
     messageId: input.messageId,
   });
 
+  if (exec.capViolation) {
+    const reply = "No pude ejecutar eso con seguridad. ¿Me lo repetís en una línea?";
+    vnext = reduceState({
+      state: vnext,
+      decision: {
+        ...decision,
+        action: "clarify",
+        responseGoal: { purpose: "clarify", facts: [], nextQuestion: reply },
+      },
+      reply,
+      userMessage: input.message,
+    });
+    const after = persistVNext(vnext, input.tenantId, input.phone);
+    const trace = buildTrace({
+      turnInput: input,
+      stateBefore,
+      stateAfter: after,
+      plan,
+      interpretMs,
+      interpretRaw,
+      interpretModel,
+      redactMs: 0,
+      totalStart,
+      inventory,
+      interpretation,
+      capabilityResults: [],
+      validationOk: true,
+      capViolation: exec.capViolation,
+      finalReply: reply,
+    });
+    saveLastTraceV3(input.tenantId, input.phone, trace);
+    return { reply, state: after, trace };
+  }
+
   vnext = reconcileVNextAfterExecute(vnext, exec.state);
   const capabilityResults = mapExecResultsToStructured(exec.results);
 
-  const reply = composeReply({
+  const composed = await composeReply({
     decision,
     interpretation,
     facts: exec.facts,
     capabilityResults,
     state: vnext,
     customerName: input.customerName,
+    env: input.env,
+    userMessage: input.message,
+    lastAssistantReply,
   });
+  const reply = composed.reply;
 
   vnext = reduceState({
     state: vnext,
@@ -473,7 +526,7 @@ export async function processConversationTurn(
     interpretMs,
     interpretRaw,
     interpretModel,
-    redactMs: 0,
+    redactMs: composed.latencyMs,
     totalStart,
     inventory,
     interpretation,
@@ -483,6 +536,8 @@ export async function processConversationTurn(
     execResults: exec.results,
     writeAttempt: exec.results.some((r) => r.writeAttempt),
     writeExecuted: exec.results.some((r) => r.writeExecuted),
+    authorizedCapabilities: exec.authorizedCapabilities,
+    executedCapabilities: exec.executedCapabilities,
     finalReply: reply,
   });
   saveLastTraceV3(input.tenantId, input.phone, trace);
@@ -519,11 +574,17 @@ function buildTrace(opts: {
   writeAttempt?: boolean;
   writeExecuted?: boolean;
   finalReply?: string;
+  capViolation?: string | null;
+  authorizedCapabilities?: string[];
+  executedCapabilities?: string[];
 }): TurnTraceV3 & {
   runtimeNext: {
     interpretation: TurnInterpretation | null;
     inventory: ReturnType<typeof buildKnowledgeInventory>;
     capabilityResults: ReturnType<typeof mapExecResultsToStructured>;
+    authorizedCapabilities?: string[];
+    executedCapabilities?: string[];
+    capViolation?: string | null;
   };
 } {
   return {
@@ -558,6 +619,9 @@ function buildTrace(opts: {
       interpretation: opts.interpretation,
       inventory: opts.inventory,
       capabilityResults: opts.capabilityResults,
+      authorizedCapabilities: opts.authorizedCapabilities,
+      executedCapabilities: opts.executedCapabilities,
+      capViolation: opts.capViolation ?? null,
     },
   };
 }

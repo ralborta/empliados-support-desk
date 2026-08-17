@@ -16,9 +16,12 @@ import type { TurnDecision } from "../types/decision.js";
 import { capabilityForServiceId } from "../registry/service-registry.js";
 import { migrateV3ToVNext } from "../state/migrate.js";
 import { incompleteTask } from "../state/reduce.js";
+import { resolveInterpretationReferences } from "./resolve-references.js";
 import {
-  resolveInterpretationReferences,
-} from "./resolve-references.js";
+  isExplicitTaskChange,
+  isLateralQuestion,
+  needsKeepOrCloseForIncompatible,
+} from "./explicit-change.js";
 
 function taskFromDomain(domain: string): TurnDecision["task"] {
   switch (domain) {
@@ -57,26 +60,35 @@ function capsFromRequests(interp: TurnInterpretation): CapabilityRequest[] {
   return caps;
 }
 
-function capFamily(name: string): string {
-  if (name === "domain.answer") return "domain";
-  if (name.startsWith("handoff.")) return "human_handoff";
-  return name.split(".")[0] ?? name;
-}
-
-function hasForeignCapability(
-  caps: CapabilityRequest[],
-  openType: string | undefined,
-): boolean {
-  if (!openType) return false;
-  return caps.some((c) => {
-    const fam = capFamily(c.name);
-    return fam !== openType && fam !== "unit" && fam !== "company" && fam !== "domain";
-  });
-}
-
 function keepOrCloseQuestion(openType: string | undefined): string {
   const label = taskLabel(openType ?? null);
   return `Tenías pendiente ${label}. ¿Seguimos con eso o preferís otra consulta?`;
+}
+
+function buildSwitchDecision(
+  i: TurnInterpretation,
+  state: ConversationStateV3,
+  requestCaps: CapabilityRequest[],
+  refs: ReturnType<typeof resolveInterpretationReferences>,
+  openV3: boolean,
+): TurnDecision {
+  const domain = i.requests[0]?.domain ?? requestCaps[0]?.name.split(".")[0];
+  const task = taskFromDomain(domain ?? "");
+  const baseIntent = { preserveCompany: true, preserveUnit: true, preserveTask: false };
+  return {
+    action: "execute",
+    reasoning: "Cambio explícito de trámite: avanzar al nuevo servicio.",
+    authorizedCapabilities: requestCaps,
+    conversationalAct: openV3 ? "switch_task" : "start_task",
+    task,
+    taskAction: openV3 ? "switch" : "start",
+    unitReference: refs.unitReference ?? null,
+    companyReference: refs.companyReference ?? null,
+    stateIntent: baseIntent,
+    responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
+    confidence: i.confidence,
+    interpretationSummary: i.normalizedMeaning,
+  };
 }
 
 export function decideTurn(input: {
@@ -183,8 +195,8 @@ export function decideTurn(input: {
 
   const openTask = incompleteTask(vnext);
   const openV3 = hasIncompleteWork(state);
+  const requestCaps = capsFromRequests(i);
 
-  // Saludo puro: responder naturalmente y conservar trámite (sin keep_or_close).
   if (isPureGreetingMessage(message) || (i.userAct === "greeting" && i.relation !== "switch")) {
     if (isPureGreetingMessage(message) || i.relation === "pause" || i.relation === "standalone") {
       return {
@@ -219,36 +231,12 @@ export function decideTurn(input: {
     };
   }
 
-  const requestCaps = capsFromRequests(i);
-
-  if (
-    openV3 &&
-    (i.relation === "switch" ||
-      i.relation === "replace" ||
-      hasForeignCapability(requestCaps, openTask?.type))
-  ) {
-    return {
-      action: "keep_or_close",
-      reasoning: "Nueva solicitud incompatible con trámite abierto.",
-      authorizedCapabilities: [],
-      conversationalAct: "ask",
-      unitReference: refs.unitReference ?? null,
-      companyReference: refs.companyReference ?? null,
-      stateIntent: baseIntent,
-      responseGoal: {
-        purpose: "clarify",
-        facts: [],
-        nextQuestion: keepOrCloseQuestion(openTask?.type),
-      },
-      confidence: i.confidence,
-      interpretationSummary: i.normalizedMeaning,
-    };
+  // Cambio explícito ANTES de keep_or_close o lateral.
+  if (isExplicitTaskChange(i)) {
+    return buildSwitchDecision(i, state, requestCaps, refs, openV3);
   }
 
-  if (
-    i.relation === "side_question" ||
-    (i.userAct === "question" && openV3 && i.relation !== "answer_expected")
-  ) {
+  if (isLateralQuestion(i) && openV3) {
     const readCaps = requestCaps.filter((c) => {
       const def = getCapability(c.name);
       return def?.kind === "read" || c.name === "domain.answer";
@@ -263,6 +251,27 @@ export function decideTurn(input: {
       companyReference: refs.companyReference ?? null,
       stateIntent: baseIntent,
       responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
+      confidence: i.confidence,
+      interpretationSummary: i.normalizedMeaning,
+    };
+  }
+
+  if (
+    needsKeepOrCloseForIncompatible(i, requestCaps, openTask?.type, openV3)
+  ) {
+    return {
+      action: "keep_or_close",
+      reasoning: "Nueva solicitud incompatible sin abandono explícito.",
+      authorizedCapabilities: [],
+      conversationalAct: "ask",
+      unitReference: refs.unitReference ?? null,
+      companyReference: refs.companyReference ?? null,
+      stateIntent: baseIntent,
+      responseGoal: {
+        purpose: "clarify",
+        facts: [],
+        nextQuestion: keepOrCloseQuestion(openTask?.type),
+      },
       confidence: i.confidence,
       interpretationSummary: i.normalizedMeaning,
     };
@@ -290,25 +299,6 @@ export function decideTurn(input: {
       companyReference: refs.companyReference ?? null,
       stateIntent: baseIntent,
       responseGoal: { purpose: "ask_missing", facts: [], nextQuestion: null },
-      confidence: i.confidence,
-      interpretationSummary: i.normalizedMeaning,
-    };
-  }
-
-  if (i.relation === "switch" || i.relation === "replace") {
-    const domain = i.requests[0]?.domain ?? requestCaps[0]?.name.split(".")[0];
-    const task = taskFromDomain(domain ?? "");
-    return {
-      action: "execute",
-      reasoning: "Cambio de trámite o foco.",
-      authorizedCapabilities: requestCaps,
-      conversationalAct: openV3 ? "switch_task" : "start_task",
-      task,
-      taskAction: openV3 ? "switch" : "start",
-      unitReference: refs.unitReference ?? null,
-      companyReference: refs.companyReference ?? null,
-      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
-      responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
       confidence: i.confidence,
       interpretationSummary: i.normalizedMeaning,
     };

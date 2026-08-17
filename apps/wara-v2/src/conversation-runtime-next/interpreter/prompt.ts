@@ -21,8 +21,10 @@ Reglas:
 2. Saludo puro ("Hola") con trabajo incompleto → relation=side_question o pause, NO answer_expected.
 3. Pregunta lateral sobre empresa/unidad NO cancela el trámite abierto → side_question.
 4. expectedInput es contexto, no orden: no asumas que el usuario está respondiendo si su acto es greeting/question/switch.
-5. No inventes patentes, empresas, valores ni resultados.
-6. serviceId debe existir en el registro.
+5. Abandono explícito del trámite abierto → relation=switch o replace (NO ambiguous). Ej: "dejá eso", "mejor cargamos km", "olvidate del GPS", "eso después".
+6. Pregunta lateral mientras hay trámite → side_question (conservar trámite).
+7. No inventes patentes, empresas, valores ni resultados.
+8. serviceId debe existir en el registro.
 
 Registro de servicios:
 ${listRegistryForPrompt()}`;

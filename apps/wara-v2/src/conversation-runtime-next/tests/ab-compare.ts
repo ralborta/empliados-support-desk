@@ -1,20 +1,19 @@
 /**
- * Comparación A/B: Commander V3 vs Runtime Next (mismo corpus, interpretationOverride).
- * Ejecutar: pnpm exec tsx src/conversation-runtime-next/tests/ab-compare.ts
+ * Comparación A/B ampliada: Commander V3 heurística vs Runtime Next.
  */
 import { createEmptyConversationStateV3 } from "../../commander-v3/types/state.js";
 import { decideTurn, filterAuthorizedCapabilities } from "../controller/decide-turn.js";
 import { planFromDecision } from "../controller/plan-from-decision.js";
 import type { TurnInterpretation } from "../types/interpretation.js";
 
-type CorpusCase = {
+type Case = {
   name: string;
   message: string;
   setup?: (s: ReturnType<typeof createEmptyConversationStateV3>) => void;
   interpretation: TurnInterpretation;
 };
 
-const corpus: CorpusCase[] = [
+const corpus: Case[] = [
   {
     name: "hola_gps_pendiente",
     message: "Hola",
@@ -52,56 +51,102 @@ const corpus: CorpusCase[] = [
     },
   },
   {
-    name: "switch_odometro",
-    message: "cargar odómetro",
+    name: "switch_explicito_odometro",
+    message: "Dejá eso, mejor carguemos el kilometraje.",
+    setup: (s) => {
+      s.activeTask = { type: "gps", status: "collecting", collected: {}, missing: ["unit"] };
+    },
+    interpretation: {
+      userAct: "cancellation",
+      relation: "switch",
+      normalizedMeaning: "Abandona GPS y carga odómetro.",
+      requests: [{ serviceId: "odometer.prepare", domain: "odometer", goal: "km", entities: {} }],
+      references: [],
+      corrections: [],
+      answersExpectedField: false,
+      confidence: 0.95,
+    },
+  },
+  {
+    name: "switch_sin_abandono",
+    message: "quiero certificado",
     setup: (s) => {
       s.activeTask = { type: "gps", status: "collecting", collected: {}, missing: ["unit"] };
     },
     interpretation: {
       userAct: "request",
-      relation: "switch",
-      normalizedMeaning: "Odómetro",
-      requests: [{ serviceId: "odometer.prepare", domain: "odometer", goal: "km", entities: {} }],
+      relation: "standalone",
+      normalizedMeaning: "Pide certificado sin abandonar.",
+      requests: [{ serviceId: "certificate.prepare", domain: "certificate", goal: "cert", entities: {} }],
       references: [],
       corrections: [],
       answersExpectedField: false,
+      confidence: 0.7,
+    },
+  },
+  {
+    name: "confirmo_sin_pending",
+    message: "CONFIRMO",
+    interpretation: {
+      userAct: "confirmation",
+      relation: "confirm",
+      normalizedMeaning: "Confirma sin pending.",
+      requests: [],
+      references: [],
+      corrections: [],
+      answersExpectedField: false,
+      confidence: 0.8,
+    },
+  },
+  {
+    name: "referencia_la_segunda",
+    message: "la segunda",
+    setup: (s) => {
+      s.lastListing = {
+        kind: "search",
+        page: 1,
+        pageSize: 2,
+        totalCount: 2,
+        items: [
+          { index: 1, label: "AA", movilId: 1 },
+          { index: 2, label: "BB", movilId: 2 },
+        ],
+        fetchedAt: new Date().toISOString(),
+      };
+    },
+    interpretation: {
+      userAct: "answer",
+      relation: "answer_expected",
+      normalizedMeaning: "Selecciona segunda unidad.",
+      requests: [],
+      references: [{ type: "index", expression: "2", index: 2, source: "last_presented" }],
+      corrections: [],
+      answersExpectedField: true,
       confidence: 0.9,
     },
   },
 ];
 
-function v3Heuristic(case_: CorpusCase, state: ReturnType<typeof createEmptyConversationStateV3>): {
-  wouldGps: boolean;
-  wouldKeepOrClose: boolean;
-} {
-  const open = Boolean(state.activeTask?.status === "collecting");
-  const greet = /^hola[\s!.]*$/i.test(case_.message.trim());
+function v3Heuristic(c: Case, state: ReturnType<typeof createEmptyConversationStateV3>) {
+  const open = state.activeTask?.status === "collecting";
+  const greet = /^hola[\s!.]*$/i.test(c.message.trim());
   return {
-    wouldGps: greet && open && case_.interpretation.relation !== "pause",
-    wouldKeepOrClose: greet && open,
+    keep_or_close: greet && open,
+    would_inject_gps_on_greet: greet && open,
   };
 }
 
-function nextDecision(case_: CorpusCase, state: ReturnType<typeof createEmptyConversationStateV3>) {
-  let d = decideTurn({
-    interpretation: case_.interpretation,
-    state,
-    message: case_.message,
-  });
-  d = { ...d, authorizedCapabilities: filterAuthorizedCapabilities(d) };
-  const plan = planFromDecision({ decision: d, interpretation: case_.interpretation });
-  return { decision: d, plan };
-}
-
-console.log("A/B Commander V3 (heurística) vs Runtime Next\n");
+console.log("A/B Commander V3 (heurística) vs Runtime Next — corpus ampliado\n");
 for (const c of corpus) {
   const state = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
   if (c.setup) c.setup(state);
   const v3 = v3Heuristic(c, state);
-  const next = nextDecision(c, state);
-  const caps = next.plan.requestedCapabilities.map((x) => x.name);
+  let d = decideTurn({ interpretation: c.interpretation, state, message: c.message });
+  d = { ...d, authorizedCapabilities: filterAuthorizedCapabilities(d) };
+  const plan = planFromDecision({ decision: d, interpretation: c.interpretation });
+  const caps = plan.requestedCapabilities.map((x) => x.name);
   console.log(`--- ${c.name} ---`);
-  console.log(`  V3 heuristic: gps=${v3.wouldGps} keep_or_close=${v3.wouldKeepOrClose}`);
-  console.log(`  Next: action=${next.decision.action} act=${next.decision.conversationalAct} caps=[${caps.join(",")}]`);
+  console.log(`  V3: keep_or_close=${v3.keep_or_close}`);
+  console.log(`  Next: action=${d.action} act=${d.conversationalAct} task=${d.task ?? "-"} caps=[${caps.join(",")}]`);
   console.log("");
 }

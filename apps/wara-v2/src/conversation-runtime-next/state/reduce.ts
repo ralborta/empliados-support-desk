@@ -94,6 +94,34 @@ export function reduceState(input: ReduceInput): ConversationStateVNext {
     };
   }
 
+  if (
+    input.decision.taskAction === "switch" ||
+    input.decision.conversationalAct === "switch_task"
+  ) {
+    const old = focusedTask(s);
+    if (old && input.decision.task && old.type !== input.decision.task) {
+      const suspended = { ...old, status: "suspended" as const };
+      s = {
+        ...s,
+        tasks: s.tasks.map((t) => (t.id === old.id ? suspended : t)),
+        suspendedTask: { task: suspended, reason: "explicit_switch" },
+        focusedTaskId: null,
+        expectedInput: null,
+      };
+    }
+    if (input.decision.task) {
+      const existing = s.tasks.find(
+        (t) =>
+          t.type === input.decision.task &&
+          t.status !== "cancelled" &&
+          t.status !== "completed",
+      );
+      if (existing) {
+        s = { ...s, focusedTaskId: existing.id };
+      }
+    }
+  }
+
   if (input.decision.action === "resume") {
     const task = focusedTask(s);
     if (task) {

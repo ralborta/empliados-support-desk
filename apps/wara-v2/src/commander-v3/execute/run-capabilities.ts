@@ -86,6 +86,8 @@ export type ExecuteContext = {
   message?: string;
   /** Idempotencia / ledger front (Prisma + bridge). */
   messageId?: string;
+  /** Runtime Next: solo requestedCapabilities; sin infer ni inyección. */
+  strictAuthorizedOnly?: boolean;
 };
 
 function hashPayload(obj: unknown): string {
@@ -325,9 +327,13 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
   let caps =
     ctx.plan.requestedCapabilities.length > 0
       ? [...ctx.plan.requestedCapabilities]
-      : inferDefaultCapabilities(ctx.plan, state);
+      : ctx.strictAuthorizedOnly
+        ? []
+        : inferDefaultCapabilities(ctx.plan, state);
 
-  if (ctx.plan.conversationalAct === "greet") {
+  if (ctx.strictAuthorizedOnly) {
+    // Runtime Next: sin infer, sin inyección de tools ni commits implícitos.
+  } else if (ctx.plan.conversationalAct === "greet") {
     caps = caps.filter((c) => c.name !== "unit.search");
   } else if (ctx.plan.task !== "unit_query") {
     caps = caps.filter((c) => {
@@ -339,8 +345,9 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
   // confirm_write: SIEMPRE asegurar el write_commit (el LLM deja caps basura y
   // antes no se inyectaba certificate.issue → loop de "confirmación explícita").
   if (
-    ctx.plan.conversationalAct === "confirm_write" ||
-    ctx.plan.taskAction === "confirm"
+    !ctx.strictAuthorizedOnly &&
+    (ctx.plan.conversationalAct === "confirm_write" ||
+      ctx.plan.taskAction === "confirm")
   ) {
     const inferred = inferDefaultCapabilities(
       { ...ctx.plan, conversationalAct: "confirm_write", requestedCapabilities: [] },
@@ -362,6 +369,7 @@ export async function executeCapabilities(ctx: ExecuteContext): Promise<{
 
   // Contrato: unit_query lista flota SOLO si no estamos seleccionando una unidad.
   if (
+    !ctx.strictAuthorizedOnly &&
     ctx.plan.task === "unit_query" &&
     !caps.some((c) => c.name === "unit.search") &&
     !caps.some((c) => c.name === "unit.select") &&
