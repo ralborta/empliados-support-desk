@@ -30,6 +30,10 @@ import {
 import { INTERPRET_TURN_PROMPT_VERSION } from "../pilot/semantic/interpret-turn-prompt.js";
 import { getLastLabTurnDiagnosis } from "../pilot/semantic/lab-turn-diagnosis.js";
 import {
+  isConversationRuntimeNextEnabled,
+  runtimeHealthInfo,
+} from "../conversation-runtime-next/index.js";
+import {
   isConversationCommanderV3Enabled,
   COMMANDER_V3_PROMPT_VERSION,
   getConversationStateV3,
@@ -186,6 +190,11 @@ export async function startShadowCanaryServer(opts?: {
             model: commanderV3ModelName(process.env),
             promptVersion: COMMANDER_V3_PROMPT_VERSION,
             path: "apps/wara-v2/src/commander-v3",
+          },
+          conversationRuntimeNext: {
+            ...runtimeHealthInfo(process.env),
+            enabled: isConversationRuntimeNextEnabled(process.env),
+            path: "apps/wara-v2/src/conversation-runtime-next",
           },
           pilot_open: process.env.WARA_V2_PILOT_OPEN === "true" || process.env.WARA_V2_PILOT_OPEN === "1",
         });

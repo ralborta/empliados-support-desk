@@ -20,12 +20,16 @@ import { buildPilotMessages } from "./prompt.js";
 import { resolvePilotWaraTurn } from "./wara-context.js";
 import type { WaraPromptSnapshot } from "./wara-types.js";
 import {
-  isConversationCommanderV3Enabled,
-  runCommanderTurn,
-} from "../commander-v3/index.js";
+  isConversationRuntimeNextEnabled,
+  processConversationTurn,
+} from "../conversation-runtime-next/index.js";
 import { loadCommanderV3Context } from "../commander-v3/lab/load-context.js";
 import { saveConversationStateV3 } from "../commander-v3/persistence/store.js";
 import { resolveConductorEnabled } from "../commander-v3/lab/conductor-mode.js";
+import {
+  isConversationCommanderV3Enabled,
+  runCommanderTurn,
+} from "../commander-v3/index.js";
 import {
   CUSTOMER_CLOSE_SUCCESS_MESSAGE,
   looksLikeCustomerConversationCloseRequest,
@@ -347,6 +351,41 @@ export async function handlePilotWhatsAppTurn(input: {
 
   const text = input.text.trim();
   const tenant = (env.WARA_V2_SHADOW_TENANT ?? "tenant_internal_ops").trim();
+
+  // Runtime Next — pipeline único (Interpreter → Controller → Execute → Composer).
+  if (isConversationRuntimeNextEnabled(env)) {
+    if (shouldSkipDuplicateV3Inbound(input.phone, text || "Hola", input.messageId)) {
+      return { status: 200, body: silent() };
+    }
+    const ctx = await loadCommanderV3Context({
+      phone: input.phone,
+      tenantId: tenant,
+      env,
+    });
+    if (!ctx.ok) {
+      return replyResult(ctx.message);
+    }
+    saveConversationStateV3(ctx.state);
+    try {
+      const result = await processConversationTurn({
+        tenantId: tenant,
+        phone: input.phone,
+        message: text || "Hola",
+        messageId: input.messageId,
+        env,
+        contacts: ctx.contacts,
+        fleetUnits: ctx.fleetUnits,
+        customerName: ctx.customerName,
+      });
+      if (!result.reply.trim()) {
+        return replyResult(replyForCustomerClose(text, FALLBACK));
+      }
+      return replyResult(replyForCustomerClose(text, result.reply));
+    } catch {
+      return replyResult(replyForCustomerClose(text, FALLBACK));
+    }
+  }
+
   // Commander V3 — path aislado; V2 brain no interviene.
   if (resolveConductorEnabled(input.phone, env) || isConversationCommanderV3Enabled(env)) {
     if (shouldSkipDuplicateV3Inbound(input.phone, text || "Hola", input.messageId)) {
