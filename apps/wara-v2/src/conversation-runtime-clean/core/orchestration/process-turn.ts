@@ -10,7 +10,7 @@ import type { TurnDecision } from "../types/decision.js";
 import type { CleanTraceObserver, CleanTraceStage, CleanTraceStatus } from "../observability/contracts.js";
 
 export type CleanTrace = Readonly<{
-  runtime: "clean"; decision: TurnDecision | null; policy: PolicyResult | null;
+  runtime: "clean"; traceId: string | null; decision: TurnDecision | null; policy: PolicyResult | null;
   resolutionCount: number; authorizedOperationIds: readonly string[]; executionCount: number;
   writeAttempt: boolean; writeExecuted: boolean; invariantViolations: readonly string[];
 }>;
@@ -40,9 +40,9 @@ export async function processCleanTurn(input: { tenantId: string; conversationId
     const responsePlan = nullInterpretationPlan();
     const reply = await deps.composer.compose({ responsePlan, state, customerName: input.customerName });
     observe("composer_validation", "fallback");
-    await deps.store.save(state);
+    await deps.store.save(state, { messageId: input.messageId, reply, traceId: trace?.traceId ?? null });
     observe("persistence", "ok");
-    return { reply, state, responsePlan, trace: { runtime: "clean", decision: null, policy: null, resolutionCount: 0, authorizedOperationIds: [], executionCount: 0, writeAttempt: false, writeExecuted: false, invariantViolations: [] } };
+    return { reply, state, responsePlan, trace: { runtime: "clean", traceId: trace?.traceId ?? null, decision: null, policy: null, resolutionCount: 0, authorizedOperationIds: [], executionCount: 0, writeAttempt: false, writeExecuted: false, invariantViolations: [] } };
   }
   observe("interpretation", "ok");
   const decision = freezeTurnDecision(deps.controller.decide({ interpretation, state }));
@@ -67,12 +67,12 @@ export async function processCleanTurn(input: { tenantId: string; conversationId
   observe("response_plan", "ok");
   const reply = await deps.composer.compose({ responsePlan, state: nextState, customerName: input.customerName });
   observe("composer_validation", "ok");
-  await deps.store.save(nextState);
+  await deps.store.save(nextState, { messageId: input.messageId, reply, traceId: trace?.traceId ?? null });
   observe("persistence", "ok");
   return {
     reply, state: nextState, responsePlan,
     trace: {
-      runtime: "clean", decision, policy, resolutionCount: resolutions.length,
+      runtime: "clean", traceId: trace?.traceId ?? null, decision, policy, resolutionCount: resolutions.length,
       authorizedOperationIds: authorization.outcome === "authorized" ? authorization.operations.map((operation) => operation.requestId) : [],
       executionCount: executions.length, writeAttempt: executions.some((result) => result.writeAttempt),
       writeExecuted: executions.some((result) => result.writeExecuted), invariantViolations: [],

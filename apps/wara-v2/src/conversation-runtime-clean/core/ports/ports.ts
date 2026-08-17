@@ -15,4 +15,5 @@ export interface CapabilityExecutor { execute(operations: readonly AuthorizedOpe
 export interface StateReducer { reduce(input: { previousState: ConversationStateClean; decision: TurnDecision; policy: PolicyResult; resolutions: readonly ResolutionResult[]; executions: readonly OperationExecutionResult[]; messageId?: string }): ConversationStateClean; }
 export interface ResponsePlanner { plan(input: { decision: TurnDecision; policy: PolicyResult; previousState: ConversationStateClean; nextState: ConversationStateClean; resolutions: readonly ResolutionResult[]; executions: readonly OperationExecutionResult[] }): ResponsePlan; }
 export interface Composer { compose(input: ComposerInput): Promise<string>; }
-export interface ConversationStore { save(state: ConversationStateClean): Promise<void>; }
+export type ConversationSaveContext = Readonly<{ messageId?: string; reply?: string; traceId?: string | null }>;
+export interface ConversationStore { save(state: ConversationStateClean, context?: ConversationSaveContext): Promise<void>; }

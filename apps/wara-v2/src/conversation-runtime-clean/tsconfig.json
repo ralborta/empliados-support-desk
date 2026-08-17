@@ -5,6 +5,6 @@
     "outDir": "../../dist/conversation-runtime-clean",
     "declaration": false
   },
-  "include": ["core/**/*.ts", "adapters/**/*.ts", "config/**/*.ts", "live/**/*.ts", "migrations/**/*.ts", "types/**/*.d.ts", "index.ts"],
+  "include": ["core/**/*.ts", "adapters/**/*.ts", "config/**/*.ts", "lab/**/*.ts", "live/**/*.ts", "migrations/**/*.ts", "types/**/*.d.ts", "index.ts"],
   "exclude": ["tests/**/*.ts"]
 }

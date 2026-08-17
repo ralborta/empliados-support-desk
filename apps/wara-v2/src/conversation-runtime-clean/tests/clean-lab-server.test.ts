@@ -5,7 +5,7 @@ import { loadCleanRuntimeConfig, sanitizedCleanHealthConfig } from "../config/cl
 import { createEmptyCleanState } from "../core/types/state.js";
 
 const state = createEmptyCleanState({ tenantId: "lab", conversationId: "session" });
-const response = { reply: "Hola", state, responsePlan: { purpose: "greet" as const, facts: [], nextQuestion: null, pendingTaskReminder: null, protectedBlocks: [] }, trace: { runtime: "clean" as const, decision: null, policy: null, resolutionCount: 0, authorizedOperationIds: [], executionCount: 0, writeAttempt: false, writeExecuted: false, invariantViolations: [] }, traceId: "trace-1" };
+const response = { reply: "Hola", state, responsePlan: { purpose: "greet" as const, facts: [], nextQuestion: null, pendingTaskReminder: null, protectedBlocks: [] }, trace: { runtime: "clean" as const, traceId: "trace-1", decision: null, policy: null, resolutionCount: 0, authorizedOperationIds: [], executionCount: 0, writeAttempt: false, writeExecuted: false, invariantViolations: [] }, traceId: "trace-1" };
 
 it("exposes isolated authenticated lab turn health trace and rate limit", async () => {
   const health = sanitizedCleanHealthConfig(loadCleanRuntimeConfig({ WARA_CLEAN_RUNTIME_ENABLED: "true" }));
