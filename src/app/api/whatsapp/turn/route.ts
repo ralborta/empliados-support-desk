@@ -5,7 +5,12 @@ import {
   requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
+import { persistCustomerInbound } from "@/lib/customerTicketInquiry";
 import { handleWhatsAppTurn } from "@/lib/whatsappTurn";
+import {
+  isWaraV2PilotTurnProxyEnabled,
+  proxyWhatsAppTurnToV2Pilot,
+} from "@/lib/waraV2PilotTurnProxy";
 
 export const maxDuration = 60;
 
@@ -72,6 +77,21 @@ export async function POST(req: NextRequest) {
     parsed.data.message ??
     ""
   ).trim();
+
+  if (body) {
+    await persistCustomerInbound(rawPhone, body, { source: "whatsapp_turn" }).catch(
+      () => undefined,
+    );
+  }
+
+  if (isWaraV2PilotTurnProxyEnabled()) {
+    const payload = await proxyWhatsAppTurnToV2Pilot({
+      phone: rawPhone,
+      body,
+      apiKey: apiKey ?? "",
+    });
+    return NextResponse.json(payload, { status: 200 });
+  }
 
   const payload = await handleWhatsAppTurn({
     rawPhone,
