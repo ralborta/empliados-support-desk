@@ -10,7 +10,7 @@ export type OperationKind = "conversation" | "read" | "write_prepare" | "write_c
 export type TaskType =
   | "company" | "unit_query" | "gps" | "odometer" | "hourmeter"
   | "maintenance" | "certificate" | "knowledge" | "human_handoff"
-  | "conversation_assignment" | "ticket";
+  | "conversation_assignment" | "ticket" | "attachment";
 export type EntityType = "company" | "unit" | "date" | "time" | "numeric_value" | "listing_index" | "confirmation";
 export type ExpectedField = "company" | "unit" | "value" | "date" | "time" | "confirmation" | "clarification" | "free_text";
 

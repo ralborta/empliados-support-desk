@@ -44,6 +44,11 @@ export const CLEAN_CAPABILITY_CATALOG: readonly CleanCapabilityDefinition[] = [
   capability("ticket.close.commit", "write_commit", "ticket", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
   capability("ticket.reopen.prepare", "write_prepare", "ticket", ["detail"], true, ["not_found", "already_open"]),
   capability("ticket.reopen.commit", "write_commit", "ticket", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("attachment.prepare", "write_prepare", "attachment", ["detail"], true, ["validation_error", "unsupported_type", "size_exceeded"]),
+  capability("attachment.commit", "write_commit", "attachment", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("attachment.get", "read", "attachment", ["detail"], false, ["not_found"]),
+  capability("attachment.link_to_ticket", "write_commit", "attachment", ["pendingOperation"], true, ["not_found", "conflict", "write_disabled"]),
+  capability("attachment.link_to_maintenance", "write_commit", "attachment", ["pendingOperation"], true, ["not_found", "conflict", "write_disabled"]),
 ];
 export function getCleanCapability(name: string): CleanCapabilityDefinition | undefined {
   return CLEAN_CAPABILITY_CATALOG.find((definition) => definition.name === name);

@@ -10,7 +10,8 @@ const requiredNames = ["company.list", "company.select", "company.get_active", "
   "certificate.prepare", "certificate.issue", "domain.answer", "handoff.prepare", "handoff.create",
   "conversation.handoff.prepare", "conversation.handoff.commit", "conversation.assign.prepare", "conversation.assign.commit",
   "conversation.release.prepare", "conversation.release.commit", "ticket.create.prepare", "ticket.create.commit", "ticket.get_status",
-  "ticket.update.prepare", "ticket.update.commit", "ticket.close.prepare", "ticket.close.commit", "ticket.reopen.prepare", "ticket.reopen.commit"];
+  "ticket.update.prepare", "ticket.update.commit", "ticket.close.prepare", "ticket.close.commit", "ticket.reopen.prepare", "ticket.reopen.commit",
+  "attachment.prepare", "attachment.commit", "attachment.get", "attachment.link_to_ticket", "attachment.link_to_maintenance"];
 const authorizer = new CleanCapabilityAuthorizer();
 
 function operation(patch: Partial<OperationRequest> = {}): OperationRequest {
