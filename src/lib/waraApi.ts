@@ -1,4 +1,5 @@
 import type { Customer, PrismaClient } from "@prisma/client";
+import { formatGreeting } from "@/lib/waraWhatsAppFormat";
 import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
@@ -1571,7 +1572,7 @@ export function looksLikeRepeatGreetingInSession(
   if (!looksLikeGreeting(selectionText) || !threadText.trim()) return false;
   const tail = threadText.slice(-3500).toLowerCase();
   return (
-    /atilio|mesa de ayuda wara|seguimos|en qu[eé] te puedo|consulta o servicio|voy a registrar|ten[eé]s \d+ unidades|listo,\s*registr|patente:/.test(
+    /atilio|mesa de ayuda wara|seguimos|en qu[eé] te puedo|en qu[eé] te ayudo|consulta o servicio|voy a registrar|ten[eé]s \d+ unidades|listo,\s*registr|patente:|asistente virtual de wara/.test(
       tail,
     )
   );
@@ -1900,13 +1901,15 @@ export function looksLikeGenericCapabilityOrTopicSwitchRequest(text: string | un
   return looksLikeExplicitCapabilityQuestion(text) || looksLikeBareAtilioMention(text);
 }
 
-export function buildAtilioHelpCapabilitiesReply(firstName?: string): string {
-  const prefix = firstName?.trim() ? `${firstName.trim()}, ` : "";
-  return (
-    `${prefix}sí, puedo ayudarte por este chat con consultas de unidades (reporte, ubicación, flota), certificados de cobertura, odómetro/horómetro y mantenimiento. ` +
-    `Contame qué necesitás — por ejemplo "reporte de LWK7902" o "listado de mis unidades". ` +
-    `Si preferís hablar con una persona, escribí "hablar con un asesor".`
-  );
+export function buildAtilioHelpCapabilitiesReply(
+  _firstName?: string,
+  companyName?: string,
+): string {
+  return formatGreeting({
+    introduced: true,
+    companyName: companyName?.trim() || null,
+    pendingTaskLabel: null,
+  });
 }
 
 function companySelectionMenuMessage(

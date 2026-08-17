@@ -45,6 +45,11 @@ import {
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
 import {
+  buildAtilioStructuredGreeting,
+  formatContinueConsult,
+  formatSoftClose,
+} from "@/lib/waraWhatsAppFormat";
+import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationClose";
@@ -603,8 +608,11 @@ export async function customerRegisteredContextResponse(
     // repetía TEXTUALMENTE el mismo párrafo largo. Pedido explícito: "cuando se le diga
     // Atilio... mejor pregunta cómo puede ayudar después de un Hola XXX" — respuesta
     // corta, no la lista completa de capacidades otra vez.
-    const firstName = customer?.name?.trim().split(/\s+/)[0];
-    responseMessage = firstName ? `Hola ${firstName}, ¿en qué te puedo ayudar?` : "Hola, ¿en qué te puedo ayudar?";
+    responseMessage = buildAtilioStructuredGreeting({
+      threadText: scopedThreadText || fullThreadText,
+      companyName: activeCompany,
+      repeatGreeting: true,
+    });
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "atilio_bare_name_mention",
@@ -631,7 +639,7 @@ export async function customerRegisteredContextResponse(
     // ayuda genérica, topic-switch) va al turn/IA — menos heurística, más diálogo.
     await clearActiveUnit(prisma, trimmed);
     const firstName = customer?.name?.trim().split(/\s+/)[0];
-    responseMessage = buildAtilioHelpCapabilitiesReply(firstName);
+    responseMessage = buildAtilioHelpCapabilitiesReply(firstName, activeCompany);
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "atilio_help_capabilities",
@@ -655,10 +663,7 @@ export async function customerRegisteredContextResponse(
     } else {
       await clearActiveUnit(prisma, trimmed);
       nextFlow = "reply";
-      const firstName = customer?.name?.trim().split(/\s+/)[0];
-      responseMessage = firstName
-        ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
-        : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
+      responseMessage = formatContinueConsult({ companyName: activeCompany || null });
       await persistCustomerBotReply(trimmed, responseMessage, {
         source: "builderbot_context",
         stage: "flow_reset",
@@ -681,10 +686,10 @@ export async function customerRegisteredContextResponse(
     } else {
       nextFlow = "reply";
       if (!responseMessage) {
-        const firstName = customer?.name?.trim().split(/\s+/)[0];
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-          : "Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?";
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: scopedThreadText || fullThreadText,
+          companyName: activeCompany,
+        });
       }
     }
   } else if (looksLikeGreeting(selectionText)) {
@@ -699,10 +704,11 @@ export async function customerRegisteredContextResponse(
       await clearPendingAction(prisma, trimmed);
       nextFlow = "reply";
       if (!responseMessage) {
-        const firstName = customer?.name?.trim().split(/\s+/)[0];
-        responseMessage = firstName
-          ? `Hola ${firstName}, seguimos por acá. ¿En qué te puedo ayudar?`
-          : "Hola, seguimos por acá. ¿En qué te puedo ayudar?";
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: threadForGreeting,
+          companyName: activeCompany,
+          repeatGreeting: true,
+        });
       }
     } else {
     const pendingNow =
@@ -716,32 +722,35 @@ export async function customerRegisteredContextResponse(
     } else {
     nextFlow = "reply";
     if (!responseMessage) {
-      const firstName = customer?.name?.trim().split(/\s+/)[0];
       const repeatGreeting = looksLikeRepeatGreetingInSession(
         threadForGreeting,
         selectionText,
       );
       if (repeatGreeting) {
-        responseMessage = firstName
-          ? `Hola ${firstName}, seguimos por acá. ¿Qué necesitás?`
-          : `Hola, seguimos. ¿En qué te ayudo?`;
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: threadForGreeting,
+          companyName: activeCompany,
+          pendingAction: pendingActionRecord,
+          repeatGreeting: true,
+        });
       } else if (lastTicket && (lastKnownPlate || lastTicket.code)) {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: threadForGreeting,
+          companyName: activeCompany,
+          pendingAction: pendingActionRecord,
+          repeatGreeting: true,
+        });
       } else if (multiCompany && waraContactsText) {
-        const hola = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
-        responseMessage =
-          `${hola}\n\n` +
-          `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
-          `${waraContactsText}\n\n` +
-          `Respondé con el número de la opción o con el nombre de la empresa.`;
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: threadForGreeting,
+          companyListBlock: waraContactsText,
+        });
       } else {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: threadForGreeting,
+          companyName: activeCompany,
+          pendingAction: pendingActionRecord,
+        });
       }
     }
     }
@@ -762,8 +771,8 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
       responseMessage = firstName
-        ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
-        : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
+        ? `${formatSoftClose("bye")} ${firstName}.`
+        : formatSoftClose("bye");
     }
     }
   } else if (

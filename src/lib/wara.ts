@@ -707,6 +707,8 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     lower.lastIndexOf("nuevo odometro en km"),
     lower.lastIndexOf("pasame el nuevo odómetro en km"),
     lower.lastIndexOf("pasame el nuevo odometro en km"),
+    lower.lastIndexOf("pasame el valor del odómetro"),
+    lower.lastIndexOf("pasame el valor del odometro"),
     lower.lastIndexOf("pasame el nuevo horómetro en horas"),
     lower.lastIndexOf("pasame el nuevo horometro en horas"),
     lower.lastIndexOf("perfecto, tomo "),
@@ -807,6 +809,8 @@ function lastOdometerFlowMarkerIndex(threadText: string): number {
     lower.lastIndexOf("nuevo odometro en km"),
     lower.lastIndexOf("pasame el nuevo odómetro en km"),
     lower.lastIndexOf("pasame el nuevo odometro en km"),
+    lower.lastIndexOf("pasame el valor del odómetro"),
+    lower.lastIndexOf("pasame el valor del odometro"),
     lower.lastIndexOf("pasame el nuevo horómetro en horas"),
     lower.lastIndexOf("pasame el nuevo horometro en horas"),
     lower.lastIndexOf("perfecto, tomo "),
@@ -1116,6 +1120,7 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
     /nuevo od[oó]metro en km/i.test(tail) ||
     /pasame el nuevo od[oó]metro en km/i.test(tail) ||
+    /pasame el valor del od[oó]metro/i.test(tail) ||
     /od[oó]metro en km,?\s*(y )?la fecha y (la )?hora/i.test(tail)
   );
 }
@@ -1136,6 +1141,7 @@ export function threadAwaitingHorometerKmValue(threadText: string): boolean {
     /perfecto, tomo .+ pasame el nuevo hor[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail) ||
     /pasame el nuevo hor[oó]metro en horas/i.test(tail) ||
+    /pasame el valor del hor[oó]metro/i.test(tail) ||
     /hor[oó]metro en horas,?\s*(y )?la fecha/i.test(tail) ||
     /hor[oó]metro en horas,?\s*la fecha y la hora/i.test(tail) ||
     /tom[eé] la fecha.+?cu[aá]ntas horas de motor/i.test(tail)
@@ -1666,7 +1672,7 @@ export function extractLastPlateFromThread(text: string): string | null {
     if (lineLooksLikeBotPlateRejection(line)) continue;
     if (lineLooksLikeBotMissingPlatePrompt(line)) continue;
     const labeled = [
-      ...line.matchAll(/(?:Patente|Matr[ií]cula)[^\n:]*[:\-]\s*([A-Za-z0-9 ]{5,12})/gi),
+      ...line.matchAll(/(?:Patente|Matr[ií]cula|Unidad)[^\n:]*[:\-]\s*\*?([A-Za-z0-9 ]{5,12})/gi),
     ];
     for (let i = labeled.length - 1; i >= 0; i--) {
       const plate = normalizePlate(labeled[i][1]);
