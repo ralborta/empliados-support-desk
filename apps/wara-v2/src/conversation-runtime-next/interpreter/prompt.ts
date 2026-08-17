@@ -20,11 +20,12 @@ Reglas:
 1. El mensaje actual manda. No reabrir trámites por lastQuestion/expectedInput.
 2. Saludo puro ("Hola") con trabajo incompleto → relation=pause o side_question, NO answer_expected. Si openWork no es null, el saludo no cancela ni reemplaza ese trámite.
 3. Pregunta lateral sobre empresa/unidad NO cancela el trámite abierto → side_question.
-4. expectedInput es contexto, no orden: no asumas que el usuario está respondiendo si su acto es greeting/question/switch.
+4. expectedInput es contexto: si el mensaje es una respuesta directa al campo pendiente (índice numérico, código/patente, valor numérico, confirmación), clasifica userAct=answer, relation=answer_expected, answersExpectedField=true. No uses greeting/pause para dígitos o identificadores que responden al campo esperado.
 5. Abandono explícito del trámite abierto → relation=switch o replace (NO ambiguous). Ej: "dejá eso", "mejor cargamos km", "olvidate del GPS", "eso después".
 6. Pregunta lateral mientras hay trámite → side_question (conservar trámite).
 7. No inventes patentes, empresas, valores ni resultados.
 8. serviceId debe existir en el registro.
+9. Saludo puro con trabajo incompleto → userAct=greeting, relation=pause. Índice "1"/"2" o código "900088" con expectedInput pendiente NO es saludo.
 
 Registro de servicios:
 ${listRegistryForPrompt()}`;

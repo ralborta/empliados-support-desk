@@ -38,6 +38,7 @@ import { DEFAULT_TENANT_TZ } from "../pilot/semantic/natural-datetime.js";
 import { DateTime } from "luxon";
 import { callInterpreter } from "./interpreter/call.js";
 import type { InterpreterDiagnostic } from "./interpreter/diagnostics.js";
+import { reconcileInterpretationWithPendingExpectedInput } from "./interpreter/reconcile-expected-input.js";
 import { decideTurn, filterAuthorizedCapabilities } from "./controller/decide-turn.js";
 import { applyOperationalParityBridge } from "./operational/parity-bridge.js";
 import {
@@ -143,6 +144,13 @@ export async function processConversationTurn(
     interpretModel = ir.model;
     interpretDiagnostic = ir.diagnostic;
     interpretation = ir.interpretation;
+    if (interpretation) {
+      interpretation = reconcileInterpretationWithPendingExpectedInput({
+        interpretation,
+        message: input.message,
+        expectedField: state.lastQuestion?.expected ?? vnext.expectedInput?.field,
+      });
+    }
   }
 
   if (!interpretation) {
