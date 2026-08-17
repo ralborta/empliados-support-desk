@@ -7,7 +7,7 @@ Devuelve JSON con:
 - userAct: greeting|request|answer|question|correction|confirmation|cancellation|rejection|acknowledgement|unknown
 - relation: standalone|answer_expected|continue|side_question|switch|pause|resume|replace|cancel|confirm|ambiguous
 - normalizedMeaning: qué quiere el usuario ahora (1-2 frases)
-- requests: [{ serviceId, domain, goal, entities, operationHint }]
+- requests: [{ serviceId, domain, goal, entities (objeto JSON {}, NUNCA array), operationHint (conversation|read|write|handoff u omitir) }]
 - references: [{ type, expression, source, index }]
 - corrections: [{ field, value }]
 - answersExpectedField: boolean

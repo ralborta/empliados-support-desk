@@ -7,6 +7,47 @@ import {
 
 const USER_ACTS = new Set(UserActSchema.options);
 const RELATIONS = new Set(ThreadRelationSchema.options);
+const OPERATION_HINTS = new Set([
+  "conversation",
+  "read",
+  "write",
+  "handoff",
+]);
+
+function coerceEntities(value: unknown): Record<string, unknown> {
+  if (value == null) return {};
+  if (Array.isArray(value)) {
+    const merged: Record<string, unknown> = {};
+    for (const item of value) {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        Object.assign(merged, item as Record<string, unknown>);
+      }
+    }
+    return merged;
+  }
+  if (typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function coerceOperationHint(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const norm = value.trim().toLowerCase();
+  if (OPERATION_HINTS.has(norm)) return norm;
+  if (
+    norm === "query" ||
+    norm === "consult" ||
+    norm === "consulta" ||
+    norm === "status" ||
+    norm === "lookup"
+  ) {
+    return "read";
+  }
+  if (norm === "chat" || norm === "talk") return "conversation";
+  if (norm === "create" || norm === "update" || norm === "submit") return "write";
+  return undefined;
+}
 
 /** Normalización estructural previa a Zod (no decide conversación). */
 export function coerceInterpretationRaw(raw: unknown): unknown {
@@ -31,9 +72,10 @@ export function coerceInterpretationRaw(raw: unknown): unknown {
       if (typeof req.goal !== "string" || !req.goal.trim()) {
         req.goal = String(req.domain ?? req.serviceId ?? "consulta").slice(0, 400);
       }
-      if (!req.entities || typeof req.entities !== "object") {
-        req.entities = {};
-      }
+      req.entities = coerceEntities(req.entities);
+      const hint = coerceOperationHint(req.operationHint);
+      if (hint) req.operationHint = hint;
+      else delete req.operationHint;
       return req;
     });
 

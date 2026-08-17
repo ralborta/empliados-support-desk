@@ -22,6 +22,29 @@ describe("interpreter coerce", () => {
     assert.ok(p.data.requests[0]?.goal);
   });
 
+  it("convierte entities array a record", () => {
+    const p = parseInterpretation({
+      userAct: "question",
+      relation: "standalone",
+      normalizedMeaning: "empresa",
+      requests: [
+        {
+          domain: "company",
+          goal: "empresa",
+          entities: [{ companyId: "1" }],
+          operationHint: "query",
+        },
+      ],
+      references: [],
+      corrections: [],
+      answersExpectedField: false,
+      confidence: 0.8,
+    });
+    assert.ok(p.ok);
+    assert.deepEqual(p.data.requests[0]!.entities, { companyId: "1" });
+    assert.equal(p.data.requests[0]!.operationHint, "read");
+  });
+
   it("rellena goal vacío en requests", () => {
     const p = parseInterpretation({
       userAct: "request",

@@ -65,7 +65,7 @@ function buildRepairUserPayload(
     previousOutput: sanitizeRawOutput(invalidRaw, 600),
     originalUserPayload: JSON.parse(originalUser),
     instruction:
-      "Devuelve SOLO JSON válido que cumpla el schema TurnInterpretation. Corrige campos inválidos; no inventes patentes ni datos.",
+      "Devuelve SOLO JSON válido que cumpla el schema TurnInterpretation. entities debe ser objeto {} (no array). operationHint solo conversation|read|write|handoff u omitir. Corrige campos inválidos; no inventes patentes ni datos.",
   });
 }
 

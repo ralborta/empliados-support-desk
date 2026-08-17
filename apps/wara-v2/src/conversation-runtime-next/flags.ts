@@ -1,6 +1,6 @@
 /** Runtime Next — flag aislado del Commander V3 legacy. */
 
-export const RUNTIME_NEXT_PROMPT_VERSION = "runtime-next-2026-08-17a";
+export const RUNTIME_NEXT_PROMPT_VERSION = "runtime-next-2026-08-17b";
 export const RUNTIME_NEXT_SCHEMA_VERSION = "1.0.0";
 export const SERVICE_REGISTRY_VERSION = "1.0.0";
 
