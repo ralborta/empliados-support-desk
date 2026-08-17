@@ -453,7 +453,7 @@ export async function runCommanderTurn(
     }
   }
 
-  plan = enrichPlanForOpenTaskHold(plan, state);
+  plan = enrichPlanForOpenTaskHold(plan, state, input.message);
   plan = enrichPlanForCompanyChange(plan, state, input.message);
   // Solo un reset de empresa descarta el pedido estacionado.
   // Elegir empresa (preserveCompany=false + company.select) debe EJECUTARLO.
@@ -845,16 +845,22 @@ export async function runCommanderTurn(
   state = exec.state;
 
   if (exec.results.some((r) => r.error === "no_unit")) {
-    const ask = exec.facts.find((f) => f.trim()) ?? "¿De qué unidad?";
-    plan = {
-      ...plan,
-      conversationalAct: "ask",
-      responseGoal: {
-        purpose: "ask_missing",
-        facts: exec.facts,
-        nextQuestion: ask,
-      },
-    };
+    const skipNoUnitAsk =
+      plan.conversationalAct === "greet" ||
+      plan.responseGoal.purpose === "clarify" ||
+      plan.parkedTurn != null;
+    if (!skipNoUnitAsk) {
+      const ask = exec.facts.find((f) => f.trim()) ?? "¿De qué unidad?";
+      plan = {
+        ...plan,
+        conversationalAct: "ask",
+        responseGoal: {
+          purpose: "ask_missing",
+          facts: exec.facts,
+          nextQuestion: ask,
+        },
+      };
+    }
   }
 
   const { reply, latencyMs: redactMs } = await redactReply({

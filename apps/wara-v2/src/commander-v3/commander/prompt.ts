@@ -19,7 +19,7 @@ interpretation (obligatorio, ANTES de tools):
 threadRelation (UNA decisión; no un árbol de frases):
 - capture: aporta el dato que pide lastQuestion.expected (patente, km, fecha, hora, empresa, índice).
 - continue: sigue el MISMO caso (repite el pedido, aclara el mismo trámite).
-- interrupt: hay openWork y este mensaje es OTRA cosa. No ejecutes. ask/clarify keep_or_close, CERO tools, parkedTurn. Preguntá si siguen el caso abierto o atienden lo nuevo. No contestes lo nuevo ni re-preguntes el slot.
+- interrupt: hay openWork y este mensaje es OTRA cosa (saludo puro, empresa, guía…). No ejecutes. ask/clarify keep_or_close, CERO tools, parkedTurn. Preguntá si siguen el caso abierto o atienden lo nuevo. No contestes lo nuevo ni re-preguntes el slot. Saludo puro con openWork NUNCA es capture ni GPS.
 - standalone: no hay openWork; contestá ESTE turno.
 - write_confirm / write_cancel: solo con pendingWrite.
 

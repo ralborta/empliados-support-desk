@@ -876,6 +876,45 @@ describe("commander-v3 contracts", () => {
     assert.equal(next.parkedTurn ?? null, null);
   });
 
+  it("GPS esperando patente + Hola → greet y keep-or-close, no pide patente", async () => {
+    const { enrichPlanForOpenTaskHold } = await import(
+      "../enrich/open-task-hold.js"
+    );
+    const { enrichPlanForGreetingPolicy } = await import(
+      "../enrich/greeting-policy.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.activeTask = {
+      type: "gps",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    s.lastQuestion = { id: "q", purpose: "unit_for_gps", expected: "unit" };
+    const incoming = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "saludo",
+        answerKind: "continue_task",
+      },
+      reasoning: "LLM retoma GPS",
+      conversationalAct: "continue_task",
+      task: "gps",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.7,
+    });
+    const greeted = enrichPlanForGreetingPolicy(incoming, s, "Hola");
+    assert.equal(greeted.conversationalAct, "greet");
+    const held = enrichPlanForOpenTaskHold(greeted, s, "Hola");
+    assert.equal(held.conversationalAct, "ask");
+    assert.equal(held.responseGoal.purpose, "clarify");
+    assert.equal(held.requestedCapabilities.length, 0);
+    assert.match(held.responseGoal.nextQuestion ?? "", /estado de la unidad/i);
+    assert.doesNotMatch(held.responseGoal.nextQuestion ?? "", /¿De qué unidad\?/i);
+  });
+
   it("GPS esperando patente + otra pregunta → keep-or-close, no ejecuta", async () => {
     const { enrichPlanForOpenTaskHold } = await import(
       "../enrich/open-task-hold.js"

@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { ActiveTaskV3, ConversationStateV3, ParkedTurnV3 } from "../types/state.js";
 import type { AnswerKind, ThreadRelation, TurnPlan } from "../types/turn-plan.js";
+import { isPureGreetingMessage } from "./greeting-policy.js";
 
 export const KEEP_OR_CLOSE_PURPOSE = "keep_or_close_task";
 
@@ -62,7 +63,8 @@ function hasForeignFamily(plan: TurnPlan, state: ConversationStateV3): boolean {
   return plan.requestedCapabilities.some((c) => !allowed.has(capFamily(c.name)));
 }
 
-function isGreetingTurn(plan: TurnPlan): boolean {
+function isGreetingTurn(plan: TurnPlan, message?: string): boolean {
+  if (message && isPureGreetingMessage(message)) return true;
   return (
     plan.conversationalAct === "greet" ||
     plan.interpretation?.answerKind === "greet"
@@ -103,7 +105,11 @@ function threadRelationOf(plan: TurnPlan): ThreadRelation | undefined {
   return plan.interpretation?.threadRelation;
 }
 
-function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boolean {
+function isIncomingOtherRequest(
+  plan: TurnPlan,
+  state: ConversationStateV3,
+  message?: string,
+): boolean {
   const act = plan.conversationalAct;
   const kind = plan.interpretation?.answerKind;
   const rel = threadRelationOf(plan);
@@ -115,7 +121,8 @@ function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boo
     return hasForeignFamily(plan, state);
   }
   if (rel === "interrupt") return true;
-  if (isGreetingTurn(plan)) return true;
+  if (message && isPureGreetingMessage(message)) return true;
+  if (isGreetingTurn(plan, message)) return true;
   if (hasForeignFamily(plan, state)) return true;
   if (act === "answer_lateral") return true;
   if (
@@ -413,14 +420,15 @@ export function enrichPlanForKeepOrCloseAnswer(
 export function enrichPlanForOpenTaskHold(
   plan: TurnPlan,
   state: ConversationStateV3,
+  message?: string,
 ): TurnPlan {
   if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) return plan;
   if (state.pendingWrite) return plan;
   if (!hasIncompleteWork(state)) return plan;
-  if (!isIncomingOtherRequest(plan, state)) return plan;
+  if (!isIncomingOtherRequest(plan, state, message)) return plan;
 
   const open = taskLabel(state.activeTask?.type);
-  const greeting = isGreetingTurn(plan);
+  const greeting = isGreetingTurn(plan, message);
   const openType = state.activeTask?.type;
   const parkedCaps = greeting
     ? []
@@ -462,7 +470,7 @@ export function enrichPlanForOpenTaskHold(
     responseGoal: {
       purpose: "clarify",
       facts: [],
-      nextQuestion: isGreetingTurn(plan)
+      nextQuestion: greeting
         ? `Teníamos un ${open} en curso. ¿Seguimos con eso o te ayudo con otra cosa?`
         : `Teníamos un ${open} en curso. ¿Seguimos con eso o lo cerramos y pasamos a lo que pediste ahora?`,
     },

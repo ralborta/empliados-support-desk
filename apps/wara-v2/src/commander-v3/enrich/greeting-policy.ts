@@ -139,10 +139,11 @@ export function enrichPlanForGreetingPolicy(
   ) {
     return plan;
   }
+  // Saludo puro no es patente/código: greet o keep-or-close, no retomar el slot.
   const awaitingTaskUnit =
     state.lastQuestion?.expected === "unit" &&
     String(state.lastQuestion.purpose ?? "").startsWith("unit_for_");
-  if (awaitingTaskUnit) {
+  if (awaitingTaskUnit && !isPureGreetingMessage(message)) {
     return plan;
   }
 
