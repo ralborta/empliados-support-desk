@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 import { isValidCleanNamespace } from "../config/clean-config.js";
 
 export type CleanMigrationMode = "dry-run" | "check" | "apply";
+export function parseCleanMigrationMode(args: readonly string[]): CleanMigrationMode {
+  const argument = args.find((value) => value !== "--") ?? "--check";
+  return argument === "--apply" ? "apply" : argument === "--dry-run" ? "dry-run" : argument === "--check" ? "check" : (() => { throw new Error("CLEAN_MIGRATION_MODE_INVALID"); })();
+}
 export interface CleanMigrationAdmin { executeScript(sql: string): Promise<void>; }
 const TOKEN = "__CLEAN_SCHEMA__";
 const MIGRATION_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "001_clean_runtime.sql");

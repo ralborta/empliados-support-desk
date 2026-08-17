@@ -103,7 +103,7 @@ Required smoke sequence:
 | Gate | Status | Evidence |
 |---|---|---|
 | Typecheck | PASS | Clean isolated tsconfig |
-| Unit/local integration | PASS | 122/122 tests |
+| Unit/local integration | PASS | 123/123 tests |
 | PostgreSQL integration | PASS | 6/6 on disposable PostgreSQL |
 | Restart/dedupe/rollback/isolation | PASS | executable PostgreSQL suite |
 | Real composition/start command | PASS | fail-closed composition root and `runtime-clean:lab` |

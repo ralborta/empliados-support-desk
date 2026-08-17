@@ -1,9 +1,9 @@
 import { loadCleanRuntimeConfig } from "../config/clean-config.js";
 import { PgPoolSqlClient } from "../adapters/persistence/pg-pool-sql-client.js";
-import { runCleanMigration, type CleanMigrationMode } from "./migration-runner.js";
+import { parseCleanMigrationMode, runCleanMigration } from "./migration-runner.js";
 
 async function main() {
-  const argument = process.argv[2] ?? "--check"; const mode: CleanMigrationMode = argument === "--apply" ? "apply" : argument === "--dry-run" ? "dry-run" : argument === "--check" ? "check" : (() => { throw new Error("CLEAN_MIGRATION_MODE_INVALID"); })();
+  const mode = parseCleanMigrationMode(process.argv.slice(2));
   const config = loadCleanRuntimeConfig(process.env); let sql: PgPoolSqlClient | undefined;
   try {
     if (mode === "apply") { const url = process.env.WARA_CLEAN_DATABASE_URL?.trim(); if (!url) throw new Error("WARA_CLEAN_DATABASE_URL_REQUIRED"); sql = new PgPoolSqlClient({ connectionString: url, statementTimeoutMs: 120_000, connectionTimeoutMs: 5_000 }); }

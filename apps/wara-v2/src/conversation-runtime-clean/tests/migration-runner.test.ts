@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { checkCleanMigration, renderCleanMigration, runCleanMigration } from "../migrations/migration-runner.js";
+import { checkCleanMigration, parseCleanMigrationMode, renderCleanMigration, runCleanMigration } from "../migrations/migration-runner.js";
+
+it("accepts the pnpm argument separator without changing migration mode", () => {
+  assert.equal(parseCleanMigrationMode(["--", "--check"]), "check");
+  assert.equal(parseCleanMigrationMode(["--", "--dry-run"]), "dry-run");
+  assert.equal(parseCleanMigrationMode(["--apply"]), "apply");
+  assert.throws(() => parseCleanMigrationMode(["--", "--unknown"]), /CLEAN_MIGRATION_MODE_INVALID/);
+});
 
 it("renders only a validated namespace and supports dry-run/check without applying", async () => {
   let applied = 0;
