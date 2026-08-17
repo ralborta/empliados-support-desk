@@ -20,3 +20,8 @@ export * from "./core/authorization/capability-catalog.js";
 export * from "./core/authorization/capability-authorizer.js";
 export * from "./adapters/fake/fakes.js";
 export * from "./adapters/legacy/entity-directory-adapter.js";
+export * from "./adapters/interpreter/versions.js";
+export * from "./adapters/interpreter/stable-output-mapper.js";
+export * from "./adapters/interpreter/stable-interpreter-adapter.js";
+export * from "./adapters/interpreter/runtime-next-stable-transport.js";
+export * from "./adapters/interpreter/live-runner.js";

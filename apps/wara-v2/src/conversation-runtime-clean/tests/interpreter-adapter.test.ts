@@ -1,0 +1,101 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { StableInterpreterAdapter, type StableInterpreterTransport } from "../adapters/interpreter/stable-interpreter-adapter.js";
+import { deepFreezeInterpretationValue, mapStableInterpretation } from "../adapters/interpreter/stable-output-mapper.js";
+import { CLEAN_INTERPRETATION_SCHEMA_VERSION, CLEAN_INTERPRETER_ADAPTER_VERSION, CLEAN_INTERPRETER_PROMPT_VERSION } from "../adapters/interpreter/versions.js";
+import { createEmptyCleanState } from "../core/types/state.js";
+
+const empty = createEmptyCleanState({ tenantId: "t", conversationId: "c" });
+function raw(patch: Record<string, unknown> = {}) {
+  return { userAct: "request", relation: "standalone", normalizedMeaning: "structured", requests: [], references: [], corrections: [], answersExpectedField: false, confidence: 0.9, ...patch };
+}
+
+test("versions the Clean adapter, schema and prompt", () => {
+  assert.match(CLEAN_INTERPRETER_ADAPTER_VERSION, /^clean-/);
+  assert.match(CLEAN_INTERPRETATION_SCHEMA_VERSION, /^clean-/);
+  assert.match(CLEAN_INTERPRETER_PROMPT_VERSION, /^clean-/);
+});
+test("invalid JSON and schema errors return null without fallback", () => {
+  assert.equal(mapStableInterpretation("{broken", empty), null);
+  assert.equal(mapStableInterpretation({ userAct: "request" }, empty), null);
+  assert.equal(mapStableInterpretation(raw({ relation: "invented" }), empty), null);
+});
+test("maps greeting without fabricating requests", () => {
+  const result = mapStableInterpretation(raw({ userAct: "greeting", relation: "pause" }), empty);
+  assert.equal(result?.userAct, "greeting"); assert.equal(result?.relation, "pause"); assert.deepEqual(result?.intents, []);
+});
+test("maps multiple registered requests to Clean operation kinds", () => {
+  const result = mapStableInterpretation(raw({ requests: [
+    { serviceId: "gps.get_status", domain: "gps", goal: "status", entities: {}, operationHint: "read" },
+    { serviceId: "certificate.prepare", domain: "certificate", goal: "prepare", entities: {}, operationHint: "write" },
+  ] }), empty);
+  assert.deepEqual(result?.intents.map((item) => [item.serviceId, item.operationKind]), [["gps.get_status", "read"], ["certificate.prepare", "write_prepare"]]);
+});
+test("maps lateral and switch relations unchanged", () => {
+  assert.equal(mapStableInterpretation(raw({ userAct: "question", relation: "side_question" }), empty)?.relation, "side_question");
+  assert.equal(mapStableInterpretation(raw({ relation: "switch" }), empty)?.relation, "switch");
+});
+test("maps answer_expected only into the typed expected field", () => {
+  const state = { ...empty, expectedInput: { field: "unit" as const, taskId: null, purpose: "unit" } };
+  const result = mapStableInterpretation(raw({ userAct: "answer", relation: "answer_expected", answersExpectedField: true, expectedFieldValue: "unit-ref" }), state);
+  assert.deepEqual(result?.suppliedFields, [{ field: "unit", value: "unit-ref" }]);
+});
+test("maps corrections and confirmation without changing meaning", () => {
+  const correction = mapStableInterpretation(raw({ userAct: "correction", relation: "continue", corrections: [{ field: "value", value: 120 }] }), empty);
+  assert.deepEqual(correction?.corrections, [{ field: "value", value: 120 }]);
+  const confirmation = mapStableInterpretation(raw({ userAct: "confirmation", relation: "confirm", confirmation: { intended: true, containsCorrections: false } }), empty);
+  assert.deepEqual(confirmation?.confirmation, { intended: true, containsCorrections: false });
+});
+test("unknown services are rejected instead of guessed", () => {
+  assert.equal(mapStableInterpretation(raw({ requests: [{ serviceId: "unknown", domain: "gps", goal: "x", entities: {}, operationHint: "write" }] }), empty), null);
+});
+test("mapped interpretation is deeply immutable and detached from raw output", () => {
+  const source = raw({
+    requests: [
+      { serviceId: "gps.get_status", domain: "gps", goal: "status", entities: { unit: { id: "u", metadata: { fleet: "f" } } }, operationHint: "read" },
+      { serviceId: "certificate.prepare", domain: "certificate", goal: "prepare", entities: { unit: "u-2" }, operationHint: "write" },
+    ],
+    references: [{ type: "unit", expression: "truck" }],
+    corrections: [{ field: "value", value: { previous: 100, next: 120 } }],
+  });
+  const result = mapStableInterpretation(source, empty)!;
+  const unit = result.intents[0]!.entities.unit as { id: string; metadata: { fleet: string } };
+  assert.throws(() => { unit.metadata.fleet = "other"; }, TypeError);
+  assert.throws(() => { result.intents.push(result.intents[0]!); }, TypeError);
+  assert.throws(() => { (result.references[0] as { expression: string }).expression = "other"; }, TypeError);
+  assert.throws(() => { ((result.corrections[0]!.value as { next: number }).next) = 130; }, TypeError);
+  (source.requests as Array<Record<string, unknown>>)[0]!.entities = { unit: "changed" };
+  ((source.corrections as Array<{ value: { next: number } }>)[0]!.value).next = 999;
+  assert.equal(unit.id, "u");
+  assert.equal((result.corrections[0]!.value as { next: number }).next, 120);
+  assert.ok(Object.isFrozen(result));
+  assert.ok(Object.isFrozen(result.intents));
+  assert.ok(Object.isFrozen(result.intents[0]!.entities));
+  assert.ok(Object.isFrozen(unit.metadata));
+});
+test("deep freeze traverses children of an already frozen array and handles cycles", () => {
+  const child = { nested: { value: 1 } };
+  const frozenContainer = Object.freeze([child]);
+  deepFreezeInterpretationValue(frozenContainer);
+  assert.ok(Object.isFrozen(child));
+  assert.ok(Object.isFrozen(child.nested));
+  assert.throws(() => { child.nested.value = 2; }, TypeError);
+
+  const cyclic: { child: { value: number }; self?: unknown } = { child: { value: 1 } };
+  cyclic.self = cyclic;
+  deepFreezeInterpretationValue(cyclic);
+  assert.ok(Object.isFrozen(cyclic));
+  assert.ok(Object.isFrozen(cyclic.child));
+});
+test("adapter converts invalid output and transport errors to safe null diagnostics", async () => {
+  class Transport implements StableInterpreterTransport {
+    constructor(private readonly output: unknown, private readonly fail = false) {}
+    async call(): Promise<unknown> { if (this.fail) throw new Error("sensitive"); return this.output; }
+  }
+  const invalid = new StableInterpreterAdapter(new Transport("bad"));
+  assert.equal(await invalid.interpret({ message: "opaque", state: empty }), null);
+  assert.equal(invalid.lastDiagnostic?.code, "invalid_output");
+  const failed = new StableInterpreterAdapter(new Transport(null, true));
+  assert.equal(await failed.interpret({ message: "opaque", state: empty }), null);
+  assert.equal(failed.lastDiagnostic?.code, "transport_error");
+});
