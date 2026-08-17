@@ -20,6 +20,9 @@ import {
   resolvedEntitiesFromPlan,
 } from "./merge-plan.js";
 import {
+  assessExpectedInputCaptureEligibility,
+} from "./expected-input-capture-gate.js";
+import {
   previewUnitResolution,
   unresolvedFromUnitPreview,
 } from "./unit-resolution-preview.js";
@@ -44,13 +47,19 @@ export function applyOperationalParityBridge(
     interpretation: input.interpretation,
   });
 
-  const expectedField =
-    input.state.lastQuestion?.expected ??
-    input.vnext.expectedInput?.field ??
-    undefined;
+  const expectedCapture = assessExpectedInputCaptureEligibility({
+    interpretation: input.interpretation,
+    decision: input.decision,
+    vnext: input.vnext,
+    stateLastQuestionExpected: input.state.lastQuestion?.expected,
+  });
+  const hasExpectedField = expectedCapture.expectedField != null;
+  const mayCaptureExpected = !hasExpectedField || expectedCapture.eligible;
+
+  const expectedField = expectedCapture.expectedField ?? undefined;
 
   let contextualUnitRef: ReturnType<typeof resolveInterpretationReferences>["unitReference"];
-  if (expectedField === "unit") {
+  if (mayCaptureExpected && expectedField === "unit") {
     const synth = resolveInterpretationReferences(
       {
         ...input.interpretation,
@@ -82,75 +91,81 @@ export function applyOperationalParityBridge(
   }
 
   const beforeCapture = JSON.stringify(plan.requestedCapabilities);
-  plan = enrichPlanForCompanyCapture(plan, input.state, input.message);
+  if (mayCaptureExpected) {
+    plan = enrichPlanForCompanyCapture(plan, input.state, input.message);
+  }
   if (JSON.stringify(plan.requestedCapabilities) !== beforeCapture) {
     enrichersApplied.push("enrichPlanForCompanyCapture");
   }
 
   const beforeExpected = JSON.stringify(plan);
-  if (contextualUnitRef) {
-    plan = enrichPlanForExpectedFields(
-      { ...plan, unitReference: contextualUnitRef },
-      input.state,
-      input.message,
-    );
-    if (!plan.unitReference || plan.unitReference.mode !== "contextual") {
-      plan = {
-        ...plan,
-        unitReference: contextualUnitRef,
-        requestedCapabilities: plan.requestedCapabilities.some(
-          (c) => c.name === "unit.select",
-        )
-          ? plan.requestedCapabilities
-          : [...plan.requestedCapabilities, { name: "unit.select", params: {} }],
-      };
-    }
-    enrichersApplied.push("expectedUnitContextual");
-  } else {
-    plan = enrichPlanForExpectedFields(plan, input.state, input.message);
-  }
-  if (JSON.stringify(plan) !== beforeExpected) {
-    enrichersApplied.push("enrichPlanForExpectedFields");
-  }
-
-  if (expectedField === "company" && !plan.companyReference) {
-    const synth = resolveInterpretationReferences(
-      {
-        ...input.interpretation,
-        references: [
-          ...input.interpretation.references,
-          {
-            type: "company",
-            expression: input.message.trim(),
-            source: "message",
-          },
-        ],
-      },
-      input.vnext,
-    );
-    if (synth.companyReference) {
-      const beforeSynth = JSON.stringify(plan);
-      plan = enrichPlanForCompanyCapture(
-        {
-          ...plan,
-          companyReference: synth.companyReference,
-        },
+  if (mayCaptureExpected) {
+    if (contextualUnitRef) {
+      plan = enrichPlanForExpectedFields(
+        { ...plan, unitReference: contextualUnitRef },
         input.state,
         input.message,
       );
-      if (JSON.stringify(plan) !== beforeSynth) {
-        enrichersApplied.push("expectedCompanyContextual");
+      if (!plan.unitReference || plan.unitReference.mode !== "contextual") {
+        plan = {
+          ...plan,
+          unitReference: contextualUnitRef,
+          requestedCapabilities: plan.requestedCapabilities.some(
+            (c) => c.name === "unit.select",
+          )
+            ? plan.requestedCapabilities
+            : [...plan.requestedCapabilities, { name: "unit.select", params: {} }],
+        };
+      }
+      enrichersApplied.push("expectedUnitContextual");
+    } else {
+      plan = enrichPlanForExpectedFields(plan, input.state, input.message);
+    }
+    if (JSON.stringify(plan) !== beforeExpected) {
+      enrichersApplied.push("enrichPlanForExpectedFields");
+    }
+
+    if (expectedField === "company" && !plan.companyReference) {
+      const synth = resolveInterpretationReferences(
+        {
+          ...input.interpretation,
+          references: [
+            ...input.interpretation.references,
+            {
+              type: "company",
+              expression: input.message.trim(),
+              source: "message",
+            },
+          ],
+        },
+        input.vnext,
+      );
+      if (synth.companyReference) {
+        const beforeSynth = JSON.stringify(plan);
+        plan = enrichPlanForCompanyCapture(
+          {
+            ...plan,
+            companyReference: synth.companyReference,
+          },
+          input.state,
+          input.message,
+        );
+        if (JSON.stringify(plan) !== beforeSynth) {
+          enrichersApplied.push("expectedCompanyContextual");
+        }
       }
     }
   }
 
   const beforeMeter = JSON.stringify(plan);
-  plan = enrichPlanForMeterValueFallback(plan, input.state, input.message);
+  if (mayCaptureExpected) {
+    plan = enrichPlanForMeterValueFallback(plan, input.state, input.message);
+  }
   if (JSON.stringify(plan) !== beforeMeter) {
     enrichersApplied.push("enrichPlanForMeterValueFallback");
   }
 
-  if (isAwaitingWriteConfirmation(input.state)) {
+  if (isAwaitingWriteConfirmation(input.state) && mayCaptureExpected) {
     const beforeConfirm = JSON.stringify(plan);
     plan = enrichPlanForConfirmationOutcome(plan, input.state, input.message);
     if (JSON.stringify(plan) !== beforeConfirm) {
@@ -161,9 +176,7 @@ export function applyOperationalParityBridge(
   const unresolved: OperationalResolutionResult["unresolved"] = [];
 
   const expectedFieldResolved =
-    input.state.lastQuestion?.expected ??
-    input.vnext.expectedInput?.field ??
-    undefined;
+    expectedCapture.eligible ? expectedCapture.expectedField : null;
 
   if (expectedFieldResolved === "unit" && plan.unitReference) {
     const preview = previewUnitResolution(plan.unitReference, input.state);
@@ -226,7 +239,13 @@ export function applyOperationalParityBridge(
     }
   }
 
-  const decision = mergeOperationalPlanIntoDecision(input.decision, plan);
+  const explicitCompanyChange = plan.requestedCapabilities.some(
+    (c) => c.name === "company.list",
+  );
+  const decision =
+    hasExpectedField && !expectedCapture.eligible && !explicitCompanyChange
+      ? input.decision
+      : mergeOperationalPlanIntoDecision(input.decision, plan);
   const resolvedEntities = resolvedEntitiesFromPlan(plan);
 
   if (expectedFieldResolved === "unit" && plan.unitReference) {
@@ -256,5 +275,6 @@ export function applyOperationalParityBridge(
     operationalFacts,
     unresolved,
     enrichersApplied,
+    expectedCapture,
   };
 }

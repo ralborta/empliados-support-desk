@@ -292,7 +292,10 @@ export function decideTurn(input: {
     };
   }
 
-  if (i.relation === "answer_expected" || i.answersExpectedField || i.userAct === "answer") {
+  if (
+    (i.relation === "answer_expected" || i.answersExpectedField) &&
+    (i.userAct === "answer" || i.userAct === "correction")
+  ) {
     const expected = state.lastQuestion?.expected;
     const fields =
       expected === "value" && i.expectedFieldValue != null

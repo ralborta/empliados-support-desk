@@ -32,6 +32,8 @@ export type OperationalResolutionInput = {
   message: string;
 };
 
+import type { ExpectedCaptureEligibility } from "./expected-input-capture-gate.js";
+
 export type OperationalResolutionResult = {
   decision: TurnDecision;
   resolvedEntities: Record<string, unknown>;
@@ -39,4 +41,5 @@ export type OperationalResolutionResult = {
   operationalFacts: OperationalFact[];
   unresolved: UnresolvedRequirement[];
   enrichersApplied: string[];
+  expectedCapture: ExpectedCaptureEligibility;
 };

@@ -42,7 +42,7 @@ function phoneMatchesAllowlist(rawPhone: string, allowlist: string[]): boolean {
 export function isWaraV2PilotTurnProxyEnabledForPhone(rawPhone: string): boolean {
   if (!isWaraV2PilotTurnProxyEnabled()) return false;
   const allowlist = proxyAllowlistPhones();
-  if (allowlist.length === 0) return true;
+  if (allowlist.length === 0) return false;
   return phoneMatchesAllowlist(rawPhone, allowlist);
 }
 

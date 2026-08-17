@@ -48,9 +48,41 @@ type TurnSpec = {
   expect?: TurnExpect;
 };
 
-type Scenario = { name: string; turns: TurnSpec[] };
+const smokeContactsDual = [
+  { id: 64866, nombre: "WARA", empresa: "WARA" },
+  { id: 131776, nombre: "El Cacique S.A.", empresa: "El Cacique S.A." },
+];
+
+type Scenario = {
+  name: string;
+  turns: TurnSpec[];
+  contacts?: Array<{ id: number; nombre: string; empresa: string }>;
+};
 
 const company = { id: "1", name: "Smoke Co", contactId: 1 };
+
+function fleet900088() {
+  return [
+    {
+      movilId: 501,
+      plate: "AA900088",
+      name: "M900-088",
+      label: "Unidad (M900-088)",
+      odometer: null,
+      hourmeter: null,
+    },
+  ];
+}
+
+function fleetUnitsFromState(s: ConversationStateV3) {
+  return (s.fleetCache ?? []).map((u) => ({
+    movil_id: u.movilId,
+    unidad: u.name ?? "",
+    patente: u.plate ?? "",
+    odometro: u.odometer ?? null,
+    horometro: u.hourmeter ?? null,
+  }));
+}
 
 function gpsOpenSetup(s: ConversationStateV3) {
   s.company = company;
@@ -504,6 +536,181 @@ const scenarios: Scenario[] = [
     ],
   },
   {
+    name: "horometro_saludo_luego_unidad",
+    turns: [
+      {
+        id: "h1",
+        message: "Quiero cargar horómetro",
+        setup: (s) => {
+          s.company = company;
+        },
+        interpretationOverride: {
+          userAct: "request",
+          relation: "standalone",
+          normalizedMeaning: "Cargar horómetro",
+          requests: [
+            {
+              serviceId: "hourmeter.prepare",
+              domain: "hourmeter",
+              goal: "cargar horómetro",
+              entities: {},
+            },
+          ],
+          references: [],
+          corrections: [],
+          answersExpectedField: false,
+          confidence: 0.9,
+        },
+        expect: {
+          action: "execute",
+          task: "hourmeter",
+          noWrites: true,
+        },
+      },
+      {
+        id: "h2",
+        message: "Hola",
+        interpretationOverride: {
+          userAct: "greeting",
+          relation: "standalone",
+          normalizedMeaning: "Saludo",
+          requests: [],
+          references: [],
+          corrections: [],
+          answersExpectedField: false,
+          confidence: 0.95,
+        },
+        expect: {
+          action: "respond",
+          conversationalAct: "greet",
+          maxCapabilities: 0,
+          replyNotContains: ["No encontré", "patente desconocida", "identificador"],
+          stateTask: "hourmeter",
+          noWrites: true,
+        },
+      },
+      {
+        id: "h3",
+        message: "900088",
+        setup: (s) => {
+          s.lastQuestion = {
+            id: "uq",
+            purpose: "unit_for_hourmeter",
+            expected: "unit",
+          };
+          s.fleetCache = fleet900088();
+        },
+        interpretationOverride: {
+          userAct: "answer",
+          relation: "answer_expected",
+          normalizedMeaning: "Código unidad",
+          requests: [],
+          references: [],
+          corrections: [],
+          answersExpectedField: true,
+          confidence: 0.9,
+        },
+        expect: {
+          action: "execute",
+          conversationalAct: "continue_task",
+          capabilityNames: ["unit.select"],
+          stateTask: "hourmeter",
+          noWrites: true,
+        },
+      },
+    ],
+  },
+  {
+    name: "horometro_pregunta_lateral_luego_unidad",
+    turns: [
+      {
+        id: "l1",
+        message: "Quiero cargar horómetro",
+        setup: (s) => {
+          s.company = company;
+        },
+        interpretationOverride: {
+          userAct: "request",
+          relation: "standalone",
+          normalizedMeaning: "Cargar horómetro",
+          requests: [
+            {
+              serviceId: "hourmeter.prepare",
+              domain: "hourmeter",
+              goal: "cargar horómetro",
+              entities: {},
+            },
+          ],
+          references: [],
+          corrections: [],
+          answersExpectedField: false,
+          confidence: 0.9,
+        },
+        expect: {
+          action: "execute",
+          task: "hourmeter",
+          noWrites: true,
+        },
+      },
+      {
+        id: "l2",
+        message: "¿Qué empresa tengo activa?",
+        interpretationOverride: {
+          userAct: "question",
+          relation: "side_question",
+          normalizedMeaning: "Consulta empresa activa",
+          requests: [
+            {
+              serviceId: "company.status",
+              domain: "company",
+              goal: "empresa activa",
+              entities: {},
+            },
+          ],
+          references: [],
+          corrections: [],
+          answersExpectedField: false,
+          confidence: 0.9,
+        },
+        expect: {
+          maxCapabilities: 0,
+          replyNotContains: ["No encontré", "identificador", "patente desconocida"],
+          stateTask: "hourmeter",
+          noWrites: true,
+        },
+      },
+      {
+        id: "l3",
+        message: "900088",
+        setup: (s) => {
+          s.lastQuestion = {
+            id: "uq2",
+            purpose: "unit_for_hourmeter",
+            expected: "unit",
+          };
+          s.fleetCache = fleet900088();
+        },
+        interpretationOverride: {
+          userAct: "answer",
+          relation: "answer_expected",
+          normalizedMeaning: "Código unidad",
+          requests: [],
+          references: [],
+          corrections: [],
+          answersExpectedField: true,
+          confidence: 0.9,
+        },
+        expect: {
+          action: "execute",
+          conversationalAct: "continue_task",
+          capabilityNames: ["unit.select"],
+          stateTask: "hourmeter",
+          noWrites: true,
+        },
+      },
+    ],
+  },
+  {
     name: "colloquial_typos",
     turns: [
       {
@@ -537,7 +744,68 @@ const scenarios: Scenario[] = [
       },
     ],
   },
+  {
+    name: "reiniciar_empresa_saludo_luego_indice",
+    contacts: smokeContactsDual,
+    turns: [
+      {
+        id: "e1",
+        message: "Reiniciar empresa",
+        setup: (s) => {
+          s.company = { id: "131776", name: "El Cacique S.A.", contactId: 131776 };
+          s.unit = {
+            movilId: 90,
+            plate: "AE483VE",
+            name: "SAVEIRO",
+            label: "AE 483 VE (SAVEIRO)",
+          };
+          s.availableCompanies = [
+            { id: "64866", name: "WARA", contactId: 64866 },
+            { id: "131776", name: "El Cacique S.A.", contactId: 131776 },
+          ];
+        },
+        expect: {
+          capabilityNames: ["company.list"],
+          noWrites: true,
+        },
+      },
+      {
+        id: "e2",
+        message: "Hola",
+        expect: {
+          maxCapabilities: 0,
+          replyNotContains: ["No encontré", "identificador", "patente desconocida"],
+          noWrites: true,
+        },
+      },
+      {
+        id: "e3",
+        message: "2",
+        setup: (s) => {
+          s.lastQuestion = { id: "cq", purpose: "company_pick", expected: "company" };
+          s.presentedCompanies = [
+            { index: 1, id: "64866", name: "WARA" },
+            { index: 2, id: "131776", name: "El Cacique S.A." },
+          ];
+        },
+        expect: {
+          capabilityNames: ["company.select"],
+          noWrites: true,
+        },
+      },
+    ],
+  },
 ];
+
+function stateSummary(s: ConversationStateV3) {
+  return {
+    company: s.company?.name ?? null,
+    unit: s.unit?.label ?? s.unit?.plate ?? null,
+    activeTask: s.activeTask?.type ?? null,
+    activeTaskStatus: s.activeTask?.status ?? null,
+    lastQuestionExpected: s.lastQuestion?.expected ?? null,
+  };
+}
 
 function sanitize(obj: unknown): unknown {
   if (!obj || typeof obj !== "object") return obj;
@@ -571,6 +839,10 @@ function verifyTurn(
   const { trace, reply, state } = result;
   const expect = turn.expect ?? {};
   const plan = trace.turnPlan;
+  const interpretation = trace.runtimeNext?.interpretation;
+  if (!interpretation) {
+    errors.push("interpretation:null");
+  }
   const decisionAction = plan?.responseGoal?.purpose === "confirm_write"
     ? "confirm_write"
     : trace.turnPlan?.conversationalAct === "ask" && plan?.responseGoal?.purpose === "clarify"
@@ -688,6 +960,8 @@ async function runScenario(scenario: Scenario, env: NodeJS.ProcessEnv, useOverri
   resetConversationStateV3(tenant, phone);
   const traces: unknown[] = [];
   const allErrors: string[] = [];
+  const contacts =
+    scenario.contacts ?? [{ id: 1, nombre: "Smoke Co", empresa: "Smoke Co" }];
 
   for (const t of scenario.turns) {
     if (t.setup) {
@@ -709,13 +983,14 @@ async function runScenario(scenario: Scenario, env: NodeJS.ProcessEnv, useOverri
       message: t.message,
       messageId: t.id,
       env,
-      contacts: [{ id: 1, nombre: "Smoke Co", empresa: "Smoke Co" }],
-      fleetUnits: [],
+      contacts,
+      fleetUnits: fleetUnitsFromState(stateBefore),
       interpretationOverride: override,
     });
 
     console.log(`  reply: ${r.reply.slice(0, 200)}`);
 
+    const parity = r.trace.runtimeNext?.operationalParity;
     const turnErrors = verifyTurn(scenario.name, t, r, stateBefore);
     allErrors.push(...turnErrors);
 
@@ -723,7 +998,14 @@ async function runScenario(scenario: Scenario, env: NodeJS.ProcessEnv, useOverri
       scenario: scenario.name,
       turnId: t.id,
       message: t.message,
-      reply: r.reply.slice(0, 500),
+      reply: r.reply,
+      interpretation: useOverrides ? t.interpretationOverride : r.trace.runtimeNext?.interpretation,
+      decision: parity?.decision ?? {
+        action: r.trace.turnPlan?.conversationalAct,
+        conversationalAct: r.trace.turnPlan?.conversationalAct,
+        task: r.trace.turnPlan?.task,
+      },
+      expectedCapture: parity?.expectedCapture ?? null,
       action: r.trace.turnPlan?.conversationalAct,
       task: r.trace.turnPlan?.task,
       authorizedCapabilities: authorizedFromTrace(r.trace),
@@ -731,10 +1013,14 @@ async function runScenario(scenario: Scenario, env: NodeJS.ProcessEnv, useOverri
       capViolation: r.trace.runtimeNext?.capViolation ?? null,
       writeAttempt: r.trace.writeAttempt,
       writeExecuted: r.trace.writeExecuted,
+      stateBefore: stateSummary(stateBefore),
+      stateAfter: stateSummary(r.state),
       activeTask: r.state.activeTask?.type,
       activeTaskStatus: r.state.activeTask?.status,
       validationOk: r.trace.validation?.ok,
-      interpretation: useOverrides ? t.interpretationOverride : r.trace.runtimeNext?.interpretation,
+      latencyMs: r.trace.latency?.totalMs ?? null,
+      interpretMs: r.trace.latency?.commanderMs ?? null,
+      interpreterDiagnostic: r.trace.runtimeNext?.interpreterDiagnostic ?? null,
     });
   }
 

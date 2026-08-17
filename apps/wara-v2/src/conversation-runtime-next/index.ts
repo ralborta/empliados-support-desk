@@ -19,6 +19,7 @@ export type { TurnInterpretation } from "./types/interpretation.js";
 export { composeReply } from "./compose/composer.js";
 export { migrateV3ToVNext, createEmptyVNext } from "./state/migrate.js";
 export { assertBridgeInvariants } from "./controller/bridge-guard.js";
+export { assessExpectedInputCaptureEligibility } from "./operational/expected-input-capture-gate.js";
 export { applyOperationalParityBridge } from "./operational/parity-bridge.js";
 export {
   OPERATIONAL_PARITY_MATRIX,

@@ -209,7 +209,7 @@ export async function processConversationTurn(
     message: input.message,
   });
   decision = parity.decision;
-  if (parity.operationalFacts.length) {
+  if (parity.operationalFacts.length && parity.expectedCapture.eligible) {
     decision = {
       ...decision,
       responseGoal: {
@@ -343,7 +343,12 @@ export async function processConversationTurn(
   const expectedUnitField =
     state.lastQuestion?.expected === "unit" || vnext.expectedInput?.field === "unit";
 
-  if (unitRes.status === "not_found" && expectedUnitField && plan.unitReference) {
+  if (
+    unitRes.status === "not_found" &&
+    parity.expectedCapture.eligible &&
+    expectedUnitField &&
+    plan.unitReference
+  ) {
     const facts =
       parity.operationalFacts.length > 0
         ? parity.operationalFacts.map((f) => f.text)
