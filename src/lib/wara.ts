@@ -989,6 +989,7 @@ export function threadHasActiveOdometerFlow(threadText: string): boolean {
   return (
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
+    threadAwaitingOdometerKmValue(threadText) ||
     threadAwaitingHorometerKmValue(threadText) ||
     threadAwaitingOdometerConfirmDetails(threadText) ||
     threadHasOdometerUnitClarificationPending(threadText) ||
@@ -1121,6 +1122,7 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
     /nuevo od[oó]metro en km/i.test(tail) ||
     /pasame el nuevo od[oó]metro en km/i.test(tail) ||
     /pasame el valor del od[oó]metro/i.test(tail) ||
+    /od[oó]metro en .{0,12}km/i.test(tail) ||
     /od[oó]metro en km,?\s*(y )?la fecha y (la )?hora/i.test(tail)
   );
 }
@@ -1142,6 +1144,7 @@ export function threadAwaitingHorometerKmValue(threadText: string): boolean {
     /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail) ||
     /pasame el nuevo hor[oó]metro en horas/i.test(tail) ||
     /pasame el valor del hor[oó]metro/i.test(tail) ||
+    /hor[oó]metro en .{0,12}hs/i.test(tail) ||
     /hor[oó]metro en horas,?\s*(y )?la fecha/i.test(tail) ||
     /hor[oó]metro en horas,?\s*la fecha y la hora/i.test(tail) ||
     /tom[eé] la fecha.+?cu[aá]ntas horas de motor/i.test(tail)
