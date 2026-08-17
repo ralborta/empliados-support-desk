@@ -46,3 +46,4 @@ export * from "./adapters/persistence/postgres-clean-persistence.js";
 export * from "./adapters/services/guarded-http-transport.js";
 export * from "./adapters/services/guarded-wara-adapter.js";
 export * from "./adapters/services/guarded-odoo-handoff-adapter.js";
+export * from "./adapters/attachments/guarded-storage-adapter.js";
