@@ -84,6 +84,19 @@ test("lateral question preserves focused task and expected input", async () => {
   assert.equal(result.state.expectedInput?.field, "unit");
 });
 
+test("answer_expected consumes only the matching expected field", async () => {
+  const active = task("odometer");
+  const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
+    expectedInput: { field: "value" as const, taskId: active.id, purpose: "odometer_value" } };
+  const d = deps(state, [interpretation({ userAct: "answer", relation: "answer_expected", answersExpectedField: true,
+    suppliedFields: [{ field: "value", value: 1200 }, { field: "date", value: "2099-01-01" }] })]);
+  const result = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
+  const collected = result.state.tasks[0]?.collectedFields;
+  assert.equal(collected?.value, 1200);
+  assert.equal("date" in (collected ?? {}), false);
+  assert.equal(result.state.expectedInput, null);
+});
+
 test("explicit semantic switch pauses old task and focuses new task", async () => {
   const active = task("hourmeter");
   const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id };
@@ -99,10 +112,21 @@ test("confirmation without pending is blocked with zero execution", async () => 
   const d = deps(state, [interpretation({ userAct: "confirmation", relation: "confirm", confirmation: { intended: true, containsCorrections: false } })]);
   const result = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
   assert.equal(result.trace.policy?.outcome, "block");
-  assert.equal(result.trace.policy?.violations[0]?.code, "CONFIRM_WITHOUT_PENDING");
+  assert.equal(result.trace.policy?.violations[0]?.code, "WRITE_REQUIRES_PENDING_OPERATION");
   assert.equal(d.executor.calls, 0);
   assert.equal(result.trace.writeAttempt, false);
   assert.equal(result.trace.writeExecuted, false);
+});
+
+test("ambiguity clarifies without resolution or execution", async () => {
+  const state = createEmptyCleanState({ tenantId: "t", conversationId: "c" });
+  const resolver = new FakeEntityResolver();
+  const d = deps(state, [interpretation({ relation: "ambiguous", ambiguity: { reason: "two valid tasks", alternatives: ["a", "b"], clarificationQuestion: "¿Cuál de las dos tareas?" } })], resolver);
+  const result = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
+  assert.equal(result.trace.policy?.outcome, "clarify");
+  assert.equal(result.state.pendingClarification?.question, "¿Cuál de las dos tareas?");
+  assert.equal(resolver.calls, 0);
+  assert.equal(d.executor.calls, 0);
 });
 
 test("valid pending binding authorizes only the declared commit", async () => {
@@ -133,6 +157,18 @@ test("cancellation clears pending and cancelled task is not restored", async () 
   const next = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
   assert.equal(next.state.focusedTaskId, null);
   assert.equal(next.state.tasks[0]?.status, "cancelled");
+});
+
+test("structured correction updates draft and invalidates prior confirmation", async () => {
+  const active = task("odometer", "awaiting_confirmation");
+  const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
+    pendingOperation: { operationId: "op", capability: "odometer.update", taskId: active.id, version: 1, payloadHash: "hash", preparedArguments: { value: 100 }, status: "awaiting_confirmation" as const } };
+  const d = deps(state, [interpretation({ userAct: "correction", relation: "continue", corrections: [{ field: "value", value: 120 }] })]);
+  const result = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
+  assert.equal(result.state.tasks[0]?.collectedFields.value, 120);
+  assert.equal(result.state.tasks[0]?.status, "collecting");
+  assert.equal(result.state.pendingOperation, null);
+  assert.equal(result.trace.executionCount, 0);
 });
 
 test("null interpretation preserves state and calls no downstream effects", async () => {

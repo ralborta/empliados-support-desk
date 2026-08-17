@@ -63,9 +63,13 @@ function operationRequests(interpretation: TurnInterpretation, resolutions: read
     }));
 }
 
-function transitionFor(act: DecisionAct, task: TaskType | null): StateTransitionIntent {
+function transitionFor(act: DecisionAct, task: TaskType | null, interpretation: TurnInterpretation, state: ConversationStateClean): StateTransitionIntent {
   const cancel = act === "cancel_task";
   const switchTask = act === "switch_task";
+  const correction = interpretation.userAct === "correction" || interpretation.corrections.length > 0;
+  const supplied = interpretation.relation === "answer_expected" && state.expectedInput
+    ? interpretation.suppliedFields.filter((field) => field.field === state.expectedInput!.field)
+    : interpretation.suppliedFields;
   return {
     preserveCompany: true,
     preserveUnit: true,
@@ -73,7 +77,11 @@ function transitionFor(act: DecisionAct, task: TaskType | null): StateTransition
     clearExpectedInput: cancel || switchTask,
     clearPendingResolution: cancel || switchTask,
     clearPendingClarification: act !== "clarify",
-    clearPendingOperation: cancel,
+    clearPendingOperation: cancel || correction,
+    fieldUpdates: Object.fromEntries([
+      ...supplied.map((field) => [field.field, field.value] as const),
+      ...interpretation.corrections.map((field) => [field.field, field.value] as const),
+    ]),
     ...(switchTask || act === "start_task" || act === "prepare_write" ? { nextFocusedTask: task } : {}),
   };
 }
@@ -98,7 +106,7 @@ export class CleanController implements Controller {
       taskIntent: taskIntentFor(act, task),
       requestedOperations: operationRequests(input.interpretation, resolutions),
       requiredResolutions: resolutions,
-      stateTransition: transitionFor(act, task),
+      stateTransition: transitionFor(act, task, input.interpretation, input.state),
       responseIntent: responseFor(act, input.interpretation, input.state),
       confidence: input.interpretation.confidence,
     };

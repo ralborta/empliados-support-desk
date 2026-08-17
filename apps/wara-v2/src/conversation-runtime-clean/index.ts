@@ -9,6 +9,7 @@ export * from "./core/ports/ports.js";
 export * from "./core/controller/controller.js";
 export * from "./core/controller/freeze-decision.js";
 export * from "./core/policy/decision-policy.js";
+export * from "./core/policy/catalog.js";
 export * from "./core/state/invariants.js";
 export * from "./core/state/reducer.js";
 export * from "./core/response/response-planner.js";

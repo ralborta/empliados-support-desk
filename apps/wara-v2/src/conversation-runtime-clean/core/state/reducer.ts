@@ -45,7 +45,7 @@ function listingFrom(result: ResolutionResult): ListingState | null {
 }
 
 export class CleanStateReducer implements StateReducer {
-  reduce(input: { previousState: ConversationStateClean; decision: TurnDecision; policy: PolicyResult; resolutions: readonly ResolutionResult[]; executions: readonly OperationExecutionResult[] }): ConversationStateClean {
+  reduce(input: { previousState: ConversationStateClean; decision: TurnDecision; policy: PolicyResult; resolutions: readonly ResolutionResult[]; executions: readonly OperationExecutionResult[]; messageId?: string }): ConversationStateClean {
     const { previousState, decision, policy } = input;
     if (policy.outcome === "block") return previousState;
     if (policy.outcome === "clarify") {
@@ -55,6 +55,7 @@ export class CleanStateReducer implements StateReducer {
         pendingResolution: null,
         pendingOperation: null,
         pendingClarification: { reason: policy.reason, question: policy.expected.purpose, taskId: policy.expected.taskId },
+        metadata: { ...previousState.metadata, ...(input.messageId ? { lastMessageId: input.messageId } : {}) },
       };
     }
 
@@ -87,6 +88,19 @@ export class CleanStateReducer implements StateReducer {
     let pendingOperation = decision.stateTransition.clearPendingOperation ? null : previousState.pendingOperation;
     let pendingClarification = decision.stateTransition.clearPendingClarification ? null : previousState.pendingClarification;
 
+    if (focusedTaskId && Object.keys(decision.stateTransition.fieldUpdates).length) {
+      const focused = tasks.find((task) => task.id === focusedTaskId);
+      if (focused) {
+        tasks = updateTask(tasks, focusedTaskId, {
+          status: "collecting",
+          collectedFields: { ...focused.collectedFields, ...decision.stateTransition.fieldUpdates },
+          updatedAt: nowFor(decision),
+        });
+        pendingOperation = null;
+        if (expectedInput && Object.hasOwn(decision.stateTransition.fieldUpdates, expectedInput.field)) expectedInput = null;
+      }
+    }
+
     if (input.resolutions.some((result) => result.status === "resolved") && expectedInput?.field === "unit") expectedInput = null;
     if (pendingResolution) { expectedInput = null; pendingClarification = null; pendingOperation = null; }
     if (decision.responseIntent.expectedNextField) {
@@ -101,6 +115,7 @@ export class CleanStateReducer implements StateReducer {
       tasks = updateTask(tasks, focusedTaskId, { status: "completed", updatedAt: nowFor(decision) });
       focusedTaskId = null; pendingOperation = null;
     }
-    return { ...previousState, company, unit, previousUnit, tasks, focusedTaskId, expectedInput, pendingResolution, pendingClarification, pendingOperation, lastListing };
+    return { ...previousState, company, unit, previousUnit, tasks, focusedTaskId, expectedInput, pendingResolution, pendingClarification, pendingOperation, lastListing,
+      metadata: { ...previousState.metadata, ...(input.messageId ? { lastMessageId: input.messageId } : {}) } };
   }
 }

@@ -9,6 +9,7 @@ export type StateTransitionIntent = Readonly<{
   preserveCompany: boolean; preserveUnit: boolean; preserveFocusedTask: boolean;
   clearExpectedInput: boolean; clearPendingResolution: boolean; clearPendingClarification: boolean;
   clearPendingOperation: boolean; nextFocusedTask?: TaskType | null;
+  fieldUpdates: Readonly<Record<string, unknown>>;
 }>;
 export type ResponseIntent = Readonly<{
   purpose: "greet" | "inform" | "ask_missing" | "clarify" | "confirm" | "cancel" | "error";

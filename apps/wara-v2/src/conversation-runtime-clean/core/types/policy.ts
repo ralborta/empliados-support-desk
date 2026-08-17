@@ -6,4 +6,9 @@ export type PolicyResult =
   | Readonly<{ outcome: "allow"; violations: readonly [] }>
   | Readonly<{ outcome: "block"; violations: readonly PolicyViolation[] }>
   | Readonly<{ outcome: "clarify"; reason: string; expected: ExpectedInputDraft; violations: readonly PolicyViolation[] }>;
-export type PolicyInput = Readonly<{ interpretation: TurnInterpretation; decision: TurnDecision; state: ConversationStateClean }>;
+export type PolicyInput = Readonly<{
+  interpretation: TurnInterpretation;
+  decision: TurnDecision;
+  state: ConversationStateClean;
+  turn: Readonly<{ messageId?: string }>;
+}>;

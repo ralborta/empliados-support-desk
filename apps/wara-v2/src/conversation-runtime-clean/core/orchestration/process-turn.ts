@@ -24,7 +24,7 @@ function nullInterpretationPlan(): ResponsePlan {
   return { purpose: "clarify", facts: [], nextQuestion: "No entendí bien. ¿Podés aclararlo?", pendingTaskReminder: null, protectedBlocks: [] };
 }
 
-export async function processCleanTurn(input: { tenantId: string; conversationId: string; message: string; customerName?: string | null }, deps: CleanRuntimeDependencies): Promise<ProcessCleanTurnResult> {
+export async function processCleanTurn(input: { tenantId: string; conversationId: string; message: string; messageId?: string; customerName?: string | null }, deps: CleanRuntimeDependencies): Promise<ProcessCleanTurnResult> {
   const state = await deps.contextLoader.load({ tenantId: input.tenantId, conversationId: input.conversationId });
   const interpretation = await deps.interpreter.interpret({ message: input.message, state });
   if (!interpretation) {
@@ -34,7 +34,7 @@ export async function processCleanTurn(input: { tenantId: string; conversationId
     return { reply, state, responsePlan, trace: { runtime: "clean", decision: null, policy: null, resolutionCount: 0, authorizedOperationIds: [], executionCount: 0, writeAttempt: false, writeExecuted: false, invariantViolations: [] } };
   }
   const decision = freezeTurnDecision(deps.controller.decide({ interpretation, state }));
-  const policy = deps.policy.evaluate({ interpretation, decision, state });
+  const policy = deps.policy.evaluate({ interpretation, decision, state, turn: { messageId: input.messageId } });
   const resolutions: readonly ResolutionResult[] = policy.outcome === "allow" && decision.requiredResolutions.length
     ? await deps.resolver.resolve(decision.requiredResolutions, state) : [];
   const authorization: AuthorizationResult = policy.outcome === "allow"
@@ -42,7 +42,7 @@ export async function processCleanTurn(input: { tenantId: string; conversationId
     : { outcome: "blocked", violations: policy.violations };
   const executions: readonly OperationExecutionResult[] = authorization.outcome === "authorized" && authorization.operations.length
     ? await deps.executor.execute(authorization.operations, state) : [];
-  const nextState = deps.reducer.reduce({ previousState: state, decision, policy, resolutions, executions });
+  const nextState = deps.reducer.reduce({ previousState: state, decision, policy, resolutions, executions, messageId: input.messageId });
   const invariantViolations = validateStateInvariants(nextState);
   if (invariantViolations.length) throw new Error(`STATE_INVARIANT:${invariantViolations.map((violation) => violation.code).join(",")}`);
   const responsePlan = deps.responsePlanner.plan({ decision, policy, previousState: state, nextState, resolutions, executions });
