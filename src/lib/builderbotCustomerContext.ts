@@ -7,9 +7,9 @@ import {
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection, hasPendingOdometerConfirmation } from "@/lib/wara";
 import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
-import { getPendingAction } from "@/lib/pendingAction";
+import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
 import { clearActiveUnit } from "@/lib/activeUnit";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation, buildPendingConfirmationPoliteAckReply } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
@@ -688,12 +688,29 @@ export async function customerRegisteredContextResponse(
       }
     }
   } else if (looksLikeGreeting(selectionText)) {
+    const threadForGreeting = scopedThreadText || fullThreadText;
+    const formalOdoConfirm = hasPendingOdometerConfirmation(threadForGreeting);
+    const pendingActionRecord = await getPendingAction(prisma, trimmed);
+    const staleOdoMidFlow =
+      !formalOdoConfirm &&
+      (pendingActionRecord?.type === "odometro" ||
+        threadHasActiveOdometerFlow(threadForGreeting));
+    if (staleOdoMidFlow) {
+      await clearPendingAction(prisma, trimmed);
+      nextFlow = "reply";
+      if (!responseMessage) {
+        const firstName = customer?.name?.trim().split(/\s+/)[0];
+        responseMessage = firstName
+          ? `Hola ${firstName}, seguimos por acá. ¿En qué te puedo ayudar?`
+          : "Hola, seguimos por acá. ¿En qué te puedo ayudar?";
+      }
+    } else {
     const pendingNow =
-      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
-      !!(await getPendingAction(prisma, trimmed))?.payload ||
-      threadHasActiveOdometerFlow(scopedThreadText || fullThreadText);
+      hasAnyPendingConfirmation(threadForGreeting) ||
+      !!pendingActionRecord?.payload ||
+      threadHasActiveOdometerFlow(threadForGreeting);
     if (pendingNow) {
-      // Saludo mid-trámite → IA (no reiniciar el tono con menú enlatado).
+      // Saludo mid-trámite con CONFIRMO u otro pending formal → router.
       nextFlow = "router";
       responseMessage = "";
     } else {
@@ -701,7 +718,7 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
       const repeatGreeting = looksLikeRepeatGreetingInSession(
-        scopedThreadText || fullThreadText,
+        threadForGreeting,
         selectionText,
       );
       if (repeatGreeting) {
@@ -726,6 +743,7 @@ export async function customerRegisteredContextResponse(
           ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
           : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
       }
+    }
     }
     }
   } else if (selectionText && looksLikeConversationClosing(selectionText)) {
