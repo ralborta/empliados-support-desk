@@ -109,6 +109,7 @@ import {
 import {
   composeAgentReplyFromDialogueState,
 } from "@/lib/atilioDialogueCompose";
+import { isStructuredGpsWhatsAppSummary } from "@/lib/waraGpsSummary";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -170,6 +171,12 @@ async function invokeExecutor(
 
 function messageFromPayload(data: JsonRecord): string {
   return String(data.message ?? data.summaryText ?? "").trim();
+}
+
+function shouldUseAgentCompose(execResult: JsonRecord): boolean {
+  if (!agentComposeRequested(execResult)) return false;
+  const template = messageFromPayload(execResult);
+  return !isStructuredGpsWhatsAppSummary(template);
 }
 
 function executorSkippedSilently(data: JsonRecord): boolean {
@@ -836,7 +843,7 @@ export async function runTurnExecutorPhase(params: {
       aiUnitExtras,
     );
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (agentComposeRequested(execResult)) {
+    if (shouldUseAgentCompose(execResult)) {
       const dialogueState = parseExecutorDialogueState(execResult);
       if (dialogueState) {
         const composed = await composeAgentReplyFromDialogueState({
@@ -874,7 +881,7 @@ export async function runTurnExecutorPhase(params: {
       aiUnitExtras,
     );
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (agentComposeRequested(execResult)) {
+    if (shouldUseAgentCompose(execResult)) {
       const dialogueState = parseExecutorDialogueState(execResult);
       if (dialogueState) {
         const composed = await composeAgentReplyFromDialogueState({
