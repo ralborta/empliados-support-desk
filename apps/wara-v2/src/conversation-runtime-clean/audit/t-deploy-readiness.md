@@ -92,4 +92,3 @@ Smoke sequence after composition is complete:
 | Deployable composition/start command | BLOCKED | requires reviewed lab DB and real transport bindings |
 
 Result: **not ready to deploy yet**. The remaining work is infrastructure composition, not conversational patching. No deployment should be attempted until both blocked gates pass and the entire verification set is repeated at the final SHA.
-

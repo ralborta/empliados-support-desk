@@ -13,4 +13,3 @@ export const CLEAN_KNOWLEDGE_FIXTURES: readonly KnowledgeDocument[] = Object.fre
     scope: "domain", domain: "platform", humanValidated: true,
   },
 ]);
-

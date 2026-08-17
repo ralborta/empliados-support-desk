@@ -21,4 +21,3 @@ export class GuardedOutboxWorker {
     } catch { await this.outbox.complete(eventId, "failed"); return { status: "failed" }; }
   }
 }
-

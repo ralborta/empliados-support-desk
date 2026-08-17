@@ -56,4 +56,3 @@ export class InMemoryCleanPersistence implements CleanPersistenceRepository {
 
   outboxSize(tenantId: string, conversationId: string): number { return this.aggregates.get(this.key(tenantId, conversationId))?.outbox.size ?? 0; }
 }
-

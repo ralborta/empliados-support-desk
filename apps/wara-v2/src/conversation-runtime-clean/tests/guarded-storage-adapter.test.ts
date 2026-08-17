@@ -29,4 +29,3 @@ it("validates metadata, scans, stores idempotently and preserves tenant isolatio
   assert.equal((await adapter.commit({ ...binding, attachmentId, target: null, tenant, correlationId: "c", authorized: true, binding, pendingBinding: binding, sourceHandle: "opaque" })).status, "success");
   assert.equal(puts, 1);
 });
-

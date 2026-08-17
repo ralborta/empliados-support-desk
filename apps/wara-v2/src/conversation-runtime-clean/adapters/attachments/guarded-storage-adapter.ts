@@ -54,4 +54,3 @@ export class GuardedAttachmentStorageAdapter {
     return { status: "success", data: next, facts: [] };
   }
 }
-

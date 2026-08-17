@@ -29,4 +29,3 @@ describe("Clean fail-closed configuration", () => {
     assert.equal(JSON.stringify(health).includes("private_clean_name"), false);
   });
 });
-

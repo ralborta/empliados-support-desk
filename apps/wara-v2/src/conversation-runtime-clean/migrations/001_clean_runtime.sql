@@ -47,4 +47,3 @@ create table __CLEAN_SCHEMA__.trace_metadata (
 -- `load_snapshot` and `commit_turn` are installed by the reviewed lab migration runner.
 -- `commit_turn` must lock conversation_state, check expectedVersion, insert dedupe first,
 -- and atomically replace state/tasks/pending/listing plus append outbox/attempt/trace rows.
-

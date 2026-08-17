@@ -8,4 +8,3 @@ export const CLEAN_LIVE_SYNTHETIC_CORPUS: readonly CleanLiveCase[] = Object.free
   { id: "reference-unit", category: "reference", message: "Usá la unidad anterior." },
   { id: "natural-confirmation", category: "naturalness", message: "Sí, confirmo esa operación." },
 ]);
-

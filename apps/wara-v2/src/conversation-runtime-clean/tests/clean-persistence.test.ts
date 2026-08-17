@@ -53,4 +53,3 @@ describe("Clean persistence", () => {
     assert.equal((await repo.load(scope))?.pendingOperation, null);
   });
 });
-

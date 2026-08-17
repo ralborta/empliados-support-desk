@@ -35,4 +35,3 @@ it("maps timeout and backend exceptions without retrying", async () => {
   assert.deepEqual(await adapter.read({ capability: "unit.search", tenant, correlationId: "c", authorized: true, query: {} }), { status: "timeout", safeError: "service_timeout" });
   assert.equal(calls, 1);
 });
-

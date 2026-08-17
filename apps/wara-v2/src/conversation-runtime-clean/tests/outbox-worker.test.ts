@@ -21,4 +21,3 @@ it("delivers once and classifies retry/dead-letter only with every parent gate e
   const worker = new GuardedOutboxWorker(config, outbox, { deliver: async () => { calls++; return { status: "delivered" }; } }, clock);
   assert.deepEqual(await worker.dispatchOne("e"), { status: "delivered" }); assert.deepEqual(await worker.dispatchOne("e"), { status: "not_claimed" }); assert.equal(calls, 1);
 });
-

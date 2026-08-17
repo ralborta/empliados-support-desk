@@ -24,4 +24,3 @@ it("is fail-closed and never turns evidence into a capability", async () => {
   assert.deepEqual(await repo.retrieve({ scope: { tenantId: "a", domain: "platform" }, topicId: "topic" }), { status: "not_found", passages: [] });
   assert.equal(JSON.stringify(docs).includes("capability"), false);
 });
-

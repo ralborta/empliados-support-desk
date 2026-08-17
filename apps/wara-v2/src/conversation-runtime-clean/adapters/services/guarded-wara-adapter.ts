@@ -22,4 +22,3 @@ export class GuardedWaraAdapter {
     return this.http.execute<T>({ ...input, kind: "write", path: PATHS[input.capability], body: input.payload });
   }
 }
-

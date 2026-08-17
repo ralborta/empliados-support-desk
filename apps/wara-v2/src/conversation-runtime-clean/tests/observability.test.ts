@@ -12,4 +12,3 @@ it("stores sanitized stage traces with tenant isolation and contractual metrics"
   assert.equal(await obs.get(traceId, "other"), null);
   assert.equal(obs.metrics().policy_blocks, 1); assert.equal(obs.metrics().write_attempts, 1); assert.equal(obs.metrics().backend_errors, 1);
 });
-

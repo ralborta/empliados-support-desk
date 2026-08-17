@@ -33,4 +33,3 @@ it("does not call the model while the LLM gate is closed", async () => {
   const composer = new FactsOnlyLlmComposer(loadCleanRuntimeConfig({}), { compose: async () => { called = true; return { factOrder: [] }; } });
   assert.equal(await composer.compose(input), "El ticket es OD-4821."); assert.equal(called, false);
 });
-

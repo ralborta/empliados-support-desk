@@ -11,4 +11,3 @@ export interface CleanTraceObserver {
   record(input: Omit<CleanTraceEvent, "tenantRef" | "at"> & Readonly<{ tenantId: string }>): void;
 }
 export type CleanMetricName = "interpretation_failures" | "policy_blocks" | "resolution_outcomes" | "capability_latency" | "backend_errors" | "composer_fallback" | "duplicate_messages" | "write_attempts" | "state_conflicts";
-

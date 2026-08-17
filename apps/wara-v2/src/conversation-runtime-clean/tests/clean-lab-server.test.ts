@@ -21,4 +21,3 @@ it("exposes isolated authenticated lab turn health trace and rate limit", async 
     assert.equal((await fetch(`${server.baseUrl}/api/wara-clean-lab/trace/trace-1?tenantId=lab`, { headers: { authorization: "Bearer test-key" } })).status, 200);
   } finally { await server.close(); }
 });
-

@@ -29,4 +29,3 @@ Read-only audit performed at `50b5f6050d584027b6689e4e2da2ff4247cc9212`. Histori
 - Delivery and mutation adapters return an explicit `blocked` result when their Clean gates are false. They never simulate success.
 - Retries belong to the outbox/worker policy. Transport adapters perform one bounded request.
 - Tenant permission is an explicit dependency of every external adapter; a tenant identifier supplied by the request is never sufficient authorization.
-

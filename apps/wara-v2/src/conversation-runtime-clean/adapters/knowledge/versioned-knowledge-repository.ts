@@ -21,4 +21,3 @@ export class VersionedKnowledgeRepository implements KnowledgeRepository {
     return passages.length ? { status: "found", passages } : { status: "not_found", passages: [] };
   }
 }
-

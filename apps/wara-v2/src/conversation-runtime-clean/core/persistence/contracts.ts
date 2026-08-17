@@ -36,4 +36,3 @@ export interface CleanPersistenceRepository {
   load(input: { tenantId: string; conversationId: string }): Promise<CleanPersistenceSnapshot | null>;
   commitTurn(input: CleanAtomicTurnCommit): Promise<CleanCommitResult>;
 }
-

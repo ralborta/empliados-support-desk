@@ -33,4 +33,3 @@ it("keeps reads and writes closed under their independent gates", async () => {
   assert.equal((await closed.ticketStatus({ tenant, correlationId: "c", authorized: true, ticketId: "T1" })).status, "unauthorized");
   assert.equal(calls, 0);
 });
-

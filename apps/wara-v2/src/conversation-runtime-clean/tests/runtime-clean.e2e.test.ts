@@ -24,4 +24,3 @@ it("resumes isolated state after repository reconstruction and deduplicates deli
   let deliveries = 0; const worker = new GuardedOutboxWorker(loadCleanRuntimeConfig({}), outbox, { deliver: async () => { deliveries++; return { status: "delivered" }; } }, clock);
   assert.equal((await worker.dispatchOne("e")).status, "blocked"); assert.equal(deliveries, 0);
 });
-

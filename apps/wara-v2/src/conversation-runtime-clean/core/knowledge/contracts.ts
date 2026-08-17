@@ -10,4 +10,3 @@ export type KnowledgeDocument = KnowledgePassage & Readonly<{
 }>;
 export interface KnowledgeRepository { retrieve(input: Readonly<{ scope: KnowledgeScope; topicId: string; limit?: number }>): Promise<KnowledgeResult>; }
 export interface KnowledgeExtractor { extract(input: Readonly<{ sourceId: string; version: string; content: Uint8Array }>): Promise<readonly KnowledgePassage[]>; }
-
