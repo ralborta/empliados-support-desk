@@ -164,7 +164,24 @@ export function looksLikeUnitNameInMessage(rawText: string | undefined | null): 
     .trim()
     .replace(/[\u2010-\u2015\u2212]/g, "-");
   if (!norm) return false;
-  return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm);
+  return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm) || extractMovilIdFromUnitMessage(norm) != null;
+}
+
+/** movil_id Wara en lenguaje natural: "unidad 900077" o respuesta corta "900110". */
+export function extractMovilIdFromUnitMessage(rawText: string | undefined | null): number | null {
+  const text = String(rawText ?? "").trim();
+  if (!text) return null;
+  for (const m of text.matchAll(/\bunidad\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n)) return n;
+  }
+  // Solo dígitos sueltos (900114). NO códigos con guión (300-092 → nombre M300-092).
+  const digitsOnly = text.replace(/\s+/g, "");
+  if (/^\d{5,7}$/.test(digitsOnly)) {
+    const n = parseInt(digitsOnly, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 /**
@@ -190,6 +207,8 @@ export function extractAmbiguousUnitCodeToken(rawText: string | undefined | null
     .trim()
     .replace(/[\u2010-\u2015\u2212]/g, "-");
   if (!text) return null;
+  const movilId = extractMovilIdFromUnitMessage(text);
+  if (movilId != null && /\bunidad\b/i.test(text)) return String(movilId);
   const labeled = extractExplicitUnitNameFromText(text);
   if (labeled) return labeled;
   const bare = text.match(/^(M?\d{3}-\d{2,3})$/i)?.[1];
@@ -278,6 +297,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   // CONFIRMO / sí / dale nunca son búsqueda de unidad (bug 2026-08-07).
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeCustomerConversationCloseRequest(text)) return false;
+  if (extractMovilIdFromUnitMessage(text) != null) return true;
   return (
     !!detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
@@ -1132,6 +1152,11 @@ function unitNameCodesFromField(unidad: string): string[] {
 export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
   const norm = normalizeUnitNameToken(query);
   if (!norm) return [];
+  const movilId = extractMovilIdFromUnitMessage(query);
+  if (movilId != null) {
+    const byMovil = units.filter((u) => u.movil_id === movilId);
+    if (byMovil.length > 0) return byMovil;
+  }
   return units.filter((u) => {
     const field = String(u.unidad || "").replace(/[\u2010-\u2015\u2212]/g, "-");
     const full = normalizeUnitNameToken(field);
@@ -1621,10 +1646,36 @@ function resolveByMovilIdOrUnitCode(
   rawText: string,
   units: WaraUnidadEstado[],
 ): UnitQueryResolution | null {
-  const compact = rawText.trim().replace(/[\s\-_.]+/g, "");
-  if (/^\d{5,7}$/.test(compact)) {
-    const movilId = parseInt(compact, 10);
+  const movilId = extractMovilIdFromUnitMessage(rawText);
+  if (movilId != null) {
     const byId = units.filter((u) => u.movil_id === movilId);
+    if (byId.length === 1) {
+      const plate = normalizeLoosePlate(byId[0].patente || byId[0].unidad || "");
+      if (plate) {
+        return {
+          intent: "consult_status",
+          plate,
+          searchTerms: [],
+          candidatePlates: [plate],
+          source: "rules",
+        };
+      }
+    }
+    if (byId.length === 0) {
+      return {
+        intent: "need_clarification",
+        plate: String(movilId),
+        searchTerms: [],
+        candidatePlates: [],
+        source: "rules",
+      };
+    }
+  }
+
+  const digitsOnly = rawText.trim().replace(/\s+/g, "");
+  if (/^\d{5,7}$/.test(digitsOnly)) {
+    const legacyMovilId = parseInt(digitsOnly, 10);
+    const byId = units.filter((u) => u.movil_id === legacyMovilId);
     if (byId.length === 1) {
       const plate = normalizeLoosePlate(byId[0].patente || byId[0].unidad || "");
       if (plate) {

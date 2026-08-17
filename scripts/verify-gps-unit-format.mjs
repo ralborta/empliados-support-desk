@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { extractLastPlateFromThread, lineLooksLikeBotMissingPlatePrompt } from "../src/lib/wara.ts";
-import { filterUnitsByUnitName } from "../src/lib/waraUnitIntent.ts";
+import {
+  extractMovilIdFromUnitMessage,
+  filterUnitsByUnitName,
+  resolveUnitQuery,
+} from "../src/lib/waraUnitIntent.ts";
 
 const fleet = [
   {
@@ -13,7 +17,26 @@ const fleet = [
     unidad: "M900-111",
     patente: "AG228NY",
   },
+  {
+    movil_id: 900077,
+    unidad: "M900-077",
+    patente: "AA100ZZ",
+  },
 ];
+
+assert.equal(
+  extractMovilIdFromUnitMessage("Quiero el estado de la unidad 900077"),
+  900077,
+  "debe extraer movil_id del mensaje completo",
+);
+
+const resolved = await resolveUnitQuery({
+  rawText: "Quiero el estado de la unidad 900077",
+  threadText: "",
+  units: fleet,
+  preferAi: false,
+});
+assert.equal(resolved.plate, "AA100ZZ", "900077 debe resolver la patente correcta");
 
 assert.equal(
   lineLooksLikeBotMissingPlatePrompt(
