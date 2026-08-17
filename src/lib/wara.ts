@@ -964,12 +964,49 @@ export function threadAwaitingOdometerConfirmDetails(threadText: string): boolea
   );
 }
 
+/** Cliente pidió cambio de odómetro/horómetro en mensajes recientes del hilo. */
+export function threadHasRecentCustomerMeterUpdateIntent(threadText: string): boolean {
+  const lines = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-24);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (/^(atilio|bot|wara)\s*:/i.test(line)) continue;
+    // Líneas del bot sin prefijo (tests / transcripts compactos).
+    if (
+      /^(perfecto, tomo |para registrar el cambio|voy a registrar:|ten[eé]s \d+ unidades|indic[aá]me la matr[ií]cula|por favor, indic[aá]me|ayudame a encontrar mi unidad|encontr[eé] varias unidades)/i.test(
+        line,
+      )
+    ) {
+      continue;
+    }
+    const msg = line.replace(/^cliente:\s*/i, "").trim();
+    if (!msg) continue;
+    if (looksLikeExplicitOdometerUpdateRequest(msg) || looksLikeHorometerOnlyIntent(msg)) {
+      return true;
+    }
+    const norm = msg
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (
+      /\b(cambiar|actualizar|registrar|informar|modificar)\b/.test(norm) &&
+      /\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(norm)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Tras pedir horómetro/odómetro, el bot pidió aclarar la unidad (varias coincidencias). */
 export function threadHasOdometerUnitClarificationPending(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-3500).toLowerCase();
   const unitPickCue =
-    /encontr[eé] varias unidades|patente exacta|empiezan con|no encontr[eé] ninguna unidad|decime la patente completa|cu[aá]l quer[eé]s|pasame la patente exacta/i.test(
+    /encontr[eé] varias unidades|patente exacta|matricula exacta|matr[ií]cula exacta|confirm[aá].{0,30}matr[ií]cula|empiezan con|no encontr[eé] ninguna unidad|decime la patente completa|cu[aá]l quer[eé]s|pasame la patente exacta/i.test(
       tail,
     );
   if (!unitPickCue) return false;
@@ -1058,7 +1095,7 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
 export function extractUnitCodeNumbersFromMessage(rawText: string): number[] {
   const out: number[] = [];
   const text = String(rawText ?? "");
-  for (const m of text.matchAll(/\bunidad\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
+  for (const m of text.matchAll(/\bunida[d]?\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
     const n = parseInt(m[1], 10);
     if (Number.isFinite(n)) out.push(n);
   }
@@ -1844,6 +1881,18 @@ export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
 export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
   if (certificateFlowState(threadText) !== "none") return false;
   if (hasPendingMaintenancePlateRequest(threadText)) return false;
+  // Bug prod 2026-08-17: aclaración de matrícula en trámite horómetro ≠ consulta GPS.
+  // No usar threadHasActiveOdometerFlow acá (recursión con threadAwaitingOdometerPlate).
+  if (threadHasRecentCustomerMeterUpdateIntent(threadText)) {
+    const meterTail = threadText.slice(-3500).toLowerCase();
+    if (
+      /matr[ií]cula exacta|confirm[aá].{0,30}matr[ií]cula|patente exacta|para registrar el cambio de hor[oó]metro|para registrar el cambio de od[oó]metro/.test(
+        meterTail,
+      )
+    ) {
+      return false;
+    }
+  }
 
   const lower = threadText
     .normalize("NFD")

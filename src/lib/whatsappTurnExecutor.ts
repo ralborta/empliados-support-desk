@@ -82,6 +82,7 @@ import {
   looksLikeUnitRejection,
   looksLikeBareNegativeResponse,
   looksLikeAnotherUnitConsultRequest,
+  threadHasRecentCustomerMeterUpdateIntent,
 } from "@/lib/wara";
 import {
   getActiveUnit,
@@ -842,6 +843,7 @@ export async function runTurnExecutorPhase(params: {
     !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
     !looksLikeHorometerOnlyIntent(selectionText) &&
     !threadHasActiveOdometerFlow(threadForFollowUp) &&
+    !threadHasRecentCustomerMeterUpdateIntent(threadForFollowUp) &&
     pendingAction?.type !== "odometro" &&
     !looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText) &&
     (looksLikeUnitConsultFollowUp(selectionText) ||
