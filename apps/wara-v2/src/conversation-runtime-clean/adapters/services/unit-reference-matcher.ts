@@ -20,7 +20,7 @@ function canonicalInternalCode(value: string): string {
 }
 
 function field(unit: UnitState, kind: UnitReferenceKind): readonly string[] {
-  if (kind === "internal_code") return [unit.code ?? "", unit.label];
+  if (kind === "internal_code") return [unit.id, unit.code ?? "", unit.label];
   if (kind === "plate") return [unit.plate ?? ""];
   if (kind === "name") return [unit.label];
   if (kind === "brand") return [unit.brand ?? ""];

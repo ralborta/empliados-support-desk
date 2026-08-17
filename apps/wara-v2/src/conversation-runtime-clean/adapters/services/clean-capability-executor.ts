@@ -24,14 +24,14 @@ const WARA_READS = new Set(["company.list", "company.get_active", "unit.search",
 const WARA_WRITES = new Set(["odometer.update", "hourmeter.update", "maintenance.create", "certificate.issue"]);
 export class CleanOperationalCapabilityExecutor implements CapabilityExecutor {
   constructor(private readonly wara: GuardedWaraAdapter, private readonly odoo: GuardedOdooHandoffAdapter, private readonly knowledge: KnowledgeRepository, private readonly allowedTenants: ReadonlySet<string>,
-    private readonly clock: Readonly<{ now(): Date }> = { now: () => new Date() }, private readonly timeZone = "America/Argentina/Buenos_Aires") {}
+    private readonly clock: Readonly<{ now(): Date }> = { now: () => new Date() }, private readonly timeZone = "America/Argentina/Buenos_Aires", private readonly channel: Readonly<{ phone?: string }> = {}) {}
   async execute(operations: readonly AuthorizedOperation[], state: ConversationStateClean): Promise<readonly OperationExecutionResult[]> {
     const values: OperationExecutionResult[] = [];
     for (const operation of operations) {
       const tenant = { tenantId: state.tenantId, allowed: this.allowedTenants.has(state.tenantId) }; const correlationId = operation.requestId;
       let result: NormalizedServiceResult<unknown>;
       if (operation.kind === "write_prepare") result = { status: "success", data: { preparedArguments: operation.arguments }, facts: [] };
-      else if (WARA_READS.has(operation.capability)) result = await this.wara.read({ capability: operation.capability as WaraReadCapability, tenant, correlationId, authorized: true, query: operation.arguments });
+      else if (WARA_READS.has(operation.capability)) result = await this.wara.read({ capability: operation.capability as WaraReadCapability, tenant, correlationId, authorized: true, query: { ...operation.arguments, ...(state.company ? { companyId: state.company.id } : {}), ...(this.channel.phone ? { phone: this.channel.phone } : {}) } });
       else if (WARA_WRITES.has(operation.capability)) result = await this.wara.write({ capability: operation.capability as WaraWriteCapability, tenant, correlationId, authorized: operation.realWriteAllowed, payload: operation.arguments, binding: binding(operation), pendingBinding: pendingBinding(state) });
       else if (operation.capability === "ticket.get_status") result = await this.odoo.ticketStatus({ tenant, correlationId, authorized: true, ticketId: String(operation.arguments.ticketId ?? "") });
       else if (operation.capability.startsWith("ticket.") && operation.capability.endsWith(".commit")) {

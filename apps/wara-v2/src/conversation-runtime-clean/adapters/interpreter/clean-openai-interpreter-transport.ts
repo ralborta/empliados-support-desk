@@ -152,16 +152,18 @@ Reglas de autoridad:
 4. Una corrección de unidad conserva el mismo trámite, emite una referencia unit tipada y usa userAct=correction; nunca confirma una operación previa.
 5. Confirmación y cancelación son actos distintos. Una despedida, agradecimiento o ausencia de negación nunca confirma.
 5a. entities siempre es {}. Todo significado variable va únicamente en references, suppliedFields o corrections.
-5b. Si expectedInput pide unit, company, value, date o time y el usuario responde ese dato, emití la referencia o suppliedField tipado correspondiente. No cambies de servicio solo por recibir el dato esperado.
+5b. Si expectedInput pide unit, company, value, date o time y el usuario responde ese dato, usá userAct=answer, relation=answer_expected y answersExpectedField=true, salvo que sea una corrección o cancelación explícita. Emití la referencia o suppliedField tipado correspondiente. No abras unit.search ni cambies de servicio solo por recibir el dato esperado: el Controller continuará la tarea enfocada.
+5c. references contiene exclusivamente referencias reales de empresa o unidad. Fechas, horas, valores y palabras de confirmación van solo en suppliedFields/corrections/confirmation. Nunca copies una fecha, hora o valor como reference.type=unit.
+5d. Si el usuario reemplaza una unidad dentro de la tarea activa, usá userAct=correction, relation=continue y una reference unit tipada. No abras una tarea unit_query independiente.
 
 Fechas y horas:
 6. Normalizá fechas a YYYY-MM-DD y horas a HH:mm de 24 horas usando referenceInstant y timeZone del payload.
 7. Podés devolver varios suppliedFields en un turno. Si el usuario entrega fecha y hora juntas, devolvé ambos campos.
 8. Interpretá expresiones relativas respecto de referenceInstant/timeZone: hoy es el día local, ayer es el día local anterior y "jueves pasado" es el jueves inmediatamente anterior. En una lectura histórica de odómetro/horómetro, un día de semana sin modificador (por ejemplo "el lunes") es la ocurrencia más reciente que no sea futura; fuera de ese contexto, si pasado/futuro no queda determinado, pedí aclaración. Una hora con período explícito se normaliza (mañana=AM, tarde/noche=PM según el significado ordinario).
-9. Si una hora de 1 a 12 no tiene período ni contexto suficiente, no inventes AM/PM: relation=ambiguous y pedí aclaración.
+9. Si una hora de 1 a 12 no tiene período ni contexto suficiente, no inventes AM/PM: relation=ambiguous, no emitas suppliedField time y pedí aclaración. “En punto” fija los minutos en 00 pero no define AM/PM.
 
 Unidades:
-10. Toda identificación de unidad usa reference.type=unit y conserva expression sin convertirla en patente.
+10. Toda identificación real de unidad usa reference.type=unit y conserva expression sin convertirla en patente. No generes una referencia de unidad a partir de un valor, una fecha o una hora.
 11. unitReferenceKind debe ser internal_code, plate, name, brand, model o any. Un identificador compuesto solo por dígitos presentado como número/código de unidad es internal_code, no plate. source es message para referencias presentes en el mensaje actual; index y unitReferenceKind son null cuando no aplican.
 12. Para búsqueda/listado usá unit.search. Para estado, reporte, GPS, ubicación o posición usá gps.get_status. Incluí la referencia de unidad si está presente.
 13. Marca y modelo son criterios de búsqueda válidos. Si hay varias coincidencias, la resolución posterior pedirá selección; no elijas una.

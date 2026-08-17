@@ -97,3 +97,11 @@ test("real WARA resolver normalizes verified fleet fields before matching a nume
   assert.equal(model[0]?.status === "resolved" && model[0].entity.entityType === "unit" && model[0].entity.unit.id, "900110");
   assert.equal((observedBodies[0] as { referenceKind?: string }).referenceKind, "internal_code");
 });
+
+test("real WARA resolver selects a typed company reference from a multi-company phone", async () => {
+  const config = loadCleanRuntimeConfig({ WARA_CLEAN_RUNTIME_ENABLED: "true", WARA_CLEAN_EXTERNAL_READS_ENABLED: "true" });
+  const wara = new GuardedWaraAdapter(new GuardedHttpTransport(config, async () => ({ ok: true, data: { companies: [{ id: 1, name: "Transporte Norte" }, { id: 2, name: "Logística Sur" }] } })));
+  const resolver = new WaraEntityResolver(wara, new Set(["t"]));
+  const result = await resolver.resolve([request("company", { type: "company", expression: "logistica sur", source: "message" })], createEmptyCleanState({ tenantId: "t", conversationId: "c" }));
+  assert.equal(result[0]?.status === "resolved" && result[0].entity.entityType === "company" && result[0].entity.company.id, "2");
+});

@@ -60,6 +60,7 @@ export * from "./core/knowledge/contracts.js";
 export * from "./adapters/knowledge/versioned-knowledge-repository.js";
 export * from "./adapters/knowledge/validated-fixtures.js";
 export * from "./adapters/composer/facts-only-composer.js";
+export * from "./adapters/http/wara-api-session-transport.js";
 export * from "./adapters/lab/clean-lab-server.js";
 export * from "./core/observability/contracts.js";
 export * from "./adapters/observability/in-memory-observability.js";

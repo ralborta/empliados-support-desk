@@ -59,6 +59,8 @@ test("native Clean prompt declares temporal authority, cancellation and every un
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /brand/);
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /model/);
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /cancellation/);
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /Nunca copies una fecha, hora o valor como reference\.type=unit/);
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /userAct=answer, relation=answer_expected/);
   assert.equal(cleanInterpreterTemporalDefaults.timeZone, "America/Argentina/Buenos_Aires");
 });
 test("native Clean transport exposes a strict closed schema for every semantic field", () => {

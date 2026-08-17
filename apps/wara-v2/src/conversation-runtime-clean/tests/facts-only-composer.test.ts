@@ -33,3 +33,10 @@ it("does not call the model while the LLM gate is closed", async () => {
   const composer = new FactsOnlyLlmComposer(loadCleanRuntimeConfig({}), { compose: async () => { called = true; return { factOrder: [] }; } });
   assert.equal(await composer.compose(input), "El ticket es OD-4821."); assert.equal(called, false);
 });
+
+it("does not let the model invent filler when the response plan has no grounded content", async () => {
+  let called = false;
+  const composer = new FactsOnlyLlmComposer(enabled, { compose: async () => { called = true; return { opening: "Datos interesantes", factOrder: [], closing: "Espero que sirva" }; } });
+  assert.equal(await composer.compose({ responsePlan: { purpose: "inform", facts: [], nextQuestion: null, pendingTaskReminder: null, protectedBlocks: [] }, state: input.state }), "Entendido.");
+  assert.equal(called, false);
+});

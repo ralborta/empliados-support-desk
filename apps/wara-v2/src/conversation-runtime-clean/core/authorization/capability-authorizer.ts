@@ -30,7 +30,7 @@ function argumentsWithResolvedEntities(request: TurnDecision["requestedOperation
   return {
     ...request.arguments,
     ...(company?.status === "resolved" && company.entity.entityType === "company" ? { companyId: company.entity.company.id } : {}),
-    ...(unit?.status === "resolved" && unit.entity.entityType === "unit" ? { unitId: unit.entity.unit.id, unitCode: unit.entity.unit.code ?? undefined, plate: unit.entity.unit.plate ?? undefined } : {}),
+    ...(unit?.status === "resolved" && unit.entity.entityType === "unit" ? { unitId: unit.entity.unit.id, unitCode: unit.entity.unit.code ?? undefined, plate: unit.entity.unit.plate ?? undefined, companyId: unit.entity.unit.companyId } : {}),
   };
 }
 export class CleanCapabilityAuthorizer implements CapabilityAuthorizer {

@@ -21,6 +21,7 @@ import { GuardedOdooHandoffAdapter } from "../adapters/services/guarded-odoo-han
 import { WaraEntityResolver } from "../adapters/services/wara-entity-resolver.js";
 import { CleanOperationalCapabilityExecutor } from "../adapters/services/clean-capability-executor.js";
 import { createJsonServiceTransport, OpenAiFactsOnlyComposerTransport, unavailableServiceTransport } from "../adapters/http/json-http-transports.js";
+import { WaraApiSessionTransport } from "../adapters/http/wara-api-session-transport.js";
 import { FactsOnlyLlmComposer } from "../adapters/composer/facts-only-composer.js";
 import { VersionedKnowledgeRepository } from "../adapters/knowledge/versioned-knowledge-repository.js";
 import { CLEAN_KNOWLEDGE_FIXTURES } from "../adapters/knowledge/validated-fixtures.js";
@@ -42,7 +43,7 @@ function serviceTransport(baseUrl: string | null, headers: Readonly<Record<strin
 export async function startCleanLabApplication(env: NodeJS.ProcessEnv = process.env): Promise<CleanLabApplication> {
   const config = loadCleanLabApplicationConfig(env); const clock = new SystemClock(); const health = sanitizedCleanHealthConfig(config.runtime);
   if (!config.runtime.runtimeEnabled) {
-    const server = await startCleanLabServer({ host: config.host, port: config.port, apiKey: config.apiKey, allowedTenants: config.allowedTenants, requestsPerMinute: config.requestsPerMinute, commit: config.commit, health, persistence: "unavailable", kb: config.runtime.kbEnabled ? "unavailable" : "disabled" }, { turn: async () => { throw new Error("CLEAN_RUNTIME_DISABLED"); } }, { get: async () => null });
+    const server = await startCleanLabServer({ host: config.host, port: config.port, apiKey: config.apiKey, allowedTenants: config.allowedTenants, requestsPerMinute: config.requestsPerMinute, commit: config.commit, health, persistence: "unavailable", kb: config.runtime.kbEnabled ? "unavailable" : "disabled", ...(config.whatsappApiKey && config.whatsappTenantId ? { whatsapp: { apiKey: config.whatsappApiKey, tenantId: config.whatsappTenantId } } : {}) }, { turn: async () => { throw new Error("CLEAN_RUNTIME_DISABLED"); } }, { get: async () => null });
     return { config, server, outboxWorker: null, components: { capabilityCatalog: CLEAN_CAPABILITY_CATALOG, kernel: { operationPrepare, operationConfirm, operationCorrect, operationCancel }, storage: null }, close: () => server.close() };
   }
   const sql = new PgPoolSqlClient({ connectionString: config.databaseUrl!, statementTimeoutMs: config.statementTimeoutMs, connectionTimeoutMs: config.connectionTimeoutMs });
@@ -50,25 +51,27 @@ export async function startCleanLabApplication(env: NodeJS.ProcessEnv = process.
   const installed = await sql.query<{ fn: string | null }>("select to_regprocedure($1) as fn", [`${config.runtime.persistenceNamespace}.load_snapshot(text,text)`]);
   if (!installed.rows[0]?.fn) { await sql.close(); throw new Error("CLEAN_STARTUP_MIGRATION_REQUIRED"); }
   const repository = new PostgresCleanPersistence(sql, config.runtime.persistenceNamespace);
-  const waraTransport = serviceTransport(config.waraBaseUrl, config.waraToken ? { authorization: `Bearer ${config.waraToken}` } : {});
-  const wara = new GuardedWaraAdapter(new GuardedHttpTransport(config.runtime, waraTransport));
   const odooHeaders: Readonly<Record<string, string>> = config.odooApiKey ? { authorization: `Bearer ${config.odooApiKey}`, "x-odoo-db": config.odooDb!, "x-odoo-email": config.odooEmail! } : {};
   const odoo = new GuardedOdooHandoffAdapter(config.runtime, serviceTransport(config.odooUrl, odooHeaders));
   const knowledge = new VersionedKnowledgeRepository(config.runtime, CLEAN_KNOWLEDGE_FIXTURES);
   const observer = new InMemoryCleanObservability(clock);
   const interpreter = new GatedCleanInterpreter(config.runtime, new StableInterpreterAdapter(new CleanOpenAiInterpreterTransport(env)));
   const composer = new FactsOnlyLlmComposer(config.runtime, new OpenAiFactsOnlyComposerTransport(config.openAiKey ?? "", config.openAiModel ?? ""));
-  const resolver = new WaraEntityResolver(wara, config.allowedTenants);
-  const executor = new CleanOperationalCapabilityExecutor(wara, odoo, knowledge, config.allowedTenants);
   const outbox = new PostgresTransactionalOutbox(sql, config.runtime.persistenceNamespace);
   const outboxWorker = new GuardedOutboxWorker(config.runtime, outbox, new HttpOutboxDeliveryDispatcher(config.deliveryUrl, config.deliveryToken), clock);
   const storage = new GuardedAttachmentStorageAdapter(config.runtime, { allowedMimeTypes: new Set(["image/jpeg", "image/png", "application/pdf"]), maxSizeBytes: 10 * 1024 * 1024 }, new HttpAttachmentScanner(config.scannerUrl), new HttpAttachmentStorage(config.storageUrl));
-  const runtime = { turn: async (input: { tenantId: string; sessionId: string; messageId: string; message: string; customerName?: string | null }) => {
+  const runtime = { turn: async (input: { tenantId: string; sessionId: string; messageId: string; message: string; customerName?: string | null; phone?: string | null }) => {
     const snapshot = await repository.load({ tenantId: input.tenantId, conversationId: input.sessionId }); const state = snapshot?.state.state ?? createEmptyCleanState({ tenantId: input.tenantId, conversationId: input.sessionId });
     const store = new AtomicCleanConversationStore(repository, clock, snapshot?.state.version ?? 0, input.messageId, config.runtime.deliveryEnabled);
+    const waraSession = config.waraBaseUrl && config.waraMaintenanceBaseUrl && config.waraToken
+      ? new WaraApiSessionTransport({ baseUrl: config.waraBaseUrl, maintenanceBaseUrl: config.waraMaintenanceBaseUrl, rootToken: config.waraToken, phone: input.phone ?? null }) : null;
+    const wara = new GuardedWaraAdapter(new GuardedHttpTransport(config.runtime, waraSession?.transport ?? unavailableServiceTransport()));
+    const channel = input.phone ? { phone: input.phone } : {};
+    const resolver = new WaraEntityResolver(wara, config.allowedTenants, channel);
+    const executor = new CleanOperationalCapabilityExecutor(wara, odoo, knowledge, config.allowedTenants, { now: () => new Date() }, "America/Argentina/Buenos_Aires", channel);
     const result = await processCleanTurn({ tenantId: input.tenantId, conversationId: input.sessionId, message: input.message, messageId: input.messageId, customerName: input.customerName }, { contextLoader: { load: async () => state }, interpreter, controller: new CleanController(), policy: new CleanDecisionPolicy(), resolver, authorizer: new CleanCapabilityAuthorizer(), executor, reducer: new CleanStateReducer(), responsePlanner: new CleanResponsePlanner(), composer, store, observer });
     return { ...result, traceId: result.trace.traceId ?? "trace-unavailable" };
   } };
-  const server = await startCleanLabServer({ host: config.host, port: config.port, apiKey: config.apiKey, allowedTenants: config.allowedTenants, requestsPerMinute: config.requestsPerMinute, commit: config.commit, health, persistence: "configured", kb: config.runtime.kbEnabled ? "configured" : "disabled" }, runtime, observer);
+  const server = await startCleanLabServer({ host: config.host, port: config.port, apiKey: config.apiKey, allowedTenants: config.allowedTenants, requestsPerMinute: config.requestsPerMinute, commit: config.commit, health, persistence: "configured", kb: config.runtime.kbEnabled ? "configured" : "disabled", ...(config.whatsappApiKey && config.whatsappTenantId ? { whatsapp: { apiKey: config.whatsappApiKey, tenantId: config.whatsappTenantId } } : {}) }, runtime, observer);
   return { config, server, outboxWorker, components: { capabilityCatalog: CLEAN_CAPABILITY_CATALOG, kernel: { operationPrepare, operationConfirm, operationCorrect, operationCancel }, storage }, close: async () => { await server.close(); await repository.close(); } };
 }

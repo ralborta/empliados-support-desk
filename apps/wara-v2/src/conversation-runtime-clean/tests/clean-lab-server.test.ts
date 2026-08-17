@@ -24,6 +24,23 @@ it("exposes isolated authenticated lab turn health trace and rate limit", async 
   } finally { await server.close(); }
 });
 
+it("exposes a transport-only WhatsApp adapter with isolated auth and stable phone session", async () => {
+  const health = sanitizedCleanHealthConfig(loadCleanRuntimeConfig({ WARA_CLEAN_RUNTIME_ENABLED: "true" }));
+  const received: Array<{ tenantId: string; sessionId: string; messageId: string; message: string; phone?: string | null }> = [];
+  const server = await startCleanLabServer({ host: "127.0.0.1", port: 0, apiKey: "lab-key", allowedTenants: new Set(["lab"]), requestsPerMinute: 10, commit: "sha", health, persistence: "in_memory", kb: "disabled", whatsapp: { apiKey: "channel-key", tenantId: "lab" } }, { turn: async (input) => { received.push(input); return response; } }, { get: async () => null });
+  try {
+    const denied = await fetch(`${server.baseUrl}/api/whatsapp/turn`, { method: "POST", headers: { "x-api-key": "lab-key", "content-type": "application/json" }, body: JSON.stringify({ phone: "+5491133788190", body: "hola" }) });
+    assert.equal(denied.status, 401);
+    const send = (body: Record<string, unknown>) => fetch(`${server.baseUrl}/api/whatsapp/turn`, { method: "POST", headers: { "x-api-key": "channel-key", "content-type": "application/json" }, body: JSON.stringify(body) });
+    const first = await send({ phone: "+5491133788190", body: "hola", messageId: "wamid-1" });
+    assert.equal(first.status, 200); const value = await first.json() as { engine: string; message: string; skipResponse_s: string; writes: { executed: boolean } };
+    assert.deepEqual(value, { engine: "wara-clean", message: "Hola", skipResponse_s: "false", writes: { attempted: false, executed: false }, ok: true, ok_s: "true", summaryText: "Hola", flowComplete_s: "true", nextFlow: "", nextFlow_s: "", replay: false, traceId: "trace-1" });
+    await send({ from: "+5491133788190", message: "hola de nuevo", id: "wamid-2" });
+    assert.equal(received[0]?.tenantId, "lab"); assert.equal(received[0]?.phone, "+5491133788190"); assert.equal(received[0]?.messageId, "wamid-1");
+    assert.equal(received[0]?.sessionId, received[1]?.sessionId); assert.equal(received[0]?.sessionId.includes("5491133788190"), false);
+  } finally { await server.close(); }
+});
+
 for (const scenario of [
   { code: "OPTIMISTIC_CONFLICT" as const, status: 409, retryable: true },
   { code: "PERSISTENCE_UNAVAILABLE" as const, status: 503, retryable: true },

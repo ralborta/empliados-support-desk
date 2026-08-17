@@ -31,7 +31,10 @@ export class FactsOnlyLlmComposer implements Composer {
   private readonly fallback = new DeterministicComposer();
   constructor(private readonly config: CleanRuntimeConfig, private readonly transport: ComposerLlmTransport) {}
   async compose(input: ComposerInput): Promise<string> {
-    if (!this.config.runtimeEnabled || !this.config.llmEnabled || input.responsePlan.facts.some((fact) => !fact.verified)) return this.fallback.compose(input);
+    const hasGroundedContent = input.responsePlan.facts.length > 0 || Boolean(input.responsePlan.nextQuestion)
+      || Boolean(input.responsePlan.pendingTaskReminder) || input.responsePlan.protectedBlocks.length > 0;
+    if (!this.config.runtimeEnabled || !this.config.llmEnabled || !hasGroundedContent
+      || input.responsePlan.facts.some((fact) => !fact.verified)) return this.fallback.compose(input);
     const facts = input.responsePlan.facts.map(({ code, text }) => ({ code, text }));
     try {
       const envelope = await this.transport.compose({
