@@ -39,6 +39,7 @@ import {
   resolveContextUnitPlate,
 } from "@/lib/conversationNotebook";
 import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
+import { confirmFooter } from "@/lib/waraWhatsAppFormat";
 
 const bodySchema = z
   .object({
@@ -1095,7 +1096,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const message = `Voy a generar el certificado de cobertura:\nPatente: ${plateDisplay}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.`;
+    const message = `Voy a generar el certificado de cobertura:\nPatente: ${plateDisplay}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.\n${confirmFooter()}`;
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       stage: "confirmation_required",

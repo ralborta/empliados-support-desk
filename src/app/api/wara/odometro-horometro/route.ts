@@ -59,7 +59,7 @@ import {
   resolvePlateWithWaraFleet,
   shouldClearOdometerPlateFromThread,
 } from "@/lib/waraUnitIntent";
-import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc } from "@/lib/odometroFecha";
+import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc, looksLikeMeterReadingWithoutFecha, customerFechaSourceText } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
@@ -1685,9 +1685,12 @@ export async function POST(req: NextRequest) {
     }
     return lines.slice(start).join("\n");
   })();
-  const fechaFromScopedThread = nonDataCustomerTurn
-    ? undefined
-    : parseFechaFromText(odometerScopedThread, customerTz);
+  const meterValueOnlyTurn = looksLikeMeterReadingWithoutFecha(rawText);
+  const customerScopedFechaText = customerFechaSourceText(rawText, odometerScopedThread);
+  const fechaFromScopedThread =
+    nonDataCustomerTurn || meterValueOnlyTurn
+      ? undefined
+      : parseFechaFromText(stripBotOdometerBotSpeech(odometerScopedThread), customerTz);
   let fechaExplicita =
     parsed.data.fecha ??
     parsed.data.date ??
@@ -1703,7 +1706,7 @@ export async function POST(req: NextRequest) {
     const baseDate =
       pendingPayloadFecha ??
       (fechaExplicita && !fechaLecturaTieneHora(fechaExplicita, rawText) ? fechaExplicita : undefined) ??
-      (fechaFromScopedThread && !fechaLecturaTieneHora(fechaFromScopedThread, odometerScopedThread)
+      (fechaFromScopedThread && !fechaLecturaTieneHora(fechaFromScopedThread, customerScopedFechaText)
         ? fechaFromScopedThread
         : undefined);
     const merged = mergeFechaConHoraSuelt(baseDate, rawText, customerTz);
@@ -1719,7 +1722,12 @@ export async function POST(req: NextRequest) {
   }
   let fecha = fechaWara(fechaExplicita, customerTz);
   let fechaDisplay = fechaExplicita ? formatFechaDisplay(fecha) : null;
-  const fechaHoraSourceText = [rawText, odometerScopedThread, pendingPayloadFecha ?? ""].join("\n");
+  const fechaHoraSourceText = [
+    customerScopedFechaText,
+    pendingPayloadFecha && clientExplicitFechaThisTurn ? pendingPayloadFecha : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const hasFechaHoraLectura = fechaLecturaTieneHora(fechaExplicita, fechaHoraSourceText);
 
   // Mejora pedida por el cliente (producción 2026-07-23): "¿cómo contempla el caso de
@@ -1814,7 +1822,7 @@ export async function POST(req: NextRequest) {
       fechaDisplay = formatFechaDisplay(fecha);
     }
     // No registrar CONFIRMO sin fecha+hora de lectura (pedido Emma 2026-08-06).
-    if (!fechaLecturaTieneHora(fechaExplicita, [rawText, odometerScopedThread].join("\n"))) {
+    if (!fechaLecturaTieneHora(fechaExplicita, customerScopedFechaText)) {
       const plateDisp = formatPlateWithSpaces(patente) ?? patente ?? "la unidad";
       const valueHint =
         typeof odometro === "number"

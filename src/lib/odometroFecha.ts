@@ -295,9 +295,48 @@ export function stripBotPromptExamples(text: string | undefined | null): string 
   if (!raw.trim()) return raw;
   return raw
     .replace(/\(\s*(?:ej(?:emplo)?\.?|por\s+ejemplo)[^)]*\)/gi, " ")
+    // WhatsApp V1: "_Ej.: 350 hs — 05/08/26 a las 14:30_" (cursiva) no matcheaba \bEj.
+    .replace(/[_*]?\s*(?:ej(?:emplo)?\.?|por\s+ejemplo)\s*[:\s][^_\n*]{0,160}[_*]?/gi, " ")
     .replace(/\b(?:ej(?:emplo)?\.?|por\s+ejemplo)\s*[:\s][^\n.?!;()]{0,120}/gi, " ")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n");
+}
+
+/** Cliente mandó solo km/hs (u otro valor medidor) sin fecha ni hora en este turno. */
+export function looksLikeMeterReadingWithoutFecha(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || !/\d/.test(raw)) return false;
+  const norm = normalizeFechaInput(raw);
+  if (/\b(hoy|ayer|anteayer|anoche|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(norm)) return false;
+  if (/\b(a las|hora\s*:|\d{1,2}:\d{2})\b/.test(norm)) return false;
+  if (looksLikeAhoraComoFechaLectura(raw)) return false;
+  if (looksLikeClockTimeOnlyMessage(raw)) return false;
+  return (
+    /^\d{1,7}$/.test(raw) ||
+    /^\d[\d.,\s]*\s*(?:km|hrs?|hs|horas?)\b/i.test(raw) ||
+    /\b\d[\d.,\s]*\s*(?:km|hrs?|hs|horas?)\b/i.test(raw)
+  );
+}
+
+/** Texto del hilo donde puede haber aportado fecha/hora el cliente (sin ejemplos del bot). */
+export function customerFechaSourceText(
+  customerMessage: string,
+  scopedThread?: string | null,
+): string {
+  const parts: string[] = [];
+  const msg = String(customerMessage ?? "").trim();
+  if (msg) parts.push(stripBotOdometerBotSpeech(msg));
+  const thread = String(scopedThread ?? "");
+  if (!thread.trim()) return parts.join("\n");
+  for (const line of thread.split(/\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^(?:cliente|customer)\s*:/i.test(trimmed)) {
+      const customerLine = trimmed.replace(/^(?:cliente|customer)\s*:\s*/i, "");
+      if (customerLine.trim()) parts.push(stripBotOdometerBotSpeech(customerLine));
+    }
+  }
+  return parts.join("\n");
 }
 
 /**

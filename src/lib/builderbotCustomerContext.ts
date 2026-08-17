@@ -7,7 +7,7 @@ import {
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadAwaitingHorometerKmValue, threadAwaitingOdometerKmValue, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection, hasPendingOdometerConfirmation } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadAwaitingHorometerKmValue, threadAwaitingOdometerKmValue, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection, hasPendingOdometerConfirmation, looksLikeOdometerPendingDataAmendment, lastTomoMeterKindInThreadTail } from "@/lib/wara";
 import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
 import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
 import { threadHasInconclusiveTramite } from "@/lib/tramiteFlowControl";
@@ -828,19 +828,30 @@ export async function customerRegisteredContextResponse(
     (looksLikeRelativeDateClarificationQuestion(selectionText) ||
       looksLikeRelativeDateChallenge(selectionText))
   ) {
-    // Preguntas/desafíos sobre hoy/ayer — respuesta determinista (AR), sin alucinar fechas.
-    nextFlow = "reply";
-    const dateReply =
-      resolveRelativeDateClarificationReply(selectionText) ??
-      resolveRelativeDateChallengeReply(selectionText);
-    if (dateReply && !responseMessage) {
-      const pending = await getPendingAction(prisma, trimmed);
-      const inOdometerFlow =
-        pending?.type === "odometro" ||
-        threadHasActiveOdometerFlow(scopedThreadText || fullThreadText);
-      responseMessage = inOdometerFlow
-        ? `${dateReply} Si veníamos con un cambio de odómetro, decime CONFIRMO cuando quieras registrarlo.`
-        : dateReply;
+    const pending = await getPendingAction(prisma, trimmed);
+    const threadForFlow = scopedThreadText || fullThreadText;
+    const inOdometerFlow =
+      pending?.type === "odometro" || threadHasActiveOdometerFlow(threadForFlow);
+    // Corrección de fecha/hora durante trámite medidor → executor (rearmar resumen), no aclaración suelta.
+    if (inOdometerFlow && looksLikeOdometerPendingDataAmendment(selectionText)) {
+      nextFlow = "router";
+      responseMessage = "";
+    } else {
+      nextFlow = "reply";
+      const dateReply =
+        resolveRelativeDateClarificationReply(selectionText) ??
+        resolveRelativeDateChallengeReply(selectionText);
+      if (dateReply && !responseMessage) {
+        const meterKind =
+          pending?.payload?.meterType === "horometro" ||
+          threadAwaitingHorometerKmValue(threadForFlow) ||
+          lastTomoMeterKindInThreadTail(threadForFlow) === "horometro"
+            ? "horómetro"
+            : "odómetro";
+        responseMessage = inOdometerFlow
+          ? `${dateReply} Si veníamos con un cambio de ${meterKind}, decime CONFIRMO cuando quieras registrarlo.`
+          : dateReply;
+      }
     }
   } else if (explicitCompanyMentionWhilePending) {
     // "la empresa es el cacique, la unidad es la AF061DO": declaración explícita de
