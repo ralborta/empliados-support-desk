@@ -71,10 +71,11 @@ function mapReferences(raw: unknown[]): EntityReference[] | null {
     if (typeof source !== "string" || !SOURCES.has(source)) return null;
     const type = item.type === "index" ? "listing_index" : item.type;
     if (type !== "company" && type !== "unit" && type !== "listing_index") return null;
-    if (item.index !== undefined && (!Number.isInteger(item.index) || Number(item.index) < 1)) return null;
-    if (item.unitReferenceKind !== undefined && (type !== "unit" || typeof item.unitReferenceKind !== "string" || !UNIT_REFERENCE_KINDS.has(item.unitReferenceKind))) return null;
-    references.push({ type, expression: item.expression, source: source as EntityReference["source"], ...(item.index === undefined ? {} : { index: Number(item.index) }),
-      ...(item.unitReferenceKind === undefined ? {} : { unitReferenceKind: item.unitReferenceKind as UnitReferenceKind }) });
+    if (item.index !== undefined && item.index !== null && (!Number.isInteger(item.index) || Number(item.index) < 1)) return null;
+    if (item.unitReferenceKind !== undefined && item.unitReferenceKind !== null
+      && (type !== "unit" || typeof item.unitReferenceKind !== "string" || !UNIT_REFERENCE_KINDS.has(item.unitReferenceKind))) return null;
+    references.push({ type, expression: item.expression, source: source as EntityReference["source"], ...(item.index === undefined || item.index === null ? {} : { index: Number(item.index) }),
+      ...(item.unitReferenceKind === undefined || item.unitReferenceKind === null ? {} : { unitReferenceKind: item.unitReferenceKind as UnitReferenceKind }) });
   }
   return references;
 }
@@ -142,11 +143,12 @@ export function mapStableInterpretation(rawInput: unknown, state: ConversationSt
   if (!suppliedFields) return null;
   const corrections = correctionsRaw.map((value) => record(value)).map((item) => item && typeof item.field === "string" ? { field: item.field, value: detachInterpretationValue(item.value) } : null);
   if (corrections.some((item) => !item)) return null;
-  const ambiguityRaw = raw.ambiguity === undefined ? undefined : record(raw.ambiguity);
-  if (raw.ambiguity !== undefined && (!ambiguityRaw || typeof ambiguityRaw.reason !== "string" || !Array.isArray(ambiguityRaw.alternatives)
+  const ambiguityRaw = raw.ambiguity === undefined || raw.ambiguity === null ? undefined : record(raw.ambiguity);
+  if (raw.ambiguity !== undefined && raw.ambiguity !== null && (!ambiguityRaw || typeof ambiguityRaw.reason !== "string" || !Array.isArray(ambiguityRaw.alternatives)
     || !ambiguityRaw.alternatives.every((item) => typeof item === "string") || typeof ambiguityRaw.clarificationQuestion !== "string")) return null;
-  const confirmationRaw = raw.confirmation === undefined ? undefined : record(raw.confirmation);
-  if (raw.confirmation !== undefined && (!confirmationRaw || typeof confirmationRaw.intended !== "boolean" || typeof confirmationRaw.containsCorrections !== "boolean")) return null;
+  const confirmationRaw = raw.confirmation === undefined || raw.confirmation === null ? undefined : record(raw.confirmation);
+  if (raw.confirmation !== undefined && raw.confirmation !== null
+    && (!confirmationRaw || typeof confirmationRaw.intended !== "boolean" || typeof confirmationRaw.containsCorrections !== "boolean")) return null;
   return deepFreezeInterpretationValue({
     userAct: raw.userAct as UserAct, relation: raw.relation as ThreadRelation, normalizedMeaning: raw.normalizedMeaning,
     intents: Object.freeze(intents), references: Object.freeze(references), suppliedFields: Object.freeze(suppliedFields),

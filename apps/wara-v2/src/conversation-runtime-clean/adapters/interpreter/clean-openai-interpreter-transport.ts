@@ -33,20 +33,117 @@ const SERVICE_CATALOG = CLEAN_CAPABILITY_CATALOG
   .map((capability) => `${capability.name} (${capability.kind}, ${capability.task})`)
   .join("\n");
 
+const PRIMITIVE_VALUE_SCHEMA = {
+  anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }],
+} as const;
+
+export const CLEAN_INTERPRETER_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "userAct", "relation", "normalizedMeaning", "requests", "references", "suppliedFields",
+    "corrections", "answersExpectedField", "confidence", "ambiguity", "confirmation",
+  ],
+  properties: {
+    userAct: { enum: ["greeting", "request", "answer", "question", "correction", "confirmation", "cancellation", "rejection", "acknowledgement", "unknown"] },
+    relation: { enum: ["standalone", "answer_expected", "continue", "side_question", "switch", "pause", "resume", "replace", "cancel", "confirm", "ambiguous"] },
+    normalizedMeaning: { type: "string" },
+    requests: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["serviceId", "domain", "goal", "entities", "operationHint"],
+        properties: {
+          serviceId: { enum: CLEAN_CAPABILITY_CATALOG.map((capability) => capability.name) },
+          domain: { enum: ["company", "unit_query", "gps", "odometer", "hourmeter", "maintenance", "certificate", "knowledge", "human_handoff", "conversation_assignment", "ticket", "attachment", "conversation"] },
+          goal: { type: "string" },
+          entities: { type: "object", additionalProperties: false, properties: {}, required: [] },
+          operationHint: { enum: ["conversation", "read", "write_prepare", "write_commit", "handoff"] },
+        },
+      },
+    },
+    references: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["type", "expression", "source", "index", "unitReferenceKind"],
+        properties: {
+          type: { enum: ["company", "unit", "listing_index"] },
+          expression: { type: "string" },
+          source: { enum: ["message", "active", "previous", "last_presented", "explicit"] },
+          index: { type: ["integer", "null"] },
+          unitReferenceKind: { enum: ["internal_code", "plate", "name", "brand", "model", "any", null] },
+        },
+      },
+    },
+    suppliedFields: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["field", "value"],
+        properties: {
+          field: { enum: ["company", "unit", "value", "date", "time", "confirmation", "clarification", "free_text"] },
+          value: PRIMITIVE_VALUE_SCHEMA,
+        },
+      },
+    },
+    corrections: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["field", "value"],
+        properties: { field: { type: "string" }, value: PRIMITIVE_VALUE_SCHEMA },
+      },
+    },
+    answersExpectedField: { type: "boolean" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    ambiguity: {
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["reason", "alternatives", "clarificationQuestion"],
+          properties: {
+            reason: { type: "string" },
+            alternatives: { type: "array", items: { type: "string" } },
+            clarificationQuestion: { type: "string" },
+          },
+        },
+        { type: "null" },
+      ],
+    },
+    confirmation: {
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["intended", "containsCorrections"],
+          properties: { intended: { type: "boolean" }, containsCorrections: { type: "boolean" } },
+        },
+        { type: "null" },
+      ],
+    },
+  },
+} as const;
+
 export const CLEAN_INTERPRETER_SYSTEM_PROMPT = `Sos el Interpreter de Runtime Clean de WARA. Sos la única autoridad que puede leer el mensaje libre y producir significado semántico.
 
-Devolvé solamente JSON con este contrato:
+Devolvé solamente JSON con este contrato exacto (el transporte lo exige mediante JSON Schema estricto):
 - userAct: greeting|request|answer|question|correction|confirmation|cancellation|rejection|acknowledgement|unknown
 - relation: standalone|answer_expected|continue|side_question|switch|pause|resume|replace|cancel|confirm|ambiguous
 - normalizedMeaning: significado actual conciso
-- requests: [{serviceId, domain, goal, entities, operationHint}]
-- references: [{type, expression, source, index?, unitReferenceKind?}]
+- requests: [{serviceId, domain, goal, entities: {}, operationHint}]
+- references: [{type, expression, source, index, unitReferenceKind}]
 - suppliedFields: [{field, value}]
 - corrections: [{field, value}]
 - answersExpectedField: boolean
 - confidence: número 0..1
-- ambiguity?: {reason, alternatives, clarificationQuestion}
-- confirmation?: {intended, containsCorrections}
+- ambiguity: {reason, alternatives, clarificationQuestion} | null
+- confirmation: {intended, containsCorrections} | null
 
 Reglas de autoridad:
 1. No inventes empresas, unidades, valores, fechas, resultados ni operaciones.
@@ -54,6 +151,8 @@ Reglas de autoridad:
 3. Una pregunta lateral conserva el trámite. Un cambio explícito de servicio usa switch o replace. Un abandono explícito usa cancellation+cancel.
 4. Una corrección de unidad conserva el mismo trámite, emite una referencia unit tipada y usa userAct=correction; nunca confirma una operación previa.
 5. Confirmación y cancelación son actos distintos. Una despedida, agradecimiento o ausencia de negación nunca confirma.
+5a. entities siempre es {}. Todo significado variable va únicamente en references, suppliedFields o corrections.
+5b. Si expectedInput pide unit, company, value, date o time y el usuario responde ese dato, emití la referencia o suppliedField tipado correspondiente. No cambies de servicio solo por recibir el dato esperado.
 
 Fechas y horas:
 6. Normalizá fechas a YYYY-MM-DD y horas a HH:mm de 24 horas usando referenceInstant y timeZone del payload.
@@ -63,7 +162,7 @@ Fechas y horas:
 
 Unidades:
 10. Toda identificación de unidad usa reference.type=unit y conserva expression sin convertirla en patente.
-11. unitReferenceKind debe ser internal_code, plate, name, brand, model o any. Un identificador numérico presentado como número/código de unidad es internal_code, no plate.
+11. unitReferenceKind debe ser internal_code, plate, name, brand, model o any. Un identificador compuesto solo por dígitos presentado como número/código de unidad es internal_code, no plate. source es message para referencias presentes en el mensaje actual; index y unitReferenceKind son null cuando no aplican.
 12. Para búsqueda/listado usá unit.search. Para estado, reporte, GPS, ubicación o posición usá gps.get_status. Incluí la referencia de unidad si está presente.
 13. Marca y modelo son criterios de búsqueda válidos. Si hay varias coincidencias, la resolución posterior pedirá selección; no elijas una.
 
@@ -104,7 +203,15 @@ export class CleanOpenAiInterpreterTransport implements StableInterpreterTranspo
       body: JSON.stringify({
         model: required(this.env, "WARA_CLEAN_OPENAI_MODEL"),
         temperature: 0,
-        response_format: { type: "json_object" },
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "wara_clean_turn_interpretation",
+            description: "Meaning of one WARA Runtime Clean user turn. No operational execution.",
+            strict: true,
+            schema: CLEAN_INTERPRETER_JSON_SCHEMA,
+          },
+        },
         messages: [
           { role: "system", content: CLEAN_INTERPRETER_SYSTEM_PROMPT },
           { role: "user", content: JSON.stringify(payload(input, this.clock, timeZone(this.env))) },

@@ -3,7 +3,7 @@ import test from "node:test";
 import { StableInterpreterAdapter, type StableInterpreterTransport } from "../adapters/interpreter/stable-interpreter-adapter.js";
 import { deepFreezeInterpretationValue, mapStableInterpretation } from "../adapters/interpreter/stable-output-mapper.js";
 import { CLEAN_INTERPRETATION_SCHEMA_VERSION, CLEAN_INTERPRETER_ADAPTER_VERSION, CLEAN_INTERPRETER_PROMPT_VERSION } from "../adapters/interpreter/versions.js";
-import { CLEAN_INTERPRETER_SYSTEM_PROMPT, cleanInterpreterTemporalDefaults } from "../adapters/interpreter/clean-openai-interpreter-transport.js";
+import { CLEAN_INTERPRETER_JSON_SCHEMA, CLEAN_INTERPRETER_SYSTEM_PROMPT, CleanOpenAiInterpreterTransport, cleanInterpreterTemporalDefaults } from "../adapters/interpreter/clean-openai-interpreter-transport.js";
 import { createEmptyCleanState } from "../core/types/state.js";
 
 const empty = createEmptyCleanState({ tenantId: "t", conversationId: "c" });
@@ -60,6 +60,48 @@ test("native Clean prompt declares temporal authority, cancellation and every un
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /model/);
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /cancellation/);
   assert.equal(cleanInterpreterTemporalDefaults.timeZone, "America/Argentina/Buenos_Aires");
+});
+test("native Clean transport exposes a strict closed schema for every semantic field", () => {
+  assert.equal(CLEAN_INTERPRETER_JSON_SCHEMA.type, "object");
+  assert.equal(CLEAN_INTERPRETER_JSON_SCHEMA.additionalProperties, false);
+  assert.deepEqual(CLEAN_INTERPRETER_JSON_SCHEMA.required, [
+    "userAct", "relation", "normalizedMeaning", "requests", "references", "suppliedFields",
+    "corrections", "answersExpectedField", "confidence", "ambiguity", "confirmation",
+  ]);
+  assert.equal(CLEAN_INTERPRETER_JSON_SCHEMA.properties.requests.items.additionalProperties, false);
+  assert.equal(CLEAN_INTERPRETER_JSON_SCHEMA.properties.references.items.additionalProperties, false);
+  assert.equal(CLEAN_INTERPRETER_JSON_SCHEMA.properties.suppliedFields.items.additionalProperties, false);
+  assert.equal(CLEAN_INTERPRETER_JSON_SCHEMA.properties.corrections.items.additionalProperties, false);
+});
+test("native Clean transport requests strict Structured Outputs", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, any> | null = null;
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(raw({ suppliedFields: [], ambiguity: null, confirmation: null })) } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const transport = new CleanOpenAiInterpreterTransport(
+      { OPENAI_API_KEY: "test-key-with-sufficient-length", WARA_CLEAN_OPENAI_MODEL: "gpt-4o-mini" },
+      { now: () => new Date("2026-08-17T16:00:00.000Z") },
+    );
+    await transport.call({ message: "structured", state: empty });
+    assert.equal(requestBody?.response_format?.type, "json_schema");
+    assert.equal(requestBody?.response_format?.json_schema?.strict, true);
+    assert.deepEqual(requestBody?.response_format?.json_schema?.schema, CLEAN_INTERPRETER_JSON_SCHEMA);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+test("maps nullable strict-schema optionals without weakening typed values", () => {
+  const result = mapStableInterpretation(raw({
+    ambiguity: null,
+    confirmation: null,
+    references: [{ type: "unit", expression: "900115", source: "message", index: null, unitReferenceKind: "internal_code" }],
+  }), empty);
+  assert.equal(result?.ambiguity, undefined);
+  assert.equal(result?.confirmation, undefined);
+  assert.deepEqual(result?.references, [{ type: "unit", expression: "900115", source: "message", unitReferenceKind: "internal_code" }]);
 });
 test("maps corrections and confirmation without changing meaning", () => {
   const correction = mapStableInterpretation(raw({ userAct: "correction", relation: "continue", corrections: [{ field: "value", value: 120 }] }), empty);

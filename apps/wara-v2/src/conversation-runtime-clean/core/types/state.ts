@@ -38,6 +38,6 @@ export function createEmptyCleanState(input: { tenantId: string; conversationId:
     ...input, company: null, unit: null, previousUnit: null, tasks: [], focusedTaskId: null,
     expectedInput: null, pendingResolution: null, pendingClarification: null, pendingOperation: null,
     lastListing: null, recentSummary: null,
-    metadata: { runtime: "clean", schemaVersion: "clean-1", promptVersion: "clean-interpreter-prompt-2" },
+    metadata: { runtime: "clean", schemaVersion: "clean-1", promptVersion: "clean-interpreter-prompt-3" },
   };
 }
