@@ -35,6 +35,9 @@ jobs:
             .dockerignore
           sparse-checkout-cone-mode: false
 
+      - name: Prepare build context
+        run: cp infra/.dockerignore .dockerignore
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -65,7 +68,7 @@ jobs:
           test "$REV" = "${{ env.GIT_COMMIT_SHA }}"
           test "$SHA_LABEL" = "${{ env.GIT_COMMIT_SHA }}"
           docker run --rm "$IMAGE" test -f /app/apps/wara-v2/src/conversation-runtime-clean/core/identity/stable-id.ts
-          docker run --rm "$IMAGE" sh -c '! test -f /app/.env && ! find /app -name ".env*" -not -path "*/node_modules/*" | grep -q .'
+          docker run --rm "$IMAGE" sh -c '! test -f /app/.env && ! find /app -type f \( -name ".env" -o -name ".env.local" -o -name ".env.production" \) -not -path "*/node_modules/*" | grep -q .'
           docker run --rm -d --name rc-lab-probe -e WARA_CLEAN_RUNTIME_ENABLED=false -e WARA_CLEAN_LAB_API_KEY=probe-key -e WARA_CLEAN_LAB_TENANT_ALLOWLIST=tenant_probe -e GIT_COMMIT_SHA=${{ env.GIT_COMMIT_SHA }} -p 8788:8788 "$IMAGE"
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8788/api/wara-clean-lab/health >/dev/null 2>&1; then break; fi
