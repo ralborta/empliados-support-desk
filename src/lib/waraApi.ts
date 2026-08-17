@@ -1370,6 +1370,25 @@ export function resolveConversationalUnitTurn(params: {
   return null;
 }
 
+/** Follow-up: el cliente duda si el pin del mapa es correcto o es la última posición. */
+export function looksLikeGpsPositionClarificationQuestion(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 220) return false;
+  const t = normCompanyToken(raw);
+  if (/\b(mantenimiento|odometro|horometro|certificado)\b/.test(t)) return false;
+  return (
+    /\b(seguro|segura|estas?\s+seguro|confirma(me)?)\b.{0,50}\b(posicion|ubicacion|lugar|coordenadas|mapa|pin)\b/.test(
+      t,
+    ) ||
+    /\b(posicion|ubicacion)\s+(es\s+)?(correcta|actual|la ultima|ultima|real|verdadera|cierta)\b/.test(
+      t,
+    ) ||
+    /\b(es\s+)?(la\s+)?ultima\s+(posicion|ubicacion)\b/.test(t) ||
+    /\b(esta\s+)?(actualizada|al dia|reciente)\s+(la\s+)?(posicion|ubicacion)\b/.test(t) ||
+    /\b(el\s+)?(punto|pin)\s+(es\s+)?(correcto|actual|el\s+ultimo)\b/.test(t)
+  );
+}
+
 /** Follow-up conversacional sobre una unidad ya en contexto (no cambio de tema). */
 export function looksLikeUnitConsultFollowUp(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
@@ -1391,6 +1410,7 @@ export function looksLikeUnitConsultFollowUp(text: string | undefined | null): b
     /\b(el\s+)?estado\b/.test(t) ||
     looksLikeUnitReportingStatusCue(text) ||
     looksLikeProblemClarificationPushback(text) ||
+    looksLikeGpsPositionClarificationQuestion(text) ||
     (looksLikeBriefConfirmation(text) && t.length >= 6)
   );
 }

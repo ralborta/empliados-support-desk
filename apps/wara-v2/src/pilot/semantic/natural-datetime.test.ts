@@ -478,4 +478,25 @@ describe("natural datetime + field correction + anomaly", () => {
       if (r.kind === "resolved") assert.equal(r.date, "2026-08-13", m);
     }
   });
+
+  it("horas coloquiales rioplatenses (paridad V1 odometroFecha)", () => {
+    const localNow = "2026-08-17T10:00:00";
+    const cases: Array<[string, string | null, string | null]> = [
+      ["4 de la tarde", "2026-08-17", "16:00"],
+      ["cuatro de la tarde", "2026-08-17", "16:00"],
+      ["12 en punto", "2026-08-17", "12:00"],
+      ["a las 8 de la mañana", "2026-08-17", "08:00"],
+      ["tipo seis", "2026-08-17", "18:00"],
+      ["ayer a las 4 de la tarde", "2026-08-16", "16:00"],
+      ["Ayer 11:00", "2026-08-16", "11:00"],
+    ];
+    for (const [msg, date, time] of cases) {
+      const r = resolveNaturalReadingDatetime(msg, { localNow, timezone: TZ });
+      assert.equal(r.kind, "resolved", msg);
+      if (r.kind === "resolved") {
+        assert.equal(r.date, date, msg);
+        assert.equal(r.time, time, msg);
+      }
+    }
+  });
 });

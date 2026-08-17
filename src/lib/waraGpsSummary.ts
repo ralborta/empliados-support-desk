@@ -64,6 +64,66 @@ function gpsClosingQuestion(): string {
   return "¿Seguimos con el estado de la unidad o cambiamos de tema?";
 }
 
+/** El hilo reciente incluyó un resumen GPS estructurado o explicación de estado. */
+export function threadHasRecentGpsContext(threadText: string): boolean {
+  const tail = String(threadText ?? "").slice(-4500);
+  if (isStructuredGpsWhatsAppSummary(tail)) return true;
+  return (
+    /funcionamiento normal|unidad detenida|falta de reporte|p[eé]rdida de se[nñ]al|falla de ignici[oó]n/i.test(
+      tail,
+    ) && /posici[oó]n:|ultimo reporte:/i.test(tail)
+  );
+}
+
+export function buildGpsPositionClarificationAnalysis(
+  unit: WaraUnidadEstado,
+  assessment: GpsAssessment,
+): string {
+  const label = formatGpsUnitLabel(unit);
+  const map = mapsLine(unit);
+  const posElapsed =
+    assessment.positionElapsed != null
+      ? formatMinutesAgo(assessment.positionElapsed)
+      : "sin dato";
+  const reportElapsed = formatMinutesAgo(assessment.reportElapsed);
+
+  let verdict: string;
+  let detail: string;
+
+  switch (assessment.status) {
+    case "ok":
+      verdict = "✅ *Sí*: es la última posición que Wara recibió de esa unidad.";
+      detail =
+        ignitionLabel(unit) === "encendida"
+          ? `Reporte y posición van al día (reporte hace ${reportElapsed}, posición hace ${posElapsed}). Con ignición encendida, el pin del mapa debería coincidir con donde está operando ahora.`
+          : `Reporte y posición van al día (reporte hace ${reportElapsed}, posición hace ${posElapsed}).`;
+      break;
+    case "coherent_pause":
+      verdict = "✅ *Sí*: es la última posición registrada en Wara.";
+      detail = `La unidad está *detenida* (ignición apagada). Es normal que el pin no se mueva aunque el equipo siga reportando (reporte hace ${reportElapsed}, posición hace ${posElapsed}).`;
+      break;
+    case "stale_position":
+      verdict = "⚠️ *No del todo*: el reporte llega pero la posición no acompaña al mismo ritmo.";
+      detail = `${assessment.reason} Reporte hace ${reportElapsed}, posición hace ${posElapsed}.`;
+      break;
+    case "missing_report":
+      verdict = "❌ *No*: no tenemos posición al día.";
+      detail = `Hace ${reportElapsed} que no recibimos reporte/posición actualizados. Lo que ves en el mapa puede ser un punto viejo, no la ubicación actual.`;
+      break;
+    case "ignition_failure":
+      verdict = "✅ *Sí* respecto a la posición: el pin es el último punto que Wara recibió.";
+      detail = `Reporte y posición van al día (posición hace ${posElapsed}), pero hay una inconsistencia en los datos de ignición que conviene revisar con Atención al cliente.`;
+      break;
+    default:
+      verdict = "📍 *Sobre la posición*";
+      detail = `Último reporte hace ${reportElapsed}; posición hace ${posElapsed}.`;
+  }
+
+  return [`📍 *Sobre la posición de ${label}*`, "", verdict, detail, "", map, "", gpsClosingQuestion()].join(
+    "\n",
+  );
+}
+
 function ignitionLine(unit: WaraUnidadEstado): string {
   const ign = ignitionLabel(unit);
   if (ign === "encendida") return "🔑 Ignición: *encendida*";
@@ -186,6 +246,16 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
 export function isStructuredGpsWhatsAppSummary(text: string | undefined | null): boolean {
   const t = String(text ?? "");
   return t.includes("📍 *Estado GPS*") && t.includes("🚗 Unidad:");
+}
+
+/** Análisis aclaratorio de posición — mismo passthrough que el resumen GPS. */
+export function isGpsPositionClarificationSummary(text: string | undefined | null): boolean {
+  const t = String(text ?? "");
+  return t.includes("📍 *Sobre la posición de") && t.includes("¿Seguimos con el estado");
+}
+
+export function isPassthroughGpsWhatsAppMessage(text: string | undefined | null): boolean {
+  return isStructuredGpsWhatsAppSummary(text) || isGpsPositionClarificationSummary(text);
 }
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {

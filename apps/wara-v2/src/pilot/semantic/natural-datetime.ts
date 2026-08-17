@@ -121,9 +121,31 @@ function expandHourWords(n: string): string {
   );
 }
 
+function applyDayPeriodHour(hour: number, period: string): number | null {
+  if (hour < 0 || hour > 23) return null;
+  if (period === "manana" || period === "madrugada") {
+    if (hour === 12) return 0;
+    return hour;
+  }
+  if (period === "tarde") {
+    if (hour >= 1 && hour <= 11) return hour + 12;
+    return hour;
+  }
+  if (period === "noche") {
+    if (hour === 12) return 0;
+    if (hour >= 1 && hour <= 11) return hour + 12;
+    return hour;
+  }
+  return hour;
+}
+
 function extractTime(n: string): string | null {
   const s = expandHourWords(n);
   const morningCtx = /\b(esta\s+)?manana\b/.test(s) || /\b(am|a\.?\s*m\.?)\b/.test(s);
+
+  if (/\bmediod[ií]a\b/.test(s)) return "12:00";
+  if (/\bmedianoche\b/.test(s)) return "00:00";
+
   // "tipo seis y media" / "tipo 6 y media"
   const tipoMedia = s.match(/\btipo\s+(\d{1,2})\s+y\s+media\b/);
   if (tipoMedia) {
@@ -142,6 +164,24 @@ function extractTime(n: string): string | null {
     if (h <= 11) return `${String(h + 12).padStart(2, "0")}:00`;
     return `${String(h).padStart(2, "0")}:00`;
   }
+
+  const enPunto = s.match(/\b(\d{1,2})\s+en\s+punto\b/);
+  if (enPunto) {
+    const h = Number(enPunto[1]);
+    if (h > 23) return null;
+    return `${String(h).padStart(2, "0")}:00`;
+  }
+
+  const deLa = s.match(
+    /\b(?:a\s+las?|las)?\s*(\d{1,2})(?::(\d{2}))?\s+de\s+la\s+(manana|madrugada|tarde|noche)\b/,
+  );
+  if (deLa) {
+    const applied = applyDayPeriodHour(Number(deLa[1]), deLa[3]);
+    const mm = deLa[2] ? Number(deLa[2]) : 0;
+    if (applied == null || mm > 59) return null;
+    return `${String(applied).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
+
   // "a eso de las ocho" / "cerca de las 8"
   const approx = s.match(/\b(?:a\s+eso\s+de\s+las|cerca\s+de\s+las|tipo\s+las)\s+(\d{1,2})(?::(\d{2}))?\b/);
   if (approx) {

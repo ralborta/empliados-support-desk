@@ -18,6 +18,7 @@ import {
   looksLikeFlowControlCommand,
   looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
+  looksLikeGpsPositionClarificationQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeGenericUnitConsultWithoutPlate,
   looksLikeConversationalUnitConcern,
@@ -53,7 +54,7 @@ import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalat
 import { findCustomerVisibleOdooCaseRef, withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
-import { buildGpsClientSummary, isStructuredGpsWhatsAppSummary } from "@/lib/waraGpsSummary";
+import { buildGpsClientSummary, isStructuredGpsWhatsAppSummary, buildGpsPositionClarificationAnalysis, threadHasRecentGpsContext } from "@/lib/waraGpsSummary";
 import {
   buildFleetUnitNotFoundMessage,
   buildUnitNameOrPlateClarificationReply,
@@ -1545,7 +1546,15 @@ export async function POST(req: NextRequest) {
       threadText,
       unitLabel: formatUnitLabel(unit),
     });
-    if (conversationalReply) {
+    const positionClarification =
+      looksLikeGpsPositionClarificationQuestion(rawText) && threadHasRecentGpsContext(threadText);
+    if (positionClarification) {
+      const assessment = assessUnitReporting(unit);
+      if (assessment) {
+        summaryText = buildGpsPositionClarificationAnalysis(unit, assessment);
+        action = assessment.status === "ok" || assessment.status === "coherent_pause" ? "observation" : "ticket";
+      }
+    } else if (conversationalReply) {
       summaryText = conversationalReply;
       if (isAtilioAgentEnabled()) {
         dialogueState = buildListenProblemDialogueState({
