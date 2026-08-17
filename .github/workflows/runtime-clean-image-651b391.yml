@@ -1,0 +1,105 @@
+name: Runtime Clean lab image 651b391
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - infra/runtime-clean-image-651b391
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/ralborta/empliados-support-desk-runtime-clean
+  GIT_COMMIT_SHA: 651b39150f01365676ece53547ab324608dcd297
+  IMAGE_TAG: "651b391"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-validate-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout approved runtime SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.GIT_COMMIT_SHA }}
+
+      - name: Checkout infra Dockerfile
+        uses: actions/checkout@v4
+        with:
+          ref: infra/runtime-clean-image-651b391
+          path: infra
+          sparse-checkout: |
+            docker/runtime-clean-lab.Dockerfile
+            .dockerignore
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/runtime-clean-lab.Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          build-args: |
+            GIT_COMMIT_SHA=${{ env.GIT_COMMIT_SHA }}
+
+      - name: Validate image contents
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          REV="$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")"
+          SHA_LABEL="$(docker inspect --format='{{ index .Config.Labels "wara.runtime-clean.git-commit-sha" }}' "$IMAGE")"
+          test "$REV" = "${{ env.GIT_COMMIT_SHA }}"
+          test "$SHA_LABEL" = "${{ env.GIT_COMMIT_SHA }}"
+          docker run --rm "$IMAGE" test -f /app/apps/wara-v2/src/conversation-runtime-clean/core/identity/stable-id.ts
+          docker run --rm "$IMAGE" sh -c '! test -f /app/.env && ! find /app -name ".env*" -not -path "*/node_modules/*" | grep -q .'
+          docker run --rm -d --name rc-lab-probe -e WARA_CLEAN_RUNTIME_ENABLED=false -e WARA_CLEAN_LAB_API_KEY=probe-key -e WARA_CLEAN_LAB_TENANT_ALLOWLIST=tenant_probe -e GIT_COMMIT_SHA=${{ env.GIT_COMMIT_SHA }} -p 8788:8788 "$IMAGE"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8788/api/wara-clean-lab/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8788/api/wara-clean-lab/health | tee /tmp/health.json
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("/tmp/health.json"))
+          assert d.get("runtime") == "clean"
+          assert d.get("commit") == "${{ env.GIT_COMMIT_SHA }}"
+          PY
+          docker rm -f rc-lab-probe
+
+      - name: Push immutable tag
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/runtime-clean-lab.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          build-args: |
+            GIT_COMMIT_SHA=${{ env.GIT_COMMIT_SHA }}
+
+      - name: Resolve digest
+        id: digest
+        run: |
+          DIGEST="$(docker buildx imagetools inspect "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "IMAGE=${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}@$DIGEST"
+
+      - name: Summary
+        run: |
+          echo "## Runtime Clean lab image" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tag: \`${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- digest: \`${{ steps.digest.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- sha: \`${{ env.GIT_COMMIT_SHA }}\`" >> "$GITHUB_STEP_SUMMARY"
