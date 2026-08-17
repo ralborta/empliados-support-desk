@@ -1644,6 +1644,41 @@ export function resolveNumericUnitSelection(rawText: string, threadText: string)
   return null;
 }
 
+/** Resuelve coincidencias por código de unidad (M900-085 / 900085), no por movil_id de DB. */
+function resolutionFromUnitNameMatches(
+  matches: WaraUnidadEstado[],
+  label: string,
+): UnitQueryResolution | null {
+  if (matches.length === 1) {
+    const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "");
+    if (plate) {
+      return {
+        intent: "consult_status",
+        plate,
+        searchTerms: [],
+        candidatePlates: [plate],
+        source: "rules",
+      };
+    }
+  }
+  if (matches.length > 1) {
+    const labels = matches
+      .slice(0, 5)
+      .map((u) => (u.patente || u.unidad || "").trim())
+      .join(", ");
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: matches
+        .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+        .filter(Boolean),
+      clarificationQuestion: `Encontré ${matches.length} unidades con código parecido a ${label} (${labels}). Decime la matrícula exacta.`,
+      source: "rules",
+    };
+  }
+  return null;
+}
+
 function resolveByMovilIdOrUnitCode(
   rawText: string,
   units: WaraUnidadEstado[],
@@ -1664,6 +1699,11 @@ function resolveByMovilIdOrUnitCode(
       }
     }
     if (byId.length === 0) {
+      const byUnitCode = resolutionFromUnitNameMatches(
+        filterUnitsByUnitName(units, String(movilId)),
+        String(movilId),
+      );
+      if (byUnitCode) return byUnitCode;
       return {
         intent: "need_clarification",
         searchTerms: [],
@@ -1692,23 +1732,20 @@ function resolveByMovilIdOrUnitCode(
         };
       }
     }
+    if (byId.length === 0) {
+      const byUnitCode = resolutionFromUnitNameMatches(
+        filterUnitsByUnitName(units, digitsOnly),
+        digitsOnly,
+      );
+      if (byUnitCode) return byUnitCode;
+    }
   }
 
   const ambiguous = extractAmbiguousUnitCodeToken(rawText);
   if (ambiguous && !detectLoosePlate(rawText)) {
     const matches = filterUnitsByUnitName(units, ambiguous);
-    if (matches.length === 1) {
-      const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "");
-      if (plate) {
-        return {
-          intent: "consult_status",
-          plate,
-          searchTerms: [],
-          candidatePlates: [plate],
-          source: "rules",
-        };
-      }
-    }
+    const fromName = resolutionFromUnitNameMatches(matches, ambiguous);
+    if (fromName) return fromName;
   }
 
   return null;
