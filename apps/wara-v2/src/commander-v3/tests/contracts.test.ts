@@ -876,6 +876,39 @@ describe("commander-v3 contracts", () => {
     assert.equal(next.parkedTurn ?? null, null);
   });
 
+  it("thread contract: Hola + GPS incompleto → interrupt, no gps tool", async () => {
+    const { resolveEffectiveThreadRelation, enforceTurnThreadContract } =
+      await import("../enrich/thread-contract.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.activeTask = {
+      type: "gps",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    s.lastQuestion = { id: "q", purpose: "unit_for_gps", expected: "unit" };
+    const llmPlan = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "saludo",
+        answerKind: "continue_task",
+        threadRelation: "continue",
+      },
+      reasoning: "LLM sigue GPS",
+      conversationalAct: "continue_task",
+      task: "gps",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.7,
+    });
+    assert.equal(resolveEffectiveThreadRelation(llmPlan, s, "Hola"), "interrupt");
+    const enforced = enforceTurnThreadContract(llmPlan, s, "Hola");
+    assert.equal(enforced.conversationalAct, "ask");
+    assert.equal(enforced.requestedCapabilities.length, 0);
+    assert.match(enforced.responseGoal.nextQuestion ?? "", /estado de la unidad/i);
+  });
+
   it("GPS esperando patente + Hola → greet y keep-or-close, no pide patente", async () => {
     const { enrichPlanForOpenTaskHold } = await import(
       "../enrich/open-task-hold.js"

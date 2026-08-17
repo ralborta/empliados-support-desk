@@ -23,7 +23,8 @@ import {
   isCompanyResetList,
 } from "./enrich/company-ops-gate.js";
 import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
-import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
+import { enrichPlanForGreetingCompanyGate } from "./enrich/company-capture.js";
+import { enforceTurnThreadContract } from "./enrich/thread-contract.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
 import { enrichPlanForQuestionContract } from "./enrich/question-contract.js";
 import {
@@ -42,7 +43,6 @@ import {
 import { applyCommanderState } from "./state/apply-patch.js";
 import {
   enrichPlanForKeepOrCloseAnswer,
-  enrichPlanForOpenTaskHold,
   KEEP_OR_CLOSE_PURPOSE,
   planFromParkedTurn,
   resumeQuestionForTask,
@@ -397,7 +397,7 @@ export async function runCommanderTurn(
   }
   plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterValueFallback(plan, state, input.message);
-  plan = enrichPlanForGreetingPolicy(plan, state, input.message);
+  plan = enforceTurnThreadContract(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForQuestionContract(plan, state);
@@ -453,7 +453,6 @@ export async function runCommanderTurn(
     }
   }
 
-  plan = enrichPlanForOpenTaskHold(plan, state, input.message);
   plan = enrichPlanForCompanyChange(plan, state, input.message);
   // Solo un reset de empresa descarta el pedido estacionado.
   // Elegir empresa (preserveCompany=false + company.select) debe EJECUTARLO.

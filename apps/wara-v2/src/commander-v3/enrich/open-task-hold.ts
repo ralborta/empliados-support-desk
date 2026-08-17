@@ -425,7 +425,8 @@ export function enrichPlanForOpenTaskHold(
   if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) return plan;
   if (state.pendingWrite) return plan;
   if (!hasIncompleteWork(state)) return plan;
-  if (!isIncomingOtherRequest(plan, state, message)) return plan;
+  const forceInterrupt = threadRelationOf(plan) === "interrupt";
+  if (!forceInterrupt && !isIncomingOtherRequest(plan, state, message)) return plan;
 
   const open = taskLabel(state.activeTask?.type);
   const greeting = isGreetingTurn(plan, message);

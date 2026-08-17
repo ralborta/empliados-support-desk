@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 17b", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-17b/);
+  it("prompt version bump 17c", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-17c/);
   });
 
   it("prompt Commander no copia el árbol de decisión V1", async () => {
