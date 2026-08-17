@@ -53,3 +53,23 @@ export const CLEAN_CAPABILITY_CATALOG: readonly CleanCapabilityDefinition[] = [
 export function getCleanCapability(name: string): CleanCapabilityDefinition | undefined {
   return CLEAN_CAPABILITY_CATALOG.find((definition) => definition.name === name);
 }
+
+const PREPARE_TO_COMMIT: Readonly<Record<string, string>> = Object.freeze({
+  "odometer.prepare": "odometer.update",
+  "hourmeter.prepare": "hourmeter.update",
+  "maintenance.prepare": "maintenance.create",
+  "certificate.prepare": "certificate.issue",
+  "handoff.prepare": "handoff.create",
+  "conversation.handoff.prepare": "conversation.handoff.commit",
+  "conversation.assign.prepare": "conversation.assign.commit",
+  "conversation.release.prepare": "conversation.release.commit",
+  "ticket.create.prepare": "ticket.create.commit",
+  "ticket.update.prepare": "ticket.update.commit",
+  "ticket.close.prepare": "ticket.close.commit",
+  "ticket.reopen.prepare": "ticket.reopen.commit",
+  "attachment.prepare": "attachment.commit",
+});
+
+export function commitCapabilityForPrepare(name: string): string | null {
+  return PREPARE_TO_COMMIT[name] ?? null;
+}

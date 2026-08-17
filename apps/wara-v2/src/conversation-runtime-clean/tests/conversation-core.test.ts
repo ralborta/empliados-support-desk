@@ -72,7 +72,7 @@ test("structured unit answer creates one resolution and selects verified result"
   assert.equal(result.trace.decision?.requiredResolutions.length, 1);
   assert.equal(resolver.calls, 1);
   assert.equal(result.state.unit?.id, "u");
-  assert.equal(result.state.expectedInput, null);
+  assert.equal(result.state.expectedInput?.field, "value");
   assert.equal(result.trace.executionCount, 0);
   assert.equal(result.responsePlan.facts.every((fact) => fact.verified), true);
 });
@@ -88,7 +88,7 @@ test("lateral question preserves focused task and expected input", async () => {
   assert.equal(result.state.expectedInput?.field, "unit");
 });
 
-test("answer_expected consumes only the matching expected field", async () => {
+test("answer_expected consumes every compatible typed field supplied by the Interpreter", async () => {
   const active = task("odometer");
   const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
     expectedInput: { field: "value" as const, taskId: active.id, purpose: "odometer_value" } };
@@ -97,8 +97,43 @@ test("answer_expected consumes only the matching expected field", async () => {
   const result = await processCleanTurn(turn("expected-answer"), d.value);
   const collected = result.state.tasks[0]?.collectedFields;
   assert.equal(collected?.value, 1200);
-  assert.equal("date" in (collected ?? {}), false);
-  assert.equal(result.state.expectedInput, null);
+  assert.equal(collected?.date, "2099-01-01");
+  assert.equal(result.state.expectedInput?.field, "unit");
+});
+
+test("hourmeter flow accepts date and time together, offers confirm or cancel, and cancellation clears it", async () => {
+  let state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "hourmeter-flow" }), company: { id: "co", name: "Company" } };
+  const run = async (messageId: string, output: TurnInterpretation, resolver = new FakeEntityResolver()) => {
+    const runtime = deps(state, [output], resolver);
+    const result = await processCleanTurn({ tenantId: "t", conversationId: "hourmeter-flow", message: "opaque", messageId }, runtime.value);
+    state = result.state;
+    return result;
+  };
+  const start = interpretation({ intents: [{ serviceId: "hourmeter.prepare", domain: "hourmeter", goal: "update", operationKind: "write_prepare", entities: {} }] });
+  assert.equal((await run("hm-start", start)).state.expectedInput?.field, "unit");
+
+  const unitAnswer = interpretation({ userAct: "answer", relation: "answer_expected", answersExpectedField: true,
+    references: [{ type: "unit", expression: "900115", source: "message", unitReferenceKind: "internal_code" }] });
+  const resolutionId = new CleanController().decide({ interpretation: unitAnswer, state, messageId: "hm-unit" }).requiredResolutions[0]!.id;
+  const resolved = new FakeEntityResolver([{ requestId: resolutionId, status: "resolved", entity: { entityType: "unit", unit: { id: "u-900115", label: "M900-115", code: "M900-115", companyId: "co" } }, facts: [] }]);
+  assert.equal((await run("hm-unit", unitAnswer, resolved)).state.expectedInput?.field, "value");
+
+  assert.equal((await run("hm-value", interpretation({ userAct: "answer", relation: "answer_expected", answersExpectedField: true,
+    suppliedFields: [{ field: "value", value: 98 }] }))).state.expectedInput?.field, "date");
+
+  const prepared = await run("hm-when", interpretation({ userAct: "answer", relation: "answer_expected", answersExpectedField: true,
+    suppliedFields: [{ field: "date", value: "2026-08-17" }, { field: "time", value: "06:00" }] }));
+  assert.equal(prepared.state.tasks.find((candidate) => candidate.id === prepared.state.focusedTaskId)?.collectedFields.time, "06:00");
+  assert.equal(prepared.state.pendingOperation?.capability, "hourmeter.update");
+  assert.match(prepared.reply, /confirmar.*cancelar/i);
+  assert.equal(prepared.trace.writeAttempt, false);
+  assert.equal(prepared.trace.writeExecuted, false);
+
+  const cancelled = await run("hm-cancel", interpretation({ userAct: "cancellation", relation: "cancel" }));
+  assert.equal(cancelled.state.pendingOperation, null);
+  assert.equal(cancelled.state.focusedTaskId, null);
+  assert.equal(cancelled.state.tasks.at(-1)?.status, "cancelled");
+  assert.equal(cancelled.trace.writeExecuted, false);
 });
 
 test("explicit semantic switch pauses old task and focuses new task", async () => {
@@ -232,6 +267,27 @@ test("structured correction updates draft and invalidates prior confirmation", a
   assert.equal(result.state.tasks[0]?.status, "collecting");
   assert.equal(result.state.pendingOperation, null);
   assert.equal(result.trace.executionCount, 0);
+});
+
+test("structured unit correction keeps the service, changes the verified unit and replaces the stale confirmation", async () => {
+  const active = { ...task("hourmeter", "awaiting_confirmation"), collectedFields: { value: 98, date: "2026-08-17", time: "18:00" } };
+  const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), company: { id: "co", name: "Company" },
+    unit: { id: "old", label: "M900-110", code: "M900-110", companyId: "co" }, tasks: [active], focusedTaskId: active.id,
+    pendingOperation: { operationId: "old-op", capability: "hourmeter.update", taskId: active.id, version: 1, payloadHash: "old-hash", idempotencyKey: "old-idem", preparedArguments: active.collectedFields, status: "awaiting_confirmation" as const } };
+  const correction = interpretation({ userAct: "correction", relation: "continue",
+    references: [{ type: "unit", expression: "900115", source: "message", unitReferenceKind: "internal_code" }] });
+  const resolutionId = new CleanController().decide({ interpretation: correction, state, messageId: "change-unit" }).requiredResolutions[0]!.id;
+  const resolver = new FakeEntityResolver([{ requestId: resolutionId, status: "resolved", entity: { entityType: "unit", unit: { id: "new", label: "M900-115", code: "M900-115", companyId: "co" } }, facts: [] }]);
+  const runtime = deps(state, [correction], resolver);
+  const result = await processCleanTurn(turn("change-unit"), runtime.value);
+  assert.equal(result.state.unit?.id, "new");
+  assert.equal(result.state.previousUnit?.id, "old");
+  assert.equal(result.state.focusedTaskId, active.id);
+  assert.equal(result.state.tasks[0]?.collectedFields.value, 98);
+  assert.notEqual(result.state.pendingOperation?.operationId, "old-op");
+  assert.equal(result.state.pendingOperation?.capability, "hourmeter.update");
+  assert.match(result.reply, /confirmar.*cancelar/i);
+  assert.equal(result.trace.writeExecuted, false);
 });
 
 test("null interpretation preserves state and calls no downstream effects", async () => {

@@ -5,7 +5,7 @@ import { PostgresCleanPersistence } from "../adapters/persistence/postgres-clean
 import { AtomicCleanConversationStore } from "../adapters/persistence/atomic-conversation-store.js";
 import { SystemClock } from "../core/persistence/contracts.js";
 import { createEmptyCleanState } from "../core/types/state.js";
-import { RuntimeNextStableTransport } from "../adapters/interpreter/runtime-next-stable-transport.js";
+import { CleanOpenAiInterpreterTransport } from "../adapters/interpreter/clean-openai-interpreter-transport.js";
 import { StableInterpreterAdapter } from "../adapters/interpreter/stable-interpreter-adapter.js";
 import { GatedCleanInterpreter } from "../adapters/interpreter/gated-interpreter.js";
 import { CleanController } from "../core/controller/controller.js";
@@ -56,7 +56,7 @@ export async function startCleanLabApplication(env: NodeJS.ProcessEnv = process.
   const odoo = new GuardedOdooHandoffAdapter(config.runtime, serviceTransport(config.odooUrl, odooHeaders));
   const knowledge = new VersionedKnowledgeRepository(config.runtime, CLEAN_KNOWLEDGE_FIXTURES);
   const observer = new InMemoryCleanObservability(clock);
-  const interpreter = new GatedCleanInterpreter(config.runtime, new StableInterpreterAdapter(new RuntimeNextStableTransport(env)));
+  const interpreter = new GatedCleanInterpreter(config.runtime, new StableInterpreterAdapter(new CleanOpenAiInterpreterTransport(env)));
   const composer = new FactsOnlyLlmComposer(config.runtime, new OpenAiFactsOnlyComposerTransport(config.openAiKey ?? "", config.openAiModel ?? ""));
   const resolver = new WaraEntityResolver(wara, config.allowedTenants);
   const executor = new CleanOperationalCapabilityExecutor(wara, odoo, knowledge, config.allowedTenants);

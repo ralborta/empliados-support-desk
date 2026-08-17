@@ -3,6 +3,7 @@ import test from "node:test";
 import { StableInterpreterAdapter, type StableInterpreterTransport } from "../adapters/interpreter/stable-interpreter-adapter.js";
 import { deepFreezeInterpretationValue, mapStableInterpretation } from "../adapters/interpreter/stable-output-mapper.js";
 import { CLEAN_INTERPRETATION_SCHEMA_VERSION, CLEAN_INTERPRETER_ADAPTER_VERSION, CLEAN_INTERPRETER_PROMPT_VERSION } from "../adapters/interpreter/versions.js";
+import { CLEAN_INTERPRETER_SYSTEM_PROMPT, cleanInterpreterTemporalDefaults } from "../adapters/interpreter/clean-openai-interpreter-transport.js";
 import { createEmptyCleanState } from "../core/types/state.js";
 
 const empty = createEmptyCleanState({ tenantId: "t", conversationId: "c" });
@@ -39,6 +40,26 @@ test("maps answer_expected only into the typed expected field", () => {
   const state = { ...empty, expectedInput: { field: "unit" as const, taskId: null, purpose: "unit" } };
   const result = mapStableInterpretation(raw({ userAct: "answer", relation: "answer_expected", answersExpectedField: true, expectedFieldValue: "unit-ref" }), state);
   assert.deepEqual(result?.suppliedFields, [{ field: "unit", value: "unit-ref" }]);
+});
+test("maps multiple normalized temporal fields and typed unit references without reinterpreting them", () => {
+  const result = mapStableInterpretation(raw({ userAct: "answer", relation: "answer_expected", answersExpectedField: true,
+    suppliedFields: [{ field: "date", value: "2026-08-17" }, { field: "time", value: "18:00" }],
+    references: [{ type: "unit", expression: "900115", source: "message", unitReferenceKind: "internal_code" }] }), empty);
+  assert.deepEqual(result?.suppliedFields, [{ field: "date", value: "2026-08-17" }, { field: "time", value: "18:00" }]);
+  assert.equal(result?.references[0]?.unitReferenceKind, "internal_code");
+});
+test("rejects malformed temporal fields and unknown unit reference kinds", () => {
+  assert.equal(mapStableInterpretation(raw({ suppliedFields: [{ field: "time", value: "25:70" }] }), empty), null);
+  assert.equal(mapStableInterpretation(raw({ suppliedFields: [{ field: "date", value: "2026-02-30" }] }), empty), null);
+  assert.equal(mapStableInterpretation(raw({ references: [{ type: "unit", expression: "900115", unitReferenceKind: "numeric_plate" }] }), empty), null);
+});
+test("native Clean prompt declares temporal authority, cancellation and every unit search key", () => {
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /referenceInstant/);
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /internal_code/);
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /brand/);
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /model/);
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /cancellation/);
+  assert.equal(cleanInterpreterTemporalDefaults.timeZone, "America/Argentina/Buenos_Aires");
 });
 test("maps corrections and confirmation without changing meaning", () => {
   const correction = mapStableInterpretation(raw({ userAct: "correction", relation: "continue", corrections: [{ field: "value", value: 120 }] }), empty);

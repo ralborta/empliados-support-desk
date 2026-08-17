@@ -4,7 +4,8 @@ import type { OperationExecutionResult } from "../types/operation.js";
 import type { PolicyResult } from "../types/policy.js";
 import type { ResolutionResult } from "../types/resolution.js";
 import type { ConversationStateClean, ListingState, TaskState } from "../types/state.js";
-import { cleanChildId } from "../identity/stable-id.js";
+import { cleanChildId, cleanPayloadHash } from "../identity/stable-id.js";
+import { commitCapabilityForPrepare } from "../authorization/capability-catalog.js";
 
 function nowFor(decision: TurnDecision): string {
   return `clean:${decision.id}`;
@@ -104,12 +105,27 @@ export class CleanStateReducer implements StateReducer {
 
     if (input.resolutions.some((result) => result.status === "resolved") && expectedInput?.field === "unit") expectedInput = null;
     if (pendingResolution) { expectedInput = null; pendingClarification = null; pendingOperation = null; }
-    if (decision.responseIntent.expectedNextField) {
+    if (decision.responseIntent.expectedNextField && !pendingResolution) {
       expectedInput = { field: decision.responseIntent.expectedNextField, taskId: focusedTaskId, purpose: decision.responseIntent.purpose };
       pendingResolution = null; pendingClarification = null; pendingOperation = null;
     }
     if (decision.act === "cancel_task") {
       expectedInput = null; pendingResolution = null; pendingClarification = null; pendingOperation = null;
+    }
+    if (decision.stateTransition.clearPendingOperation && focusedTaskId && decision.act !== "cancel_task") {
+      tasks = updateTask(tasks, focusedTaskId, { status: "collecting", updatedAt: nowFor(decision) });
+    }
+    const preparedRequest = decision.requestedOperations.find((request) => request.kind === "write_prepare"
+      && input.executions.some((execution) => execution.requestId === request.id && execution.status === "success"));
+    if (preparedRequest && focusedTaskId) {
+      const capability = commitCapabilityForPrepare(preparedRequest.capability);
+      if (capability) {
+        const operationId = cleanChildId({ decisionId: decision.id, kind: "operation", discriminator: capability, ordinal: 1 });
+        pendingOperation = { operationId, capability, taskId: focusedTaskId, version: 1, payloadHash: cleanPayloadHash(preparedRequest.arguments),
+          idempotencyKey: operationId, preparedArguments: preparedRequest.arguments, status: "awaiting_confirmation" };
+        tasks = updateTask(tasks, focusedTaskId, { status: "awaiting_confirmation", updatedAt: nowFor(decision) });
+        expectedInput = null; pendingResolution = null; pendingClarification = null;
+      }
     }
     const successfulWrite = input.executions.find((result) => result.status === "success" && result.writeExecuted);
     if (successfulWrite && focusedTaskId) {

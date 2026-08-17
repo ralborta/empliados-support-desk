@@ -12,9 +12,12 @@ it("guards every WARA read and performs one normalized request only when enabled
   const blocked = new GuardedWaraAdapter(new GuardedHttpTransport(loadCleanRuntimeConfig({}), async () => { calls++; return {}; }));
   assert.equal((await blocked.read({ capability: "company.list", tenant, correlationId: "c", authorized: true, query: {} })).status, "unauthorized");
   assert.equal(calls, 0);
-  const enabled = new GuardedWaraAdapter(new GuardedHttpTransport(loadCleanRuntimeConfig({ WARA_CLEAN_RUNTIME_ENABLED: "true", WARA_CLEAN_EXTERNAL_READS_ENABLED: "true" }), async ({ path, tenantId }) => { calls++; return { ok: true, data: { path, tenantId } }; }));
-  const result = await enabled.read({ capability: "gps.get_status", tenant, correlationId: "c", authorized: true, query: { unitId: "u" } });
+  let observed: { path: string; body?: Readonly<Record<string, unknown>> } | null = null;
+  const enabled = new GuardedWaraAdapter(new GuardedHttpTransport(loadCleanRuntimeConfig({ WARA_CLEAN_RUNTIME_ENABLED: "true", WARA_CLEAN_EXTERNAL_READS_ENABLED: "true" }), async ({ path, tenantId, body }) => { calls++; observed = { path, body }; return { ok: true, data: { path, tenantId } }; }));
+  const result = await enabled.read({ capability: "gps.get_status", tenant, correlationId: "c", authorized: true, query: { unitId: "u", plate: "AD427MC" } });
   assert.equal(result.status, "success"); assert.equal(calls, 1);
+  assert.equal(observed?.path, "/ConsultarEstadoUnidades");
+  assert.deepEqual(observed?.body?.patentes, ["AD427MC"]);
 });
 
 it("physically blocks writes unless global gate authorization and exact pending binding all match", async () => {

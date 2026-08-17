@@ -49,6 +49,7 @@ export * from "./adapters/persistence/postgres-clean-persistence.js";
 export * from "./adapters/persistence/pg-pool-sql-client.js";
 export * from "./migrations/migration-runner.js";
 export * from "./lab/composition-root.js";
+export * from "./adapters/interpreter/clean-openai-interpreter-transport.js";
 export * from "./adapters/outbox/postgres-outbox.js";
 export * from "./adapters/persistence/atomic-conversation-store.js";
 export * from "./adapters/services/guarded-http-transport.js";

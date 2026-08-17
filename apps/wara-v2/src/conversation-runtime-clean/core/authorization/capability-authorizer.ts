@@ -23,6 +23,16 @@ function bindingMatches(args: Readonly<Record<string, unknown>>, state: Conversa
   return Boolean(pending && args.operationId === pending.operationId && args.version === pending.version && args.payloadHash === pending.payloadHash
     && args.idempotencyKey === pending.idempotencyKey);
 }
+function argumentsWithResolvedEntities(request: TurnDecision["requestedOperations"][number], resolutions: readonly ResolutionResult[]): Readonly<Record<string, unknown>> {
+  const required = new Set(request.requiredResolutionIds);
+  const company = resolutions.find((result) => required.has(result.requestId) && result.status === "resolved" && result.entity.entityType === "company");
+  const unit = resolutions.find((result) => required.has(result.requestId) && result.status === "resolved" && result.entity.entityType === "unit");
+  return {
+    ...request.arguments,
+    ...(company?.status === "resolved" && company.entity.entityType === "company" ? { companyId: company.entity.company.id } : {}),
+    ...(unit?.status === "resolved" && unit.entity.entityType === "unit" ? { unitId: unit.entity.unit.id, unitCode: unit.entity.unit.code ?? undefined, plate: unit.entity.unit.plate ?? undefined } : {}),
+  };
+}
 export class CleanCapabilityAuthorizer implements CapabilityAuthorizer {
   authorize(input: { decision: TurnDecision; state: ConversationStateClean; resolutions: readonly ResolutionResult[] }): AuthorizationResult {
     const resolved = resolutionIds(input.resolutions);
@@ -34,7 +44,7 @@ export class CleanCapabilityAuthorizer implements CapabilityAuthorizer {
       if (request.requiredResolutionIds.some((id) => !resolved.has(id))) return blocked("UNRESOLVED_DEPENDENCY", `Resolución pendiente para ${request.capability}`);
       if (definition.requiredFields.some((field) => !hasField(field, request.arguments, input.state, input.resolutions))) return blocked("CAPABILITY_REQUIRED_FIELD_MISSING", `Faltan campos para ${request.capability}`);
       if (request.kind === "write_commit" && !bindingMatches(request.arguments, input.state)) return blocked("CONFIRMATION_BINDING_MATCH", `Binding inválido para ${request.capability}`);
-      operations.push({ requestId: request.id, capability: request.capability, kind: request.kind, task: request.task, arguments: request.arguments, realWriteAllowed: false });
+      operations.push({ requestId: request.id, capability: request.capability, kind: request.kind, task: request.task, arguments: argumentsWithResolvedEntities(request, input.resolutions), realWriteAllowed: false });
     }
     return { outcome: "authorized", operations };
   }

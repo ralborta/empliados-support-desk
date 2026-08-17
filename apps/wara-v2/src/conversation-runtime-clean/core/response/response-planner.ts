@@ -11,13 +11,16 @@ function verifiedFacts(resolutions: readonly ResolutionResult[], executions: rea
     .filter((fact) => fact.verified);
 }
 
-function questionFor(policy: PolicyResult, decision: TurnDecision): string | null {
+function questionFor(policy: PolicyResult, decision: TurnDecision, nextState: ConversationStateClean): string | null {
   if (policy.outcome === "clarify") return policy.expected.purpose;
+  if (nextState.pendingResolution?.entityType === "unit") return "No pude identificar una única unidad. Decime el número, patente, nombre, marca o modelo, o elegí una opción del listado.";
+  if (nextState.pendingResolution?.entityType === "company") return "No pude identificar una única empresa. Elegí una opción del listado.";
+  if (decision.responseIntent.purpose === "confirm" && nextState.pendingOperation) return "Respondé confirmar para continuar o cancelar para descartar la operación.";
   const field = decision.responseIntent.expectedNextField;
   if (!field) return null;
   const questions: Record<string, string> = {
     company: "¿Qué empresa elegís?", unit: "¿Qué unidad o patente?", value: "¿Qué valor querés registrar?",
-    date: "¿Qué fecha corresponde?", time: "¿Qué hora corresponde?", confirmation: "¿Confirmás la operación?",
+    date: "¿Qué fecha corresponde?", time: "¿Qué hora corresponde?", confirmation: "Respondé confirmar para continuar o cancelar para descartar la operación.",
     clarification: "¿Podés aclararlo?", free_text: "¿Podés darme más detalle?",
   };
   return questions[field] ?? null;
@@ -33,7 +36,7 @@ export class CleanResponsePlanner implements ResponsePlanner {
     return {
       purpose: input.policy.outcome === "block" ? "error" : input.policy.outcome === "clarify" ? "clarify" : input.decision.responseIntent.purpose,
       facts: [...policyFacts, ...verifiedFacts(input.resolutions, input.executions)],
-      nextQuestion: questionFor(input.policy, input.decision),
+      nextQuestion: questionFor(input.policy, input.decision, input.nextState),
       pendingTaskReminder: pending,
       protectedBlocks: [],
     };

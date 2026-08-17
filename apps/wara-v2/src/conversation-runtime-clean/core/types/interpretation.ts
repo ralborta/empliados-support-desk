@@ -13,6 +13,7 @@ export type TaskType =
   | "conversation_assignment" | "ticket" | "attachment";
 export type EntityType = "company" | "unit" | "date" | "time" | "numeric_value" | "listing_index" | "confirmation";
 export type ExpectedField = "company" | "unit" | "value" | "date" | "time" | "confirmation" | "clarification" | "free_text";
+export type UnitReferenceKind = "internal_code" | "plate" | "name" | "brand" | "model" | "any";
 
 export type IntentRequest = Readonly<{
   serviceId: string;
@@ -26,6 +27,7 @@ export type EntityReference = Readonly<{
   expression: string;
   source: "message" | "active" | "previous" | "last_presented" | "explicit";
   index?: number;
+  unitReferenceKind?: UnitReferenceKind;
 }>;
 export type SuppliedField = Readonly<{ field: ExpectedField; value: unknown }>;
 export type Correction = Readonly<{ field: string; value: unknown }>;

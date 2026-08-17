@@ -63,7 +63,11 @@ test("allows a valid prepare in simulation mode", () => {
 test("allows resolved unit to satisfy a same-turn requirement", () => {
   const request = operation({ capability: "gps.get_status", kind: "read", task: "gps", requiredResolutionIds: ["r"] });
   const resolutions = [{ requestId: "r", status: "resolved" as const, entity: { entityType: "unit" as const, unit: { id: "u", label: "U", companyId: "c" } }, facts: [] }];
-  assert.equal(authorizer.authorize({ decision: decision([request]), state: state(), resolutions }).outcome, "authorized");
+  const result = authorizer.authorize({ decision: decision([request]), state: state(), resolutions });
+  assert.equal(result.outcome, "authorized");
+  if (result.outcome === "authorized") {
+    assert.equal(result.operations[0]?.arguments.unitId, "u");
+  }
 });
 test("commit requires exact pending binding and remains simulation-only", () => {
   const active: TaskState = { id: "task", type: "certificate", status: "awaiting_confirmation", collectedFields: {}, createdAt: "a", updatedAt: "a" };

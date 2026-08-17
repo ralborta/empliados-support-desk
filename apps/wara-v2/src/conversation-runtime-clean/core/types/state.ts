@@ -1,7 +1,15 @@
 import type { ExpectedField, TaskType } from "./interpretation.js";
 
 export type CompanyState = Readonly<{ id: string; name: string }>;
-export type UnitState = Readonly<{ id: string; label: string; code?: string | null; plate?: string | null; companyId: string }>;
+export type UnitState = Readonly<{
+  id: string;
+  label: string;
+  code?: string | null;
+  plate?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  companyId: string;
+}>;
 export type TaskStatus = "collecting" | "awaiting_resolution" | "awaiting_confirmation" | "paused" | "completed" | "cancelled";
 export type TaskState = Readonly<{
   id: string; type: TaskType; status: TaskStatus;
@@ -30,6 +38,6 @@ export function createEmptyCleanState(input: { tenantId: string; conversationId:
     ...input, company: null, unit: null, previousUnit: null, tasks: [], focusedTaskId: null,
     expectedInput: null, pendingResolution: null, pendingClarification: null, pendingOperation: null,
     lastListing: null, recentSummary: null,
-    metadata: { runtime: "clean", schemaVersion: "clean-1", promptVersion: "clean-core-no-llm" },
+    metadata: { runtime: "clean", schemaVersion: "clean-1", promptVersion: "clean-interpreter-prompt-2" },
   };
 }

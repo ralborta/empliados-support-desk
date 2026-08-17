@@ -58,3 +58,13 @@ test("PolicyResult cannot carry a TurnDecision", () => {
   };
   visit(alias.type);
 });
+
+test("lab composition and live corpus use the native Clean Interpreter, never Runtime Next", () => {
+  const cleanRoot = join(root, "..");
+  for (const relative of ["lab/composition-root.ts", "live/run-live-corpus.ts"]) {
+    const source = readFileSync(join(cleanRoot, relative), "utf8");
+    assert.equal(source.includes("conversation-runtime-next"), false, relative);
+    assert.equal(source.includes("RuntimeNextStableTransport"), false, relative);
+    assert.equal(source.includes("CleanOpenAiInterpreterTransport"), true, relative);
+  }
+});

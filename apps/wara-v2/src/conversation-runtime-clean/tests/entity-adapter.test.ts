@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { LegacyEntityDirectoryAdapter } from "../adapters/legacy/entity-directory-adapter.js";
+import { WaraEntityResolver } from "../adapters/services/wara-entity-resolver.js";
+import { GuardedWaraAdapter } from "../adapters/services/guarded-wara-adapter.js";
+import { GuardedHttpTransport } from "../adapters/services/guarded-http-transport.js";
+import { loadCleanRuntimeConfig } from "../config/clean-config.js";
 import type { ResolutionRequest } from "../core/types/decision.js";
 import type { EntityReference } from "../core/types/interpretation.js";
 import { createEmptyCleanState } from "../core/types/state.js";
@@ -9,15 +13,24 @@ const companies = [
   { id: "co-a", name: "Transportes Norte" }, { id: "co-b", name: "Transportes Sur" }, { id: "co-c", name: "Logística Central" },
 ];
 const units = [
-  { id: "u-1", label: "Camión Alfa", code: "M900-088", plate: "AA900088", companyId: "co-a" },
-  { id: "u-2", label: "Camión Beta", code: "M300-097", plate: "AB300097", companyId: "co-a" },
-  { id: "u-3", label: "Camión Gamma", code: "M700-011", plate: "AC700011", companyId: "co-a" },
+  { id: "u-1", label: "Camión Alfa", code: "M900-088", plate: "AA900088", brand: "Iveco", model: "Tector 170E", companyId: "co-a" },
+  { id: "u-2", label: "Camión Beta", code: "M300-097", plate: "AB300097", brand: "Scania", model: "R450", companyId: "co-a" },
+  { id: "u-3", label: "Camión Gamma", code: "M700-011", plate: "AC700011", brand: "Iveco", model: "Daily", companyId: "co-a" },
 ];
 const adapter = new LegacyEntityDirectoryAdapter({ companies, units });
 
 function request(entityType: "company" | "unit", reference: EntityReference): ResolutionRequest {
   return { id: "r", entityType, reference, scope: { tenantId: "t", companyId: "co-a" } };
 }
+test("unit search keeps numeric internal codes distinct from plates and supports brand/model", async () => {
+  const code = await resolve("unit", { type: "unit", expression: "900088", source: "message", unitReferenceKind: "internal_code" });
+  assert.equal(code.status === "resolved" && code.entity.entityType === "unit" && code.entity.unit.id, "u-1");
+  const plate = await resolve("unit", { type: "unit", expression: "AA900088", source: "message", unitReferenceKind: "plate" });
+  assert.equal(plate.status === "resolved" && plate.entity.entityType === "unit" && plate.entity.unit.id, "u-1");
+  assert.equal((await resolve("unit", { type: "unit", expression: "Iveco", source: "message", unitReferenceKind: "brand" })).status, "ambiguous");
+  const model = await resolve("unit", { type: "unit", expression: "R450", source: "message", unitReferenceKind: "model" });
+  assert.equal(model.status === "resolved" && model.entity.entityType === "unit" && model.entity.unit.id, "u-2");
+});
 async function resolve(entityType: "company" | "unit", reference: EntityReference, statePatch = {}) {
   const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), ...statePatch };
   return (await adapter.resolve([request(entityType, reference)], state))[0]!;
@@ -62,4 +75,25 @@ test("company resolves exact, ambiguous and active", async () => {
   assert.equal((await resolve("company", { type: "company", expression: "Transportes", source: "explicit" })).status, "ambiguous");
   const active = await resolve("company", { type: "company", expression: "", source: "active" }, { company: companies[0] });
   assert.equal(active.status === "resolved" && active.entity.entityType === "company" && active.entity.company.id, "co-a");
+});
+
+test("real WARA resolver normalizes verified fleet fields before matching a numeric code, brand or model", async () => {
+  const observedBodies: unknown[] = [];
+  const config = loadCleanRuntimeConfig({ WARA_CLEAN_RUNTIME_ENABLED: "true", WARA_CLEAN_EXTERNAL_READS_ENABLED: "true" });
+  const wara = new GuardedWaraAdapter(new GuardedHttpTransport(config, async (input) => {
+    observedBodies.push(input.body);
+    return { ok: true, data: { unidades: [
+      { movil_id: 900115, unidad: "M900-115", patente: "AD427MC", marca: "Iveco", modelo: "Tector" },
+      { movil_id: 900110, unidad: "M900-110", patente: "AF110ZZ", marca: "Iveco", modelo: "Daily" },
+    ] } };
+  }));
+  const resolver = new WaraEntityResolver(wara, new Set(["t"]));
+  const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), company: { id: "co-a", name: "Company" } };
+  const code = await resolver.resolve([request("unit", { type: "unit", expression: "900115", source: "message", unitReferenceKind: "internal_code" })], state);
+  assert.equal(code[0]?.status === "resolved" && code[0].entity.entityType === "unit" && code[0].entity.unit.id, "900115");
+  const brand = await resolver.resolve([request("unit", { type: "unit", expression: "Iveco", source: "message", unitReferenceKind: "brand" })], state);
+  assert.equal(brand[0]?.status, "ambiguous");
+  const model = await resolver.resolve([request("unit", { type: "unit", expression: "Daily", source: "message", unitReferenceKind: "model" })], state);
+  assert.equal(model[0]?.status === "resolved" && model[0].entity.entityType === "unit" && model[0].entity.unit.id, "900110");
+  assert.equal((observedBodies[0] as { referenceKind?: string }).referenceKind, "internal_code");
 });

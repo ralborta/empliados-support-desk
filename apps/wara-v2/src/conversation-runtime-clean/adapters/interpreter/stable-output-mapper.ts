@@ -1,10 +1,12 @@
 import { getCleanCapability } from "../../core/authorization/capability-catalog.js";
-import type { EntityReference, ExpectedField, OperationKind, SuppliedField, TaskType, ThreadRelation, TurnInterpretation, UserAct } from "../../core/types/interpretation.js";
+import type { EntityReference, ExpectedField, OperationKind, SuppliedField, TaskType, ThreadRelation, TurnInterpretation, UnitReferenceKind, UserAct } from "../../core/types/interpretation.js";
 import type { ConversationStateClean } from "../../core/types/state.js";
 
 const USER_ACTS: ReadonlySet<string> = new Set<UserAct>(["greeting", "request", "answer", "question", "correction", "confirmation", "cancellation", "rejection", "acknowledgement", "unknown"]);
 const RELATIONS: ReadonlySet<string> = new Set<ThreadRelation>(["standalone", "answer_expected", "continue", "side_question", "switch", "pause", "resume", "replace", "cancel", "confirm", "ambiguous"]);
-const SOURCES: ReadonlySet<string> = new Set(["message", "active", "previous", "last_presented"]);
+const SOURCES: ReadonlySet<string> = new Set(["message", "active", "previous", "last_presented", "explicit"]);
+const EXPECTED_FIELDS: ReadonlySet<string> = new Set<ExpectedField>(["company", "unit", "value", "date", "time", "confirmation", "clarification", "free_text"]);
+const UNIT_REFERENCE_KINDS: ReadonlySet<string> = new Set<UnitReferenceKind>(["internal_code", "plate", "name", "brand", "model", "any"]);
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -70,11 +72,47 @@ function mapReferences(raw: unknown[]): EntityReference[] | null {
     const type = item.type === "index" ? "listing_index" : item.type;
     if (type !== "company" && type !== "unit" && type !== "listing_index") return null;
     if (item.index !== undefined && (!Number.isInteger(item.index) || Number(item.index) < 1)) return null;
-    references.push({ type, expression: item.expression, source: source as EntityReference["source"], ...(item.index === undefined ? {} : { index: Number(item.index) }) });
+    if (item.unitReferenceKind !== undefined && (type !== "unit" || typeof item.unitReferenceKind !== "string" || !UNIT_REFERENCE_KINDS.has(item.unitReferenceKind))) return null;
+    references.push({ type, expression: item.expression, source: source as EntityReference["source"], ...(item.index === undefined ? {} : { index: Number(item.index) }),
+      ...(item.unitReferenceKind === undefined ? {} : { unitReferenceKind: item.unitReferenceKind as UnitReferenceKind }) });
   }
   return references;
 }
-function expectedField(state: ConversationStateClean, raw: Record<string, unknown>): SuppliedField[] {
+function digits(value: string, start: number, end: number): boolean {
+  for (let index = start; index < end; index++) {
+    const code = value.charCodeAt(index);
+    if (code < 48 || code > 57) return false;
+  }
+  return true;
+}
+function validDate(value: unknown): boolean {
+  if (typeof value !== "string" || value.length !== 10 || value[4] !== "-" || value[7] !== "-" || !digits(value, 0, 4) || !digits(value, 5, 7) || !digits(value, 8, 10)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+function validTime(value: unknown): boolean {
+  if (typeof value !== "string" || value.length !== 5 || value[2] !== ":" || !digits(value, 0, 2) || !digits(value, 3, 5)) return false;
+  const hour = Number(value.slice(0, 2)); const minute = Number(value.slice(3, 5));
+  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
+}
+function validSuppliedValue(field: ExpectedField, value: unknown): boolean {
+  if (field === "date") return validDate(value);
+  if (field === "time") return validTime(value);
+  return value !== undefined;
+}
+function expectedField(state: ConversationStateClean, raw: Record<string, unknown>): SuppliedField[] | null {
+  if (Array.isArray(raw.suppliedFields)) {
+    const supplied: SuppliedField[] = [];
+    const seen = new Set<string>();
+    for (const value of raw.suppliedFields) {
+      const item = record(value);
+      if (!item || typeof item.field !== "string" || !EXPECTED_FIELDS.has(item.field) || seen.has(item.field)
+        || !validSuppliedValue(item.field as ExpectedField, item.value)) return null;
+      seen.add(item.field);
+      supplied.push({ field: item.field as ExpectedField, value: detachInterpretationValue(item.value) });
+    }
+    return supplied;
+  }
   if (raw.answersExpectedField !== true || raw.expectedFieldValue === undefined || !state.expectedInput) return [];
   const field: ExpectedField = state.expectedInput.field;
   return [{ field, value: detachInterpretationValue(raw.expectedFieldValue) }];
@@ -100,6 +138,8 @@ export function mapStableInterpretation(rawInput: unknown, state: ConversationSt
   }
   const references = mapReferences(referencesRaw);
   if (!references) return null;
+  const suppliedFields = expectedField(state, raw);
+  if (!suppliedFields) return null;
   const corrections = correctionsRaw.map((value) => record(value)).map((item) => item && typeof item.field === "string" ? { field: item.field, value: detachInterpretationValue(item.value) } : null);
   if (corrections.some((item) => !item)) return null;
   const ambiguityRaw = raw.ambiguity === undefined ? undefined : record(raw.ambiguity);
@@ -109,7 +149,7 @@ export function mapStableInterpretation(rawInput: unknown, state: ConversationSt
   if (raw.confirmation !== undefined && (!confirmationRaw || typeof confirmationRaw.intended !== "boolean" || typeof confirmationRaw.containsCorrections !== "boolean")) return null;
   return deepFreezeInterpretationValue({
     userAct: raw.userAct as UserAct, relation: raw.relation as ThreadRelation, normalizedMeaning: raw.normalizedMeaning,
-    intents: Object.freeze(intents), references: Object.freeze(references), suppliedFields: Object.freeze(expectedField(state, raw)),
+    intents: Object.freeze(intents), references: Object.freeze(references), suppliedFields: Object.freeze(suppliedFields),
     corrections: Object.freeze(corrections as Array<{ field: string; value: unknown }>), answersExpectedField: raw.answersExpectedField,
     ...(confirmationRaw ? { confirmation: Object.freeze({ intended: confirmationRaw.intended as boolean, containsCorrections: confirmationRaw.containsCorrections as boolean }) } : {}),
     ...(ambiguityRaw ? { ambiguity: { reason: ambiguityRaw.reason as string, alternatives: [...ambiguityRaw.alternatives as string[]], clarificationQuestion: ambiguityRaw.clarificationQuestion as string } } : {}),
