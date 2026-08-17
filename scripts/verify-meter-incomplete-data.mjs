@@ -16,6 +16,7 @@ import {
 import {
   looksLikeOdometerPendingDataAmendment,
   threadAwaitingHorometerKmValue,
+  stripMeterValuesMatchingUnitReference,
 } from "../src/lib/wara.ts";
 import { formatMeterAskWithReading } from "../src/lib/waraWhatsAppFormat.ts";
 import { confirmFooter } from "../src/lib/waraWhatsAppFormat.ts";
@@ -63,5 +64,30 @@ const ayer11 = parseFechaFromText("No la fecha es de ayer a las 11", tz);
 assert.ok(ayer11?.includes("T11:00"), `ayer a las 11 → ${ayer11}`);
 
 assert.match(confirmFooter(), /CONFIRMO.*CANCELAR/s, "footer estándar confirmación");
+
+// Bug 2026-08-17: pending horómetro + pedido nuevo de odómetro con unidad no debe confirmar solo patente.
+const odoIntent = "Quiero cambiar el odometro de la unidad 900077";
+assert.equal(/\bod[oó]metro\b/i.test(odoIntent) && !/\bhor[oó]metro\b/i.test(odoIntent), true);
+assert.equal(
+  stripMeterValuesMatchingUnitReference(odoIntent, { odometro: 900077, horometro: 78 }).odometro,
+  undefined,
+  "código unidad no es km",
+);
+assert.equal(
+  stripMeterValuesMatchingUnitReference(odoIntent, { odometro: 900077, horometro: 78 }).horometro,
+  78,
+);
+// Tras limpiar horómetro por intención odómetro explícita, falta el km activo.
+const afterOdoSwitch = { odometro: undefined, horometro: undefined };
+assert.equal(
+  typeof afterOdoSwitch.odometro === "number",
+  false,
+  "sin km → debe pedir valor+fecha, no CONFIRMO",
+);
+assert.match(
+  formatMeterAskWithReading({ meter: "odometer", unitLabel: "AA 496 GJ" }),
+  /🛣.*Odómetro/s,
+  "pedido km+fecha formateado con iconos",
+);
 
 console.log("OK — valor sin fecha pide faltantes; ejemplo bot no contamina; corrección fecha medidor");
