@@ -63,6 +63,7 @@ test("native Clean prompt declares temporal authority, cancellation and every un
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /userAct=answer, relation=answer_expected/);
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /company\.select/);
   assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /Nunca vuelvas a emitir company\.list para una selección/);
+  assert.match(CLEAN_INTERPRETER_SYSTEM_PROMPT, /Una cantidad no es una confirmación/);
   assert.equal(cleanInterpreterTemporalDefaults.timeZone, "America/Argentina/Buenos_Aires");
 });
 test("native Clean transport exposes a strict closed schema for every semantic field", () => {
@@ -110,8 +111,14 @@ test("maps nullable strict-schema optionals without weakening typed values", () 
 test("maps corrections and confirmation without changing meaning", () => {
   const correction = mapStableInterpretation(raw({ userAct: "correction", relation: "continue", corrections: [{ field: "value", value: 120 }] }), empty);
   assert.deepEqual(correction?.corrections, [{ field: "value", value: 120 }]);
-  const confirmation = mapStableInterpretation(raw({ userAct: "confirmation", relation: "confirm", confirmation: { intended: true, containsCorrections: false } }), empty);
+  const pending = { ...empty, pendingOperation: { operationId: "op", capability: "hourmeter.update", taskId: "task", version: 1, payloadHash: "hash", idempotencyKey: "idem", preparedArguments: {}, status: "awaiting_confirmation" as const } };
+  const confirmation = mapStableInterpretation(raw({ userAct: "confirmation", relation: "confirm", confirmation: { intended: true, containsCorrections: false } }), pending);
   assert.deepEqual(confirmation?.confirmation, { intended: true, containsCorrections: false });
+});
+test("rejects contradictory confirmation semantics when no operation is pending", () => {
+  const state = { ...empty, expectedInput: { field: "value" as const, taskId: null, purpose: "value" } };
+  assert.equal(mapStableInterpretation(raw({ userAct: "confirmation", relation: "answer_expected", answersExpectedField: true,
+    suppliedFields: [{ field: "value", value: 120 }], confirmation: { intended: true, containsCorrections: false } }), state), null);
 });
 test("unknown services are rejected instead of guessed", () => {
   assert.equal(mapStableInterpretation(raw({ requests: [{ serviceId: "unknown", domain: "gps", goal: "x", entities: {}, operationHint: "write" }] }), empty), null);

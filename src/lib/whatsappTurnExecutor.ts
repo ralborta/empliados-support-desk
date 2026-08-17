@@ -109,7 +109,7 @@ import {
 import {
   composeAgentReplyFromDialogueState,
 } from "@/lib/atilioDialogueCompose";
-import { isStructuredGpsWhatsAppSummary } from "@/lib/waraGpsSummary";
+import { isPassthroughGpsWhatsAppMessage } from "@/lib/waraGpsSummary";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -176,7 +176,7 @@ function messageFromPayload(data: JsonRecord): string {
 function shouldUseAgentCompose(execResult: JsonRecord): boolean {
   if (!agentComposeRequested(execResult)) return false;
   const template = messageFromPayload(execResult);
-  return !isStructuredGpsWhatsAppSummary(template);
+  return !isPassthroughGpsWhatsAppMessage(template);
 }
 
 function executorSkippedSilently(data: JsonRecord): boolean {

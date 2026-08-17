@@ -149,6 +149,10 @@ export function mapStableInterpretation(rawInput: unknown, state: ConversationSt
   const confirmationRaw = raw.confirmation === undefined || raw.confirmation === null ? undefined : record(raw.confirmation);
   if (raw.confirmation !== undefined && raw.confirmation !== null
     && (!confirmationRaw || typeof confirmationRaw.intended !== "boolean" || typeof confirmationRaw.containsCorrections !== "boolean")) return null;
+  const confirmationAct = raw.userAct === "confirmation" || raw.relation === "confirm";
+  if (confirmationAct && !state.pendingOperation) return null;
+  if (raw.answersExpectedField && state.expectedInput && state.expectedInput.field !== "confirmation"
+    && raw.userAct !== "answer" && raw.userAct !== "correction") return null;
   return deepFreezeInterpretationValue({
     userAct: raw.userAct as UserAct, relation: raw.relation as ThreadRelation, normalizedMeaning: raw.normalizedMeaning,
     intents: Object.freeze(intents), references: Object.freeze(references), suppliedFields: Object.freeze(suppliedFields),

@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 import {
   buildStructuredGpsBody,
   buildTemplateSummary,
+  buildGpsPositionClarificationAnalysis,
   formatGpsUnitLabel,
+  threadHasRecentGpsContext,
 } from "./waraGpsSummary";
+import { looksLikeGpsPositionClarificationQuestion } from "./waraApi";
 import type { WaraUnidadEstado } from "./waraApi";
 
 function sampleUnit(): WaraUnidadEstado {
@@ -77,5 +80,34 @@ describe("waraGpsSummary formato WhatsApp", () => {
     assert.match(text, /⚠️ \*Falta de reporte\*/);
     assert.match(text, /#37183/);
     assert.match(text, /\[Ver ubicación\]/);
+  });
+
+  it("detecta preguntas aclaratorias sobre la posición", () => {
+    assert.equal(looksLikeGpsPositionClarificationQuestion("¿Estás seguro de la posición?"), true);
+    assert.equal(looksLikeGpsPositionClarificationQuestion("¿La posición es correcta?"), true);
+    assert.equal(looksLikeGpsPositionClarificationQuestion("¿Es la última posición?"), true);
+    assert.equal(looksLikeGpsPositionClarificationQuestion("Quiero cambiar odómetro"), false);
+  });
+
+  it("buildGpsPositionClarificationAnalysis explica si es la última posición", () => {
+    const text = buildGpsPositionClarificationAnalysis(sampleUnit(), {
+      status: "ok",
+      reportElapsed: 60,
+      positionElapsed: 70,
+      ignitionElapsed: 80,
+    });
+    assert.match(text, /Sí.*última posición/i);
+    assert.match(text, /reporte hace/i);
+    assert.match(text, /\[Ver ubicación\]/);
+  });
+
+  it("threadHasRecentGpsContext reconoce resumen estructurado", () => {
+    const thread = buildTemplateSummary({
+      unitLabel: "AG 228 NY",
+      unit: sampleUnit(),
+      assessment: { status: "ok", reportElapsed: 60, positionElapsed: 70, ignitionElapsed: 80 },
+      action: "observation",
+    });
+    assert.equal(threadHasRecentGpsContext(thread), true);
   });
 });

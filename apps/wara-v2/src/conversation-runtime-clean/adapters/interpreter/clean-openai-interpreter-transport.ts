@@ -156,6 +156,7 @@ Reglas de autoridad:
 5c. references contiene exclusivamente referencias reales de empresa o unidad. Fechas, horas, valores y palabras de confirmación van solo en suppliedFields/corrections/confirmation. Nunca copies una fecha, hora o valor como reference.type=unit.
 5d. Si el usuario reemplaza una unidad dentro de la tarea activa, usá userAct=correction, relation=continue y una reference unit tipada. No abras una tarea unit_query independiente.
 5e. Si expectedInput pide company, o el contexto muestra que se acaba de solicitar una empresa, y el usuario responde con su nombre, identificador o índice del listado, usá company.select. Emití una reference company para nombre/identificador o listing_index para un índice. Nunca vuelvas a emitir company.list para una selección.
+5f. Solo existe una confirmación cuando hasPendingOperation=true y el usuario aprueba explícitamente esa operación. Si hasPendingOperation=false, nunca uses userAct=confirmation ni relation=confirm. Si expectedInput pide value y el usuario entrega una cantidad, incluso acompañada por su unidad de medida, usá userAct=answer, relation=answer_expected y suppliedFields=[{field:"value", value: cantidad}]. Una cantidad no es una confirmación.
 
 Fechas y horas:
 6. Normalizá fechas a YYYY-MM-DD y horas a HH:mm de 24 horas usando referenceInstant y timeZone del payload.
