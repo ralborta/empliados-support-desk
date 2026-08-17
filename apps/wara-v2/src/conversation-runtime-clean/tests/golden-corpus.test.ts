@@ -7,8 +7,8 @@ import { runGoldenCorpus } from "../golden/deterministic-runner.js";
 import { runGoldenInterpreterFixtures } from "../golden/interpreter-runner.js";
 import type { StableInterpreterTransport } from "../adapters/interpreter/stable-interpreter-adapter.js";
 
-test("golden corpus deterministically passes every scenario with zero writes", () => {
-  const results = runGoldenCorpus(GOLDEN_CORPUS);
+test("golden corpus deterministically passes every scenario with zero writes", async () => {
+  const results = await runGoldenCorpus(GOLDEN_CORPUS);
   assert.ok(results.length > 39);
   assert.deepEqual(results.filter((result) => !result.passed), []);
   for (const scenario of GOLDEN_CORPUS) for (const turn of scenario.turns) {
