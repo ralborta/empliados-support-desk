@@ -480,9 +480,9 @@ function normalizeToken(value: string): string {
     .replace(/\s+/g, "");
 }
 
-/** Palabras sueltas (sin acentos, sin unir) del patente+unidad, para matchear por PALABRA COMPLETA. */
+/** Palabras sueltas (sin acentos, sin unir) del patente+unidad+marca+modelo, para matchear por PALABRA COMPLETA. */
 function haystackWordsForUnit(unit: WaraUnidadEstado): string[] {
-  const raw = `${unit.patente ?? ""} ${unit.unidad ?? ""}`;
+  const raw = `${unit.patente ?? ""} ${unit.unidad ?? ""} ${unit.marca ?? ""} ${unit.modelo ?? ""}`;
   return raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -539,6 +539,71 @@ function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
 
+/** Etiqueta legible para listar coincidencias (patente · nombre · marca/modelo). */
+export function formatUnitListLabel(unit: WaraUnidadEstado): string {
+  const plateRaw = unit.patente?.trim() || "";
+  const plate = plateRaw ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw : "";
+  const parts: string[] = [];
+  if (plate) parts.push(plate);
+  const nombre = unit.unidad?.trim() || "";
+  if (nombre && normalizeLoosePlate(nombre) !== normalizeLoosePlate(plate)) parts.push(nombre);
+  const mm = [unit.marca?.trim(), unit.modelo?.trim()].filter(Boolean).join(" ");
+  if (mm) {
+    const hay = `${parts.join(" ")}`.toLowerCase();
+    if (!hay.includes(mm.toLowerCase())) parts.push(mm);
+  }
+  return parts.join(" · ") || "sin datos";
+}
+
+/**
+ * Marca/modelo en lenguaje natural: "la Nissan", "marca Saveiro", "buscar la Hilux".
+ * Complementa el catálogo cerrado de looksLikeVehicleBrandOrUnitSearch.
+ */
+export function extractBrandSearchLabel(rawText: string): string | null {
+  const raw = String(rawText ?? "").trim();
+  if (!raw || raw.length > 160) return null;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const marcaKw = t.match(/\b(?:marca|modelo)\s+([a-z0-9]{3,20})\b/);
+  if (marcaKw?.[1] && !STOPWORDS.has(marcaKw[1])) return marcaKw[1];
+
+  const pick = (cand: string | undefined): string | null => {
+    if (!cand) return null;
+    const trimmed = cand.trim();
+    if (detectLoosePlate(trimmed) || looksLikeUnitNameInMessage(trimmed)) return null;
+    const norm = trimmed
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (norm.length < 3 || STOPWORDS.has(norm)) return null;
+    if (
+      /^(certificado|certficado|cobertura|mantenimiento|agenda|reporte|estado|gps|ticket|caso|patente|matricula|unidad|flota|posicion|ubicacion|ignicion|odometro|horometro|tambien|también|obtener|saber|consultar|registrar|programar|pedir|generar|ayudar|ayudas|certificado)$/.test(
+        norm,
+      )
+    ) {
+      return null;
+    }
+    return trimmed;
+  };
+
+  const deLa = raw.match(/\bde\s+la\s+([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9-]{2,20})\b/i);
+  const fromDeLa = pick(deLa?.[1]);
+  if (fromDeLa) return fromDeLa;
+
+  const articles = [...raw.matchAll(/\b(?:la|el|una|un)\s+([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9-]{2,20})\b/gi)];
+  if (articles.length) {
+    const fromArticle = pick(articles[articles.length - 1]?.[1]);
+    if (fromArticle) return fromArticle;
+  }
+
+  const verbLead = raw.match(
+    /\b(?:busco|buscar|quiero|necesito|dame|pasame|decime|ver)\s+(?:la|el|una|un|mi|mis)?\s*([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9-]{2,20})\b/i,
+  );
+  return pick(verbLead?.[1]);
+}
+
 /** Búsqueda determinística por marca/nombre/etiqueta en patente + unidad (campo Wara). */
 function resolveBrandOrNameInFleet(
   rawText: string,
@@ -549,7 +614,10 @@ function resolveBrandOrNameInFleet(
   if (looksLikeUnitNameInMessage(rawText) || (nameHint && looksLikeUnitNameInMessage(nameHint))) {
     return null;
   }
-  const freeLabel = nameHint?.trim() || extractFreeTextUnitSearchCandidate(rawText);
+  const freeLabel =
+    nameHint?.trim() ||
+    extractFreeTextUnitSearchCandidate(rawText) ||
+    extractBrandSearchLabel(rawText);
   const canSearch =
     !!freeLabel ||
     looksLikeVehicleBrandOrUnitSearch(rawText) ||
@@ -579,7 +647,7 @@ function resolveBrandOrNameInFleet(
   if (matches.length > 1) {
     const labels = matches
       .slice(0, 8)
-      .map((u) => (u.patente || u.unidad || "").trim())
+      .map((u) => formatUnitListLabel(u))
       .join(", ");
     return {
       intent: "need_clarification",
@@ -701,6 +769,8 @@ function compactUnitsForAi(
     movil_id: u.movil_id,
     patente: (u.patente ?? "").trim(),
     unidad: (u.unidad ?? "").trim(),
+    marca: (u.marca ?? "").trim(),
+    modelo: (u.modelo ?? "").trim(),
   }));
 }
 
@@ -1793,7 +1863,11 @@ function resolveWithRules(
   const unitSelection = resolveUnitSelectionHint(rawText, units);
   if (unitSelection) return unitSelection;
 
-  if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
+  if (
+    looksLikeVehicleBrandOrUnitSearch(rawText) ||
+    !!extractFreeTextUnitSearchCandidate(rawText) ||
+    !!extractBrandSearchLabel(rawText)
+  ) {
     const brandResolution = resolveBrandOrNameInFleet(rawText, units);
     if (brandResolution) return brandResolution;
   }
@@ -2291,7 +2365,11 @@ export async function resolveUnitQuery(params: {
   }
 
   // Marca/nombre (Nissan, Saveiro, Altamiranda, etc.) contra el catálogo real.
-  if (looksLikeVehicleBrandOrUnitSearch(params.rawText) || !!extractFreeTextUnitSearchCandidate(params.rawText)) {
+  if (
+    looksLikeVehicleBrandOrUnitSearch(params.rawText) ||
+    !!extractFreeTextUnitSearchCandidate(params.rawText) ||
+    !!extractBrandSearchLabel(params.rawText)
+  ) {
     const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units, params.nameHint);
     if (brandRules) return brandRules;
   }

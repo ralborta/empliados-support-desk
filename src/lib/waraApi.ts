@@ -443,6 +443,7 @@ export function looksLikeVehicleBrandOrUnitSearch(text: string | undefined | nul
   // sea un párrafo larguísimo y que mencione una marca real del catálogo cerrado.
   if (!t || t.length > 160) return false;
   if (/\b(empresa|wara|cacique|guara)\b/.test(t)) return false;
+  if (/\b(marca|modelo)\s+[a-z0-9]{3,}/.test(t)) return true;
   const tokens = t.split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return false;
   return tokens.some((token) => VEHICLE_BRAND_TOKENS.has(token));
@@ -2213,6 +2214,10 @@ export type WaraUnidadEstado = {
   unidad: string;
   /** Matrícula / patente (backoffice: Matrícula, ej. NKL 952). */
   patente: string;
+  /** Marca del vehículo (ej. Nissan, Volkswagen) — cuando Wara la expone aparte del nombre. */
+  marca?: string;
+  /** Modelo del vehículo (ej. Saveiro, Frontier). */
+  modelo?: string;
   ultimo_reporte?: {
     fecha?: string;
     hace_segundos?: number;
@@ -3106,12 +3111,28 @@ function normalizeWaraUnidadEstado(raw: unknown): WaraUnidadEstado | null {
   const row = raw as Record<string, unknown>;
   const patente = typeof row.patente === "string" ? row.patente : "";
   const unidad = typeof row.unidad === "string" ? row.unidad : "";
+  const marcaRaw =
+    typeof row.marca === "string"
+      ? row.marca
+      : typeof row.brand === "string"
+        ? row.brand
+        : "";
+  const modeloRaw =
+    typeof row.modelo === "string"
+      ? row.modelo
+      : typeof row.model === "string"
+        ? row.model
+        : "";
+  const marca = marcaRaw.trim();
+  const modelo = modeloRaw.trim();
   if (!patente.trim() && !unidad.trim()) return null;
   return {
     ...(raw as WaraUnidadEstado),
     movil_id: coerceWaraMovilId(row.movil_id),
     patente,
     unidad,
+    ...(marca ? { marca } : {}),
+    ...(modelo ? { modelo } : {}),
   };
 }
 

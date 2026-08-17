@@ -34,6 +34,7 @@ const PUSH_SUITES = [
   "verify-delivery-critical-fixes.mjs",
   "verify-nissan-problem-list-offer.mjs",
   "verify-brand-mention-in-question.mjs",
+  "verify-brand-marca-modelo-search.mjs",
   "verify-platform-access-routing.mjs",
   "verify-odoo-partner-name-match.mjs",
   "verify-conversation-closing.mjs",
