@@ -149,7 +149,7 @@ function formatUnitLabel(unit: WaraUnidadEstado): string {
   const plate = plateRaw ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw : "";
   const nombre = unit.unidad?.trim() || "";
   if (plate && nombre && normalizeLoosePlate(plate) !== normalizeLoosePlate(nombre)) {
-    return `${plate} (nombre ${nombre})`;
+    return `${plate} (${nombre})`;
   }
   return plate || nombre || "la unidad";
 }

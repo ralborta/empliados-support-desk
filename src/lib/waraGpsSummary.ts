@@ -1,15 +1,14 @@
-import OpenAI from "openai";
 import {
   ensureOdooCaseRefInClientMessage,
   formatCustomerOdooCaseRefForWhatsApp,
 } from "@/lib/customerOdooCaseRef";
 import type { WaraUnidadEstado } from "@/lib/waraApi";
-import { withOpenAiTimeout } from "@/lib/openaiTimeout";
+import { formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
 import {
+  assessUnitReporting,
   buildGpsFacts,
   formatMinutesAgo,
   ignitionLabel,
-  MISSING_REPORT_TICKET_THRESHOLD_SECONDS,
   type GpsAssessment,
 } from "@/lib/waraGpsAssessment";
 
@@ -25,115 +24,162 @@ export type GpsSummaryInput = {
   ticketIssueDetail?: string;
 };
 
-function buildTemplateSummary(input: GpsSummaryInput): string {
-  const { unitLabel, unit, assessment, action, ticketRef, odooRef, ticketReused, ticketIssueDetail } =
-    input;
-  const facts = buildGpsFacts(unit, assessment);
+function normalizeLoosePlate(value: string): string {
+  return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
+}
+
+/** Etiqueta cliente: patente + código interno (ej. AG 228 NY (M900-111)). */
+export function formatGpsUnitLabel(unit: WaraUnidadEstado): string {
+  const plateRaw = unit.patente?.trim() || "";
+  const plate = plateRaw
+    ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw
+    : "";
+  const nombre = unit.unidad?.trim() || "";
+  if (plate && nombre && normalizeLoosePlate(plate) !== normalizeLoosePlate(nombre)) {
+    return `${plate} (${nombre})`;
+  }
+  return plate || nombre || "la unidad";
+}
+
+function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
+  const lat = unit.ultima_posicion?.lat;
+  const lon = unit.ultima_posicion?.lon;
+  if (typeof lat !== "number" || typeof lon !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return `https://maps.google.com/?q=${lat},${lon}`;
+}
+
+function mapsLine(unit: WaraUnidadEstado): string {
+  const url = mapsLinkForUnit(unit);
+  return url ? `🗺️ [Ver ubicación](${url})` : "🗺️ Sin coordenadas de última posición en WARA.";
+}
+
+function ignitionLine(unit: WaraUnidadEstado): string {
+  const ign = ignitionLabel(unit);
+  if (ign === "encendida") return "🔑 Ignición: *encendida*";
+  if (ign === "apagada") return "🔑 Ignición: *apagada*";
+  return "🔑 Ignición: sin dato claro";
+}
+
+function reportLine(assessment: GpsAssessment): string {
+  return `⏱️ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`;
+}
+
+function positionLine(assessment: GpsAssessment): string {
+  const elapsed =
+    assessment.positionElapsed != null
+      ? formatMinutesAgo(assessment.positionElapsed)
+      : "sin dato";
+  return `📍 Posición: hace ${elapsed}`;
+}
+
+export function buildStructuredGpsBody(unit: WaraUnidadEstado, assessment: GpsAssessment): string {
+  const label = formatGpsUnitLabel(unit);
+  const unitLine = `🚗 Unidad: *${label}*`;
+  const map = mapsLine(unit);
 
   if (assessment.status === "ok") {
-    return (
-      `Funcionamiento normal: la unidad ${unitLabel} envía reporte y posición actualizados` +
-      (facts.ignicionEstado === "encendida"
-        ? `; la ignición está encendida. `
-        : ` y la ignición acompaña. `) +
-      `No genero ticket. Si algo cambia, volvé a consultar.`
-    );
+    return [
+      "✅ *Funcionamiento normal*",
+      unitLine,
+      "📡 Envía reporte y posición actualizados.",
+      ignitionLine(unit),
+      reportLine(assessment),
+      positionLine(assessment),
+      map,
+    ].join("\n");
   }
 
   if (assessment.status === "coherent_pause") {
-    const reportRecent = assessment.reportElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS;
-    const pauseReason = reportRecent
-      ? "La ignición está apagada y la última posición coincide con ese apagado: la unidad está detenida y es normal que no actualice posición aunque el reporte sea reciente."
-      : "El reporte, la posición y la ignición apagada van alineados en el tiempo.";
-    return (
-      `La unidad ${unitLabel} está detenida. ` +
-      `${pauseReason} No genero ticket por ahora. Si algo cambia, volvé a consultar.`
-    );
+    return [
+      "⏸ *Unidad detenida*",
+      unitLine,
+      "🔑 Ignición: *apagada*",
+      reportLine(assessment),
+      positionLine(assessment),
+      "Es normal que no actualice posición mientras está parada.",
+      map,
+    ].join("\n");
   }
 
-  if (action === "ticket" && ticketIssueDetail) {
-    if (odooRef) {
-      const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
-      const casePart = ticketReused
-        ? ` Ese caso ya estaba abierto (*${display}*); no generé uno nuevo. Un asesor de Atención al cliente lo sigue revisando.`
-        : ` Generé el caso *${display}* en Atención al cliente. Un asesor lo va a revisar.`;
-      return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${casePart}`;
+  if (assessment.status === "missing_report") {
+    return [
+      "⚠️ *Falta de reporte*",
+      unitLine,
+      ignitionLine(unit),
+      reportLine(assessment),
+      positionLine(assessment),
+      "No está enviando reporte y posición al día.",
+      map,
+    ].join("\n");
+  }
+
+  if (assessment.status === "ignition_failure") {
+    return [
+      "⚠️ *Falla de ignición*",
+      unitLine,
+      reportLine(assessment),
+      positionLine(assessment),
+      `🔑 Última ignición: hace ${formatMinutesAgo(assessment.ignitionElapsed)} (${ignitionLabel(unit)})`,
+      "El reporte y la posición van al día, pero la ignición no acompaña.",
+      map,
+    ].join("\n");
+  }
+
+  return [
+    "⚠️ *Pérdida de señal satelital*",
+    unitLine,
+    reportLine(assessment),
+    positionLine(assessment),
+    assessment.reason,
+    map,
+  ].join("\n");
+}
+
+function buildTicketFooter(input: GpsSummaryInput): string {
+  const { odooRef, ticketRef, ticketReused, ticketIssueDetail } = input;
+  if (!ticketIssueDetail) return "";
+
+  if (odooRef) {
+    const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
+    return ticketReused
+      ? `Generé el seguimiento en el caso *${display}* que ya tenías abierto. Un asesor de Atención al cliente lo sigue revisando.`
+      : `Generé el caso *${display}* en Atención al cliente por ${ticketIssueDetail}. Un asesor lo va a revisar.`;
+  }
+
+  if (ticketRef) {
+    return ticketReused
+      ? "Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando."
+      : "Generé un caso para que Atención al cliente lo revise (todavía no tengo el número para pasarte).";
+  }
+
+  return "";
+}
+
+function buildTemplateSummary(input: GpsSummaryInput): string {
+  const label = formatGpsUnitLabel(input.unit);
+  const intro = `El estado GPS de la unidad ${label} es el siguiente:`;
+  const header = ["📍 *Estado de la unidad*", `🚗 Unidad: *${label}*`].join("\n");
+  const body = buildStructuredGpsBody(input.unit, input.assessment);
+  const parts = [intro, "", header, "", body];
+
+  const ticketFooter = input.action === "ticket" ? buildTicketFooter(input) : "";
+  if (ticketFooter) parts.push("", ticketFooter);
+
+  if (input.assessment.status === "ok" || input.assessment.status === "coherent_pause") {
+    if (input.action === "observation") {
+      parts.push("", "No genero ticket por este estado. Si algo cambia, volvé a consultar.");
     }
-    const ticketPart = ticketRef
-      ? ticketReused
-        ? " Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando."
-        : " Generé un caso para que Atención al cliente lo revise (todavía no tengo el número para pasarte)."
-      : "";
-    return `La unidad ${unitLabel} presenta ${ticketIssueDetail}.${ticketPart}`;
   }
 
-  return `Consulta de ${unitLabel}.`;
+  return parts.join("\n");
 }
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {
   const template = buildTemplateSummary(input);
   const finalize = (text: string) =>
     ensureOdooCaseRefInClientMessage(text, input.odooRef, { reused: input.ticketReused });
-
-  if (!process.env.OPENAI_API_KEY?.trim()) return finalize(template);
-
-  const facts = buildGpsFacts(input.unit, input.assessment);
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const odooDisplay = input.odooRef
-    ? formatCustomerOdooCaseRefForWhatsApp(input.odooRef)
-    : null;
-
-  try {
-    const response = await withOpenAiTimeout((signal) =>
-      openai.chat.completions.create(
-        {
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Redactás respuestas de WhatsApp para mesa de ayuda Wara GPS. " +
-                "Mantené los hechos (estado general, ignición, si se generó caso o no, acción) sin tiempos técnicos crudos ni segundos. " +
-                "No menciones intervalos de reporte del GPS. No inventes datos. " +
-                "Si hay numero_caso_odoo, OBLIGATORIO incluirlo exacto (ej. *#36248*). " +
-                "Si caso_reutilizado=true: dejá claro que el caso YA ESTABA abierto y NO generaste uno nuevo. " +
-                "Si caso_reutilizado=false y hay numero_caso_odoo: dejá claro que GENERASTE ese caso ahora. " +
-                "Nunca digas solo «hay un caso abierto» sin aclarar si es nuevo o previo, ni omitas el número si existe. " +
-                "Si no hay numero_caso_odoo, no inventes ni menciones números de caso. " +
-                "Español rioplatense, 2-4 oraciones, sin emojis.",
-            },
-            {
-              role: "user",
-              content: JSON.stringify({
-                plantilla_base: template,
-                hechos_obligatorios: facts,
-                accion: input.action,
-                se_genero_caso: !!(input.odooRef ?? input.ticketRef),
-                numero_caso_odoo: odooDisplay,
-                caso_reutilizado: input.ticketReused ?? false,
-                detalle_ticket: input.ticketIssueDetail ?? null,
-              }),
-            },
-          ],
-          temperature: 0.2,
-          max_tokens: 280,
-        },
-        { signal },
-      ),
-    );
-    if (!response) return finalize(template);
-
-    const text = response.choices[0]?.message?.content?.trim();
-    if (!text || text.length < 40) return finalize(template);
-    // Si la IA omitió el #Odoo, preferimos plantilla (ya lo trae) + reinyección.
-    if (odooDisplay && !text.includes(odooDisplay.replace(/^#/, "")) && !text.includes(odooDisplay)) {
-      return finalize(template);
-    }
-    return finalize(text);
-  } catch (error) {
-    console.warn("[waraGpsSummary] IA falló, uso plantilla:", error instanceof Error ? error.message : error);
-    return finalize(template);
-  }
+  return finalize(template);
 }
 
-export { buildTemplateSummary, ignitionLabel, formatMinutesAgo };
+export { buildTemplateSummary, buildGpsFacts, ignitionLabel, formatMinutesAgo, assessUnitReporting };

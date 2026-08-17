@@ -1577,13 +1577,19 @@ export function lineLooksLikeBotMissingPlatePrompt(line: string): boolean {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+  const hasExample = /(ej\.|ejemplo|marca\/nombre|por ejemplo)/.test(norm);
+  if (!hasExample) return false;
   return (
-    (/para registrar el cambio de odometro necesito la patente/.test(norm) ||
-      (/necesito la patente de la unidad/.test(norm) &&
-        /odometro|horometro|kilometraje/.test(norm)) ||
-      /para programar mantenimiento preventivo necesito la patente/.test(norm) ||
-      /para registrar el mantenimiento necesito la patente/.test(norm)) &&
-    /(ej\.|ejemplo|marca\/nombre|por ejemplo)/.test(norm)
+    /para registrar el cambio de odometro necesito la patente/.test(norm) ||
+    (/necesito la patente de la unidad/.test(norm) &&
+      /odometro|horometro|kilometraje/.test(norm)) ||
+    /para programar mantenimiento preventivo necesito la patente/.test(norm) ||
+    /para registrar el mantenimiento necesito la patente/.test(norm) ||
+    /pasame la matricula de la unidad/.test(norm) ||
+    /para revisar el gps/.test(norm) ||
+    /revisar el gps, la ignicion o el reporte/.test(norm) ||
+    (/necesito la unidad/.test(norm) && /patente/.test(norm)) ||
+    (/cual es la patente o unidad/.test(norm) && /matricula/.test(norm))
   );
 }
 
