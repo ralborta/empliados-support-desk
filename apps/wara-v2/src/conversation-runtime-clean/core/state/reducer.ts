@@ -1,0 +1,106 @@
+import type { StateReducer } from "../ports/ports.js";
+import type { TurnDecision } from "../types/decision.js";
+import type { OperationExecutionResult } from "../types/operation.js";
+import type { PolicyResult } from "../types/policy.js";
+import type { ResolutionResult } from "../types/resolution.js";
+import type { ConversationStateClean, ListingState, TaskState } from "../types/state.js";
+
+function nowFor(decision: TurnDecision): string {
+  return `clean:${decision.id}`;
+}
+
+function updateTask(tasks: readonly TaskState[], id: string, patch: Partial<TaskState>): TaskState[] {
+  return tasks.map((task) => task.id === id ? { ...task, ...patch } : task);
+}
+
+function ensureTask(state: ConversationStateClean, decision: TurnDecision): { tasks: TaskState[]; focusedTaskId: string | null } {
+  const intent = decision.taskIntent;
+  if (!intent) return { tasks: [...state.tasks], focusedTaskId: state.focusedTaskId };
+  const current = state.tasks.find((task) => task.id === state.focusedTaskId);
+  if (intent.action === "cancel") {
+    return current ? { tasks: updateTask(state.tasks, current.id, { status: "cancelled", updatedAt: nowFor(decision) }), focusedTaskId: null }
+      : { tasks: [...state.tasks], focusedTaskId: null };
+  }
+  if (intent.action === "pause") {
+    return current ? { tasks: updateTask(state.tasks, current.id, { status: "paused", updatedAt: nowFor(decision) }), focusedTaskId: current.id }
+      : { tasks: [...state.tasks], focusedTaskId: state.focusedTaskId };
+  }
+  if (intent.action === "resume" && current) {
+    return { tasks: updateTask(state.tasks, current.id, { status: "collecting", updatedAt: nowFor(decision) }), focusedTaskId: current.id };
+  }
+  if (intent.action === "switch" || intent.action === "start") {
+    const paused = current && current.status !== "cancelled" && current.status !== "completed"
+      ? updateTask(state.tasks, current.id, { status: "paused", updatedAt: nowFor(decision) }) : [...state.tasks];
+    const existing = paused.find((task) => task.type === intent.type && task.status === "paused");
+    if (existing) return { tasks: updateTask(paused, existing.id, { status: "collecting", updatedAt: nowFor(decision) }), focusedTaskId: existing.id };
+    const task: TaskState = { id: `task-${decision.id}`, type: intent.type, status: "collecting", collectedFields: {}, createdAt: nowFor(decision), updatedAt: nowFor(decision) };
+    return { tasks: [...paused, task], focusedTaskId: task.id };
+  }
+  return { tasks: [...state.tasks], focusedTaskId: state.focusedTaskId };
+}
+
+function listingFrom(result: ResolutionResult): ListingState | null {
+  if (result.status !== "ambiguous" || result.candidates.length === 0) return null;
+  return { kind: result.candidates[0]!.entityType, items: result.candidates, createdAt: `clean:${result.requestId}` };
+}
+
+export class CleanStateReducer implements StateReducer {
+  reduce(input: { previousState: ConversationStateClean; decision: TurnDecision; policy: PolicyResult; resolutions: readonly ResolutionResult[]; executions: readonly OperationExecutionResult[] }): ConversationStateClean {
+    const { previousState, decision, policy } = input;
+    if (policy.outcome === "block") return previousState;
+    if (policy.outcome === "clarify") {
+      return {
+        ...previousState,
+        expectedInput: null,
+        pendingResolution: null,
+        pendingOperation: null,
+        pendingClarification: { reason: policy.reason, question: policy.expected.purpose, taskId: policy.expected.taskId },
+      };
+    }
+
+    let company = decision.stateTransition.preserveCompany ? previousState.company : null;
+    let unit = decision.stateTransition.preserveUnit ? previousState.unit : null;
+    let previousUnit = previousState.previousUnit;
+    let lastListing = previousState.lastListing;
+    let pendingResolution = decision.stateTransition.clearPendingResolution ? null : previousState.pendingResolution;
+    for (const result of input.resolutions) {
+      if (result.status === "resolved" && result.entity.entityType === "company") {
+        company = result.entity.company;
+        if (unit && unit.companyId !== company.id) { previousUnit = unit; unit = null; }
+      } else if (result.status === "resolved" && result.entity.entityType === "unit") {
+        previousUnit = unit;
+        unit = result.entity.unit;
+        pendingResolution = null;
+      } else if (result.status === "ambiguous") {
+        lastListing = listingFrom(result);
+        pendingResolution = { requestId: result.requestId, entityType: result.candidates[0]?.entityType ?? "unit", taskId: previousState.focusedTaskId };
+      } else if (result.status === "not_found") {
+        const request = decision.requiredResolutions.find((candidate) => candidate.id === result.requestId);
+        if (request) pendingResolution = { requestId: request.id, entityType: request.entityType, taskId: previousState.focusedTaskId };
+      }
+    }
+
+    const taskResult = ensureTask(previousState, decision);
+    let tasks = taskResult.tasks;
+    let focusedTaskId = taskResult.focusedTaskId;
+    let expectedInput = decision.stateTransition.clearExpectedInput ? null : previousState.expectedInput;
+    let pendingOperation = decision.stateTransition.clearPendingOperation ? null : previousState.pendingOperation;
+    let pendingClarification = decision.stateTransition.clearPendingClarification ? null : previousState.pendingClarification;
+
+    if (input.resolutions.some((result) => result.status === "resolved") && expectedInput?.field === "unit") expectedInput = null;
+    if (pendingResolution) { expectedInput = null; pendingClarification = null; pendingOperation = null; }
+    if (decision.responseIntent.expectedNextField) {
+      expectedInput = { field: decision.responseIntent.expectedNextField, taskId: focusedTaskId, purpose: decision.responseIntent.purpose };
+      pendingResolution = null; pendingClarification = null; pendingOperation = null;
+    }
+    if (decision.act === "cancel_task") {
+      expectedInput = null; pendingResolution = null; pendingClarification = null; pendingOperation = null;
+    }
+    const successfulWrite = input.executions.find((result) => result.status === "success" && result.writeExecuted);
+    if (successfulWrite && focusedTaskId) {
+      tasks = updateTask(tasks, focusedTaskId, { status: "completed", updatedAt: nowFor(decision) });
+      focusedTaskId = null; pendingOperation = null;
+    }
+    return { ...previousState, company, unit, previousUnit, tasks, focusedTaskId, expectedInput, pendingResolution, pendingClarification, pendingOperation, lastListing };
+  }
+}

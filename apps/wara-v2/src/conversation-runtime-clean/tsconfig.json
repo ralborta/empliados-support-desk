@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../dist/conversation-runtime-clean",
+    "declaration": false
+  },
+  "include": ["core/**/*.ts", "adapters/**/*.ts", "index.ts"],
+  "exclude": ["tests/**/*.ts"]
+}
