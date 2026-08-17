@@ -16,5 +16,7 @@ export * from "./core/response/response-planner.js";
 export * from "./core/response/deterministic-composer.js";
 export * from "./core/orchestration/process-turn.js";
 export * from "./core/kernel/operational-kernel.js";
+export * from "./core/authorization/capability-catalog.js";
+export * from "./core/authorization/capability-authorizer.js";
 export * from "./adapters/fake/fakes.js";
 export * from "./adapters/legacy/entity-directory-adapter.js";

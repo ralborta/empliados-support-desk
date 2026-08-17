@@ -41,7 +41,7 @@ export class FakeCapabilityAuthorizer implements CapabilityAuthorizer {
           return { outcome: "blocked", violations: [{ code: "PENDING_BINDING_MISMATCH", message: "El commit no coincide con la operación preparada.", severity: "blocking" }] };
         }
       }
-      operations.push({ requestId: request.id, capability: request.capability, kind: request.kind, task: request.task, arguments: request.arguments });
+      operations.push({ requestId: request.id, capability: request.capability, kind: request.kind, task: request.task, arguments: request.arguments, realWriteAllowed: false });
     }
     return { outcome: "authorized", operations };
   }
@@ -53,6 +53,7 @@ export class FakeCapabilityExecutor implements CapabilityExecutor {
   constructor(private readonly configured: readonly OperationExecutionResult[] = []) {}
   async execute(operations: readonly AuthorizedOperation[]): Promise<readonly OperationExecutionResult[]> {
     this.calls += 1; this.received = operations;
+    if (operations.some((operation) => operation.realWriteAllowed !== false)) throw new Error("REAL_WRITE_NOT_ALLOWED");
     return this.configured.length ? this.configured : operations.map((operation) => ({
       requestId: operation.requestId, capability: operation.capability, status: "success" as const,
       facts: [], writeAttempt: false, writeExecuted: false,
