@@ -31,6 +31,8 @@ import {
   type WaraIncidentType,
   threadAwaitingOdometerPlate,
   threadAwaitingHorometerPlate,
+  threadAwaitingOdometerKmValue,
+  threadAwaitingHorometerKmValue,
   threadHasOdometerUnitClarificationPending,
   threadAwaitingOdometerConfirmDetails,
   threadHasPendingUnitStatusCheckOffer,
@@ -769,6 +771,8 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   const odometerFlowAwaitingInput =
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
+    threadAwaitingOdometerKmValue(threadText) ||
+    threadAwaitingHorometerKmValue(threadText) ||
     threadHasOdometerUnitClarificationPending(threadText) ||
     threadAwaitingOdometerConfirmDetails(threadText) ||
     hasPendingOdometerConfirmation(threadText);

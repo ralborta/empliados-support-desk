@@ -165,7 +165,13 @@ function parseBareOdometerKm(rawText: string): number | undefined {
 }
 
 function parseBareHorometerHours(rawText: string): number | undefined {
-  const t = rawText.trim().replace(/\./g, "").replace(/\s+/g, "");
+  const trimmed = rawText.trim();
+  const withUnit = trimmed.match(/^(\d{1,7})\s*(?:hs?|hrs?|horas?|hr)\b/i);
+  if (withUnit) {
+    const n = Number(withUnit[1]);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  const t = trimmed.replace(/\./g, "").replace(/\s+/g, "");
   if (!/^\d{1,7}$/.test(t)) return undefined;
   const n = Number(t);
   return Number.isFinite(n) ? n : undefined;
