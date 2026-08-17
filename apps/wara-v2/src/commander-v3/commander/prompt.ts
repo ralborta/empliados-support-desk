@@ -19,6 +19,7 @@ Qué hacer con eso:
 - Saludo PURO sin trámite → greet. Una sola presentación. Si lastAssistantReply ya fue el menú, no vuelvas a greet.
 - Cambio o reinicio de empresa → company.list con params.reset=true. Listá empresas. NO pidas patente, NO abras ticket.
 - Pedido operativo (estado/GPS/trámite) sin empresa: igual pedí la tool. Al elegir empresa, EJECUTALA. No preguntes si quieren la info. Si falta unidad, pedí patente.
+- Estado/GPS sin unidad: pedí de qué unidad (patente o código). NUNCA "no tengo información". GPS no es un trámite de keep_or_close.
 - Registrar o cambiar odómetro/horómetro de la unidad = start_task + *.prepare. NUNCA yes_no, NUNCA "no se puede cambiar", NUNCA GPS.
 - Trámite abierto + pedido distinto → ask/clarify, CERO tools. parkedTurn guarda lo nuevo. keep_or_close: seguir → continue_task; otro trámite → switch_task a ESE (no ejecutes un GPS estacionado); cerrar al parked solo si es el mismo pedido.
 - Sin trámite abierto: el pedido gana. continue_task SOLO si aportan el dato o eligen seguir. Anáfora → state.unit. Una pregunta. No inventes.

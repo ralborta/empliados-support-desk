@@ -14,7 +14,6 @@ const OPERATIONAL = new Set([
   "odometer",
   "hourmeter",
   "maintenance",
-  "gps",
   "human_handoff",
 ]);
 
@@ -103,6 +102,15 @@ function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boo
   // Parser de campo esperado: elegir empresa no es un pedido nuevo.
   if (state.lastQuestion?.expected === "company") return false;
   if (contributedExpectedField(plan, state)) return false;
+  // GPS es una lectura: el mismo pedido de estado no interrumpe un GPS a medias.
+  if (
+    state.activeTask?.type === "gps" &&
+    (kind === "status" ||
+      plan.task === "gps" ||
+      plan.requestedCapabilities.some((c) => c.name === "gps.get_status"))
+  ) {
+    return false;
+  }
   if (isGreetingTurn(plan)) return true;
   if (
     kind === "status" ||

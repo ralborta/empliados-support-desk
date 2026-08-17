@@ -32,6 +32,10 @@ function looksLikeLockedFormFact(f: string): boolean {
   );
 }
 
+function looksLikeAskUnitFact(f: string): boolean {
+  return /¿De qué unidad\?|necesito la patente|Pasame la \*patente\*/i.test(f);
+}
+
 function looksLikeOperationalFact(f: string): boolean {
   if (looksLikeListingFact(f)) return true;
   if (looksLikeLockedFormFact(f)) return true;
@@ -46,9 +50,13 @@ export function shouldDumpFactsWithoutLlm(
   plan?: TurnPlan,
 ): boolean {
   const kind = plan?.interpretation?.answerKind;
-  if (kind === "yes_no" || kind === "status" || kind === "how_to") return false;
   if (kind === "greet") return false;
   if (plan?.parkedTurn || plan?.responseGoal.purpose === "clarify") return false;
+  if (facts.some(looksLikeAskUnitFact)) return true;
+  if (plan?.responseGoal.purpose === "ask_missing" && facts.some(looksLikeAskUnitFact)) {
+    return true;
+  }
+  if (kind === "yes_no" || kind === "status" || kind === "how_to") return false;
   if (kind === "list") return facts.some(looksLikeListingFact);
   return facts.some(looksLikeListingFact) || facts.some(looksLikeLockedFormFact);
 }

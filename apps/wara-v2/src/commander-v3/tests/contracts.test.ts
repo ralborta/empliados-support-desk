@@ -736,4 +736,80 @@ describe("commander-v3 contracts", () => {
       true,
     );
   });
+
+  it("GPS a medias + estado de unidad no es keep-or-close", async () => {
+    const { enrichPlanForOpenTaskHold } = await import(
+      "../enrich/open-task-hold.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.activeTask = {
+      type: "gps",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    s.lastQuestion = { id: "q", purpose: "unit_for_gps", expected: "unit" };
+    const held = enrichPlanForOpenTaskHold(
+      TurnPlanSchema.parse({
+        interpretation: {
+          userQuestion: "estado de una unidad",
+          answerKind: "status",
+        },
+        reasoning: "pide estado",
+        conversationalAct: "inform",
+        task: "gps",
+        requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.8,
+      }),
+      s,
+    );
+    assert.equal(held.responseGoal.purpose, "inform");
+    assert.ok(held.requestedCapabilities.some((c) => c.name === "gps.get_status"));
+    assert.equal(held.parkedTurn ?? null, null);
+  });
+
+  it("GPS sin unidad pide de qué unidad y el redactor no lo reescribe", async () => {
+    const { executeCapabilities } = await import("../execute/run-capabilities.js");
+    const { shouldDumpFactsWithoutLlm } = await import("../reply/redact.js");
+    const { formatAskUnit } = await import("../reply/format-wa.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    const plan = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "estado de una unidad",
+        answerKind: "status",
+      },
+      reasoning: "pide estado",
+      conversationalAct: "inform",
+      task: "gps",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const exec = await executeCapabilities({
+      state: s,
+      plan,
+      env: {},
+      fleetUnits: [],
+      resolvedUnit: null,
+      resolvedCompanyId: "1",
+      message: "Estado de una unidad",
+    });
+    assert.equal(exec.results[0]?.error, "no_unit");
+    assert.match(exec.facts.join("\n"), /¿De qué unidad\?/);
+    assert.doesNotMatch(exec.facts.join("\n"), /no tengo información/i);
+    assert.equal(exec.state.lastQuestion?.expected, "unit");
+    assert.equal(
+      shouldDumpFactsWithoutLlm(exec.facts, {
+        ...plan,
+        interpretation: plan.interpretation,
+      }),
+      true,
+    );
+    assert.match(formatAskUnit("gps"), /¿De qué unidad\?/);
+  });
 });

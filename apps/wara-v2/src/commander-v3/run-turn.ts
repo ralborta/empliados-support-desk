@@ -584,15 +584,26 @@ export async function runCommanderTurn(
   ensurePrepareFor("hourmeter", "hourmeter.prepare");
   ensurePrepareFor("certificate", "certificate.prepare");
 
-  // GPS: asegurar lectura + búsqueda si falta unidad (contrato, no semántica).
+  // GPS: asegurar lectura si el Commander pidió estado/GPS (contrato, no semántica).
   // Si ya hay domain.answer, no inyectar GPS (guía de panel ≠ reporte).
+  // keep-or-close: no reinyectar (parkedTurn / clarify).
+  const statusWantsGps =
+    plan.interpretation?.answerKind === "status" &&
+    plan.task !== "odometer" &&
+    plan.task !== "hourmeter" &&
+    plan.task !== "certificate" &&
+    plan.task !== "maintenance" &&
+    plan.task !== "human_handoff";
   if (
-    plan.task === "gps" &&
+    !plan.parkedTurn &&
+    plan.responseGoal.purpose !== "clarify" &&
+    (plan.task === "gps" || statusWantsGps) &&
     !plan.requestedCapabilities.some((c) => c.name === "domain.answer") &&
     !plan.requestedCapabilities.some((c) => c.name === "gps.get_status")
   ) {
     plan = {
       ...plan,
+      task: plan.task ?? "gps",
       requestedCapabilities: [
         ...plan.requestedCapabilities,
         { name: "gps.get_status", params: {} },
@@ -841,6 +852,19 @@ export async function runCommanderTurn(
 
   state = exec.state;
 
+  if (exec.results.some((r) => r.error === "no_unit")) {
+    const ask = exec.facts.find((f) => f.trim()) ?? "¿De qué unidad?";
+    plan = {
+      ...plan,
+      conversationalAct: "ask",
+      responseGoal: {
+        purpose: "ask_missing",
+        facts: exec.facts,
+        nextQuestion: ask,
+      },
+    };
+  }
+
   const { reply, latencyMs: redactMs } = await redactReply({
     plan,
     facts: exec.facts,
@@ -967,7 +991,7 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
     state.activeTask?.type === "gps" ||
     String(state.lastQuestion?.purpose ?? "").includes("gps")
   ) {
-    return "Para el reporte GPS necesito la patente, el número de la lista o la marca/prefijo de la unidad.";
+    return "¿De qué unidad? Pasame la patente o el código.";
   }
   return "Necesito una aclaración puntual para seguir con el trámite.";
 }

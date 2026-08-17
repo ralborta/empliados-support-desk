@@ -202,7 +202,7 @@ export function formatUnitMenu(label: string): string {
 }
 
 export function formatAskUnit(
-  kind: "odometer" | "hourmeter" | "certificate" | "maintenance",
+  kind: "odometer" | "hourmeter" | "certificate" | "maintenance" | "gps",
 ): string {
   const title =
     kind === "hourmeter"
@@ -211,7 +211,9 @@ export function formatAskUnit(
         ? "📋 *Certificado*"
         : kind === "maintenance"
           ? "🔧 *Mantenimiento*"
-          : "🛣 *Odómetro*";
+          : kind === "gps"
+            ? "📍 *Estado de la unidad*"
+            : "🛣 *Odómetro*";
   return [
     title,
     "",

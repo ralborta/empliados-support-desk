@@ -949,9 +949,7 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
         return {
           capability: req.name,
           ok: false,
-          facts: [
-            "Para el reporte GPS necesito la patente, el número de la lista o la marca/prefijo de la unidad.",
-          ],
+          facts: [formatAskUnit("gps")],
           error: "no_unit",
           data: {
             statePatch: {
