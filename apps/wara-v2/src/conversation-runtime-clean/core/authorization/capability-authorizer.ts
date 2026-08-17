@@ -20,7 +20,8 @@ function hasField(field: string, args: Readonly<Record<string, unknown>>, state:
 }
 function bindingMatches(args: Readonly<Record<string, unknown>>, state: ConversationStateClean): boolean {
   const pending = state.pendingOperation;
-  return Boolean(pending && args.operationId === pending.operationId && args.version === pending.version && args.payloadHash === pending.payloadHash);
+  return Boolean(pending && args.operationId === pending.operationId && args.version === pending.version && args.payloadHash === pending.payloadHash
+    && args.idempotencyKey === pending.idempotencyKey);
 }
 export class CleanCapabilityAuthorizer implements CapabilityAuthorizer {
   authorize(input: { decision: TurnDecision; state: ConversationStateClean; resolutions: readonly ResolutionResult[] }): AuthorizationResult {

@@ -13,7 +13,7 @@ export function validateStateInvariants(state: ConversationStateClean): readonly
   if (state.pendingOperation) {
     const task = state.tasks.find((candidate) => candidate.id === state.pendingOperation!.taskId);
     if (!task || task.status !== "awaiting_confirmation") violations.push({ code: "INVALID_OPERATION_TASK", message: "pendingOperation requiere una tarea awaiting_confirmation." });
-    if (!state.pendingOperation.operationId || state.pendingOperation.version <= 0 || !state.pendingOperation.payloadHash || !state.pendingOperation.capability) {
+    if (!state.pendingOperation.operationId || state.pendingOperation.version <= 0 || !state.pendingOperation.payloadHash || !state.pendingOperation.idempotencyKey || !state.pendingOperation.capability) {
       violations.push({ code: "INVALID_PENDING_OPERATION", message: "pendingOperation no contiene binding completo." });
     }
   }

@@ -8,7 +8,7 @@ import type { PolicyInput } from "../core/types/policy.js";
 import { createEmptyCleanState, type ConversationStateClean, type TaskState } from "../core/types/state.js";
 
 const task: TaskState = { id: "task", type: "certificate", status: "awaiting_confirmation", collectedFields: {}, createdAt: "a", updatedAt: "a" };
-const commit: OperationRequest = { id: "commit", capability: "certificate.issue", kind: "write_commit", task: "certificate", arguments: { operationId: "op", version: 1, payloadHash: "hash" }, requiredResolutionIds: [] };
+const commit: OperationRequest = { id: "commit", capability: "certificate.issue", kind: "write_commit", task: "certificate", arguments: { operationId: "op", version: 1, payloadHash: "hash", idempotencyKey: "idem" }, requiredResolutionIds: [] };
 const prepare: OperationRequest = { id: "prepare", capability: "certificate.prepare", kind: "write_prepare", task: "certificate", arguments: {}, requiredResolutionIds: [] };
 
 function interpretation(patch: Partial<TurnInterpretation> = {}): TurnInterpretation {
@@ -24,7 +24,7 @@ function decision(patch: Partial<TurnDecision> = {}): TurnDecision {
     responseIntent: { purpose: "confirm", reminderOfPendingTask: false }, confidence: 0.9, ...patch };
 }
 function pendingState(): ConversationStateClean {
-  return state({ tasks: [task], focusedTaskId: task.id, pendingOperation: { operationId: "op", capability: "certificate.issue", taskId: task.id, version: 1, payloadHash: "hash", preparedArguments: {}, status: "awaiting_confirmation" } });
+  return state({ tasks: [task], focusedTaskId: task.id, pendingOperation: { operationId: "op", capability: "certificate.issue", taskId: task.id, version: 1, payloadHash: "hash", idempotencyKey: "idem", preparedArguments: {}, status: "awaiting_confirmation" } });
 }
 function context(patch: Partial<PolicyEvaluationContext> = {}): PolicyEvaluationContext {
   return { input: { interpretation: interpretation(), decision: decision(), state: pendingState(), turn: {} }, ...patch };
@@ -41,7 +41,7 @@ test("catalog declares every required hard policy with metadata", () => {
 });
 test("WRITE_REQUIRES_PENDING_OPERATION", () => assert.equal(has("WRITE_REQUIRES_PENDING_OPERATION", context({ input: { ...context().input, state: state() } })), true));
 test("WRITE_REQUIRES_BOUND_CONFIRMATION", () => assert.equal(has("WRITE_REQUIRES_BOUND_CONFIRMATION", context({ input: { ...context().input, interpretation: interpretation({ confirmation: { intended: false, containsCorrections: false } }) } })), true));
-test("CONFIRMATION_BINDING_MATCH", () => assert.equal(has("CONFIRMATION_BINDING_MATCH", context({ input: { ...context().input, decision: decision({ requestedOperations: [{ ...commit, arguments: { operationId: "other", version: 1, payloadHash: "hash" } }] }) } })), true));
+test("CONFIRMATION_BINDING_MATCH", () => assert.equal(has("CONFIRMATION_BINDING_MATCH", context({ input: { ...context().input, decision: decision({ requestedOperations: [{ ...commit, arguments: { operationId: "other", version: 1, payloadHash: "hash", idempotencyKey: "idem" } }] }) } })), true));
 test("UNKNOWN_CAPABILITY_BLOCKED", () => assert.equal(has("UNKNOWN_CAPABILITY_BLOCKED", context({ knownCapabilities: new Set(["company.list"]) })), true));
 test("OPERATION_NOT_IN_DECISION_BLOCKED", () => assert.equal(has("OPERATION_NOT_IN_DECISION_BLOCKED", context({ candidateOperations: [{ ...commit, id: "injected" }] })), true));
 test("UNIT_MUST_BELONG_TO_ACTIVE_COMPANY", () => assert.equal(has("UNIT_MUST_BELONG_TO_ACTIVE_COMPANY", context({ nextState: state({ company: { id: "a", name: "A" }, unit: { id: "u", label: "U", companyId: "b" } }) })), true));

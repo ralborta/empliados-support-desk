@@ -50,7 +50,8 @@ function bindingMatches(decision: TurnDecision, state: ConversationStateClean): 
   if (!pending) return false;
   return decision.requestedOperations.filter((operation) => operation.kind === "write_commit").every((operation) =>
     operation.capability === pending.capability && operation.arguments.operationId === pending.operationId
-      && operation.arguments.version === pending.version && operation.arguments.payloadHash === pending.payloadHash);
+      && operation.arguments.version === pending.version && operation.arguments.payloadHash === pending.payloadHash
+      && operation.arguments.idempotencyKey === pending.idempotencyKey);
 }
 
 export function evaluateCleanPolicies(context: PolicyEvaluationContext): readonly PolicyViolation[] {

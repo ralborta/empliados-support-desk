@@ -29,6 +29,21 @@ export const CLEAN_CAPABILITY_CATALOG: readonly CleanCapabilityDefinition[] = [
   capability("domain.answer", "read", "knowledge", [], false, ["unknown_topic"]),
   capability("handoff.prepare", "write_prepare", "human_handoff", ["detail"], true, ["missing_detail"]),
   capability("handoff.create", "write_commit", "human_handoff", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("conversation.handoff.prepare", "write_prepare", "human_handoff", ["detail"], true, ["destination_not_found", "already_handed_off"]),
+  capability("conversation.handoff.commit", "write_commit", "human_handoff", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("conversation.assign.prepare", "write_prepare", "conversation_assignment", ["detail"], true, ["destination_not_found", "already_assigned"]),
+  capability("conversation.assign.commit", "write_commit", "conversation_assignment", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("conversation.release.prepare", "write_prepare", "conversation_assignment", ["detail"], true, ["already_released"]),
+  capability("conversation.release.commit", "write_commit", "conversation_assignment", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("ticket.create.prepare", "write_prepare", "ticket", ["detail"], true, ["validation_error"]),
+  capability("ticket.create.commit", "write_commit", "ticket", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("ticket.get_status", "read", "ticket", ["detail"], false, ["not_found", "backend_error"]),
+  capability("ticket.update.prepare", "write_prepare", "ticket", ["detail"], true, ["validation_error", "not_found"]),
+  capability("ticket.update.commit", "write_commit", "ticket", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("ticket.close.prepare", "write_prepare", "ticket", ["detail"], true, ["not_found", "already_closed"]),
+  capability("ticket.close.commit", "write_commit", "ticket", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
+  capability("ticket.reopen.prepare", "write_prepare", "ticket", ["detail"], true, ["not_found", "already_open"]),
+  capability("ticket.reopen.commit", "write_commit", "ticket", ["pendingOperation"], true, ["binding_mismatch", "write_disabled"]),
 ];
 export function getCleanCapability(name: string): CleanCapabilityDefinition | undefined {
   return CLEAN_CAPABILITY_CATALOG.find((definition) => definition.name === name);

@@ -11,7 +11,7 @@ export type ExpectedInputDraft = Readonly<{ field: ExpectedField; taskId: string
 export type PendingResolutionState = Readonly<{ requestId: string; entityType: "company" | "unit"; taskId: string | null }>;
 export type PendingClarificationState = Readonly<{ reason: string; question: string; taskId: string | null }>;
 export type PendingOperationState = Readonly<{
-  operationId: string; capability: string; taskId: string; version: number; payloadHash: string;
+  operationId: string; capability: string; taskId: string; version: number; payloadHash: string; idempotencyKey: string;
   preparedArguments: Readonly<Record<string, unknown>>; status: "prepared" | "awaiting_confirmation";
 }>;
 export type ListingItem = Readonly<{ index: number; entityType: "company" | "unit"; id: string; label: string }>;

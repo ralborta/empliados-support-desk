@@ -25,3 +25,6 @@ export * from "./adapters/interpreter/stable-output-mapper.js";
 export * from "./adapters/interpreter/stable-interpreter-adapter.js";
 export * from "./adapters/interpreter/runtime-next-stable-transport.js";
 export * from "./adapters/interpreter/live-runner.js";
+export * from "./adapters/services/normalized-service-result.js";
+export * from "./adapters/services/operational-service-contracts.js";
+export * from "./adapters/services/fake-operational-adapters.js";

@@ -132,9 +132,9 @@ test("ambiguity clarifies without resolution or execution", async () => {
 test("valid pending binding authorizes only the declared commit", async () => {
   const active = task("certificate", "awaiting_confirmation");
   const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
-    pendingOperation: { operationId: "op-1", capability: "certificate.test", taskId: active.id, version: 2, payloadHash: "hash", preparedArguments: {}, status: "awaiting_confirmation" as const } };
+    pendingOperation: { operationId: "op-1", capability: "certificate.test", taskId: active.id, version: 2, payloadHash: "hash", idempotencyKey: "idem", preparedArguments: {}, status: "awaiting_confirmation" as const } };
   const confirm = interpretation({ userAct: "confirmation", relation: "confirm", confirmation: { intended: true, containsCorrections: false },
-    intents: [intent("certificate", "write_commit", { operationId: "op-1", version: 2, payloadHash: "hash" })] });
+    intents: [intent("certificate", "write_commit", { operationId: "op-1", version: 2, payloadHash: "hash", idempotencyKey: "idem" })] });
   const d = deps(state, [confirm]);
   const result = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
   assert.equal(result.trace.policy?.outcome, "allow");
@@ -147,7 +147,7 @@ test("valid pending binding authorizes only the declared commit", async () => {
 test("cancellation clears pending and cancelled task is not restored", async () => {
   const active = task("certificate", "awaiting_confirmation");
   const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
-    pendingOperation: { operationId: "op", capability: "certificate.test", taskId: active.id, version: 1, payloadHash: "hash", preparedArguments: {}, status: "awaiting_confirmation" as const } };
+    pendingOperation: { operationId: "op", capability: "certificate.test", taskId: active.id, version: 1, payloadHash: "hash", idempotencyKey: "idem", preparedArguments: {}, status: "awaiting_confirmation" as const } };
   const d = deps(state, [interpretation({ userAct: "cancellation", relation: "cancel" }), interpretation({ userAct: "greeting", relation: "standalone" })]);
   const cancelled = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
   assert.equal(cancelled.state.pendingOperation, null);
@@ -162,7 +162,7 @@ test("cancellation clears pending and cancelled task is not restored", async () 
 test("structured correction updates draft and invalidates prior confirmation", async () => {
   const active = task("odometer", "awaiting_confirmation");
   const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
-    pendingOperation: { operationId: "op", capability: "odometer.update", taskId: active.id, version: 1, payloadHash: "hash", preparedArguments: { value: 100 }, status: "awaiting_confirmation" as const } };
+    pendingOperation: { operationId: "op", capability: "odometer.update", taskId: active.id, version: 1, payloadHash: "hash", idempotencyKey: "idem", preparedArguments: { value: 100 }, status: "awaiting_confirmation" as const } };
   const d = deps(state, [interpretation({ userAct: "correction", relation: "continue", corrections: [{ field: "value", value: 120 }] })]);
   const result = await processCleanTurn({ tenantId: "t", conversationId: "c", message: "opaque" }, d.value);
   assert.equal(result.state.tasks[0]?.collectedFields.value, 120);

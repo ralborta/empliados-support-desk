@@ -37,7 +37,8 @@ export class FakeCapabilityAuthorizer implements CapabilityAuthorizer {
       if (request.kind === "write_commit") {
         const pending = input.state.pendingOperation;
         if (!pending || request.capability !== pending.capability || request.arguments.operationId !== pending.operationId
-          || request.arguments.version !== pending.version || request.arguments.payloadHash !== pending.payloadHash) {
+          || request.arguments.version !== pending.version || request.arguments.payloadHash !== pending.payloadHash
+          || request.arguments.idempotencyKey !== pending.idempotencyKey) {
           return { outcome: "blocked", violations: [{ code: "PENDING_BINDING_MISMATCH", message: "El commit no coincide con la operación preparada.", severity: "blocking" }] };
         }
       }

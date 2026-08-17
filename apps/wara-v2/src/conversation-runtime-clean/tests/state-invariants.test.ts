@@ -15,7 +15,7 @@ test("detects dominant expectation XOR", () => {
 
 test("detects incomplete pending binding and invalid task", () => {
   const state = createEmptyCleanState({ tenantId: "t", conversationId: "c" });
-  const invalid = { ...state, pendingOperation: { operationId: "", capability: "", taskId: "missing", version: 0, payloadHash: "", preparedArguments: {}, status: "prepared" as const } };
+  const invalid = { ...state, pendingOperation: { operationId: "", capability: "", taskId: "missing", version: 0, payloadHash: "", idempotencyKey: "", preparedArguments: {}, status: "prepared" as const } };
   const codes = validateStateInvariants(invalid).map((violation) => violation.code);
   assert.equal(codes.includes("INVALID_OPERATION_TASK"), true);
   assert.equal(codes.includes("INVALID_PENDING_OPERATION"), true);

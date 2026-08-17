@@ -9,7 +9,8 @@ export type ThreadRelation =
 export type OperationKind = "conversation" | "read" | "write_prepare" | "write_commit" | "handoff";
 export type TaskType =
   | "company" | "unit_query" | "gps" | "odometer" | "hourmeter"
-  | "maintenance" | "certificate" | "knowledge" | "human_handoff";
+  | "maintenance" | "certificate" | "knowledge" | "human_handoff"
+  | "conversation_assignment" | "ticket";
 export type EntityType = "company" | "unit" | "date" | "time" | "numeric_value" | "listing_index" | "confirmation";
 export type ExpectedField = "company" | "unit" | "value" | "date" | "time" | "confirmation" | "clarification" | "free_text";
 

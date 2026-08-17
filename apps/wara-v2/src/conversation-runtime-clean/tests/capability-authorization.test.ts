@@ -7,7 +7,10 @@ import { createEmptyCleanState, type ConversationStateClean, type TaskState } fr
 
 const requiredNames = ["company.list", "company.select", "company.get_active", "unit.search", "unit.select", "unit.get_active", "unit.get_previous",
   "gps.get_status", "odometer.prepare", "odometer.update", "hourmeter.prepare", "hourmeter.update", "maintenance.prepare", "maintenance.create",
-  "certificate.prepare", "certificate.issue", "domain.answer", "handoff.prepare", "handoff.create"];
+  "certificate.prepare", "certificate.issue", "domain.answer", "handoff.prepare", "handoff.create",
+  "conversation.handoff.prepare", "conversation.handoff.commit", "conversation.assign.prepare", "conversation.assign.commit",
+  "conversation.release.prepare", "conversation.release.commit", "ticket.create.prepare", "ticket.create.commit", "ticket.get_status",
+  "ticket.update.prepare", "ticket.update.commit", "ticket.close.prepare", "ticket.close.commit", "ticket.reopen.prepare", "ticket.reopen.commit"];
 const authorizer = new CleanCapabilityAuthorizer();
 
 function operation(patch: Partial<OperationRequest> = {}): OperationRequest {
@@ -64,11 +67,11 @@ test("allows resolved unit to satisfy a same-turn requirement", () => {
 test("commit requires exact pending binding and remains simulation-only", () => {
   const active: TaskState = { id: "task", type: "certificate", status: "awaiting_confirmation", collectedFields: {}, createdAt: "a", updatedAt: "a" };
   const boundState = state({ tasks: [active], focusedTaskId: active.id, pendingOperation: { operationId: "pending", capability: "certificate.issue", taskId: active.id,
-    version: 2, payloadHash: "hash", preparedArguments: {}, status: "awaiting_confirmation" } });
-  const valid = operation({ capability: "certificate.issue", kind: "write_commit", task: "certificate", arguments: { operationId: "pending", version: 2, payloadHash: "hash" } });
+    version: 2, payloadHash: "hash", idempotencyKey: "idem", preparedArguments: {}, status: "awaiting_confirmation" } });
+  const valid = operation({ capability: "certificate.issue", kind: "write_commit", task: "certificate", arguments: { operationId: "pending", version: 2, payloadHash: "hash", idempotencyKey: "idem" } });
   const allowed = authorizer.authorize({ decision: decision([valid]), state: boundState, resolutions: [] });
   assert.equal(allowed.outcome, "authorized");
   if (allowed.outcome === "authorized") assert.equal(allowed.operations[0]?.realWriteAllowed, false);
-  const invalid = authorizer.authorize({ decision: decision([{ ...valid, arguments: { operationId: "other", version: 2, payloadHash: "hash" } }]), state: boundState, resolutions: [] });
+  const invalid = authorizer.authorize({ decision: decision([{ ...valid, arguments: { operationId: "other", version: 2, payloadHash: "hash", idempotencyKey: "idem" } }]), state: boundState, resolutions: [] });
   assert.equal(invalid.outcome === "blocked" && invalid.violations[0]?.code, "CONFIRMATION_BINDING_MATCH");
 });
