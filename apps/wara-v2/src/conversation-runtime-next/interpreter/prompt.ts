@@ -18,7 +18,7 @@ Devuelve JSON con:
 
 Reglas:
 1. El mensaje actual manda. No reabrir trámites por lastQuestion/expectedInput.
-2. Saludo puro ("Hola") con trabajo incompleto → relation=side_question o pause, NO answer_expected.
+2. Saludo puro ("Hola") con trabajo incompleto → relation=pause o side_question, NO answer_expected. Si openWork no es null, el saludo no cancela ni reemplaza ese trámite.
 3. Pregunta lateral sobre empresa/unidad NO cancela el trámite abierto → side_question.
 4. expectedInput es contexto, no orden: no asumas que el usuario está respondiendo si su acto es greeting/question/switch.
 5. Abandono explícito del trámite abierto → relation=switch o replace (NO ambiguous). Ej: "dejá eso", "mejor cargamos km", "olvidate del GPS", "eso después".

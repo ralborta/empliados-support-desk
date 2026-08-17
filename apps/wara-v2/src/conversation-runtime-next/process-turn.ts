@@ -37,6 +37,7 @@ import type { TurnPlan } from "../commander-v3/types/turn-plan.js";
 import { DEFAULT_TENANT_TZ } from "../pilot/semantic/natural-datetime.js";
 import { DateTime } from "luxon";
 import { callInterpreter } from "./interpreter/call.js";
+import type { InterpreterDiagnostic } from "./interpreter/diagnostics.js";
 import { decideTurn, filterAuthorizedCapabilities } from "./controller/decide-turn.js";
 import {
   planFromDecision,
@@ -124,6 +125,7 @@ export async function processConversationTurn(
   let interpretMs = 0;
   let interpretRaw: unknown = null;
   let interpretModel = "";
+  let interpretDiagnostic: InterpreterDiagnostic | null = null;
   let interpretation: TurnInterpretation | null = null;
 
   if (input.interpretationOverride) {
@@ -138,16 +140,18 @@ export async function processConversationTurn(
     interpretMs = ir.latencyMs;
     interpretRaw = ir.raw;
     interpretModel = ir.model;
+    interpretDiagnostic = ir.diagnostic;
     interpretation = ir.interpretation;
   }
 
   if (!interpretation) {
+    const failKind = interpretDiagnostic?.finalFailureKind ?? "unknown_error";
     const reply = "No entendí bien. ¿Qué necesitás hacer?";
     vnext = reduceState({
       state: vnext,
       decision: {
         action: "clarify",
-        reasoning: "Intérprete falló.",
+        reasoning: `Intérprete falló (${failKind}).`,
         authorizedCapabilities: [],
         conversationalAct: "ask",
         stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
@@ -180,6 +184,7 @@ export async function processConversationTurn(
       interpretation: null,
       capabilityResults: [],
       validationOk: false,
+      interpretDiagnostic,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -230,6 +235,7 @@ export async function processConversationTurn(
       interpretation,
       capabilityResults: [],
       validationOk: false,
+      interpretDiagnostic,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -363,6 +369,7 @@ export async function processConversationTurn(
       validationOk: true,
       execFacts: facts,
       finalReply: reply,
+      interpretDiagnostic,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -420,6 +427,7 @@ export async function processConversationTurn(
       capabilityResults: [],
       validationOk: true,
       finalReply: reply,
+      interpretDiagnostic,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -475,6 +483,7 @@ export async function processConversationTurn(
       validationOk: true,
       capViolation: exec.capViolation,
       finalReply: reply,
+      interpretDiagnostic,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -539,6 +548,7 @@ export async function processConversationTurn(
     authorizedCapabilities: exec.authorizedCapabilities,
     executedCapabilities: exec.executedCapabilities,
     finalReply: reply,
+    interpretDiagnostic,
   });
   saveLastTraceV3(input.tenantId, input.phone, trace);
   return { reply, state: after, trace };
@@ -577,6 +587,7 @@ function buildTrace(opts: {
   capViolation?: string | null;
   authorizedCapabilities?: string[];
   executedCapabilities?: string[];
+  interpretDiagnostic?: InterpreterDiagnostic | null;
 }): TurnTraceV3 & {
   runtimeNext: {
     interpretation: TurnInterpretation | null;
@@ -585,6 +596,7 @@ function buildTrace(opts: {
     authorizedCapabilities?: string[];
     executedCapabilities?: string[];
     capViolation?: string | null;
+    interpreterDiagnostic?: InterpreterDiagnostic | null;
   };
 } {
   return {
@@ -622,6 +634,7 @@ function buildTrace(opts: {
       authorizedCapabilities: opts.authorizedCapabilities,
       executedCapabilities: opts.executedCapabilities,
       capViolation: opts.capViolation ?? null,
+      interpreterDiagnostic: opts.interpretDiagnostic ?? null,
     },
   };
 }
