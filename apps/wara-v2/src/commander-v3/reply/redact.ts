@@ -11,7 +11,8 @@ const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
 - Si priorReply.relevant, lo que Atilio dijo recién importa.
 - Pedido de trámite: no lo conviertas en una guía del panel ni en repetir la pregunta anterior.
 - Tono de colega que ofrece ayuda, no de ventanilla.
-- Pregunta (yes_no/status/how_to): no la reemplaces por un listado.
+- Pregunta (yes_no/status/how_to): no la reemplaces por un listado NI por el saludo/menú.
+- Si ya te presentaste, no vuelvas a presentarte. Contestá el pedido.
 - LISTADOS: si answerKind=list y hay listado numerado, copialo COMPLETO.
 - UNA pregunta por turno. Sin saludo salvo purpose/act greet. Sin inventar hechos, plazos ni unidades.
 - Conservá nros de caso (#…) e iconos/negrita de WhatsApp de los facts.
@@ -49,6 +50,24 @@ export function shouldDumpFactsWithoutLlm(
   return facts.some(looksLikeListingFact) || facts.some(looksLikeLockedFormFact);
 }
 
+/** Presentación de Atilio: solo si el turno ES un saludo, no un pedido. */
+export function shouldUseGreetingTemplate(plan: TurnPlan): boolean {
+  if (plan.conversationalAct !== "greet") return false;
+  const kind = plan.interpretation?.answerKind;
+  if (kind && kind !== "greet") return false;
+  if (
+    plan.requestedCapabilities.some(
+      (c) =>
+        c.name === "domain.answer" ||
+        c.name.includes("prepare") ||
+        c.name === "gps.get_status",
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function redactReply(input: {
   plan: TurnPlan;
   facts: string[];
@@ -62,7 +81,7 @@ export async function redactReply(input: {
     return { reply: input.conflictClarify, usedLlm: false, latencyMs: 0 };
   }
 
-  if (input.plan.conversationalAct === "greet") {
+  if (shouldUseGreetingTemplate(input.plan)) {
     const companyFacts = input.facts.filter(
       (f) => /empresa/i.test(f) || /^\d+\.\s/.test(f) || /eleg/i.test(f),
     );

@@ -2120,7 +2120,7 @@ function domainFact(topic: string): string {
   if (t.includes("platform_unidades") || t.includes("chevron") || t.includes("atajo")) {
     return platformStaticFallback("unidades", topic);
   }
-  if (t.includes("platform_opciones") || t.includes("agenda") || t.includes("notific")) {
+  if (t.includes("platform_opciones") || t.includes("agenda") || t.includes("notific") || t.includes("configur")) {
     return platformStaticFallback("opciones", topic);
   }
   if (t.includes("platform_mantenimiento") || t.includes("mantenim")) {

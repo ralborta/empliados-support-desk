@@ -125,6 +125,15 @@ export const TurnPlanSchema = z.object({
     .nullable()
     .optional(),
   requestedCapabilities: z.array(CapabilityRequestSchema).default([]),
+  parkedTurn: z
+    .object({
+      answerKind: z.string(),
+      userQuestion: z.string(),
+      task: TaskTypeSchema.nullable().optional(),
+      capabilities: z.array(CapabilityRequestSchema).optional(),
+    })
+    .nullable()
+    .optional(),
   stateIntent: z.object({
     preserveCompany: z.boolean(),
     preserveUnit: z.boolean(),

@@ -103,6 +103,10 @@ export function applyCommanderState(input: ApplyInput): {
       pendingEntity: null,
       lastQuestion: null,
       suspendedTask: null,
+      conversationMetadata: {
+        ...s.conversationMetadata,
+        parkedTurn: null,
+      },
     };
   } else if (
     (input.plan.conversationalAct === "switch_task" ||
@@ -206,6 +210,45 @@ export function applyCommanderState(input: ApplyInput): {
         greetedAt: s.conversationMetadata.greetedAt ?? new Date().toISOString(),
       },
       ...(listingAsk ? { lastQuestion: null } : {}),
+    };
+  }
+
+  if (
+    input.plan.parkedTurn &&
+    input.plan.responseGoal.purpose === "clarify" &&
+    input.plan.conversationalAct === "ask"
+  ) {
+    s = {
+      ...s,
+      lastQuestion: {
+        id: randomUUID(),
+        purpose: "keep_or_close_task",
+        expected: "clarification",
+      },
+      conversationMetadata: {
+        ...s.conversationMetadata,
+        parkedTurn: {
+          answerKind: input.plan.parkedTurn.answerKind,
+          userQuestion: input.plan.parkedTurn.userQuestion,
+          task: input.plan.parkedTurn.task ?? null,
+          capabilities: (input.plan.parkedTurn.capabilities ?? []).map((c) => ({
+            name: c.name,
+            params: c.params ?? {},
+          })),
+        },
+      },
+    };
+  } else if (
+    input.plan.responseGoal.purpose === "resume" &&
+    input.plan.conversationalAct === "continue_task" &&
+    s.activeTask
+  ) {
+    s = {
+      ...s,
+      conversationMetadata: {
+        ...s.conversationMetadata,
+        parkedTurn: null,
+      },
     };
   }
 

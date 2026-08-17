@@ -34,6 +34,13 @@ import {
   stateForSwitchedTask,
 } from "./enrich/task-switch.js";
 import { applyCommanderState } from "./state/apply-patch.js";
+import {
+  enrichPlanForKeepOrCloseAnswer,
+  enrichPlanForOpenTaskHold,
+  KEEP_OR_CLOSE_PURPOSE,
+  planFromParkedTurn,
+  resumeQuestionForTask,
+} from "./enrich/open-task-hold.js";
 import { redactReply } from "./reply/redact.js";
 import {
   getConversationStateV3,
@@ -387,6 +394,47 @@ export async function runCommanderTurn(
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForQuestionContract(plan, state);
+
+  plan = enrichPlanForKeepOrCloseAnswer(plan, state);
+  if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) {
+    if (
+      plan.conversationalAct === "cancel_task" ||
+      plan.taskAction === "cancel"
+    ) {
+      const parked = state.conversationMetadata.parkedTurn ?? null;
+      state = {
+        ...state,
+        activeTask: null,
+        pendingWrite: null,
+        pendingEntity: null,
+        lastQuestion: null,
+        conversationMetadata: {
+          ...state.conversationMetadata,
+          parkedTurn: null,
+        },
+      };
+      if (parked) {
+        plan = planFromParkedTurn(parked, plan);
+        plan = enrichPlanForQuestionContract(plan, state);
+      }
+    } else if (
+      plan.conversationalAct === "continue_task" ||
+      plan.responseGoal.purpose === "resume"
+    ) {
+      state = {
+        ...state,
+        lastQuestion: state.activeTask
+          ? resumeQuestionForTask(state.activeTask)
+          : null,
+        conversationMetadata: {
+          ...state.conversationMetadata,
+          parkedTurn: null,
+        },
+      };
+    }
+  }
+
+  plan = enrichPlanForOpenTaskHold(plan, state);
 
   // LLM a veces marca switch_task sin trámite previo → no debe pisar el prepare.
   if (

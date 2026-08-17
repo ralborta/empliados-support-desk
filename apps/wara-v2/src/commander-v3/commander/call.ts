@@ -237,6 +237,12 @@ export function coercePlan(raw: unknown): unknown {
       o.conversationalAct = "start_task";
       if (!o.taskAction) o.taskAction = "start";
     }
+    if (
+      o.conversationalAct === "greet" &&
+      caps.some((c) => String(c.name ?? "") === "domain.answer")
+    ) {
+      o.conversationalAct = "inform";
+    }
   }
 
   const actMap: Record<string, string> = {
@@ -349,6 +355,38 @@ export function coercePlan(raw: unknown): unknown {
     o.reasoning = o.reasoning.trim().slice(0, 800);
   }
   o.interpretation = coerceInterpretation(o);
+  const kind = String(
+    (o.interpretation as { answerKind?: string } | undefined)?.answerKind ?? "",
+  );
+  // greet solo si interpretation dice greet. Un how_to/trámite no se presenta de nuevo.
+  if (o.conversationalAct === "greet" && kind && kind !== "greet") {
+    if (kind === "start_task") {
+      o.conversationalAct = "start_task";
+      if (!o.taskAction) o.taskAction = "start";
+    } else if (kind === "continue_task") {
+      o.conversationalAct = "continue_task";
+      if (!o.taskAction) o.taskAction = "continue";
+    } else if (kind === "close") {
+      o.conversationalAct = "farewell";
+    } else {
+      o.conversationalAct = "inform";
+    }
+  }
+  if (kind === "how_to") {
+    if (!caps.some((c) => String(c.name ?? "") === "domain.answer")) {
+      caps.push({
+        name: "domain.answer",
+        params: {
+          topic: String(
+            (o.interpretation as { userQuestion?: string } | undefined)
+              ?.userQuestion ?? "wara",
+          ),
+        },
+      });
+      o.requestedCapabilities = caps;
+    }
+    if (o.conversationalAct === "greet") o.conversationalAct = "inform";
+  }
   return o;
 }
 

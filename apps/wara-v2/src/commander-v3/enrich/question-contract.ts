@@ -52,10 +52,18 @@ export function enrichPlanForQuestionContract(
   );
   const needsGpsEvidence =
     (kind === "yes_no" || kind === "status") && Boolean(state.unit) && !hasEvidence;
+  const needsDomainEvidence = kind === "how_to" && !hasEvidence;
 
   if (needsGpsEvidence) {
     caps = [...caps, { name: "gps.get_status", params: {} }];
     if (!task || task === "unit_query") task = "gps";
+  }
+  if (needsDomainEvidence) {
+    caps = [
+      ...caps,
+      { name: "domain.answer", params: { topic: interp.userQuestion || "wara" } },
+    ];
+    task = null;
   }
 
   let bindActiveUnit = false;
@@ -72,14 +80,17 @@ export function enrichPlanForQuestionContract(
     }
   }
 
+  const demoteGreet = kind === "how_to" && plan.conversationalAct === "greet";
   const sameCaps =
     !hadSearch &&
     !needsGpsEvidence &&
+    !needsDomainEvidence &&
     caps.length === plan.requestedCapabilities.length;
-  if (sameCaps && !bindActiveUnit) return plan;
+  if (sameCaps && !bindActiveUnit && !demoteGreet) return plan;
 
   return {
     ...plan,
+    conversationalAct: demoteGreet ? "inform" : plan.conversationalAct,
     task,
     unitReference: bindActiveUnit ? contextualActiveUnitRef() : plan.unitReference,
     stateIntent: bindActiveUnit
@@ -93,6 +104,9 @@ export function enrichPlanForQuestionContract(
         : "") +
       (needsGpsEvidence
         ? "Traigo GPS de la unidad activa como evidencia de esa pregunta."
+        : "") +
+      (needsDomainEvidence
+        ? "how_to: domain.answer es la evidencia; no reenvío el saludo."
         : ""),
   };
 }

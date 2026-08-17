@@ -24,6 +24,13 @@ export type ActiveTaskV3 = {
   missing: string[];
 };
 
+export type ParkedTurnV3 = {
+  answerKind: string;
+  userQuestion: string;
+  task: TaskTypeV3 | null;
+  capabilities: Array<{ name: string; params?: Record<string, unknown> }>;
+};
+
 export type GpsIncidentRecord = {
   movilId: number;
   plate: string;
@@ -114,6 +121,8 @@ export type ConversationStateV3 = {
       assistantReplyPreview: string;
       at: string;
     } | null;
+    /** Pedido nuevo en pausa hasta que el usuario cierre o siga el trámite abierto. */
+    parkedTurn?: ParkedTurnV3 | null;
   };
 
   updatedAt: string;

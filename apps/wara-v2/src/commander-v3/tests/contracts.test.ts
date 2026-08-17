@@ -217,4 +217,96 @@ describe("commander-v3 contracts", () => {
     assert.equal(isHardValidationConflict(["confirm_without_pending_write"]), true);
     assert.equal(isHardValidationConflict(["write_commit_without_confirm:x"]), true);
   });
+
+  it("greet + how_to no se queda en presentación: inform + domain.answer", () => {
+    const coerced = TurnPlanSchema.parse(
+      coercePlan({
+        interpretation: {
+          userQuestion: "ayuda para usar el panel",
+          answerKind: "how_to",
+        },
+        conversationalAct: "greet",
+        requestedCapabilities: [],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.8,
+      }),
+    );
+    assert.equal(coerced.conversationalAct, "inform");
+    assert.equal(coerced.interpretation?.answerKind, "how_to");
+    assert.ok(coerced.requestedCapabilities.some((c) => c.name === "domain.answer"));
+  });
+
+  it("trámite abierto + how_to → keep_or_close, no arranca lo nuevo", async () => {
+    const { enrichPlanForOpenTaskHold, enrichPlanForKeepOrCloseAnswer, planFromParkedTurn } =
+      await import("../enrich/open-task-hold.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "El Cacique S.A." };
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value"],
+    };
+    const incoming = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "ayuda con el panel",
+        answerKind: "how_to",
+      },
+      reasoning: "pidió guía",
+      conversationalAct: "inform",
+      requestedCapabilities: [
+        { name: "domain.answer", params: { topic: "ayuda con el panel" } },
+      ],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const held = enrichPlanForOpenTaskHold(incoming, s);
+    assert.equal(held.conversationalAct, "ask");
+    assert.equal(held.responseGoal.purpose, "clarify");
+    assert.equal(held.requestedCapabilities.length, 0);
+    assert.ok(held.parkedTurn);
+    assert.match(held.responseGoal.nextQuestion ?? "", /odómetro/i);
+    assert.doesNotMatch(held.responseGoal.nextQuestion ?? "", /Qué necesitás/);
+
+    s.lastQuestion = {
+      id: "q",
+      purpose: "keep_or_close_task",
+      expected: "clarification",
+    };
+    s.conversationMetadata.parkedTurn = held.parkedTurn!;
+
+    const keep = enrichPlanForKeepOrCloseAnswer(
+      TurnPlanSchema.parse({
+        interpretation: { userQuestion: "seguir el trámite", answerKind: "continue_task" },
+        reasoning: "sigue",
+        conversationalAct: "continue_task",
+        requestedCapabilities: [],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "resume", facts: [] },
+        confidence: 0.9,
+      }),
+      s,
+    );
+    assert.equal(keep.conversationalAct, "continue_task");
+    assert.equal(keep.task, "odometer");
+
+    const close = enrichPlanForKeepOrCloseAnswer(
+      TurnPlanSchema.parse({
+        interpretation: { userQuestion: "cerrar y ver el panel", answerKind: "how_to" },
+        reasoning: "cierra",
+        conversationalAct: "inform",
+        requestedCapabilities: [],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.9,
+      }),
+      s,
+    );
+    assert.equal(close.conversationalAct, "cancel_task");
+    const restored = planFromParkedTurn(held.parkedTurn!, close);
+    assert.equal(restored.conversationalAct, "inform");
+    assert.ok(restored.requestedCapabilities.some((c) => c.name === "domain.answer"));
+  });
 });

@@ -16,14 +16,10 @@ interpretation (obligatorio, ANTES de elegir tools):
 - priorReply: si el mensaje solo se entiende con lo que Atilio dijo recién → relevant=true, summary, refersTo last_facts|last_question|active_entity. Si se entiende solo → relevant=false, refersTo=none.
 
 Qué hacer con eso:
-- Saludo (hola / buenas, sin pedido) → conversationalAct=greet. El redactor saluda como Atilio. No dejes el turno en una pregunta seca de ventanilla.
-- Quiere que Atilio HAGA un trámite (registrar km/hs, certificado, OT, reporte GPS de una unidad, listar flota) → start_task o continue_task + la capability de ese trámite. El nombre del trámite ES el trámite, no una guía del panel.
-- Si tu último mensaje fue una pregunta abierta y ahora piden un trámite o contestan algo concreto, ESE pedido gana: no repitas la pregunta anterior. Arrancá o continuá el trámite. Unidad en state → usala.
-- Pregunta cómo usar el panel o qué es un concepto → how_to + domain.answer.
-- Pregunta sobre un hecho (si la posición es correcta, si está al día) → yes_no o status + tools de evidencia. NUNCA sustituyas esa pregunta por un listado.
-- Anáfora (su/esa/la/esa unidad) → state.unit si existe. Unidad activa no cambia salvo que nombren otra.
-- Pedí SOLO lo que falta. Una pregunta por turno. Usá empresa/unidad/campos ya en state.
-- Si no entendés, clarify UNA pregunta concreta. No inventes unidades, casos, plazos ni "no hay información" si hay facts o state.
+- Saludo PURO (hola, sin pedido) → greet. Una sola presentación. Si lastAssistantReply ya fue el menú, no vuelvas a greet.
+- Trámite abierto + pedido distinto → ask/clarify: ¿seguimos o cerramos? parkedTurn guarda lo nuevo. No arranques lo nuevo ni reenvíes el menú. lastQuestion.purpose=keep_or_close_task: seguir → continue_task; cerrar → cancel_task.
+- Sin trámite abierto: el pedido gana (start_task + capability, o how_to + domain.answer del panel). Nunca reenvíes la presentación.
+- Hecho (posición, al día) → yes_no/status + evidencia. NUNCA un listado. Anáfora → state.unit. Una pregunta. No inventes.
 
 Tools: traen evidencia o preparan el trámite declarado. responseGoal.facts vacío si la tool trae los hechos. yes_no|status|how_to → NUNCA unit.search.
 
@@ -53,7 +49,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el hilo. Completá interpretation primero. Si el usuario pide un trámite, arrancalo (no repitas lastAssistantReply). Saludo sin pedido → greet. Tools sirven a ESA petición.",
+        "Interpretá el hilo. Completá interpretation primero. Con trámite abierto y pedido distinto: preguntá si se sigue o se cierra (no reenvíes el saludo). Tools sirven a ESA petición.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
@@ -102,6 +98,13 @@ export function buildCommanderUserPayload(input: {
             }
           : null,
         lastTurn: s.conversationMetadata.lastTurn ?? null,
+        parkedTurn: s.conversationMetadata.parkedTurn
+          ? {
+              answerKind: s.conversationMetadata.parkedTurn.answerKind,
+              userQuestion: s.conversationMetadata.parkedTurn.userQuestion,
+              task: s.conversationMetadata.parkedTurn.task,
+            }
+          : null,
       },
       lastAssistantReply: lastAssistant?.text
         ? lastAssistant.text.slice(0, 1800)
