@@ -29,6 +29,7 @@ const PUSH_SUITES = [
   "verify-horometer-value-continuation.mjs",
   "verify-odometer-horometro-unida-900096.mjs",
   "verify-tramite-cancel-resume.mjs",
+  "verify-meter-incomplete-data.mjs",
   "verify-ai-first-dialogue.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-certificate-not-greeting-loop.mjs",
