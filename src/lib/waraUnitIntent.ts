@@ -27,6 +27,7 @@ import {
   threadTextSinceCompanySelection,
   hasPendingOdometerConfirmation,
   hasPendingUnitConsultPlateRequest,
+  threadHasRecentCustomerMeterUpdateIntent,
   looksLikeBriefConfirmation,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeBareOdometerTopicMention,
@@ -171,7 +172,8 @@ export function looksLikeUnitNameInMessage(rawText: string | undefined | null): 
 export function extractMovilIdFromUnitMessage(rawText: string | undefined | null): number | null {
   const text = String(rawText ?? "").trim();
   if (!text) return null;
-  for (const m of text.matchAll(/\bunidad\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
+  // "unida" sin d final — typo frecuente en WhatsApp (bug prod 2026-08-17).
+  for (const m of text.matchAll(/\bunida[d]?\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
     const n = parseInt(m[1], 10);
     if (Number.isFinite(n)) return n;
   }
@@ -1053,7 +1055,8 @@ export function looksLikeVagueUnitReference(rawText: string): boolean {
   // volvía a pedir matrícula en vez de reusar activeUnit.
   if (
     /\b(de esta|de esa|esta|esa)\s+(patente|matricula|unidad)\b/.test(norm) ||
-    /\b(la misma|esta misma)\s+(patente|matricula|unidad)\b/.test(norm)
+    /\b(la misma|esta misma)\s+(patente|matricula|unidad)\b/.test(norm) ||
+    /\bde la unida[d]?\b/.test(norm)
   ) {
     return true;
   }
@@ -2581,6 +2584,16 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
     return false;
   }
 
+  // Tras pedir horómetro/odómetro, elegir unidad por código → odómetro, no GPS.
+  if (
+    threadHasRecentCustomerMeterUpdateIntent(threadText) &&
+    (isOdometerPlateSelectionMessage(selectionText) ||
+      extractMovilIdFromUnitMessage(selectionText) != null ||
+      looksLikeVagueUnitReference(selectionText))
+  ) {
+    return false;
+  }
+
   // GPS/reporte en vivo — siempre al executor (no exige patente/marca en el mensaje).
   if (
     looksLikeLiveUnitConsultIntent(selectionText) ||
@@ -2655,7 +2668,8 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   if (
     hasPendingUnitConsultPlateRequest(threadText) &&
     !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
-    !looksLikeHorometerOnlyIntent(selectionText)
+    !looksLikeHorometerOnlyIntent(selectionText) &&
+    !threadHasRecentCustomerMeterUpdateIntent(threadText)
   ) {
     return false;
   }
@@ -2688,6 +2702,17 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   if (
     (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) &&
     looksLikeSubstantiveCustomerMessage(selectionText)
+  ) {
+    return true;
+  }
+  // Tras pedir horómetro/odómetro, el cliente confirma unidad por código o referencia.
+  if (
+    threadHasRecentCustomerMeterUpdateIntent(threadText) &&
+    (isOdometerPlateSelectionMessage(selectionText) ||
+      extractMovilIdFromUnitMessage(selectionText) != null ||
+      looksLikeVagueUnitReference(selectionText)) &&
+    !looksLikeGpsOrUnitStatusQuestion(selectionText) &&
+    !looksLikeLiveUnitConsultIntent(selectionText)
   ) {
     return true;
   }
