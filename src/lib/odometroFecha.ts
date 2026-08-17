@@ -43,6 +43,194 @@ function daysSinceLastWeekday(targetDow: number, timezone: string): number {
   return (todayDow - targetDow + 7) % 7;
 }
 
+/** Días hasta la próxima ocurrencia de ese weekday (7 si hoy es ese día). */
+function daysUntilNextWeekday(targetDow: number, timezone: string): number {
+  const since = daysSinceLastWeekday(targetDow, timezone);
+  return since === 0 ? 7 : 7 - since;
+}
+
+function normalizeFechaInput(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+const HOUR_WORDS: Record<string, number> = {
+  una: 1,
+  uno: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  once: 11,
+  doce: 12,
+};
+
+function expandHourWords(norm: string): string {
+  return norm.replace(
+    /\b(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b/g,
+    (w) => String(HOUR_WORDS[w] ?? w),
+  );
+}
+
+function padTimePart(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function applyDayPeriodHour(hour: number, period: string): number | null {
+  if (hour < 0 || hour > 23) return null;
+  if (period === "manana" || period === "madrugada") {
+    if (hour === 12) return 0;
+    return hour <= 11 ? hour : hour;
+  }
+  if (period === "tarde") {
+    if (hour >= 1 && hour <= 11) return hour + 12;
+    return hour;
+  }
+  if (period === "noche") {
+    if (hour === 12) return 0;
+    if (hour >= 1 && hour <= 11) return hour + 12;
+    return hour;
+  }
+  return hour;
+}
+
+/**
+ * Hora coloquial rioplatense: "4 de la tarde", "12 en punto", "a las 8 de la mañana",
+ * "tipo seis" (~18:00). Misma convención que apps/wara-v2 natural-datetime (determinística).
+ */
+export function parseColloquialTimeFromText(text: string): { hh: string; min: string } | null {
+  const n = expandHourWords(normalizeFechaInput(text));
+  if (!n.trim()) return null;
+
+  if (/\bmediod[ií]a\b/.test(n)) return { hh: "12", min: "00" };
+  if (/\bmedianoche\b/.test(n)) return { hh: "00", min: "00" };
+
+  const tipoMedia = n.match(/\btipo\s+(\d{1,2})\s+y\s+media\b/);
+  if (tipoMedia) {
+    let h = Number(tipoMedia[1]);
+    if (h === 6) h = 18;
+    else if (h >= 1 && h <= 11) h += 12;
+    if (h > 23) return null;
+    return { hh: padTimePart(h), min: "30" };
+  }
+  const tipo = n.match(/\btipo\s+(\d{1,2})\b/);
+  if (tipo) {
+    let h = Number(tipo[1]);
+    if (h === 6) h = 18;
+    else if (h >= 1 && h <= 11) h += 12;
+    if (h > 23) return null;
+    return { hh: padTimePart(h), min: "00" };
+  }
+
+  const enPunto = n.match(/\b(\d{1,2})\s+en\s+punto\b/);
+  if (enPunto) {
+    const h = Number(enPunto[1]);
+    if (h > 23) return null;
+    return { hh: padTimePart(h), min: "00" };
+  }
+
+  const deLa = n.match(
+    /\b(?:a\s+las?|las)?\s*(\d{1,2})(?::(\d{2}))?\s+de\s+la\s+(manana|madrugada|tarde|noche)\b/,
+  );
+  if (deLa) {
+    const applied = applyDayPeriodHour(Number(deLa[1]), deLa[3]);
+    const mm = deLa[2] ? Number(deLa[2]) : 0;
+    if (applied == null || mm > 59) return null;
+    return { hh: padTimePart(applied), min: padTimePart(mm) };
+  }
+
+  const estaManana = n.match(/\b(?:esta\s+)?manana\s+(?:a\s+las\s+)?(\d{1,2})(?::(\d{2}))?\b/);
+  if (estaManana) {
+    const h = Number(estaManana[1]);
+    const mm = estaManana[2] ? Number(estaManana[2]) : 0;
+    if (h > 23 || mm > 59) return null;
+    return { hh: padTimePart(h), min: padTimePart(mm) };
+  }
+
+  const aLas = n.match(/\b(?:a\s+las?|las)\s+(\d{1,2})(?::(\d{2}))?\b/);
+  if (aLas) {
+    const h = Number(aLas[1]);
+    const mm = aLas[2] ? Number(aLas[2]) : 0;
+    if (h > 23 || mm > 59) return null;
+    return { hh: padTimePart(h), min: padTimePart(mm) };
+  }
+
+  const hm =
+    n.match(/\b(?:a\s+las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/) ??
+    n.match(/\ba\s+las\s*(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\b/) ??
+    n.match(/\b(?:hora|horas)\b[^0-9]{0,24}(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\b/) ??
+    n.match(/\b(\d{1,2}):(\d{2})\b/);
+  if (hm) {
+    const h = Number(hm[1]);
+    const mm = Number(hm[2]);
+    if (h > 23 || mm > 59) return null;
+    return { hh: padTimePart(h), min: padTimePart(mm) };
+  }
+
+  return null;
+}
+
+/** Resuelve delta de días respecto a hoy (negativo = pasado). */
+function resolveRelativeDayDelta(norm: string, timezone: string): number | undefined {
+  if (/\banoche\b/.test(norm)) return -1;
+  if (/\besta\s+manana\b/.test(norm)) return 0;
+  const relative = norm.match(/\b(anteayer|ayer|hoy)\b/);
+  if (relative) {
+    return relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
+  }
+  // "mañana" como día futuro (no confundir con "de la mañana" ni "esta mañana").
+  if (/\bmanana\b/.test(norm) && !/\bde\s+la\s+manana\b/.test(norm)) {
+    return 1;
+  }
+  const haceDias = norm.match(/\bhace\s+(\d{1,2})\s+d[ií]as?\b/);
+  if (haceDias) return -Number(haceDias[1]);
+  const weekdayMatch = norm.match(
+    /\b(?:el\s+)?(?:pasad[oa]\s+)?(domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b/,
+  );
+  if (weekdayMatch) {
+    const dow = WEEKDAY_NAMES[weekdayMatch[1]];
+    if (/\b(proxim[oa]|siguiente)\b/.test(norm)) {
+      return daysUntilNextWeekday(dow, timezone);
+    }
+    return -daysSinceLastWeekday(dow, timezone);
+  }
+  return undefined;
+}
+
+function buildNaiveFechaIso(
+  parts: { year: number; month: number; day: number },
+  time: { hh: string; min: string } | null,
+): string {
+  const { year, month, day } = parts;
+  const hh = time?.hh ?? "00";
+  const mi = time?.min ?? "00";
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${hh}:${mi}:00`;
+}
+
+function parseRelativeOrColloquialFecha(norm: string, timezone: string): string | undefined {
+  const deltaDays = resolveRelativeDayDelta(norm, timezone);
+  const colloquialTime = parseColloquialTimeFromText(norm);
+
+  if (deltaDays !== undefined) {
+    const { year, month, day } = shiftCalendarDay(todayPartsInTz(timezone), deltaDays);
+    return buildNaiveFechaIso({ year, month, day }, colloquialTime);
+  }
+
+  if (colloquialTime) {
+    const { year, month, day } = todayPartsInTz(timezone);
+    return buildNaiveFechaIso({ year, month, day }, colloquialTime);
+  }
+
+  return undefined;
+}
+
 /**
  * Hora de lectura cerca de una fecha numérica.
  * Acepta: "Hora: 16:16", "a las 14:00 Hs", y también "10:10 hs" / "10:10" en línea
@@ -169,60 +357,10 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
     }
   }
   if (matches.length === 0) {
-    const norm = raw
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-    const relative = norm.match(/\b(anteayer|ayer|hoy)\b/);
-    // Bug real, producción 2026-07-28: "11:45 del domingo" y "la fecha es de hace 2
-    // dias" no matcheaban NINGÚN patrón (solo se reconocían "hoy/ayer/anteayer" y
-    // fechas numéricas) — se ignoraban en silencio y el trámite quedaba con la fecha
-    // de HOY, sin avisarle al cliente que no se entendió la corrección.
-    const haceDias = norm.match(/\bhace\s+(\d{1,2})\s+d[ií]as?\b/);
-    const weekdayMatch = norm.match(
-      /\b(domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b/,
-    );
-    let deltaDays: number | undefined;
-    if (relative) {
-      deltaDays = relative[1] === "hoy" ? 0 : relative[1] === "ayer" ? -1 : -2;
-    } else if (haceDias) {
-      deltaDays = -Number(haceDias[1]);
-    } else if (weekdayMatch) {
-      deltaDays = -daysSinceLastWeekday(WEEKDAY_NAMES[weekdayMatch[1]], tz);
-    }
-    if (deltaDays === undefined) {
-      // Solo hora del reloj, sin fecha explícita → asumimos "hoy" (lectura en el día actual).
-      // Ej. "16:45", "a las 16:45", "Hora: 16:45" — no confundir con horómetro decimal.
-      // También reconoce la hora quiando queda dentro de una oración más larga (bug real,
-      // producción 2026-07-28: "me equivoque la hora es a las13:05" durante una corrección
-      // de confirmación pendiente no matcheaba porque el patrón exigía que el mensaje
-      // ENTERO fuera solo la hora — el dato quedaba sin fecha detectada y desaparecía del
-      // resumen en vez de actualizarse).
-      const bareClock =
-        norm.match(/^(?:(?:hora|horas)\s*:?\s*|a\s+las\s+)?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\.?$/) ??
-        norm.match(/\b(\d{1,2}):(\d{2})\b\s*(?:de\s+)?(?:hoy|ayer|anteayer)\b/) ??
-        norm.match(/\b(?:hora|horas)\b[^0-9]{0,20}?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\b/) ??
-        norm.match(/\ba\s+las\s*(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?\b/);
-      if (bareClock) {
-        const hh = Number(bareClock[1]);
-        const mm = Number(bareClock[2]);
-        if (hh <= 23 && mm <= 59) {
-          const { year, month, day } = todayPartsInTz(tz);
-          return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00`;
-        }
-      }
-      return undefined;
-    }
-    const timeMatch =
-      norm.match(/\b(?:a las|horas?)\s*(?:es|:|-)?\s*(\d{1,2}):(\d{2})(?:\s*h\s*s|\s*hs)?/) ??
-      norm.match(
-        /\b(\d{1,2}):(\d{2})\b\s*(?:de(?:l)?\s+)?(?:hoy|ayer|anteayer|domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b/,
-      ) ??
-      norm.match(/\b(\d{1,2}):(\d{2})\b/);
-    const { year, month, day } = shiftCalendarDay(todayPartsInTz(tz), deltaDays);
-    const hh = (timeMatch?.[1] ?? "00").padStart(2, "0");
-    const mi = (timeMatch?.[2] ?? "00").padStart(2, "0");
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${hh}:${mi}:00`;
+    const norm = normalizeFechaInput(raw);
+    const relativeParsed = parseRelativeOrColloquialFecha(norm, tz);
+    if (relativeParsed) return relativeParsed;
+    return undefined;
   }
   const m = matches[matches.length - 1];
   const dd = m[1].padStart(2, "0");
@@ -233,12 +371,10 @@ export function parseFechaFromText(text: string, timezone?: string): string | un
   let hh = m[4];
   let min = m[5];
   if (hh == null || min == null) {
-    // Bug real, producción 2026-07-23: plantilla con hora en línea separada ("Hora: 10:35 /
-    // Fecha 21/07/26"). Bug 2026-07-27: otra plantilla común pone Fecha ANTES de Hora
-    // ("Fecha: 26/07/26" + "Hora: 16:16Hs") — hay que buscar en ventana antes Y después
-    // de la fecha, y aceptar sufijo "Hs" pegado a los minutos.
     const dateIdx = m.index ?? 0;
-    const horaMatch = parseHoraLecturaNearDate(raw, dateIdx, m[0].length);
+    const horaMatch =
+      parseHoraLecturaNearDate(raw, dateIdx, m[0].length) ??
+      parseColloquialTimeFromText(raw.slice(Math.max(0, dateIdx - 80), dateIdx + m[0].length + 80));
     if (horaMatch) {
       hh = horaMatch.hh;
       min = horaMatch.min;
@@ -414,13 +550,9 @@ export function fechaLecturaTieneHora(
 export function looksLikeClockTimeOnlyMessage(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
-  const t = raw
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[!?.¡¿]+/g, "")
-    .trim();
-  if (/\b(hoy|ayer|anteayer|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(t)) return false;
+  const t = normalizeFechaInput(raw).replace(/[!?.¡¿]+/g, "").trim();
+  if (/\b(hoy|ayer|anteayer|anoche|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(t)) return false;
+  if (parseColloquialTimeFromText(t)) return true;
   return (
     /^(?:(?:hora|horas)\s*:?\s*|a\s+las\s+)?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?$/.test(t) ||
     /^(?:la\s+)?hora\s+(?:es\s+)?(?:a\s+las\s+)?(\d{1,2}):(\d{2})(?:\s*(?:hs?|h\s*s))?$/.test(t)

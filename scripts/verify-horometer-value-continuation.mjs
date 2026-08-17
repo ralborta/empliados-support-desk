@@ -40,4 +40,23 @@ assert.equal(
   "shouldContinueOdometerFlow('71 hr ayer 11:00') con horómetro pendiente",
 );
 
+const shortHoroAsk = [
+  "⏱ *Horómetro*",
+  "🚗 Unidad: *AG 396 ZD*",
+  "",
+  "🔢 Pasame el valor del horómetro en *hs*.",
+].join("\n");
+const threadShort = `Cliente: horómetro\nAtilio: ${shortHoroAsk}`;
+
+assert.equal(
+  shouldContinueOdometerFlow("81", threadShort),
+  true,
+  "shouldContinueOdometerFlow('81') con horómetro pendiente (valor corto)",
+);
+assert.equal(
+  shouldContinueOdometerFlow("Ayer 11:00", threadShort),
+  true,
+  "shouldContinueOdometerFlow('Ayer 11:00') con horómetro pendiente",
+);
+
 console.log("OK verify-horometer-value-continuation");

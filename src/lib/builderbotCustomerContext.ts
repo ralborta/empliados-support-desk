@@ -7,7 +7,7 @@ import {
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection, hasPendingOdometerConfirmation } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadAwaitingHorometerKmValue, threadAwaitingOdometerKmValue, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection, hasPendingOdometerConfirmation } from "@/lib/wara";
 import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
 import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
 import { clearActiveUnit } from "@/lib/activeUnit";
@@ -696,8 +696,12 @@ export async function customerRegisteredContextResponse(
     const threadForGreeting = scopedThreadText || fullThreadText;
     const formalOdoConfirm = hasPendingOdometerConfirmation(threadForGreeting);
     const pendingActionRecord = await getPendingAction(prisma, trimmed);
+    const awaitingMeterValueOnly =
+      threadAwaitingHorometerKmValue(threadForGreeting) ||
+      threadAwaitingOdometerKmValue(threadForGreeting);
     const staleOdoMidFlow =
       !formalOdoConfirm &&
+      !awaitingMeterValueOnly &&
       (pendingActionRecord?.type === "odometro" ||
         threadHasActiveOdometerFlow(threadForGreeting));
     if (staleOdoMidFlow) {

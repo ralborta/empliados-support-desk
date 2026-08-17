@@ -757,10 +757,8 @@ export async function runTurnExecutorPhase(params: {
 
   // Arranque explícito odómetro/horómetro — antes de unidades/agente (también con marca en el mensaje).
   if (
-    (looksLikeExplicitOdometerUpdateRequest(selectionText) ||
-      looksLikeHorometerOnlyIntent(selectionText)) &&
-    !threadOdometerRegistrationCompleted(threadCtx.classificationThread) &&
-    !isOdometerFlowSuperseded(threadCtx.classificationThread)
+    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+    looksLikeHorometerOnlyIntent(selectionText)
   ) {
     if (pendingAction?.type === "mantenimiento") {
       await clearPendingAction(prisma, rawPhone);
@@ -824,6 +822,8 @@ export async function runTurnExecutorPhase(params: {
   if (
     !skipSchematicUnitRoute &&
     activeUnit?.plate &&
+    !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
+    !looksLikeHorometerOnlyIntent(selectionText) &&
     !threadHasActiveOdometerFlow(threadForFollowUp) &&
     pendingAction?.type !== "odometro" &&
     !looksLikeGenericCapabilityOrTopicSwitchRequest(selectionText) &&

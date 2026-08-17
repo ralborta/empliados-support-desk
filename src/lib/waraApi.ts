@@ -801,6 +801,16 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (odometerFlowAwaitingInput) {
+    const bare = String(text ?? "")
+      .trim()
+      .replace(/\./g, "")
+      .replace(/\s+/g, "");
+    if (threadAwaitingHorometerKmValue(threadText) && /^\d{1,7}$/.test(bare)) {
+      return true;
+    }
+    if (threadAwaitingOdometerKmValue(threadText) && /^\d{4,7}$/.test(bare)) {
+      return true;
+    }
     if (looksLikePlateCorrectionRequest(text)) return true;
     if (looksLikePatenteUnknownReply(text)) return true;
     if (looksLikeOdometerOperationalSupplement(text)) return true;
