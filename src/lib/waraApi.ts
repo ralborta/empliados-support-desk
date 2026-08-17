@@ -792,6 +792,7 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
     return true;
   }
   if (looksLikeConversationAcknowledgement(text)) return false;
+  if (looksLikeGreeting(text)) return false;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (odometerFlowAwaitingInput) {

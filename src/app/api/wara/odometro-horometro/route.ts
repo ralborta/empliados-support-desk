@@ -774,11 +774,15 @@ export async function POST(req: NextRequest) {
     !looksLikePendingTramiteAffirmation(rawText) &&
     (looksLikeOpcionesInfoRequest(rawText) ||
       looksLikeUnidadesInfoRequest(rawText) ||
+      looksLikeGreeting(rawText) ||
       looksLikeConversationAcknowledgement(rawText) ||
       (looksLikeNonOdometerOperationalIntent(rawText) && !plateCorrection) ||
       isOdometerFlowSuperseded(threadText)) &&
     !shouldContinueOdometerFlow(rawText, threadText)
   ) {
+    if (looksLikeGreeting(rawText)) {
+      await clearPendingAction(prisma, rawPhone);
+    }
     return NextResponse.json(
       {
         ok: true,

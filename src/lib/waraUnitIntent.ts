@@ -39,6 +39,7 @@ import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConvers
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
+  looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeConversationalUnitConcern,
@@ -2547,6 +2548,7 @@ export function shouldRouteTurnToOdometerExecutor(params: {
 
   if (!flowActive) return false;
   if (looksLikeFlowControlCommand(selectionText)) return false;
+  if (looksLikeGreeting(selectionText)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(selectionText) || looksLikeLiveUnitConsultIntent(selectionText)) {
     return false;
   }
