@@ -80,12 +80,14 @@ export function applyStructuralExtensions(
   const has = (name: string) => caps.some((c) => c.name === name);
 
   if (decision.task && STRUCTURAL_PREPARE[decision.task] && !has(STRUCTURAL_PREPARE[decision.task])) {
-    if (
+    const prepName = STRUCTURAL_PREPARE[decision.task];
+    const shouldAddPrepare =
       decision.conversationalAct === "start_task" ||
       decision.conversationalAct === "switch_task" ||
-      decision.conversationalAct === "continue_task"
-    ) {
-      caps.push({ name: STRUCTURAL_PREPARE[decision.task], params: {} });
+      (decision.conversationalAct === "continue_task" &&
+        decision.authorizedCapabilities.some((c) => c.name === prepName));
+    if (shouldAddPrepare) {
+      caps.push({ name: prepName, params: {} });
     }
   }
 

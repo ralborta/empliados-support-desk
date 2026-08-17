@@ -1,7 +1,8 @@
 import type { CapabilityResult } from "../types/capability-result.js";
 
 type ExecResult = {
-  name: string;
+  name?: string;
+  capability?: string;
   facts?: string[];
   error?: string;
   structured?: Record<string, unknown>;
@@ -11,9 +12,10 @@ export function mapExecResultsToStructured(
   results: ExecResult[],
 ): CapabilityResult[] {
   return results.map((r) => {
+    const capName = r.capability ?? r.name ?? "unknown";
     if (r.error === "no_unit" || r.error === "missing_fields") {
       return {
-        capability: r.name,
+        capability: capName,
         status: "missing_input",
         facts: r.facts ?? [],
         missingFields: r.error === "no_unit" ? ["unit"] : ["fields"],
@@ -23,7 +25,7 @@ export function mapExecResultsToStructured(
     }
     if (r.error === "not_found") {
       return {
-        capability: r.name,
+        capability: capName,
         status: "not_found",
         facts: r.facts ?? [],
         error: r.error,
@@ -32,14 +34,14 @@ export function mapExecResultsToStructured(
     }
     if (r.error) {
       return {
-        capability: r.name,
+        capability: capName,
         status: "error",
         facts: r.facts ?? [],
         error: r.error,
         structured: r.structured,
       };
     }
-    const name = r.name;
+    const name = capName;
     if (name.endsWith(".prepare")) {
       return {
         capability: name,

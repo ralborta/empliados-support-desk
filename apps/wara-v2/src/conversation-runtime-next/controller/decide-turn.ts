@@ -5,6 +5,11 @@ import {
   isUnequivocalWriteConfirm,
 } from "../../commander-v3/enrich/confirmation-outcome.js";
 import {
+  isAwaitingWriteConfirmation,
+  isConfirmWithCorrection,
+  resolveConfirmationGuard,
+} from "./confirmation-guard.js";
+import {
   hasIncompleteWork,
   KEEP_OR_CLOSE_PURPOSE,
   taskLabel,
@@ -124,7 +129,17 @@ export function decideTurn(input: {
     };
   }
 
-  if (state.pendingWrite || state.lastQuestion?.expected === "confirmation") {
+  const confirmationGuard = resolveConfirmationGuard({
+    state,
+    message,
+    interpretation: i,
+    baseIntent,
+  });
+  if (confirmationGuard) {
+    return confirmationGuard;
+  }
+
+  if (isAwaitingWriteConfirmation(state)) {
     if (isUnequivocalWriteConfirm(message)) {
       const task = state.pendingWrite?.task ?? state.activeTask?.type ?? "certificate";
       const commitCap =

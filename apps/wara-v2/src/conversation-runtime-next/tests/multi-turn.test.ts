@@ -253,6 +253,8 @@ describe("runtime-next multi-turn", () => {
       confidence: 0.8,
     };
     const decision = decideTurn({ interpretation: interp, state, message: "CONFIRMO" });
+    assert.equal(decision.action, "clarify");
+    assert.equal(decision.authorizedCapabilities.length, 0);
     assert.notEqual(decision.action, "confirm_write");
   });
 
