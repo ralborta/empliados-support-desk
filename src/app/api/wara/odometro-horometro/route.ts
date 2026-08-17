@@ -659,6 +659,7 @@ export async function POST(req: NextRequest) {
   if (treatAsBlankFlowStart || supersedesPendingConfirm) {
     await clearPendingAction(prisma, rawPhone);
   }
+  const pendingWasClearedThisTurn = treatAsBlankFlowStart || supersedesPendingConfirm;
   const fromText = parseFromText(rawText);
   const threadText = treatAsBlankFlowStart || supersedesPendingConfirm ? "" : preliminaryThreadText;
   const prefixInMessageEarly = extractPlatePrefixFromMessage(rawText);
@@ -1229,6 +1230,7 @@ export async function POST(req: NextRequest) {
   const fechaFromMessageEarly = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
   if (
     hasLiveOdometerPendingAction &&
+    !pendingWasClearedThisTurn &&
     !pendingOdoConfirm &&
     dbPendingOdoAction?.payload
   ) {
@@ -1253,6 +1255,14 @@ export async function POST(req: NextRequest) {
   const strippedMeters = stripMeterValuesMatchingUnitReference(rawText, { odometro, horometro });
   odometro = strippedMeters.odometro;
   horometro = strippedMeters.horometro;
+
+  const rawExplicitlyMentionsHorometerOnly =
+    /\bhor[oó]metro\b/i.test(rawText) && !/\bod[oó]metro\b/i.test(rawText);
+  if (rawExplicitlyMentionsOdometroOnly) {
+    horometro = undefined;
+  } else if (rawExplicitlyMentionsHorometerOnly) {
+    odometro = undefined;
+  }
 
   if (
     (horometerFlowActive || horometerOnlyIntent || awaitingHorometerKm) &&
@@ -1404,7 +1414,11 @@ export async function POST(req: NextRequest) {
     if (fleetResolved.kind === "clarification") return fleetResolved.response;
     if (fleetResolved.kind === "resolved") patente = fleetResolved.patente;
   }
-  if (!(typeof odometro === "number" && Number.isFinite(odometro)) && !(typeof horometro === "number" && Number.isFinite(horometro))) {
+  if (
+    (horometerFlowActive || horometerOnlyIntent
+      ? !(typeof horometro === "number" && Number.isFinite(horometro))
+      : !(typeof odometro === "number" && Number.isFinite(odometro)))
+  ) {
     // Bug real, producción 2026-07-28: la "unidad activa" (usada como respaldo por
     // OTROS trámites cuando no hay patente explícita) solo se actualizaba al completar
     // el registro con éxito. Si el trámite quedaba a medias en este paso intermedio
@@ -1750,10 +1764,12 @@ export async function POST(req: NextRequest) {
   }
 
   const confirmSignal = parsed.data.confirm ?? parsed.data.confirmation ?? rawText;
+  const wantsHorometroPayload = horometerFlowActive || horometerOnlyIntent;
   const hasCompleteOdoPayload =
     !!patente &&
-    ((typeof odometro === "number" && Number.isFinite(odometro)) ||
-      (typeof horometro === "number" && Number.isFinite(horometro)));
+    (wantsHorometroPayload
+      ? typeof horometro === "number" && Number.isFinite(horometro)
+      : typeof odometro === "number" && Number.isFinite(odometro));
   const confirmed =
     isConfirmed(confirmSignal) ||
     confirmWithSupplement ||
@@ -2030,18 +2046,47 @@ export async function POST(req: NextRequest) {
     const plateDisplay = formatFleetUnitLabel(formatPlateWithSpaces(patente) ?? patente);
     const wantsHorometroConfirm = horometerFlowActive || horometerOnlyIntent;
     const meterValue = wantsHorometroConfirm ? horometro : odometro;
+    const hasMeterValue = typeof meterValue === "number" && Number.isFinite(meterValue);
+    if (!hasMeterValue) {
+      const meterType = resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent });
+      const fallbackTemplate = wantsHorometroConfirm
+        ? formatMeterAskWithReading({ meter: "hourmeter", unitLabel: plateDisplay })
+        : formatMeterAskWithReading({ meter: "odometer", unitLabel: plateDisplay });
+      const message = await composeOdometerDialogueReply({
+        situation: "missing_value",
+        history: flowThreadText,
+        lastCustomerMessage: rawText,
+        requiredTokens: [plateDisplay],
+        fieldHint: wantsHorometroConfirm ? "horometro" : "odometro",
+        fallbackTemplate,
+      });
+      await setPendingAction(prisma, rawPhone, "odometro", {
+        summary: message,
+        payload: {
+          patente,
+          odometro: wantsHorometroConfirm ? undefined : odometro,
+          horometro: wantsHorometroConfirm ? horometro : undefined,
+          fecha: fechaExplicita ?? undefined,
+          meterType,
+        },
+      });
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "missing_value_before_summary",
+      });
+      return NextResponse.json(
+        { ok: false, ok_s: "false", error: "Falta odómetro u horómetro", message },
+        { status: BB_STATUS },
+      );
+    }
     const { dateDisp, time } = splitFechaDisplayParts(fechaDisplay);
-    const confirmMessage =
-      typeof meterValue === "number" && fechaDisplay && hasFechaHoraLectura
-        ? formatMeterConfirm({
-            meter: wantsHorometroConfirm ? "hourmeter" : "odometer",
-            unitLabel: plateDisplay,
-            value: meterValue,
-            dateDisp,
-            time,
-          })
-        : `Voy a registrar:\n• Patente: ${plateDisplay}\n\n` +
-          `Si está correcto, respondé CONFIRMO para registrarlo en Wara.\n➡️ Respondé *CONFIRMO* o *CANCELAR*.`;
+    const confirmMessage = formatMeterConfirm({
+      meter: wantsHorometroConfirm ? "hourmeter" : "odometer",
+      unitLabel: plateDisplay,
+      value: meterValue,
+      dateDisp,
+      time,
+    });
     if (!fechaDisplay || !hasFechaHoraLectura) {
       const fallbackTemplate =
         `Me falta la fecha y hora de la lectura. Pasame ambas (ej. 05/08/26 a las 14:30).`;
