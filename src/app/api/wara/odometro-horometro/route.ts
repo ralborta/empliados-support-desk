@@ -48,6 +48,8 @@ import {
   threadAwaitingOdometerKmValue,
   threadTextSinceCompanySelection,
   extractPlatePrefixFromMessage,
+  lastTomoMeterKindInThreadTail,
+  stripMeterValuesMatchingUnitReference,
 } from "@/lib/wara";
 import {
   extractExplicitUnitNameFromText,
@@ -728,10 +730,12 @@ export async function POST(req: NextRequest) {
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
   const notebookHorometerFlow =
     isConversationNotebookEnabled() && notebookIndicatesHorometerFlow(sessionNotebook);
-  let horometerFlowActive = rawExplicitlyMentionsOdometroOnly
+  const tomoMeterKindInThread = lastTomoMeterKindInThreadTail(flowThreadText);
+  let horometerFlowActive = rawExplicitlyMentionsOdometroOnly || tomoMeterKindInThread === "odometro"
     ? false
     : horometerOnlyIntent ||
       notebookHorometerFlow ||
+      tomoMeterKindInThread === "horometro" ||
       (horometerAwaitingInThread &&
         !(odometerAwaitingInThread && lastAwaitingFieldPromptInTail(threadText) === "odometro"));
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
@@ -1145,6 +1149,18 @@ export async function POST(req: NextRequest) {
     horometro = undefined;
   }
 
+  const strippedMeters = stripMeterValuesMatchingUnitReference(rawText, { odometro, horometro });
+  odometro = strippedMeters.odometro;
+  horometro = strippedMeters.horometro;
+
+  if (
+    (horometerFlowActive || horometerOnlyIntent || awaitingHorometerKm) &&
+    !explicitKmInMessage &&
+    !messageExplicitlyStatesKm(rawText)
+  ) {
+    odometro = undefined;
+  }
+
   // Fecha ya confirmada en el resumen pendiente, para no perderla si la corrección de
   // este turno no la vuelve a mencionar (ver uso en fechaExplicita más abajo).
   let pendingPayloadFecha: string | undefined;
@@ -1446,6 +1462,7 @@ export async function POST(req: NextRequest) {
         odometro: typeof odometro === "number" ? odometro : undefined,
         horometro: typeof horometro === "number" ? horometro : undefined,
         fecha: earlyFechaNaive ?? undefined,
+        meterType,
       },
     });
     await appendOutboundBotMessage(rawPhone, message, {
@@ -1795,6 +1812,8 @@ export async function POST(req: NextRequest) {
       const plateDisp = formatPlateWithSpaces(patente) ?? patente ?? "la unidad";
       // Solo mostrar km si vinieron del cliente (no del "Tomé … (10500 km)" del bot).
       const showKmHint =
+        !horometerFlowActive &&
+        !horometerOnlyIntent &&
         typeof odometro === "number" &&
         (typeof kmFromCurrentMessage === "number" ||
           explicitKmInMessage ||
@@ -1808,6 +1827,7 @@ export async function POST(req: NextRequest) {
           ? ` (${horometro} h)`
           : "";
       const odometroForPending = showKmHint ? odometro : undefined;
+      const meterType = resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent });
       const onlyDateNoTime =
         !!fechaExplicita && !fechaLecturaTieneHora(fechaExplicita, fechaHoraSourceText);
       // OJO: si dijo "ayer"/"lunes", mostrar DD/MM/AAAA concreto (sin 00:00 engañoso).
@@ -1833,6 +1853,7 @@ export async function POST(req: NextRequest) {
           odometro: odometroForPending,
           horometro,
           fecha: fechaExplicita ?? undefined,
+          meterType,
         },
       });
       await appendOutboundBotMessage(rawPhone, message, {

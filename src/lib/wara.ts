@@ -1049,12 +1049,66 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   return false;
 }
 
+/** Números que identifican unidad (movil_id / M900-114), no lectura de medidor. */
+export function extractUnitCodeNumbersFromMessage(rawText: string): number[] {
+  const out: number[] = [];
+  const text = String(rawText ?? "");
+  for (const m of text.matchAll(/\bunidad\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n)) out.push(n);
+  }
+  for (const m of text.matchAll(/\b(?:M|m)(\d{3})-(\d{2,3})\b/g)) {
+    const n = parseInt(`${m[1]}${m[2]}`, 10);
+    if (Number.isFinite(n)) out.push(n);
+  }
+  const compact = text.trim().replace(/[\s\-_.]+/g, "");
+  if (/^\d{5,7}$/.test(compact)) {
+    out.push(parseInt(compact, 10));
+  }
+  return out;
+}
+
+/** Descarta km/hs que en realidad son código de unidad (ej. 900114 tras "unidad"). */
+export function stripMeterValuesMatchingUnitReference(
+  rawText: string,
+  values: { odometro?: number; horometro?: number },
+): { odometro?: number; horometro?: number } {
+  const unitCodes = new Set(extractUnitCodeNumbersFromMessage(rawText));
+  if (!unitCodes.size) return values;
+  let { odometro, horometro } = values;
+  if (typeof odometro === "number" && unitCodes.has(odometro)) odometro = undefined;
+  if (typeof horometro === "number" && unitCodes.has(horometro)) horometro = undefined;
+  return { odometro, horometro };
+}
+
+/** Último "Tomé … (N km|h)" del bot en el tail del hilo. */
+export function lastTomoMeterKindInThreadTail(
+  threadText: string,
+): "odometro" | "horometro" | null {
+  const tail = threadText.slice(-2500);
+  const matches = [...tail.matchAll(/tom[eé]\s+[^.\n]+?\(\s*([\d.,]+)\s*(km|h)\s*\)/gi)];
+  if (!matches.length) return null;
+  const unit = matches[matches.length - 1][2].toLowerCase();
+  if (unit === "h") return "horometro";
+  if (unit.startsWith("km")) return "odometro";
+  return null;
+}
+
+function threadBotAskedMissingFechaHora(threadText: string): boolean {
+  return /me falta la fecha y hora de la lectura/i.test(threadText.slice(-2500));
+}
+
 /** El bot pidió el nuevo odómetro en km (patente ya confirmada). */
 export function threadAwaitingOdometerKmValue(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
+  if (threadBotAskedMissingFechaHora(threadText)) {
+    const kind = lastTomoMeterKindInThreadTail(threadText);
+    if (kind === "odometro") return true;
+    if (kind === "horometro") return false;
+  }
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
     /perfecto, tomo .+ pasame el nuevo od[oó]metro/i.test(tail) ||
@@ -1062,8 +1116,7 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
     /nuevo od[oó]metro en km/i.test(tail) ||
     /pasame el nuevo od[oó]metro en km/i.test(tail) ||
-    /od[oó]metro en km,?\s*(y )?la fecha y (la )?hora/i.test(tail) ||
-    /fecha y hora de la lectura/i.test(tail)
+    /od[oó]metro en km,?\s*(y )?la fecha y (la )?hora/i.test(tail)
   );
 }
 
@@ -1073,11 +1126,17 @@ export function threadAwaitingHorometerKmValue(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
+  if (threadBotAskedMissingFechaHora(threadText)) {
+    const kind = lastTomoMeterKindInThreadTail(threadText);
+    if (kind === "horometro") return true;
+    if (kind === "odometro") return false;
+  }
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
     /perfecto, tomo .+ pasame el nuevo hor[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail) ||
     /pasame el nuevo hor[oó]metro en horas/i.test(tail) ||
+    /hor[oó]metro en horas,?\s*(y )?la fecha/i.test(tail) ||
     /hor[oó]metro en horas,?\s*la fecha y la hora/i.test(tail) ||
     /tom[eé] la fecha.+?cu[aá]ntas horas de motor/i.test(tail)
   );
