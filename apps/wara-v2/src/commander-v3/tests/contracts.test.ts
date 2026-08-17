@@ -813,6 +813,69 @@ describe("commander-v3 contracts", () => {
     assert.match(formatAskUnit("gps"), /¿De qué unidad\?/);
   });
 
+  it("trabajo incompleto + threadRelation interrupt → keep-or-close aunque las tools sean las del caso", async () => {
+    const { enrichPlanForOpenTaskHold } = await import(
+      "../enrich/open-task-hold.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    s.lastQuestion = { id: "q", purpose: "unit_for_gps", expected: "unit" };
+    s.activeTask = {
+      type: "gps",
+      status: "collecting",
+      collected: {},
+      missing: ["unit"],
+    };
+    const held = enrichPlanForOpenTaskHold(
+      TurnPlanSchema.parse({
+        interpretation: {
+          userQuestion: "en qué empresa estamos",
+          answerKind: "status",
+          threadRelation: "interrupt",
+        },
+        reasoning: "otra pregunta con trabajo incompleto",
+        conversationalAct: "inform",
+        task: "gps",
+        requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.8,
+      }),
+      s,
+    );
+    assert.equal(held.conversationalAct, "ask");
+    assert.equal(held.responseGoal.purpose, "clarify");
+    assert.equal(held.requestedCapabilities.length, 0);
+    assert.ok(held.parkedTurn);
+  });
+
+  it("sin trabajo incompleto no hay keep-or-close: se atiende este turno", async () => {
+    const { enrichPlanForOpenTaskHold } = await import(
+      "../enrich/open-task-hold.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "1", name: "WARA", contactId: 1 };
+    const next = enrichPlanForOpenTaskHold(
+      TurnPlanSchema.parse({
+        interpretation: {
+          userQuestion: "en qué empresa estamos",
+          answerKind: "status",
+          threadRelation: "standalone",
+        },
+        reasoning: "pregunta la empresa",
+        conversationalAct: "inform",
+        requestedCapabilities: [{ name: "company.get_active", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.8,
+      }),
+      s,
+    );
+    assert.equal(next.conversationalAct, "inform");
+    assert.ok(next.requestedCapabilities.some((c) => c.name === "company.get_active"));
+    assert.equal(next.parkedTurn ?? null, null);
+  });
+
   it("GPS esperando patente + otra pregunta → keep-or-close, no ejecuta", async () => {
     const { enrichPlanForOpenTaskHold } = await import(
       "../enrich/open-task-hold.js"

@@ -442,8 +442,6 @@ const ANSWER_KIND_ALIASES: Record<string, string> = {
   yesno: "yes_no",
   "yes-no": "yes_no",
   boolean: "yes_no",
-  gps: "status",
-  reporte: "status",
   howto: "how_to",
   "how-to": "how_to",
   guia: "how_to",
@@ -455,6 +453,15 @@ const ANSWER_KIND_ALIASES: Record<string, string> = {
   goodbye: "close",
   greeting: "greet",
 };
+
+const THREAD_RELATIONS = new Set([
+  "capture",
+  "continue",
+  "interrupt",
+  "standalone",
+  "write_confirm",
+  "write_cancel",
+]);
 
 const PRIOR_REFERS = new Set(["none", "last_facts", "last_question", "active_entity"]);
 
@@ -470,6 +477,7 @@ function answerKindFromAct(act: string): string {
 function coerceInterpretation(o: Record<string, unknown>): {
   userQuestion: string;
   answerKind: string;
+  threadRelation?: string;
   priorReply: {
     relevant: boolean;
     summary: string;
@@ -480,6 +488,7 @@ function coerceInterpretation(o: Record<string, unknown>): {
   const act = String(o.conversationalAct ?? "inform");
   let userQuestion = "";
   let answerKind = "";
+  let threadRelation: string | undefined;
   let priorReply: {
     relevant: boolean;
     summary: string;
@@ -497,6 +506,11 @@ function coerceInterpretation(o: Record<string, unknown>): {
     answerKind = ANSWER_KINDS.has(kindRaw)
       ? kindRaw
       : (ANSWER_KIND_ALIASES[kindRaw] ?? "");
+    const relRaw = String(i.threadRelation ?? i.thread_relation ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+    if (THREAD_RELATIONS.has(relRaw)) threadRelation = relRaw;
     const pr = i.priorReply ?? i.previousReply;
     if (typeof pr === "string" && pr.trim()) {
       priorReply = {
@@ -525,7 +539,9 @@ function coerceInterpretation(o: Record<string, unknown>): {
   if (!ANSWER_KINDS.has(answerKind)) {
     answerKind = answerKindFromAct(act);
   }
-  return { userQuestion, answerKind, priorReply };
+  return threadRelation
+    ? { userQuestion, answerKind, threadRelation, priorReply }
+    : { userQuestion, answerKind, priorReply };
 }
 
 function coerceEntityRef(v: unknown, kind: "company" | "unit"): unknown {

@@ -43,37 +43,13 @@ export function enrichPlanForQuestionContract(
   const hadSearch = plan.requestedCapabilities.some((c) => c.name === "unit.search");
   let caps = plan.requestedCapabilities.filter((c) => c.name !== "unit.search");
   let task = plan.task;
-  if (hadSearch && task === "unit_query") {
-    task = kind === "how_to" ? null : kind === "status" || kind === "yes_no" ? "gps" : task;
+  if (hadSearch && task === "unit_query" && kind === "how_to") {
+    task = null;
   }
 
-  const hasEvidence = caps.some(
-    (c) =>
-      c.name === "gps.get_status" ||
-      c.name === "domain.answer" ||
-      c.name === "company.get_active" ||
-      c.name === "company.list",
-  );
-  const meterTask =
-    task === "odometer" ||
-    task === "hourmeter" ||
-    task === "certificate" ||
-    caps.some((c) => String(c.name ?? "").includes(".prepare"));
-  const openMeter =
-    state.activeTask?.type === "odometer" ||
-    state.activeTask?.type === "hourmeter" ||
-    state.activeTask?.type === "certificate";
-  const needsGpsEvidence =
-    (kind === "status" || (kind === "yes_no" && !meterTask && !openMeter)) &&
-    Boolean(state.unit) &&
-    !hasEvidence &&
-    (task === "gps" || caps.some((c) => c.name === "gps.get_status"));
-  const needsDomainEvidence = kind === "how_to" && !hasEvidence;
+  const hasDomain = caps.some((c) => c.name === "domain.answer");
+  const needsDomainEvidence = kind === "how_to" && !hasDomain;
 
-  if (needsGpsEvidence) {
-    caps = [...caps, { name: "gps.get_status", params: {} }];
-    if (!task || task === "unit_query") task = "gps";
-  }
   if (needsDomainEvidence) {
     caps = [
       ...caps,
@@ -99,7 +75,6 @@ export function enrichPlanForQuestionContract(
   const demoteGreet = kind === "how_to" && plan.conversationalAct === "greet";
   const sameCaps =
     !hadSearch &&
-    !needsGpsEvidence &&
     !needsDomainEvidence &&
     caps.length === plan.requestedCapabilities.length;
   if (sameCaps && !bindActiveUnit && !demoteGreet) return plan;
@@ -117,9 +92,6 @@ export function enrichPlanForQuestionContract(
       (plan.reasoning ? `${plan.reasoning} ` : "") +
       (hadSearch
         ? "Pregunta del cliente: unit.search no es evidencia; no sustituyo la pregunta por un listado. "
-        : "") +
-      (needsGpsEvidence
-        ? "Traigo GPS de la unidad activa como evidencia de esa pregunta."
         : "") +
       (needsDomainEvidence
         ? "how_to: domain.answer es la evidencia; no reenvío el saludo."

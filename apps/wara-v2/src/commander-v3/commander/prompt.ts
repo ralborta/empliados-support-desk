@@ -6,24 +6,29 @@ export { COMMANDER_V3_PROMPT_VERSION };
 
 export const COMMANDER_V3_SYSTEM_PROMPT = `Sos el Conversation Commander de Atilio (WARA). Única autoridad semántica del turno.
 
-Producí UN TurnPlan JSON válido. WhatsApp rioplatense: typos, sin tildes, frases cortas, abreviaturas. NUNCA copies fechas de ejemplos.
+Producí UN TurnPlan JSON válido. WhatsApp rioplatense: typos, sin tildes, frases cortas. NUNCA copies fechas de ejemplos.
 
-Entendé qué quiere ESTA persona EN ESTE hilo. Leé el mensaje + lastAssistantReply + lastTurn + state. No clasifiques por palabras sueltas ni imites un menú rígido.
+Leé mensaje + lastAssistantReply + lastTurn + state.openWork. Entendé el hilo, no clasifiques por palabra suelta ni imites un menú rígido.
 
-interpretation (obligatorio, ANTES de elegir tools):
-- userQuestion: qué pidió o preguntó, sentido completo (no el texto crudo).
+interpretation (obligatorio, ANTES de tools):
+- userQuestion: sentido completo de lo que pidió (no el texto crudo).
 - answerKind: yes_no | status | how_to | list | start_task | continue_task | clarify | close | greet | other
-- priorReply: si el mensaje solo se entiende con lo que Atilio dijo recién → relevant=true, summary, refersTo last_facts|last_question|active_entity. Si se entiende solo → relevant=false, refersTo=none.
+- threadRelation: capture | continue | interrupt | standalone | write_confirm | write_cancel
+- priorReply: si el mensaje solo se entiende con lo que Atilio dijo recién → relevant=true. Si se entiende solo → relevant=false, refersTo=none.
 
-Qué hacer con eso:
-- Saludo PURO sin trámite → greet. Una sola presentación. Si lastAssistantReply ya fue el menú, no vuelvas a greet.
-- Dato pedido (patente/km/fecha) y lo aportan → continue_task.
-- Caso abierto (escritura O GPS esperando patente) + OTRA pregunta → ask/clarify keep_or_close, CERO tools, parkedTurn. Preguntá si sigue el caso anterior o atiende lo nuevo. No contestes lo nuevo ni re-preguntes el slot en el mismo turno.
-- Sin caso abierto: contestá ESTE turno. Empresa activa → company.get_active. Unidad → gps.get_status. answerKind=status no implica GPS.
-- Cambio o reinicio de empresa → company.list con params.reset=true. Listá empresas. NO pidas patente, NO abras ticket. Al elegir empresa, EJECUTALA lo estacionado si había.
-- Registrar o cambiar odómetro/horómetro = start_task + *.prepare. NUNCA yes_no, NUNCA "no se puede cambiar", NUNCA GPS.
+threadRelation (UNA decisión; no un árbol de frases):
+- capture: aporta el dato que pide lastQuestion.expected (patente, km, fecha, hora, empresa, índice).
+- continue: sigue el MISMO caso (repite el pedido, aclara el mismo trámite).
+- interrupt: hay openWork y este mensaje es OTRA cosa. No ejecutes. ask/clarify keep_or_close, CERO tools, parkedTurn. Preguntá si siguen el caso abierto o atienden lo nuevo. No contestes lo nuevo ni re-preguntes el slot.
+- standalone: no hay openWork; contestá ESTE turno.
+- write_confirm / write_cancel: solo con pendingWrite.
 
-Tools: traen evidencia o preparan el trámite declarado. responseGoal.facts vacío si la tool trae los hechos. yes_no|status|how_to → NUNCA unit.search.
+standalone: empresa activa → company.get_active. Estado de unidad → gps.get_status. Guía/how_to → domain.answer. answerKind=status no implica GPS.
+Saludo PURO sin pedido → greet. Si lastAssistantReply ya fue el menú, no vuelvas a greet.
+Cambio o reinicio de empresa → company.list params.reset=true. Listá empresas. NO pidas patente ni abras ticket. Al elegir empresa, EJECUTALA lo estacionado si había.
+Registrar odómetro/horómetro → start_task + *.prepare. NUNCA yes_no, NUNCA "no se puede cambiar", NUNCA GPS.
+
+Tools: evidencia de userQuestion. responseGoal.facts vacío si la tool trae los hechos. yes_no|how_to → NUNCA unit.search.
 
 Seguridad (no es intención):
 - Escritura SOLO con la palabra CONFIRMO y pendingWrite vigente. "dale"/"ok"/"si" no confirman.
@@ -37,6 +42,36 @@ Campos JSON: interpretation, reasoning, conversationalAct, task, taskAction, com
 purpose SOLO: inform|ask_missing|confirm_write|clarify|resume|close.
 `;
 
+function openWorkSummary(s: ConversationStateV3): {
+  type: string;
+  status: string;
+  missing: string[];
+  lastQuestionExpected: string | null;
+  lastQuestionPurpose: string | null;
+} | null {
+  const t = s.activeTask;
+  if (!t) return null;
+  if (t.status === "awaiting_confirmation") {
+    return {
+      type: t.type,
+      status: t.status,
+      missing: t.missing ?? [],
+      lastQuestionExpected: s.lastQuestion?.expected ?? null,
+      lastQuestionPurpose: s.lastQuestion?.purpose ?? null,
+    };
+  }
+  if (t.status === "collecting") {
+    return {
+      type: t.type,
+      status: t.status,
+      missing: t.missing ?? [],
+      lastQuestionExpected: s.lastQuestion?.expected ?? null,
+      lastQuestionPurpose: s.lastQuestion?.purpose ?? null,
+    };
+  }
+  return null;
+}
+
 export function buildCommanderUserPayload(input: {
   message: string;
   localNow: string;
@@ -47,11 +82,12 @@ export function buildCommanderUserPayload(input: {
   const lastAssistant = [...s.recentTurns]
     .reverse()
     .find((t) => t.role === "assistant");
+  const openWork = openWorkSummary(s);
 
   return JSON.stringify(
     {
       instruction:
-        "Interpretá ESTE mensaje. Si hay un caso abierto (odómetro/certificado/GPS esperando patente) y preguntan OTRA cosa, no ejecutes: preguntá si siguen el caso anterior o atienden lo nuevo. Si aportan el dato pedido, capturalo. Si no hay caso abierto, contestá esta pregunta (empresa → company.get_active; unidad → gps).",
+        "Interpretá ESTE mensaje respecto de openWork. Si openWork existe y el mensaje no aporta el dato pedido ni sigue el mismo caso, threadRelation=interrupt (keep_or_close, CERO tools). Si no hay openWork, threadRelation=standalone y contestá esta pregunta.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
@@ -69,6 +105,7 @@ export function buildCommanderUserPayload(input: {
           id: c.id,
           name: c.name,
         })),
+        openWork,
         activeTask: s.activeTask,
         pendingEntity: s.pendingEntity,
         pendingWrite: s.pendingWrite
@@ -128,7 +165,7 @@ export function buildRepairUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Repará el TurnPlan. Conservá interpretation. Si el usuario pidió un trámite, el plan debe ser start_task/continue_task + la capability (no copies una pregunta abierta anterior). Corregí SOLO los errores de validación. No inventes hechos.",
+        "Repará el TurnPlan. Conservá interpretation (userQuestion, threadRelation). Si el usuario pidió un trámite, el plan debe ser start_task/continue_task + la capability (no copies una pregunta abierta anterior). Corregí SOLO los errores de validación. No inventes hechos.",
       originalMessage: input.originalMessage,
       previousPlan: input.previousPlan,
       validationErrors: input.validationErrors,
@@ -137,6 +174,7 @@ export function buildRepairUserPayload(input: {
         company: input.state.company?.name ?? null,
         unit: input.state.unit?.label ?? null,
         activeTask: input.state.activeTask?.type ?? null,
+        openWork: openWorkSummary(input.state),
         pendingWrite: Boolean(input.state.pendingWrite),
         lastQuestion: input.state.lastQuestion,
         lastTurn: input.state.conversationMetadata.lastTurn ?? null,

@@ -4,19 +4,11 @@
  */
 import { randomUUID } from "node:crypto";
 import type { ActiveTaskV3, ConversationStateV3, ParkedTurnV3 } from "../types/state.js";
-import type { AnswerKind, TurnPlan } from "../types/turn-plan.js";
+import type { AnswerKind, ThreadRelation, TurnPlan } from "../types/turn-plan.js";
 
 export const KEEP_OR_CLOSE_PURPOSE = "keep_or_close_task";
 
-const OPEN_STATUSES = new Set(["collecting", "ready", "awaiting_confirmation"]);
-const OPERATIONAL = new Set([
-  "certificate",
-  "odometer",
-  "hourmeter",
-  "maintenance",
-  "gps",
-  "human_handoff",
-]);
+const INCOMPLETE_STATUSES = new Set(["collecting", "awaiting_confirmation"]);
 
 export function taskLabel(task: string | null | undefined): string {
   switch (task) {
@@ -37,11 +29,37 @@ export function taskLabel(task: string | null | undefined): string {
   }
 }
 
-export function isOpenOperationalTask(state: ConversationStateV3): boolean {
+/** Trabajo incompleto del hilo: hay que capturar o confirmar, no un GPS ya respondido. */
+export function hasIncompleteWork(state: ConversationStateV3): boolean {
   const t = state.activeTask;
   if (!t) return false;
-  if (!OPEN_STATUSES.has(t.status)) return false;
-  return OPERATIONAL.has(t.type);
+  return INCOMPLETE_STATUSES.has(t.status);
+}
+
+/** @deprecated usar hasIncompleteWork; se mantiene el nombre para tests existentes. */
+export function isOpenOperationalTask(state: ConversationStateV3): boolean {
+  return hasIncompleteWork(state);
+}
+
+function capFamily(name: string): string {
+  if (name === "domain.answer") return "domain";
+  if (name.startsWith("handoff.") || name.startsWith("human_")) {
+    return "human_handoff";
+  }
+  return name.split(".")[0] ?? name;
+}
+
+function allowedFamilies(state: ConversationStateV3): Set<string> {
+  const families = new Set<string>();
+  if (state.activeTask?.type) families.add(state.activeTask.type);
+  if (state.lastQuestion?.expected === "unit") families.add("unit");
+  if (state.lastQuestion?.expected === "company") families.add("company");
+  return families;
+}
+
+function hasForeignFamily(plan: TurnPlan, state: ConversationStateV3): boolean {
+  const allowed = allowedFamilies(state);
+  return plan.requestedCapabilities.some((c) => !allowed.has(capFamily(c.name)));
 }
 
 function isGreetingTurn(plan: TurnPlan): boolean {
@@ -81,66 +99,25 @@ function contributedExpectedField(
   return false;
 }
 
-function hasForeignEvidence(
-  plan: TurnPlan,
-  state: ConversationStateV3,
-): boolean {
-  const open = state.activeTask?.type;
-  return plan.requestedCapabilities.some((c) => {
-    const name = c.name;
-    if (name === "domain.answer") return true;
-    if (name === "company.get_active" || name === "company.list") return true;
-    if (name === "gps.get_status" && open !== "gps") return true;
-    if (name.endsWith(".prepare") && open && !name.startsWith(`${open}.`)) {
-      return true;
-    }
-    return false;
-  });
+function threadRelationOf(plan: TurnPlan): ThreadRelation | undefined {
+  return plan.interpretation?.threadRelation;
 }
 
 function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boolean {
-  const kind = plan.interpretation?.answerKind;
   const act = plan.conversationalAct;
-  // Parser de campo esperado: elegir empresa no es un pedido nuevo.
-  if (state.lastQuestion?.expected === "company") return false;
+  const kind = plan.interpretation?.answerKind;
+  const rel = threadRelationOf(plan);
   if (contributedExpectedField(plan, state)) return false;
-  const hasOtherQuestionTool = plan.requestedCapabilities.some(
-    (c) =>
-      c.name === "company.get_active" ||
-      c.name === "company.list" ||
-      c.name === "domain.answer",
-  );
-  // Mismo pedido de estado de unidad: siguen en el GPS, no es interrupción.
-  if (
-    state.activeTask?.type === "gps" &&
-    !hasOtherQuestionTool &&
-    (plan.task === "gps" ||
-      plan.requestedCapabilities.some((c) => c.name === "gps.get_status"))
-  ) {
+  if (state.lastQuestion?.expected === "company" && !hasForeignFamily(plan, state)) {
     return false;
   }
+  if (rel === "capture" || rel === "continue") {
+    return hasForeignFamily(plan, state);
+  }
+  if (rel === "interrupt") return true;
   if (isGreetingTurn(plan)) return true;
-  if (
-    kind === "status" ||
-    kind === "yes_no" ||
-    kind === "how_to" ||
-    kind === "list" ||
-    kind === "other"
-  ) {
-    return true;
-  }
+  if (hasForeignFamily(plan, state)) return true;
   if (act === "answer_lateral") return true;
-  if (hasForeignEvidence(plan, state)) return true;
-  if (
-    act === "continue_task" ||
-    act === "amend_task" ||
-    act === "confirm_write" ||
-    act === "cancel_task" ||
-    act === "farewell"
-  ) {
-    return false;
-  }
-  if (kind === "continue_task") return false;
   if (
     (act === "start_task" ||
       act === "switch_task" ||
@@ -149,6 +126,16 @@ function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boo
     plan.task !== state.activeTask?.type
   ) {
     return true;
+  }
+  if (
+    act === "continue_task" ||
+    act === "amend_task" ||
+    act === "confirm_write" ||
+    act === "cancel_task" ||
+    act === "farewell" ||
+    kind === "continue_task"
+  ) {
+    return false;
   }
   return false;
 }
@@ -429,7 +416,7 @@ export function enrichPlanForOpenTaskHold(
 ): TurnPlan {
   if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) return plan;
   if (state.pendingWrite) return plan;
-  if (!isOpenOperationalTask(state)) return plan;
+  if (!hasIncompleteWork(state)) return plan;
   if (!isIncomingOtherRequest(plan, state)) return plan;
 
   const open = taskLabel(state.activeTask?.type);

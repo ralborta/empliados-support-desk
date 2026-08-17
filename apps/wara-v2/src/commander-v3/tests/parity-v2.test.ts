@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 16k", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16k/);
+  it("prompt version bump 17a", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-17a/);
   });
 
   it("prompt Commander no copia el árbol de decisión V1", async () => {
@@ -26,7 +26,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /reinicio de empresa|company.list/i);
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /horómetro|hourmeter|start_task \+ \*\.prepare/i);
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /Al elegir empresa|EJECUTALA/i);
-    assert.match(COMMANDER_V3_SYSTEM_PROMPT, /caso abierto|keep_or_close/i);
+    assert.match(COMMANDER_V3_SYSTEM_PROMPT, /threadRelation|openWork|keep_or_close/i);
     assert.ok(COMMANDER_V3_SYSTEM_PROMPT.length < 4500);
   });
 
@@ -2770,9 +2770,10 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     };
     const enriched = enrichPlanForQuestionContract(questionPlan, s);
     assert.ok(!enriched.requestedCapabilities.some((c) => c.name === "unit.search"));
-    assert.ok(enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"));
-    assert.equal(enriched.task, "gps");
-    assert.equal(enriched.unitReference?.reference, "active");
+    assert.equal(
+      enriched.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      false,
+    );
     assert.equal(capabilitiesConflictWithQuestion(enriched).length, 0);
 
     const payload = JSON.parse(

@@ -62,14 +62,26 @@ export const PriorReplyRefersToSchema = z.enum([
   "active_entity",
 ]);
 
+/** Relación de ESTE mensaje con el trabajo incompleto del hilo. */
+export const ThreadRelationSchema = z.enum([
+  "capture",
+  "continue",
+  "interrupt",
+  "standalone",
+  "write_confirm",
+  "write_cancel",
+]);
+
 /**
  * Contrato de interpretación del turno.
  * Las tools y el redactor sirven a userQuestion; no sustituyen la pregunta.
  * priorReply: si el mensaje solo se entiende con la respuesta anterior de Atilio.
+ * threadRelation: qué hace este mensaje respecto del trabajo abierto (no es un árbol de frases).
  */
 export const InterpretationSchema = z.object({
   userQuestion: z.string().min(1).max(400),
   answerKind: AnswerKindSchema,
+  threadRelation: ThreadRelationSchema.optional(),
   priorReply: z
     .object({
       relevant: z.boolean(),
@@ -157,5 +169,6 @@ export const TurnPlanSchema = z.object({
 export type TurnPlan = z.infer<typeof TurnPlanSchema>;
 export type CapabilityRequest = z.infer<typeof CapabilityRequestSchema>;
 export type AnswerKind = z.infer<typeof AnswerKindSchema>;
+export type ThreadRelation = z.infer<typeof ThreadRelationSchema>;
 export type TurnInterpretation = z.infer<typeof InterpretationSchema>;
 export type TaskType = TaskTypeV3;
