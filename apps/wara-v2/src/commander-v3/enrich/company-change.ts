@@ -39,6 +39,7 @@ export function enrichPlanForCompanyChange(
       requestedCapabilities: [{ name: "company.get_active", params: {} }],
       companyReference: null,
       unitReference: null,
+      parkedTurn: null,
       stateIntent: {
         preserveCompany: false,
         preserveUnit: false,
@@ -67,6 +68,7 @@ export function enrichPlanForCompanyChange(
     requestedCapabilities: [
       { name: "company.list", params: { reset: true } },
     ],
+    parkedTurn: null,
     stateIntent: {
       preserveCompany: false,
       preserveUnit: false,

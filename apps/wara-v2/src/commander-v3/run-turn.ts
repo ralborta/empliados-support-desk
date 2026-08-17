@@ -18,6 +18,7 @@ import {
   enrichPlanForGreetingCompanyGate,
 } from "./enrich/company-capture.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
+import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
 import { enrichPlanForQuestionContract } from "./enrich/question-contract.js";
@@ -437,6 +438,16 @@ export async function runCommanderTurn(
   }
 
   plan = enrichPlanForOpenTaskHold(plan, state);
+  plan = enrichPlanForCompanyChange(plan, state, input.message);
+  if (plan.stateIntent.preserveCompany === false) {
+    state = {
+      ...state,
+      conversationMetadata: {
+        ...state.conversationMetadata,
+        parkedTurn: null,
+      },
+    };
+  }
 
   // LLM a veces marca switch_task sin trámite previo → no debe pisar el prepare.
   if (
@@ -531,7 +542,8 @@ export async function runCommanderTurn(
   const skipPrepare =
     Boolean(plan.parkedTurn) ||
     plan.conversationalAct === "greet" ||
-    plan.responseGoal.purpose === "clarify";
+    plan.responseGoal.purpose === "clarify" ||
+    plan.stateIntent.preserveCompany === false;
   const ensurePrepareFor = (
     task: "odometer" | "hourmeter" | "certificate",
     cap: string,

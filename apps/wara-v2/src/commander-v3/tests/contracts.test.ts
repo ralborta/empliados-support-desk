@@ -441,4 +441,52 @@ describe("commander-v3 contracts", () => {
       false,
     );
   });
+
+  it("cambio de empresa gana sobre pedido de patente o ticket", async () => {
+    const { enrichPlanForCompanyChange } = await import("../enrich/company-change.js");
+    const { enrichPlanForOpenTaskHold } = await import("../enrich/open-task-hold.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "2", name: "El Cacique S.A.", contactId: 2 };
+    s.availableCompanies = [
+      { id: "1", name: "WARA", contactId: 1 },
+      { id: "2", name: "El Cacique S.A.", contactId: 2 },
+    ];
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value"],
+    };
+    s.lastQuestion = { id: "q", purpose: "unit_for_odometer", expected: "unit" };
+    const incoming = TurnPlanSchema.parse({
+      interpretation: { userQuestion: "reiniciar empresa", answerKind: "other" },
+      reasoning: "pidió unidad",
+      conversationalAct: "ask",
+      requestedCapabilities: [{ name: "unit.search", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: {
+        purpose: "ask_missing",
+        facts: [],
+        nextQuestion: "pasame la patente",
+      },
+      confidence: 0.7,
+    });
+    const held = enrichPlanForOpenTaskHold(incoming, s);
+    const changed = enrichPlanForCompanyChange(held, s, "Reiniciar empresa quiero");
+    assert.equal(changed.stateIntent.preserveCompany, false);
+    assert.ok(
+      changed.requestedCapabilities.some(
+        (c) => c.name === "company.list" && c.params?.reset === true,
+      ),
+    );
+    assert.equal(
+      changed.requestedCapabilities.some((c) => c.name === "unit.search"),
+      false,
+    );
+    assert.equal(
+      changed.requestedCapabilities.some((c) => c.name === "handoff.prepare"),
+      false,
+    );
+    assert.equal(changed.parkedTurn ?? null, null);
+  });
 });

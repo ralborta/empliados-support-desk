@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 16e", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16e/);
+  it("prompt version bump 16f", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16f/);
   });
 
   it("prompt Commander no copia el árbol de decisión V1", async () => {
@@ -23,6 +23,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /Qué necesitás/);
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /keep_or_close|parkedTurn|Pedido nuevo|trámite abierto/i);
     assert.match(COMMANDER_V3_SYSTEM_PROMPT, /Saludo PURO|saludo o pedido|how_to/i);
+    assert.match(COMMANDER_V3_SYSTEM_PROMPT, /reinicio de empresa|company.list/i);
     assert.ok(COMMANDER_V3_SYSTEM_PROMPT.length < 4500);
   });
 

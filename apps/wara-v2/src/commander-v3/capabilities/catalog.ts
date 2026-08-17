@@ -24,7 +24,7 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   },
   {
     name: "company.list",
-    purpose: "Listar empresas disponibles",
+    purpose: "Listar empresas. Con reset=true: cambio/reinicio de empresa (no pedir patente ni abrir ticket)",
     params: [],
     kind: "read",
     requiredFields: [],
