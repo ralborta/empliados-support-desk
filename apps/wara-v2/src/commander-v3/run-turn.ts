@@ -18,6 +18,7 @@ import {
   enrichPlanForGreetingCompanyGate,
 } from "./enrich/company-capture.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
+import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
 import { enrichPlanForQuestionContract } from "./enrich/question-contract.js";
 import {
@@ -391,6 +392,7 @@ export async function runCommanderTurn(
   }
   plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterValueFallback(plan, state, input.message);
+  plan = enrichPlanForGreetingPolicy(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForQuestionContract(plan, state);
@@ -526,10 +528,15 @@ export async function runCommanderTurn(
   }
 
   // Trámites de escritura: si el LLM eligió el task, asegurar *.prepare
+  const skipPrepare =
+    Boolean(plan.parkedTurn) ||
+    plan.conversationalAct === "greet" ||
+    plan.responseGoal.purpose === "clarify";
   const ensurePrepareFor = (
     task: "odometer" | "hourmeter" | "certificate",
     cap: string,
   ) => {
+    if (skipPrepare) return;
     if (
       plan.task === task &&
       !plan.requestedCapabilities.some((c) => c.name === cap)

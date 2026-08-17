@@ -115,7 +115,7 @@ export function coercePlan(raw: unknown): unknown {
 
   // Capabilities pedidas (normalizar antes de tocar task).
   if (!Array.isArray(o.requestedCapabilities)) o.requestedCapabilities = [];
-  const caps = o.requestedCapabilities as Array<{ name?: string; params?: unknown }>;
+  let caps = o.requestedCapabilities as Array<{ name?: string; params?: unknown }>;
 
   // task: "certificate.prepare" → certificate; "company.get_active" → null + cap
   if (typeof o.task === "string") {
@@ -228,15 +228,7 @@ export function coercePlan(raw: unknown): unknown {
       o.conversationalAct = "inform";
     }
   } else {
-    if (
-      (o.conversationalAct === "greet" ||
-        o.conversationalAct === "inform" ||
-        o.conversationalAct === "ask") &&
-      caps.some((c) => String(c.name ?? "").includes("prepare"))
-    ) {
-      o.conversationalAct = "start_task";
-      if (!o.taskAction) o.taskAction = "start";
-    }
+    // prepare no pisa greet acá: interpretation (más abajo) decide si era trámite o saludo.
     if (
       o.conversationalAct === "greet" &&
       caps.some((c) => String(c.name ?? "") === "domain.answer")
@@ -358,8 +350,13 @@ export function coercePlan(raw: unknown): unknown {
   const kind = String(
     (o.interpretation as { answerKind?: string } | undefined)?.answerKind ?? "",
   );
-  // greet solo si interpretation dice greet. Un how_to/trámite no se presenta de nuevo.
-  if (o.conversationalAct === "greet" && kind && kind !== "greet") {
+  // Un saludo no es captura de trámite: no promover greet→start_task por un *.prepare.
+  if (kind === "greet") {
+    o.conversationalAct = "greet";
+    o.taskAction = null;
+    caps = caps.filter((c) => !String(c.name ?? "").includes("prepare"));
+    o.requestedCapabilities = caps;
+  } else if (o.conversationalAct === "greet" && kind && kind !== "greet") {
     if (kind === "start_task") {
       o.conversationalAct = "start_task";
       if (!o.taskAction) o.taskAction = "start";
@@ -371,6 +368,16 @@ export function coercePlan(raw: unknown): unknown {
     } else {
       o.conversationalAct = "inform";
     }
+  }
+  if (
+    kind !== "greet" &&
+    (o.conversationalAct === "greet" ||
+      o.conversationalAct === "inform" ||
+      o.conversationalAct === "ask") &&
+    caps.some((c) => String(c.name ?? "").includes("prepare"))
+  ) {
+    o.conversationalAct = "start_task";
+    if (!o.taskAction) o.taskAction = "start";
   }
   if (kind === "how_to") {
     if (!caps.some((c) => String(c.name ?? "") === "domain.answer")) {

@@ -14,7 +14,8 @@ const REDACTOR_SYSTEM = `Sos Atilio (WARA) escribiendo por WhatsApp.
 - Pregunta (yes_no/status/how_to): no la reemplaces por un listado NI por el saludo/menú.
 - Si ya te presentaste, no vuelvas a presentarte. Contestá el pedido.
 - LISTADOS: si answerKind=list y hay listado numerado, copialo COMPLETO.
-- UNA pregunta por turno. Sin saludo salvo purpose/act greet. Sin inventar hechos, plazos ni unidades.
+- UNA pregunta por turno. Sin presentación completa salvo purpose/act greet SIN trámite abierto.
+- Si hay trámite abierto y nextQuestion pregunta si se sigue o se cambia: saludá breve y hacé ESA pregunta. No reenvíes el formulario de km/hs ni el menú de 4 ítems.
 - Conservá nros de caso (#…) e iconos/negrita de WhatsApp de los facts.
 - Si no hay facts, una pregunta abierta. Nunca "no tengo información" si hay facts o menú.`;
 
@@ -46,6 +47,8 @@ export function shouldDumpFactsWithoutLlm(
 ): boolean {
   const kind = plan?.interpretation?.answerKind;
   if (kind === "yes_no" || kind === "status" || kind === "how_to") return false;
+  if (kind === "greet") return false;
+  if (plan?.parkedTurn || plan?.responseGoal.purpose === "clarify") return false;
   if (kind === "list") return facts.some(looksLikeListingFact);
   return facts.some(looksLikeListingFact) || facts.some(looksLikeLockedFormFact);
 }
@@ -53,6 +56,7 @@ export function shouldDumpFactsWithoutLlm(
 /** Presentación de Atilio: solo si el turno ES un saludo, no un pedido. */
 export function shouldUseGreetingTemplate(plan: TurnPlan): boolean {
   if (plan.conversationalAct !== "greet") return false;
+  if (plan.parkedTurn || plan.responseGoal.purpose === "clarify") return false;
   const kind = plan.interpretation?.answerKind;
   if (kind && kind !== "greet") return false;
   if (

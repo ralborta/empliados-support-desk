@@ -44,10 +44,41 @@ export function isOpenOperationalTask(state: ConversationStateV3): boolean {
   return OPERATIONAL.has(t.type);
 }
 
+function isGreetingTurn(plan: TurnPlan): boolean {
+  return (
+    plan.conversationalAct === "greet" ||
+    plan.interpretation?.answerKind === "greet"
+  );
+}
+
+function contributedExpectedField(
+  plan: TurnPlan,
+  state: ConversationStateV3,
+): boolean {
+  const expected = state.lastQuestion?.expected;
+  const fields = plan.suppliedFields ?? {};
+  if (expected === "value" && fields.value != null) return true;
+  if (
+    expected === "date" &&
+    (fields.date != null || fields.observedAt != null)
+  ) {
+    return true;
+  }
+  if (
+    expected === "time" &&
+    (fields.time != null || fields.observedAt != null)
+  ) {
+    return true;
+  }
+  if (expected === "unit" && plan.unitReference) return true;
+  return false;
+}
+
 function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boolean {
   const kind = plan.interpretation?.answerKind;
   const act = plan.conversationalAct;
-  if (act === "greet" && (kind === "greet" || kind == null)) return false;
+  // Saludo o pedido que no aporta el campo pedido: no retomar la captura.
+  if (isGreetingTurn(plan) && !contributedExpectedField(plan, state)) return true;
   if (
     act === "continue_task" ||
     act === "amend_task" ||
@@ -58,7 +89,7 @@ function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boo
     return false;
   }
   if (act === "answer_lateral" && plan.stateIntent.preserveTask) return false;
-  if (kind === "continue_task" || kind === "greet") return false;
+  if (kind === "continue_task") return false;
   if (kind === "how_to") return true;
   if (
     (act === "start_task" ||
@@ -104,6 +135,33 @@ export function planFromParkedTurn(
   parked: ParkedTurnV3,
   base: TurnPlan,
 ): TurnPlan {
+  if (parked.answerKind === "greet") {
+    return {
+      ...base,
+      interpretation: {
+        userQuestion: parked.userQuestion,
+        answerKind: "greet",
+      },
+      conversationalAct: "ask",
+      task: null,
+      taskAction: null,
+      requestedCapabilities: [],
+      parkedTurn: null,
+      stateIntent: {
+        preserveCompany: true,
+        preserveUnit: true,
+        preserveTask: false,
+      },
+      responseGoal: {
+        purpose: "ask_missing",
+        facts: [],
+        nextQuestion: "¿En qué te ayudo?",
+      },
+      reasoning:
+        (base.reasoning ? `${base.reasoning} ` : "") +
+        "Cerró el trámite; el saludo no traía un pedido nuevo.",
+    };
+  }
   const howTo = parked.answerKind === "how_to";
   return {
     ...base,
@@ -250,18 +308,28 @@ export function enrichPlanForOpenTaskHold(
   if (!isIncomingOtherRequest(plan, state)) return plan;
 
   const open = taskLabel(state.activeTask?.type);
+  const greeting = isGreetingTurn(plan);
   const parked: ParkedTurnV3 = {
-    answerKind: plan.interpretation?.answerKind ?? "other",
-    userQuestion: plan.interpretation?.userQuestion ?? "pedido nuevo",
-    task: plan.task ?? null,
-    capabilities: plan.requestedCapabilities.map((c) => ({
-      name: c.name,
-      params: c.params ?? {},
-    })),
+    answerKind: greeting ? "greet" : (plan.interpretation?.answerKind ?? "other"),
+    userQuestion: plan.interpretation?.userQuestion ?? (greeting ? "saludo" : "pedido nuevo"),
+    task: greeting ? null : (plan.task ?? null),
+    capabilities: greeting
+      ? []
+      : plan.requestedCapabilities.map((c) => ({
+          name: c.name,
+          params: c.params ?? {},
+        })),
   };
 
   return {
     ...plan,
+    interpretation: greeting
+      ? {
+          userQuestion: plan.interpretation?.userQuestion ?? "saludo",
+          answerKind: "greet" as const,
+          priorReply: plan.interpretation?.priorReply ?? null,
+        }
+      : plan.interpretation,
     conversationalAct: "ask",
     task: null,
     taskAction: null,
@@ -275,7 +343,9 @@ export function enrichPlanForOpenTaskHold(
     responseGoal: {
       purpose: "clarify",
       facts: [],
-      nextQuestion: `Teníamos un ${open} en curso. ¿Seguimos con eso o lo cerramos y pasamos a lo que pediste ahora?`,
+      nextQuestion: isGreetingTurn(plan)
+        ? `Teníamos un ${open} en curso. ¿Seguimos con eso o te ayudo con otra cosa?`
+        : `Teníamos un ${open} en curso. ¿Seguimos con eso o lo cerramos y pasamos a lo que pediste ahora?`,
     },
     reasoning:
       (plan.reasoning ? `${plan.reasoning} ` : "") +

@@ -129,11 +129,13 @@ export function enrichPlanForGreetingPolicy(
     return plan;
   }
 
-  // No pisar captura de medidor/certificado por un "hola" embebido raro
+  // Un saludo puro no es el dato del medidor: greet, y el hold pregunta si se sigue.
+  // Saludo embebido + dato ("hola, 129556") lo deja el parser de campo.
   if (
-    state.lastQuestion?.expected === "value" ||
-    state.lastQuestion?.expected === "date" ||
-    state.lastQuestion?.expected === "time"
+    !isPureGreetingMessage(message) &&
+    (state.lastQuestion?.expected === "value" ||
+      state.lastQuestion?.expected === "date" ||
+      state.lastQuestion?.expected === "time")
   ) {
     return plan;
   }
@@ -163,10 +165,17 @@ export function enrichPlanForGreetingPolicy(
     }
     return {
       ...plan,
+      interpretation: {
+        userQuestion: plan.interpretation?.userQuestion ?? "saludo",
+        answerKind: "greet",
+        priorReply: plan.interpretation?.priorReply ?? null,
+      },
       conversationalAct: "greet",
       task: null,
       taskAction: null,
-      requestedCapabilities: withoutCompanyCaps.filter((c) => c.name !== "unit.search"),
+      requestedCapabilities: withoutCompanyCaps.filter(
+        (c) => c.name !== "unit.search" && !c.name.includes("prepare"),
+      ),
       reasoning:
         (plan.reasoning ? `${plan.reasoning} ` : "") +
         `El usuario saludó con empresa activa (${state.company.name}): greet sin listar flota.`,
@@ -180,9 +189,17 @@ export function enrichPlanForGreetingPolicy(
 
   return {
     ...plan,
+    interpretation: {
+      userQuestion: plan.interpretation?.userQuestion ?? "saludo",
+      answerKind: "greet",
+      priorReply: plan.interpretation?.priorReply ?? null,
+    },
     conversationalAct: "greet",
     task: null,
     taskAction: null,
+    requestedCapabilities: plan.requestedCapabilities.filter(
+      (c) => !c.name.includes("prepare"),
+    ),
     reasoning:
       (plan.reasoning ? `${plan.reasoning} ` : "") +
       "El usuario saludó: respondo con greet.",

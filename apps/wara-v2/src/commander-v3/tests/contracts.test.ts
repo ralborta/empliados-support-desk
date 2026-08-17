@@ -309,4 +309,69 @@ describe("commander-v3 contracts", () => {
     assert.equal(restored.conversationalAct, "inform");
     assert.ok(restored.requestedCapabilities.some((c) => c.name === "domain.answer"));
   });
+
+  it("greet + prepare no arranca el trámite: se queda en greet", () => {
+    const coerced = TurnPlanSchema.parse(
+      coercePlan({
+        interpretation: { userQuestion: "saludo", answerKind: "greet" },
+        conversationalAct: "continue_task",
+        task: "odometer",
+        requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "resume", facts: [] },
+        confidence: 0.8,
+      }),
+    );
+    assert.equal(coerced.conversationalAct, "greet");
+    assert.equal(
+      coerced.requestedCapabilities.some((c) => c.name === "odometer.prepare"),
+      false,
+    );
+  });
+
+  it("trámite abierto + saludo → keep_or_close, no pide el km", async () => {
+    const { enrichPlanForOpenTaskHold, planFromParkedTurn } = await import(
+      "../enrich/open-task-hold.js"
+    );
+    const { enrichPlanForGreetingPolicy } = await import(
+      "../enrich/greeting-policy.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "El Cacique S.A." };
+    s.unit = {
+      movilId: 900111,
+      plate: "AG 228 NY",
+      name: "M900-111",
+      label: "AG 228 NY (M900-111)",
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value"],
+    };
+    s.lastQuestion = { id: "q", purpose: "value", expected: "value" };
+    const incoming = TurnPlanSchema.parse({
+      interpretation: { userQuestion: "saludo", answerKind: "continue_task" },
+      reasoning: "LLM retoma captura",
+      conversationalAct: "continue_task",
+      task: "odometer",
+      requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "ask_missing", facts: [] },
+      confidence: 0.8,
+    });
+    const greeted = enrichPlanForGreetingPolicy(incoming, s, "Hola");
+    assert.equal(greeted.conversationalAct, "greet");
+    const held = enrichPlanForOpenTaskHold(greeted, s);
+    assert.equal(held.conversationalAct, "ask");
+    assert.equal(held.responseGoal.purpose, "clarify");
+    assert.equal(held.requestedCapabilities.length, 0);
+    assert.ok(held.parkedTurn);
+    assert.match(held.responseGoal.nextQuestion ?? "", /odómetro/i);
+    assert.doesNotMatch(held.responseGoal.nextQuestion ?? "", /Pasame el valor/i);
+    const restored = planFromParkedTurn(held.parkedTurn!, held);
+    assert.equal(restored.conversationalAct, "ask");
+    assert.match(restored.responseGoal.nextQuestion ?? "", /ayudo/i);
+  });
 });
