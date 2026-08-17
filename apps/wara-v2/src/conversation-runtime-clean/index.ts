@@ -45,3 +45,4 @@ export * from "./adapters/persistence/in-memory-clean-persistence.js";
 export * from "./adapters/persistence/postgres-clean-persistence.js";
 export * from "./adapters/services/guarded-http-transport.js";
 export * from "./adapters/services/guarded-wara-adapter.js";
+export * from "./adapters/services/guarded-odoo-handoff-adapter.js";
