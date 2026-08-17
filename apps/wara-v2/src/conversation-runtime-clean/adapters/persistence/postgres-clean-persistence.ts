@@ -6,7 +6,9 @@ export interface SqlTransaction {
 export interface SqlClient extends SqlTransaction { transaction<T>(run: (tx: SqlTransaction) => Promise<T>): Promise<T>; }
 
 function assertIdentifier(namespace: string): string {
-  if (!/^[a-z][a-z0-9_]{2,62}$/.test(namespace)) throw new Error("CLEAN_PERSISTENCE_UNSAFE_NAMESPACE");
+  const valid = namespace.length >= 3 && namespace.length <= 63 && namespace[0]! >= "a" && namespace[0]! <= "z"
+    && [...namespace].every((char) => (char >= "a" && char <= "z") || (char >= "0" && char <= "9") || char === "_");
+  if (!valid) throw new Error("CLEAN_PERSISTENCE_UNSAFE_NAMESPACE");
   return namespace;
 }
 
@@ -32,4 +34,3 @@ export class PostgresCleanPersistence implements CleanPersistenceRepository {
     });
   }
 }
-

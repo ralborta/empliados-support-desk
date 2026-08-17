@@ -22,7 +22,8 @@ export class GuardedOdooHandoffAdapter {
     return this.http.execute({ ...input, capability: `ticket.${input.action}.commit`, kind: "write", path: `/odoo/helpdesk/${input.action}`, body: { ticketId: input.ticketId, subject: input.subject, detail: input.detail, idempotencyKey: input.idempotencyKey } });
   }
   conversationWrite(input: WriteContext & Readonly<{ action: "handoff" | "assign" | "release"; conversationId: string; destination?: ConversationDestination; reason?: string }>): Promise<NormalizedServiceResult<ConversationOperationData>> {
-    if (input.action !== "release" && (!input.destination?.id || !["agent", "team", "queue"].includes(input.destination.type))) return Promise.resolve({ status: "validation_error", errors: ["valid_destination_required"] });
+    const validDestination = input.destination?.type === "agent" || input.destination?.type === "team" || input.destination?.type === "queue";
+    if (input.action !== "release" && (!input.destination?.id || !validDestination)) return Promise.resolve({ status: "validation_error", errors: ["valid_destination_required"] });
     return this.http.execute({ ...input, capability: `conversation.${input.action}.commit`, kind: "write", path: `/conversations/${input.action}`, body: { conversationId: input.conversationId, destination: input.destination, reason: input.reason } });
   }
   presence(input: Readonly<{ tenant: TenantPermission; correlationId: string; authorized: boolean; teamId: string }>): Promise<NormalizedServiceResult<readonly AdvisorCandidate[]>> {

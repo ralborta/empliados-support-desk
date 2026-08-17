@@ -30,7 +30,10 @@ export type SanitizedCleanHealthConfig = Readonly<{
 }>;
 
 const DEFAULT_NAMESPACE = "wara_runtime_clean_lab";
-const NAMESPACE = /^[a-z][a-z0-9_]{2,62}$/;
+function safeNamespace(value: string): boolean {
+  if (value.length < 3 || value.length > 63 || value[0]! < "a" || value[0]! > "z") return false;
+  return [...value].every((char) => (char >= "a" && char <= "z") || (char >= "0" && char <= "9") || char === "_");
+}
 
 function strictBoolean(value: string | undefined, key: string): boolean {
   if (value === undefined || value.trim() === "") return false;
@@ -49,7 +52,7 @@ export function loadCleanRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Cl
     kbEnabled: strictBoolean(env.WARA_CLEAN_KB_ENABLED, "WARA_CLEAN_KB_ENABLED"),
     persistenceNamespace: (env.WARA_CLEAN_PERSISTENCE_NAMESPACE ?? DEFAULT_NAMESPACE).trim(),
   });
-  if (!NAMESPACE.test(config.persistenceNamespace)) {
+  if (!safeNamespace(config.persistenceNamespace)) {
     throw new Error("INVALID_CLEAN_CONFIG:WARA_CLEAN_PERSISTENCE_NAMESPACE:unsafe_identifier");
   }
   if (!config.runtimeEnabled && (config.externalReadsEnabled || config.externalWritesEnabled || config.deliveryEnabled || config.llmEnabled || config.kbEnabled)) {
@@ -76,4 +79,3 @@ export function sanitizedCleanHealthConfig(config: CleanRuntimeConfig): Sanitize
     persistenceNamespace: config.persistenceNamespace ? "configured" : "missing",
   });
 }
-
