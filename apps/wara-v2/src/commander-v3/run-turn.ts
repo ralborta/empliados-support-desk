@@ -26,7 +26,6 @@ import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
 import { enrichPlanForQuestionContract } from "./enrich/question-contract.js";
-import { enrichPlanForCurrentQuestion } from "./enrich/current-question.js";
 import {
   enrichPlanForExpectedFields,
   enrichPlanForMeterValueFallback,
@@ -402,7 +401,6 @@ export async function runCommanderTurn(
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
   plan = enrichPlanForQuestionContract(plan, state);
-  plan = enrichPlanForCurrentQuestion(plan, state);
 
   plan = enrichPlanForKeepOrCloseAnswer(plan, state);
   if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) {
@@ -425,7 +423,6 @@ export async function runCommanderTurn(
       if (parked) {
         plan = planFromParkedTurn(parked, plan);
         plan = enrichPlanForQuestionContract(plan, state);
-        plan = enrichPlanForCurrentQuestion(plan, state);
       }
     } else if (
       plan.conversationalAct === "continue_task" ||
@@ -605,8 +602,6 @@ export async function runCommanderTurn(
       ],
     };
   }
-
-  plan = enrichPlanForCurrentQuestion(plan, state);
 
   // Ensure company selected for ops if only one contact
   // (no auto-seleccionar si el usuario pidió reiniciar/cambiar empresa).

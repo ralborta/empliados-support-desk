@@ -14,6 +14,7 @@ const OPERATIONAL = new Set([
   "odometer",
   "hourmeter",
   "maintenance",
+  "gps",
   "human_handoff",
 ]);
 
@@ -30,7 +31,7 @@ export function taskLabel(task: string | null | undefined): string {
     case "human_handoff":
       return "ticket";
     case "gps":
-      return "GPS";
+      return "estado de la unidad";
     default:
       return "trámite";
   }
@@ -88,6 +89,7 @@ function hasForeignEvidence(
   return plan.requestedCapabilities.some((c) => {
     const name = c.name;
     if (name === "domain.answer") return true;
+    if (name === "company.get_active" || name === "company.list") return true;
     if (name === "gps.get_status" && open !== "gps") return true;
     if (name.endsWith(".prepare") && open && !name.startsWith(`${open}.`)) {
       return true;
@@ -102,11 +104,17 @@ function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boo
   // Parser de campo esperado: elegir empresa no es un pedido nuevo.
   if (state.lastQuestion?.expected === "company") return false;
   if (contributedExpectedField(plan, state)) return false;
-  // GPS es una lectura: el mismo pedido de estado no interrumpe un GPS a medias.
+  const hasOtherQuestionTool = plan.requestedCapabilities.some(
+    (c) =>
+      c.name === "company.get_active" ||
+      c.name === "company.list" ||
+      c.name === "domain.answer",
+  );
+  // Mismo pedido de estado de unidad: siguen en el GPS, no es interrupción.
   if (
     state.activeTask?.type === "gps" &&
-    (kind === "status" ||
-      plan.task === "gps" ||
+    !hasOtherQuestionTool &&
+    (plan.task === "gps" ||
       plan.requestedCapabilities.some((c) => c.name === "gps.get_status"))
   ) {
     return false;
@@ -164,6 +172,9 @@ export function resumeQuestionForTask(task: ActiveTaskV3): ConversationStateV3["
     if (c.time == null && c.observedAt == null) {
       return { id: randomUUID(), purpose: "time", expected: "time" };
     }
+  }
+  if (task.type === "gps" && (task.missing ?? []).includes("unit")) {
+    return { id: randomUUID(), purpose: "unit_for_gps", expected: "unit" };
   }
   return {
     id: randomUUID(),

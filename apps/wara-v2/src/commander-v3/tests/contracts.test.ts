@@ -813,12 +813,9 @@ describe("commander-v3 contracts", () => {
     assert.match(formatAskUnit("gps"), /¿De qué unidad\?/);
   });
 
-  it("pregunta nueva con slot de unidad no re-ejecuta GPS", async () => {
-    const { enrichPlanForCurrentQuestion } = await import(
-      "../enrich/current-question.js"
-    );
-    const { enrichPlanForQuestionContract } = await import(
-      "../enrich/question-contract.js"
+  it("GPS esperando patente + otra pregunta → keep-or-close, no ejecuta", async () => {
+    const { enrichPlanForOpenTaskHold } = await import(
+      "../enrich/open-task-hold.js"
     );
     const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
     s.company = { id: "1", name: "WARA", contactId: 1 };
@@ -846,14 +843,18 @@ describe("commander-v3 contracts", () => {
       responseGoal: { purpose: "inform", facts: [] },
       confidence: 0.8,
     });
-    const contracted = enrichPlanForQuestionContract(incoming, s);
-    const next = enrichPlanForCurrentQuestion(contracted, s);
-    assert.ok(next.requestedCapabilities.some((c) => c.name === "company.get_active"));
+    const held = enrichPlanForOpenTaskHold(incoming, s);
+    assert.equal(held.conversationalAct, "ask");
+    assert.equal(held.responseGoal.purpose, "clarify");
+    assert.equal(held.requestedCapabilities.length, 0);
+    assert.match(held.responseGoal.nextQuestion ?? "", /estado de la unidad/i);
+    assert.ok(
+      held.parkedTurn?.capabilities?.some((c) => c.name === "company.get_active"),
+    );
     assert.equal(
-      next.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      held.parkedTurn?.capabilities?.some((c) => c.name === "gps.get_status"),
       false,
     );
-    assert.notEqual(next.task, "gps");
   });
 
   it("status sin task gps no se convierte en GPS", async () => {

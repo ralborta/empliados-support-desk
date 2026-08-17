@@ -693,10 +693,11 @@ async function runOne(req: CapabilityRequest, ctx: ExecuteContext): Promise<Tool
               ctx.state.pendingEntity?.type === "company"
                 ? null
                 : ctx.state.pendingEntity,
-            lastQuestion:
-              ctx.state.lastQuestion?.expected === "company"
+            lastQuestion: alreadyActive
+              ? ctx.state.lastQuestion?.expected === "company"
                 ? null
-                : ctx.state.lastQuestion,
+                : ctx.state.lastQuestion
+              : null,
             lastListing:
               ctx.state.lastListing?.kind === "companies"
                 ? null
