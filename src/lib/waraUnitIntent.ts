@@ -2558,6 +2558,17 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   pendingActionType?: string | null;
 }): boolean {
   const { selectionText, threadText, pendingActionType } = params;
+
+  // Arranque explícito (p. ej. tras consulta GPS u horómetro previo) → executor SIEMPRE,
+  // antes de "superseded" o registro completado en el hilo (bug 2026-08-17: "cambiar odómetro
+  // unidad 900080" caía al follow-up GPS por isOdometerFlowSuperseded).
+  if (
+    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+    looksLikeHorometerOnlyIntent(selectionText)
+  ) {
+    return true;
+  }
+
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   // Con pending de odómetro el trámite sigue vivo aunque el hilo dispare un falso
   // "superseded" (bug 2026-08-06: pedido de fecha/hora con "necesito").
@@ -2569,14 +2580,6 @@ export function shouldRouteTurnToOdometerExecutor(params: {
     !looksLikeHorometerOnlyIntent(selectionText)
   ) {
     return false;
-  }
-
-  // Arranque explícito (p. ej. tras consulta GPS/mantenimiento) → executor aunque no haya flujo activo previo.
-  if (
-    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
-    looksLikeHorometerOnlyIntent(selectionText)
-  ) {
-    return true;
   }
 
   const flowActive =

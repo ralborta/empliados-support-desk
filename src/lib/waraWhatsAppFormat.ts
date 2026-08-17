@@ -3,7 +3,13 @@
  * Portado de apps/wara-v2/src/commander-v3/reply/format-wa.ts — solo presentación.
  */
 import type { PendingActionRecord } from "@/lib/pendingAction";
-import { formatPlateWithSpaces, normalizePlate, threadHasActiveOdometerFlow } from "@/lib/wara";
+import {
+  formatPlateWithSpaces,
+  normalizePlate,
+  threadAwaitingHorometerKmValue,
+  threadAwaitingOdometerKmValue,
+  threadHasActiveOdometerFlow,
+} from "@/lib/wara";
 
 export function confirmFooter(): string {
   return "➡️ Respondé *CONFIRMO* o *CANCELAR*.";
@@ -33,6 +39,7 @@ export function resolvePendingTaskLabelV1(
   pendingAction: PendingActionRecord | null | undefined,
   threadText?: string,
 ): string | null {
+  if (threadText && threadAwaitingHorometerKmValue(threadText)) return "un horómetro";
   if (pendingAction?.type === "odometro") {
     const meter = pendingAction.payload?.meterType;
     if (meter === "horometro") return "un horómetro";
@@ -40,7 +47,10 @@ export function resolvePendingTaskLabelV1(
   }
   if (pendingAction?.type === "certificados") return "un certificado";
   if (pendingAction?.type === "mantenimiento") return "un mantenimiento";
-  if (threadText && threadHasActiveOdometerFlow(threadText)) return "un odómetro";
+  if (threadText && threadHasActiveOdometerFlow(threadText)) {
+    if (threadAwaitingOdometerKmValue(threadText)) return "un odómetro";
+    return "un odómetro";
+  }
   return null;
 }
 
@@ -79,6 +89,18 @@ export function formatMeterAskWithReading(input: {
     ? "🔢 Pasame el valor del horómetro en *hs* y la fecha y hora de la lectura.\n_Ej.: 350 hs — 05/08/26 a las 14:30_"
     : "🔢 Pasame el valor del odómetro en *km* y la fecha y hora de la lectura.\n_Ej.: 10500 km — 05/08/26 a las 14:30_";
   return [title, unit, "", ask].join("\n");
+}
+
+/** "21/07/2026 10:35" → { dateDisp, time } para formatMeterConfirm. */
+export function splitFechaDisplayParts(fechaDisplay: string | null | undefined): {
+  dateDisp: string;
+  time: string;
+} {
+  const raw = String(fechaDisplay ?? "").trim();
+  if (!raw) return { dateDisp: "", time: "" };
+  const space = raw.indexOf(" ");
+  if (space === -1) return { dateDisp: raw, time: "" };
+  return { dateDisp: raw.slice(0, space), time: raw.slice(space + 1).trim() };
 }
 
 export function formatMeterConfirm(input: {

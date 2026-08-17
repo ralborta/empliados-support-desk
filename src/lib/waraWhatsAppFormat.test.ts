@@ -5,6 +5,9 @@ import {
   formatFleetUnitLabel,
   formatMeterAsk,
   formatMeterAskWithReading,
+  formatMeterConfirm,
+  resolvePendingTaskLabelV1,
+  splitFechaDisplayParts,
 } from "./waraWhatsAppFormat";
 
 describe("waraWhatsAppFormat", () => {
@@ -45,5 +48,40 @@ describe("waraWhatsAppFormat", () => {
     assert.match(msg, /Seguimos con \*El Cacique S\.A\.\*/);
     assert.match(msg, /Tenemos pendiente un odómetro/);
     assert.match(msg, /• 🛣 Odómetro/);
+  });
+
+  it("resolvePendingTaskLabelV1 infiere horómetro desde el hilo", () => {
+    const thread = [
+      "⏱ *Horómetro*",
+      "🚗 Unidad: *AG 396 ZD*",
+      "🔢 Pasame el valor del horómetro en *hs*.",
+    ].join("\n");
+    assert.equal(
+      resolvePendingTaskLabelV1({ type: "odometro", createdAt: "", payload: { patente: "AG396ZD" } }, thread),
+      "un horómetro",
+    );
+  });
+
+  it("formatMeterConfirm incluye iconos y opción CANCELAR", () => {
+    const msg = formatMeterConfirm({
+      meter: "odometer",
+      unitLabel: "AH 652 KW (M900-100)",
+      value: 10500,
+      dateDisp: "17/08/2026",
+      time: "11:00",
+    });
+    assert.match(msg, /🛣 \*Confirmar odómetro\*/);
+    assert.match(msg, /🚗 Unidad: \*AH 652 KW \(M900-100\)\*/);
+    assert.match(msg, /🔢 Valor: \*10500\* km/);
+    assert.match(msg, /📅 Fecha: \*17\/08\/2026\*/);
+    assert.match(msg, /🕐 Hora: \*11:00\*/);
+    assert.match(msg, /Respondé \*CONFIRMO\* o \*CANCELAR\*/);
+  });
+
+  it("splitFechaDisplayParts separa fecha y hora", () => {
+    assert.deepEqual(splitFechaDisplayParts("17/08/2026 11:00"), {
+      dateDisp: "17/08/2026",
+      time: "11:00",
+    });
   });
 });

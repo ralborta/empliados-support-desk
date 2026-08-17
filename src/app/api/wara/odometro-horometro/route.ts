@@ -68,6 +68,8 @@ import {
   formatFleetUnitLabel,
   formatMeterAsk,
   formatMeterAskWithReading,
+  formatMeterConfirm,
+  splitFechaDisplayParts,
 } from "@/lib/waraWhatsAppFormat";
 import { composeOdometerDialogueReply } from "@/lib/odometerDialogueAI";
 import { getActiveUnit, setActiveUnit, shouldUseActiveUnitFallback } from "@/lib/activeUnit";
@@ -806,11 +808,38 @@ export async function POST(req: NextRequest) {
         formatPlateWithSpaces(resumePlateRaw) ?? resumePlateRaw,
         pendingPayload?.unidad ? String(pendingPayload.unidad) : null,
       );
-      const message = formatMeterAsk({
-        meter: wantsHorometroResume ? "hourmeter" : "odometer",
-        unitLabel,
-        expected: "value",
-      });
+      const pendingHoro =
+        typeof pendingPayload?.horometro === "number" ? pendingPayload.horometro : undefined;
+      const pendingOdo =
+        typeof pendingPayload?.odometro === "number" ? pendingPayload.odometro : undefined;
+      const hasPartialValue = wantsHorometroResume
+        ? pendingHoro != null
+        : pendingOdo != null;
+      const message = hasPartialValue
+        ? formatMeterAsk({
+            meter: wantsHorometroResume ? "hourmeter" : "odometer",
+            unitLabel,
+            expected: "datetime",
+          })
+        : formatMeterAsk({
+            meter: wantsHorometroResume ? "hourmeter" : "odometer",
+            unitLabel,
+            expected: "value",
+          });
+      const tail = flowThreadText.slice(-1200);
+      if (tail.includes(message.trim())) {
+        return NextResponse.json(
+          {
+            ok: true,
+            ok_s: "true",
+            flowComplete_s: "true",
+            message: "",
+            skipResponse_s: "true",
+            duplicatePrompt_s: "true",
+          },
+          { status: BB_STATUS },
+        );
+      }
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_odometro_response",
         stage: "greeting_resume_meter_ask",
@@ -1199,10 +1228,24 @@ export async function POST(req: NextRequest) {
 
   const fechaFromMessageEarly = parseFechaFromText(rawText, "America/Argentina/Buenos_Aires");
   if (
+    hasLiveOdometerPendingAction &&
+    !pendingOdoConfirm &&
+    dbPendingOdoAction?.payload
+  ) {
+    const payload = dbPendingOdoAction.payload;
+    if (typeof horometro !== "number" && typeof payload.horometro === "number") {
+      horometro = payload.horometro as number;
+    }
+    if (typeof odometro !== "number" && typeof payload.odometro === "number") {
+      odometro = payload.odometro as number;
+    }
+  }
+  if (
     (awaitingHorometerKm || horometerFlowActive) &&
     fechaFromMessageEarly &&
     !bareHorometerInMessage &&
-    typeof fromText.horometro !== "number"
+    typeof fromText.horometro !== "number" &&
+    typeof horometro !== "number"
   ) {
     horometro = undefined;
   }
@@ -1796,6 +1839,7 @@ export async function POST(req: NextRequest) {
           odometro,
           horometro,
           fecha: fechaExplicita ?? undefined,
+          meterType: resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent }),
         },
       });
       await appendOutboundBotMessage(rawPhone, message, {
@@ -1975,20 +2019,21 @@ export async function POST(req: NextRequest) {
         { status: BB_STATUS },
       );
     }
-    const plateDisplay = formatPlateWithSpaces(patente) ?? patente;
-    const odoLine =
-      !horometerFlowActive &&
-      !horometerOnlyIntent &&
-      typeof odometro === "number"
-        ? `• Odómetro: ${odometro} km`
-        : typeof horometro === "number"
-          ? `• Horómetro: ${horometro} h`
-          : "";
-    // A esta altura fecha+hora ya son obligatorias (gate missing_fecha_hora arriba).
-    const fechaLine = fechaDisplay ? `\n• Fecha: ${fechaDisplay}` : "";
+    const plateDisplay = formatFleetUnitLabel(formatPlateWithSpaces(patente) ?? patente);
+    const wantsHorometroConfirm = horometerFlowActive || horometerOnlyIntent;
+    const meterValue = wantsHorometroConfirm ? horometro : odometro;
+    const { dateDisp, time } = splitFechaDisplayParts(fechaDisplay);
     const confirmMessage =
-      `Voy a registrar:\n• Patente: ${plateDisplay}\n${odoLine}${fechaLine}\n\n` +
-      `Si está correcto, respondé CONFIRMO para registrarlo en Wara.`;
+      typeof meterValue === "number" && fechaDisplay && hasFechaHoraLectura
+        ? formatMeterConfirm({
+            meter: wantsHorometroConfirm ? "hourmeter" : "odometer",
+            unitLabel: plateDisplay,
+            value: meterValue,
+            dateDisp,
+            time,
+          })
+        : `Voy a registrar:\n• Patente: ${plateDisplay}\n\n` +
+          `Si está correcto, respondé CONFIRMO para registrarlo en Wara.\n➡️ Respondé *CONFIRMO* o *CANCELAR*.`;
     if (!fechaDisplay || !hasFechaHoraLectura) {
       const fallbackTemplate =
         `Me falta la fecha y hora de la lectura. Pasame ambas (ej. 05/08/26 a las 14:30).`;
@@ -2017,7 +2062,13 @@ export async function POST(req: NextRequest) {
     // debe afectar cómo se interpreta una confirmación/corrección posterior.
     await setPendingAction(prisma, rawPhone, "odometro", {
       summary: confirmMessage,
-      payload: { patente, odometro, horometro, fecha: fechaExplicita ?? undefined },
+      payload: {
+        patente,
+        odometro,
+        horometro,
+        fecha: fechaExplicita ?? undefined,
+        meterType: resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent }),
+      },
     });
     if (isConversationNotebookEnabled() && patente) {
       const meterType = resolveMeterNotebookType({ horometerFlowActive, horometerOnlyIntent });
@@ -2043,25 +2094,6 @@ export async function POST(req: NextRequest) {
     // Nota: a diferencia de otros returns de este archivo, este bloque NO llamaba a
     // appendOutboundBotMessage antes de este cambio (BuilderBot envía `message` directo al
     // cliente por su cuenta en este paso) — se mantiene igual, solo se compone el texto.
-    const confirmRequiredTokens = [
-      ...(plateDisplay ? [plateDisplay] : []),
-      ...(typeof odometro === "number" && !horometerFlowActive && !horometerOnlyIntent
-        ? [String(odometro)]
-        : []),
-      ...(typeof horometro === "number" && (horometerFlowActive || horometerOnlyIntent)
-        ? [String(horometro)]
-        : []),
-      ...(fechaDisplay ? [fechaDisplay] : []),
-    ];
-    const humanizedConfirmMessage = await composeOdometerDialogueReply({
-      situation: "confirmation_summary",
-      history: flowThreadText,
-      lastCustomerMessage: rawText,
-      requiredTokens: confirmRequiredTokens,
-      requireConfirmoWord: true,
-      fieldHint: horometerFlowActive || horometerOnlyIntent ? "horometro" : "odometro",
-      fallbackTemplate: confirmMessage,
-    });
     return NextResponse.json(
       {
         ok: true,
@@ -2069,7 +2101,7 @@ export async function POST(req: NextRequest) {
         flowComplete_s: "true",
         confirmationRequired: true,
         confirmationRequired_s: "true",
-        message: humanizedConfirmMessage,
+        message: confirmMessage,
         patente,
         odometro,
         horometro,

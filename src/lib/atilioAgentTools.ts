@@ -151,10 +151,13 @@ export async function executeAtilioAgentTool(params: {
   const ok = raw.ok !== false && raw.ok_s !== "false";
   const skipResponse = String(raw.skipResponse_s ?? "") === "true" && !backendMessage;
   const flowComplete = String(raw.flowComplete_s ?? "") === "true";
+  const confirmationRequired = String(raw.confirmationRequired_s ?? "") === "true";
   const dialogueState = parseExecutorDialogueState(raw);
   let composedMessage: string | undefined;
 
-  if (agentComposeRequested(raw) && dialogueState) {
+  if (confirmationRequired && backendMessage) {
+    composedMessage = backendMessage;
+  } else if (agentComposeRequested(raw) && dialogueState) {
     composedMessage = await composeAgentReplyFromDialogueState({
       threadText: params.threadText ?? "",
       customerMessage: params.customerMessage,
