@@ -39,3 +39,4 @@ export * from "./golden/contracts.js";
 export * from "./golden/corpus.js";
 export * from "./golden/deterministic-runner.js";
 export * from "./golden/interpreter-runner.js";
+export * from "./config/clean-config.js";
