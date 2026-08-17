@@ -60,6 +60,7 @@ import {
   customerOnlyThreadText,
   extractAmbiguousUnitCodeToken,
   extractExplicitUnitSearchLabel,
+  extractMovilIdFromUnitMessage,
   extractTokenFromUnitNameOrPlateClarification,
   filterUnitsByResolvedPlate,
   filterUnitsBySearchTerms,
@@ -1298,6 +1299,7 @@ export async function POST(req: NextRequest) {
     // (problema vago, historial/recorrido, pushback) sin nombrar de nuevo la unidad.
     if (
       !parsed.data.platePrefix?.trim() &&
+      extractMovilIdFromUnitMessage(effectiveRawText) == null &&
       (liveUnitConsult || conversationalConcern || gpsLoopFollowUp) &&
       shouldUseActiveUnitFallback(effectiveRawText) &&
       activeUnitRecord?.plate &&
@@ -1339,6 +1341,7 @@ export async function POST(req: NextRequest) {
       } else if (
         resolved.intent === "need_clarification" &&
         resolved.candidatePlates.length === 0 &&
+        extractMovilIdFromUnitMessage(effectiveRawText) == null &&
         shouldUseActiveUnitFallback(effectiveRawText) &&
         activeUnitRecord?.plate &&
         filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
