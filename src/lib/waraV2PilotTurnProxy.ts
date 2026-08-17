@@ -2,12 +2,48 @@
  * Proxy opcional de /api/whatsapp/turn → cerebro V2 (Runtime Next / Commander V3).
  * BBC sigue llamando al mismo host; el backend reenvía a v2-shadow.
  */
+import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+
 function isTrue(v: string | undefined): boolean {
   return v === "true" || v === "1";
 }
 
 export function isWaraV2PilotTurnProxyEnabled(): boolean {
   return isTrue(process.env.WARA_CONVERSATION_RUNTIME_NEXT_PROXY?.trim());
+}
+
+function proxyAllowlistPhones(): string[] {
+  const raw =
+    process.env.WARA_CONVERSATION_RUNTIME_NEXT_PROXY_ALLOWLIST?.trim() ||
+    process.env.WARA_V2_SHADOW_ALLOWLIST?.trim() ||
+    "";
+  if (!raw) return [];
+  return raw
+    .split(/[,\s]+/)
+    .map((p) => normalizeWhatsAppPhone(p))
+    .filter((p) => p.length >= 8);
+}
+
+function phoneMatchesAllowlist(rawPhone: string, allowlist: string[]): boolean {
+  const n = normalizeWhatsAppPhone(rawPhone);
+  if (!n) return false;
+  if (allowlist.includes(n)) return true;
+  if (n.startsWith("549")) {
+    const without9 = "54" + n.slice(3);
+    if (allowlist.includes(without9)) return true;
+  } else if (n.startsWith("54")) {
+    const with9 = "549" + n.slice(2);
+    if (allowlist.includes(with9)) return true;
+  }
+  return false;
+}
+
+/** Proxy global ON + teléfono en allowlist (si hay lista configurada). */
+export function isWaraV2PilotTurnProxyEnabledForPhone(rawPhone: string): boolean {
+  if (!isWaraV2PilotTurnProxyEnabled()) return false;
+  const allowlist = proxyAllowlistPhones();
+  if (allowlist.length === 0) return true;
+  return phoneMatchesAllowlist(rawPhone, allowlist);
 }
 
 function pilotTurnEndpoint(): string | null {

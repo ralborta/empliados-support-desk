@@ -8,7 +8,7 @@ import {
 import { persistCustomerInbound } from "@/lib/customerTicketInquiry";
 import { handleWhatsAppTurn } from "@/lib/whatsappTurn";
 import {
-  isWaraV2PilotTurnProxyEnabled,
+  isWaraV2PilotTurnProxyEnabledForPhone,
   proxyWhatsAppTurnToV2Pilot,
 } from "@/lib/waraV2PilotTurnProxy";
 
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (isWaraV2PilotTurnProxyEnabled()) {
+  if (isWaraV2PilotTurnProxyEnabledForPhone(rawPhone)) {
     const payload = await proxyWhatsAppTurnToV2Pilot({
       phone: rawPhone,
       body,

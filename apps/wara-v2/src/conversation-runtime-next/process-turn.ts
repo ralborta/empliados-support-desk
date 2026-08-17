@@ -39,6 +39,7 @@ import { DateTime } from "luxon";
 import { callInterpreter } from "./interpreter/call.js";
 import type { InterpreterDiagnostic } from "./interpreter/diagnostics.js";
 import { decideTurn, filterAuthorizedCapabilities } from "./controller/decide-turn.js";
+import { applyOperationalParityBridge } from "./operational/parity-bridge.js";
 import {
   planFromDecision,
 } from "./controller/plan-from-decision.js";
@@ -200,6 +201,27 @@ export async function processConversationTurn(
     authorizedCapabilities: filterAuthorizedCapabilities(decision),
   };
 
+  const parity = applyOperationalParityBridge({
+    decision,
+    interpretation,
+    state,
+    vnext,
+    message: input.message,
+  });
+  decision = parity.decision;
+  if (parity.operationalFacts.length) {
+    decision = {
+      ...decision,
+      responseGoal: {
+        ...decision.responseGoal,
+        facts: [
+          ...parity.operationalFacts.map((f) => f.text),
+          ...(decision.responseGoal.facts ?? []),
+        ],
+      },
+    };
+  }
+
   let plan = planFromDecision({ decision, interpretation });
   let validation = validateTurnPlan(plan, state);
 
@@ -318,6 +340,59 @@ export async function processConversationTurn(
   const resolvedUnit = unitRes.status === "exact" ? unitRes.unit : null;
   const resolvedCompany = companyRes.status === "exact" ? companyRes.company : null;
 
+  const expectedUnitField =
+    state.lastQuestion?.expected === "unit" || vnext.expectedInput?.field === "unit";
+
+  if (unitRes.status === "not_found" && expectedUnitField && plan.unitReference) {
+    const facts =
+      parity.operationalFacts.length > 0
+        ? parity.operationalFacts.map((f) => f.text)
+        : [
+            `No encontré una unidad con el identificador «${unitRes.query ?? input.message.trim()}». ¿Podés repetir el código o la patente?`,
+          ];
+    const composed = await composeReply({
+      decision: { ...decision, action: "clarify", conversationalAct: "ask" },
+      interpretation,
+      facts,
+      capabilityResults: [],
+      state: vnext,
+      customerName: input.customerName,
+      env: input.env,
+      userMessage: input.message,
+      lastAssistantReply,
+    });
+    const reply = composed.reply;
+    vnext = reduceState({
+      state: vnext,
+      decision: { ...decision, action: "clarify" },
+      reply,
+      userMessage: input.message,
+      resolvedCompany,
+    });
+    const after = persistVNext(vnext, input.tenantId, input.phone);
+    const trace = buildTrace({
+      turnInput: input,
+      stateBefore,
+      stateAfter: after,
+      plan,
+      interpretMs,
+      interpretRaw,
+      interpretModel,
+      redactMs: composed.latencyMs,
+      totalStart,
+      inventory,
+      interpretation,
+      capabilityResults: [],
+      validationOk: true,
+      execFacts: facts,
+      finalReply: reply,
+      interpretDiagnostic,
+      operationalParity: parity,
+    });
+    saveLastTraceV3(input.tenantId, input.phone, trace);
+    return { reply, state: after, trace };
+  }
+
   if (unitRes.status === "many") {
     const labels = unitRes.candidates!.map((u, i) => `${i + 1}. ${u.label}`).join("\n");
     const facts = [`Encontré varias unidades:\n${labels}\n\nDecime el número o la patente exacta.`];
@@ -370,6 +445,7 @@ export async function processConversationTurn(
       execFacts: facts,
       finalReply: reply,
       interpretDiagnostic,
+      operationalParity: parity,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -378,7 +454,6 @@ export async function processConversationTurn(
   if (
     decision.action === "respond" ||
     decision.action === "clarify" ||
-    decision.action === "keep_or_close" ||
     (decision.action === "cancel" && decision.authorizedCapabilities.length === 0)
   ) {
     const composed = await composeReply({
@@ -428,6 +503,7 @@ export async function processConversationTurn(
       validationOk: true,
       finalReply: reply,
       interpretDiagnostic,
+      operationalParity: parity,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -484,6 +560,7 @@ export async function processConversationTurn(
       capViolation: exec.capViolation,
       finalReply: reply,
       interpretDiagnostic,
+      operationalParity: parity,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
     return { reply, state: after, trace };
@@ -549,6 +626,7 @@ export async function processConversationTurn(
     executedCapabilities: exec.executedCapabilities,
     finalReply: reply,
     interpretDiagnostic,
+    operationalParity: parity,
   });
   saveLastTraceV3(input.tenantId, input.phone, trace);
   return { reply, state: after, trace };
@@ -588,6 +666,7 @@ function buildTrace(opts: {
   authorizedCapabilities?: string[];
   executedCapabilities?: string[];
   interpretDiagnostic?: InterpreterDiagnostic | null;
+  operationalParity?: ReturnType<typeof applyOperationalParityBridge>;
 }): TurnTraceV3 & {
   runtimeNext: {
     interpretation: TurnInterpretation | null;
@@ -597,6 +676,7 @@ function buildTrace(opts: {
     executedCapabilities?: string[];
     capViolation?: string | null;
     interpreterDiagnostic?: InterpreterDiagnostic | null;
+    operationalParity?: ReturnType<typeof applyOperationalParityBridge>;
   };
 } {
   return {
@@ -635,6 +715,7 @@ function buildTrace(opts: {
       executedCapabilities: opts.executedCapabilities,
       capViolation: opts.capViolation ?? null,
       interpreterDiagnostic: opts.interpretDiagnostic ?? null,
+      operationalParity: opts.operationalParity,
     },
   };
 }
