@@ -3051,6 +3051,33 @@ function waraData(json: Record<string, unknown> | null): Record<string, unknown>
   return json ?? {};
 }
 
+/** Wara a veces manda movil_id como string en JSON; normalizamos en el límite de la API. */
+function coerceWaraMovilId(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = parseInt(trimmed, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
+}
+
+function normalizeWaraUnidadEstado(raw: unknown): WaraUnidadEstado | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const patente = typeof row.patente === "string" ? row.patente : "";
+  const unidad = typeof row.unidad === "string" ? row.unidad : "";
+  if (!patente.trim() && !unidad.trim()) return null;
+  return {
+    ...(raw as WaraUnidadEstado),
+    movil_id: coerceWaraMovilId(row.movil_id),
+    patente,
+    unidad,
+  };
+}
+
 export async function consultarEstadoUnidades(
   sessionToken: string,
   patentes: string[] = []
@@ -3110,11 +3137,14 @@ export async function consultarEstadoUnidades(
     }
 
     const data = waraData(json);
+    const rawUnidades = Array.isArray(data.unidades) ? data.unidades : [];
     return {
       ok: json?.ok !== false,
       status: res.status,
       cliente: typeof data.cliente === "string" ? data.cliente : undefined,
-      unidades: Array.isArray(data.unidades) ? (data.unidades as WaraUnidadEstado[]) : [],
+      unidades: rawUnidades
+        .map((row) => normalizeWaraUnidadEstado(row))
+        .filter((row): row is WaraUnidadEstado => row != null),
       error: json?.ok === false ? errorFromWara(json, "Wara no devolvió unidades") : undefined,
     };
   }

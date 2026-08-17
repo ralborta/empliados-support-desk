@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { extractLastPlateFromThread, lineLooksLikeBotMissingPlatePrompt } from "../src/lib/wara.ts";
 import {
+  extractAmbiguousUnitCodeToken,
   extractMovilIdFromUnitMessage,
   filterUnitsByUnitName,
   resolveUnitQuery,
@@ -37,6 +38,24 @@ const resolved = await resolveUnitQuery({
   preferAi: false,
 });
 assert.equal(resolved.plate, "AA100ZZ", "900077 debe resolver la patente correcta");
+
+const resolvedStringId = await resolveUnitQuery({
+  rawText: "Quiero el estado de la unidad 900088",
+  threadText: "",
+  units: [{ movil_id: "900088", unidad: "M900-088", patente: "AA900088" }],
+  preferAi: false,
+});
+assert.equal(
+  resolvedStringId.plate,
+  "AA900088",
+  "movil_id string de Wara debe matchear igual que number",
+);
+
+assert.equal(
+  extractAmbiguousUnitCodeToken("Quiero el estado de la unidad 900088"),
+  null,
+  "movil_id explícito no es token ambiguo unidad-vs-patente",
+);
 
 assert.equal(
   lineLooksLikeBotMissingPlatePrompt(

@@ -168,7 +168,6 @@ export function looksLikeUnitNameInMessage(rawText: string | undefined | null): 
   return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm) || extractMovilIdFromUnitMessage(norm) != null;
 }
 
-/** movil_id Wara en lenguaje natural: "unidad 900077" o respuesta corta "900110". */
 export function extractMovilIdFromUnitMessage(rawText: string | undefined | null): number | null {
   const text = String(rawText ?? "").trim();
   if (!text) return null;
@@ -183,6 +182,10 @@ export function extractMovilIdFromUnitMessage(rawText: string | undefined | null
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+function movilIdMatches(unitMovilId: unknown, target: number): boolean {
+  return Number(unitMovilId) === target;
 }
 
 /**
@@ -208,8 +211,6 @@ export function extractAmbiguousUnitCodeToken(rawText: string | undefined | null
     .trim()
     .replace(/[\u2010-\u2015\u2212]/g, "-");
   if (!text) return null;
-  const movilId = extractMovilIdFromUnitMessage(text);
-  if (movilId != null && /\bunidad\b/i.test(text)) return String(movilId);
   const labeled = extractExplicitUnitNameFromText(text);
   if (labeled) return labeled;
   const bare = text.match(/^(M?\d{3}-\d{2,3})$/i)?.[1];
@@ -1155,7 +1156,7 @@ export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string):
   if (!norm) return [];
   const movilId = extractMovilIdFromUnitMessage(query);
   if (movilId != null) {
-    const byMovil = units.filter((u) => u.movil_id === movilId);
+    const byMovil = units.filter((u) => movilIdMatches(u.movil_id, movilId));
     if (byMovil.length > 0) return byMovil;
   }
   return units.filter((u) => {
@@ -1649,7 +1650,7 @@ function resolveByMovilIdOrUnitCode(
 ): UnitQueryResolution | null {
   const movilId = extractMovilIdFromUnitMessage(rawText);
   if (movilId != null) {
-    const byId = units.filter((u) => u.movil_id === movilId);
+    const byId = units.filter((u) => movilIdMatches(u.movil_id, movilId));
     if (byId.length === 1) {
       const plate = normalizeLoosePlate(byId[0].patente || byId[0].unidad || "");
       if (plate) {
@@ -1665,9 +1666,11 @@ function resolveByMovilIdOrUnitCode(
     if (byId.length === 0) {
       return {
         intent: "need_clarification",
-        plate: String(movilId),
         searchTerms: [],
         candidatePlates: [],
+        clarificationQuestion: buildFleetUnitNotFoundMessage({
+          searchedText: String(movilId),
+        }),
         source: "rules",
       };
     }
@@ -1676,7 +1679,7 @@ function resolveByMovilIdOrUnitCode(
   const digitsOnly = rawText.trim().replace(/\s+/g, "");
   if (/^\d{5,7}$/.test(digitsOnly)) {
     const legacyMovilId = parseInt(digitsOnly, 10);
-    const byId = units.filter((u) => u.movil_id === legacyMovilId);
+    const byId = units.filter((u) => movilIdMatches(u.movil_id, legacyMovilId));
     if (byId.length === 1) {
       const plate = normalizeLoosePlate(byId[0].patente || byId[0].unidad || "");
       if (plate) {

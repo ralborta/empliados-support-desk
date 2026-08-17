@@ -1353,9 +1353,12 @@ export async function POST(req: NextRequest) {
         explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
       } else if (resolved.intent === "need_clarification") {
         const companyName = session.companyName || result.cliente || "tu empresa";
+        const explicitMovilId = extractMovilIdFromUnitMessage(effectiveRawText);
         const ambiguousToken =
-          extractAmbiguousUnitCodeToken(effectiveRawText) ||
-          extractExplicitUnitSearchLabel(effectiveRawText);
+          explicitMovilId == null
+            ? extractAmbiguousUnitCodeToken(effectiveRawText) ||
+              extractExplicitUnitSearchLabel(effectiveRawText)
+            : null;
         const clarification =
           resolved.clarificationQuestion ??
           (ambiguousToken
@@ -1363,7 +1366,10 @@ export async function POST(req: NextRequest) {
             : buildFleetUnitNotFoundMessage({
                 companyName,
                 rawText: effectiveRawText,
-                searchedText: extractExplicitUnitSearchLabel(effectiveRawText) ?? undefined,
+                searchedText:
+                  explicitMovilId != null
+                    ? String(explicitMovilId)
+                    : extractExplicitUnitSearchLabel(effectiveRawText) ?? undefined,
               }));
         await appendOutboundBotMessage(rawPhone, clarification, {
           source: "wara_unidades_clarification",
@@ -1378,13 +1384,20 @@ export async function POST(req: NextRequest) {
         const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
         if (plateMatches.length === 0) {
           const companyName = session.companyName || result.cliente || "tu empresa";
-          const ambiguousToken = extractAmbiguousUnitCodeToken(effectiveRawText);
+          const explicitMovilId = extractMovilIdFromUnitMessage(effectiveRawText);
+          const ambiguousToken =
+            explicitMovilId == null ? extractAmbiguousUnitCodeToken(effectiveRawText) : null;
           const notFound =
-            ambiguousToken || looksLikeAmbiguousUnitCodeToken(resolved.plate)
-              ? buildUnitNameOrPlateClarificationReply(
-                  ambiguousToken || String(resolved.plate),
-                )
-              : buildFleetUnitNotFoundMessage({
+            explicitMovilId != null
+              ? buildFleetUnitNotFoundMessage({
+                  companyName,
+                  searchedText: String(explicitMovilId),
+                })
+              : ambiguousToken || looksLikeAmbiguousUnitCodeToken(resolved.plate)
+                ? buildUnitNameOrPlateClarificationReply(
+                    ambiguousToken || String(resolved.plate),
+                  )
+                : buildFleetUnitNotFoundMessage({
                   companyName,
                   plate: resolved.plate,
                   rawText: effectiveRawText,
@@ -1694,12 +1707,18 @@ export async function POST(req: NextRequest) {
   }
 
   if (!summaryText.trim() && looksLikeFleetUnitSearchInput(effectiveRawText)) {
-    const ambiguousToken = extractAmbiguousUnitCodeToken(effectiveRawText);
+    const explicitMovilId = extractMovilIdFromUnitMessage(effectiveRawText);
+    const ambiguousToken =
+      explicitMovilId == null ? extractAmbiguousUnitCodeToken(effectiveRawText) : null;
     summaryText = ambiguousToken
       ? buildUnitNameOrPlateClarificationReply(ambiguousToken)
       : buildFleetUnitNotFoundMessage({
           companyName: session.companyName || result.cliente || "tu empresa",
           rawText: effectiveRawText,
+          searchedText:
+            explicitMovilId != null
+              ? String(explicitMovilId)
+              : undefined,
           plate:
             wantedPlate && isPlausibleVehiclePlate(wantedPlate) ? wantedPlate : undefined,
         });
