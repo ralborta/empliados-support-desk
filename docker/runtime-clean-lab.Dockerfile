@@ -9,6 +9,7 @@ LABEL wara.runtime-clean.git-commit-sha="${GIT_COMMIT_SHA}"
 
 ENV NODE_ENV=production \
     PORT=8788 \
+    WARA_CLEAN_BIND_HOST=0.0.0.0 \
     GIT_COMMIT_SHA="${GIT_COMMIT_SHA}"
 
 RUN corepack enable && corepack prepare pnpm@9.12.1 --activate
