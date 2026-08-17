@@ -374,4 +374,71 @@ describe("commander-v3 contracts", () => {
     assert.equal(restored.conversationalAct, "ask");
     assert.match(restored.responseGoal.nextQuestion ?? "", /ayudo/i);
   });
+
+  it("trámite abierto + status → preguntar antes, no volcar GPS", async () => {
+    const { enrichPlanForOpenTaskHold, enrichPlanForKeepOrCloseAnswer, planFromParkedTurn } =
+      await import("../enrich/open-task-hold.js");
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "El Cacique S.A." };
+    s.unit = {
+      movilId: 900111,
+      plate: "AG 228 NY",
+      name: "M900-111",
+      label: "AG 228 NY (M900-111)",
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value"],
+    };
+    s.lastQuestion = { id: "q", purpose: "value", expected: "value" };
+    const incoming = TurnPlanSchema.parse({
+      interpretation: {
+        userQuestion: "estado de la unidad",
+        answerKind: "status",
+      },
+      reasoning: "pidió estado",
+      conversationalAct: "inform",
+      task: "gps",
+      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+      responseGoal: { purpose: "inform", facts: [] },
+      confidence: 0.8,
+    });
+    const held = enrichPlanForOpenTaskHold(incoming, s);
+    assert.equal(held.conversationalAct, "ask");
+    assert.equal(held.responseGoal.purpose, "clarify");
+    assert.equal(held.requestedCapabilities.length, 0);
+    assert.ok(held.parkedTurn);
+    assert.equal(held.parkedTurn?.answerKind, "status");
+    assert.doesNotMatch(held.responseGoal.nextQuestion ?? "", /Pasame el valor/i);
+
+    s.lastQuestion = {
+      id: "q2",
+      purpose: "keep_or_close_task",
+      expected: "clarification",
+    };
+    s.conversationMetadata.parkedTurn = held.parkedTurn!;
+    const close = enrichPlanForKeepOrCloseAnswer(
+      TurnPlanSchema.parse({
+        interpretation: { userQuestion: "el estado", answerKind: "status" },
+        reasoning: "quiere el pedido nuevo",
+        conversationalAct: "inform",
+        requestedCapabilities: [{ name: "gps.get_status", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.9,
+      }),
+      s,
+    );
+    assert.equal(close.conversationalAct, "cancel_task");
+    const restored = planFromParkedTurn(held.parkedTurn!, close);
+    assert.equal(restored.conversationalAct, "inform");
+    assert.ok(restored.requestedCapabilities.some((c) => c.name === "gps.get_status"));
+    assert.equal(
+      restored.requestedCapabilities.some((c) => c.name === "odometer.prepare"),
+      false,
+    );
+  });
 });

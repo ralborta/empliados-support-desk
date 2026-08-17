@@ -74,11 +74,38 @@ function contributedExpectedField(
   return false;
 }
 
+function hasForeignEvidence(
+  plan: TurnPlan,
+  state: ConversationStateV3,
+): boolean {
+  const open = state.activeTask?.type;
+  return plan.requestedCapabilities.some((c) => {
+    const name = c.name;
+    if (name === "domain.answer") return true;
+    if (name === "gps.get_status" && open !== "gps") return true;
+    if (name.endsWith(".prepare") && open && !name.startsWith(`${open}.`)) {
+      return true;
+    }
+    return false;
+  });
+}
+
 function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boolean {
   const kind = plan.interpretation?.answerKind;
   const act = plan.conversationalAct;
-  // Saludo o pedido que no aporta el campo pedido: no retomar la captura.
-  if (isGreetingTurn(plan) && !contributedExpectedField(plan, state)) return true;
+  if (contributedExpectedField(plan, state)) return false;
+  if (isGreetingTurn(plan)) return true;
+  if (
+    kind === "status" ||
+    kind === "yes_no" ||
+    kind === "how_to" ||
+    kind === "list" ||
+    kind === "other"
+  ) {
+    return true;
+  }
+  if (act === "answer_lateral") return true;
+  if (hasForeignEvidence(plan, state)) return true;
   if (
     act === "continue_task" ||
     act === "amend_task" ||
@@ -88,9 +115,7 @@ function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boo
   ) {
     return false;
   }
-  if (act === "answer_lateral" && plan.stateIntent.preserveTask) return false;
   if (kind === "continue_task") return false;
-  if (kind === "how_to") return true;
   if (
     (act === "start_task" ||
       act === "switch_task" ||
@@ -100,7 +125,6 @@ function isIncomingOtherRequest(plan: TurnPlan, state: ConversationStateV3): boo
   ) {
     return true;
   }
-  if (kind === "list" && state.lastQuestion?.expected !== "unit") return true;
   return false;
 }
 
@@ -163,28 +187,37 @@ export function planFromParkedTurn(
     };
   }
   const howTo = parked.answerKind === "how_to";
+  const statusLike =
+    parked.answerKind === "status" || parked.answerKind === "yes_no";
+  const caps =
+    parked.capabilities.length > 0
+      ? parked.capabilities.map((c) => ({
+          name: c.name,
+          params: c.params ?? {},
+        }))
+      : howTo
+        ? [{ name: "domain.answer", params: { topic: parked.userQuestion } }]
+        : statusLike
+          ? [{ name: "gps.get_status", params: {} }]
+          : [];
   return {
     ...base,
     interpretation: {
       userQuestion: parked.userQuestion,
       answerKind: parked.answerKind as AnswerKind,
     },
-    conversationalAct: howTo
+    conversationalAct: howTo || statusLike
       ? "inform"
       : parked.task
         ? "start_task"
         : "inform",
-    task: parked.task ?? null,
-    taskAction: parked.task && !howTo ? "start" : null,
-    requestedCapabilities:
-      parked.capabilities.length > 0
-        ? parked.capabilities.map((c) => ({
-            name: c.name,
-            params: c.params ?? {},
-          }))
-        : howTo
-          ? [{ name: "domain.answer", params: { topic: parked.userQuestion } }]
-          : [],
+    task: statusLike
+      ? "gps"
+      : howTo
+        ? null
+        : parked.task ?? null,
+    taskAction: parked.task && !howTo && !statusLike ? "start" : null,
+    requestedCapabilities: caps,
     parkedTurn: null,
     stateIntent: {
       preserveCompany: true,
@@ -211,17 +244,21 @@ export function enrichPlanForKeepOrCloseAnswer(
   const kind = plan.interpretation?.answerKind;
   const act = plan.conversationalAct;
 
-  const wantsKeep =
-    act === "continue_task" ||
-    kind === "continue_task" ||
-    act === "confirm_write";
   const wantsClose =
     act === "cancel_task" ||
     kind === "close" ||
     kind === "how_to" ||
+    kind === "status" ||
+    kind === "yes_no" ||
+    kind === "list" ||
     kind === "start_task" ||
     act === "start_task" ||
     act === "switch_task";
+  const wantsKeep =
+    !wantsClose &&
+    (act === "continue_task" ||
+      kind === "continue_task" ||
+      act === "confirm_write");
 
   if (wantsKeep && !wantsClose) {
     const open = taskLabel(state.activeTask?.type);
@@ -309,16 +346,23 @@ export function enrichPlanForOpenTaskHold(
 
   const open = taskLabel(state.activeTask?.type);
   const greeting = isGreetingTurn(plan);
+  const openType = state.activeTask?.type;
+  const parkedCaps = greeting
+    ? []
+    : plan.requestedCapabilities.filter((c) => {
+        if (openType && (c.name === `${openType}.prepare` || c.name.startsWith(`${openType}.`))) {
+          return false;
+        }
+        return true;
+      });
   const parked: ParkedTurnV3 = {
     answerKind: greeting ? "greet" : (plan.interpretation?.answerKind ?? "other"),
     userQuestion: plan.interpretation?.userQuestion ?? (greeting ? "saludo" : "pedido nuevo"),
-    task: greeting ? null : (plan.task ?? null),
-    capabilities: greeting
-      ? []
-      : plan.requestedCapabilities.map((c) => ({
-          name: c.name,
-          params: c.params ?? {},
-        })),
+    task: greeting ? null : (plan.task && plan.task !== openType ? plan.task : null),
+    capabilities: parkedCaps.map((c) => ({
+      name: c.name,
+      params: c.params ?? {},
+    })),
   };
 
   return {
