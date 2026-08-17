@@ -50,8 +50,19 @@ export function enrichPlanForQuestionContract(
   const hasEvidence = caps.some(
     (c) => c.name === "gps.get_status" || c.name === "domain.answer",
   );
+  const meterTask =
+    task === "odometer" ||
+    task === "hourmeter" ||
+    task === "certificate" ||
+    caps.some((c) => String(c.name ?? "").includes(".prepare"));
+  const openMeter =
+    state.activeTask?.type === "odometer" ||
+    state.activeTask?.type === "hourmeter" ||
+    state.activeTask?.type === "certificate";
   const needsGpsEvidence =
-    (kind === "yes_no" || kind === "status") && Boolean(state.unit) && !hasEvidence;
+    (kind === "status" || (kind === "yes_no" && !meterTask && !openMeter)) &&
+    Boolean(state.unit) &&
+    !hasEvidence;
   const needsDomainEvidence = kind === "how_to" && !hasEvidence;
 
   if (needsGpsEvidence) {

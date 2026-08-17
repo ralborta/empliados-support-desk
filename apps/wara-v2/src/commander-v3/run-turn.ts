@@ -434,6 +434,18 @@ export async function runCommanderTurn(
           parkedTurn: null,
         },
       };
+    } else if (
+      plan.conversationalAct === "switch_task" ||
+      plan.taskAction === "switch"
+    ) {
+      state = {
+        ...state,
+        lastQuestion: null,
+        conversationMetadata: {
+          ...state.conversationMetadata,
+          parkedTurn: null,
+        },
+      };
     }
   }
 

@@ -489,4 +489,74 @@ describe("commander-v3 contracts", () => {
     );
     assert.equal(changed.parkedTurn ?? null, null);
   });
+
+  it("keep-or-close + horómetro → switch, no GPS ni 'no se puede'", async () => {
+    const { enrichPlanForKeepOrCloseAnswer } = await import(
+      "../enrich/open-task-hold.js"
+    );
+    const s = createEmptyConversationStateV3({ tenantId: "t", phone: "+1" });
+    s.company = { id: "c1", name: "El Cacique S.A." };
+    s.unit = {
+      movilId: 900111,
+      plate: "AG 228 NY",
+      name: "M900-111",
+      label: "AG 228 NY (M900-111)",
+    };
+    s.activeTask = {
+      type: "odometer",
+      status: "collecting",
+      collected: {},
+      missing: ["value"],
+    };
+    s.lastQuestion = {
+      id: "q",
+      purpose: "keep_or_close_task",
+      expected: "clarification",
+    };
+    s.conversationMetadata.parkedTurn = {
+      answerKind: "status",
+      userQuestion: "estado",
+      task: "gps",
+      capabilities: [{ name: "gps.get_status", params: {} }],
+    };
+    const switched = enrichPlanForKeepOrCloseAnswer(
+      TurnPlanSchema.parse({
+        interpretation: {
+          userQuestion: "cambiar horómetro de esta unidad",
+          answerKind: "start_task",
+        },
+        reasoning: "quiere horómetro",
+        conversationalAct: "start_task",
+        task: "hourmeter",
+        requestedCapabilities: [{ name: "hourmeter.prepare", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.9,
+      }),
+      s,
+    );
+    assert.equal(switched.conversationalAct, "switch_task");
+    assert.equal(switched.task, "hourmeter");
+    assert.ok(switched.requestedCapabilities.some((c) => c.name === "hourmeter.prepare"));
+    assert.equal(
+      switched.requestedCapabilities.some((c) => c.name === "gps.get_status"),
+      false,
+    );
+  });
+
+  it("yes_no + task hourmeter no se queda en yes_no", () => {
+    const coerced = TurnPlanSchema.parse(
+      coercePlan({
+        interpretation: { userQuestion: "cambiar horómetro", answerKind: "yes_no" },
+        conversationalAct: "inform",
+        task: "hourmeter",
+        requestedCapabilities: [{ name: "hourmeter.prepare", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "inform", facts: [] },
+        confidence: 0.8,
+      }),
+    );
+    assert.equal(coerced.interpretation?.answerKind, "start_task");
+    assert.equal(coerced.conversationalAct, "start_task");
+  });
 });

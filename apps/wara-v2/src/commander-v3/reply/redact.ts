@@ -85,6 +85,16 @@ export async function redactReply(input: {
     return { reply: input.conflictClarify, usedLlm: false, latencyMs: 0 };
   }
 
+  const clarifyQ = input.plan.responseGoal.nextQuestion?.trim();
+  if (
+    input.plan.responseGoal.purpose === "clarify" &&
+    (input.plan.parkedTurn ||
+      input.state.lastQuestion?.purpose === "keep_or_close_task") &&
+    clarifyQ
+  ) {
+    return { reply: clarifyQ, usedLlm: false, latencyMs: 0 };
+  }
+
   if (shouldUseGreetingTemplate(input.plan)) {
     const companyFacts = input.facts.filter(
       (f) => /empresa/i.test(f) || /^\d+\.\s/.test(f) || /eleg/i.test(f),

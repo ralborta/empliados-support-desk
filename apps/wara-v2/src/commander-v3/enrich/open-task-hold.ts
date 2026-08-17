@@ -188,7 +188,12 @@ export function planFromParkedTurn(
   }
   const howTo = parked.answerKind === "how_to";
   const statusLike =
-    parked.answerKind === "status" || parked.answerKind === "yes_no";
+    parked.answerKind === "status" ||
+    (parked.answerKind === "yes_no" &&
+      (parked.task === "gps" ||
+        parked.capabilities.some((c) => c.name === "gps.get_status")));
+  const meterTask =
+    parked.task === "odometer" || parked.task === "hourmeter";
   const caps =
     parked.capabilities.length > 0
       ? parked.capabilities.map((c) => ({
@@ -199,7 +204,9 @@ export function planFromParkedTurn(
         ? [{ name: "domain.answer", params: { topic: parked.userQuestion } }]
         : statusLike
           ? [{ name: "gps.get_status", params: {} }]
-          : [];
+          : meterTask
+            ? [{ name: `${parked.task}.prepare`, params: {} }]
+            : [];
   return {
     ...base,
     interpretation: {
@@ -243,17 +250,70 @@ export function enrichPlanForKeepOrCloseAnswer(
   if (state.lastQuestion?.purpose !== KEEP_OR_CLOSE_PURPOSE) return plan;
   const kind = plan.interpretation?.answerKind;
   const act = plan.conversationalAct;
+  const parked = state.conversationMetadata.parkedTurn;
+  const newTask = plan.task;
+  const isNewTramite =
+    Boolean(
+      newTask &&
+        newTask !== state.activeTask?.type &&
+        (act === "start_task" ||
+          act === "switch_task" ||
+          kind === "start_task" ||
+          plan.taskAction === "start" ||
+          plan.taskAction === "switch"),
+    );
+
+  if (isNewTramite && newTask) {
+    const prepare =
+      newTask === "odometer" || newTask === "hourmeter" || newTask === "certificate"
+        ? `${newTask}.prepare`
+        : newTask === "gps"
+          ? "gps.get_status"
+          : newTask === "maintenance"
+            ? "maintenance.prepare"
+            : newTask === "human_handoff"
+              ? "handoff.prepare"
+              : null;
+    const caps = plan.requestedCapabilities.filter((c) => {
+      const open = state.activeTask?.type;
+      if (open && (c.name === `${open}.prepare` || c.name.startsWith(`${open}.`))) {
+        return false;
+      }
+      if (c.name === "gps.get_status" && newTask !== "gps") return false;
+      return true;
+    });
+    if (prepare && !caps.some((c) => c.name === prepare)) {
+      caps.push({ name: prepare, params: {} });
+    }
+    return {
+      ...plan,
+      conversationalAct: "switch_task",
+      task: newTask,
+      taskAction: "switch",
+      requestedCapabilities: caps,
+      parkedTurn: null,
+      stateIntent: {
+        preserveCompany: true,
+        preserveUnit: true,
+        preserveTask: false,
+      },
+      responseGoal: {
+        purpose: "ask_missing",
+        facts: [],
+        nextQuestion: null,
+      },
+      reasoning:
+        (plan.reasoning ? `${plan.reasoning} ` : "") +
+        "En keep-or-close pidió otro trámite: suelto el anterior y arranco ese.",
+    };
+  }
 
   const wantsClose =
     act === "cancel_task" ||
     kind === "close" ||
-    kind === "how_to" ||
-    kind === "status" ||
-    kind === "yes_no" ||
-    kind === "list" ||
-    kind === "start_task" ||
-    act === "start_task" ||
-    act === "switch_task";
+    (kind === "how_to" && parked?.answerKind === "how_to") ||
+    (kind === "status" && parked?.answerKind === "status") ||
+    (kind === "list" && parked?.answerKind === "list");
   const wantsKeep =
     !wantsClose &&
     (act === "continue_task" ||

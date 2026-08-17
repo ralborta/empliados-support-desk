@@ -394,6 +394,25 @@ export function coercePlan(raw: unknown): unknown {
     }
     if (o.conversationalAct === "greet") o.conversationalAct = "inform";
   }
+  const taskName = String(o.task ?? "");
+  if (
+    (taskName === "odometer" || taskName === "hourmeter") &&
+    (kind === "yes_no" || kind === "status")
+  ) {
+    const interp = o.interpretation as { userQuestion?: string; answerKind?: string };
+    o.interpretation = {
+      ...interp,
+      answerKind: "start_task",
+    };
+    if (
+      o.conversationalAct === "inform" ||
+      o.conversationalAct === "ask" ||
+      o.conversationalAct === "greet"
+    ) {
+      o.conversationalAct = "start_task";
+      if (!o.taskAction) o.taskAction = "start";
+    }
+  }
   return o;
 }
 
