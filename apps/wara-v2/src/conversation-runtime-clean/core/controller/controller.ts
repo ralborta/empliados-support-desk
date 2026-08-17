@@ -1,6 +1,6 @@
 import type { Controller } from "../ports/ports.js";
 import type { DecisionAct, OperationRequest, ResolutionRequest, ResponseIntent, StateTransitionIntent, TaskIntent, TurnDecision } from "../types/decision.js";
-import type { EntityReference, TaskType, TurnInterpretation } from "../types/interpretation.js";
+import type { TaskType, TurnInterpretation } from "../types/interpretation.js";
 import type { ConversationStateClean } from "../types/state.js";
 
 function focusedTaskType(state: ConversationStateClean): TaskType | null {
@@ -41,10 +41,10 @@ function taskIntentFor(act: DecisionAct, task: TaskType | null): TaskIntent | nu
 
 function resolutionRequests(interpretation: TurnInterpretation, state: ConversationStateClean): ResolutionRequest[] {
   return interpretation.references
-    .filter((reference): reference is EntityReference & { type: "company" | "unit" } => reference.type === "company" || reference.type === "unit")
-    .map((reference, index) => ({
+    .filter((reference) => reference.type === "company" || reference.type === "unit" || (reference.type === "listing_index" && state.lastListing))
+    .map((reference, index): ResolutionRequest => ({
       id: `resolution-${index}`,
-      entityType: reference.type,
+      entityType: reference.type === "listing_index" ? state.lastListing!.kind : reference.type as "company" | "unit",
       reference,
       scope: { tenantId: state.tenantId, ...(state.company ? { companyId: state.company.id } : {}) },
     }));
