@@ -66,7 +66,7 @@ export function enrichPlanForGreetingPolicy(
           responseGoal: {
             purpose: "ask_missing",
             facts: [fact],
-            nextQuestion: "¿Qué necesitás?",
+            nextQuestion: "¿En qué te ayudo?",
           },
           reasoning:
             (plan.reasoning ? `${plan.reasoning} ` : "") +

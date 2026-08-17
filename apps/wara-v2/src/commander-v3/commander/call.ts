@@ -229,7 +229,9 @@ export function coercePlan(raw: unknown): unknown {
     }
   } else {
     if (
-      (o.conversationalAct === "greet" || o.conversationalAct === "inform") &&
+      (o.conversationalAct === "greet" ||
+        o.conversationalAct === "inform" ||
+        o.conversationalAct === "ask") &&
       caps.some((c) => String(c.name ?? "").includes("prepare"))
     ) {
       o.conversationalAct = "start_task";

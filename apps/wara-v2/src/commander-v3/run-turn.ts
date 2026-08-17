@@ -5,7 +5,7 @@ import { randomUUID, createHash } from "node:crypto";
 import type { WaraUnidadEstado } from "../pilot/wara-types.js";
 import { formatUnitLabel, toFleetUnitRef } from "../pilot/unit-fleet.js";
 import { callCommander, repairCommanderPlan } from "./commander/call.js";
-import { validateTurnPlan } from "./validate/validate-plan.js";
+import { validateTurnPlan, isHardValidationConflict } from "./validate/validate-plan.js";
 import {
   isExplicitUnitReference,
   resolveCompanyReference,
@@ -143,7 +143,7 @@ export async function runCommanderTurn(
     [...state.recentTurns].reverse().find((t) => t.role === "assistant")?.text ??
     null;
 
-  const commander = await callCommander({
+  let commander = await callCommander({
     message: input.message,
     state,
     env: input.env,
@@ -276,12 +276,43 @@ export async function runCommanderTurn(
     }
   }
 
+  // Plan nulo/inválido: un reintento fresco (no copiar la pregunta abierta anterior).
+  if (
+    (!validation.ok || !plan) &&
+    !isHardValidationConflict(validation.errors)
+  ) {
+    const retried = await callCommander({
+      message: input.message,
+      state,
+      env: input.env,
+    });
+    if (retried.plan) {
+      commander = retried;
+      plan = enrichPlanForQuestionContract(retried.plan, state);
+      if (
+        plan &&
+        (state.pendingWrite || state.lastQuestion?.expected === "confirmation")
+      ) {
+        plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+      }
+      validation = validateTurnPlan(plan, state);
+    }
+  }
+
   if (!validation.ok || !plan) {
-    const clarify = buildConflictClarify(validation.errors, state);
+    const hardConflict = isHardValidationConflict(validation.errors);
+    const clarify = hardConflict
+      ? buildConflictClarify(validation.errors, state)
+      : null;
+    const firstContact = !lastAssistantReply && !state.activeTask;
     const { reply, latencyMs: redactMs } = await redactReply({
       plan: plan ?? {
-        reasoning: "Validación falló; pido aclaración puntual.",
-        conversationalAct: "ask",
+        reasoning: hardConflict
+          ? "Validación falló; pido aclaración puntual."
+          : firstContact
+            ? "Plan ausente en primer contacto: presentación de Atilio."
+            : "Plan ausente; el redactor responde al pedido del hilo (sin stub de ventanilla).",
+        conversationalAct: firstContact && !hardConflict ? "greet" : "ask",
         requestedCapabilities: [],
         stateIntent: {
           preserveCompany: true,
@@ -289,7 +320,7 @@ export async function runCommanderTurn(
           preserveTask: true,
         },
         responseGoal: {
-          purpose: "clarify",
+          purpose: hardConflict ? "clarify" : firstContact ? "inform" : "ask_missing",
           facts: [],
           nextQuestion: clarify,
         },
@@ -843,10 +874,7 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
   ) {
     return "Para el reporte GPS necesito la patente, el número de la lista o la marca/prefijo de la unidad.";
   }
-  if (!state.activeTask) {
-    return "¿Qué necesitás?";
-  }
-  return "Necesito una aclaración puntual: ¿qué querés hacer?";
+  return "Necesito una aclaración puntual para seguir con el trámite.";
 }
 
 /** Stub + enrich de campo esperado cuando el TurnPlan LLM es null/inválido. */

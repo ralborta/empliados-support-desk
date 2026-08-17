@@ -11,8 +11,8 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 16a", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16a/);
+  it("prompt version bump 16b", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16b/);
   });
 
   it("prompt Commander no copia el árbol de decisión V1", async () => {
@@ -20,6 +20,9 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /paridad V1/i);
     assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /lista porfa/);
     assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /7e4\)/);
+    assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /Qué necesitás/);
+    assert.match(COMMANDER_V3_SYSTEM_PROMPT, /ESE pedido gana/i);
+    assert.match(COMMANDER_V3_SYSTEM_PROMPT, /conversationalAct=greet/);
     assert.ok(COMMANDER_V3_SYSTEM_PROMPT.length < 4500);
   });
 
@@ -118,7 +121,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     assert.equal(open.conversationalAct, "inform");
     assert.equal(open.responseGoal.purpose, "ask_missing");
     assert.equal(open.requestedCapabilities.length, 0);
-    assert.match(open.responseGoal.facts[0] ?? "", /Qué necesitás/i);
+    assert.match(open.responseGoal.facts[0] ?? "", /En qué te ayudo/i);
     assert.doesNotMatch(
       open.responseGoal.facts.join(" "),
       /no tengo informaci/i,
@@ -135,7 +138,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     const demoted = enrichPlanForGreetingPolicy(greetish, s, "Hacer otra consulta");
     assert.equal(demoted.conversationalAct, "inform");
-    assert.match(demoted.responseGoal.facts[0] ?? "", /Qué necesitás/i);
+    assert.match(demoted.responseGoal.facts[0] ?? "", /En qué te ayudo/i);
 
     const fleetDump = TurnPlanSchema.parse({
       reasoning: "confundió consulta con listado",
@@ -148,7 +151,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     const noDump = enrichPlanForOpenConsult(fleetDump, s, "Hacer otra consulta");
     assert.equal(noDump.requestedCapabilities.length, 0);
-    assert.match(noDump.responseGoal.facts[0] ?? "", /Qué necesitás/i);
+    assert.match(noDump.responseGoal.facts[0] ?? "", /En qué te ayudo/i);
 
     const phonyQuery = TurnPlanSchema.parse({
       reasoning: "metió el mensaje como query",
@@ -163,7 +166,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     });
     const noPhony = enrichPlanForOpenConsult(phonyQuery, s, "Hacer otra consulta");
     assert.equal(noPhony.requestedCapabilities.length, 0);
-    assert.match(noPhony.responseGoal.facts[0] ?? "", /Qué necesitás/i);
+    assert.match(noPhony.responseGoal.facts[0] ?? "", /En qué te ayudo/i);
 
     const phonyGps = TurnPlanSchema.parse({
       reasoning: "abrió menú pero eligió gps",
@@ -180,7 +183,7 @@ describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
     const noGps = enrichPlanForOpenConsult(phonyGps, s, "Hacer otra consulta");
     assert.equal(noGps.task, null);
     assert.equal(noGps.requestedCapabilities.length, 0);
-    assert.match(noGps.responseGoal.facts[0] ?? "", /Qué necesitás/i);
+    assert.match(noGps.responseGoal.facts[0] ?? "", /En qué te ayudo/i);
   });
 
   it("Hola con empresa no vuelca la flota", async () => {

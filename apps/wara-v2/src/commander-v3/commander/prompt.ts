@@ -16,7 +16,9 @@ interpretation (obligatorio, ANTES de elegir tools):
 - priorReply: si el mensaje solo se entiende con lo que Atilio dijo recién → relevant=true, summary, refersTo last_facts|last_question|active_entity. Si se entiende solo → relevant=false, refersTo=none.
 
 Qué hacer con eso:
+- Saludo (hola / buenas, sin pedido) → conversationalAct=greet. El redactor saluda como Atilio. No dejes el turno en una pregunta seca de ventanilla.
 - Quiere que Atilio HAGA un trámite (registrar km/hs, certificado, OT, reporte GPS de una unidad, listar flota) → start_task o continue_task + la capability de ese trámite. El nombre del trámite ES el trámite, no una guía del panel.
+- Si tu último mensaje fue una pregunta abierta y ahora piden un trámite o contestan algo concreto, ESE pedido gana: no repitas la pregunta anterior. Arrancá o continuá el trámite. Unidad en state → usala.
 - Pregunta cómo usar el panel o qué es un concepto → how_to + domain.answer.
 - Pregunta sobre un hecho (si la posición es correcta, si está al día) → yes_no o status + tools de evidencia. NUNCA sustituyas esa pregunta por un listado.
 - Anáfora (su/esa/la/esa unidad) → state.unit si existe. Unidad activa no cambia salvo que nombren otra.
@@ -51,7 +53,7 @@ export function buildCommanderUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Interpretá el hilo (mensaje + lastAssistantReply + lastTurn + state). Completá interpretation primero. Las tools sirven a ESA petición. No rutees por palabras sueltas.",
+        "Interpretá el hilo. Completá interpretation primero. Si el usuario pide un trámite, arrancalo (no repitas lastAssistantReply). Saludo sin pedido → greet. Tools sirven a ESA petición.",
       message: input.message,
       localNow: input.localNow,
       timezone: input.timezone,
@@ -121,7 +123,7 @@ export function buildRepairUserPayload(input: {
   return JSON.stringify(
     {
       instruction:
-        "Repará el TurnPlan. Conservá interpretation (completalo si falta). Corregí SOLO los errores de validación. No inventes hechos. No rutees por el texto del mensaje.",
+        "Repará el TurnPlan. Conservá interpretation. Si el usuario pidió un trámite, el plan debe ser start_task/continue_task + la capability (no copies una pregunta abierta anterior). Corregí SOLO los errores de validación. No inventes hechos.",
       originalMessage: input.originalMessage,
       previousPlan: input.previousPlan,
       validationErrors: input.validationErrors,

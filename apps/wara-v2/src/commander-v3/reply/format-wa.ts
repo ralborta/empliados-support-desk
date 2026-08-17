@@ -247,7 +247,7 @@ export function formatContinueConsult(input: {
   }
   lines.push(
     "",
-    "¿Qué necesitás?",
+    "¿En qué te ayudo?",
     "• 🛣 Odómetro / ⏱ horómetro",
     "• 📋 Certificado",
     "• 📍 GPS / reporte",

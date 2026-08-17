@@ -8,7 +8,7 @@ import {
   createEmptyConversationStateV3,
   assertExpectationXorV3,
 } from "../types/state.js";
-import { validateTurnPlan } from "../validate/validate-plan.js";
+import { validateTurnPlan, isHardValidationConflict } from "../validate/validate-plan.js";
 import { resolveUnitReference } from "../entities/resolve.js";
 import { CAPABILITY_CATALOG } from "../capabilities/catalog.js";
 import { coercePlan } from "../commander/call.js";
@@ -194,5 +194,27 @@ describe("commander-v3 contracts", () => {
     );
     assert.equal(coercedMissing.interpretation?.answerKind, "greet");
     assert.ok(coercedMissing.interpretation?.userQuestion);
+  });
+
+  it("ask + prepare se coerce a start_task (no se queda preguntando)", () => {
+    const coerced = TurnPlanSchema.parse(
+      coercePlan({
+        conversationalAct: "ask",
+        task: "odometer",
+        requestedCapabilities: [{ name: "odometer.prepare", params: {} }],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "ask_missing", facts: [], nextQuestion: "¿Qué necesitás?" },
+        confidence: 0.8,
+      }),
+    );
+    assert.equal(coerced.conversationalAct, "start_task");
+    assert.equal(coerced.taskAction, "start");
+  });
+
+  it("plan_null no es conflicto duro de escritura", () => {
+    assert.equal(isHardValidationConflict(["plan_null"]), false);
+    assert.equal(isHardValidationConflict(["schema_invalid"]), false);
+    assert.equal(isHardValidationConflict(["confirm_without_pending_write"]), true);
+    assert.equal(isHardValidationConflict(["write_commit_without_confirm:x"]), true);
   });
 });

@@ -80,3 +80,14 @@ export function validateTurnPlan(
 
   return { ok: errors.length === 0, errors, plan };
 }
+
+/** Conflictos de escritura/XOR. Plan nulo idle no es esto: no debe tragarse un trámite. */
+export function isHardValidationConflict(errors: string[]): boolean {
+  return errors.some(
+    (e) =>
+      e === "confirm_without_pending_write" ||
+      e.startsWith("write_commit_without") ||
+      e === "amend_vs_cancel_conflict" ||
+      e === "cancel_vs_confirm_conflict",
+  );
+}
