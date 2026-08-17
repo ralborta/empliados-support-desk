@@ -286,6 +286,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
     looksLikeVehicleBrandOrUnitSearch(text) ||
     looksLikePlateCorrectionRequest(text) ||
     looksLikeUnitNameInMessage(text) ||
+    looksLikeAmbiguousUnitCodeToken(text) ||
     !!extractFreeTextUnitSearchCandidate(text)
   );
 }
@@ -1616,6 +1617,48 @@ export function resolveNumericUnitSelection(rawText: string, threadText: string)
   return null;
 }
 
+function resolveByMovilIdOrUnitCode(
+  rawText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  const compact = rawText.trim().replace(/[\s\-_.]+/g, "");
+  if (/^\d{5,7}$/.test(compact)) {
+    const movilId = parseInt(compact, 10);
+    const byId = units.filter((u) => u.movil_id === movilId);
+    if (byId.length === 1) {
+      const plate = normalizeLoosePlate(byId[0].patente || byId[0].unidad || "");
+      if (plate) {
+        return {
+          intent: "consult_status",
+          plate,
+          searchTerms: [],
+          candidatePlates: [plate],
+          source: "rules",
+        };
+      }
+    }
+  }
+
+  const ambiguous = extractAmbiguousUnitCodeToken(rawText);
+  if (ambiguous && !detectLoosePlate(rawText)) {
+    const matches = filterUnitsByUnitName(units, ambiguous);
+    if (matches.length === 1) {
+      const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "");
+      if (plate) {
+        return {
+          intent: "consult_status",
+          plate,
+          searchTerms: [],
+          candidatePlates: [plate],
+          source: "rules",
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 function resolveWithRules(
   rawText: string,
   threadText: string,
@@ -1638,6 +1681,9 @@ function resolveWithRules(
 
   const clarificationPick = resolveClarificationCandidateSelection(rawText, threadText);
   if (clarificationPick) return clarificationPick;
+
+  const movilOrCode = resolveByMovilIdOrUnitCode(rawText, units);
+  if (movilOrCode) return movilOrCode;
 
   if (looksLikeUnitListRequest(rawText)) {
     return { intent: "list_fleet", searchTerms: [], candidatePlates: [], source: "rules" };
@@ -1977,6 +2023,9 @@ export async function resolveUnitQuery(params: {
 
   const clarificationPick = resolveClarificationCandidateSelection(params.rawText, params.threadText);
   if (clarificationPick) return clarificationPick;
+
+  const movilOrCodeEarly = resolveByMovilIdOrUnitCode(params.rawText, params.units);
+  if (movilOrCodeEarly) return movilOrCodeEarly;
 
   const historialForAi = params.aiHistorial ?? params.threadText;
   const overridePrefix = normalizePrefixHint(params.prefixHint);

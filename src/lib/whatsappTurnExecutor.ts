@@ -599,7 +599,7 @@ export async function runTurnExecutorPhase(params: {
       return {
         message:
           understanding.clarifyQuestion?.trim() ||
-          "Dale, pasame la matrícula de la unidad (ej. AD427MC).",
+          "Dale, pasame la matrícula o el código de la unidad (ej. AD427MC o M900-114).",
         executor: "info_guides",
         ok: true,
       };
@@ -987,7 +987,7 @@ export async function runTurnExecutorPhase(params: {
         looksLikeGenericUnitConsultWithoutPlate(selectionText))
     ) {
       finalMessage =
-        "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan).";
+        "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC), el código (ej. M900-114) o el número de unidad (ej. 900114).";
     } else if (pendingKind) {
       finalMessage = buildPendingConfirmStillWaitingReminder(pendingKind);
     } else {
