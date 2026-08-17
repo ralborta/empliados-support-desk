@@ -35,3 +35,7 @@ export * from "./core/assignment/assignment-strategy.js";
 export * from "./core/tickets/ticket-safety.js";
 export * from "./adapters/attachments/fake-attachment-adapter.js";
 export * from "./adapters/outbox/in-memory-outbox.js";
+export * from "./golden/contracts.js";
+export * from "./golden/corpus.js";
+export * from "./golden/deterministic-runner.js";
+export * from "./golden/interpreter-runner.js";
