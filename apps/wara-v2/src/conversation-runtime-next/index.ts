@@ -16,3 +16,6 @@ export { planFromDecision } from "./controller/plan-from-decision.js";
 export { SERVICE_REGISTRY } from "./registry/service-registry.js";
 export { TurnInterpretationSchema } from "./types/interpretation.js";
 export type { TurnInterpretation } from "./types/interpretation.js";
+export { composeReply } from "./compose/composer.js";
+export { migrateV3ToVNext, createEmptyVNext } from "./state/migrate.js";
+export { assertBridgeInvariants } from "./controller/bridge-guard.js";

@@ -13,9 +13,12 @@ import { isPureGreetingMessage } from "../../commander-v3/enrich/greeting-policy
 import { getCapability } from "../../commander-v3/capabilities/catalog.js";
 import type { TurnInterpretation } from "../types/interpretation.js";
 import type { TurnDecision } from "../types/decision.js";
+import { capabilityForServiceId } from "../registry/service-registry.js";
+import { migrateV3ToVNext } from "../state/migrate.js";
+import { incompleteTask } from "../state/reduce.js";
 import {
-  capabilityForServiceId,
-} from "../registry/service-registry.js";
+  resolveInterpretationReferences,
+} from "./resolve-references.js";
 
 function taskFromDomain(domain: string): TurnDecision["task"] {
   switch (domain) {
@@ -54,9 +57,26 @@ function capsFromRequests(interp: TurnInterpretation): CapabilityRequest[] {
   return caps;
 }
 
-function keepOrCloseQuestion(state: ConversationStateV3): string {
-  const label = taskLabel(state.activeTask?.type);
-  return `Tenías pendiente el ${label}. ¿Seguimos con eso o preferís otra consulta?`;
+function capFamily(name: string): string {
+  if (name === "domain.answer") return "domain";
+  if (name.startsWith("handoff.")) return "human_handoff";
+  return name.split(".")[0] ?? name;
+}
+
+function hasForeignCapability(
+  caps: CapabilityRequest[],
+  openType: string | undefined,
+): boolean {
+  if (!openType) return false;
+  return caps.some((c) => {
+    const fam = capFamily(c.name);
+    return fam !== openType && fam !== "unit" && fam !== "company" && fam !== "domain";
+  });
+}
+
+function keepOrCloseQuestion(openType: string | undefined): string {
+  const label = taskLabel(openType ?? null);
+  return `Tenías pendiente ${label}. ¿Seguimos con eso o preferís otra consulta?`;
 }
 
 export function decideTurn(input: {
@@ -65,13 +85,33 @@ export function decideTurn(input: {
   message: string;
 }): TurnDecision {
   const { interpretation: i, state, message } = input;
+  const vnext = migrateV3ToVNext(state);
   const baseIntent = {
     preserveCompany: true,
     preserveUnit: true,
     preserveTask: true,
   };
 
-  // Seguridad escritura: determinístico, no intención libre.
+  const refs = resolveInterpretationReferences(i, vnext);
+  if (refs.clarifyQuestion && !i.ambiguity?.clarificationQuestion) {
+    return {
+      action: "clarify",
+      reasoning: "Referencia ambigua o no resuelta.",
+      authorizedCapabilities: [],
+      conversationalAct: "ask",
+      unitReference: refs.unitReference ?? null,
+      companyReference: refs.companyReference ?? null,
+      stateIntent: baseIntent,
+      responseGoal: {
+        purpose: "clarify",
+        facts: [],
+        nextQuestion: refs.clarifyQuestion,
+      },
+      confidence: i.confidence,
+      interpretationSummary: i.normalizedMeaning,
+    };
+  }
+
   if (state.pendingWrite || state.lastQuestion?.expected === "confirmation") {
     if (isUnequivocalWriteConfirm(message)) {
       const task = state.pendingWrite?.task ?? state.activeTask?.type ?? "certificate";
@@ -112,7 +152,6 @@ export function decideTurn(input: {
     }
   }
 
-  // Respuesta a keep_or_close
   if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) {
     if (i.userAct === "cancellation" || i.relation === "cancel") {
       return {
@@ -142,45 +181,33 @@ export function decideTurn(input: {
     }
   }
 
-  // Saludo puro con trabajo incompleto → no GPS ni slots.
-  if (isPureGreetingMessage(message) && hasIncompleteWork(state)) {
-    return {
-      action: "keep_or_close",
-      reasoning: "Saludo con trabajo incompleto: preguntar si continúa o cambia.",
-      authorizedCapabilities: [],
-      conversationalAct: "ask",
-      stateIntent: baseIntent,
-      responseGoal: {
-        purpose: "clarify",
-        facts: [],
-        nextQuestion: keepOrCloseQuestion(state),
-      },
-      confidence: Math.max(i.confidence, 0.9),
-      interpretationSummary: i.normalizedMeaning,
-    };
+  const openTask = incompleteTask(vnext);
+  const openV3 = hasIncompleteWork(state);
+
+  // Saludo puro: responder naturalmente y conservar trámite (sin keep_or_close).
+  if (isPureGreetingMessage(message) || (i.userAct === "greeting" && i.relation !== "switch")) {
+    if (isPureGreetingMessage(message) || i.relation === "pause" || i.relation === "standalone") {
+      return {
+        action: "respond",
+        reasoning: "Saludo natural conservando trámite pendiente si existe.",
+        authorizedCapabilities: [],
+        conversationalAct: "greet",
+        stateIntent: baseIntent,
+        responseGoal: { purpose: "inform", facts: ["hola"], nextQuestion: null },
+        confidence: Math.max(i.confidence, 0.9),
+        interpretationSummary: i.normalizedMeaning,
+      };
+    }
   }
 
-  // Saludo sin trabajo abierto
-  if (i.userAct === "greeting" || isPureGreetingMessage(message)) {
-    return {
-      action: "respond",
-      reasoning: "Saludo standalone.",
-      authorizedCapabilities: [],
-      conversationalAct: "greet",
-      stateIntent: baseIntent,
-      responseGoal: { purpose: "inform", facts: ["hola"], nextQuestion: null },
-      confidence: i.confidence,
-      interpretationSummary: i.normalizedMeaning,
-    };
-  }
-
-  // Ambigüedad explícita del intérprete
   if (i.ambiguity?.clarificationQuestion) {
     return {
       action: "clarify",
       reasoning: i.ambiguity.reason,
       authorizedCapabilities: [],
       conversationalAct: "ask",
+      unitReference: refs.unitReference ?? null,
+      companyReference: refs.companyReference ?? null,
       stateIntent: baseIntent,
       responseGoal: {
         purpose: "clarify",
@@ -192,27 +219,48 @@ export function decideTurn(input: {
     };
   }
 
-  // Pregunta lateral / side_question
+  const requestCaps = capsFromRequests(i);
+
+  if (
+    openV3 &&
+    (i.relation === "switch" ||
+      i.relation === "replace" ||
+      hasForeignCapability(requestCaps, openTask?.type))
+  ) {
+    return {
+      action: "keep_or_close",
+      reasoning: "Nueva solicitud incompatible con trámite abierto.",
+      authorizedCapabilities: [],
+      conversationalAct: "ask",
+      unitReference: refs.unitReference ?? null,
+      companyReference: refs.companyReference ?? null,
+      stateIntent: baseIntent,
+      responseGoal: {
+        purpose: "clarify",
+        facts: [],
+        nextQuestion: keepOrCloseQuestion(openTask?.type),
+      },
+      confidence: i.confidence,
+      interpretationSummary: i.normalizedMeaning,
+    };
+  }
+
   if (
     i.relation === "side_question" ||
-    (i.userAct === "question" &&
-      hasIncompleteWork(state) &&
-      i.relation !== "answer_expected")
+    (i.userAct === "question" && openV3 && i.relation !== "answer_expected")
   ) {
-    const caps = capsFromRequests(i);
-    const readCaps = caps.filter((c) => {
+    const readCaps = requestCaps.filter((c) => {
       const def = getCapability(c.name);
       return def?.kind === "read" || c.name === "domain.answer";
     });
     return {
       action: "execute",
-      reasoning: "Pregunta lateral: ejecutar lectura y preservar trámite.",
+      reasoning: "Pregunta lateral: lectura preservando trámite.",
       authorizedCapabilities: readCaps,
       conversationalAct: "answer_lateral",
-      lateralQuestion: {
-        topic: i.normalizedMeaning,
-        preserveTask: true,
-      },
+      lateralQuestion: { topic: i.normalizedMeaning, preserveTask: true },
+      unitReference: refs.unitReference ?? null,
+      companyReference: refs.companyReference ?? null,
       stateIntent: baseIntent,
       responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
       confidence: i.confidence,
@@ -220,16 +268,7 @@ export function decideTurn(input: {
     };
   }
 
-  // Respuesta al campo esperado
-  if (
-    i.relation === "answer_expected" ||
-    i.answersExpectedField ||
-    i.userAct === "answer"
-  ) {
-    const supplied =
-      i.expectedFieldValue != null
-        ? { value: Number(i.expectedFieldValue) || undefined }
-        : undefined;
+  if (i.relation === "answer_expected" || i.answersExpectedField || i.userAct === "answer") {
     const expected = state.lastQuestion?.expected;
     const fields =
       expected === "value" && i.expectedFieldValue != null
@@ -238,16 +277,17 @@ export function decideTurn(input: {
           ? { date: String(i.expectedFieldValue) }
           : expected === "time" && i.expectedFieldValue != null
             ? { time: String(i.expectedFieldValue) }
-            : supplied;
-    const task = state.activeTask?.type ?? null;
+            : undefined;
     return {
       action: "execute",
       reasoning: "Captura de campo esperado.",
       authorizedCapabilities: [],
       conversationalAct: "continue_task",
-      task,
+      task: openTask?.type ?? state.activeTask?.type ?? null,
       taskAction: "continue",
       suppliedFields: fields ?? undefined,
+      unitReference: refs.unitReference ?? null,
+      companyReference: refs.companyReference ?? null,
       stateIntent: baseIntent,
       responseGoal: { purpose: "ask_missing", facts: [], nextQuestion: null },
       confidence: i.confidence,
@@ -255,18 +295,18 @@ export function decideTurn(input: {
     };
   }
 
-  // Cambio de trámite / switch
   if (i.relation === "switch" || i.relation === "replace") {
-    const caps = capsFromRequests(i);
-    const domain = i.requests[0]?.domain ?? caps[0]?.name.split(".")[0];
+    const domain = i.requests[0]?.domain ?? requestCaps[0]?.name.split(".")[0];
     const task = taskFromDomain(domain ?? "");
     return {
       action: "execute",
       reasoning: "Cambio de trámite o foco.",
-      authorizedCapabilities: caps,
-      conversationalAct: hasIncompleteWork(state) ? "switch_task" : "start_task",
+      authorizedCapabilities: requestCaps,
+      conversationalAct: openV3 ? "switch_task" : "start_task",
       task,
-      taskAction: hasIncompleteWork(state) ? "switch" : "start",
+      taskAction: openV3 ? "switch" : "start",
+      unitReference: refs.unitReference ?? null,
+      companyReference: refs.companyReference ?? null,
       stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: false },
       responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
       confidence: i.confidence,
@@ -274,7 +314,6 @@ export function decideTurn(input: {
     };
   }
 
-  // Cancelación explícita
   if (i.userAct === "cancellation" || i.relation === "cancel") {
     return {
       action: "cancel",
@@ -289,23 +328,19 @@ export function decideTurn(input: {
     };
   }
 
-  // Pedido operativo / request
-  const caps = capsFromRequests(i);
   const primary = i.requests[0];
-  const task =
-    primary?.domain ? taskFromDomain(primary.domain) : null;
-  const hasWritePrepare = caps.some((c) => {
-    const def = getCapability(c.name);
-    return def?.kind === "write_prepare";
-  });
+  const task = primary?.domain ? taskFromDomain(primary.domain) : null;
+  const hasWritePrepare = requestCaps.some((c) => getCapability(c.name)?.kind === "write_prepare");
 
   return {
     action: "execute",
     reasoning: i.normalizedMeaning,
-    authorizedCapabilities: caps,
+    authorizedCapabilities: requestCaps,
     conversationalAct: hasWritePrepare || task ? "start_task" : "inform",
     task,
     taskAction: task ? "start" : undefined,
+    unitReference: refs.unitReference ?? null,
+    companyReference: refs.companyReference ?? null,
     stateIntent: baseIntent,
     responseGoal: {
       purpose: hasWritePrepare ? "ask_missing" : "inform",

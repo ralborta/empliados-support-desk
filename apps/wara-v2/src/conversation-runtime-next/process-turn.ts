@@ -1,49 +1,53 @@
-import { randomUUID } from "node:crypto";
-import type { WaraUnidadEstado } from "../../pilot/wara-types.js";
-import { formatUnitLabel, toFleetUnitRef } from "../../pilot/unit-fleet.js";
-import { validateTurnPlan } from "../../commander-v3/validate/validate-plan.js";
+import type { WaraUnidadEstado } from "../pilot/wara-types.js";
+import { formatUnitLabel } from "../pilot/unit-fleet.js";
+import { validateTurnPlan } from "../commander-v3/validate/validate-plan.js";
 import {
   resolveCompanyReference,
   resolveUnitReference,
-} from "../../commander-v3/entities/resolve.js";
+} from "../commander-v3/entities/resolve.js";
 import {
   executeCapabilities,
   stripMeterValueConfusedWithUnit,
-} from "../../commander-v3/execute/run-capabilities.js";
-import { enrichPlanWithNaturalDatetime } from "../../commander-v3/enrich/natural-datetime-plan.js";
-import { enrichPlanForCompanyOpsGate } from "../../commander-v3/enrich/company-ops-gate.js";
-import { enrichPlanStripBareFleetDump } from "../../commander-v3/enrich/bare-fleet-dump.js";
+} from "../commander-v3/execute/run-capabilities.js";
+import { enrichPlanWithNaturalDatetime } from "../commander-v3/enrich/natural-datetime-plan.js";
+import { enrichPlanStripBareFleetDump } from "../commander-v3/enrich/bare-fleet-dump.js";
 import {
   KEEP_OR_CLOSE_PURPOSE,
   planFromParkedTurn,
-  resumeQuestionForTask,
-} from "../../commander-v3/enrich/open-task-hold.js";
-import { applyCommanderState } from "../../commander-v3/state/apply-patch.js";
-import { redactReply } from "../../commander-v3/reply/redact.js";
+} from "../commander-v3/enrich/open-task-hold.js";
+import { composeReply } from "./compose/composer.js";
+import { migrateV3ToVNext } from "./state/migrate.js";
+import { vnextToV3 } from "./state/to-v3.js";
+import { reconcileVNextAfterExecute } from "./state/reconcile.js";
+import { reduceState, ensureFocusedTask } from "./state/reduce.js";
+import type { ConversationStateVNext } from "./state/vnext-types.js";
+import {
+  applyStructuralExtensions,
+  assertBridgeInvariants,
+} from "./controller/bridge-guard.js";
 import {
   getConversationStateV3,
   saveConversationStateV3,
   saveLastTraceV3,
   createEmptyIfNeeded,
-} from "../../commander-v3/persistence/store-helpers.js";
-import type { ConversationStateV3 } from "../../commander-v3/types/state.js";
-import type { CompanyRef } from "../../commander-v3/types/refs.js";
-import type { TurnTraceV3 } from "../../commander-v3/observability/trace.js";
-import type { TurnPlan } from "../../commander-v3/types/turn-plan.js";
-import { DEFAULT_TENANT_TZ } from "../../pilot/semantic/natural-datetime.js";
+} from "../commander-v3/persistence/store-helpers.js";
+import type { ConversationStateV3 } from "../commander-v3/types/state.js";
+import type { CompanyRef } from "../commander-v3/types/refs.js";
+import type { TurnTraceV3 } from "../commander-v3/observability/trace.js";
+import type { TurnPlan } from "../commander-v3/types/turn-plan.js";
+import { DEFAULT_TENANT_TZ } from "../pilot/semantic/natural-datetime.js";
 import { DateTime } from "luxon";
-import { callInterpreter } from "../interpreter/call.js";
-import { decideTurn, filterAuthorizedCapabilities } from "../controller/decide-turn.js";
+import { callInterpreter } from "./interpreter/call.js";
+import { decideTurn, filterAuthorizedCapabilities } from "./controller/decide-turn.js";
 import {
   planFromDecision,
-  lastQuestionForKeepOrClose,
-} from "../controller/plan-from-decision.js";
-import { mapExecResultsToStructured } from "../execute/adapt-results.js";
+} from "./controller/plan-from-decision.js";
+import { mapExecResultsToStructured } from "./execute/adapt-results.js";
 import {
   RUNTIME_NEXT_PROMPT_VERSION,
   SERVICE_REGISTRY_VERSION,
-} from "../flags.js";
-import { buildKnowledgeInventory } from "../registry/knowledge-inventory.js";
+} from "./flags.js";
+import { buildKnowledgeInventory } from "./registry/knowledge-inventory.js";
 import type { TurnInterpretation } from "../types/interpretation.js";
 
 export type ProcessConversationTurnInput = {
@@ -71,61 +75,10 @@ export type ProcessConversationTurnResult = {
   };
 };
 
-function structuralFinalizePlan(
-  plan: TurnPlan,
-  state: ConversationStateV3,
-): TurnPlan {
-  let p = plan;
-  const skipPrepare =
-    p.conversationalAct === "greet" ||
-    p.responseGoal.purpose === "clarify" ||
-    Boolean(p.parkedTurn);
-
-  const ensurePrepare = (task: "odometer" | "hourmeter" | "certificate", cap: string) => {
-    if (skipPrepare || p.task !== task) return;
-    if (!p.requestedCapabilities.some((c) => c.name === cap)) {
-      p = {
-        ...p,
-        requestedCapabilities: [...p.requestedCapabilities, { name: cap, params: {} }],
-      };
-    }
-  };
-  ensurePrepare("odometer", "odometer.prepare");
-  ensurePrepare("hourmeter", "hourmeter.prepare");
-  ensurePrepare("certificate", "certificate.prepare");
-
-  if (
-    !p.parkedTurn &&
-    p.task === "gps" &&
-    !p.requestedCapabilities.some((c) => c.name === "gps.get_status")
-  ) {
-    p = {
-      ...p,
-      requestedCapabilities: [
-        ...p.requestedCapabilities,
-        { name: "gps.get_status", params: {} },
-      ],
-    };
-  }
-
-  if (
-    p.task === "unit_query" &&
-    !p.requestedCapabilities.some((c) => c.name === "unit.search")
-  ) {
-    p = {
-      ...p,
-      requestedCapabilities: [{ name: "unit.search", params: {} }, ...p.requestedCapabilities],
-    };
-  }
-
-  p = enrichPlanForCompanyOpsGate(p, state);
-  if (!state.fleetCache.length) {
-    p = {
-      ...p,
-      requestedCapabilities: p.requestedCapabilities.filter((c) => c.name !== "unit.search"),
-    };
-  }
-  return p;
+function persistVNext(vnext: ConversationStateVNext, tenantId: string, phone: string): ConversationStateV3 {
+  const v3 = vnextToV3(vnext);
+  saveConversationStateV3(v3);
+  return v3;
 }
 
 export async function processConversationTurn(
@@ -147,10 +100,12 @@ export async function processConversationTurn(
     state = { ...state, availableCompanies };
   }
 
+  let vnext = migrateV3ToVNext(state);
+
   const fleetUnits = input.fleetUnits ?? [];
   if (fleetUnits.length) {
-    state = {
-      ...state,
+    vnext = {
+      ...vnext,
       fleetCache: fleetUnits.map((u) => ({
         movilId: u.movil_id,
         plate: u.patente ?? null,
@@ -160,6 +115,7 @@ export async function processConversationTurn(
         hourmeter: u.horometro ?? null,
       })),
     };
+    state = { ...state, fleetCache: vnext.fleetCache };
   }
 
   const stateBefore = structuredClone(state);
@@ -187,45 +143,39 @@ export async function processConversationTurn(
   }
 
   if (!interpretation) {
-    const fallbackPlan: TurnPlan = {
-      reasoning: "Intérprete falló; aclaración puntual.",
-      conversationalAct: "ask",
-      requestedCapabilities: [],
-      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
-      responseGoal: {
-        purpose: "clarify",
-        facts: [],
-        nextQuestion: "No entendí bien. ¿Qué necesitás hacer?",
+    const reply = "No entendí bien. ¿Qué necesitás hacer?";
+    vnext = reduceState({
+      state: vnext,
+      decision: {
+        action: "clarify",
+        reasoning: "Intérprete falló.",
+        authorizedCapabilities: [],
+        conversationalAct: "ask",
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "clarify", facts: [], nextQuestion: reply },
+        confidence: 0.2,
+        interpretationSummary: "",
       },
-      confidence: 0.2,
-    };
-    const { reply, latencyMs: redactMs } = await redactReply({
-      plan: fallbackPlan,
-      facts: [],
-      state,
-      env: input.env,
+      reply,
       userMessage: input.message,
-      lastAssistantReply,
     });
-    const after = {
-      ...state,
-      recentTurns: [
-        ...state.recentTurns,
-        { role: "user" as const, text: input.message, at: new Date().toISOString() },
-        { role: "assistant" as const, text: reply, at: new Date().toISOString() },
-      ].slice(-20),
-      updatedAt: new Date().toISOString(),
-    };
-    saveConversationStateV3(after);
+    const after = persistVNext(vnext, input.tenantId, input.phone);
     const trace = buildTrace({
       turnInput: input,
       stateBefore,
       stateAfter: after,
-      plan: fallbackPlan,
+      plan: {
+        reasoning: "fallback",
+        conversationalAct: "ask",
+        requestedCapabilities: [],
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "clarify", facts: [] },
+        confidence: 0.2,
+      },
       interpretMs,
       interpretRaw,
       interpretModel,
-      redactMs,
+      redactMs: 0,
       totalStart,
       inventory,
       interpretation: null,
@@ -250,45 +200,32 @@ export async function processConversationTurn(
   let validation = validateTurnPlan(plan, state);
 
   if (!validation.ok) {
-    const clarifyPlan: TurnPlan = {
-      reasoning: `Validación falló: ${validation.errors.join("; ")}`,
-      conversationalAct: "ask",
-      requestedCapabilities: [],
-      stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
-      responseGoal: {
-        purpose: "clarify",
-        facts: [],
-        nextQuestion: "Necesito una aclaración para seguir.",
+    const reply = "Necesito una aclaración para seguir.";
+    vnext = reduceState({
+      state: vnext,
+      decision: {
+        action: "clarify",
+        reasoning: validation.errors.join("; "),
+        authorizedCapabilities: [],
+        conversationalAct: "ask",
+        stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+        responseGoal: { purpose: "clarify", facts: [], nextQuestion: reply },
+        confidence: 0.3,
+        interpretationSummary: interpretation.normalizedMeaning,
       },
-      confidence: 0.3,
-    };
-    const { reply, latencyMs: redactMs } = await redactReply({
-      plan: clarifyPlan,
-      facts: [],
-      state,
-      env: input.env,
+      reply,
       userMessage: input.message,
-      lastAssistantReply,
     });
-    const after = {
-      ...state,
-      recentTurns: [
-        ...state.recentTurns,
-        { role: "user" as const, text: input.message, at: new Date().toISOString() },
-        { role: "assistant" as const, text: reply, at: new Date().toISOString() },
-      ].slice(-20),
-      updatedAt: new Date().toISOString(),
-    };
-    saveConversationStateV3(after);
+    const after = persistVNext(vnext, input.tenantId, input.phone);
     const trace = buildTrace({
       turnInput: input,
       stateBefore,
       stateAfter: after,
-      plan: clarifyPlan,
+      plan: clarifyPlanStub(),
       interpretMs,
       interpretRaw,
       interpretModel,
-      redactMs,
+      redactMs: 0,
       totalStart,
       inventory,
       interpretation,
@@ -305,26 +242,28 @@ export async function processConversationTurn(
     localNow,
   });
 
-  // keep_or_close / resume / cancel (estructural, no enrich chain)
-  if (state.lastQuestion?.purpose === KEEP_OR_CLOSE_PURPOSE) {
+  if (decision.task && decision.action === "execute") {
+    vnext = ensureFocusedTask(vnext, decision.task);
+  }
+
+  if (vnext.expectedInput?.purpose === KEEP_OR_CLOSE_PURPOSE) {
     if (decision.action === "cancel") {
-      const parked = state.conversationMetadata.parkedTurn ?? null;
-      state = {
-        ...state,
-        activeTask: null,
-        pendingWrite: null,
-        pendingEntity: null,
-        lastQuestion: null,
-        conversationMetadata: { ...state.conversationMetadata, parkedTurn: null },
+      const parked = vnext.conversationMetadata.parkedTurn ?? null;
+      vnext = {
+        ...vnext,
+        tasks: vnext.tasks.filter((t) => t.id !== vnext.focusedTaskId),
+        focusedTaskId: null,
+        expectedInput: null,
+        pendingOperation: null,
+        conversationMetadata: { ...vnext.conversationMetadata, parkedTurn: null },
       };
       if (parked) {
         plan = planFromParkedTurn(parked, plan);
       }
     } else if (decision.action === "resume") {
-      state = {
-        ...state,
-        lastQuestion: state.activeTask ? resumeQuestionForTask(state.activeTask) : null,
-        conversationMetadata: { ...state.conversationMetadata, parkedTurn: null },
+      vnext = {
+        ...vnext,
+        conversationMetadata: { ...vnext.conversationMetadata, parkedTurn: null },
       };
     }
   }
@@ -335,7 +274,7 @@ export async function processConversationTurn(
   ) {
     const cleaned = stripMeterValueConfusedWithUnit({
       value: plan.suppliedFields.value,
-      unit: state.unit,
+      unit: vnext.unit,
       message: input.message,
       unitReferenceValue:
         plan.unitReference?.kind === "unit"
@@ -349,12 +288,26 @@ export async function processConversationTurn(
     }
   }
 
-  plan = structuralFinalizePlan(plan, state);
-
-  if (!state.company && state.availableCompanies.length === 1) {
-    state = { ...state, company: state.availableCompanies[0]! };
+  const planBeforeStructural = plan;
+  plan = applyStructuralExtensions(plan, decision);
+  const bridgeCheck = assertBridgeInvariants(decision, planBeforeStructural, plan);
+  if (!bridgeCheck.ok) {
+    plan = planBeforeStructural;
   }
 
+  if (!vnext.fleetCache.length) {
+    plan = {
+      ...plan,
+      requestedCapabilities: plan.requestedCapabilities.filter((c) => c.name !== "unit.search"),
+    };
+  }
+
+  if (!vnext.company && vnext.availableCompanies.length === 1) {
+    vnext = { ...vnext, company: vnext.availableCompanies[0]! };
+    state = { ...state, company: vnext.company };
+  }
+
+  state = vnextToV3(vnext);
   const unitRes = resolveUnitReference(plan.unitReference ?? null, state);
   const companyRes = resolveCompanyReference(plan.companyReference ?? null, state);
   const resolvedUnit = unitRes.status === "exact" ? unitRes.unit : null;
@@ -362,42 +315,107 @@ export async function processConversationTurn(
 
   if (unitRes.status === "many") {
     const labels = unitRes.candidates!.map((u, i) => `${i + 1}. ${u.label}`).join("\n");
-    const { reply, latencyMs: redactMs } = await redactReply({
-      plan,
-      facts: [`Encontré varias unidades:\n${labels}\n\nDecime el número o la patente exacta.`],
-      state,
-      env: input.env,
-      userMessage: input.message,
-      lastAssistantReply,
+    const facts = [`Encontré varias unidades:\n${labels}\n\nDecime el número o la patente exacta.`];
+    const reply = composeReply({
+      decision,
+      interpretation,
+      facts,
+      capabilityResults: [],
+      state: vnext,
+      customerName: input.customerName,
     });
-    const applied = applyCommanderState({
-      state,
-      plan,
-      resolvedUnit: null,
-      resolvedCompany,
-      unitMany: unitRes.candidates,
-      message: input.message,
+    vnext = reduceState({
+      state: vnext,
+      decision,
       reply,
+      userMessage: input.message,
+      resolvedCompany,
+      unitListing: {
+        kind: "search",
+        page: 1,
+        pageSize: unitRes.candidates!.length,
+        totalCount: unitRes.candidates!.length,
+        items: unitRes.candidates!.map((u, i) => ({
+          index: i + 1,
+          label: u.label,
+          movilId: u.movilId,
+        })),
+        fetchedAt: new Date().toISOString(),
+      },
     });
-    saveConversationStateV3(applied.state);
+    const after = persistVNext(vnext, input.tenantId, input.phone);
     const trace = buildTrace({
       turnInput: input,
       stateBefore,
-      stateAfter: applied.state,
+      stateAfter: after,
       plan,
       interpretMs,
       interpretRaw,
       interpretModel,
-      redactMs,
+      redactMs: 0,
       totalStart,
       inventory,
       interpretation,
       capabilityResults: [],
       validationOk: true,
-      execFacts: [labels],
+      execFacts: facts,
+      finalReply: reply,
     });
     saveLastTraceV3(input.tenantId, input.phone, trace);
-    return { reply, state: applied.state, trace };
+    return { reply, state: after, trace };
+  }
+
+  if (
+    decision.action === "respond" ||
+    decision.action === "clarify" ||
+    decision.action === "keep_or_close" ||
+    (decision.action === "cancel" && decision.authorizedCapabilities.length === 0)
+  ) {
+    const reply = composeReply({
+      decision,
+      interpretation,
+      facts: decision.responseGoal.facts ?? [],
+      capabilityResults: [],
+      state: vnext,
+      customerName: input.customerName,
+    });
+    vnext = reduceState({
+      state: vnext,
+      decision,
+      reply,
+      userMessage: input.message,
+      resolvedUnit,
+      resolvedCompany,
+    });
+    vnext = {
+      ...vnext,
+      conversationMetadata: {
+        ...vnext.conversationMetadata,
+        runtimeNext: {
+          promptVersion: RUNTIME_NEXT_PROMPT_VERSION,
+          registryVersion: SERVICE_REGISTRY_VERSION,
+        },
+      },
+    };
+    const after = persistVNext(vnext, input.tenantId, input.phone);
+    const trace = buildTrace({
+      turnInput: input,
+      stateBefore,
+      stateAfter: after,
+      plan,
+      interpretMs,
+      interpretRaw,
+      interpretModel,
+      redactMs: 0,
+      totalStart,
+      inventory,
+      interpretation,
+      capabilityResults: [],
+      validationOk: true,
+      finalReply: reply,
+    });
+    saveLastTraceV3(input.tenantId, input.phone, trace);
+    return { reply, state: after, trace };
   }
 
   plan = enrichPlanStripBareFleetDump(plan);
@@ -413,53 +431,31 @@ export async function processConversationTurn(
     messageId: input.messageId,
   });
 
-  state = exec.state;
+  vnext = reconcileVNextAfterExecute(vnext, exec.state);
   const capabilityResults = mapExecResultsToStructured(exec.results);
 
-  if (exec.results.some((r) => r.error === "no_unit")) {
-    const skipNoUnitAsk =
-      plan.conversationalAct === "greet" ||
-      plan.responseGoal.purpose === "clarify" ||
-      plan.parkedTurn != null;
-    if (!skipNoUnitAsk) {
-      const ask = exec.facts.find((f) => f.trim()) ?? "¿De qué unidad?";
-      plan = {
-        ...plan,
-        conversationalAct: "ask",
-        responseGoal: { purpose: "ask_missing", facts: exec.facts, nextQuestion: ask },
-      };
-    }
-  }
-
-  const { reply, latencyMs: redactMs } = await redactReply({
-    plan,
+  const reply = composeReply({
+    decision,
+    interpretation,
     facts: exec.facts,
-    state,
-    env: input.env,
-    userMessage: input.message,
-    lastAssistantReply,
+    capabilityResults,
+    state: vnext,
+    customerName: input.customerName,
   });
 
-  const applied = applyCommanderState({
-    state,
-    plan,
+  vnext = reduceState({
+    state: vnext,
+    decision,
+    reply,
+    userMessage: input.message,
     resolvedUnit,
     resolvedCompany,
-    message: input.message,
-    reply,
+    capabilityResults,
   });
-
-  let finalState = {
-    ...applied.state,
-    activeTask: state.activeTask ?? applied.state.activeTask,
-    pendingWrite: state.pendingWrite ?? applied.state.pendingWrite,
-    pendingEntity: state.pendingEntity ?? applied.state.pendingEntity,
-    lastQuestion: state.lastQuestion ?? applied.state.lastQuestion,
-    unit: state.unit ?? applied.state.unit,
-    company: state.company ?? applied.state.company,
+  vnext = {
+    ...vnext,
     conversationMetadata: {
-      ...applied.state.conversationMetadata,
-      ...state.conversationMetadata,
+      ...vnext.conversationMetadata,
       runtimeNext: {
         promptVersion: RUNTIME_NEXT_PROMPT_VERSION,
         registryVersion: SERVICE_REGISTRY_VERSION,
@@ -467,34 +463,17 @@ export async function processConversationTurn(
     },
   };
 
-  if (decision.action === "keep_or_close") {
-    const lq = lastQuestionForKeepOrClose(plan);
-    if (lq) {
-      finalState = { ...finalState, lastQuestion: lq };
-    }
-  }
-
-  if (decision.action === "cancel") {
-    finalState = {
-      ...finalState,
-      activeTask: null,
-      pendingWrite: null,
-      pendingEntity: null,
-      lastQuestion: null,
-    };
-  }
-
-  saveConversationStateV3(finalState);
+  const after = persistVNext(vnext, input.tenantId, input.phone);
 
   const trace = buildTrace({
     turnInput: input,
     stateBefore,
-    stateAfter: finalState,
+    stateAfter: after,
     plan,
     interpretMs,
     interpretRaw,
     interpretModel,
-    redactMs,
+    redactMs: 0,
     totalStart,
     inventory,
     interpretation,
@@ -507,7 +486,18 @@ export async function processConversationTurn(
     finalReply: reply,
   });
   saveLastTraceV3(input.tenantId, input.phone, trace);
-  return { reply, state: finalState, trace };
+  return { reply, state: after, trace };
+}
+
+function clarifyPlanStub(): TurnPlan {
+  return {
+    reasoning: "clarify",
+    conversationalAct: "ask",
+    requestedCapabilities: [],
+    stateIntent: { preserveCompany: true, preserveUnit: true, preserveTask: true },
+    responseGoal: { purpose: "clarify", facts: [] },
+    confidence: 0.2,
+  };
 }
 
 function buildTrace(opts: {
