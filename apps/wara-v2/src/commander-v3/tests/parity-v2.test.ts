@@ -11,8 +11,16 @@ import { COMMANDER_V3_PROMPT_VERSION } from "../flags.js";
 import { coercePlan } from "../commander/call.js";
 
 describe("commander-v3 parity V2 (KB + fechas + derivación)", () => {
-  it("prompt version bump 15f", () => {
-    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-15f/);
+  it("prompt version bump 16a", () => {
+    assert.match(COMMANDER_V3_PROMPT_VERSION, /2026-08-16a/);
+  });
+
+  it("prompt Commander no copia el árbol de decisión V1", async () => {
+    const { COMMANDER_V3_SYSTEM_PROMPT } = await import("../commander/prompt.js");
+    assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /paridad V1/i);
+    assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /lista porfa/);
+    assert.doesNotMatch(COMMANDER_V3_SYSTEM_PROMPT, /7e4\)/);
+    assert.ok(COMMANDER_V3_SYSTEM_PROMPT.length < 4500);
   });
 
   it("Dale / Genial / No gracias idle → farewell (incluso con lastQuestion free_text)", async () => {

@@ -44,8 +44,7 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   },
   {
     name: "unit.search",
-    purpose:
-      "Buscar unidades o listar flota completa (lista/la lista/lista porfa/listado → sin query)",
+    purpose: "Buscar unidades (query=filtro) o listar flota (sin query)",
     params: ["query", "mode"],
     kind: "read",
     requiredFields: ["company"],
@@ -85,7 +84,7 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   },
   {
     name: "gps.get_status",
-    purpose: "Lectura GPS de la unidad activa o referida. Follow-up sobre posición/reporte/si está al día: esta cap sobre state.unit, nunca unit.search.",
+    purpose: "Lectura GPS de la unidad activa o referida",
     params: ["movilId"],
     kind: "read",
     requiredFields: ["unit"],
@@ -196,7 +195,7 @@ export const CAPABILITY_CATALOG: CapabilityDef[] = [
   {
     name: "domain.answer",
     purpose:
-      "Guía panel o concepto WARA (topic: platform_opciones|platform_unidades|platform_mantenimiento|odometer|horometer|gps|certificate|wara). Opciones/agenda/notificaciones/perfiles → platform_opciones; chevron/historial → platform_unidades; módulo de mantenimiento / preventivo / correctivo / cómo con una unidad → platform_mantenimiento (KB V1 completa). Con unidad activa o lastGpsIncident, una pregunta de módulo SIGUE siendo domain.answer, no gps.get_status.",
+      "Guía de panel o concepto WARA (topic: platform_opciones|platform_unidades|platform_mantenimiento|odometer|horometer|gps|certificate|wara). Solo si preguntan cómo usar el panel o qué es; no sustituye un trámite.",
     params: ["topic"],
     kind: "domain",
     requiredFields: [],

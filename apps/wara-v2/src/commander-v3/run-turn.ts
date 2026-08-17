@@ -3,7 +3,7 @@
  */
 import { randomUUID, createHash } from "node:crypto";
 import type { WaraUnidadEstado } from "../pilot/wara-types.js";
-import { formatUnitLabel, toFleetUnitRef, extractUnitNameCode } from "../pilot/unit-fleet.js";
+import { formatUnitLabel, toFleetUnitRef } from "../pilot/unit-fleet.js";
 import { callCommander, repairCommanderPlan } from "./commander/call.js";
 import { validateTurnPlan } from "./validate/validate-plan.js";
 import {
@@ -17,41 +17,19 @@ import {
   enrichPlanForCompanyCapture,
   enrichPlanForGreetingCompanyGate,
 } from "./enrich/company-capture.js";
-import { enrichPlanForCompanyChange } from "./enrich/company-change.js";
 import { enrichPlanForCompanyOpsGate } from "./enrich/company-ops-gate.js";
-import { enrichPlanForGreetingPolicy } from "./enrich/greeting-policy.js";
 import { enrichPlanStripBareFleetDump } from "./enrich/bare-fleet-dump.js";
 import { enrichPlanForQuestionContract } from "./enrich/question-contract.js";
-import { enrichPlanForSoftClose } from "./enrich/soft-close.js";
-import { enrichPlanForOpenConsult } from "./enrich/open-consult.js";
-import { enrichPlanForConversationClose } from "./enrich/conversation-close.js";
 import {
   enrichPlanForExpectedFields,
   enrichPlanForMeterValueFallback,
 } from "./enrich/expected-field-capture.js";
-import { enrichPlanForMeterUnitInMessage } from "./enrich/meter-unit-from-message.js";
-import {
-  enrichPlanForFleetSearchQuery,
-  enrichPlanForGpsUnitInMessage,
-  enrichPlanPromoteGpsFromReasoning,
-  extractFleetFilterHint,
-} from "./enrich/gps-unit-from-message.js";
-import { enrichPlanForCancelGuard } from "./enrich/cancel-guard.js";
 import {
   enrichPlanForConfirmationOutcome,
   isConfirmationReject,
   isUnequivocalWriteConfirm,
 } from "./enrich/confirmation-outcome.js";
 import {
-  alternateTaskWhileConfirmPending,
-  enrichPlanForPendingConfirmSwitch,
-} from "./enrich/pending-confirm-switch.js";
-import {
-  enrichPlanForIdlePendingClarifyAnswer,
-  enrichPlanForIdlePendingConfirm,
-} from "./enrich/idle-pending-confirm.js";
-import {
-  enrichPlanForTaskSwitch,
   isSwitchingTask,
   stateForSwitchedTask,
 } from "./enrich/task-switch.js";
@@ -176,16 +154,12 @@ export async function runCommanderTurn(
     plan = enrichPlanForQuestionContract(plan, state);
   }
 
-  // Confirmación pendiente: CONFIRMO / CANCELAR / switch a otro trámite ANTES de validate.
-  // Si no, el LLM re-pide certificate.prepare o mete issue → loop de CONFIRMO.
+  // Confirmación pendiente: CONFIRMO / CANCELAR (seguridad de escritura, no intención).
   if (
     plan &&
     (state.pendingWrite || state.lastQuestion?.expected === "confirmation")
   ) {
     plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
-    plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
-    plan = enrichPlanForIdlePendingConfirm(plan, state, input.message);
-    plan = enrichPlanForIdlePendingClarifyAnswer(plan, state, input.message);
     if (plan.conversationalAct === "confirm_write") {
       plan = {
         ...plan,
@@ -223,9 +197,6 @@ export async function runCommanderTurn(
       (state.pendingWrite || state.lastQuestion?.expected === "confirmation")
     ) {
       plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
-      plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
-      plan = enrichPlanForIdlePendingConfirm(plan, state, input.message);
-      plan = enrichPlanForIdlePendingClarifyAnswer(plan, state, input.message);
       if (plan.conversationalAct === "confirm_write") {
         plan = {
           ...plan,
@@ -289,41 +260,6 @@ export async function runCommanderTurn(
           input.message,
         );
         validation = validateTurnPlan(plan, state);
-      } else {
-        const alt = alternateTaskWhileConfirmPending(input.message, state);
-        if (alt) {
-          const prep =
-            alt === "odometer"
-              ? "odometer.prepare"
-              : alt === "hourmeter"
-                ? "hourmeter.prepare"
-                : alt === "certificate"
-                  ? "certificate.prepare"
-                  : alt === "maintenance"
-                    ? "maintenance.prepare"
-                    : alt === "gps"
-                      ? "gps.get_status"
-                      : null;
-          plan = {
-            reasoning: `Switch stub: confirmación pendiente y el usuario pidió ${alt}.`,
-            conversationalAct: "switch_task",
-            task: alt,
-            taskAction: "switch",
-            requestedCapabilities: prep ? [{ name: prep, params: {} }] : [],
-            stateIntent: {
-              preserveCompany: true,
-              preserveUnit: true,
-              preserveTask: true,
-            },
-            responseGoal: {
-              purpose: "ask_missing",
-              facts: [],
-              nextQuestion: null,
-            },
-            confidence: 1,
-          };
-          validation = validateTurnPlan(plan, state);
-        }
       }
     }
   }
@@ -336,22 +272,6 @@ export async function runCommanderTurn(
     );
     if (recovered) {
       plan = recovered;
-      validation = validateTurnPlan(plan, state);
-    }
-  }
-
-  if (!validation.ok || !plan) {
-    const gpsRecovered = tryRecoverGpsPlan(state, input.message);
-    if (gpsRecovered) {
-      plan = gpsRecovered;
-      validation = validateTurnPlan(plan, state);
-    }
-  }
-
-  if (!validation.ok || !plan) {
-    const meterRecovered = tryRecoverMeterStartPlan(state, input.message);
-    if (meterRecovered) {
-      plan = meterRecovered;
       validation = validateTurnPlan(plan, state);
     }
   }
@@ -425,202 +345,17 @@ export async function runCommanderTurn(
     return { reply, state: after, trace };
   }
 
+  // Parsers y contrato (no reinterpretan intención):
+  // fecha natural y campo ya esperado; greet+sin empresa; interpretation → evidencia.
   plan = enrichPlanWithNaturalDatetime(plan, state, input.message, dtOpts);
-  plan = enrichPlanForGreetingPolicy(plan, state, input.message);
-  plan = enrichPlanForSoftClose(plan, state, input.message);
-  plan = enrichPlanForOpenConsult(plan, state, input.message);
-  plan = enrichPlanForConversationClose(plan, state, input.message);
-  plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
-  // Campos esperados ANTES del switch: un "900078" es el km, no un trámite nuevo.
+  if (state.pendingWrite || state.lastQuestion?.expected === "confirmation") {
+    plan = enrichPlanForConfirmationOutcome(plan, state, input.message);
+  }
   plan = enrichPlanForExpectedFields(plan, state, input.message);
   plan = enrichPlanForMeterValueFallback(plan, state, input.message);
-  plan = enrichPlanForTaskSwitch(plan, state);
-  plan = enrichPlanForCancelGuard(plan, state, input.message);
-  plan = enrichPlanForCompanyChange(plan, state, input.message);
   plan = enrichPlanForGreetingCompanyGate(plan, state);
   plan = enrichPlanForCompanyCapture(plan, state, input.message);
-  plan = enrichPlanForPendingConfirmSwitch(plan, state, input.message);
-  plan = enrichPlanForIdlePendingConfirm(plan, state, input.message);
-  plan = enrichPlanForIdlePendingClarifyAnswer(plan, state, input.message);
-  plan = enrichPlanForMeterUnitInMessage(plan, state, input.message);
-  plan = enrichPlanPromoteGpsFromReasoning(plan, state);
-  plan = enrichPlanForGpsUnitInMessage(plan, state, input.message);
-  plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
   plan = enrichPlanForQuestionContract(plan, state);
-
-  // Mid odómetro/horómetro: nunca GPS/unit_query hijack; seguir pidiendo km/fecha.
-  // Excepciones: cancel, switch real a otro trámite, pregunta lateral (empresa), cambio de unidad.
-  if (
-    (state.activeTask?.type === "odometer" ||
-      state.activeTask?.type === "hourmeter") &&
-    state.activeTask.status === "collecting" &&
-    !state.pendingWrite
-  ) {
-    const meter = state.activeTask.type;
-    const prep = meter === "hourmeter" ? "hourmeter.prepare" : "odometer.prepare";
-    const switchTarget = plan.task;
-    const realOpsSwitch =
-      (plan.conversationalAct === "switch_task" ||
-        plan.taskAction === "switch" ||
-        plan.conversationalAct === "start_task") &&
-      switchTarget &&
-      switchTarget !== meter &&
-      (switchTarget === "certificate" ||
-        switchTarget === "gps" ||
-        switchTarget === "maintenance" ||
-        switchTarget === "human_handoff" ||
-        switchTarget === "odometer" ||
-        switchTarget === "hourmeter");
-    const answeringField =
-      state.lastQuestion?.expected === "value" ||
-      state.lastQuestion?.expected === "date" ||
-      state.lastQuestion?.expected === "time" ||
-      /^\d+(?:[.,]\d+)?$/.test(input.message.trim());
-    const unitOverride = Boolean(plan.unitReference);
-    const lateralOk =
-      plan.conversationalAct === "answer_lateral" ||
-      plan.conversationalAct === "farewell" ||
-      (plan.conversationalAct === "inform" &&
-        !plan.requestedCapabilities.some(
-          (c) =>
-            c.name.startsWith("odometer") ||
-            c.name.startsWith("hourmeter") ||
-            c.name === "unit.search",
-        ) &&
-        !answeringField &&
-        !unitOverride);
-    const keepSwitch = Boolean(realOpsSwitch) && !answeringField;
-    const scrubbedFacts = (plan.responseGoal.facts ?? []).filter(
-      (f) => !/Dejamos pendiente/i.test(f),
-    );
-
-    // Cambio explícito de unidad mid-odo: soltar la unidad vieja para resolver la nueva.
-    if (unitOverride && state.unit) {
-      state = { ...state, previousUnit: state.unit, unit: null };
-    }
-
-    if (!keepSwitch && !lateralOk) {
-      plan = {
-        ...plan,
-        task: meter,
-        conversationalAct:
-          plan.conversationalAct === "cancel_task"
-            ? "cancel_task"
-            : "continue_task",
-        taskAction:
-          plan.taskAction === "cancel" ? "cancel" : "continue",
-        responseGoal: {
-          ...plan.responseGoal,
-          purpose: "ask_missing",
-          facts: scrubbedFacts,
-        },
-        requestedCapabilities: [
-          ...plan.requestedCapabilities.filter(
-            (c) =>
-              c.name !== "gps.get_status" &&
-              c.name !== "unit.search" &&
-              c.name !== "domain.answer",
-          ),
-          ...(plan.requestedCapabilities.some((c) => c.name === prep)
-            ? []
-            : [{ name: prep, params: {} }]),
-        ],
-      };
-    } else if (keepSwitch) {
-      plan = {
-        ...plan,
-        task: switchTarget!,
-        conversationalAct: "switch_task",
-        taskAction: "switch",
-      };
-    }
-  }
-
-  // Mid mantenimiento: el detalle (ej. "Del GPS") NUNCA es gps.get_status.
-  if (
-    state.activeTask?.type === "maintenance" &&
-    state.activeTask.status === "collecting" &&
-    !state.pendingWrite
-  ) {
-    const answeringDetail =
-      state.lastQuestion?.expected === "free_text" ||
-      state.lastQuestion?.purpose === "maintenance_detail" ||
-      state.lastQuestion?.expected === "unit" ||
-      Boolean(plan.suppliedFields?.detail);
-    const switchTarget = plan.task;
-    const realOpsSwitch =
-      (plan.conversationalAct === "switch_task" ||
-        plan.taskAction === "switch" ||
-        plan.conversationalAct === "start_task") &&
-      switchTarget &&
-      switchTarget !== "maintenance" &&
-      (switchTarget === "certificate" ||
-        switchTarget === "gps" ||
-        switchTarget === "odometer" ||
-        switchTarget === "hourmeter" ||
-        switchTarget === "human_handoff");
-    // "Del GPS" / texto corto mientras pedimos detalle ≠ switch a GPS.
-    const keepSwitch =
-      Boolean(realOpsSwitch) &&
-      !answeringDetail &&
-      state.lastQuestion?.expected !== "free_text";
-    const lateralOk =
-      plan.conversationalAct === "farewell" ||
-      plan.conversationalAct === "cancel_task";
-
-    if (!keepSwitch && !lateralOk) {
-      const detail =
-        (typeof plan.suppliedFields?.detail === "string"
-          ? plan.suppliedFields.detail
-          : null) ??
-        (answeringDetail &&
-        state.lastQuestion?.expected === "free_text" &&
-        input.message.trim()
-          ? input.message.trim()
-          : null);
-      plan = {
-        ...plan,
-        task: "maintenance",
-        conversationalAct:
-          plan.conversationalAct === "cancel_task"
-            ? "cancel_task"
-            : "continue_task",
-        taskAction:
-          plan.taskAction === "cancel" ? "cancel" : "continue",
-        suppliedFields: {
-          ...(plan.suppliedFields ?? {}),
-          ...(detail ? { detail } : {}),
-        },
-        responseGoal: {
-          purpose: "ask_missing",
-          facts: (plan.responseGoal.facts ?? []).filter(
-            (f) =>
-              !/Dejamos pendiente|aclaraci[oó]n puntual|tr[aá]mite actual/i.test(
-                f,
-              ),
-          ),
-          nextQuestion: null,
-        },
-        requestedCapabilities: [
-          ...plan.requestedCapabilities.filter(
-            (c) =>
-              c.name !== "gps.get_status" &&
-              c.name !== "unit.search" &&
-              c.name !== "domain.answer" &&
-              c.name !== "certificate.prepare",
-          ),
-          ...(plan.requestedCapabilities.some(
-            (c) => c.name === "maintenance.prepare",
-          )
-            ? []
-            : [{ name: "maintenance.prepare", params: {} }]),
-        ],
-        reasoning:
-          (plan.reasoning ? `${plan.reasoning} ` : "") +
-          "Mid-mantenimiento: mantengo maintenance.prepare (no GPS).",
-      };
-    }
-  }
 
   // LLM a veces marca switch_task sin trámite previo → no debe pisar el prepare.
   if (
@@ -711,9 +446,6 @@ export async function runCommanderTurn(
     plan = { ...plan, task: "unit_query" };
   }
 
-  // Tras reinyectar unit.search: si era reapertura idle, preferir menú abierto.
-  plan = enrichPlanForOpenConsult(plan, state, input.message);
-
   // Trámites de escritura: si el LLM eligió el task, asegurar *.prepare
   const ensurePrepareFor = (
     task: "odometer" | "hourmeter" | "certificate",
@@ -750,44 +482,6 @@ export async function runCommanderTurn(
         { name: "gps.get_status", params: {} },
       ],
     };
-  }
-  // unit.search solo con flota cargada; si no, gps.get_status pide unidad sin "no_fleet".
-  if (
-    plan.task === "gps" &&
-    !state.unit &&
-    !plan.unitReference &&
-    state.fleetCache.length > 0 &&
-    !plan.requestedCapabilities.some(
-      (c) => c.name === "unit.search" || c.name === "unit.select",
-    )
-  ) {
-    plan = {
-      ...plan,
-      requestedCapabilities: [
-        ...plan.requestedCapabilities,
-        { name: "unit.search", params: {} },
-      ],
-    };
-    plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
-  }
-  // Con filtro ya en el mensaje/ref y flota: buscar (no listar todo).
-  // También con unidad activa: otra patente/código cierra el hilo anterior.
-  if (
-    plan.task === "gps" &&
-    isExplicitUnitReference(plan.unitReference) &&
-    state.fleetCache.length > 0 &&
-    !plan.requestedCapabilities.some(
-      (c) => c.name === "unit.search" || c.name === "unit.select",
-    )
-  ) {
-    plan = {
-      ...plan,
-      requestedCapabilities: [
-        ...plan.requestedCapabilities,
-        { name: "unit.search", params: {} },
-      ],
-    };
-    plan = enrichPlanForFleetSearchQuery(plan, state, input.message);
   }
 
   // Ensure company selected for ops if only one contact
@@ -1006,8 +700,6 @@ export async function runCommanderTurn(
     return { reply, state: applied.state, trace };
   }
 
-  // Último cinturón: post-enrich GPS/flota fantasma tras despedida → menú.
-  plan = enrichPlanForOpenConsult(plan, state, input.message);
   plan = enrichPlanStripBareFleetDump(plan);
 
   const exec = await executeCapabilities({
@@ -1152,107 +844,9 @@ function buildConflictClarify(errors: string[], state: ConversationStateV3): str
     return "Para el reporte GPS necesito la patente, el número de la lista o la marca/prefijo de la unidad.";
   }
   if (!state.activeTask) {
-    return "¿En qué te ayudo? Puedo con odómetro, certificado, GPS, o guías de la plataforma (Opciones / Unidades).";
+    return "¿Qué necesitás?";
   }
-  return "Necesito una aclaración puntual: ¿qué querés hacer exactamente con el trámite actual?";
-}
-
-/** Si el LLM falla pero el mensaje pide GPS con marca/patente, recuperar sin spam genérico. */
-function tryRecoverGpsPlan(
-  state: ConversationStateV3,
-  message: string,
-): TurnPlan | null {
-  const hint = extractFleetFilterHint(message, state);
-  const wantsGps =
-    state.activeTask?.type === "gps" ||
-    String(state.lastQuestion?.purpose ?? "").includes("gps") ||
-    /\b(reporte|gps|ubicaci[oó]n|estado)\b/i.test(message);
-  if (!wantsGps) return null;
-  if (!hint && state.unit) {
-    return {
-      reasoning: "Recupero GPS con unidad activa tras plan inválido.",
-      conversationalAct: "continue_task",
-      task: "gps",
-      taskAction: "continue",
-      requestedCapabilities: [{ name: "gps.get_status", params: {} }],
-      stateIntent: {
-        preserveCompany: true,
-        preserveUnit: true,
-        preserveTask: true,
-      },
-      responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
-      confidence: 0.85,
-    };
-  }
-  if (!hint) return null;
-  return {
-    reasoning: `Recupero GPS con filtro «${hint}» tras plan inválido.`,
-    conversationalAct: "continue_task",
-    task: "gps",
-    taskAction: "continue",
-    unitReference: {
-      kind: "unit",
-      mode: "named",
-      value: hint,
-      reference: null,
-    },
-    requestedCapabilities: [
-      { name: "unit.search", params: { query: hint, mode: "query" } },
-      { name: "gps.get_status", params: {} },
-    ],
-    stateIntent: {
-      preserveCompany: true,
-      preserveUnit: true,
-      preserveTask: true,
-    },
-    responseGoal: { purpose: "inform", facts: [], nextQuestion: null },
-    confidence: 0.85,
-  };
-}
-
-/** Si el LLM falla pero el mensaje pide odómetro/horómetro + unidad, arrancar trámite. */
-function tryRecoverMeterStartPlan(
-  state: ConversationStateV3,
-  message: string,
-): TurnPlan | null {
-  if (state.pendingWrite) return null;
-  if (
-    state.activeTask?.type === "odometer" ||
-    state.activeTask?.type === "hourmeter"
-  ) {
-    return null;
-  }
-  const t = message
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const meter: "odometer" | "hourmeter" | null = /\b(od[oó]metro|odometro|odo)\b/.test(
-    t,
-  )
-    ? "odometer"
-    : /\b(hor[oó]metro|horometro|horo)\b/.test(t)
-      ? "hourmeter"
-      : null;
-  if (!meter) return null;
-  const code = extractUnitNameCode(message);
-  const prep = meter === "hourmeter" ? "hourmeter.prepare" : "odometer.prepare";
-  return {
-    reasoning: `Recupero inicio de ${meter} tras plan inválido.`,
-    conversationalAct: "start_task",
-    task: meter,
-    taskAction: "start",
-    unitReference: code
-      ? { kind: "unit", mode: "unit_name", value: code, reference: null }
-      : null,
-    requestedCapabilities: [{ name: prep, params: {} }],
-    stateIntent: {
-      preserveCompany: true,
-      preserveUnit: true,
-      preserveTask: true,
-    },
-    responseGoal: { purpose: "ask_missing", facts: [], nextQuestion: null },
-    confidence: 0.9,
-  };
+  return "Necesito una aclaración puntual: ¿qué querés hacer?";
 }
 
 /** Stub + enrich de campo esperado cuando el TurnPlan LLM es null/inválido. */
