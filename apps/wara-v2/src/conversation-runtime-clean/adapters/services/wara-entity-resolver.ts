@@ -45,19 +45,30 @@ export class WaraEntityResolver implements EntityResolver {
   constructor(private readonly wara: GuardedWaraAdapter, private readonly allowedTenants: ReadonlySet<string>, private readonly channel: Readonly<{ phone?: string }> = {}) {}
   async resolve(requests: readonly ResolutionRequest[], state: ConversationStateClean): Promise<readonly ResolutionResult[]> {
     const results: ResolutionResult[] = [];
+    let resolutionState = state;
     for (const request of requests) {
-      const local = active(request, state); if (local) { results.push(local); continue; }
-      const listed = request.reference.type === "listing_index" && request.reference.index && state.lastListing?.kind === request.entityType
-        ? state.lastListing.items.find((item) => item.index === request.reference.index) : null;
+      const local = active(request, resolutionState); if (local) { results.push(local); continue; }
+      const listed = request.reference.type === "listing_index" && request.reference.index && resolutionState.lastListing?.kind === request.entityType
+        ? resolutionState.lastListing.items.find((item) => item.index === request.reference.index) : null;
       const effectiveReference = listed ? { ...request.reference, expression: listed.id, source: "last_presented" as const } : request.reference;
       const result = await this.wara.read<RemoteEntityData>({ capability: request.entityType === "company" ? "company.list" : "unit.search", tenant: { tenantId: state.tenantId, allowed: this.allowedTenants.has(state.tenantId) }, correlationId: request.id, authorized: true, query: { expression: effectiveReference.expression, source: effectiveReference.source,
         ...(effectiveReference.unitReferenceKind ? { referenceKind: effectiveReference.unitReferenceKind } : {}), ...(request.reference.index ? { index: request.reference.index } : {}),
-        ...(request.entityType === "unit" ? { patentes: [] } : {}), ...(state.company ? { companyId: state.company.id } : {}), ...(this.channel.phone ? { phone: this.channel.phone } : {}) } });
+        ...(request.entityType === "unit" ? { patentes: [] } : {}), ...(resolutionState.company ? { companyId: resolutionState.company.id } : {}), ...(this.channel.phone ? { phone: this.channel.phone } : {}) } });
       if (result.status === "success") {
         const items = request.entityType === "company"
           ? matchCompanies((result.data.companies ?? []).map(normalizeCompany).filter((item): item is CompanyState => Boolean(item)), effectiveReference.expression)
-          : matchUnitsByReference((result.data.units ?? result.data.unidades ?? []).map((item) => normalizeUnit(item, state.company?.id)).filter((item): item is UnitState => Boolean(item)), effectiveReference);
-        if (items.length === 1) results.push(request.entityType === "company" ? { requestId: request.id, status: "resolved", entity: { entityType: "company", company: items[0] as CompanyState }, facts: result.facts } : { requestId: request.id, status: "resolved", entity: { entityType: "unit", unit: items[0] as UnitState }, facts: result.facts });
+          : matchUnitsByReference((result.data.units ?? result.data.unidades ?? []).map((item) => normalizeUnit(item, resolutionState.company?.id)).filter((item): item is UnitState => Boolean(item)), effectiveReference);
+        if (items.length === 1) {
+          if (request.entityType === "company") {
+            const selected = items[0] as CompanyState;
+            results.push({ requestId: request.id, status: "resolved", entity: { entityType: "company", company: selected }, facts: [...result.facts, fact("COMPANY_RESOLVED", `Empresa ${selected.name} seleccionada.`)] });
+            resolutionState = { ...resolutionState, company: selected, unit: resolutionState.unit?.companyId === selected.id ? resolutionState.unit : null };
+          } else {
+            const selected = items[0] as UnitState;
+            results.push({ requestId: request.id, status: "resolved", entity: { entityType: "unit", unit: selected }, facts: [...result.facts, fact("UNIT_RESOLVED", `Unidad ${selected.label} seleccionada.`)] });
+            resolutionState = { ...resolutionState, unit: selected };
+          }
+        }
         else if (items.length > 1) results.push({ requestId: request.id, status: "ambiguous", candidates: items.map((item, index) => ({ index: index + 1, entityType: request.entityType, id: item.id, label: "name" in item ? item.name : item.label })), facts: result.facts });
         else results.push({ requestId: request.id, status: "not_found", facts: result.facts });
       } else if (result.status === "not_found") results.push({ requestId: request.id, status: "not_found", facts: result.facts });

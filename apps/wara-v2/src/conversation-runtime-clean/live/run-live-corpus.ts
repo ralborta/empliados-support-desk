@@ -8,13 +8,18 @@ import { CLEAN_LIVE_SYNTHETIC_CORPUS } from "./synthetic-corpus.js";
 import { cleanLiveMessageId } from "./corpus-identity.js";
 import { stableCleanId } from "../core/identity/stable-id.js";
 
-function stateFor(context: "previous_unit" | "without_previous_unit" | "expected_date" | "expected_unit" | "pending_hourmeter" | undefined) {
+function stateFor(context: "previous_unit" | "without_previous_unit" | "expected_date" | "expected_unit" | "expected_company" | "pending_hourmeter" | undefined) {
   const state = createEmptyCleanState({ tenantId: "clean-live-synthetic", conversationId: "clean-live-synthetic" });
   const company = { id: "synthetic-company", name: "Synthetic" };
   if (context === "previous_unit") return { ...state, company, unit: { id: "synthetic-current", label: "Current", companyId: company.id }, previousUnit: { id: "synthetic-previous", label: "Previous", companyId: company.id } };
   if (context === "expected_unit") {
     const task = { id: "synthetic-task-unit", type: "hourmeter" as const, status: "collecting" as const, collectedFields: {}, createdAt: "synthetic", updatedAt: "synthetic" };
     return { ...state, company, tasks: [task], focusedTaskId: task.id, expectedInput: { field: "unit" as const, taskId: task.id, purpose: "hourmeter_unit" } };
+  }
+  if (context === "expected_company") {
+    const unitReference = { type: "unit" as const, expression: "900113", source: "message" as const, unitReferenceKind: "internal_code" as const };
+    const task = { id: "synthetic-task-company", type: "gps" as const, status: "collecting" as const, collectedFields: { unitReference }, createdAt: "synthetic", updatedAt: "synthetic" };
+    return { ...state, tasks: [task], focusedTaskId: task.id, expectedInput: { field: "company" as const, taskId: task.id, purpose: "gps_company" } };
   }
   if (context === "expected_date") {
     const task = { id: "synthetic-task-date", type: "hourmeter" as const, status: "collecting" as const, collectedFields: { value: 98 }, createdAt: "synthetic", updatedAt: "synthetic" };

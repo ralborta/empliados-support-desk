@@ -103,7 +103,7 @@ export class CleanStateReducer implements StateReducer {
       }
     }
 
-    if (input.resolutions.some((result) => result.status === "resolved") && expectedInput?.field === "unit") expectedInput = null;
+    if (expectedInput && input.resolutions.some((result) => result.status === "resolved" && result.entity.entityType === expectedInput?.field)) expectedInput = null;
     if (pendingResolution) { expectedInput = null; pendingClarification = null; pendingOperation = null; }
     if (decision.responseIntent.expectedNextField && !pendingResolution) {
       expectedInput = { field: decision.responseIntent.expectedNextField, taskId: focusedTaskId, purpose: decision.responseIntent.purpose };

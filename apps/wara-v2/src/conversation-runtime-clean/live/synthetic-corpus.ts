@@ -1,8 +1,8 @@
 export type CleanLiveCase = Readonly<{
   id: string;
-  category: "interpretation" | "continuity" | "lateral" | "switch" | "correction" | "reference" | "naturalness" | "temporal" | "cancellation" | "unit_search" | "status";
+  category: "interpretation" | "continuity" | "lateral" | "switch" | "correction" | "reference" | "naturalness" | "temporal" | "cancellation" | "unit_search" | "status" | "company_selection";
   message: string;
-  context?: "previous_unit" | "without_previous_unit" | "expected_date" | "expected_unit" | "pending_hourmeter";
+  context?: "previous_unit" | "without_previous_unit" | "expected_date" | "expected_unit" | "expected_company" | "pending_hourmeter";
 }>;
 export const CLEAN_LIVE_SYNTHETIC_CORPUS: readonly CleanLiveCase[] = Object.freeze([
   { id: "interpret-odometer", category: "interpretation", message: "Quiero informar el kilometraje de una unidad." },
@@ -22,6 +22,7 @@ export const CLEAN_LIVE_SYNTHETIC_CORPUS: readonly CleanLiveCase[] = Object.free
   { id: "cancel-pending-hourmeter", category: "cancellation", message: "No quiero hacerlo, cancelalo.", context: "pending_hourmeter" },
   { id: "change-unit-pending-hourmeter", category: "correction", message: "Mejor hacelo para la unidad 900115.", context: "pending_hourmeter" },
   { id: "unit-code-report", category: "status", message: "Quiero el estado y la posición de la unidad 900115." },
+  { id: "company-answer", category: "company_selection", message: "El Cacique S.A.", context: "expected_company" },
   { id: "unit-code-expected", category: "unit_search", message: "900110", context: "expected_unit" },
   { id: "unit-brand-search", category: "unit_search", message: "Buscá las unidades marca Iveco." },
   { id: "unit-model-search", category: "unit_search", message: "Buscá las unidades modelo Tector." },

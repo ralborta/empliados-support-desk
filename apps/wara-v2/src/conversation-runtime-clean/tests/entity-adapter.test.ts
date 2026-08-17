@@ -105,3 +105,22 @@ test("real WARA resolver selects a typed company reference from a multi-company 
   const result = await resolver.resolve([request("company", { type: "company", expression: "logistica sur", source: "message" })], createEmptyCleanState({ tenantId: "t", conversationId: "c" }));
   assert.equal(result[0]?.status === "resolved" && result[0].entity.entityType === "company" && result[0].entity.company.id, "2");
 });
+
+test("real WARA resolver applies a company resolution before resolving the dependent unit", async () => {
+  const observedCompanyIds: unknown[] = [];
+  const config = loadCleanRuntimeConfig({ WARA_CLEAN_RUNTIME_ENABLED: "true", WARA_CLEAN_EXTERNAL_READS_ENABLED: "true" });
+  const wara = new GuardedWaraAdapter(new GuardedHttpTransport(config, async (input) => {
+    const body = input.body as Record<string, unknown>;
+    if (input.path === "/ObtenerContactosPorNumero") return { ok: true, data: { companies: [{ id: "131776", name: "El Cacique S.A." }] } };
+    observedCompanyIds.push(body.companyId);
+    return { ok: true, data: { unidades: [{ movil_id: 334, unidad: "900113", patente: "AA000AA" }] } };
+  }));
+  const resolver = new WaraEntityResolver(wara, new Set(["t"]));
+  const results = await resolver.resolve([
+    { id: "company-resolution", entityType: "company", reference: { type: "company", expression: "El Cacique", source: "message" }, scope: { tenantId: "t" } },
+    { id: "unit-resolution", entityType: "unit", reference: { type: "unit", expression: "900113", source: "message", unitReferenceKind: "internal_code" }, scope: { tenantId: "t" } },
+  ], createEmptyCleanState({ tenantId: "t", conversationId: "c" }));
+  assert.deepEqual(results.map((result) => result.status), ["resolved", "resolved"]);
+  assert.deepEqual(observedCompanyIds, ["131776"]);
+  assert.match(results.flatMap((result) => "facts" in result ? result.facts : []).map((item) => item.text).join(" "), /Empresa El Cacique S\.A\. seleccionada/);
+});

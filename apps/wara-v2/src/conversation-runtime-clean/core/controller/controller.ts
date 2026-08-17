@@ -1,6 +1,6 @@
 import type { Controller } from "../ports/ports.js";
 import type { DecisionAct, OperationRequest, ResolutionRequest, ResponseIntent, StateTransitionIntent, TaskIntent, TurnDecision } from "../types/decision.js";
-import type { ExpectedField, TaskType, TurnInterpretation } from "../types/interpretation.js";
+import type { EntityReference, ExpectedField, TaskType, TurnInterpretation } from "../types/interpretation.js";
 import type { ConversationStateClean } from "../types/state.js";
 import { cleanChildId, cleanDecisionId } from "../identity/stable-id.js";
 import { getCleanCapability, type CapabilityField } from "../authorization/capability-catalog.js";
@@ -10,8 +10,12 @@ function focusedTaskType(state: ConversationStateClean): TaskType | null {
 }
 
 function semanticTask(interpretation: TurnInterpretation, state: ConversationStateClean): TaskType | null {
+  const focused = focusedTaskType(state);
+  const answersCompanyDependency = state.expectedInput?.field === "company"
+    && interpretation.references.some((reference) => reference.type === "company" || reference.type === "listing_index");
+  if (focused && answersCompanyDependency) return focused;
   const domain = interpretation.intents.find((intent) => intent.domain !== "conversation")?.domain;
-  return domain && domain !== "conversation" ? domain : focusedTaskType(state);
+  return domain && domain !== "conversation" ? domain : focused;
 }
 
 function actFor(interpretation: TurnInterpretation, hasTask: boolean): DecisionAct {
@@ -41,12 +45,29 @@ function taskIntentFor(act: DecisionAct, task: TaskType | null): TaskIntent | nu
   return { type: task, action };
 }
 
+function storedUnitReference(state: ConversationStateClean): EntityReference | null {
+  const task = state.tasks.find((candidate) => candidate.id === state.focusedTaskId);
+  const value = task?.collectedFields.unitReference;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Partial<EntityReference>;
+  return candidate.type === "unit" && typeof candidate.expression === "string" && typeof candidate.source === "string"
+    ? candidate as EntityReference : null;
+}
+
+function entityType(reference: EntityReference, state: ConversationStateClean): "company" | "unit" | null {
+  if (reference.type === "company" || reference.type === "unit") return reference.type;
+  return reference.type === "listing_index" ? state.lastListing?.kind ?? null : null;
+}
+
 function resolutionRequests(decisionId: string, interpretation: TurnInterpretation, state: ConversationStateClean): ResolutionRequest[] {
-  return interpretation.references
-    .filter((reference) => reference.type === "company" || reference.type === "unit" || (reference.type === "listing_index" && state.lastListing))
+  const companyReferences = interpretation.references.filter((reference) => entityType(reference, state) === "company");
+  const canResolveUnit = Boolean(state.company || companyReferences.length);
+  const currentUnitReferences = canResolveUnit ? interpretation.references.filter((reference) => entityType(reference, state) === "unit") : [];
+  const deferredUnit = currentUnitReferences.length === 0 && canResolveUnit ? storedUnitReference(state) : null;
+  return [...companyReferences, ...currentUnitReferences, ...(deferredUnit ? [deferredUnit] : [])]
     .map((reference, index): ResolutionRequest => ({
       id: cleanChildId({ decisionId, kind: "resolution", discriminator: reference.type, ordinal: index }),
-      entityType: reference.type === "listing_index" ? state.lastListing!.kind : reference.type as "company" | "unit",
+      entityType: entityType(reference, state)!,
       reference,
       scope: { tenantId: state.tenantId, ...(state.company ? { companyId: state.company.id } : {}) },
     }));
@@ -61,6 +82,8 @@ function collectedArguments(interpretation: TurnInterpretation, state: Conversat
 }
 
 function fallbackServiceId(task: TaskType | null): string | null {
+  if (task === "gps") return "gps.get_status";
+  if (task === "unit_query") return "unit.search";
   if (task === "odometer") return "odometer.prepare";
   if (task === "hourmeter") return "hourmeter.prepare";
   if (task === "maintenance") return "maintenance.prepare";
@@ -69,6 +92,13 @@ function fallbackServiceId(task: TaskType | null): string | null {
 }
 
 function effectiveIntents(interpretation: TurnInterpretation, state: ConversationStateClean, task: TaskType | null) {
+  const answersCompanyDependency = state.expectedInput?.field === "company"
+    && interpretation.references.some((reference) => reference.type === "company" || reference.type === "listing_index");
+  if (answersCompanyDependency && task && task !== "company") {
+    const serviceId = fallbackServiceId(task);
+    const capability = serviceId ? getCleanCapability(serviceId) : null;
+    if (capability) return [{ serviceId: capability.name, domain: capability.task, goal: "continue after company resolution", operationKind: capability.kind, entities: {} }] as const;
+  }
   if (interpretation.intents.some((intent) => intent.domain !== "conversation")) return interpretation.intents;
   if ((interpretation.userAct === "confirmation" || interpretation.relation === "confirm") && state.pendingOperation && task) {
     const pending = state.pendingOperation;
@@ -85,8 +115,8 @@ function effectiveIntents(interpretation: TurnInterpretation, state: Conversatio
 }
 
 function fieldAvailable(field: CapabilityField, args: Readonly<Record<string, unknown>>, interpretation: TurnInterpretation, state: ConversationStateClean): boolean {
-  if (field === "company") return Boolean(state.company || interpretation.references.some((reference) => reference.type === "company"));
-  if (field === "unit") return Boolean(state.unit || interpretation.references.some((reference) => reference.type === "unit" || reference.type === "listing_index"));
+  if (field === "company") return Boolean(state.company || interpretation.references.some((reference) => entityType(reference, state) === "company"));
+  if (field === "unit") return Boolean(state.unit || storedUnitReference(state) || interpretation.references.some((reference) => reference.type === "unit" || reference.type === "listing_index"));
   if (field === "pendingOperation") return Boolean(state.pendingOperation);
   return args[field] !== undefined && args[field] !== null && args[field] !== "";
 }
@@ -112,6 +142,7 @@ function operationRequests(decisionId: string, interpretation: TurnInterpretatio
   const collected = collectedArguments(interpretation, state, task);
   return effectiveIntents(interpretation, state, task)
     .filter((intent): intent is typeof intent & { domain: TaskType } => intent.domain !== "conversation")
+    .filter((intent) => intent.serviceId !== "company.select" && intent.serviceId !== "unit.select")
     .filter((intent) => {
       const definition = getCleanCapability(intent.serviceId);
       const args = { ...collected, ...intent.entities };
@@ -154,6 +185,7 @@ function transitionFor(act: DecisionAct, task: TaskType | null, interpretation: 
   const switchTask = act === "switch_task";
   const correction = interpretation.userAct === "correction" || interpretation.corrections.length > 0;
   const supplied = compatibleSuppliedFields(task, interpretation, state);
+  const deferredUnitReference = !state.company ? interpretation.references.find((reference) => reference.type === "unit") : undefined;
   return {
     preserveCompany: true,
     preserveUnit: true,
@@ -165,6 +197,7 @@ function transitionFor(act: DecisionAct, task: TaskType | null, interpretation: 
     fieldUpdates: Object.fromEntries([
       ...supplied.map((field) => [field.field, field.value] as const),
       ...interpretation.corrections.map((field) => [field.field, field.value] as const),
+      ...(deferredUnitReference ? [["unitReference", deferredUnitReference] as const] : []),
     ]),
     ...(switchTask || act === "start_task" || act === "prepare_write" ? { nextFocusedTask: task } : {}),
   };

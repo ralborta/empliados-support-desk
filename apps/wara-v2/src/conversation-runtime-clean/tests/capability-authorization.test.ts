@@ -56,14 +56,14 @@ test("blocks unresolved dependencies", () => {
 });
 test("allows a valid prepare in simulation mode", () => {
   const request = operation({ capability: "odometer.prepare", kind: "write_prepare", task: "odometer", arguments: { value: 10, date: "2099-01-01", time: "10:00" } });
-  const result = authorizer.authorize({ decision: decision([request]), state: state({ unit: { id: "u", label: "U", companyId: "c" } }), resolutions: [] });
+  const result = authorizer.authorize({ decision: decision([request]), state: state({ company: { id: "c", name: "Company" }, unit: { id: "u", label: "U", companyId: "c" } }), resolutions: [] });
   assert.equal(result.outcome, "authorized");
   if (result.outcome === "authorized") assert.equal(result.operations[0]?.realWriteAllowed, false);
 });
-test("allows resolved unit to satisfy a same-turn requirement", () => {
+test("allows active company plus resolved unit to satisfy same-turn GPS requirements", () => {
   const request = operation({ capability: "gps.get_status", kind: "read", task: "gps", requiredResolutionIds: ["r"] });
   const resolutions = [{ requestId: "r", status: "resolved" as const, entity: { entityType: "unit" as const, unit: { id: "u", label: "U", companyId: "c" } }, facts: [] }];
-  const result = authorizer.authorize({ decision: decision([request]), state: state(), resolutions });
+  const result = authorizer.authorize({ decision: decision([request]), state: state({ company: { id: "c", name: "Company" } }), resolutions });
   assert.equal(result.outcome, "authorized");
   if (result.outcome === "authorized") {
     assert.equal(result.operations[0]?.arguments.unitId, "u");

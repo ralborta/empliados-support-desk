@@ -77,6 +77,40 @@ test("structured unit answer creates one resolution and selects verified result"
   assert.equal(result.responsePlan.facts.every((fact) => fact.verified), true);
 });
 
+test("company dependency preserves the typed unit and resolves company then unit before the GPS read", async () => {
+  const initial = createEmptyCleanState({ tenantId: "t", conversationId: "c" });
+  const statusRequest = interpretation({ intents: [{ serviceId: "gps.get_status", domain: "gps", goal: "status and last position", operationKind: "read", entities: {} }],
+    references: [{ type: "unit", expression: "900113", source: "message", unitReferenceKind: "internal_code" }] });
+  const firstRuntime = deps(initial, [statusRequest]);
+  const first = await processCleanTurn(turn("gps-before-company"), firstRuntime.value);
+  assert.equal(first.state.expectedInput?.field, "company");
+  assert.equal(first.state.tasks.find((candidate) => candidate.id === first.state.focusedTaskId)?.type, "gps");
+  assert.deepEqual(first.state.tasks.find((candidate) => candidate.id === first.state.focusedTaskId)?.collectedFields.unitReference,
+    { type: "unit", expression: "900113", source: "message", unitReferenceKind: "internal_code" });
+  assert.equal(first.trace.resolutionCount, 0);
+  assert.equal(first.trace.executionCount, 0);
+
+  const companyAnswer = interpretation({ userAct: "answer", relation: "answer_expected", answersExpectedField: true,
+    intents: [{ serviceId: "company.select", domain: "company", goal: "select company", operationKind: "read", entities: {} }],
+    references: [{ type: "company", expression: "El Cacique S.A.", source: "message" }] });
+  const decision = new CleanController().decide({ interpretation: companyAnswer, state: first.state, messageId: "company-answer" });
+  assert.deepEqual(decision.requiredResolutions.map((request) => request.entityType), ["company", "unit"]);
+  assert.deepEqual(decision.requestedOperations.map((operation) => operation.capability), ["gps.get_status"]);
+  const resolver = new FakeEntityResolver([
+    { requestId: decision.requiredResolutions[0]!.id, status: "resolved", entity: { entityType: "company", company: { id: "131776", name: "El Cacique S.A." } }, facts: [] },
+    { requestId: decision.requiredResolutions[1]!.id, status: "resolved", entity: { entityType: "unit", unit: { id: "900113", label: "900113", code: "900113", companyId: "131776" } }, facts: [] },
+  ]);
+  const secondRuntime = deps(first.state, [companyAnswer], resolver);
+  const second = await processCleanTurn(turn("company-answer"), secondRuntime.value);
+  assert.equal(second.state.company?.id, "131776");
+  assert.equal(second.state.unit?.code, "900113");
+  assert.equal(second.state.expectedInput, null);
+  assert.equal(second.trace.executionCount, 1);
+  assert.equal(secondRuntime.executor.received[0]?.capability, "gps.get_status");
+  assert.equal(second.trace.writeAttempt, false);
+  assert.equal(second.trace.writeExecuted, false);
+});
+
 test("lateral question preserves focused task and expected input", async () => {
   const active = task("hourmeter");
   const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
@@ -90,7 +124,7 @@ test("lateral question preserves focused task and expected input", async () => {
 
 test("answer_expected consumes every compatible typed field supplied by the Interpreter", async () => {
   const active = task("odometer");
-  const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), tasks: [active], focusedTaskId: active.id,
+  const state = { ...createEmptyCleanState({ tenantId: "t", conversationId: "c" }), company: { id: "co", name: "Company" }, tasks: [active], focusedTaskId: active.id,
     expectedInput: { field: "value" as const, taskId: active.id, purpose: "odometer_value" } };
   const d = deps(state, [interpretation({ userAct: "answer", relation: "answer_expected", answersExpectedField: true,
     suppliedFields: [{ field: "value", value: 1200 }, { field: "date", value: "2099-01-01" }] })]);
