@@ -50,3 +50,4 @@ export * from "./adapters/attachments/guarded-storage-adapter.js";
 export * from "./core/knowledge/contracts.js";
 export * from "./adapters/knowledge/versioned-knowledge-repository.js";
 export * from "./adapters/knowledge/validated-fixtures.js";
+export * from "./adapters/composer/facts-only-composer.js";
