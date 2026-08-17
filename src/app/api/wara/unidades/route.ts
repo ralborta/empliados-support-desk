@@ -10,7 +10,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, extractPlatePrefixFromMessage, extractPlateSuffixFromMessage, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, extractPlatePrefixFromMessage, extractPlateSuffixFromMessage, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, buildAnotherUnitConsultAskMessage, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
@@ -316,13 +316,7 @@ function extractLastPlateFromThreadCompat(text: string): string | null {
 
 /** El cliente habla de otra unidad distinta a la del hilo — no reutilizar patente anterior. */
 function looksLikeAnotherUnitRequest(rawText: string | undefined | null): boolean {
-  const norm = (rawText ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  return /\b(otra unidad|otro unidad|otro veh[ií]culo|otra patente|la otra unidad|segunda unidad|otra camioneta|tengo otra|otro m[oó]vil)\b/.test(
-    norm
-  );
+  return looksLikeAnotherUnitConsultRequest(rawText);
 }
 
 function mentionsMissingReportWithoutPlate(rawText: string | undefined | null): boolean {
@@ -1085,8 +1079,7 @@ export async function POST(req: NextRequest) {
     if (isConversationNotebookEnabled()) {
       await clearSessionNotebook(prisma, rawPhone);
     }
-    const message =
-      "Entendido. Pasame la patente o el nombre de la otra unidad (ej. M300-093 o NKL 961) y la consulto en Wara.";
+    const message = buildAnotherUnitConsultAskMessage();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_unidades_another_unit_consult",
       rawText,

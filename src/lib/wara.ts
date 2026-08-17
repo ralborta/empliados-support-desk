@@ -1955,6 +1955,13 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
  * Bug real, producción 2026-08-03: "Quiero consultar por otra unidad" matcheaba
  * looksLikeUnitRejection y el bot respondía "Entendido, no era esa" en vez de pedir la otra.
  */
+export function buildAnotherUnitConsultAskMessage(): string {
+  return (
+    "Entendido. ¿Cuál es la otra unidad? Pasame la patente, el código interno (ej. M900-093) " +
+    "o la marca/nombre (ej. Nissan, Saveiro) y la consulto en Wara."
+  );
+}
+
 export function looksLikeAnotherUnitConsultRequest(
   rawText: string | undefined | null,
 ): boolean {
@@ -1971,6 +1978,18 @@ export function looksLikeAnotherUnitConsultRequest(
   if (/\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm)) return false;
   if (/\b(es|era)\s+otra\b/.test(norm) && !/\b(consult\w*|quiero|ver|revis\w*)\b/.test(norm)) {
     return false;
+  }
+  if (
+    /^(quiero\s+)?(consultar\s+)?(por\s+)?(la\s+)?(otra|otro|otras|otros)\s+(unidad\w*|patente\w*|vehicul\w*|movil\w*|camionet\w*)\s*\.?$/.test(
+      norm,
+    ) ||
+    /^(ver|revisar|chequear|mirar)\s+(la\s+)?(otra|otro)\s+(unidad\w*|vehicul\w*|patente\w*)\s*\.?$/.test(
+      norm,
+    ) ||
+    /^(la\s+)?(otra|otro)\s+(unidad\w*|vehicul\w*|patente\w*|movil\w*)\s*\.?$/.test(norm) ||
+    /\bcambiar\s+(de\s+)?(unidad|patente|vehicul\w*)\b/.test(norm)
+  ) {
+    return true;
   }
   return (
     /\b(consult\w*|revis\w*|cheque\w*|mir\w*|ver|estado|posicion|ubicacion)\w*\b.{0,40}\b(otra|otras|otro|otros)\s+(unidad\w*|patente\w*|vehicul\w*|camionet\w*)\b/.test(
