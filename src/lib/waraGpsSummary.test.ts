@@ -54,9 +54,10 @@ describe("waraGpsSummary formato WhatsApp", () => {
       },
       action: "observation",
     });
-    assert.match(text, /El estado GPS de la unidad AG 228 NY \(M900-111\)/);
-    assert.match(text, /📍 \*Estado de la unidad\*/);
-    assert.match(text, /No genero ticket/);
+    assert.match(text, /El estado GPS de la unidad AG 228 NY es el siguiente:/);
+    assert.match(text, /📍 \*Estado GPS\*/);
+    assert.match(text, /¿Seguimos con el estado de la unidad o cambiamos de tema\?/);
+    assert.doesNotMatch(text, /No genero ticket/);
   });
 
   it("falta de reporte incluye caso Odoo cuando corresponde", () => {

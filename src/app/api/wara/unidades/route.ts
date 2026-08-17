@@ -46,7 +46,6 @@ import {
   type ExecutorDialogueState,
 } from "@/lib/executorDialogueState";
 import {
-  buildGpsAssessmentDialogueState,
   buildListenProblemDialogueState,
   buildNoEquipmentDialogueState,
 } from "@/lib/unitDialogueState";
@@ -54,7 +53,7 @@ import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalat
 import { findCustomerVisibleOdooCaseRef, withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
-import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
+import { buildGpsClientSummary, isStructuredGpsWhatsAppSummary } from "@/lib/waraGpsSummary";
 import {
   buildFleetUnitNotFoundMessage,
   buildUnitNameOrPlateClarificationReply,
@@ -1681,21 +1680,14 @@ export async function POST(req: NextRequest) {
             ticketIssueDetail,
           });
         }
-        if (isAtilioAgentEnabled()) {
-          dialogueState = buildGpsAssessmentDialogueState({
-            unit,
-            rawText,
-            assessment,
-            action,
-            ticketRef: ticketRef || undefined,
-            ticketReused,
-            ticketIssueDetail,
-            odooRef: ticketRef || undefined,
-          });
-        }
+        // El resumen GPS ya trae formato WhatsApp fijo (emojis, mapa, cierre).
+        // agent_compose lo reescribía en prosa sin emojis (WARA_AGENT_MODE).
+        dialogueState = null;
       }
     }
-    summaryText = appendLocationIfRequested(summaryText, unit, rawText);
+    if (!isStructuredGpsWhatsAppSummary(summaryText)) {
+      summaryText = appendLocationIfRequested(summaryText, unit, rawText);
+    }
   }
 
   if (!summaryText.trim() && looksLikeFleetUnitSearchInput(effectiveRawText)) {

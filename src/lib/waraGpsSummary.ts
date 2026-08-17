@@ -28,12 +28,18 @@ function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
 
+/** Patente formateada para intro (ej. AG 228 NY). */
+export function formatGpsPlateIntro(unit: WaraUnidadEstado): string {
+  const plateRaw = unit.patente?.trim() || "";
+  if (plateRaw) {
+    return formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw;
+  }
+  return unit.unidad?.trim() || "la unidad";
+}
+
 /** Etiqueta cliente: patente + código interno (ej. AG 228 NY (M900-111)). */
 export function formatGpsUnitLabel(unit: WaraUnidadEstado): string {
-  const plateRaw = unit.patente?.trim() || "";
-  const plate = plateRaw
-    ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw
-    : "";
+  const plate = formatGpsPlateIntro(unit);
   const nombre = unit.unidad?.trim() || "";
   if (plate && nombre && normalizeLoosePlate(plate) !== normalizeLoosePlate(nombre)) {
     return `${plate} (${nombre})`;
@@ -52,6 +58,10 @@ function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
 function mapsLine(unit: WaraUnidadEstado): string {
   const url = mapsLinkForUnit(unit);
   return url ? `🗺️ [Ver ubicación](${url})` : "🗺️ Sin coordenadas de última posición en WARA.";
+}
+
+function gpsClosingQuestion(): string {
+  return "¿Seguimos con el estado de la unidad o cambiamos de tema?";
 }
 
 function ignitionLine(unit: WaraUnidadEstado): string {
@@ -158,21 +168,24 @@ function buildTicketFooter(input: GpsSummaryInput): string {
 
 function buildTemplateSummary(input: GpsSummaryInput): string {
   const label = formatGpsUnitLabel(input.unit);
-  const intro = `El estado GPS de la unidad ${label} es el siguiente:`;
-  const header = ["📍 *Estado de la unidad*", `🚗 Unidad: *${label}*`].join("\n");
+  const plateIntro = formatGpsPlateIntro(input.unit);
+  const intro = `El estado GPS de la unidad ${plateIntro} es el siguiente:`;
+  const header = ["📍 *Estado GPS*", `🚗 Unidad: *${label}*`].join("\n");
   const body = buildStructuredGpsBody(input.unit, input.assessment);
   const parts = [intro, "", header, "", body];
 
   const ticketFooter = input.action === "ticket" ? buildTicketFooter(input) : "";
   if (ticketFooter) parts.push("", ticketFooter);
 
-  if (input.assessment.status === "ok" || input.assessment.status === "coherent_pause") {
-    if (input.action === "observation") {
-      parts.push("", "No genero ticket por este estado. Si algo cambia, volvé a consultar.");
-    }
-  }
+  parts.push("", gpsClosingQuestion());
 
   return parts.join("\n");
+}
+
+/** Respuesta GPS ya viene formateada para WhatsApp — no pasar por agent_compose. */
+export function isStructuredGpsWhatsAppSummary(text: string | undefined | null): boolean {
+  const t = String(text ?? "");
+  return t.includes("📍 *Estado GPS*") && t.includes("🚗 Unidad:");
 }
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {
