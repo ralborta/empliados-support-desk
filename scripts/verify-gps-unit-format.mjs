@@ -81,4 +81,20 @@ const byCode = filterUnitsByUnitName(fleet, "900-114");
 assert.equal(byCode.length, 1, "900-114 debe resolver M900-114");
 assert.equal(byCode[0]?.movil_id, 900114);
 
+const caciqueFleet = [
+  { movil_id: 42, unidad: "M900-085", patente: "AA815XE" },
+  { movil_id: 99, unidad: "M900-099", patente: "AA815XP" },
+];
+const byCaciqueCode = await resolveUnitQuery({
+  rawText: "Quiero el estado de la unidad 900085",
+  threadText: "",
+  units: caciqueFleet,
+  preferAi: false,
+});
+assert.equal(
+  byCaciqueCode.plate,
+  "AA815XE",
+  "900085 debe resolver M900-085 aunque movil_id de DB sea distinto",
+);
+
 console.log("verify-gps-unit-format: OK");
