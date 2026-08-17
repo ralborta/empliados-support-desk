@@ -28,6 +28,7 @@ const PUSH_SUITES = [
   "verify-odometer-defer-other-query.mjs",
   "verify-horometer-value-continuation.mjs",
   "verify-odometer-horometro-unida-900096.mjs",
+  "verify-tramite-cancel-resume.mjs",
   "verify-ai-first-dialogue.mjs",
   "verify-certificate-flow-continuity.mjs",
   "verify-certificate-not-greeting-loop.mjs",
