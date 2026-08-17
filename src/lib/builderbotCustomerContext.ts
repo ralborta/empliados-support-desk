@@ -10,6 +10,7 @@ import {
 import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadAwaitingHorometerKmValue, threadAwaitingOdometerKmValue, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection, hasPendingOdometerConfirmation } from "@/lib/wara";
 import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
 import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
+import { threadHasInconclusiveTramite } from "@/lib/tramiteFlowControl";
 import { clearActiveUnit } from "@/lib/activeUnit";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation, buildPendingConfirmationPoliteAckReply } from "@/lib/pendingConfirmation";
 import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
@@ -694,57 +695,19 @@ export async function customerRegisteredContextResponse(
     }
   } else if (looksLikeGreeting(selectionText)) {
     const threadForGreeting = scopedThreadText || fullThreadText;
-    const formalOdoConfirm = hasPendingOdometerConfirmation(threadForGreeting);
     const pendingActionRecord = await getPendingAction(prisma, trimmed);
-    const awaitingMeterValueOnly =
-      threadAwaitingHorometerKmValue(threadForGreeting) ||
-      threadAwaitingOdometerKmValue(threadForGreeting);
-    const staleOdoMidFlow =
-      !formalOdoConfirm &&
-      !awaitingMeterValueOnly &&
-      (pendingActionRecord?.type === "odometro" ||
-        threadHasActiveOdometerFlow(threadForGreeting));
-    if (staleOdoMidFlow) {
+    const inconclusive = threadHasInconclusiveTramite(threadForGreeting, pendingActionRecord);
+    // Saludo = arrancar de cero aunque haya trámite inconcluso (bug prod 2026-08-17).
+    if (inconclusive) {
       await clearPendingAction(prisma, trimmed);
-      nextFlow = "reply";
-      if (!responseMessage) {
-        responseMessage = buildAtilioStructuredGreeting({
-          threadText: threadForGreeting,
-          companyName: activeCompany,
-          repeatGreeting: true,
-        });
-      }
-    } else {
-    const pendingNow =
-      hasAnyPendingConfirmation(threadForGreeting) ||
-      !!pendingActionRecord?.payload ||
-      threadHasActiveOdometerFlow(threadForGreeting);
-    if (pendingNow) {
-      // Saludo mid-trámite con CONFIRMO u otro pending formal → router.
-      nextFlow = "router";
-      responseMessage = "";
-    } else {
+    }
     nextFlow = "reply";
     if (!responseMessage) {
-      const repeatGreeting = looksLikeRepeatGreetingInSession(
-        threadForGreeting,
-        selectionText,
-      );
-      if (repeatGreeting) {
-        responseMessage = buildAtilioStructuredGreeting({
-          threadText: threadForGreeting,
-          companyName: activeCompany,
-          pendingAction: pendingActionRecord,
-          repeatGreeting: true,
-        });
-      } else if (lastTicket && (lastKnownPlate || lastTicket.code)) {
-        responseMessage = buildAtilioStructuredGreeting({
-          threadText: threadForGreeting,
-          companyName: activeCompany,
-          pendingAction: pendingActionRecord,
-          repeatGreeting: true,
-        });
-      } else if (multiCompany && waraContactsText) {
+      const repeatGreeting =
+        inconclusive ||
+        looksLikeRepeatGreetingInSession(threadForGreeting, selectionText) ||
+        !!(lastTicket && (lastKnownPlate || lastTicket.code));
+      if (repeatGreeting && multiCompany && waraContactsText && !inconclusive) {
         responseMessage = buildAtilioStructuredGreeting({
           threadText: threadForGreeting,
           companyListBlock: waraContactsText,
@@ -753,11 +716,9 @@ export async function customerRegisteredContextResponse(
         responseMessage = buildAtilioStructuredGreeting({
           threadText: threadForGreeting,
           companyName: activeCompany,
-          pendingAction: pendingActionRecord,
+          repeatGreeting,
         });
       }
-    }
-    }
     }
   } else if (selectionText && looksLikeConversationClosing(selectionText)) {
     const pendingNow =

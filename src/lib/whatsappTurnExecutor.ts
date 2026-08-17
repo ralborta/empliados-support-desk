@@ -105,6 +105,14 @@ import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
+import {
+  looksLikeTramiteCancellationIntent,
+  threadHasInconclusiveTramite,
+  buildTramiteCancellationReply,
+  looksLikeResumeInconclusiveTramite,
+  buildInconclusiveTramiteResumePrompt,
+  resolveExecutorForInconclusiveTramite,
+} from "@/lib/tramiteFlowControl";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
@@ -295,6 +303,45 @@ export async function runTurnExecutorPhase(params: {
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
   const pendingAction = await getPendingAction(prisma, rawPhone);
   const thread = threadCtx.classificationThread;
+
+  // Cancelación explícita en cualquier servicio con trámite inconcluso.
+  if (looksLikeTramiteCancellationIntent(selectionText)) {
+    const inconclusive = threadHasInconclusiveTramite(thread, pendingAction);
+    const unitPickReject =
+      looksLikeUnitRejection(selectionText) && threadHasOdometerUnitClarificationPending(thread);
+    if (inconclusive && !unitPickReject) {
+      await clearPendingAction(prisma, rawPhone);
+      return {
+        message: buildTramiteCancellationReply(thread, pendingAction),
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+    if (
+      !inconclusive &&
+      /^(cancelar|cancela|cancelalo|cancelala|anular|salir)$/i.test(selectionText.trim())
+    ) {
+      return {
+        message: "No tenés ningún trámite pendiente. ¿En qué te ayudo?",
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+  }
+
+  // Retomar trámite inconcluso (sin CONFIRMO): preguntar antes de continuar.
+  if (
+    looksLikeResumeInconclusiveTramite(selectionText) &&
+    threadHasInconclusiveTramite(thread, pendingAction) &&
+    !detectPendingConfirmKind(thread)
+  ) {
+    const executor = resolveExecutorForInconclusiveTramite(thread, pendingAction);
+    return {
+      message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
+      executor,
+      ok: true,
+    };
+  }
 
   // CONFIRMO pendiente + "No"/rechazo: la IA razona (¿cancelar? ¿era consulta? ¿corregir unidad?).
   // Nunca asumir "no era esa patente" sin razonar el contexto del resumen.
