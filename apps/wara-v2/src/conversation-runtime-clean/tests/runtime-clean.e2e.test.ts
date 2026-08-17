@@ -17,9 +17,9 @@ it("executes the complete 39-capability multi-turn corpus with fakes and zero ex
 });
 it("resumes isolated state after repository reconstruction and deduplicates delivery", async () => {
   const repo = new InMemoryCleanPersistence(clock); const scope = { tenantId: "tenant-a", conversationId: "session-a" };
-  await repo.commitTurn({ ...scope, expectedVersion: 0, messageId: "m1", nextState: createEmptyCleanState(scope) });
+  await repo.commitTurn({ ...scope, expectedVersion: 0, messageId: "m1", replayResult: { reply: "one", traceId: "trace-one" }, nextState: createEmptyCleanState(scope) });
   const resumed = await repo.load(scope); assert.equal(resumed?.state.version, 1); assert.equal(resumed?.state.turnSequence, 1);
-  const duplicate = await repo.commitTurn({ ...scope, expectedVersion: 1, messageId: "m1", nextState: createEmptyCleanState(scope) }); assert.equal(duplicate.status, "duplicate");
+  const duplicate = await repo.commitTurn({ ...scope, expectedVersion: 1, messageId: "m1", replayResult: { reply: "different", traceId: "trace-different" }, nextState: createEmptyCleanState(scope) }); assert.equal(duplicate.status, "duplicate"); assert.equal(duplicate.replayResult.reply, "one");
   const outbox = new InMemoryTransactionalOutbox(new Set(["reply.v1"])); await outbox.append({ operationResult: {}, event: { id: "e", tenantId: "tenant-a", aggregateType: "conversation", aggregateId: "session-a", eventType: "reply", payloadHash: "h", idempotencyKey: "k", status: "pending", attempts: 0, nextAttemptAt: null }, payload: { schema: "reply.v1", values: {} } });
   let deliveries = 0; const worker = new GuardedOutboxWorker(loadCleanRuntimeConfig({}), outbox, { deliver: async () => { deliveries++; return { status: "delivered" }; } }, clock);
   assert.equal((await worker.dispatchOne("e")).status, "blocked"); assert.equal(deliveries, 0);

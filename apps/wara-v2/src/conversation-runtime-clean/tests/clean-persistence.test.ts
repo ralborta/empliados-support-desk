@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { InMemoryCleanPersistence } from "../adapters/persistence/in-memory-clean-persistence.js";
-import { CleanOptimisticConflictError, type Clock } from "../core/persistence/contracts.js";
+import { CleanOperationConflictError, CleanOptimisticConflictError, type Clock } from "../core/persistence/contracts.js";
 import { createEmptyCleanState } from "../core/types/state.js";
 
 const clock: Clock = { now: () => new Date("2026-08-17T12:00:00.000Z") };
 const scope = { tenantId: "tenant-a", conversationId: "conversation-a" };
 
 function commitInput(messageId: string, expectedVersion = 0) {
-  return { ...scope, messageId, expectedVersion, nextState: createEmptyCleanState(scope) };
+  return { ...scope, messageId, expectedVersion, replayResult: { reply: `reply-${messageId}`, traceId: `trace-${messageId}` }, nextState: createEmptyCleanState(scope) };
 }
 
 describe("Clean persistence", () => {
@@ -18,7 +18,14 @@ describe("Clean persistence", () => {
     assert.equal(first.record.version, 1); assert.equal(first.record.turnSequence, 1);
     const duplicate = await repo.commitTurn(commitInput("m1", 1));
     assert.equal(duplicate.status, "duplicate"); assert.equal(duplicate.record.version, 1);
+    assert.deepEqual(duplicate.replayResult, { reply: "reply-m1", traceId: "trace-m1" });
     assert.equal((await repo.load(scope))?.state.state.metadata.runtime, "clean");
+  });
+
+  it("rejects tenant-global message reuse in another conversation", async () => {
+    const repo = new InMemoryCleanPersistence(clock); await repo.commitTurn(commitInput("global-message"));
+    const other = { tenantId: scope.tenantId, conversationId: "conversation-b" };
+    await assert.rejects(repo.commitTurn({ ...other, messageId: "global-message", expectedVersion: 0, replayResult: { reply: "other", traceId: "other" }, nextState: createEmptyCleanState(other) }), CleanOperationConflictError);
   });
 
   it("enforces optimistic concurrency", async () => {

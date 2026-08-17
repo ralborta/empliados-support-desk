@@ -2,6 +2,7 @@ import type { Controller } from "../ports/ports.js";
 import type { DecisionAct, OperationRequest, ResolutionRequest, ResponseIntent, StateTransitionIntent, TaskIntent, TurnDecision } from "../types/decision.js";
 import type { TaskType, TurnInterpretation } from "../types/interpretation.js";
 import type { ConversationStateClean } from "../types/state.js";
+import { cleanChildId, cleanDecisionId } from "../identity/stable-id.js";
 
 function focusedTaskType(state: ConversationStateClean): TaskType | null {
   return state.tasks.find((task) => task.id === state.focusedTaskId)?.type ?? null;
@@ -39,22 +40,22 @@ function taskIntentFor(act: DecisionAct, task: TaskType | null): TaskIntent | nu
   return { type: task, action };
 }
 
-function resolutionRequests(interpretation: TurnInterpretation, state: ConversationStateClean): ResolutionRequest[] {
+function resolutionRequests(decisionId: string, interpretation: TurnInterpretation, state: ConversationStateClean): ResolutionRequest[] {
   return interpretation.references
     .filter((reference) => reference.type === "company" || reference.type === "unit" || (reference.type === "listing_index" && state.lastListing))
     .map((reference, index): ResolutionRequest => ({
-      id: `resolution-${index}`,
+      id: cleanChildId({ decisionId, kind: "resolution", discriminator: reference.type, ordinal: index }),
       entityType: reference.type === "listing_index" ? state.lastListing!.kind : reference.type as "company" | "unit",
       reference,
       scope: { tenantId: state.tenantId, ...(state.company ? { companyId: state.company.id } : {}) },
     }));
 }
 
-function operationRequests(interpretation: TurnInterpretation, resolutions: readonly ResolutionRequest[]): OperationRequest[] {
+function operationRequests(decisionId: string, interpretation: TurnInterpretation, resolutions: readonly ResolutionRequest[]): OperationRequest[] {
   return interpretation.intents
     .filter((intent): intent is typeof intent & { domain: TaskType } => intent.domain !== "conversation")
     .map((intent, index) => ({
-      id: `operation-${index}`,
+      id: cleanChildId({ decisionId, kind: "operation", discriminator: intent.serviceId, ordinal: index }),
       capability: intent.serviceId,
       kind: intent.operationKind,
       task: intent.domain,
@@ -95,16 +96,17 @@ function responseFor(act: DecisionAct, interpretation: TurnInterpretation, state
 }
 
 export class CleanController implements Controller {
-  decide(input: { interpretation: TurnInterpretation; state: ConversationStateClean }): TurnDecision {
+  decide(input: { interpretation: TurnInterpretation; state: ConversationStateClean; messageId: string }): TurnDecision {
+    const id = cleanDecisionId({ tenantId: input.state.tenantId, conversationId: input.state.conversationId, messageId: input.messageId });
     const task = semanticTask(input.interpretation, input.state);
     const act = actFor(input.interpretation, Boolean(focusedTaskType(input.state)));
-    const resolutions = resolutionRequests(input.interpretation, input.state);
+    const resolutions = resolutionRequests(id, input.interpretation, input.state);
     return {
-      id: "decision-0",
+      id,
       act,
       relation: input.interpretation.relation,
       taskIntent: taskIntentFor(act, task),
-      requestedOperations: operationRequests(input.interpretation, resolutions),
+      requestedOperations: operationRequests(id, input.interpretation, resolutions),
       requiredResolutions: resolutions,
       stateTransition: transitionFor(act, task, input.interpretation, input.state),
       responseIntent: responseFor(act, input.interpretation, input.state),

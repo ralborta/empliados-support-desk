@@ -4,6 +4,7 @@ import type { OperationExecutionResult } from "../types/operation.js";
 import type { PolicyResult } from "../types/policy.js";
 import type { ResolutionResult } from "../types/resolution.js";
 import type { ConversationStateClean, ListingState, TaskState } from "../types/state.js";
+import { cleanChildId } from "../identity/stable-id.js";
 
 function nowFor(decision: TurnDecision): string {
   return `clean:${decision.id}`;
@@ -33,7 +34,7 @@ function ensureTask(state: ConversationStateClean, decision: TurnDecision): { ta
       ? updateTask(state.tasks, current.id, { status: "paused", updatedAt: nowFor(decision) }) : [...state.tasks];
     const existing = paused.find((task) => task.type === intent.type && task.status === "paused");
     if (existing) return { tasks: updateTask(paused, existing.id, { status: "collecting", updatedAt: nowFor(decision) }), focusedTaskId: existing.id };
-    const task: TaskState = { id: `task-${decision.id}`, type: intent.type, status: "collecting", collectedFields: {}, createdAt: nowFor(decision), updatedAt: nowFor(decision) };
+    const task: TaskState = { id: cleanChildId({ decisionId: decision.id, kind: "task", discriminator: intent.type, ordinal: 0 }), type: intent.type, status: "collecting", collectedFields: {}, createdAt: nowFor(decision), updatedAt: nowFor(decision) };
     return { tasks: [...paused, task], focusedTaskId: task.id };
   }
   return { tasks: [...state.tasks], focusedTaskId: state.focusedTaskId };

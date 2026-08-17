@@ -2,6 +2,8 @@ export * from "./core/types/interpretation.js";
 export * from "./core/types/decision.js";
 export * from "./core/types/policy.js";
 export * from "./core/types/state.js";
+export * from "./core/identity/stable-id.js";
+export * from "./core/errors/runtime-errors.js";
 export * from "./core/types/resolution.js";
 export * from "./core/types/operation.js";
 export * from "./core/types/response.js";

@@ -43,6 +43,11 @@ test("unit resolves active and previous only from structured source", async () =
   assert.equal(active.status === "resolved" && active.entity.entityType === "unit" && active.entity.unit.id, "u-1");
   assert.equal(previous.status === "resolved" && previous.entity.entityType === "unit" && previous.entity.unit.id, "u-2");
 });
+test("previous unit without structured context is not invented", async () => {
+  const result = await resolve("unit", { type: "unit", expression: "", source: "previous" });
+  assert.equal(result.status, "not_found");
+  assert.equal("entity" in result, false);
+});
 test("unit distinguishes not_found and ambiguous", async () => {
   assert.equal((await resolve("unit", { type: "unit", expression: "ZZ999999", source: "explicit" })).status, "not_found");
   assert.equal((await resolve("unit", { type: "unit", expression: "Camión", source: "explicit" })).status, "ambiguous");

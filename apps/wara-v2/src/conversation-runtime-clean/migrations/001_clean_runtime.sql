@@ -7,8 +7,9 @@ create table if not exists __CLEAN_SCHEMA__.conversation_state (
 );
 create table if not exists __CLEAN_SCHEMA__.dedupe_message (
   tenant_id text not null, message_id text not null, conversation_id text not null,
-  turn_sequence bigint not null, created_at timestamptz not null, primary key (tenant_id, message_id)
+  turn_sequence bigint not null, replay_result jsonb, created_at timestamptz not null, primary key (tenant_id, message_id)
 );
+alter table __CLEAN_SCHEMA__.dedupe_message add column if not exists replay_result jsonb;
 create table if not exists __CLEAN_SCHEMA__.task_state (
   tenant_id text not null, conversation_id text not null, task_id text not null, task jsonb not null,
   primary key (tenant_id, conversation_id, task_id)
@@ -83,18 +84,24 @@ declare
   v_current bigint; v_turn bigint; v_now timestamptz := clock_timestamp();
   v_state jsonb := p_input->'nextState'; v_pending jsonb := p_input->'nextState'->'pendingOperation';
   v_listing jsonb := p_input->'nextState'->'lastListing'; v_outbox jsonb := p_input->'outbox';
-  v_trace jsonb := p_input->'trace'; v_item jsonb;
+  v_trace jsonb := p_input->'trace'; v_replay jsonb := p_input->'replayResult'; v_item jsonb;
+  v_dedupe_conversation text; v_prior_replay jsonb;
 begin
-  if v_tenant is null or v_conversation is null or v_message is null or v_expected is null or v_expected < 0 or v_state is null then
+  if v_tenant is null or v_conversation is null or v_message is null or v_expected is null or v_expected < 0 or v_state is null or v_replay is null then
     raise exception using errcode = 'CR002', message = 'clean_invalid_commit_input';
   end if;
   if v_state->>'tenantId' is distinct from v_tenant or v_state->>'conversationId' is distinct from v_conversation then
     raise exception using errcode = 'CR002', message = 'clean_scope_mismatch';
   end if;
   perform pg_advisory_xact_lock(hashtextextended(length(v_tenant)::text || ':' || v_tenant || v_conversation, 0));
-  if exists (select 1 from __CLEAN_SCHEMA__.dedupe_message dm
-    where dm.tenant_id = v_tenant and dm.message_id = v_message) then
-    status := 'duplicate'; snapshot := __CLEAN_SCHEMA__.load_snapshot(v_tenant, v_conversation);
+  select dm.conversation_id, dm.replay_result into v_dedupe_conversation, v_prior_replay
+    from __CLEAN_SCHEMA__.dedupe_message dm where dm.tenant_id = v_tenant and dm.message_id = v_message;
+  if found then
+    if v_dedupe_conversation is distinct from v_conversation then
+      raise exception using errcode = 'CR003', message = 'clean_message_conversation_conflict';
+    end if;
+    status := 'duplicate'; snapshot := __CLEAN_SCHEMA__.load_snapshot(v_tenant, v_conversation)
+      || jsonb_build_object('replayResult', coalesce(v_prior_replay, jsonb_build_object('reply', '', 'traceId', null)));
     return next; return;
   end if;
   select cs.version into v_current from __CLEAN_SCHEMA__.conversation_state cs
@@ -106,8 +113,8 @@ begin
   v_turn := coalesce((select cs.turn_sequence + 1 from __CLEAN_SCHEMA__.conversation_state cs
     where cs.tenant_id = v_tenant and cs.conversation_id = v_conversation), 1);
   insert into __CLEAN_SCHEMA__.dedupe_message
-    (tenant_id, message_id, conversation_id, turn_sequence, created_at)
-    values (v_tenant, v_message, v_conversation, v_turn, v_now);
+    (tenant_id, message_id, conversation_id, turn_sequence, replay_result, created_at)
+    values (v_tenant, v_message, v_conversation, v_turn, v_replay, v_now);
   insert into __CLEAN_SCHEMA__.conversation_state
     (tenant_id, conversation_id, version, turn_sequence, schema_version, state, updated_at)
     values (v_tenant, v_conversation, v_current + 1, v_turn, v_state->'metadata'->>'schemaVersion', v_state, v_now)
@@ -163,6 +170,7 @@ begin
       values (v_trace->>'traceId', v_tenant, v_conversation, v_message, v_turn,
         v_trace->>'runtimeVersion', nullif(v_trace->>'errorCode', ''), (v_trace->>'createdAt')::timestamptz);
   end if;
-  status := 'committed'; snapshot := __CLEAN_SCHEMA__.load_snapshot(v_tenant, v_conversation); return next;
+  status := 'committed'; snapshot := __CLEAN_SCHEMA__.load_snapshot(v_tenant, v_conversation)
+    || jsonb_build_object('replayResult', v_replay); return next;
 end;
 $clean$;

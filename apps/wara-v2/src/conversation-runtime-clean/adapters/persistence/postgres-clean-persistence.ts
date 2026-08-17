@@ -1,5 +1,5 @@
 import type { CleanAtomicTurnCommit, CleanCommitResult, CleanPersistenceRepository, CleanPersistenceSnapshot } from "../../core/persistence/contracts.js";
-import { CleanOptimisticConflictError } from "../../core/persistence/contracts.js";
+import { CleanOperationConflictError, CleanOptimisticConflictError, CleanPersistenceInputError, CleanPersistenceUnavailableError } from "../../core/persistence/contracts.js";
 import { isValidCleanNamespace } from "../../config/clean-config.js";
 
 export interface SqlTransaction {
@@ -10,9 +10,6 @@ export interface SqlClient extends SqlTransaction {
   healthCheck(): Promise<boolean>;
   close(): Promise<void>;
 }
-export class CleanPersistenceInputError extends Error { constructor() { super("CLEAN_PERSISTENCE_INVALID_INPUT"); } }
-export class CleanPersistenceUnavailableError extends Error { constructor(cause?: unknown) { super("CLEAN_PERSISTENCE_UNAVAILABLE", { cause }); } }
-
 function schemaName(namespace: string): string {
   if (!isValidCleanNamespace(namespace)) throw new Error("CLEAN_PERSISTENCE_UNSAFE_NAMESPACE");
   return namespace;
@@ -30,13 +27,26 @@ export class PostgresCleanPersistence implements CleanPersistenceRepository {
       return result.rows[0]?.snapshot ?? null;
     } catch (error) { throw this.mapError(error); }
   }
+  async findReplay(input: { tenantId: string; conversationId: string; messageId: string }) {
+    try {
+      const result = await this.sql.query<{ conversation_id: string; replay_result: CleanCommitResult["replayResult"] | null; snapshot: CleanPersistenceSnapshot | null }>(
+        `select dm.conversation_id, dm.replay_result, ${this.schema}.load_snapshot(dm.tenant_id, dm.conversation_id) as snapshot from ${this.schema}.dedupe_message dm where dm.tenant_id=$1 and dm.message_id=$2`,
+        [input.tenantId, input.messageId],
+      );
+      const row = result.rows[0]; if (!row) return null;
+      if (row.conversation_id !== input.conversationId) throw new CleanOperationConflictError();
+      if (!row.snapshot?.state || !row.replay_result) throw new CleanPersistenceUnavailableError();
+      return { record: row.snapshot.state, replayResult: row.replay_result };
+    } catch (error) { throw this.mapError(error); }
+  }
   async commitTurn(input: CleanAtomicTurnCommit): Promise<CleanCommitResult> {
     try {
       return await this.sql.transaction(async (tx) => {
-        const result = await tx.query<{ status: "committed" | "duplicate"; snapshot: CleanPersistenceSnapshot }>(`select status, snapshot from ${this.schema}.commit_turn($1::jsonb)`, [JSON.stringify(input)]);
+        const result = await tx.query<{ status: "committed" | "duplicate"; snapshot: CleanPersistenceSnapshot & { replayResult?: CleanCommitResult["replayResult"] } }>(`select status, snapshot from ${this.schema}.commit_turn($1::jsonb)`, [JSON.stringify(input)]);
         const row = result.rows[0];
         if (!row?.snapshot?.state) throw new CleanPersistenceUnavailableError();
-        return { status: row.status, record: row.snapshot.state };
+        if (!row.snapshot.replayResult) throw new CleanPersistenceUnavailableError();
+        return { status: row.status, record: row.snapshot.state, replayResult: row.snapshot.replayResult };
       });
     } catch (error) { throw this.mapError(error); }
   }
@@ -46,7 +56,8 @@ export class PostgresCleanPersistence implements CleanPersistenceRepository {
     const code = errorCode(error);
     if (code === "CR001") return new CleanOptimisticConflictError();
     if (code === "CR002") return new CleanPersistenceInputError();
-    if (error instanceof CleanOptimisticConflictError || error instanceof CleanPersistenceInputError || error instanceof CleanPersistenceUnavailableError) return error;
+    if (code === "CR003") return new CleanOperationConflictError();
+    if (error instanceof CleanOptimisticConflictError || error instanceof CleanOperationConflictError || error instanceof CleanPersistenceInputError || error instanceof CleanPersistenceUnavailableError) return error;
     return new CleanPersistenceUnavailableError(error);
   }
 }

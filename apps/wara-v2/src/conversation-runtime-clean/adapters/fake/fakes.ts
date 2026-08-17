@@ -64,5 +64,8 @@ export class FakeCapabilityExecutor implements CapabilityExecutor {
 
 export class InMemoryConversationStore implements ConversationStore {
   public saved: ConversationStateClean[] = [];
-  async save(state: ConversationStateClean): Promise<void> { this.saved.push(state); }
+  async findReplay() { return null; }
+  async save(state: ConversationStateClean, context: { messageId: string; reply: string; traceId: string | null }) {
+    this.saved.push(state); return { status: "committed" as const, state, reply: context.reply, traceId: context.traceId };
+  }
 }
