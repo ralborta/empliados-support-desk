@@ -98,18 +98,50 @@ export type WaraCustomerResolution = {
  * Formato de la env: lista separada por comas. Aceptamos cualquier formato (con/sin "+",
  * con/sin "9", con/sin código país); se normaliza igual que `normalizeWhatsAppPhone`.
  *   WARA_TEST_ALLOWED_PHONES="+5492613867127, 5492612478856"
- * Vacío o no seteado => modo abierto (producción real).
+ *
+ * Modo abierto (producción — todos los números): vacío, o sentinelas
+ * `disabled`, `off`, `false`, `open`, `all`, `*`.
  */
+const TEST_WHITELIST_DISABLED_SENTINELS = new Set([
+  "disabled",
+  "off",
+  "false",
+  "no",
+  "none",
+  "open",
+  "all",
+  "*",
+  "0",
+]);
+
+function isTestWhitelistEnvOpen(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return true;
+  const tokens = trimmed
+    .split(/[,;\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) return true;
+  if (tokens.length === 1 && TEST_WHITELIST_DISABLED_SENTINELS.has(tokens[0])) {
+    return true;
+  }
+  return false;
+}
+
 function testPhoneWhitelist(): Set<string> {
   if (/apps\.visionblo\.com/i.test(waraApiBaseUrl())) return new Set();
   const raw = process.env.WARA_TEST_ALLOWED_PHONES?.trim() || "";
-  if (!raw) return new Set();
+  if (isTestWhitelistEnvOpen(raw)) return new Set();
   return new Set(
     raw
       .split(/[,;\s]+/)
       .map((s) => normalizeWhatsAppPhone(s))
       .filter((s) => s.length >= 8)
   );
+}
+
+export function isTestWhitelistOpenMode(): boolean {
+  return !isTestWhitelistEnabled();
 }
 
 export function isTestWhitelistEnabled(): boolean {
@@ -680,9 +712,16 @@ export function looksLikeConversationAcknowledgement(text: string | undefined | 
   ) {
     return true;
   }
-  return /^(ok|listo|perfecto|genial|buenisimo|buenisima|dale gracias|tks|ty|thx|thanks)[\s!.,¡¿]*$/.test(
+  return /^(ok|listo|perfecto|genial|joya|barbaro|obvio|claro|exacto|buenisimo|buenisima|dale gracias|tks|ty|thx|thanks)[\s!.,¡¿]*$/.test(
     t,
   );
+}
+
+/**
+ * Coloquial rioplatense de cierre/agradecimiento — alias explícito para callers del executor.
+ */
+export function looksLikeColloquialGratitudeAck(text: string | undefined | null): boolean {
+  return looksLikeConversationAcknowledgement(text);
 }
 
 /**
@@ -1784,6 +1823,12 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
   const norm = normCompanyToken(text ?? "");
   if (!norm || norm.length > 160) return false;
   if (looksLikeHumanAdvisorRequest(text)) return false;
+
+  const compact = norm.replace(/\s+/g, " ").trim();
+  if (/^(porfa|porfavor|porfis)\s*,?\s*(ayudame|ayud[aá]me)\s*[!.?]*$/.test(compact)) return true;
+  if (/^(ayudame|ayud[aá]me|me ayudas|me ayud[aá]s)(\s+(porfa|porfavor|porfis))?\s*[!.?]*$/.test(compact)) {
+    return true;
+  }
 
   if (/\b(por que|porque|por qué)\s+me\s+deriv/.test(norm)) return true;
   if (/\bno\s+me\s+(deriv|pases|pase)\b/.test(norm)) return true;

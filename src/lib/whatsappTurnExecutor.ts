@@ -44,6 +44,8 @@ import {
   resetCustomerCompanyMenu,
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
+  looksLikeColloquialGratitudeAck,
+  looksLikeConversationAcknowledgement,
 } from "@/lib/waraApi";
 import {
   detectPendingConfirmKind,
@@ -85,6 +87,8 @@ import {
   looksLikeBareNegativeResponse,
   looksLikeAnotherUnitConsultRequest,
   threadHasRecentCustomerMeterUpdateIntent,
+  threadHasRecentCertificateSuccess,
+  threadHasRecentMaintenanceSuccess,
 } from "@/lib/wara";
 import {
   getActiveUnit,
@@ -302,6 +306,27 @@ export async function runTurnExecutorPhase(params: {
     return { message: reset.message, executor: "unidades", ok: true };
   }
 
+  const { resolveCustomerByWaraPhone } = await import("@/lib/waraApi");
+  const waraResolution = await resolveCustomerByWaraPhone(prisma, rawPhone);
+  if (!waraResolution.registered && !waraResolution.testBlocked) {
+    const {
+      ensureUnregisteredPhoneAdvisorHandoff,
+      UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+      UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+    } = await import("@/lib/unregisteredPhoneHandoff");
+    const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, rawPhone, {
+      messageText: selectionText || undefined,
+      source: "turn_executor",
+    });
+    return {
+      message: handoff.shouldNotifyCustomer
+        ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
+        : UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+      executor: "odoo_ticket",
+      ok: true,
+    };
+  }
+
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
   const pendingAction = await getPendingAction(prisma, rawPhone);
   const thread = threadCtx.classificationThread;
@@ -348,6 +373,22 @@ export async function runTurnExecutorPhase(params: {
   // CONFIRMO pendiente + "No"/rechazo: la IA razona (¿cancelar? ¿era consulta? ¿corregir unidad?).
   // Nunca asumir "no era esa patente" sin razonar el contexto del resumen.
   const pendingKind = detectPendingConfirmKind(thread);
+
+  // Trámite ya cerrado + "Genial"/"joya"/"gracias" → cierre social, no reabrir CONFIRMO.
+  if (
+    (looksLikeConversationAcknowledgement(selectionText) ||
+      looksLikeColloquialGratitudeAck(selectionText)) &&
+    (threadHasRecentCertificateSuccess(thread) ||
+      threadHasRecentMaintenanceSuccess(thread) ||
+      threadOdometerRegistrationCompleted(thread))
+  ) {
+    return {
+      message: "De nada. ¿En qué más te ayudo?",
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
   // Consulta lateral ya respondida: "ah entiendo" / "continuamos porfa" debe retomar
   // el CONFIRMO, no silenciar ni registrar como si hubiera dicho CONFIRMO.
   if (

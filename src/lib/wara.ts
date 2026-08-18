@@ -2156,6 +2156,7 @@ export function isCertificateFlowSuperseded(threadText: string): boolean {
   const markers = [
     lower.lastIndexOf("para el certificado de cobertura necesito la unidad"),
     lower.lastIndexOf("voy a generar el certificado de cobertura"),
+    lower.lastIndexOf("confirmar certificado"),
   ].filter((i) => i >= 0);
   if (markers.length === 0) return false;
   const cutIdx = Math.max(...markers);
@@ -2186,9 +2187,24 @@ export function isCertificateFlowSuperseded(threadText: string): boolean {
   );
 }
 
+/** Certificado ya emitido en el hilo reciente — no reabrir CONFIRMO pendiente. */
+export function threadHasRecentCertificateSuccess(threadText: string): boolean {
+  const tail = normThreadText(threadText.slice(-6000));
+  return /(?:perfecto,? )?genere el certificado de cobertura/.test(tail);
+}
+
+/** Mantenimiento ya registrado en el hilo reciente. */
+export function threadHasRecentMaintenanceSuccess(threadText: string): boolean {
+  const tail = normThreadText(threadText.slice(-6000));
+  return /deje registrada|mantenimiento registrado|registro registrado|listo,? registre el mantenimiento/.test(
+    tail,
+  );
+}
+
 /** Estado del trámite de certificado según mensajes recientes del hilo. */
 export function certificateFlowState(threadText: string): CertificateFlowState {
   if (isCertificateFlowSuperseded(threadText)) return "none";
+  if (threadHasRecentCertificateSuccess(threadText)) return "none";
   const lines = threadText
     .split("\n")
     .map((l) => l.trim())
@@ -2209,7 +2225,7 @@ export function certificateFlowState(threadText: string): CertificateFlowState {
   // El resumen del bot es multilínea (Patente / Empresa / CONFIRMO en líneas distintas).
   if (
     (/voy a generar el certificado de cobertura|confirmar certificado/.test(tail) &&
-      /respond[eé]\s+\*?confirmo/.test(tail)) ||
+      /respond[eé]\s+\**confirmo/.test(tail)) ||
     (/voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail))
   ) {
     return "awaiting_confirm";

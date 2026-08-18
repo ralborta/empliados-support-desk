@@ -9,59 +9,44 @@ import {
 import { allocateTicketCode } from "@/lib/tickets";
 import { resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 
-/** Asunto visible en el panel para números que Wara no reconoce. */
-export const UNREGISTERED_PHONE_TICKET_TITLE = "Número no registrado en Wara";
+/** Cliente registrado pide asesor — primera derivación al panel. */
+export const REGISTERED_ADVISOR_HANDOFF_REPLY =
+  "Listo, derivé tu consulta a un asesor de Atención al Cliente. Te van a escribir por este medio a la brevedad.";
 
-/** Primer aviso al cliente cuando el número no está en Wara. */
-export const UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY =
-  "No encontramos este número registrado en Wara. Derivamos tu consulta a un asesor de Atención al Cliente; te van a escribir por este medio a la brevedad.";
+/** Reingreso mientras ya hay caso en cola de asesor. */
+export const REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY =
+  "Ya tenemos tu consulta: un asesor de Atención al Cliente te va a atender lo antes posible por este medio.";
 
-/**
- * Si el cliente escribe de nuevo tras la derivación: calma, sin repetir el aviso largo
- * ni pausar Atilio (Atilio sigue respondiendo este mensaje).
- */
-export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY =
-  "Ya tenemos tu consulta: un asesor de Atención al Cliente de WARA te va a atender lo antes posible por este medio. Gracias por tu paciencia.";
-
-export type UnregisteredPhoneHandoffResult = {
+export type RegisteredAdvisorHandoffResult = {
   customer: Customer;
   ticket: Ticket;
-  /** Se creó el ticket en este llamado (primera derivación). */
   isNewTicket: boolean;
-  /** Primera vez: mensaje BBC de “no registrado / te derivamos”. Después: mensaje de calma. */
+  /** Primera derivación en este hilo → mensaje completo al cliente. */
   shouldNotifyCustomer: boolean;
 };
 
 /**
- * Número no validado por Wara → espejo local + ticket en panel + asignación a asesor.
- *
- * Antes solo se mandaba el mensaje BBC "vamos a derivarte" sin crear nada
- * (skippedUnknownCustomer), y el cliente quedaba en loop sin entrar al backoffice.
+ * Cliente registrado pide hablar con un asesor → ticket local + auto-asignación.
+ * Odoo Helpdesk es opcional (capa aparte); el panel siempre debe quedar informado.
  */
-export async function ensureUnregisteredPhoneAdvisorHandoff(
+export async function ensureRegisteredAdvisorHandoff(
   prisma: PrismaClient,
   rawPhone: string,
   opts?: {
     contactName?: string;
     messageText?: string;
     source?: string;
+    title?: string;
   },
-): Promise<UnregisteredPhoneHandoffResult> {
-  const contactName =
-    opts?.contactName?.trim() || "Contacto no registrado en Wara";
+): Promise<RegisteredAdvisorHandoffResult> {
+  const contactName = opts?.contactName?.trim() || "Cliente Wara";
   const messageText = opts?.messageText?.trim() || "";
-  const source = opts?.source ?? "unregistered_phone_handoff";
+  const source = opts?.source ?? "registered_advisor_handoff";
+  const title = opts?.title?.trim() || "Cliente solicita asesor humano";
 
   const customer = await resolveCustomerByWhatsAppNumber(prisma, rawPhone, {
     name: contactName,
   });
-
-  if (!customer.companyName?.trim()) {
-    await prisma.customer.update({
-      where: { id: customer.id },
-      data: { companyName: "No registrado en Wara" },
-    });
-  }
 
   await mergeDuplicateOpenTicketsForCustomer(prisma, customer.id);
 
@@ -75,20 +60,16 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
         code,
         customerId: customer.id,
         contactName,
-        title: UNREGISTERED_PHONE_TICKET_TITLE,
+        title,
         status: "OPEN",
         priority: "NORMAL",
         category: "OTHER",
         incidentType: "otro",
         channel: "WHATSAPP",
-        aiSummary:
-          "WhatsApp no validado por Wara (ObtenerContactosPorNumero). Derivado a Atención al Cliente.",
+        aiSummary: "Cliente solicita asesor humano por WhatsApp.",
       },
     });
     isNewTicket = true;
-    console.log(
-      `[unregisteredHandoff] Ticket ${ticket.code} creado para ${customer.phone} (${source})`,
-    );
   }
 
   if (messageText) {
@@ -109,7 +90,7 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
           direction: "INBOUND",
           from: "CUSTOMER",
           text: messageText,
-          rawPayload: { source, unregisteredPhoneHandoff: true },
+          rawPayload: { source, registeredAdvisorHandoff: true },
         },
       });
       await prisma.ticket.update({
@@ -123,7 +104,7 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     where: {
       ticketId: ticket.id,
       type: "ESCALATED",
-      payload: { path: ["reason"], equals: "unregistered_phone_notice" },
+      payload: { path: ["reason"], equals: "registered_advisor_handoff_notice" },
     },
     select: { id: true },
   });
@@ -134,7 +115,7 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
         ticketId: ticket.id,
         type: "ESCALATED",
         payload: {
-          reason: "unregistered_phone_notice",
+          reason: "registered_advisor_handoff_notice",
           source,
           phone: customer.phone,
         },
@@ -155,15 +136,12 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
       await autoAssignNewTicket(ticket.id);
     }
   } catch (e) {
-    console.error("[unregisteredHandoff] autoAssign:", e);
+    console.error("[advisorHandoff] autoAssign:", e);
   }
 
-  // Regla: número no registrado NO pausa Atilio — debe poder mandar el aviso de calma.
-  await reactivateAtilioForCustomer(
-    customer.id,
-    prisma,
-    "unregistered_phone_handoff_keep_active",
-  ).catch((e) => console.error("[unregisteredHandoff] reactivateAtilio:", e));
+  await reactivateAtilioForCustomer(customer.id, prisma, "advisor_handoff_keep_active").catch(
+    (e) => console.error("[advisorHandoff] reactivateAtilio:", e),
+  );
 
   const refreshed =
     (await prisma.ticket.findUnique({ where: { id: ticket.id } })) ?? ticket;

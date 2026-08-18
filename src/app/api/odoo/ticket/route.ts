@@ -44,6 +44,11 @@ import {
 } from "@/lib/customerOdooCaseRef";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
+import {
+  ensureRegisteredAdvisorHandoff,
+  REGISTERED_ADVISOR_HANDOFF_REPLY,
+  REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY,
+} from "@/lib/advisorHandoff";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 
 /**
@@ -245,20 +250,6 @@ export async function POST(req: NextRequest) {
   const authError = requireBuilderBotContextAuth(req);
   if (authError) return authError;
 
-  const cfg = getOdooConfig();
-  if (!cfg) {
-    return NextResponse.json(
-      {
-        ok: false,
-        ok_s: "false",
-        message: "No pude registrar el caso en este momento. Te derivo con un asesor.",
-        error: "Odoo no configurado",
-        missing: getOdooConfigStatus().missing,
-      },
-      { status: BB_STATUS }
-    );
-  }
-
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
@@ -276,6 +267,7 @@ export async function POST(req: NextRequest) {
 
   const data = parsed.data;
   const rawPhone = (data.from ?? data.phone ?? data.customerPhone ?? "").trim();
+  const cfg = getOdooConfig();
 
   if (rawPhone && !allowPhoneRequest(rawPhone, 15)) {
     return NextResponse.json(
@@ -457,6 +449,9 @@ export async function POST(req: NextRequest) {
     looksLikeExplicitReclamoOrTicketRequest(data.rawText) ||
     looksLikeOutOfScopeSupportClaim(data.rawText);
 
+  let advisorHandoffLocal: Awaited<ReturnType<typeof ensureRegisteredAdvisorHandoff>> | null =
+    null;
+
   if (handoffToAdvisor) {
     const existingAdvisorRef = await findRecentOdooRef(rawPhone, plate || undefined);
     if (existingAdvisorRef) {
@@ -475,6 +470,36 @@ export async function POST(req: NextRequest) {
         reused_s: "true",
         message,
       });
+    }
+
+    if (rawPhone) {
+      advisorHandoffLocal = await ensureRegisteredAdvisorHandoff(prisma, rawPhone, {
+        contactName: customerName || undefined,
+        messageText: rawText || undefined,
+        source: "odoo_ticket",
+        title: advisorRequest
+          ? "Cliente solicita asesor humano"
+          : rawText.slice(0, 120).trim() || "Reclamo / soporte",
+      });
+
+      if (!cfg) {
+        const message = advisorHandoffLocal.shouldNotifyCustomer
+          ? REGISTERED_ADVISOR_HANDOFF_REPLY
+          : REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY;
+        await appendOutboundBotMessage(rawPhone, message, {
+          source: "odoo_ticket",
+          stage: "advisor_handoff_local_only",
+          ticketCode: advisorHandoffLocal.ticket.code,
+        });
+        return NextResponse.json({
+          ok: true,
+          ok_s: "true",
+          message,
+          ticketCode: advisorHandoffLocal.ticket.code,
+          skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
+          flowComplete_s: "true",
+        });
+      }
     }
   }
 
@@ -594,13 +619,14 @@ export async function POST(req: NextRequest) {
   const description = descriptionLines.filter(Boolean).join("\n");
 
   const dedupeKey = `odoo_ticket:${rawPhone}:${plate || "no-plate"}:${subject.slice(0, 120)}`;
-  const localTicket =
-    localCustomer &&
-    (await prisma.ticket.findFirst({
-      where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
-      orderBy: { lastMessageAt: "desc" },
-      select: { id: true },
-    }));
+  const localTicket = advisorHandoffLocal
+    ? { id: advisorHandoffLocal.ticket.id }
+    : localCustomer &&
+      (await prisma.ticket.findFirst({
+        where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+        orderBy: { lastMessageAt: "desc" },
+        select: { id: true },
+      }));
 
   try {
     if (localTicket) {
@@ -649,6 +675,19 @@ export async function POST(req: NextRequest) {
           message,
         });
       }
+    }
+
+    if (!cfg) {
+      return NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          message: "No pude registrar el caso en este momento. Te derivo con un asesor.",
+          error: "Odoo no configurado",
+          missing: getOdooConfigStatus().missing,
+        },
+        { status: BB_STATUS },
+      );
     }
 
     const result = await createHelpdeskTicket(cfg, {
