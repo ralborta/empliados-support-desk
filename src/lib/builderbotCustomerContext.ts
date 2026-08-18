@@ -37,6 +37,7 @@ import {
   buildAtilioHelpCapabilitiesReply,
   buildTicketCreationInfoReply,
   looksLikeAtilioHelpRequest,
+  looksLikeServiceScopeConsultationMeta,
   looksLikeThanksOnlyAcknowledgement,
   looksLikeSubstantiveCustomerMessage,
   looksLikeTicketCreationInfoQuestion,
@@ -47,6 +48,7 @@ import {
 } from "@/lib/waraApi";
 import {
   buildAtilioStructuredGreeting,
+  buildBriefServiceScopeConsultationReply,
   formatContinueConsult,
   formatSoftClose,
 } from "@/lib/waraWhatsAppFormat";
@@ -625,6 +627,20 @@ export async function customerRegisteredContextResponse(
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "ticket_creation_info",
+    });
+    nextFlow = "reply";
+  } else if (
+    selectionText &&
+    looksLikeServiceScopeConsultationMeta(selectionText) &&
+    !(
+      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
+      (await getPendingAction(prisma, trimmed))?.payload
+    )
+  ) {
+    responseMessage = buildBriefServiceScopeConsultationReply();
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "service_scope_consultation_meta",
     });
     nextFlow = "reply";
   } else if (

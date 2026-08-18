@@ -230,6 +230,15 @@ export function formatMeterConfirm(input: {
   ].join("\n");
 }
 
+export function buildBriefServiceScopeConsultationReply(): string {
+  return [
+    "Sí, podés consultarme por acá.",
+    "",
+    "Atiendo *GPS/reporte*, *odómetro/horómetro*, *certificados*, *mantenimiento* y *guías de Wara*.",
+    "¿Sobre cuál?",
+  ].join("\n");
+}
+
 export function formatGreeting(input: {
   introduced: boolean;
   companyName?: string | null;

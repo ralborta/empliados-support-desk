@@ -1479,8 +1479,8 @@ export function buildUnexpectedTurnFallbackMessage(raw: string | undefined | nul
     );
   }
   return (
-    "Recibí tu consulta. Contame un poco más en concreto qué necesitás " +
-    "(por ejemplo patente, trámite o módulo de Wara) y te guío."
+    "Por acá atiendo consultas de GPS/reporte, odómetro/horómetro, certificados, mantenimiento y guías de Wara. " +
+    "Contame en concreto qué necesitás."
   );
 }
 
@@ -1830,6 +1830,31 @@ function hasConcreteOperationalTopic(text: string, norm: string): boolean {
       norm,
     ) ||
     !!detectLoosePlate(text ?? "")
+  );
+}
+
+/**
+ * Meta-consulta sin tema concreto: "¿puedo hacer una consulta?", "tengo una consulta".
+ * Respuesta breve acotada a servicios Wara — no menú largo ni repetir GPS.
+ */
+export function looksLikeServiceScopeConsultationMeta(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm || norm.length > 120) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+  if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
+  if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
+  if (looksLikeExplicitCapabilityMenuRequest(text)) return false;
+  return (
+    /\bpuedo\s+hacer\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\bpuedo\s+(hacerte|consultarte)\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\b(te\s+)?puedo\s+consultarte\b/.test(norm) ||
+    /\b(te\s+)?puedo\s+consultar(\s+algo)?\b/.test(norm) ||
+    /\bpod[eé]s\s+atender\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\btengo\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\bquer[ií]a\s+(hacerte\s+)?(una\s+)?consultas?\b/.test(norm) ||
+    /\b(te\s+)?(hago|hacer[ií]a)\s+(una\s+)?consultas?\b/.test(norm) ||
+    /^consultas?\s*[?.!]*$/.test(norm) ||
+    /\bes\s+(solo\s+)?(una\s+)?consultas?\s*[?.!]*$/.test(norm)
   );
 }
 
