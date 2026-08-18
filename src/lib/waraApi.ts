@@ -1,5 +1,5 @@
 import type { Customer, PrismaClient } from "@prisma/client";
-import { formatGreeting } from "@/lib/waraWhatsAppFormat";
+import { formatGreeting, formatCompanySelected } from "@/lib/waraWhatsAppFormat";
 import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
@@ -939,9 +939,7 @@ function isGenericMaintenanceFallbackText(text: string): boolean {
 
 /** Confirma empresa elegida sin duplicar punto final (p. ej. "S.A." → "S.A.."). */
 export function formatCompanyConfirmMessage(companyName: string): string {
-  const name = companyName.trim().replace(/\.+\s*$/, "").trim();
-  if (!name) return "Perfecto. ¿En qué te puedo ayudar?";
-  return `Perfecto, sigo con ${name}. ¿En qué te puedo ayudar?`;
+  return formatCompanySelected(companyName);
 }
 
 /** Trámite operativo real (programar/registrar), no guía informativa. */

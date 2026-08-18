@@ -585,6 +585,27 @@ export function fechaLecturaTieneHora(
   return /\b(?:00|0):00\b/.test(src) || /\bmedianoche\b/i.test(src);
 }
 
+/**
+ * Fecha/hora de lectura del medidor (no búsqueda de unidad ni km/hs de motor).
+ * Bug real 2026-08-17: "Hoy a las 4 de la tarde" matcheaba «de la tarde» como marca.
+ */
+export function looksLikeFechaHoraLecturaMessage(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  if (/\b\d+\s*(?:km|k\b|hs?|horas?)\b/i.test(raw)) return false;
+  const norm = normalizeFechaInput(raw).replace(/[!?.¡¿]+/g, "").trim();
+  if (parseColloquialTimeFromText(norm)) {
+    if (/\b(hoy|ayer|anteayer|anoche|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(norm)) return true;
+    return true;
+  }
+  if (looksLikeClockTimeOnlyMessage(raw)) return true;
+  if (/\b(hoy|ayer|anteayer|anoche)\b/.test(norm) && /\ba\s+las?\s+\d/.test(norm)) return true;
+  const parsed = parseFechaFromText(raw, "America/Argentina/Buenos_Aires");
+  if (!parsed) return false;
+  if (fechaLecturaTieneHora(parsed, raw)) return true;
+  return /\b(hoy|ayer|anteayer|anoche|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(norm);
+}
+
 /** True si el mensaje es solo (o casi solo) una hora de reloj, sin día. */
 export function looksLikeClockTimeOnlyMessage(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();

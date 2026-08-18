@@ -15,6 +15,13 @@ export function confirmFooter(): string {
   return "➡️ Respondé *CONFIRMO* o *CANCELAR*.";
 }
 
+/** Plantillas con emoji de servicio — no pasar por IA (preserva iconos y negritas). */
+export function isStructuredWhatsAppTemplate(text: string | undefined | null): boolean {
+  const t = String(text ?? "").trim();
+  if (!t) return false;
+  return /^[📍🛣⏱📋🔧👋🚗🔢📅🕐📌🏢🙏👍⚡🛠📝]/.test(t);
+}
+
 export function formatFleetUnitLabel(plate: string, unitName?: string | null): string {
   const plateRaw = plate?.trim() || "";
   const plateDisp =
@@ -75,6 +82,104 @@ export function formatMeterAsk(input: {
     ask = "🕐 ¿A qué hora?\n_Ej.: 14:30_";
   }
   return [title, unit, "", ask].join("\n");
+}
+
+/** Tras tomar valor parcial: falta fecha/hora, solo hora, o valor+fecha completos. */
+export function formatMeterPartialAck(input: {
+  meter: "odometer" | "hourmeter";
+  unitLabel: string;
+  value?: number;
+  missing: "datetime" | "time" | "value_and_datetime";
+  dateDisp?: string;
+}): string {
+  const isHoro = input.meter === "hourmeter";
+  const title = isHoro ? "⏱ *Horómetro*" : "🛣 *Odómetro*";
+  const lines = [title, `🚗 Unidad: *${input.unitLabel}*`, ""];
+  if (typeof input.value === "number") {
+    lines.push(`🔢 Valor: *${input.value}* ${isHoro ? "hs" : "km"}`, "");
+  }
+  if (input.missing === "time" && input.dateDisp) {
+    lines.push(`📅 Fecha: *${input.dateDisp}*`, "", "🕐 ¿A qué hora fue la lectura?", "_Ej.: 14:30_");
+  } else if (input.missing === "datetime") {
+    lines.push(
+      "📅 Me falta la *fecha y hora* de la lectura.",
+      "_Ej.: 05/08/26 a las 14:30_",
+    );
+  } else {
+    lines.push(
+      isHoro
+        ? "🔢 Pasame el valor del horómetro en *hs* y la fecha y hora de la lectura."
+        : "🔢 Pasame el valor del odómetro en *km* y la fecha y hora de la lectura.",
+      "_Ej.: 10500 km — 05/08/26 a las 14:30_",
+    );
+  }
+  return lines.join("\n");
+}
+
+export function formatCertificateConfirm(input: {
+  unitLabel: string;
+  companyName: string;
+}): string {
+  return [
+    "📋 *Confirmar certificado*",
+    `🚗 Unidad: *${input.unitLabel}*`,
+    `🏢 Empresa: *${input.companyName}*`,
+    "",
+    "¿Confirmás la solicitud a WARA?",
+    confirmFooter(),
+  ].join("\n");
+}
+
+export function formatCertificateAlreadySent(input: {
+  unitLabel: string;
+  rateLimited?: boolean;
+}): string {
+  const tail = input.rateLimited
+    ? 'Si seguís sin recibirlo, escribí *"hablar con un asesor"*.'
+    : "Si necesitás que lo reenvíe, pedímelo explícitamente.";
+  return [
+    "📋 *Certificado de cobertura*",
+    `🚗 Unidad: *${input.unitLabel}*`,
+    "",
+    "✅ Ya fue enviado.",
+    tail,
+  ].join("\n");
+}
+
+export function formatMaintenanceConfirm(input: {
+  unitLabel: string;
+  service: string;
+  priorityLabel: string;
+  detalle: string;
+}): string {
+  return [
+    "🔧 *Confirmar mantenimiento*",
+    `🚗 Unidad: *${input.unitLabel}*`,
+    `🛠 Tipo: *${input.service}*`,
+    `⚡ Prioridad: *${input.priorityLabel}*`,
+    `📝 Detalle: *${input.detalle}*`,
+    "",
+    "¿Confirmás el registro?",
+    confirmFooter(),
+  ].join("\n");
+}
+
+export function formatPendingConfirmReminder(): string {
+  return [
+    "📌 *Confirmación pendiente*",
+    "",
+    "Respondé *CONFIRMO* para registrar.",
+    "Si algo no está bien, decime la patente o el valor correcto.",
+    "También podés escribir *CANCELAR* o pedir otra gestión.",
+  ].join("\n");
+}
+
+export function formatCompanySelected(companyName: string): string {
+  let name = companyName.trim();
+  if (!name) return "👋 Perfecto. ¿En qué te puedo ayudar?";
+  name = name.replace(/\.\.+\s*$/, ".").trim();
+  const trailingDot = name.endsWith(".") ? "" : ".";
+  return [`🏢 Perfecto, sigo con *${name}*${trailingDot}`, "", "¿En qué te puedo ayudar?"].join("\n");
 }
 
 /** Pedido V1: valor + fecha/hora de lectura en un solo paso. */

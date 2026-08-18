@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildAtilioStructuredGreeting,
+  formatCertificateConfirm,
+  formatCompanySelected,
   formatFleetUnitLabel,
   formatMeterAsk,
   formatMeterAskWithReading,
   formatMeterConfirm,
+  formatMeterPartialAck,
+  formatMaintenanceConfirm,
+  isStructuredWhatsAppTemplate,
   resolvePendingTaskLabelV1,
   splitFechaDisplayParts,
 } from "./waraWhatsAppFormat";
@@ -83,5 +88,40 @@ describe("waraWhatsAppFormat", () => {
       dateDisp: "17/08/2026",
       time: "11:00",
     });
+  });
+
+  it("formatMeterPartialAck mantiene unidad al pedir fecha", () => {
+    const msg = formatMeterPartialAck({
+      meter: "odometer",
+      unitLabel: "AH 492 LV",
+      value: 123555,
+      missing: "datetime",
+    });
+    assert.match(msg, /🛣 \*Odómetro\*/);
+    assert.match(msg, /🚗 Unidad: \*AH 492 LV\*/);
+    assert.match(msg, /🔢 Valor: \*123555\* km/);
+    assert.match(msg, /fecha y hora/);
+  });
+
+  it("formatCertificateConfirm y mantenimiento usan iconos", () => {
+    const cert = formatCertificateConfirm({ unitLabel: "AH 492 LV", companyName: "El Cacique S.A." });
+    assert.match(cert, /📋 \*Confirmar certificado\*/);
+    assert.match(cert, /Respondé \*CONFIRMO\* o \*CANCELAR\*/);
+    const maint = formatMaintenanceConfirm({
+      unitLabel: "AH 492 LV",
+      service: "Preventivo",
+      priorityLabel: "Normal",
+      detalle: "Service 10.000 km",
+    });
+    assert.match(maint, /🔧 \*Confirmar mantenimiento\*/);
+  });
+
+  it("isStructuredWhatsAppTemplate detecta plantillas con emoji", () => {
+    assert.equal(isStructuredWhatsAppTemplate("🛣 *Odómetro*"), true);
+    assert.equal(isStructuredWhatsAppTemplate("Tomé AH 492 LV"), false);
+  });
+
+  it("formatCompanySelected incluye emoji de empresa", () => {
+    assert.match(formatCompanySelected("El Cacique S.A."), /🏢 Perfecto, sigo con \*El Cacique S\.A\.\*/);
   });
 });

@@ -15,6 +15,7 @@
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { formatCalendarContextBlock } from "@/lib/odometroFecha";
+import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 
 export function isOdometerDialogueAiEnabled(): boolean {
   const raw = process.env.WARA_DIALOGUE_AI_ODOMETRO?.trim().toLowerCase();
@@ -97,6 +98,7 @@ function responseContainsAllTokens(text: string, tokens: string[] | undefined): 
  * devuelve `fallbackTemplate` sin cambios — mismo comportamiento que el sistema tiene hoy.
  */
 export async function composeOdometerDialogueReply(req: OdometerDialogueRequest): Promise<string> {
+  if (isStructuredWhatsAppTemplate(req.fallbackTemplate)) return req.fallbackTemplate;
   if (!isOdometerDialogueAiEnabled()) return req.fallbackTemplate;
   if (!process.env.OPENAI_API_KEY?.trim()) return req.fallbackTemplate;
 

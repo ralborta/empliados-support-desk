@@ -1,4 +1,8 @@
-import { stripBotPromptExamples, stripBotOdometerBotSpeech } from "@/lib/odometroFecha";
+import {
+  looksLikeFechaHoraLecturaMessage,
+  stripBotPromptExamples,
+  stripBotOdometerBotSpeech,
+} from "@/lib/odometroFecha";
 
 export type WaraIncidentType =
   | "MISSING_REPORT"
@@ -470,6 +474,7 @@ function isLikelyPlateOrPrefixToken(hint: string): boolean {
 export function extractPlateCorrectionHint(text: string | undefined | null): string | null {
   const raw = String(text ?? "").trim();
   if (!raw) return null;
+  if (looksLikeFechaHoraLecturaMessage(raw)) return null;
   const norm = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -507,7 +512,7 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
       // pasar nombres de marca reales ("Saveiro", "Nissan") que sí ayudan a resolver.
       if (
         hint.length >= 3 &&
-        !/^(CORRECTA|OTRA|OTRO|ESA|ESE|LA|EL|MIS|UNA|ESA|ESO|UNIDAD|UNIDADES|VEHICULO|VEHICULOS|PATENTE|PATENTES|MATRICULA|MATRICULAS|CAMION|CAMIONES|AUTO|AUTOS|COCHE|MOTO|FLOTA|MENCIONADA|MENCIONADO|ANTERIOR|MISMA|MISMO|DICHA|DICHO|REFERIDA|REFERIDO|CUESTION|ULTIMA|ULTIMO|ULTIMAS|ULTIMOS|UBICACION|COORDENADAS|COORDENADA|POSICION|REPORTE|ESTADO|GPS|CONSULTA)$/.test(
+        !/^(CORRECTA|OTRA|OTRO|ESA|ESE|LA|EL|MIS|UNA|ESA|ESO|UNIDAD|UNIDADES|VEHICULO|VEHICULOS|PATENTE|PATENTES|MATRICULA|MATRICULAS|CAMION|CAMIONES|AUTO|AUTOS|COCHE|MOTO|FLOTA|MENCIONADA|MENCIONADO|ANTERIOR|MISMA|MISMO|DICHA|DICHO|REFERIDA|REFERIDO|CUESTION|ULTIMA|ULTIMO|ULTIMAS|ULTIMOS|UBICACION|COORDENADAS|COORDENADA|POSICION|REPORTE|ESTADO|GPS|CONSULTA|TARDE|MANANA|NOCHE|MADRUGADA|MEDIODIA|MEDIANOCHE|HOY|AYER|ANOCHE|ANTEAYER)$/.test(
           hint,
         )
       ) {
@@ -1814,13 +1819,32 @@ export function extractHorometroFromOdometerSummary(text: string): number | unde
   return undefined;
 }
 
-/** Patente confirmada en "Perfecto, tomo OST 225. ¿Cuál es el nuevo horómetro?" */
+/** Patente confirmada en "Perfecto, tomo …" o "Tomé … (N km|h)" del bot. */
 export function extractPlateFromPerfectoTomo(text: string): string | undefined {
-  const matches = [...(text || "").matchAll(/perfecto,\s*tomo\s+([A-Za-z0-9 ]{4,14})/gi)];
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const plate = normalizePlate(matches[i][1].replace(/\.\s*$/, ""));
+  const tryPlate = (raw: string | undefined): string | undefined => {
+    const plate = normalizePlate(String(raw ?? "").replace(/\.\s*$/, "").trim());
     if (plate && isPlausibleVehiclePlate(plate) && !isExamplePlate(plate)) return plate;
+    return undefined;
+  };
+
+  const perfectoMatches = [...(text || "").matchAll(/perfecto,\s*tomo\s+([A-Za-z0-9 ]{4,14})/gi)];
+  for (let i = perfectoMatches.length - 1; i >= 0; i--) {
+    const plate = tryPlate(perfectoMatches[i][1]);
+    if (plate) return plate;
   }
+
+  const tomeMatches = [
+    ...(text || "").matchAll(
+      /\btom[eé]\s+(?:el\s+d[ií]a\s+[\d./]+\s+para\s+)?([A-Za-z0-9 ]{4,14})(?:\s*\([\d.,]+\s*(?:km|h)\))?/gi,
+    ),
+  ];
+  for (let i = tomeMatches.length - 1; i >= 0; i--) {
+    const raw = tomeMatches[i][1]?.trim();
+    if (!raw || /^(?:el|la|d[ií]a|para)\b/i.test(raw)) continue;
+    const plate = tryPlate(raw);
+    if (plate) return plate;
+  }
+
   return undefined;
 }
 
