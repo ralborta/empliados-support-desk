@@ -718,7 +718,9 @@ export async function POST(req: NextRequest) {
   if ((isConfirmed(text) || isConfirmed(confirmRaw)) && !pendingConfirm) {
     const tail = threadText.slice(-4000).toLowerCase();
     const summaryPending =
-      /voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail);
+      (/voy a generar el certificado de cobertura|confirmar certificado/.test(tail) &&
+        /respond[eé]\s+\*?confirmo/.test(tail)) ||
+      (/voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail));
     const summaryPlate = extractPlateFromCertificateSummary(threadText);
     if (summaryPending && summaryPlate) {
       pendingConfirm = true;
