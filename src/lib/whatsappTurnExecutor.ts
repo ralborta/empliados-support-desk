@@ -21,6 +21,7 @@ import {
   unitSearchHintFromUnderstanding,
   type UtteranceUnderstanding,
 } from "@/lib/utteranceUnderstanding";
+import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
 import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeChangeCompanyRequest,
@@ -29,6 +30,7 @@ import {
   looksLikeOutOfScopeSupportClaim,
   looksLikeTechnicalSupportRequest,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
+  looksLikeServiceScopeConsultationMeta,
   looksLikeGenericUnitConsultWithoutPlate,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
@@ -582,6 +584,18 @@ export async function runTurnExecutorPhase(params: {
     if (execMessage) {
       return { message: execMessage, executor: "odometro", ok: execOk };
     }
+  }
+
+  if (
+    looksLikeServiceScopeConsultationMeta(selectionText) &&
+    !pendingConfirmExecutor &&
+    !pendingAction?.payload
+  ) {
+    return {
+      message: buildBriefServiceScopeConsultationReply(),
+      executor: "unidades",
+      ok: true,
+    };
   }
 
   // ——— IA primero (casi todo el diálogo) ———
