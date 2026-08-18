@@ -1,6 +1,7 @@
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import { looksLikeOpenCaseStatusInquiry, looksLikeCaseResolutionEtaInquiry } from "@/lib/customerTicketInquiry";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
+import { looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import {
   certificateFlowState,
   shouldContinueCertificateUnitCollection,
@@ -406,6 +407,15 @@ const TURN_RULES: TurnRule[] = [
       looksLikePostAdvisorCaseSupplement(text, threadText) ? "odoo_ticket" : null,
   },
   {
+    id: "certificate_unit_change_during_confirm",
+    reason: "Cambio de unidad durante CONFIRMO de certificado — retomar certificados.",
+    decide: ({ text, threadText }) =>
+      certificateFlowState(threadText) === "awaiting_confirm" &&
+      looksLikeCertificateUnitPivot(text)
+        ? "certificados"
+        : null,
+  },
+  {
     id: "certificate_unit_context_selection",
     reason: "Respuesta de unidad tras pedido de unidad/patente del flujo de certificado.",
     decide: ({ text, threadText }) =>
@@ -643,6 +653,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "explicit_odometer_horometer_start",
   "structured_odometer_update",
   "post_advisor_case_supplement",
+  "certificate_unit_change_during_confirm",
   "gps_or_live_unit_consult",
   "certificate_unit_context_selection",
   "unit_consult_plate_selection",

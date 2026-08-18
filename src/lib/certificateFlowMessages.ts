@@ -3,13 +3,24 @@
  * (ver `certificateFlowState` en `@/lib/wara`). Viven en un módulo aparte, sin
  * dependencias de Prisma/Next, para poder testearlos sin levantar la DB.
  */
+import {
+  detectLoosePlate,
+  looksLikeAnotherUnitConsultRequest,
+  looksLikeUnitRejection,
+} from "@/lib/wara";
+import { looksLikePlateCorrectionRequest } from "@/lib/waraApi";
+import {
+  extractExplicitUnitNameFromText,
+  extractMovilIdFromUnitMessage,
+  looksLikeAmbiguousUnitCodeToken,
+} from "@/lib/waraUnitIntent";
 
 export function askCertificateUnitMessage(): string {
   return [
     "📋 *Certificado*",
     "",
     "Para el certificado de cobertura necesito la unidad:",
-    "🔢 Pasame la *patente* (ej. AD 427 MC), el *código* (ej. M900-088) o un *prefijo* (ej. HEJ).",
+    "🔢 Pasame la *patente* (ej. AD 427 MC), el *código* (ej. M300-097, M600-170) o un *prefijo* (ej. HEJ).",
   ].join("\n");
 }
 
@@ -55,4 +66,44 @@ export function anchorToCertificateUnitFlow(message: string): string {
   if (/para el certificado de cobertura necesito la unidad/i.test(trimmed)) return trimmed;
   if (/^📋\s*\*certificado\*/i.test(trimmed)) return trimmed;
   return `${trimmed}\n\n${askCertificateUnitMessage()}`;
+}
+
+function normalizeCertPivotText(rawText: string): string {
+  return rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function messageHasUnitIdentifier(rawText: string): boolean {
+  return (
+    extractMovilIdFromUnitMessage(rawText) != null ||
+    !!extractExplicitUnitNameFromText(rawText) ||
+    !!detectLoosePlate(rawText) ||
+    looksLikeAmbiguousUnitCodeToken(rawText)
+  );
+}
+
+/**
+ * El cliente cambia la unidad durante el resumen CONFIRMO del certificado
+ * (ej. "Para otra unidad 900076", "no era esa, la M300-097").
+ * Bug prod 2026-08-18: caía en recordatorio de CONFIRMO sin resolver la nueva unidad.
+ */
+export function looksLikeCertificateUnitPivot(rawText: string | undefined | null): boolean {
+  const text = String(rawText ?? "").trim();
+  if (!text) return false;
+  if (looksLikeAnotherUnitConsultRequest(text)) return true;
+  if (looksLikePlateCorrectionRequest(text)) return true;
+  if (looksLikeUnitRejection(text) && messageHasUnitIdentifier(text)) return true;
+
+  const norm = normalizeCertPivotText(text);
+  if (/\bpara\s+(la\s+)?(otra|otro)\s+(unidad\w*|patente\w*|vehicul\w*)\b/.test(norm)) {
+    return true;
+  }
+  if (!messageHasUnitIdentifier(text)) return false;
+  return (
+    /\b(otra|otro|distint[ao]|diferente|cambiar|correct[ao]|en\s+lugar)\b/.test(norm) &&
+    /\b(unidad\w*|patente\w*|vehicul\w*|movil\w*|interno|c[oó]digo)\b/.test(norm)
+  );
 }

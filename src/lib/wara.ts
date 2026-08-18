@@ -1100,7 +1100,7 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   return false;
 }
 
-/** Números que identifican unidad (movil_id / M900-114), no lectura de medidor. */
+/** Números que identifican unidad (código interno / movil_id), no lectura de medidor — cualquier prefijo numérico. */
 export function extractUnitCodeNumbersFromMessage(rawText: string): number[] {
   const out: number[] = [];
   const text = String(rawText ?? "");
@@ -2165,7 +2165,8 @@ export function looksLikeAnotherUnitConsultRequest(
       norm,
     ) ||
     /^(la\s+)?(otra|otro)\s+(unidad\w*|vehicul\w*|patente\w*|movil\w*)\s*\.?$/.test(norm) ||
-    /\bcambiar\s+(de\s+)?(unidad|patente|vehicul\w*)\b/.test(norm)
+    /\bcambiar\s+(de\s+)?(unidad|patente|vehicul\w*)\b/.test(norm) ||
+    /\bpara\s+(la\s+)?(otra|otro)\s+(unidad\w*|patente\w*|vehicul\w*)\b/.test(norm)
   ) {
     return true;
   }
