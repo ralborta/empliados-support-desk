@@ -62,14 +62,18 @@ const implicitSwitchPhrases = [
   "necesito trabajar con el cacique",
   "quiero pasarme a wara",
   "quiero cambiarme al cacique",
+  "Quiero operar con la empresa El Cacique.",
+  "Quiero operar con la empresa El Cacique",
+  "quiero operar con el cacique",
 ];
 for (const text of implicitSwitchPhrases) {
   const matched = matchCompanyContinuationMention(text, contacts);
   assert(!!matched, `matchCompanyContinuationMention("${text}") encuentra un contacto (verbo distinto de continuar/seguir)`);
 }
 assert(
-  matchCompanyContinuationMention("Quiero operar en Wara", contacts)?.empresa === "WARA",
-  "'Quiero operar en Wara' matchea específicamente WARA",
+  matchCompanyContinuationMention("Quiero operar con la empresa El Cacique.", contacts)?.empresa ===
+    "El Cacique S.A.",
+  "'Quiero operar con la empresa El Cacique.' matchea El Cacique S.A. (menú post-reinicio)",
 );
 for (const text of continuationPhrases) {
   const matched = matchCompanyContinuationMention(text, contacts);

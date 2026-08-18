@@ -581,6 +581,9 @@ function strongCompanyNameMatch(contact: WaraEmpresaContact, mentionedNorm: stri
 const COMPANY_MENTION_EXACT_FILLERS = new Set([
   "en", "con", "de", "del", "la", "los", "las", "el", "al", "y", "o", "que", "mi", "tu", "su",
   "por", "para", "a", "dale", "ok", "porfa", "porfavor", "favor", "che", "bueno", "buena",
+  // Bug 2026-08-18: "Quiero operar con la empresa El Cacique" dejaba «empresa» y no
+  // matcheaba "El Cacique S.A.".
+  "empresa", "empresas", "compania", "companias", "sa", "srl", "es",
 ]);
 /** Raíces (prefijos) para tolerar conjugaciones sin enumerar cada forma — mismo patrón
  * ya usado en el resto del archivo (ej. "ayud\w*", "preventiv\w*"). */
@@ -657,7 +660,11 @@ export function extractExplicitCompanyMention(
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 160 || contacts.length === 0) return null;
   const norm = normCompanyToken(raw);
-  const m = norm.match(/\bla\s+empresa\s+(?:es|:|=)\s*(.+)/) ?? norm.match(/\bempresa\s*(?:es|:|=)\s*(.+)/);
+  const m =
+    norm.match(/\bla\s+empresa\s+(?:es|:|=)\s*(.+)/) ??
+    norm.match(/\bempresa\s*(?:es|:|=)\s*(.+)/) ??
+    // "con la empresa El Cacique" / "en la empresa Wara" (menú pendiente, 2026-08-18).
+    norm.match(/\b(?:con|en)\s+la\s+empresa\s+(.+)/);
   if (!m) return null;
   const segment = (m[1] ?? "")
     .split(/[,.;]|\by\s+la\s+unidad\b|\bla\s+unidad\b|\bunidad\b|\bpatente\b|\bmatricula\b|\bmovil\b/)[0]
