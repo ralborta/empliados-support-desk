@@ -47,6 +47,7 @@ const PUSH_SUITES = [
   "verify-session-unit-continuity.mjs",
   "verify-maintenance-inherits-odometer-plate.mjs",
   "verify-maintenance-whatsapp-confirm-format.mjs",
+  "verify-colloquial-argentine-confirm.mjs",
   "verify-outbound-dedup.mjs",
   "verify-company-continuation-mention.mjs",
   "verify-utterance-understanding.mjs",
