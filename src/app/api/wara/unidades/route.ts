@@ -57,9 +57,9 @@ import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedS
 import { buildGpsClientSummary, isStructuredGpsWhatsAppSummary, buildGpsPositionClarificationAnalysis, threadHasRecentGpsContext } from "@/lib/waraGpsSummary";
 import {
   buildFleetUnitNotFoundMessage,
-  buildUnitNameOrPlateClarificationReply,
   customerOnlyThreadText,
   extractAmbiguousUnitCodeToken,
+  replyForUnresolvedUnitCodeToken,
   extractExplicitUnitSearchLabel,
   extractMovilIdFromUnitMessage,
   extractTokenFromUnitNameOrPlateClarification,
@@ -77,6 +77,7 @@ import {
   threadAskedUnitNameOrPlateClarification,
 } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback, extractActiveUnitNameCode, type ActiveUnitRecord } from "@/lib/activeUnit";
+import { formatFleetListWhatsApp, looksLikeMoreFleetListRequest, nextFleetListOffset } from "@/lib/waraWhatsAppFormat";
 import { clearPendingAction } from "@/lib/pendingAction";
 import {
   clearSessionNotebook,
@@ -1356,7 +1357,7 @@ export async function POST(req: NextRequest) {
         const clarification =
           resolved.clarificationQuestion ??
           (ambiguousToken
-            ? buildUnitNameOrPlateClarificationReply(ambiguousToken)
+            ? replyForUnresolvedUnitCodeToken(ambiguousToken, { companyName })
             : buildFleetUnitNotFoundMessage({
                 companyName,
                 rawText: effectiveRawText,
@@ -1388,9 +1389,9 @@ export async function POST(req: NextRequest) {
                   searchedText: String(explicitMovilId),
                 })
               : ambiguousToken || looksLikeAmbiguousUnitCodeToken(resolved.plate)
-                ? buildUnitNameOrPlateClarificationReply(
-                    ambiguousToken || String(resolved.plate),
-                  )
+                ? replyForUnresolvedUnitCodeToken(ambiguousToken || String(resolved.plate), {
+                    companyName,
+                  })
                 : buildFleetUnitNotFoundMessage({
                   companyName,
                   plate: resolved.plate,
@@ -1463,17 +1464,14 @@ export async function POST(req: NextRequest) {
   }
   const buildManyUnitsText = (units: WaraUnidadEstado[]): string => {
     const cliente = session.companyName || result.cliente || "este cliente";
-    const max = 8;
-    const labels = units
-      .map((u) => formatUnitLabel(u))
-      .filter((label) => label.length > 0);
-    const head = labels.slice(0, max).join(", ");
-    const remainder = labels.length - max;
-    const suffix = remainder > 0 ? ` y ${remainder} más` : "";
-    if (unitQuery?.kind === "nombre") {
-      return `Encontré ${units.length} unidades con nombre parecido a ${unitQuery.value} en ${cliente}. ${head}${suffix}. Decime la matrícula exacta si querés ver una sola.`;
-    }
-    return `Tenés ${units.length} unidades en ${cliente}. Te muestro ${max} como referencia: ${head}${suffix}. Por WhatsApp no puedo enviar las ${units.length} de una sola vez — decime matrícula, nombre de unidad (ej. M600-157) o marca para buscar una en particular.`;
+    const wantsMore = looksLikeMoreFleetListRequest(effectiveRawText);
+    const offset = wantsMore ? nextFleetListOffset(threadText) : 0;
+    return formatFleetListWhatsApp({
+      companyName: cliente,
+      units,
+      offset,
+      matchHint: unitQuery?.kind === "nombre" ? unitQuery.value : null,
+    });
   };
   let action: "none" | "observation" | "ticket" = "none";
   let ticketRef = "";
@@ -1713,7 +1711,9 @@ export async function POST(req: NextRequest) {
     const ambiguousToken =
       explicitMovilId == null ? extractAmbiguousUnitCodeToken(effectiveRawText) : null;
     summaryText = ambiguousToken
-      ? buildUnitNameOrPlateClarificationReply(ambiguousToken)
+      ? replyForUnresolvedUnitCodeToken(ambiguousToken, {
+          companyName: session.companyName || result.cliente || "tu empresa",
+        })
       : buildFleetUnitNotFoundMessage({
           companyName: session.companyName || result.cliente || "tu empresa",
           rawText: effectiveRawText,

@@ -169,13 +169,32 @@ async function customerOnlyThreadText(prisma: PrismaClient, rawPhone: string): P
   }
 }
 
+/** Guiones tipográficos / de WhatsApp → ASCII, para no perder «300-020». */
+const TYPOGRAPHIC_HYPHENS = /[\u00AD\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g;
+
 /** Nombre interno de unidad Wara (ej. M600-026, 300-092) — no es una patente. */
 export function looksLikeUnitNameInMessage(rawText: string | undefined | null): boolean {
   const norm = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-");
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
   if (!norm) return false;
   return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm) || extractMovilIdFromUnitMessage(norm) != null;
+}
+
+/**
+ * Token que es nombre de unidad, nunca patente Mercosur: «300-020», «M300-020», «300020».
+ * Bug real 2026-08-18: el cliente escribió solo 300-020 y el bot preguntó
+ * «¿unidad o patente?» en vez de buscar M300-020 en la flota.
+ */
+export function looksLikeDefiniteUnitNameCode(rawText: string | undefined | null): boolean {
+  const text = String(rawText ?? "")
+    .trim()
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
+  if (!text) return false;
+  if (/^(M?\d{3}-\d{2,3})$/i.test(text)) return true;
+  const compact = text.replace(/[\s\-_.]+/g, "").toUpperCase();
+  if (!/^(M?\d{5,6})$/.test(compact)) return false;
+  return !isPlausibleVehiclePlate(compact);
 }
 
 export function extractMovilIdFromUnitMessage(rawText: string | undefined | null): number | null {
@@ -208,7 +227,7 @@ export function looksLikeAmbiguousUnitCodeToken(rawText: string | undefined | nu
   if (looksLikeUnitNameInMessage(rawText)) return true;
   const compact = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(TYPOGRAPHIC_HYPHENS, "-")
     .replace(/[\s\-_.]+/g, "")
     .toUpperCase();
   if (!compact) return false;
@@ -220,7 +239,7 @@ export function looksLikeAmbiguousUnitCodeToken(rawText: string | undefined | nu
 export function extractAmbiguousUnitCodeToken(rawText: string | undefined | null): string | null {
   const text = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-");
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
   if (!text) return null;
   const labeled = extractExplicitUnitNameFromText(text);
   if (labeled) return labeled;
@@ -243,6 +262,20 @@ export function buildUnitNameOrPlateClarificationReply(token: string): string {
     `o la *patente/matrícula* (ej. AH 755 SM)?\n` +
     `Respondé *unidad* o *patente*.`
   );
+}
+
+/** Código tipo 300-020: buscar como unidad; si no está, decilo (no preguntar patente). */
+export function replyForUnresolvedUnitCodeToken(
+  token: string,
+  opts?: { companyName?: string | null },
+): string {
+  if (looksLikeDefiniteUnitNameCode(token)) {
+    return buildFleetUnitNotFoundMessage({
+      companyName: opts?.companyName,
+      searchedText: token,
+    });
+  }
+  return buildUnitNameOrPlateClarificationReply(token);
 }
 
 export function threadAskedUnitNameOrPlateClarification(threadText: string): boolean {
@@ -1220,9 +1253,19 @@ function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnida
 
 function normalizeUnitNameToken(value: string): string {
   return value
-    .replace(/[\u2010-\u2015\u2212]/g, "-") // guiones tipográficos → ASCII
+    .replace(TYPOGRAPHIC_HYPHENS, "-")
     .replace(/[\s-]+/g, "")
     .toLowerCase();
+}
+
+/**
+ * Identidad numérica de un código interno: 300-020, M300-020 y M300-20
+ * son el mismo (ceros a la izquierda en el sufijo). La letra inicial se ignora.
+ */
+function unitNameIdentityKey(norm: string): string | null {
+  const m = String(norm ?? "").match(/^([a-z]?)(\d{3})(\d{2,3})$/i);
+  if (!m) return null;
+  return `${Number(m[2])}|${Number(m[3])}`;
 }
 
 /**
@@ -1233,20 +1276,31 @@ function normalizeUnitNameToken(value: string): string {
  * Importante: "M600-170" NO debe matchear un label tipo "Tanda 600-170 backup"
  * (solo el código canónico con M, o el mismo token exacto).
  */
-function unitNameCodesMatch(queryNorm: string, unitCode: string): boolean {
+function unitNameCodesMatch(
+  queryNorm: string,
+  unitCode: string,
+  opts?: { allowMissingMOnUnit?: boolean },
+): boolean {
   if (!queryNorm || !unitCode) return false;
   if (queryNorm === unitCode) return true;
   // Cliente omitió la M (300-097 → M300-097). Solo si el código en Wara trae la M.
   if (!/^m\d/.test(queryNorm) && /^m\d/.test(unitCode) && unitCode === `m${queryNorm}`) {
     return true;
   }
-  return false;
+  const qKey = unitNameIdentityKey(queryNorm);
+  const uKey = unitNameIdentityKey(unitCode);
+  if (!qKey || !uKey || qKey !== uKey) return false;
+  // 300-020 ≡ M300-20 (padding). Query con M no debe matchear «600-170» dentro de
+  // un label tipo "Tanda 600-170 backup".
+  if (!/^m\d/.test(queryNorm)) return true;
+  if (/^m\d/.test(unitCode)) return true;
+  return opts?.allowMissingMOnUnit === true;
 }
 
 /** Códigos M600-170 / 300-092 presentes como token en el campo unidad de Wara. */
 function unitNameCodesFromField(unidad: string): string[] {
   const tokens = new Set<string>();
-  const field = String(unidad ?? "").replace(/[\u2010-\u2015\u2212]/g, "-");
+  const field = String(unidad ?? "").replace(TYPOGRAPHIC_HYPHENS, "-");
   const normalized = normalizeUnitNameToken(field);
   if (normalized) tokens.add(normalized);
   for (const match of field.matchAll(/\b(M?\d{3}-\d{2,3})\b/gi)) {
@@ -1266,12 +1320,9 @@ export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string):
     if (byMovil.length > 0) return byMovil;
   }
   return units.filter((u) => {
-    const field = String(u.unidad || "").replace(/[\u2010-\u2015\u2212]/g, "-");
+    const field = String(u.unidad || "").replace(TYPOGRAPHIC_HYPHENS, "-");
     const full = normalizeUnitNameToken(field);
-    // Campo unidad ES exactamente el código (con o sin M), no un label largo con el número adentro.
-    if (full && (full === norm || (!/^m\d/.test(norm) && full === `m${norm}`) || (/^m\d/.test(norm) && full === norm.slice(1)))) {
-      return true;
-    }
+    if (full && unitNameCodesMatch(norm, full, { allowMissingMOnUnit: true })) return true;
     return unitNameCodesFromField(field).some((code) => unitNameCodesMatch(norm, code));
   });
 }
@@ -1280,7 +1331,7 @@ export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string):
 export function extractExplicitUnitNameFromText(rawText: string): string | null {
   const text = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-");
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
   if (!text) return null;
   const labeled = text.match(/\bunidad\s*(?:es\s*)?[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (labeled?.[1]) return labeled[1];
@@ -1308,7 +1359,9 @@ function resolveByUnitName(
   if (!unitName || !looksLikeUnitNameInMessage(rawText)) return null;
   const matches = filterUnitsByUnitName(units, unitName);
   if (matches.length === 1) {
-    const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "");
+    const plate =
+      normalizeLoosePlate(matches[0].patente || "") ||
+      (matches[0].patente || "").replace(/\s+/g, "").toUpperCase();
     if (!plate) return null;
     return {
       intent: "consult_status",
@@ -1337,8 +1390,8 @@ function resolveByUnitName(
     intent: "need_clarification",
     searchTerms: [],
     candidatePlates: [],
-    // Bug 2026-08-10: no decir "patente 600006"; preguntar si es unidad o matrícula.
-    clarificationQuestion: buildUnitNameOrPlateClarificationReply(unitName),
+    // 300-020 / M300-020 es nombre de unidad: si no está, decilo; no preguntes patente.
+    clarificationQuestion: replyForUnresolvedUnitCodeToken(unitName),
     source: "rules",
   };
 }

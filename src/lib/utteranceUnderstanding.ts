@@ -84,6 +84,7 @@ unit_ref (OBLIGATORIO razonarlo siempre):
 - none — no hay referencia a unidad en el mensaje_nuevo.
 
 Principios (generales):
+- Si el cliente pide LISTADO / FLOTA / TODAS las unidades ("listame", "dame el listado") → new_request, unit_ref none. NO pidas matrícula: quieren ver la lista.
 - Si el cliente pide estado/GPS por nombre o etiqueta que aparece en la flota (persona, chofer, alias listado) → vehicle_unit + unit_ref brand o unit_name. NUNCA pidas la matrícula: buscá por ese texto.
 - Si el hilo pide patente/prefijo/unidad y el mensaje parece un intento de identificarla → vehicle_unit + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
 - Si el hilo YA tiene una unidad activa/confirmada (el bot dijo "Con la unidad X…" o "contame qué problema") y el cliente pide estado/reporte/GPS sin repetir la patente ("Quiero el estado", "el reporte", "¿cómo está?") → vehicle_unit, unit_ref.none, clarify_question null. NUNCA pidas la matrícula de nuevo: usá la del hilo.
