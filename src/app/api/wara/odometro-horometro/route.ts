@@ -49,6 +49,7 @@ import {
   threadTextSinceCompanySelection,
   extractPlatePrefixFromMessage,
   lastTomoMeterKindInThreadTail,
+  lastAwaitingMeterPromptInTail,
   stripMeterValuesMatchingUnitReference,
 } from "@/lib/wara";
 import {
@@ -264,29 +265,10 @@ function parseFromText(rawText: string): {
 }
 
 /**
- * De los prompts EXACTOS que el propio bot manda pidiendo el valor/patente de odómetro u
- * horómetro, ¿cuál aparece más tarde (más reciente) en el tail del hilo? Ver uso y bug
- * real, producción 2026-07-29, en horometerFlowActive más abajo — desempata cuando ambas
- * preguntas (una vieja, una nueva tras una corrección) conviven en el mismo tail.
+ * @deprecated Usar lastAwaitingMeterPromptInTail de @/lib/wara (incluye plantillas WhatsApp).
  */
 function lastAwaitingFieldPromptInTail(threadText: string): "odometro" | "horometro" | null {
-  const tail = threadText
-    .slice(-2500)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const horoIdx = Math.max(
-    tail.lastIndexOf("para registrar el cambio de horometro necesito la patente"),
-    tail.lastIndexOf("cual es el nuevo horometro en horas"),
-    tail.lastIndexOf("cuantas horas de motor"),
-  );
-  const odoIdx = Math.max(
-    tail.lastIndexOf("para registrar el cambio de odometro necesito la patente"),
-    tail.lastIndexOf("cual es el nuevo odometro en km"),
-    tail.lastIndexOf("cual es el nuevo valor de odometro"),
-  );
-  if (horoIdx < 0 && odoIdx < 0) return null;
-  return horoIdx > odoIdx ? "horometro" : "odometro";
+  return lastAwaitingMeterPromptInTail(threadText);
 }
 
 /** True si el hilo pide explícitamente actualizar horómetro (no confundir con "hora de lectura"). */
@@ -748,13 +730,25 @@ export async function POST(req: NextRequest) {
   const notebookHorometerFlow =
     isConversationNotebookEnabled() && notebookIndicatesHorometerFlow(sessionNotebook);
   const tomoMeterKindInThread = lastTomoMeterKindInThreadTail(flowThreadText);
-  let horometerFlowActive = rawExplicitlyMentionsOdometroOnly || tomoMeterKindInThread === "odometro"
-    ? false
-    : horometerOnlyIntent ||
-      notebookHorometerFlow ||
-      tomoMeterKindInThread === "horometro" ||
-      (horometerAwaitingInThread &&
-        !(odometerAwaitingInThread && lastAwaitingFieldPromptInTail(threadText) === "odometro"));
+  const awaitingMeterKind = lastAwaitingMeterPromptInTail(threadText);
+  const rawExplicitlyStatesKm =
+    messageExplicitlyStatesKm(rawText) && !looksLikeHorometerOnlyIntent(rawText);
+  let horometerFlowActive: boolean;
+  if (
+    rawExplicitlyMentionsOdometroOnly ||
+    tomoMeterKindInThread === "odometro" ||
+    rawExplicitlyStatesKm
+  ) {
+    horometerFlowActive = false;
+  } else if (horometerOnlyIntent || notebookHorometerFlow || tomoMeterKindInThread === "horometro") {
+    horometerFlowActive = true;
+  } else if (horometerAwaitingInThread || odometerAwaitingInThread) {
+    if (awaitingMeterKind === "odometro") horometerFlowActive = false;
+    else if (awaitingMeterKind === "horometro") horometerFlowActive = true;
+    else horometerFlowActive = horometerAwaitingInThread && !odometerAwaitingInThread;
+  } else {
+    horometerFlowActive = false;
+  }
   const plateCorrection = looksLikePlateCorrectionRequest(rawText);
   const unitHintInMessage =
     looksLikeVehicleBrandOrUnitSearch(rawText) || /\bpatente\s+(?:de|del)\b/i.test(rawText);

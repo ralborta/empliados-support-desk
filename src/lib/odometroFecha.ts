@@ -109,7 +109,7 @@ export function parseColloquialTimeFromText(text: string): { hh: string; min: st
   const n = expandHourWords(normalizeFechaInput(text));
   if (!n.trim()) return null;
 
-  if (/\bmediod[ií]a\b/.test(n)) return { hh: "12", min: "00" };
+  if (/\bmediod[ií]a\b/.test(n) || /\bmedio\s+d[ií]a\b/.test(n)) return { hh: "12", min: "00" };
   if (/\bmedianoche\b/.test(n)) return { hh: "00", min: "00" };
 
   const tipoMedia = n.match(/\btipo\s+(\d{1,2})\s+y\s+media\b/);

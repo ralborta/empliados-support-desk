@@ -1141,21 +1141,103 @@ export function lastTomoMeterKindInThreadTail(
   return null;
 }
 
+/** Último encabezado WhatsApp estructurado 🛣 Odómetro vs ⏱ Horómetro en el tail. */
+export function lastStructuredMeterKindInThreadTail(
+  threadText: string,
+): "odometro" | "horometro" | null {
+  const tail = threadText.slice(-2500);
+  let lastOdo = -1;
+  let lastHoro = -1;
+  for (const m of tail.matchAll(/🛣\s*\*[Oo]d[oó]metro\*/g)) {
+    if (m.index != null) lastOdo = m.index;
+  }
+  for (const m of tail.matchAll(/⏱\s*\*[Hh]or[oó]metro\*/g)) {
+    if (m.index != null) lastHoro = m.index;
+  }
+  if (lastOdo < 0 && lastHoro < 0) return null;
+  return lastHoro > lastOdo ? "horometro" : "odometro";
+}
+
+/**
+ * De todos los prompts del bot pidiendo odómetro u horómetro (texto plano + plantillas
+ * WhatsApp estructuradas), ¿cuál aparece más tarde en el tail del hilo?
+ */
+export function lastAwaitingMeterPromptInTail(
+  threadText: string,
+): "odometro" | "horometro" | null {
+  const tail = threadText.slice(-2500);
+  const tailNorm = tail
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  type Marker = { kind: "odometro" | "horometro"; idx: number };
+  const markers: Marker[] = [];
+  const addNorm = (needle: string, kind: "odometro" | "horometro") => {
+    const n = needle
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const idx = tailNorm.lastIndexOf(n);
+    if (idx >= 0) markers.push({ kind, idx });
+  };
+  addNorm("para registrar el cambio de horometro necesito la patente", "horometro");
+  addNorm("cual es el nuevo horometro en horas", "horometro");
+  addNorm("cuantas horas de motor", "horometro");
+  addNorm("pasame el valor del horometro", "horometro");
+  addNorm("pasame el nuevo horometro", "horometro");
+  addNorm("para registrar el cambio de odometro necesito la patente", "odometro");
+  addNorm("cual es el nuevo odometro en km", "odometro");
+  addNorm("cual es el nuevo valor de odometro", "odometro");
+  addNorm("pasame el valor del odometro", "odometro");
+  addNorm("pasame el nuevo odometro", "odometro");
+  for (const m of tail.matchAll(/🛣\s*\*[Oo]d[oó]metro\*/g)) {
+    if (m.index != null) markers.push({ kind: "odometro", idx: m.index });
+  }
+  for (const m of tail.matchAll(/⏱\s*\*[Hh]or[oó]metro\*/g)) {
+    if (m.index != null) markers.push({ kind: "horometro", idx: m.index });
+  }
+  for (const m of tail.matchAll(/🔢\s*valor:\s*\*[\d.,]+\*\s*km/gi)) {
+    if (m.index != null) markers.push({ kind: "odometro", idx: m.index });
+  }
+  for (const m of tail.matchAll(/🔢\s*valor:\s*\*[\d.,]+\*\s*hs/gi)) {
+    if (m.index != null) markers.push({ kind: "horometro", idx: m.index });
+  }
+  if (!markers.length) return null;
+  markers.sort((a, b) => b.idx - a.idx);
+  return markers[0].kind;
+}
+
+function resolveAwaitingMeterKindInThread(threadText: string): "odometro" | "horometro" | null {
+  return (
+    lastTomoMeterKindInThreadTail(threadText) ??
+    lastAwaitingMeterPromptInTail(threadText) ??
+    lastStructuredMeterKindInThreadTail(threadText)
+  );
+}
+
 function threadBotAskedMissingFechaHora(threadText: string): boolean {
-  return /me falta la fecha y hora de la lectura/i.test(threadText.slice(-2500));
+  const tail = threadText.slice(-2500).toLowerCase();
+  return (
+    /me falta la .{0,12}fecha y hora.{0,12} de la lectura/i.test(tail) ||
+    /me falta la fecha y hora de la lectura/i.test(tail)
+  );
 }
 
 /** El bot pidió el nuevo odómetro en km (patente ya confirmada). */
 export function threadAwaitingOdometerKmValue(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  const tail = threadText.slice(-2500).toLowerCase();
+  const scoped = threadTailSinceFleetUnitSearch(threadText);
+  const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
-  if (threadBotAskedMissingFechaHora(threadText)) {
-    const kind = lastTomoMeterKindInThreadTail(threadText);
+  if (threadBotAskedMissingFechaHora(scoped)) {
+    const kind = resolveAwaitingMeterKindInThread(scoped);
     if (kind === "odometro") return true;
     if (kind === "horometro") return false;
   }
+  const structuredKind = lastAwaitingMeterPromptInTail(scoped);
+  if (structuredKind === "odometro") return true;
+  if (structuredKind === "horometro") return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
     /perfecto, tomo .+ pasame el nuevo od[oó]metro/i.test(tail) ||
@@ -1173,13 +1255,17 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
 export function threadAwaitingHorometerKmValue(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  const tail = threadText.slice(-2500).toLowerCase();
+  const scoped = threadTailSinceFleetUnitSearch(threadText);
+  const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
-  if (threadBotAskedMissingFechaHora(threadText)) {
-    const kind = lastTomoMeterKindInThreadTail(threadText);
+  if (threadBotAskedMissingFechaHora(scoped)) {
+    const kind = resolveAwaitingMeterKindInThread(scoped);
     if (kind === "horometro") return true;
     if (kind === "odometro") return false;
   }
+  const structuredKind = lastAwaitingMeterPromptInTail(scoped);
+  if (structuredKind === "horometro") return true;
+  if (structuredKind === "odometro") return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
     /perfecto, tomo .+ pasame el nuevo hor[oó]metro/i.test(tail) ||
@@ -1797,6 +1883,7 @@ export function extractOdometroFromOdometerContext(text: string): number | undef
     /(?:nuevo valor(?: del od[oó]metro)?|el od[oó]metro es|valor del od[oó]metro es|el nuevo valor es)\s*(?:de\s+)?([\d.,]+)\s*(?:km)?/gi,
     /(?:los\s+)?(?:kil[oó]metros?|kilometraje|km)\s*(?:son|es|de|:)?\s*([\d.,]+)/gi,
     /(\d[\d.,]{2,})\s*km\b/gi,
+    /🔢\s*valor:\s*\*([\d.,]+)\*\s*km/gi,
   ];
   for (const re of patterns) {
     const matches = [...tail.matchAll(re)];
