@@ -59,7 +59,7 @@ import {
   resolvePlateWithWaraFleet,
   shouldClearOdometerPlateFromThread,
 } from "@/lib/waraUnitIntent";
-import { fechaWara, formatFechaDisplay, isFechaEnFuturo, parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc, looksLikeMeterReadingWithoutFecha, customerFechaSourceText } from "@/lib/odometroFecha";
+import { parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc, looksLikeMeterReadingWithoutFecha, customerFechaSourceText, looksLikeFechaHoraLecturaMessage, fechaWara, formatFechaDisplay, isFechaEnFuturo } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
@@ -69,6 +69,8 @@ import {
   formatMeterAsk,
   formatMeterAskWithReading,
   formatMeterConfirm,
+  formatMeterPartialAck,
+  formatPendingConfirmReminder,
   splitFechaDisplayParts,
 } from "@/lib/waraWhatsAppFormat";
 import { composeOdometerDialogueReply } from "@/lib/odometerDialogueAI";
@@ -939,7 +941,8 @@ export async function POST(req: NextRequest) {
   const isFleetUnitSelection =
     looksLikeFleetUnitSearchInput(rawText) &&
     !isConfirmed(rawText) &&
-    !looksLikeBriefConfirmation(rawText);
+    !looksLikeBriefConfirmation(rawText) &&
+    !looksLikeFechaHoraLecturaMessage(rawText);
   const prefixInMessage = extractPlatePrefixFromMessage(rawText);
   const plateInMessage = normalizePlate(fromText.patente ?? detectPlate(rawText) ?? "");
   let explicitMessagePlate = normalizePlate(parsed.data.patente ?? parsed.data.plate ?? plateInMessage ?? "");
@@ -970,7 +973,8 @@ export async function POST(req: NextRequest) {
     lockedPlateFromTomoRaw && shouldClearOdometerPlateFromThread(rawText)
       ? undefined
       : lockedPlateFromTomoRaw;
-  const clockTimeOnlyReading = looksLikeClockTimeOnlyReading(rawText);
+  const clockTimeOnlyReading =
+    looksLikeClockTimeOnlyReading(rawText) || looksLikeFechaHoraLecturaMessage(rawText);
   const awaitingPlateSelection =
     (threadAwaitingOdometerPlate(flowThreadText) && !awaitingOdometerKm) ||
     (threadAwaitingHorometerPlate(flowThreadText) && !awaitingHorometerKm) ||
@@ -987,6 +991,17 @@ export async function POST(req: NextRequest) {
   let patente = lockedPlateFromTomo
     ? normalizePlate(lockedPlateFromTomo)
     : explicitMessagePlate;
+
+  if (
+    !patente &&
+    hasLiveOdometerPendingAction &&
+    dbPendingOdoAction?.payload?.patente &&
+    !shouldClearOdometerPlateFromThread(rawText) &&
+    !explicitPlateInCurrentMessage &&
+    (awaitingOdometerKm || awaitingHorometerKm || looksLikeFechaHoraLecturaMessage(rawText))
+  ) {
+    patente = normalizePlate(String(dbPendingOdoAction.payload.patente));
+  }
 
   // Bug real 2026-07-27: "La q empieza con RMX" tomaba OST 223 del hilo/unidad activa
   // porque resolveOdometerContextPlate corría ANTES que la flota. Prefijo/marca/patente
@@ -1846,9 +1861,18 @@ export async function POST(req: NextRequest) {
           : typeof horometro === "number"
             ? ` (${horometro} h)`
             : "";
-      const fallbackTemplate =
-        `Para ${plateDisp}${valueHint} me falta la fecha y hora de la lectura. ` +
-        `Pasame ambas (ej. 05/08/26 a las 14:30).`;
+      const meterKindEarly = horometerFlowActive || horometerOnlyIntent ? "hourmeter" : "odometer";
+      const fallbackTemplate = formatMeterPartialAck({
+        meter: meterKindEarly,
+        unitLabel: plateDisp,
+        value:
+          typeof odometro === "number"
+            ? odometro
+            : typeof horometro === "number"
+              ? horometro
+              : undefined,
+        missing: "datetime",
+      });
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",
         history: flowThreadText,
@@ -1962,11 +1986,27 @@ export async function POST(req: NextRequest) {
       const fechaDiaDisplay = fechaDisplay?.includes(" ")
         ? fechaDisplay.split(" ")[0]
         : fechaDisplay;
+      const meterKind = horometerFlowActive || horometerOnlyIntent ? "hourmeter" : "odometer";
       const fallbackTemplate = onlyDateNoTime
-        ? `Tomé el día ${fechaDiaDisplay} para ${plateDisp}${valueHint}. ¿A qué hora fue la lectura? (ej. 14:30).`
+        ? formatMeterPartialAck({
+            meter: meterKind,
+            unitLabel: plateDisp,
+            value: showKmHint ? odometro : typeof horometro === "number" ? horometro : undefined,
+            missing: "time",
+            dateDisp: fechaDiaDisplay ?? undefined,
+          })
         : valueHint
-          ? `Tomé ${plateDisp}${valueHint}. Me falta la fecha y hora de la lectura: pasamelas (ej. 05/08/26 a las 14:30).`
-          : `Tomé ${plateDisp}. Pasame el odómetro en km y la fecha y hora de la lectura (ej. 8900 el 05/08/26 a las 14:30).`;
+          ? formatMeterPartialAck({
+              meter: meterKind,
+              unitLabel: plateDisp,
+              value: showKmHint ? odometro : typeof horometro === "number" ? horometro : undefined,
+              missing: "datetime",
+            })
+          : formatMeterPartialAck({
+              meter: meterKind,
+              unitLabel: plateDisp,
+              missing: "value_and_datetime",
+            });
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",
         history: flowThreadText,
@@ -1994,8 +2034,7 @@ export async function POST(req: NextRequest) {
       );
     }
     if (effectivePendingOdoConfirm && hasPendingOdometerConfirmation(flowThreadText)) {
-      const remindMessage =
-        "Para registrar el cambio respondé CONFIRMO. Si algo no está bien, decime la patente o el valor correcto, o escribí que querés hacer otra gestión.";
+      const remindMessage = formatPendingConfirmReminder();
       await appendOutboundBotMessage(rawPhone, remindMessage, {
         source: "wara_odometro_response",
         stage: "confirmation_reminder",
@@ -2088,8 +2127,12 @@ export async function POST(req: NextRequest) {
       time,
     });
     if (!fechaDisplay || !hasFechaHoraLectura) {
-      const fallbackTemplate =
-        `Me falta la fecha y hora de la lectura. Pasame ambas (ej. 05/08/26 a las 14:30).`;
+      const fallbackTemplate = formatMeterPartialAck({
+        meter: horometerFlowActive || horometerOnlyIntent ? "hourmeter" : "odometer",
+        unitLabel: plateDisplay,
+        value: typeof meterValue === "number" ? meterValue : undefined,
+        missing: "datetime",
+      });
       const message = await composeOdometerDialogueReply({
         situation: "missing_fecha_hora",
         history: flowThreadText,

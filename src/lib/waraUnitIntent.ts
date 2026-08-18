@@ -37,6 +37,7 @@ import {
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
+import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
@@ -298,6 +299,7 @@ export function looksLikeChosePlateReply(rawText: string | undefined | null): bo
 export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
   const text = String(rawText ?? "").trim();
   if (!text) return false;
+  if (looksLikeFechaHoraLecturaMessage(text)) return false;
   // CONFIRMO / sí / dale nunca son búsqueda de unidad (bug 2026-08-07).
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeCustomerConversationCloseRequest(text)) return false;
@@ -561,6 +563,19 @@ export function formatUnitListLabel(unit: WaraUnidadEstado): string {
  * Marca/modelo en lenguaje natural: "la Nissan", "marca Saveiro", "buscar la Hilux".
  * Complementa el catálogo cerrado de looksLikeVehicleBrandOrUnitSearch.
  */
+const TIME_OF_DAY_SEARCH_TOKENS = new Set([
+  "tarde",
+  "manana",
+  "madrugada",
+  "noche",
+  "mediodia",
+  "medianoche",
+  "hoy",
+  "ayer",
+  "anoche",
+  "anteayer",
+]);
+
 export function extractBrandSearchLabel(rawText: string): string | null {
   const raw = String(rawText ?? "").trim();
   if (!raw || raw.length > 160) return null;
@@ -580,6 +595,7 @@ export function extractBrandSearchLabel(rawText: string): string | null {
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
     if (norm.length < 3 || STOPWORDS.has(norm)) return null;
+    if (TIME_OF_DAY_SEARCH_TOKENS.has(norm)) return null;
     if (
       /^(certificado|certficado|cobertura|mantenimiento|agenda|reporte|estado|gps|ticket|caso|patente|matricula|unidad|flota|posicion|ubicacion|ignicion|odometro|horometro|tambien|también|obtener|saber|consultar|registrar|programar|pedir|generar|ayudar|ayudas|certificado)$/.test(
         norm,
@@ -2577,6 +2593,7 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   threadText: string;
 }): boolean {
   const { selectionText, threadText } = params;
+  if (looksLikeFechaHoraLecturaMessage(selectionText)) return false;
   if (
     looksLikeExplicitOdometerUpdateRequest(selectionText) ||
     looksLikeHorometerOnlyIntent(selectionText)
@@ -2725,6 +2742,14 @@ export function shouldRouteTurnToOdometerExecutor(params: {
       tail,
     ) &&
     !threadOdometerRegistrationCompleted(threadText)
+  ) {
+    return true;
+  }
+  if (
+    looksLikeFechaHoraLecturaMessage(selectionText) &&
+    (threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText) ||
+      pendingActionType === "odometro")
   ) {
     return true;
   }

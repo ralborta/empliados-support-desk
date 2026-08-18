@@ -9,6 +9,7 @@ import {
   formatFechaDisplay,
   getCalendarContext,
   looksLikeClockTimeOnlyMessage,
+  looksLikeFechaHoraLecturaMessage,
   mergeFechaConHoraSuelt,
   parseColloquialTimeFromText,
   parseFechaFromText,
@@ -50,6 +51,10 @@ console.log("— Hora suelta tras día pendiente —");
 assert.equal(looksLikeClockTimeOnlyMessage("4 de la tarde"), true);
 const merged = mergeFechaConHoraSuelt(`${ctx.yesterdayIso}T00:00:00`, "12 en punto", tz);
 check("merge ayer + 12 en punto", merged === `${ctx.yesterdayIso}T12:00:00`);
+
+console.log("— Fecha coloquial con día relativo —");
+assert.equal(looksLikeFechaHoraLecturaMessage("Hoy a las 4 de la tarde"), true);
+assert.equal(looksLikeFechaHoraLecturaMessage("123555 km"), false);
 
 console.log("— Sin hora imprecisa (sigue pidiendo hora) —");
 const ayerSolo = parseFechaFromText("ayer", tz);

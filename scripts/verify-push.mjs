@@ -24,6 +24,7 @@ const PUSH_SUITES = [
   "verify-more-units-request-routing.mjs",
   "verify-odometer-plate-continuity.mjs",
   "verify-odometer-fecha-hora.mjs",
+  "verify-odometer-fecha-tarde-unit-lock.mjs",
   "verify-odometer-gracias-pending-confirm.mjs",
   "verify-odometer-defer-other-query.mjs",
   "verify-horometer-value-continuation.mjs",

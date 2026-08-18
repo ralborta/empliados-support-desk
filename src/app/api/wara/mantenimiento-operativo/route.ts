@@ -61,7 +61,7 @@ import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
-import { confirmFooter } from "@/lib/waraWhatsAppFormat";
+import { formatFleetUnitLabel, formatMaintenanceConfirm } from "@/lib/waraWhatsAppFormat";
 
 const bodySchema = z
   .object({
@@ -1057,7 +1057,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const message = `Voy a registrar:\nPatente: ${plate}\nTipo: ${service}\nPrioridad: ${priorityLabel(priority)}\nDetalle: ${text}\n\nSi esta correcto, responde CONFIRMO para registrarlo.\n${confirmFooter()}`;
+    const plateDisplay = formatFleetUnitLabel(plate);
+    const message = formatMaintenanceConfirm({
+      unitLabel: plateDisplay,
+      service,
+      priorityLabel: priorityLabel(priority),
+      detalle: text,
+    });
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
       stage: "confirmation_required",

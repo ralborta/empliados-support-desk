@@ -131,8 +131,9 @@ assert(
   "non-odometer operational after company pick",
 );
 assert(
-  formatCompanyConfirmMessage("El Cacique S.A.") ===
-    "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
+  formatCompanyConfirmMessage("El Cacique S.A.").includes("Perfecto, sigo con *El Cacique S.A.*") &&
+    formatCompanyConfirmMessage("El Cacique S.A.").includes("🏢") &&
+    !formatCompanyConfirmMessage("El Cacique S.A.").includes("S.A.."),
   "company confirm without double period",
 );
 

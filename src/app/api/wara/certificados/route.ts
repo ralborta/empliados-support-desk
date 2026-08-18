@@ -39,7 +39,11 @@ import {
   resolveContextUnitPlate,
 } from "@/lib/conversationNotebook";
 import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
-import { confirmFooter } from "@/lib/waraWhatsAppFormat";
+import {
+  formatCertificateAlreadySent,
+  formatCertificateConfirm,
+  formatFleetUnitLabel,
+} from "@/lib/waraWhatsAppFormat";
 
 const bodySchema = z
   .object({
@@ -869,7 +873,7 @@ export async function POST(req: NextRequest) {
       if (generated) {
         const plateDisplay = formatPlateWithSpaces(plateHint) ?? plateHint;
         const company = resolution.selectedCompanyName || resolution.customer?.companyName || "tu empresa";
-        const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+        const message = formatCertificateAlreadySent({ unitLabel: plateDisplay });
         return NextResponse.json(
           {
             ok: true,
@@ -1009,7 +1013,7 @@ export async function POST(req: NextRequest) {
   if (wantsExplicitResend) {
     const resendCount = await countExplicitCertificateResends(rawPhone, plate);
     if (resendCount >= 3) {
-      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado varias veces en las últimas horas. Si seguís sin recibirlo, escribí "hablar con un asesor".`;
+      const message = formatCertificateAlreadySent({ unitLabel: plateDisplay, rateLimited: true });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_certificados",
         stage: "resend_limit_reached",
@@ -1046,7 +1050,7 @@ export async function POST(req: NextRequest) {
   if (isConfirmed(confirmation) && !wantsExplicitResend) {
     const generated = await findGeneratedCertificate(rawPhone, plate);
     if (generated) {
-      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+      const message = formatCertificateAlreadySent({ unitLabel: plateDisplay });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_certificados",
         stage: "already_generated",
@@ -1073,7 +1077,7 @@ export async function POST(req: NextRequest) {
   if (!isConfirmed(confirmation) && !wantsExplicitResend) {
     const generated = await findGeneratedCertificate(rawPhone, plate);
     if (generated) {
-      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+      const message = formatCertificateAlreadySent({ unitLabel: plateDisplay });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_certificados",
         stage: "already_generated",
@@ -1096,7 +1100,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const message = `Voy a generar el certificado de cobertura:\nPatente: ${plateDisplay}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.\n${confirmFooter()}`;
+    const message = formatCertificateConfirm({ unitLabel: plateDisplay, companyName: company });
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       stage: "confirmation_required",

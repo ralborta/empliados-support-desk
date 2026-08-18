@@ -7,7 +7,7 @@
 
 import OpenAI from "openai";
 import { extractPlatePrefixFromMessage, normalizePlate } from "@/lib/wara";
-import { parseFechaFromText } from "@/lib/odometroFecha";
+import { looksLikeFechaHoraLecturaMessage, parseFechaFromText } from "@/lib/odometroFecha";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 
 export type OdometerTramiteKind = "odometro" | "horometro";
@@ -255,6 +255,7 @@ export async function resolveOdometerHorometerFields(
 export function looksLikeClockTimeOnlyReading(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
+  if (looksLikeFechaHoraLecturaMessage(t)) return true;
   if (/^\d{1,2}:\d{2}(\s+de\s+(hoy|ayer|anteayer))?$/i.test(t)) return true;
   if (/\b\d{1,2}:\d{2}\b/.test(t) && !/\b\d+\s*h(?:oras?)?\b/i.test(t) && !/\bhor[oó]metro\b/i.test(t)) {
     return !!parseFechaFromText(t, "America/Argentina/Buenos_Aires");
