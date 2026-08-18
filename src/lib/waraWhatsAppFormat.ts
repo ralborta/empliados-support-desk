@@ -22,6 +22,96 @@ export function isStructuredWhatsAppTemplate(text: string | undefined | null): b
   return /^[📍🛣⏱📋🔧👋🚗🔢📅🕐📌🏢🙏👍⚡🛠📝]/.test(t);
 }
 
+export type FleetListUnitRow = {
+  patente?: string | null;
+  unidad?: string | null;
+  marca?: string | null;
+};
+
+export const FLEET_LIST_PAGE_SIZE = 25;
+
+function fleetListSortKey(unit: FleetListUnitRow): string {
+  return `${String(unit.unidad ?? "").trim()}|${String(unit.patente ?? "").trim()}`.toUpperCase();
+}
+
+function formatFleetListPlate(plate: string | null | undefined): string {
+  const raw = String(plate ?? "").trim();
+  if (!raw) return "s/ patente";
+  return formatPlateWithSpaces(normalizePlate(raw) ?? raw.replace(/\s+/g, "")) ?? raw;
+}
+
+/** Offset de la próxima página según el último “te muestro 1–25” del hilo. */
+export function nextFleetListOffset(threadText: string, pageSize = FLEET_LIST_PAGE_SIZE): number {
+  const matches = [...String(threadText ?? "").matchAll(/te muestro \*?(\d+)\s*[–-]\s*(\d+)\*?/gi)];
+  const last = matches.at(-1);
+  if (!last) return 0;
+  const end = Number(last[2]);
+  if (!Number.isFinite(end) || end <= 0) return 0;
+  return end;
+}
+
+export function looksLikeMoreFleetListRequest(text: string | undefined | null): boolean {
+  const t = String(text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(mas|mas)\s+(unidades|opciones|lista|camiones)|otras unidades|resto de la lista|el resto de la lista\b/.test(
+    t,
+  );
+}
+
+/** Listado WhatsApp: patente, nro de unidad y marca, ordenado, paginado. */
+export function formatFleetListWhatsApp(input: {
+  companyName: string;
+  units: FleetListUnitRow[];
+  offset?: number;
+  pageSize?: number;
+  matchHint?: string | null;
+}): string {
+  const pageSize = input.pageSize ?? FLEET_LIST_PAGE_SIZE;
+  const offset = Math.max(0, input.offset ?? 0);
+  const sorted = [...input.units].sort((a, b) =>
+    fleetListSortKey(a).localeCompare(fleetListSortKey(b), "es", { numeric: true }),
+  );
+  const total = sorted.length;
+  if (total === 0) {
+    return [
+      "📋 *Listado de unidades*",
+      `🏢 *${input.companyName}*`,
+      "",
+      "No encontré unidades en esta empresa.",
+    ].join("\n");
+  }
+  const start = Math.min(offset, total);
+  const slice = sorted.slice(start, start + pageSize);
+  const from = start + 1;
+  const to = start + slice.length;
+  const hint = input.matchHint?.trim();
+  const lines = slice.map((unit, i) => {
+    const n = start + i + 1;
+    const plate = formatFleetListPlate(unit.patente);
+    const nro = String(unit.unidad ?? "").trim() || "s/ nro";
+    const marca = String(unit.marca ?? "").trim() || "s/ marca";
+    return `${n}. 🚗 *${plate}* · 🔢 *${nro}* · 🏭 ${marca}`;
+  });
+  const header = [
+    "📋 *Listado de unidades*",
+    `🏢 *${input.companyName}*`,
+    hint
+      ? `🚗 *${total}* coinciden con *${hint}* — te muestro *${from}–${to}*, ordenadas por nro.`
+      : `🚗 *${total}* unidades — te muestro *${from}–${to}*, ordenadas por nro.`,
+    "",
+  ];
+  const footer =
+    to < total
+      ? [
+          "",
+          `➡️ Quedan *${total - to}*. Escribí *más unidades* para seguir, o una patente / marca para buscar.`,
+        ]
+      : ["", "➡️ Si querés el estado de una, pasame la patente o el nro."];
+  return [...header, ...lines, ...footer].join("\n");
+}
+
 export function formatFleetUnitLabel(plate: string, unitName?: string | null): string {
   const plateRaw = plate?.trim() || "";
   const plateDisp =

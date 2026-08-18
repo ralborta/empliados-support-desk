@@ -102,7 +102,6 @@ import {
 import {
   isMaintenancePlateSelectionMessage,
   isOdometerPlateSelectionMessage,
-  shouldRouteTurnToFleetListExecutor,
   shouldRouteTurnToOdometerExecutor,
   shouldRouteTurnToUnidadesExecutor,
   buildFleetUnitNotFoundMessage,
@@ -665,6 +664,21 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Listado de flota ANTES de la IA: "listame las unidades" no debe pedir matrícula.
+  if (
+    await shouldRouteTurnToFleetListExecutorHybrid({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+    })
+  ) {
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor: "unidades", ok: execOk };
+    }
+  }
+
   // ——— IA primero (casi todo el diálogo) ———
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
@@ -903,21 +917,6 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return { message: execMessage, executor: "mantenimiento", ok: execOk };
-    }
-  }
-
-  // Listado de flota → executor unidades directo (NUNCA pedir patente para listar).
-  if (
-    await shouldRouteTurnToFleetListExecutorHybrid({
-      selectionText,
-      threadText: threadCtx.classificationThread,
-    })
-  ) {
-    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
-    const execMessage = messageFromPayload(execResult);
-    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (execMessage) {
-      return { message: execMessage, executor: "unidades", ok: execOk };
     }
   }
 

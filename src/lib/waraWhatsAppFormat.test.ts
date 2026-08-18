@@ -5,6 +5,7 @@ import {
   buildAtilioStructuredGreeting,
   formatCertificateConfirm,
   formatCompanySelected,
+  formatFleetListWhatsApp,
   formatFleetUnitLabel,
   formatMeterAsk,
   formatMeterAskWithReading,
@@ -12,6 +13,7 @@ import {
   formatMeterPartialAck,
   formatMaintenanceConfirm,
   isStructuredWhatsAppTemplate,
+  nextFleetListOffset,
   resolvePendingTaskLabelV1,
   splitFechaDisplayParts,
 } from "./waraWhatsAppFormat";
@@ -115,6 +117,28 @@ describe("waraWhatsAppFormat", () => {
       detalle: "Service 10.000 km",
     });
     assert.match(maint, /🔧 \*Confirmar mantenimiento\*/);
+  });
+
+  it("formatFleetListWhatsApp ordena patente, nro y marca con iconos", () => {
+    const msg = formatFleetListWhatsApp({
+      companyName: "El Cacique S.A.",
+      units: [
+        { patente: "AH975RV", unidad: "M900-120", marca: "Iveco" },
+        { patente: "AD427MC", unidad: "M300-097", marca: "Nissan" },
+      ],
+    });
+    assert.match(msg, /^📋 \*Listado de unidades\*/);
+    assert.match(msg, /🏢 \*El Cacique S\.A\.\*/);
+    assert.match(msg, /te muestro \*1–2\*/);
+    const first = msg.indexOf("M300-097");
+    const second = msg.indexOf("M900-120");
+    assert.ok(first >= 0 && second > first, "ordenado por nro de unidad");
+    assert.match(msg, /🚗 \*AD 427 MC\* · 🔢 \*M300-097\* · 🏭 Nissan/);
+  });
+
+  it("nextFleetListOffset lee la última página mostrada", () => {
+    assert.equal(nextFleetListOffset("te muestro *1–25*"), 25);
+    assert.equal(nextFleetListOffset(""), 0);
   });
 
   it("isStructuredWhatsAppTemplate detecta plantillas con emoji", () => {

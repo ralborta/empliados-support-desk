@@ -3178,7 +3178,20 @@ function normalizeWaraUnidadEstado(raw: unknown): WaraUnidadEstado | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
   const patente = typeof row.patente === "string" ? row.patente : "";
-  const unidad = typeof row.unidad === "string" ? row.unidad : "";
+  const unidadRaw = typeof row.unidad === "string" ? row.unidad.trim() : "";
+  const nombreRaw =
+    typeof row.nombre === "string"
+      ? row.nombre.trim()
+      : typeof row.name === "string"
+        ? row.name.trim()
+        : "";
+  const internoRaw =
+    typeof row.interno === "string"
+      ? row.interno.trim()
+      : typeof row.codigo === "string"
+        ? row.codigo.trim()
+        : "";
+  const unidad = [...new Set([unidadRaw, nombreRaw, internoRaw].filter(Boolean))].join(" ");
   const marcaRaw =
     typeof row.marca === "string"
       ? row.marca
