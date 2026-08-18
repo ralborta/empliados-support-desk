@@ -76,6 +76,7 @@ import {
   looksLikeCertificateKeyword,
   certificateFlowState,
   hasPendingCertificateConfirmation,
+  hasPendingOdometerConfirmation,
   shouldContinueCertificateUnitCollection,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
