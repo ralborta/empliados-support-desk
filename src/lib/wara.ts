@@ -1194,10 +1194,10 @@ export function lastAwaitingMeterPromptInTail(
   addNorm("cual es el nuevo valor de odometro", "odometro");
   addNorm("pasame el valor del odometro", "odometro");
   addNorm("pasame el nuevo odometro", "odometro");
-  for (const m of tail.matchAll(/🛣\s*\*[Oo]d[oó]metro\*/g)) {
+  for (const m of tail.matchAll(/🛣️?\s*(?:\*[Oo]d[oó]metro\*|[Oo]d[oó]metro)/g)) {
     if (m.index != null) markers.push({ kind: "odometro", idx: m.index });
   }
-  for (const m of tail.matchAll(/⏱\s*\*[Hh]or[oó]metro\*/g)) {
+  for (const m of tail.matchAll(/⏱️?\s*(?:\*[Hh]or[oó]metro\*|[Hh]or[oó]metro)/g)) {
     if (m.index != null) markers.push({ kind: "horometro", idx: m.index });
   }
   for (const m of tail.matchAll(/🔢\s*valor:\s*\*[\d.,]+\*\s*km/gi)) {
@@ -1240,7 +1240,11 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
     if (kind === "horometro") return false;
   }
   const structuredKind = lastAwaitingMeterPromptInTail(scoped);
-  if (structuredKind === "odometro") return true;
+  const tailHasOdometerKmAsk =
+    /pasame el valor del od[oó]metro|pasame el nuevo od[oó]metro|nuevo od[oó]metro en km|valor del od[oó]metro en \*?km|🔢/.test(
+      tail,
+    );
+  if (structuredKind === "odometro" && tailHasOdometerKmAsk) return true;
   if (structuredKind === "horometro") return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
@@ -1268,7 +1272,11 @@ export function threadAwaitingHorometerKmValue(threadText: string): boolean {
     if (kind === "odometro") return false;
   }
   const structuredKind = lastAwaitingMeterPromptInTail(scoped);
-  if (structuredKind === "horometro") return true;
+  const tailHasHorometerHsAsk =
+    /pasame el valor del hor[oó]metro|pasame el nuevo hor[oó]metro|nuevo hor[oó]metro en horas|valor del hor[oó]metro en \*?hs|🔢/.test(
+      tail,
+    );
+  if (structuredKind === "horometro" && tailHasHorometerHsAsk) return true;
   if (structuredKind === "odometro") return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||

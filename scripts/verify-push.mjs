@@ -29,6 +29,7 @@ const PUSH_SUITES = [
   "verify-odometer-defer-other-query.mjs",
   "verify-horometer-value-continuation.mjs",
   "verify-odometer-km-not-horometer.mjs",
+  "verify-odometer-bare-km-not-unit-search.mjs",
   "verify-odometer-horometro-unida-900096.mjs",
   "verify-tramite-cancel-resume.mjs",
   "verify-meter-incomplete-data.mjs",

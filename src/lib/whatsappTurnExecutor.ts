@@ -569,9 +569,13 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Valor numérico (km/hs) con patente ya confirmada → odómetro, antes que confirmaciones stale.
+  const meterValuePendingFromDb =
+    pendingAction?.type === "odometro" &&
+    !!pendingAction.payload?.patente &&
+    !hasPendingOdometerConfirmation(threadCtx.classificationThread);
   if (
     looksLikeBareMeterValue(selectionText) &&
-    threadHasActiveMeterValueRequest(threadCtx.classificationThread)
+    (threadHasActiveMeterValueRequest(threadCtx.classificationThread) || meterValuePendingFromDb)
   ) {
     if (pendingAction?.type === "mantenimiento") {
       await clearPendingAction(prisma, rawPhone);
