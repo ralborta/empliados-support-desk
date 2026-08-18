@@ -40,7 +40,7 @@ import {
   patchSessionNotebook,
   resolveContextUnitPlate,
 } from "@/lib/conversationNotebook";
-import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
+import { askCertificateUnitMessage, anchorToCertificateUnitFlow, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import {
   formatCertificateAlreadySent,
   formatCertificateConfirm,
@@ -147,6 +147,7 @@ function isGenericCertificateRequest(text: string): boolean {
 
 function looksLikeCertificateUnitSelection(text: string, threadText = ""): boolean {
   return (
+    looksLikeCertificateUnitPivot(text) ||
     looksLikeCertificateUnitReply(text, threadText) ||
     looksLikePlateCorrectionRequest(text) ||
     looksLikeVehicleBrandOrUnitSearch(text)
@@ -790,12 +791,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (pendingConfirm && looksLikeCertificateUnitPivot(text)) {
+    await clearPendingAction(prisma, rawPhone);
+    pendingConfirm = false;
+  }
+
   if (
     pendingConfirm &&
     !isConfirmed(text) &&
     !isConfirmed(confirmRaw) &&
     !isCertificateCancellation(text) &&
-    !looksLikeExplicitCertificateResendRequest(text)
+    !looksLikeExplicitCertificateResendRequest(text) &&
+    !looksLikeCertificateUnitPivot(text)
   ) {
     const remindMessage =
       "Para generar el certificado respondé CONFIRMO. Si la unidad no es correcta, decime la patente o el nombre correcto.";

@@ -1733,7 +1733,7 @@ export function resolveNumericUnitSelection(rawText: string, threadText: string)
   return null;
 }
 
-/** Resuelve coincidencias por código de unidad (M900-085 / 900085), no por movil_id de DB. */
+/** Resuelve coincidencias por código de unidad (M300-097 / 300097), no por movil_id de DB. */
 function resolutionFromUnitNameMatches(
   matches: WaraUnidadEstado[],
   label: string,

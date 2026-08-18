@@ -22,7 +22,7 @@ import {
   type UtteranceUnderstanding,
 } from "@/lib/utteranceUnderstanding";
 import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
-import { askCertificateUnitMessage } from "@/lib/certificateFlowMessages";
+import { askCertificateUnitMessage, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeChangeCompanyRequest,
@@ -75,6 +75,7 @@ import {
   threadOdometerRegistrationCompleted,
   looksLikeCertificateKeyword,
   certificateFlowState,
+  hasPendingCertificateConfirmation,
   shouldContinueCertificateUnitCollection,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
@@ -408,6 +409,14 @@ export async function runTurnExecutorPhase(params: {
       ok: true,
     };
   }
+  if (pendingKind === "certificados" && looksLikeCertificateUnitPivot(selectionText)) {
+    const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "certificados", ok: execOk };
+    }
+  }
   if (pendingKind && looksLikePendingConfirmPushback(selectionText, pendingKind)) {
     const stance = await reasonPendingConfirmationRejection({
       selectionText,
@@ -660,8 +669,19 @@ export async function runTurnExecutorPhase(params: {
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
   );
-  // Pivot a otra unidad: limpiar contexto y pedir cuál — nunca repetir GPS de la activa.
+  // Pivot a otra unidad: limpiar contexto — excepto certificado en CONFIRMO (sigue en certificados).
   if (looksLikeAnotherUnitConsultRequest(selectionText)) {
+    if (
+      hasPendingCertificateConfirmation(threadCtx.classificationThread) &&
+      looksLikeCertificateUnitPivot(selectionText)
+    ) {
+      const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (execMessage || !executorSkippedSilently(execResult)) {
+        return { message: execMessage, executor: "certificados", ok: execOk };
+      }
+    }
     await clearActiveUnit(prisma, rawPhone).catch(() => {});
     const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
@@ -756,7 +776,7 @@ export async function runTurnExecutorPhase(params: {
       return {
         message:
           understanding.clarifyQuestion?.trim() ||
-          "Dale, pasame la matrícula o el código de la unidad (ej. AD427MC o M900-114).",
+          "Dale, pasame la matrícula o el código de la unidad (ej. AD427MC, M300-097 o 600088).",
         executor: "info_guides",
         ok: true,
       };
@@ -1147,7 +1167,7 @@ export async function runTurnExecutorPhase(params: {
         looksLikeGenericUnitConsultWithoutPlate(selectionText))
     ) {
       finalMessage =
-        "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC), el código (ej. M900-114) o el número de unidad (ej. 900114).";
+        "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC), el código (ej. M300-097) o el número de unidad (ej. 600088).";
     } else if (pendingKind) {
       finalMessage = buildPendingConfirmStillWaitingReminder(pendingKind);
     } else {
