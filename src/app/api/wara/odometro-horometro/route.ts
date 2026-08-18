@@ -931,9 +931,13 @@ export async function POST(req: NextRequest) {
   // skipThreadPlate ya indica que el cliente está señalando explícitamente OTRA
   // unidad (corrección de patente o marca/nombre distinto en el mensaje).
   const activeUnitRecord = activeUnitRecordEarly;
+  const awaitingOdometerKm = threadAwaitingOdometerKmValue(flowThreadText);
+  const awaitingHorometerKm = threadAwaitingHorometerKmValue(flowThreadText);
   // CONFIRMO / sí / dale NO son búsqueda de flota (bug 2026-08-07: «CONFIRMO» → no encontré unidad).
   const isFleetUnitSelection =
-    looksLikeFleetUnitSearchInput(rawText) &&
+    looksLikeFleetUnitSearchInput(rawText, flowThreadText) &&
+    !awaitingOdometerKm &&
+    !awaitingHorometerKm &&
     !isConfirmed(rawText) &&
     !looksLikeBriefConfirmation(rawText) &&
     !looksLikeFechaHoraLecturaMessage(rawText);
@@ -957,8 +961,6 @@ export async function POST(req: NextRequest) {
   ) {
     explicitMessagePlate = normalizePlate(explicitMessagePlate || mergedFields.patente);
   }
-  const awaitingOdometerKm = threadAwaitingOdometerKmValue(flowThreadText);
-  const awaitingHorometerKm = threadAwaitingHorometerKmValue(flowThreadText);
   const lockedPlateFromTomoRaw =
     awaitingHorometerKm || awaitingOdometerKm
       ? extractPlateFromPerfectoTomo(flowThreadText)

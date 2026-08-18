@@ -20,7 +20,9 @@ import {
   threadAwaitingHorometerPlate,
   threadAwaitingOdometerKmValue,
   threadAwaitingOdometerPlate,
+  threadHasActiveMeterValueRequest,
   threadHasActiveOdometerFlow,
+  looksLikeBareMeterValue,
   threadHasFailedUnitSearch,
   threadHasOdometerUnitClarificationPending,
   threadOdometerRegistrationCompleted,
@@ -87,27 +89,33 @@ export function buildFleetUnitNotFoundMessage(opts: {
   const prefix = (opts.prefix ?? prefixFromText ?? barePrefix)?.trim().toUpperCase() || null;
 
   if (prefix) {
-    return (
-      `No encontré ninguna unidad en ${company} con patente que empiece con ${prefix}. ` +
-      `¿Podés pasarme la matrícula completa (ej. OST 223)? También podés escribir «listado de mis unidades».`
-    );
+    return [
+      "🚗 *Unidad no encontrada*",
+      "",
+      `No encontré ninguna unidad en ${company} con patente que empiece con *${prefix}*.`,
+      "Pasame la matrícula completa (ej. OST 223) o escribí «listado de mis unidades».",
+    ].join("\n");
   }
 
   if (opts.plate) {
     const display = formatPlateWithSpaces(opts.plate) ?? opts.plate;
-    return (
-      `La patente ${display} no está en la flota de ${company}. ` +
-      `Revisá que esté bien escrita. Si la unidad es de otra empresa, escribí «cambiar empresa».`
-    );
+    return [
+      "🚗 *Unidad no encontrada*",
+      "",
+      `La patente *${display}* no está en la flota de ${company}.`,
+      "Revisá que esté bien escrita. Si la unidad es de otra empresa, escribí «cambiar empresa».",
+    ].join("\n");
   }
 
   const searched = opts.searchedText?.trim();
   if (searched) {
-    return (
-      `No encontré ninguna unidad que coincida con «${searched}» en la flota de ${company}. ` +
-      `Revisá que esté bien escrito o pasame la matrícula completa (ej. NKL 952). ` +
-      `Si querés ver opciones de tu flota, escribí «listado de mis unidades».`
-    );
+    return [
+      "🚗 *Unidad no encontrada*",
+      "",
+      `No encontré ninguna unidad que coincida con «${searched}» en la flota de ${company}.`,
+      "Revisá que esté bien escrito o pasame la matrícula completa (ej. NKL 952).",
+      "Si querés ver opciones de tu flota, escribí «listado de mis unidades».",
+    ].join("\n");
   }
 
   // Caso sin prefijo/patente detectados: puede ser que el cliente no haya dado
@@ -296,13 +304,22 @@ export function looksLikeChosePlateReply(rawText: string | undefined | null): bo
 }
 
 /** Entrada que debe resolver contra la flota (patente, prefijo, marca, nombre/etiqueta). */
-export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
+export function looksLikeFleetUnitSearchInput(rawText: string, threadText = ""): boolean {
   const text = String(rawText ?? "").trim();
   if (!text) return false;
   if (looksLikeFechaHoraLecturaMessage(text)) return false;
   // CONFIRMO / sí / dale nunca son búsqueda de unidad (bug 2026-08-07).
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeCustomerConversationCloseRequest(text)) return false;
+  // Bug prod 2026-08-18: "123600" tras pedir km/hs del odómetro/horómetro matcheaba
+  // movil_id (5–7 dígitos) y el turno iba a unidades en vez de seguir el trámite.
+  if (
+    threadText &&
+    threadHasActiveMeterValueRequest(threadText) &&
+    looksLikeBareMeterValue(text)
+  ) {
+    return false;
+  }
   if (extractMovilIdFromUnitMessage(text) != null) return true;
   return (
     !!detectLoosePlate(text) ||
@@ -2595,6 +2612,12 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   const { selectionText, threadText } = params;
   if (looksLikeFechaHoraLecturaMessage(selectionText)) return false;
   if (
+    looksLikeBareMeterValue(selectionText) &&
+    (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText))
+  ) {
+    return false;
+  }
+  if (
     looksLikeExplicitOdometerUpdateRequest(selectionText) ||
     looksLikeHorometerOnlyIntent(selectionText)
   ) {
@@ -2650,7 +2673,7 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
     return true;
   }
 
-  if (!looksLikeFleetUnitSearchInput(selectionText)) return false;
+  if (!looksLikeFleetUnitSearchInput(selectionText, threadText)) return false;
   if (looksLikeUnitListRequest(selectionText)) return false;
   if (hasPendingUnitConsultPlateRequest(threadText)) return true;
   if (threadHasRecentLiveUnitConsultIntent(threadText)) return true;
@@ -2703,6 +2726,15 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   if (looksLikeGreeting(selectionText)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(selectionText) || looksLikeLiveUnitConsultIntent(selectionText)) {
     return false;
+  }
+
+  if (
+    looksLikeBareMeterValue(selectionText) &&
+    (threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText) ||
+      pendingActionType === "odometro")
+  ) {
+    return true;
   }
 
   if (threadAwaitingOdometerKmValue(threadText) || threadAwaitingHorometerKmValue(threadText)) {
