@@ -34,6 +34,7 @@ const PUSH_SUITES = [
   "verify-meter-incomplete-data.mjs",
   "verify-ai-first-dialogue.mjs",
   "verify-certificate-flow-continuity.mjs",
+  "verify-certificate-unit-code-continuation.mjs",
   "verify-certificate-not-greeting-loop.mjs",
   "verify-certificate-flow-superseded.mjs",
   "verify-delivery-critical-fixes.mjs",

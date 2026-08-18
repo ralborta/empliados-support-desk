@@ -1,4 +1,8 @@
 import {
+  botLineAnchorsCertificateUnitAsk,
+  botLineIsCertificateUnitClarification,
+} from "@/lib/certificateFlowMessages";
+import {
   looksLikeFechaHoraLecturaMessage,
   stripBotPromptExamples,
   stripBotOdometerBotSpeech,
@@ -1424,6 +1428,20 @@ export function threadHasCertificateUnitPrompt(threadText: string): boolean {
   const tail = lines.slice(-12).join("\n").toLowerCase();
   if (/para el certificado de cobertura necesito la unidad/.test(tail)) return true;
 
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 12; i--) {
+    if (botLineAnchorsCertificateUnitAsk(lines[i])) return true;
+  }
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 12; i--) {
+    if (!botLineIsCertificateUnitClarification(lines[i])) continue;
+    const prior = lines.slice(Math.max(0, i - 12), i).join("\n");
+    if (
+      looksLikeCertificateKeyword(prior) ||
+      lines.slice(0, i).some((l) => botLineAnchorsCertificateUnitAsk(l))
+    ) {
+      return true;
+    }
+  }
+
   // Ancla: el "¿Cuál unidad?" genérico, pero SOLO cuando el pedido que lo motivó fue
   // de certificado (looksLikeCertificateKeyword sobre lo anterior).
   for (let i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) {
@@ -2680,6 +2698,41 @@ export function looksLikePendingTramiteAffirmation(text: string | undefined | nu
   return true;
 }
 
+export function hasPendingCertificateUnitRequest(
+  threadText: string,
+  pendingAction?: { type?: string; payload?: Record<string, unknown> } | null,
+): boolean {
+  if (
+    pendingAction?.type === "certificados" &&
+    pendingAction.payload?.stage === "awaiting_unit"
+  ) {
+    return true;
+  }
+  return certificateFlowState(threadText) === "awaiting_unit";
+}
+
+/** Respuesta del cliente que continúa identificando la unidad en trámite de certificado. */
+export function shouldContinueCertificateUnitCollection(
+  text: string,
+  threadText: string,
+  pendingAction?: { type?: string; payload?: Record<string, unknown> } | null,
+): boolean {
+  if (!hasPendingCertificateUnitRequest(threadText, pendingAction)) return false;
+  if (looksLikeCertificateUnitReply(text, threadText)) return true;
+  const norm = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return false;
+  if (/^(es|era)\s+(la|el)\s+unidad\b/.test(norm)) return true;
+  const compact = norm.replace(/[\s\-_.]+/g, "");
+  if (/^\d{5,7}$/.test(compact)) return true;
+  if (extractUnitCodeNumbersFromMessage(text).length > 0) return true;
+  if (detectLoosePlate(text) || isBarePlatePrefixHint(text)) return true;
+  return false;
+}
+
 export function looksLikeCertificateUnitReply(text: string, threadText = ""): boolean {
   if (detectLoosePlate(text) || isBarePlatePrefixHint(text)) return true;
   if (extractPlateCorrectionHint(text)) return true;
@@ -2691,6 +2744,9 @@ export function looksLikeCertificateUnitReply(text: string, threadText = ""): bo
     return false;
   }
   if (certificateFlowState(threadText) !== "awaiting_unit") return false;
+  const compact = text.trim().replace(/[\s\-_.]+/g, "");
+  if (/^\d{5,7}$/.test(compact)) return true;
+  if (extractUnitCodeNumbersFromMessage(text).length > 0) return true;
   if (/\b(de la|para la|la unidad|unidad)\b/.test(norm) && /[a-z0-9]{2,}/.test(norm)) return true;
   return false;
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { askCertificateUnitMessage } from "./certificateFlowMessages";
 import {
   buildAtilioStructuredGreeting,
   formatCertificateConfirm,
@@ -119,6 +120,13 @@ describe("waraWhatsAppFormat", () => {
   it("isStructuredWhatsAppTemplate detecta plantillas con emoji", () => {
     assert.equal(isStructuredWhatsAppTemplate("🛣 *Odómetro*"), true);
     assert.equal(isStructuredWhatsAppTemplate("Tomé AH 492 LV"), false);
+    assert.equal(isStructuredWhatsAppTemplate(askCertificateUnitMessage()), true);
+  });
+
+  it("askCertificateUnitMessage usa formato estructurado de certificado", () => {
+    const msg = askCertificateUnitMessage();
+    assert.match(msg, /^📋 \*Certificado\*/);
+    assert.match(msg, /🔢 Pasame la \*patente\*/);
   });
 
   it("formatCompanySelected incluye emoji de empresa", () => {
