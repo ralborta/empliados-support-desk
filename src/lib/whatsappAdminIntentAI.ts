@@ -78,5 +78,16 @@ export async function looksLikeChangeCompanyRequestHybrid(text: string | undefin
   if (looksLikeChangeCompanyRequest(text)) return true;
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  // Elegir/operar CON una empresa nombrada no es reiniciar el menú (bug 2026-08-18).
+  if (
+    /\b(pasar a|operar con|operar en|usar|trabajar con|seguir con)\b/.test(t) &&
+    !/\b(cambiar|reinici|otra empresa)\b/.test(t)
+  ) {
+    return false;
+  }
   return (await classifyAdminIntentWithAi(raw)) === "change_company";
 }

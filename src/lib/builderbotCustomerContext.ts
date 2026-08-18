@@ -379,34 +379,42 @@ export async function customerRegisteredContextResponse(
       looksLikeImplicitCompanyChangeAffirmation(selectionText, earlyThreadForCompany) ||
       (await looksLikeChangeCompanyRequestHybrid(selectionText)))
   ) {
-    const reset = await resetCustomerCompanyMenu(prisma, trimmed);
-    const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
-    const customer = resolution.customer;
-    return NextResponse.json({
-      registered: resolution.registered,
-      registered_s: resolution.registered ? "true" : "false",
-      ignore: false,
-      ignore_s: "false",
-      phone: normalized,
-      name: customer?.name?.trim() || "",
-      companyName: "",
-      validationSource: resolution.source,
-      waraLookupConfigured: resolution.lookup?.configured ?? false,
-      waraContactsCount: reset.contacts.length,
-      waraContactId: reset.contacts[0]?.id ?? null,
-      waraContacts: reset.contacts,
-      waraContactsText: reset.waraContactsText,
-      requiresCompanySelection: reset.requiresCompanySelection,
-      requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
-      companyPickedThisTurn: false,
-      companyPickedThisTurn_s: "false",
-      nextFlow: "reply",
-      nextFlow_s: "reply",
-      selectionFailed_s: "false",
-      message: reset.message,
-      testBlocked: resolution.testBlocked ?? false,
-      testBlocked_s: resolution.testBlocked ? "true" : "false",
-    });
+    const peek = await resolveCustomerByWaraPhone(prisma, trimmed);
+    const peekContacts = peek.lookup?.contactos ?? [];
+    const namedCompany =
+      matchCompanyContinuationMention(selectionText, peekContacts) ??
+      extractExplicitCompanyMention(selectionText, peekContacts);
+    // "Quiero operar con la empresa El Cacique" nombra una empresa: es elección, no reset.
+    if (!namedCompany) {
+      const reset = await resetCustomerCompanyMenu(prisma, trimmed);
+      const resolution = peek;
+      const customer = resolution.customer;
+      return NextResponse.json({
+        registered: resolution.registered,
+        registered_s: resolution.registered ? "true" : "false",
+        ignore: false,
+        ignore_s: "false",
+        phone: normalized,
+        name: customer?.name?.trim() || "",
+        companyName: "",
+        validationSource: resolution.source,
+        waraLookupConfigured: resolution.lookup?.configured ?? false,
+        waraContactsCount: reset.contacts.length,
+        waraContactId: reset.contacts[0]?.id ?? null,
+        waraContacts: reset.contacts,
+        waraContactsText: reset.waraContactsText,
+        requiresCompanySelection: reset.requiresCompanySelection,
+        requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
+        companyPickedThisTurn: false,
+        companyPickedThisTurn_s: "false",
+        nextFlow: "reply",
+        nextFlow_s: "reply",
+        selectionFailed_s: "false",
+        message: reset.message,
+        testBlocked: resolution.testBlocked ?? false,
+        testBlocked_s: resolution.testBlocked ? "true" : "false",
+      });
+    }
   }
 
   let resolution = await resolveCustomerForTurnContext(prisma, trimmed);
@@ -531,7 +539,7 @@ export async function customerRegisteredContextResponse(
     looksLikeCompanyListQuestion(selectionText)
   ) {
     responseMessage = buildCompanyStatusReply(activeCompany, contacts.length, waraContactsText);
-  } else if (!responseMessage && needsCompanyMenu && waraContactsText) {
+  } else if (!responseMessage && needsCompanyMenu && waraContactsText && !matchedCompanyMention && !explicitCompanyMentionWhilePending) {
     responseMessage =
       `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
       `${waraContactsText}\n\n` +
@@ -875,22 +883,19 @@ export async function customerRegisteredContextResponse(
           : dateReply;
       }
     }
-  } else if (explicitCompanyMentionWhilePending) {
-    // "la empresa es el cacique, la unidad es la AF061DO": declaración explícita de
-    // empresa aunque venga con contenido operativo pegado — tiene que resolverse ANTES
-    // que la rama de abajo (que de otro modo manda el mensaje al router genérico sin
-    // haber registrado la empresa, y el trámite vuelve a pedirla en loop).
+  } else if (explicitCompanyMentionWhilePending || matchedCompanyMention) {
+    // "la empresa es el cacique…" o "quiero operar con la empresa El Cacique":
+    // elegir empresa ANTES del router operativo ("quiero" no es un trámite).
+    const chosen = explicitCompanyMentionWhilePending ?? matchedCompanyMention;
     nextFlow = "reply";
     const picked = await selectCompanyForCustomer(prisma, trimmed, {
-      waraContactId: explicitCompanyMentionWhilePending.id,
+      waraContactId: chosen!.id,
     });
-    if (!responseMessage) {
-      responseMessage =
-        picked.menuMessage ??
-        formatCompanyConfirmMessage(
-          picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
-        );
-    }
+    responseMessage =
+      picked.menuMessage ??
+      formatCompanyConfirmMessage(
+        picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
+      );
   } else if (selectionText && looksLikeOperationalIntent(selectionText)) {
     // Trámites operativos (certificado, odómetro, etc.) van al router aunque falte menú empresa.
     nextFlow = "router";
@@ -919,18 +924,6 @@ export async function customerRegisteredContextResponse(
   ) {
     nextFlow = "ignore";
     responseMessage = "";
-  } else if (matchedCompanyMention) {
-    nextFlow = "reply";
-    const picked = await selectCompanyForCustomer(prisma, trimmed, {
-      waraContactId: matchedCompanyMention.id,
-    });
-    if (!responseMessage) {
-      responseMessage =
-        picked.menuMessage ??
-        formatCompanyConfirmMessage(
-          picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
-        );
-    }
   } else if (registered && selectionText.trim()) {
     // Fase 1 completa: /turn clasifica y ejecuta (operativo + guías + derivación).
     nextFlow = "router";
