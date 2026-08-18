@@ -3,6 +3,7 @@ import { looksLikeOpenCaseStatusInquiry, looksLikeCaseResolutionEtaInquiry } fro
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import {
   certificateFlowState,
+  shouldContinueCertificateUnitCollection,
   detectIncidentType,
   detectLoosePlate,
   hasPendingCertificateConfirmation,
@@ -136,10 +137,6 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
     return false;
   }
   return /\b(mantenimiento|preventiv\w*|correctiv\w*|service|taller|reparaci[oó]n)\b/.test(blob);
-}
-
-function isCertificateUnitContext(threadText: string): boolean {
-  return certificateFlowState(threadText) === "awaiting_unit";
 }
 
 function isUnitSelectionMessage(text: string, threadText = ""): boolean {
@@ -410,15 +407,25 @@ const TURN_RULES: TurnRule[] = [
   },
   {
     id: "certificate_unit_context_selection",
-    reason: "Respuesta de unidad tras 'necesito la unidad' del flujo de certificado.",
+    reason: "Respuesta de unidad tras pedido de unidad/patente del flujo de certificado.",
     decide: ({ text, threadText }) =>
-      isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText) ? "certificados" : null,
+      certificateFlowState(threadText) === "awaiting_unit" &&
+      (isUnitSelectionMessage(text, threadText) ||
+        shouldContinueCertificateUnitCollection(text, threadText))
+        ? "certificados"
+        : null,
   },
   {
     id: "gps_or_live_unit_consult",
     reason: "GPS/ignición/reporte en vivo — prioridad sobre guías y mantenimiento arrastrado del hilo.",
     decide: ({ text, threadText }) => {
-      if (isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText)) return null;
+      if (
+        certificateFlowState(threadText) === "awaiting_unit" &&
+        (isUnitSelectionMessage(text, threadText) ||
+          shouldContinueCertificateUnitCollection(text, threadText))
+      ) {
+        return null;
+      }
       return looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? "unidades" : null;
     },
   },

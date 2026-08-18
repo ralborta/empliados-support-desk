@@ -25,6 +25,7 @@ import {
   looksLikeUnitConsultFollowUp,
   threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
+import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 import {
   isOdometerFlowSuperseded,
   looksLikeOdometerInfoRequest,
@@ -265,6 +266,7 @@ function shouldRequireToolCall(params: {
 }
 
 function shouldPassthroughBackendMessage(msg: string): boolean {
+  if (isStructuredWhatsAppTemplate(msg)) return true;
   return (
     /listo,\s*registr[eé]/i.test(msg) ||
     /para registrar el cambio respond[eé] confirmo/i.test(msg) ||

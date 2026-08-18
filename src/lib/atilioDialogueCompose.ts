@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import type { ExecutorDialogueState } from "@/lib/executorDialogueState";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { ensureOdooCaseRefInClientMessage } from "@/lib/customerOdooCaseRef";
+import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 
 export function isAtilioAgentEnabled(): boolean {
   const raw = process.env.WARA_AGENT_MODE?.trim().toLowerCase();
@@ -57,6 +58,10 @@ export async function composeAgentReplyFromDialogueState(
     ensureOdooCaseRefInClientMessage(text, input.dialogueState.caso_odoo, {
       reused: input.dialogueState.caso_reutilizado,
     });
+
+  if (fallback && isStructuredWhatsAppTemplate(fallback)) {
+    return finalize(fallback);
+  }
 
   if (!isAtilioAgentEnabled() || !process.env.OPENAI_API_KEY?.trim()) {
     return finalize(fallback ?? input.dialogueState.hechos.join(" "));

@@ -22,6 +22,7 @@ import {
   type UtteranceUnderstanding,
 } from "@/lib/utteranceUnderstanding";
 import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
+import { askCertificateUnitMessage } from "@/lib/certificateFlowMessages";
 import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeChangeCompanyRequest,
@@ -74,6 +75,7 @@ import {
   threadOdometerRegistrationCompleted,
   looksLikeCertificateKeyword,
   certificateFlowState,
+  shouldContinueCertificateUnitCollection,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
   hasPendingMantenimientoConfirmation,
@@ -130,6 +132,7 @@ import {
   composeAgentReplyFromDialogueState,
 } from "@/lib/atilioDialogueCompose";
 import { isPassthroughGpsWhatsAppMessage } from "@/lib/waraGpsSummary";
+import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -144,13 +147,8 @@ const EXECUTOR_HANDLERS: Record<TurnExecutorId, ExecutorHandler> = {
   info_guides: infoGuidesPost,
 };
 
-function looksLikePendingCertificateUnitReply(text: string): boolean {
-  return (
-    !!detectLoosePlate(text) ||
-    isBarePlatePrefixHint(text) ||
-    looksLikeFleetUnitSearchInput(text) ||
-    looksLikeUnitNameInMessage(text)
-  );
+function looksLikePendingCertificateUnitReply(text: string, threadText = ""): boolean {
+  return shouldContinueCertificateUnitCollection(text, threadText);
 }
 
 function executorBody(
@@ -196,6 +194,7 @@ function messageFromPayload(data: JsonRecord): string {
 function shouldUseAgentCompose(execResult: JsonRecord): boolean {
   if (!agentComposeRequested(execResult)) return false;
   const template = messageFromPayload(execResult);
+  if (isStructuredWhatsAppTemplate(template)) return false;
   return !isPassthroughGpsWhatsAppMessage(template);
 }
 
@@ -639,6 +638,19 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
+  // Trámite de certificado esperando unidad: antes que interpretación IA / GPS.
+  if (
+    shouldContinueCertificateUnitCollection(selectionText, threadCtx.classificationThread, pendingAction) &&
+    !looksLikeBriefConfirmation(selectionText)
+  ) {
+    const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "certificados", ok: execOk };
+    }
+  }
+
   // ——— IA primero (casi todo el diálogo) ———
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
@@ -701,6 +713,16 @@ export async function runTurnExecutorPhase(params: {
       !activeUnitForNl?.plate &&
       !threadAwaitingUnitProblem
     ) {
+      if (shouldContinueCertificateUnitCollection(selectionText, threadCtx.classificationThread, pendingAction)) {
+        console.info(
+          `[utteranceUnderstanding] certificado-aclarar phone=${rawPhone.slice(0, 4)}… referent=${understanding?.referent}`,
+        );
+        return {
+          message: askCertificateUnitMessage(),
+          executor: "certificados",
+          ok: true,
+        };
+      }
       console.info(
         `[utteranceUnderstanding] aclarar phone=${rawPhone.slice(0, 4)}… referent=${understanding?.referent} conf=${understanding?.confidence}`,
       );
@@ -718,6 +740,16 @@ export async function runTurnExecutorPhase(params: {
       !activeUnitForNl?.plate &&
       !threadAwaitingUnitProblem
     ) {
+      if (shouldContinueCertificateUnitCollection(selectionText, threadCtx.classificationThread, pendingAction)) {
+        console.info(
+          `[utteranceUnderstanding] certificado-sin-dato phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent}`,
+        );
+        return {
+          message: askCertificateUnitMessage(),
+          executor: "certificados",
+          ok: true,
+        };
+      }
       console.info(
         `[utteranceUnderstanding] unidad-sin-dato phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent}`,
       );
@@ -1063,7 +1095,7 @@ export async function runTurnExecutorPhase(params: {
   if (
     pendingAction?.type === "certificados" &&
     pendingAction.payload?.stage === "awaiting_unit" &&
-    looksLikePendingCertificateUnitReply(selectionText) &&
+    shouldContinueCertificateUnitCollection(selectionText, threadCtx.classificationThread, pendingAction) &&
     !looksLikeBriefConfirmation(selectionText)
   ) {
     executor = "certificados";
