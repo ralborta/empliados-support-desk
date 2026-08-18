@@ -2380,18 +2380,86 @@ export function looksLikePostAdvisorCaseSupplement(
 }
 
 function stripLeadingAffirmationPrefix(raw: string): string {
-  return raw
+  let s = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/^ahora\s+(si|sí)\s*,?\s*/i, "")
-    .replace(/^(bueno|ok|dale)\s+,?\s*/i, "")
     .trim();
+  if (/^dale\s+(porfa|porfavor|porfis|nom[aá]s|nomas)\b/i.test(s)) return s;
+  return s.replace(/^(bueno|ok|dale|che)\s+,?\s*/i, "").trim();
+}
+
+/** Typos y abreviaturas rioplatenses antes de matchear confirmación breve. */
+function normalizeColloquialInboundForConfirm(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\bvancame\b/g, "avanzame")
+    .replace(/\bbamcame\b/g, "avanzame")
+    .replace(/\bavanza me\b/g, "avanzame")
+    .replace(/\bmete le\b/g, "metele")
+    .replace(/\bnomas\b/g, "nomás");
+}
+
+/** Coloquialismos argentinos de visto bueno (interpretar, no imitar al responder). */
+export function looksLikeColloquialArgentineAffirmation(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 80) return false;
+  const norm = normalizeColloquialInboundForConfirm(stripLeadingAffirmationPrefix(raw));
+  if (!norm) return false;
+  if (/^bancame(\s+(un\s+toque|ahi|a\s*hi|por\s*favor|pf))?$/i.test(norm)) return false;
+  if (/^gracias(\s+(genial|joya|che|atilio|atili[oó]))?$/i.test(norm)) return false;
+  const compact = norm.replace(/[^a-z]/g, "");
+  if (
+    new Set([
+      "joya",
+      "joyita",
+      "genial",
+      "barbaro",
+      "barbara",
+      "obvio",
+      "claro",
+      "deuna",
+      "dalenomás",
+      "dalenomas",
+      "metele",
+      "porfa",
+      "porfavor",
+      "porfis",
+      "avanzame",
+      "avanzá",
+      "avanza",
+      "mandale",
+      "mandale nomás",
+      "hacelo",
+      "registralo",
+      "registralo nomás",
+      "siporfa",
+      "siporfavor",
+      "daleporfa",
+      "daleporfavor",
+    ]).has(compact)
+  ) {
+    return true;
+  }
+  return (
+    /^(dale|si|sip|ok|joya|genial|barbaro|obvio|claro|de una|metele|avanza|avanzame|mandale|hacelo|registralo)(\s+(porfa|porfavor|porfis|nomás|nomas|che))*$/.test(
+      norm,
+    ) ||
+    /^(porfa|porfavor|porfis)$/.test(norm) ||
+    /\b(dale|si|sip)\s+(porfa|porfavor|porfis)\b/.test(norm)
+  );
 }
 
 /** Aceptación breve tipo CONFIRMO / sí / dale / ok. */
 export function looksLikeBriefConfirmation(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  if (looksLikeColloquialArgentineAffirmation(raw)) return true;
   const stripped = stripLeadingAffirmationPrefix(raw);
   const t = stripped
     .normalize("NFD")
@@ -2494,8 +2562,11 @@ export function looksLikePendingTramiteAffirmation(text: string | undefined | nu
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (
-    !/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|de acuerdo)\b/.test(norm) &&
-    !/^ahora\s+(si|sí)\b/.test(norm)
+    !/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|de acuerdo|joya|genial|porfa|porfavor|porfis|avanza|avanzame|obvio|claro)\b/.test(
+      norm,
+    ) &&
+    !/^ahora\s+(si|sí)\b/.test(norm) &&
+    !looksLikeColloquialArgentineAffirmation(raw)
   ) {
     return false;
   }
