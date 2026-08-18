@@ -286,7 +286,7 @@ async function recentThreadText(rawPhone: string): Promise<string> {
   }
 }
 
-/** Extrae los datos del resumen "Voy a registrar:" (Patente / Tipo / Prioridad / Detalle). */
+/** Extrae los datos del resumen de confirmación (formato legacy o plantilla WhatsApp). */
 function parseMantenimientoSummary(text: string): {
   patente?: string;
   servicio?: string;
@@ -295,22 +295,24 @@ function parseMantenimientoSummary(text: string): {
 } {
   const out: { patente?: string; servicio?: string; prioridad?: Priority; detalle?: string } = {};
 
+  const stripBold = (value: string): string => value.replace(/^\*+|\*+$/g, "").trim();
+
   const lastCapture = (pattern: RegExp): string | undefined => {
     const matches = [...text.matchAll(pattern)];
     const m = matches.at(-1);
     return m?.[1]?.trim();
   };
 
-  const patente = lastCapture(/Patente:\s*([A-Za-z0-9 ]{5,12})/g);
-  if (patente) out.patente = patente;
+  const patente = lastCapture(/(?:Patente|Unidad):\s*\*?([^*\n]+)/gi);
+  if (patente) out.patente = stripBold(patente);
 
-  const servicio = lastCapture(/Tipo:\s*(.+)/g);
-  if (servicio) out.servicio = servicio.split("\n")[0]?.trim();
+  const servicio = lastCapture(/Tipo:\s*\*?([^*\n]+)/gi);
+  if (servicio) out.servicio = stripBold(servicio.split("\n")[0]?.trim() ?? "");
 
-  const detalle = lastCapture(/Detalle:\s*(.+)/g);
-  if (detalle) out.detalle = detalle.split("\n")[0]?.trim();
+  const detalle = lastCapture(/Detalle:\s*\*?(.+)/gi);
+  if (detalle) out.detalle = stripBold(detalle.split("\n")[0]?.trim() ?? "");
 
-  const prioRaw = lastCapture(/Prioridad:\s*(\w+)/gi);
+  const prioRaw = lastCapture(/Prioridad:\s*\*?(\w+)/gi);
   if (prioRaw) {
     const p = prioRaw.toLowerCase();
     if (/urg/.test(p)) out.prioridad = "URGENT";
@@ -484,16 +486,26 @@ export async function POST(req: NextRequest) {
   const hasLiveMaintPendingAction = dbPendingMaint?.type === "mantenimiento";
   const pendingMaintConfirm =
     hasPendingMantenimientoConfirmation(threadText) ||
-    (hasLiveMaintPendingAction &&
-      !!dbPendingMaint.payload &&
-      /voy a registrar:/i.test(String(dbPendingMaint.summary ?? threadText)) &&
-      /tipo:/i.test(String(dbPendingMaint.summary ?? threadText)));
+    (hasLiveMaintPendingAction && !!dbPendingMaint.payload);
   const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
-  const summary = parseMantenimientoSummary(
-    /voy a registrar:/i.test(threadText) ? threadText : "",
-  );
+  const summarySource =
+    pendingMaintConfirm ||
+    /voy a registrar:/i.test(threadText) ||
+    /confirmar mantenimiento/i.test(threadText)
+      ? threadText
+      : String(dbPendingMaint?.summary ?? "");
+  const summary = parseMantenimientoSummary(summarySource);
 
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
+  const maintPayload =
+    hasLiveMaintPendingAction && dbPendingMaint.payload
+      ? (dbPendingMaint.payload as {
+          plate?: string;
+          service?: string;
+          priority?: Priority;
+          detalle?: string;
+        })
+      : undefined;
 
   const inboundForConfirm = rawInbound || lastInbound;
   let confirmed = isMaintenanceConfirmationAccepted({
@@ -555,6 +567,8 @@ export async function POST(req: NextRequest) {
   if (pendingMaintConfirm && confirmed) {
     text =
       summary.detalle ||
+      (typeof maintPayload?.detalle === "string" ? maintPayload.detalle : undefined) ||
+      sessionNotebook?.tramite?.detalle ||
       summary.servicio ||
       "Solicitud de gestion de mantenimiento";
   } else {
@@ -634,14 +648,6 @@ export async function POST(req: NextRequest) {
   }
 
   const threadService = inferServiceFromThread(threadText);
-  const maintPayload =
-    hasLiveMaintPendingAction && dbPendingMaint.payload
-      ? (dbPendingMaint.payload as {
-          plate?: string;
-          service?: string;
-          priority?: Priority;
-        })
-      : undefined;
   const service =
     pendingMaintConfirm && confirmed && summary.servicio
       ? summary.servicio
@@ -1074,7 +1080,7 @@ export async function POST(req: NextRequest) {
     });
     await setPendingAction(prisma, rawPhone, "mantenimiento", {
       summary: message,
-      payload: { plate, service, priority },
+      payload: { plate, service, priority, detalle: text },
     });
     return NextResponse.json(
       {

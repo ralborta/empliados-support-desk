@@ -2208,8 +2208,9 @@ export function certificateFlowState(threadText: string): CertificateFlowState {
 
   // El resumen del bot es multilínea (Patente / Empresa / CONFIRMO en líneas distintas).
   if (
-    /voy a generar el certificado de cobertura/.test(tail) &&
-    /responde\s+confirmo/.test(tail)
+    (/voy a generar el certificado de cobertura|confirmar certificado/.test(tail) &&
+      /respond[eé]\s+\*?confirmo/.test(tail)) ||
+    (/voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail))
   ) {
     return "awaiting_confirm";
   }
@@ -2241,17 +2242,10 @@ export function threadHasActiveMeterValueRequest(threadText: string): boolean {
   return threadAwaitingHorometerKmValue(threadText) || threadAwaitingOdometerKmValue(threadText);
 }
 
-export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
-  // Odómetro/horómetro en curso manda sobre un resumen viejo de mantenimiento en el hilo.
-  if (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText)) {
-    return false;
-  }
-  const tail = normThreadText(threadText.slice(-4000));
-  const summaryStart = tail.lastIndexOf("voy a registrar:");
-  if (summaryStart === -1) return false;
+function maintenanceConfirmSummaryPending(tail: string, summaryStart: number): boolean {
   const block = tail.slice(summaryStart, summaryStart + 1200);
   if (/odometro|horometro|kilometraje/.test(block)) return false;
-  if (!/tipo:/.test(block) || !/responde\s+confirmo/.test(block)) return false;
+  if (!/tipo:/.test(block) || !/respond[eé]\s+\*?confirmo/.test(block)) return false;
   // Bug real, producción 2026-07-30: tras completar horómetro ("Listo, registré el cambio…")
   // y arrancar mantenimiento en la misma sesión, el chequeo global en los últimos 800
   // caracteres del hilo veía el cierre del horómetro y devolvía false — "Confirmó" volvía
@@ -2264,6 +2258,19 @@ export function hasPendingMantenimientoConfirmation(threadText: string): boolean
   return true;
 }
 
+export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
+  // Odómetro/horómetro en curso manda sobre un resumen viejo de mantenimiento en el hilo.
+  if (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText)) {
+    return false;
+  }
+  const tail = normThreadText(threadText.slice(-4000));
+  const newStart = tail.lastIndexOf("confirmar mantenimiento");
+  if (newStart >= 0 && maintenanceConfirmSummaryPending(tail, newStart)) return true;
+  const legacyStart = tail.lastIndexOf("voy a registrar:");
+  if (legacyStart >= 0 && maintenanceConfirmSummaryPending(tail, legacyStart)) return true;
+  return false;
+}
+
 /**
  * Detalle del resumen "Voy a registrar:" de mantenimiento (último CONFIRMO pendiente).
  * Sirve para reencaminar si el cliente dijo "No" y en realidad pedía una consulta.
@@ -2271,10 +2278,10 @@ export function hasPendingMantenimientoConfirmation(threadText: string): boolean
 export function extractPendingMaintenanceDetalle(threadText: string): string | null {
   if (!hasPendingMantenimientoConfirmation(threadText)) return null;
   const tail = threadText.slice(-4000);
-  const matches = [...tail.matchAll(/Detalle:\s*(.+)/gi)];
+  const matches = [...tail.matchAll(/Detalle:\s*\*?(.+)/gi)];
   const last = matches.at(-1)?.[1]?.trim();
   if (!last) return null;
-  return last.split("\n")[0]?.trim() || null;
+  return last.replace(/\*+$/, "").split("\n")[0]?.trim() || null;
 }
 
 /**
