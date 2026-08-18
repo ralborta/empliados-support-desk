@@ -7,11 +7,13 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
-import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadHasRecentCertificateSuccess, threadTextSinceCompanySelection } from "@/lib/wara";
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
+  looksLikeConversationAcknowledgement,
+  looksLikeColloquialGratitudeAck,
   looksLikeOpcionesInfoRequest,
   looksLikePlateCorrectionRequest,
   looksLikeUnidadesInfoRequest,
@@ -651,6 +653,24 @@ export async function POST(req: NextRequest) {
 
   const threadText = await recentThreadText(rawPhone);
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
+
+  if (
+    threadHasRecentCertificateSuccess(threadText) &&
+    (looksLikeConversationAcknowledgement(text) || looksLikeColloquialGratitudeAck(text))
+  ) {
+    const message = "De nada. ¿En qué más te ayudo?";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      stage: "post_certificate_gratitude",
+    });
+    return NextResponse.json({
+      ok: true,
+      ok_s: "true",
+      flowComplete_s: "true",
+      message,
+    });
+  }
+
   const certState = certificateFlowState(threadText);
 
   if (

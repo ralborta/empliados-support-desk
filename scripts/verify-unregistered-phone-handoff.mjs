@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import {
   UNREGISTERED_PHONE_TICKET_TITLE,
+  UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
   UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
   ensureUnregisteredPhoneAdvisorHandoff,
 } from "../src/lib/unregisteredPhoneHandoff.ts";
@@ -29,6 +30,11 @@ assert.equal(
   UNREGISTERED_PHONE_TICKET_TITLE,
   "Número no registrado en Wara",
   "título estable (no romper filtros del panel)",
+);
+assert.ok(
+  /encontramos.*registrado/i.test(UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY) &&
+    /asesor/i.test(UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY),
+  "primer aviso al cliente no registrado",
 );
 assert.ok(
   /asesor/i.test(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY) &&
