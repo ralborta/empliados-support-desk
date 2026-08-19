@@ -29,6 +29,7 @@ import {
 import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry.ts";
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationClose.ts";
 import { assessUnitReporting } from "../src/lib/waraGpsAssessment.ts";
+import { resolveGpsHeaderMediaUrl } from "../src/lib/waraGpsSummary.ts";
 import {
   extractPlatePrefixFromMessage,
   isBarePlatePrefixHint,
@@ -371,6 +372,16 @@ const gps = [
 for (const [u, expect] of gps) {
   const a = assessUnitReporting(u);
   assert(a?.status === expect, `GPS esperaba ${expect}, got ${a?.status ?? "null"}`);
+  const media = resolveGpsHeaderMediaUrl(u, a.status);
+  if (expect === "missing_report") {
+    assert(media?.includes("alert-falta-reporte.jpg"), "falta de reporte → banner falta-reporte");
+    assert(!media?.includes("falla-ignicion"), "falta de reporte nunca usa banner ignición");
+  } else if (expect === "ignition_failure") {
+    assert(media?.includes("alert-falla-ignicion.jpg"), "falla ignición → banner falla-ignicion");
+    assert(!media?.includes("falta-reporte"), "falla ignición nunca usa banner falta-reporte");
+  } else {
+    assert(!media, `status ${expect} no debe adjuntar banner GPS`);
+  }
 }
 
 if (failed > 0) {

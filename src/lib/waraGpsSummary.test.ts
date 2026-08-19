@@ -3,14 +3,18 @@ import { describe, it } from "node:test";
 import {
   buildStructuredGpsBody,
   buildTemplateSummary,
+  buildGpsClientSummary,
   buildGpsPositionClarificationAnalysis,
   formatGpsUnitLabel,
   gpsAlertIgnitionFailureMediaUrl,
+  gpsAlertMissingReportMediaUrl,
   resolveGpsHeaderMediaUrl,
   threadHasRecentGpsContext,
 } from "./waraGpsSummary";
 import { looksLikeGpsPositionClarificationQuestion } from "./waraApi";
 import type { WaraUnidadEstado } from "./waraApi";
+import { assessUnitReporting } from "./waraGpsAssessment";
+import { extractMediaUrlAndCleanText } from "./mediaUrlMarker";
 
 function sampleUnit(): WaraUnidadEstado {
   return {
@@ -104,6 +108,78 @@ describe("waraGpsSummary formato WhatsApp", () => {
     assert.equal((text.match(/🚗 Unidad:/g) ?? []).length, 1);
     assert.match(text, /Última ignición:/);
     assert.match(text, /El reporte y la posición van al día/);
+  });
+
+  it("cada estado GPS adjunta solo su banner (falta reporte ≠ falla ignición)", async () => {
+    const telemetryUnit = (input: {
+      reporte: number;
+      posicion?: number;
+      ignicionEstado: boolean;
+      ignicionHace: number;
+    }): WaraUnidadEstado =>
+      ({
+        movil_id: 400099,
+        unidad: "M400-099",
+        patente: "AD612UQ",
+        ultimo_reporte: { hace_segundos: input.reporte },
+        ultima_posicion: {
+          hace_segundos: input.posicion ?? input.reporte,
+          lat: -32.93,
+          lon: -68.84,
+        },
+        ultima_ignicion: {
+          estado: input.ignicionEstado,
+          hace_segundos: input.ignicionHace,
+        },
+      }) as WaraUnidadEstado;
+
+    const missingUnit = telemetryUnit({
+      reporte: 7200,
+      posicion: 15000,
+      ignicionEstado: false,
+      ignicionHace: 7200,
+    });
+    const ignitionUnit = telemetryUnit({
+      reporte: 400,
+      posicion: 400,
+      ignicionEstado: false,
+      ignicionHace: 8000,
+    });
+
+    const missingAssessment = assessUnitReporting(missingUnit)!;
+    const ignitionAssessment = assessUnitReporting(ignitionUnit)!;
+    assert.equal(missingAssessment.status, "missing_report");
+    assert.equal(ignitionAssessment.status, "ignition_failure");
+
+    const missingUrl = resolveGpsHeaderMediaUrl(missingUnit, missingAssessment.status);
+    const ignitionUrl = resolveGpsHeaderMediaUrl(ignitionUnit, ignitionAssessment.status);
+    assert.equal(missingUrl, gpsAlertMissingReportMediaUrl());
+    assert.equal(ignitionUrl, gpsAlertIgnitionFailureMediaUrl());
+    assert.notEqual(missingUrl, ignitionUrl);
+
+    for (const status of ["ok", "coherent_pause", "stale_position"] as const) {
+      assert.equal(resolveGpsHeaderMediaUrl(sampleUnit(), status), undefined);
+    }
+
+    const missingSummary = await buildGpsClientSummary({
+      unitLabel: "AD 612 UQ (M400-099)",
+      unit: missingUnit,
+      assessment: missingAssessment,
+      action: "observation",
+    });
+    const ignitionSummary = await buildGpsClientSummary({
+      unitLabel: "AD 612 UQ (M400-099)",
+      unit: ignitionUnit,
+      assessment: ignitionAssessment,
+      action: "observation",
+    });
+
+    const missingMedia = extractMediaUrlAndCleanText(missingSummary);
+    const ignitionMedia = extractMediaUrlAndCleanText(ignitionSummary);
+    assert.match(missingMedia.mediaUrl ?? "", /alert-falta-reporte\.jpg$/);
+    assert.match(ignitionMedia.mediaUrl ?? "", /alert-falla-ignicion\.jpg$/);
+    assert.doesNotMatch(missingMedia.mediaUrl ?? "", /falla-ignicion/);
+    assert.doesNotMatch(ignitionMedia.mediaUrl ?? "", /falta-reporte/);
   });
 
   it("detecta preguntas aclaratorias sobre la posición", () => {

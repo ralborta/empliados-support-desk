@@ -34,8 +34,20 @@ export function gpsAlertIgnitionFailureMediaUrl(): string {
   return waraPublicAssetUrl(GPS_ALERT_IGNITION_FAILURE_ASSET_PATH);
 }
 
+/** Únicos estados con banner WhatsApp — cada uno con asset distinto e inmutable. */
+export const GPS_BANNER_MEDIA_BY_STATUS = {
+  missing_report: GPS_ALERT_MISSING_REPORT_ASSET_PATH,
+  ignition_failure: GPS_ALERT_IGNITION_FAILURE_ASSET_PATH,
+} as const;
+
+export type GpsBannerStatus = keyof typeof GPS_BANNER_MEDIA_BY_STATUS;
+
+export function isGpsBannerStatus(status: GpsAssessment["status"]): status is GpsBannerStatus {
+  return status in GPS_BANNER_MEDIA_BY_STATUS;
+}
+
 export function gpsStatusHasBanner(status: GpsAssessment["status"]): boolean {
-  return status === "missing_report" || status === "ignition_failure";
+  return isGpsBannerStatus(status);
 }
 
 export type GpsSummaryInput = {
@@ -300,18 +312,13 @@ export function isPassthroughGpsWhatsAppMessage(text: string | undefined | null)
   return isStructuredGpsWhatsAppSummary(text) || isGpsPositionClarificationSummary(text);
 }
 
-/** Imagen de encabezado WhatsApp (solo assets del cliente; sin dummyimage). */
+/** Imagen de encabezado WhatsApp — solo falta de reporte o falla ignición; nunca otra. */
 export function resolveGpsHeaderMediaUrl(
   _unit: WaraUnidadEstado,
   status: GpsAssessment["status"],
 ): string | undefined {
-  if (status === "missing_report") {
-    return gpsAlertMissingReportMediaUrl();
-  }
-  if (status === "ignition_failure") {
-    return gpsAlertIgnitionFailureMediaUrl();
-  }
-  return undefined;
+  if (!isGpsBannerStatus(status)) return undefined;
+  return waraPublicAssetUrl(GPS_BANNER_MEDIA_BY_STATUS[status]);
 }
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {

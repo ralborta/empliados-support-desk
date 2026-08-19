@@ -46,4 +46,16 @@ describe("waraGpsAssessment criterio GPRS 10 min", () => {
     ) as GpsAssessment;
     assert.equal(a.status, "missing_report");
   });
+
+  it("reporte viejo → missing_report; reporte al día + ignición vieja → ignition_failure", () => {
+    const missing = assessUnitReporting(
+      unit({ reporte: 7200, posicion: 15000, ignicionEstado: false, ignicionHace: 7200 }),
+    );
+    assert.equal(missing?.status, "missing_report");
+
+    const ignition = assessUnitReporting(
+      unit({ reporte: 400, posicion: 400, ignicionEstado: false, ignicionHace: 8000 }),
+    );
+    assert.equal(ignition?.status, "ignition_failure");
+  });
 });
