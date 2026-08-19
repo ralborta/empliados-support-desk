@@ -57,7 +57,6 @@ import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedS
 import {
   buildGpsClientSummary,
   isStructuredGpsWhatsAppSummary,
-  resolveGpsHeaderMediaUrl,
   buildGpsPositionClarificationAnalysis,
   threadHasRecentGpsContext,
 } from "@/lib/waraGpsSummary";
@@ -1736,18 +1735,7 @@ export async function POST(req: NextRequest) {
   const composePayload = agentComposePayload(dialogueState);
   const outbound = extractMediaUrlAndCleanText(summaryText);
   summaryText = outbound.text;
-  let headerMediaUrl = outbound.mediaUrl;
-  if (
-    !headerMediaUrl &&
-    result.ok &&
-    filtered.length === 1 &&
-    isStructuredGpsWhatsAppSummary(summaryText)
-  ) {
-    const assessment = assessUnitReporting(filtered[0]);
-    if (assessment) {
-      headerMediaUrl = resolveGpsHeaderMediaUrl(filtered[0], assessment.status);
-    }
-  }
+  const headerMediaUrl = outbound.mediaUrl;
 
   if (!composePayload.agent_compose_s && summaryText.trim()) {
     await appendOutboundBotMessage(rawPhone, summaryText, {

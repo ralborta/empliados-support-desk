@@ -339,8 +339,7 @@ export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<str
   const template = buildTemplateSummary(input);
   const finalize = (text: string) =>
     ensureOdooCaseRefInClientMessage(text, input.odooRef, { reused: input.ticketReused });
-  const text = finalize(template);
-  return withMediaUrlMarker(text, resolveGpsHeaderMediaUrl(input.unit, input.assessment.status));
+  return finalize(template);
 }
 
 export { buildTemplateSummary, buildGpsFacts, ignitionLabel, formatMinutesAgo, assessUnitReporting };
