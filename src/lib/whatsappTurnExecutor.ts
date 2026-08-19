@@ -113,6 +113,8 @@ import {
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
+import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
+import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
 import {
   looksLikeTramiteCancellationIntent,
@@ -188,8 +190,20 @@ async function invokeExecutor(
   return (await res.json().catch(() => ({}))) as JsonRecord;
 }
 
-function messageFromPayload(data: JsonRecord): string {
+function rawMessageFromPayload(data: JsonRecord): string {
   return String(data.message ?? data.summaryText ?? "").trim();
+}
+
+function mediaUrlFromPayload(data: JsonRecord): string | undefined {
+  const explicit = String(data.mediaUrl ?? data.mediaUrl_s ?? "").trim();
+  if (explicit && /^https?:\/\//i.test(explicit)) return explicit;
+  return extractMediaUrlAndCleanText(rawMessageFromPayload(data)).mediaUrl;
+}
+
+function messageFromPayload(data: JsonRecord): string {
+  const raw = rawMessageFromPayload(data);
+  if (!raw) return "";
+  return extractMediaUrlAndCleanText(raw).text;
 }
 
 function shouldUseAgentCompose(execResult: JsonRecord): boolean {
@@ -268,8 +282,12 @@ export function scheduleDeferredTurnExecutor(params: {
     (async () => {
       try {
         const result = await runTurnExecutorPhase(params);
-        if (!result.message) return;
-        await sendWhatsAppMessage({ number: params.rawPhone, message: result.message });
+        if (!result.message && !result.mediaUrl) return;
+        await sendWhatsAppTextWithOptionalMedia({
+          number: params.rawPhone,
+          message: result.message,
+          mediaUrl: result.mediaUrl,
+        });
         await persistCustomerBotReply(params.rawPhone, result.message, {
           source: "whatsapp_turn_execute",
           executor: result.executor,
@@ -295,7 +313,7 @@ export async function runTurnExecutorPhase(params: {
   rawPhone: string;
   selectionText: string;
   apiKey: string;
-}): Promise<{ message: string; executor: TurnExecutorId; ok: boolean }> {
+}): Promise<{ message: string; mediaUrl?: string; executor: TurnExecutorId; ok: boolean }> {
   const { rawPhone, selectionText, apiKey } = params;
 
   if (
@@ -1179,5 +1197,10 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  return { message: finalMessage, executor, ok: execOk };
+  return {
+    message: finalMessage,
+    mediaUrl: finalMessage ? mediaUrlFromPayload(execResult) : undefined,
+    executor,
+    ok: execOk,
+  };
 }

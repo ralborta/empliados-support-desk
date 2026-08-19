@@ -54,7 +54,14 @@ import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalat
 import { findCustomerVisibleOdooCaseRef, withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
-import { buildGpsClientSummary, isStructuredGpsWhatsAppSummary, buildGpsPositionClarificationAnalysis, threadHasRecentGpsContext } from "@/lib/waraGpsSummary";
+import {
+  buildGpsClientSummary,
+  isStructuredGpsWhatsAppSummary,
+  resolveGpsHeaderMediaUrl,
+  buildGpsPositionClarificationAnalysis,
+  threadHasRecentGpsContext,
+} from "@/lib/waraGpsSummary";
+import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
 import {
   buildFleetUnitNotFoundMessage,
   customerOnlyThreadText,
@@ -1612,11 +1619,11 @@ export async function POST(req: NextRequest) {
         if (assessment.status === "ok" || assessment.status === "coherent_pause") {
           action = "observation";
           summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-          });
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+            });
         } else if (assessment.status === "ignition_failure") {
           action = "ticket";
           const ignText =
@@ -1637,15 +1644,15 @@ export async function POST(req: NextRequest) {
           ticketRef = created.ref;
           ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-            ticketRef: created.ref,
-            odooRef: created.odooRef ?? undefined,
-            ticketReused: created.reused,
-            ticketIssueDetail,
-          });
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+              ticketRef: created.ref,
+              odooRef: created.odooRef ?? undefined,
+              ticketReused: created.reused,
+              ticketIssueDetail,
+            });
         } else if (assessment.status === "stale_position") {
           action = "ticket";
           ticketIssueDetail = assessment.reason;
@@ -1662,15 +1669,15 @@ export async function POST(req: NextRequest) {
           ticketRef = created.ref;
           ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-            ticketRef: created.ref,
-            odooRef: created.odooRef ?? undefined,
-            ticketReused: created.reused,
-            ticketIssueDetail,
-          });
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+              ticketRef: created.ref,
+              odooRef: created.odooRef ?? undefined,
+              ticketReused: created.reused,
+              ticketIssueDetail,
+            });
         } else {
           action = "ticket";
           ticketIssueDetail = `falta de reporte: el GPS no envía datos hace ${elapsedText}`;
@@ -1686,15 +1693,15 @@ export async function POST(req: NextRequest) {
           ticketRef = created.ref;
           ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-            ticketRef: created.ref,
-            odooRef: created.odooRef ?? undefined,
-            ticketReused: created.reused,
-            ticketIssueDetail,
-          });
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+              ticketRef: created.ref,
+              odooRef: created.odooRef ?? undefined,
+              ticketReused: created.reused,
+              ticketIssueDetail,
+            });
         }
         // El resumen GPS ya trae formato WhatsApp fijo (emojis, mapa, cierre).
         // agent_compose lo reescribía en prosa sin emojis (WARA_AGENT_MODE).
@@ -1727,6 +1734,20 @@ export async function POST(req: NextRequest) {
   }
 
   const composePayload = agentComposePayload(dialogueState);
+  const outbound = extractMediaUrlAndCleanText(summaryText);
+  summaryText = outbound.text;
+  let headerMediaUrl = outbound.mediaUrl;
+  if (
+    !headerMediaUrl &&
+    result.ok &&
+    filtered.length === 1 &&
+    isStructuredGpsWhatsAppSummary(summaryText)
+  ) {
+    const assessment = assessUnitReporting(filtered[0]);
+    if (assessment) {
+      headerMediaUrl = resolveGpsHeaderMediaUrl(filtered[0], assessment.status);
+    }
+  }
 
   if (!composePayload.agent_compose_s && summaryText.trim()) {
     await appendOutboundBotMessage(rawPhone, summaryText, {
@@ -1736,6 +1757,7 @@ export async function POST(req: NextRequest) {
       companyName: pickOdooCompanyName(session.companyName, result.cliente),
       action,
       ticketRef,
+      ...(headerMediaUrl ? { mediaUrl: headerMediaUrl } : {}),
     });
   }
 
@@ -1748,6 +1770,7 @@ export async function POST(req: NextRequest) {
       unidadesCount: filtered.length,
       summaryText,
       message: summaryText,
+      ...(headerMediaUrl ? { mediaUrl: headerMediaUrl, mediaUrl_s: headerMediaUrl } : {}),
       action,
       ticketRef,
       odooRef: ticketRef || undefined,

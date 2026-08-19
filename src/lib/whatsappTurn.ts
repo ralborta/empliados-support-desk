@@ -17,6 +17,7 @@ import {
   isBarePlatePrefixHint,
 } from "@/lib/wara";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
+import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
 import {
   runTurnExecutorPhase,
   scheduleDeferredTurnExecutor,
@@ -33,12 +34,16 @@ function buildTurnPayload(
   overrides: Partial<JsonRecord> = {},
 ): JsonRecord {
   const nextFlow = String(overrides.nextFlow ?? context.nextFlow ?? "reply");
-  const message = String(
+  const rawMessage = String(
     overrides.message ?? overrides.summaryText ?? context.message ?? context.summaryText ?? "",
   ).trim();
+  const extracted = extractMediaUrlAndCleanText(rawMessage);
+  const message = extracted.text;
+  const mediaUrl =
+    extracted.mediaUrl ?? (String(overrides.mediaUrl ?? "").trim() || undefined);
   const skipResponse =
     overrides.skipResponse_s ??
-    (shouldTurnSendWhatsAppToCustomer()
+    (shouldTurnSendWhatsAppToCustomer() || mediaUrl
       ? "true"
       : message
         ? bbcShouldSendExecutorMessage()
@@ -53,6 +58,7 @@ function buildTurnPayload(
     ok_s: String(overrides.ok_s ?? (overrides.ok === false ? "false" : "true")),
     message,
     summaryText: String(overrides.summaryText ?? message),
+    ...(mediaUrl ? { mediaUrl, mediaUrl_s: mediaUrl } : {}),
     skipResponse_s: skipResponse,
     flowComplete_s: overrides.flowComplete_s ?? "true",
     nextFlow,
@@ -237,6 +243,7 @@ export async function handleWhatsAppTurn(params: {
       ok: execPhase.ok,
       ok_s: execPhase.ok ? "true" : "false",
       message: execPhase.message,
+      mediaUrl: execPhase.mediaUrl,
       nextFlow: "reply",
       nextFlow_s: "reply",
       executor: execPhase.executor,

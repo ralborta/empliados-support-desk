@@ -1,9 +1,10 @@
-import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import {
   bbcShouldSendExecutorMessage,
   shouldTurnSendWhatsAppToCustomer,
 } from "@/lib/waraInboundAudit";
+import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
+import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -14,7 +15,12 @@ export async function deliverTurnToWhatsApp(
   rawPhone: string,
   payload: JsonRecord,
 ): Promise<JsonRecord> {
-  const message = String(payload.message ?? payload.summaryText ?? "").trim();
+  const extracted = extractMediaUrlAndCleanText(String(payload.message ?? payload.summaryText ?? "").trim());
+  const message = extracted.text;
+  const explicitMedia = String(payload.mediaUrl ?? payload.mediaUrl_s ?? "").trim();
+  const mediaUrl =
+    (explicitMedia && /^https?:\/\//i.test(explicitMedia) ? explicitMedia : undefined) ??
+    extracted.mediaUrl;
   const nextFlow = String(payload.nextFlow_s ?? payload.nextFlow ?? "reply");
 
   if (!message || nextFlow === "ignore") {
@@ -25,13 +31,15 @@ export async function deliverTurnToWhatsApp(
     return { ...payload, message, skipResponse_s: "true", nextFlow, nextFlow_s: nextFlow };
   }
 
+  const mustSendViaBackend = shouldTurnSendWhatsAppToCustomer() || !!mediaUrl;
+
   const persistMeta = {
     source: "whatsapp_turn",
     executor: payload.executor_s ?? payload.executor ?? "turn",
-    waDelivery: shouldTurnSendWhatsAppToCustomer() ? "backend" : "bbc",
+    waDelivery: mustSendViaBackend ? "backend" : "bbc",
   };
 
-  if (!shouldTurnSendWhatsAppToCustomer()) {
+  if (!mustSendViaBackend) {
     const bbcSends = bbcShouldSendExecutorMessage();
     await persistCustomerBotReply(rawPhone, message, persistMeta).catch(() => undefined);
     return {
@@ -43,7 +51,7 @@ export async function deliverTurnToWhatsApp(
   }
 
   try {
-    await sendWhatsAppMessage({ number: rawPhone, message });
+    await sendWhatsAppTextWithOptionalMedia({ number: rawPhone, message, mediaUrl });
     await persistCustomerBotReply(rawPhone, message, { ...persistMeta, waDelivery: "backend" });
     return {
       ...payload,
