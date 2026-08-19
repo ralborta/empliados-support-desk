@@ -206,6 +206,20 @@ function messageFromPayload(data: JsonRecord): string {
   return extractMediaUrlAndCleanText(raw).text;
 }
 
+function phaseFromExecResult(
+  execResult: JsonRecord,
+  message: string,
+  executor: TurnExecutorId,
+  ok: boolean,
+): { message: string; mediaUrl?: string; executor: TurnExecutorId; ok: boolean } {
+  return {
+    message,
+    mediaUrl: message ? mediaUrlFromPayload(execResult) : undefined,
+    executor,
+    ok,
+  };
+}
+
 function shouldUseAgentCompose(execResult: JsonRecord): boolean {
   if (!agentComposeRequested(execResult)) return false;
   const template = messageFromPayload(execResult);
@@ -566,7 +580,7 @@ export async function runTurnExecutorPhase(params: {
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage || !executorSkippedSilently(execResult)) {
-      return { message: execMessage, executor: "unidades", ok: execOk };
+      return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
     }
   }
 
@@ -693,7 +707,7 @@ export async function runTurnExecutorPhase(params: {
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
-      return { message: execMessage, executor: "unidades", ok: execOk };
+      return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
     }
   }
 
@@ -724,7 +738,7 @@ export async function runTurnExecutorPhase(params: {
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage || !executorSkippedSilently(execResult)) {
-      return { message: execMessage, executor: "unidades", ok: execOk };
+      return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
     }
   }
   if (shouldInterpretAmbiguousUtterance(selectionText, threadCtx.classificationThread)) {
@@ -1048,13 +1062,13 @@ export async function runTurnExecutorPhase(params: {
           fallbackTemplate: messageFromPayload(execResult),
         });
         if (composed) {
-          return { message: composed, executor: "unidades", ok: execOk };
+          return phaseFromExecResult(execResult, composed, "unidades", execOk);
         }
       }
     }
     const execMessage = messageFromPayload(execResult);
     if (execMessage) {
-      return { message: execMessage, executor: "unidades", ok: execOk };
+      return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
     }
   }
 
@@ -1086,13 +1100,13 @@ export async function runTurnExecutorPhase(params: {
           fallbackTemplate: messageFromPayload(execResult),
         });
         if (composed) {
-          return { message: composed, executor: "unidades", ok: execOk };
+          return phaseFromExecResult(execResult, composed, "unidades", execOk);
         }
       }
     }
     const execMessage = messageFromPayload(execResult);
     if (execMessage || !executorSkippedSilently(execResult)) {
-      return { message: execMessage, executor: "unidades", ok: execOk };
+      return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
     }
   }
 
