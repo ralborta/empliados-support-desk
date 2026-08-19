@@ -43,7 +43,7 @@ function buildTurnPayload(
     extracted.mediaUrl ?? (String(overrides.mediaUrl ?? "").trim() || undefined);
   const skipResponse =
     overrides.skipResponse_s ??
-    (shouldTurnSendWhatsAppToCustomer() || mediaUrl
+    (shouldTurnSendWhatsAppToCustomer()
       ? "true"
       : message
         ? bbcShouldSendExecutorMessage()

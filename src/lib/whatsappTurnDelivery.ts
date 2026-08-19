@@ -4,6 +4,7 @@ import {
   shouldTurnSendWhatsAppToCustomer,
 } from "@/lib/waraInboundAudit";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
+import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 
 type JsonRecord = Record<string, unknown>;
@@ -31,15 +32,42 @@ export async function deliverTurnToWhatsApp(
     return { ...payload, message, skipResponse_s: "true", nextFlow, nextFlow_s: nextFlow };
   }
 
-  const mustSendViaBackend = shouldTurnSendWhatsAppToCustomer() || !!mediaUrl;
+  const backendSendsAll = shouldTurnSendWhatsAppToCustomer();
+  /** GPS banner: imagen por API; texto por BBC (Fase 1) para no bloquear ni duplicar. */
+  const gpsMediaViaApi = !!mediaUrl && !backendSendsAll;
 
   const persistMeta = {
     source: "whatsapp_turn",
     executor: payload.executor_s ?? payload.executor ?? "turn",
-    waDelivery: mustSendViaBackend ? "backend" : "bbc",
+    waDelivery: backendSendsAll ? "backend" : gpsMediaViaApi ? "gps_media_bbc_text" : "bbc",
   };
 
-  if (!mustSendViaBackend) {
+  if (gpsMediaViaApi) {
+    let mediaSent = false;
+    try {
+      await sendWhatsAppMessage({ number: rawPhone, message: " ", mediaUrl });
+      mediaSent = true;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error("[whatsappTurn] Envío imagen GPS falló:", detail);
+    }
+    const bbcSends = bbcShouldSendExecutorMessage();
+    await persistCustomerBotReply(rawPhone, message, {
+      ...persistMeta,
+      waMediaSent_s: mediaSent ? "true" : "false",
+    }).catch(() => undefined);
+    return {
+      ...payload,
+      message,
+      summaryText: String(payload.summaryText ?? message),
+      skipResponse_s: bbcSends ? "false" : "true",
+      waSent_s: mediaSent ? "true" : "false",
+      waDelivery: "gps_media_bbc_text",
+      ...(mediaUrl ? { mediaUrl, mediaUrl_s: mediaUrl } : {}),
+    };
+  }
+
+  if (!backendSendsAll) {
     const bbcSends = bbcShouldSendExecutorMessage();
     await persistCustomerBotReply(rawPhone, message, persistMeta).catch(() => undefined);
     return {
