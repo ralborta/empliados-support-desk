@@ -5,6 +5,8 @@ import {
   buildTemplateSummary,
   buildGpsPositionClarificationAnalysis,
   formatGpsUnitLabel,
+  gpsAlertIgnitionFailureMediaUrl,
+  resolveGpsHeaderMediaUrl,
   threadHasRecentGpsContext,
 } from "./waraGpsSummary";
 import { looksLikeGpsPositionClarificationQuestion } from "./waraApi";
@@ -77,9 +79,31 @@ describe("waraGpsSummary formato WhatsApp", () => {
       odooRef: "37183",
       ticketIssueDetail: "falta de reporte: el GPS no envía datos hace 1 hora",
     });
-    assert.match(text, /⚠️ \*Falta de reporte\*/);
+    assert.doesNotMatch(text, /⚠️ \*Falta de reporte\*/);
+    assert.equal((text.match(/🚗 Unidad:/g) ?? []).length, 1);
     assert.match(text, /#37183/);
     assert.match(text, /\[Ver ubicación\]/);
+  });
+
+  it("falla de ignición usa banner y texto compacto sin duplicar estado", () => {
+    const assessment = {
+      status: "ignition_failure" as const,
+      reportElapsed: 120,
+      positionElapsed: 130,
+      ignitionElapsed: 7200,
+    };
+    assert.equal(resolveGpsHeaderMediaUrl(sampleUnit(), assessment.status), gpsAlertIgnitionFailureMediaUrl());
+    const text = buildTemplateSummary({
+      unitLabel: "AG 228 NY (M900-111)",
+      unit: sampleUnit(),
+      assessment,
+      action: "observation",
+    });
+    assert.doesNotMatch(text, /⚠️ \*Falla de ignición\*/);
+    assert.doesNotMatch(text, /📍 \*Estado GPS\*/);
+    assert.equal((text.match(/🚗 Unidad:/g) ?? []).length, 1);
+    assert.match(text, /Última ignición:/);
+    assert.match(text, /El reporte y la posición van al día/);
   });
 
   it("detecta preguntas aclaratorias sobre la posición", () => {

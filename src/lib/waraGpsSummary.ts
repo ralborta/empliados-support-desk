@@ -15,6 +15,7 @@ import { withMediaUrlMarker } from "@/lib/mediaUrlMarker";
 
 /** Asset estático en /public/gps (servido por wara.nivel41.com). */
 export const GPS_ALERT_MISSING_REPORT_ASSET_PATH = "/gps/alert-falta-reporte.jpg";
+export const GPS_ALERT_IGNITION_FAILURE_ASSET_PATH = "/gps/alert-falla-ignicion.jpg";
 
 function waraPublicAssetUrl(relativePath: string): string {
   const base =
@@ -27,6 +28,14 @@ function waraPublicAssetUrl(relativePath: string): string {
 
 export function gpsAlertMissingReportMediaUrl(): string {
   return waraPublicAssetUrl(GPS_ALERT_MISSING_REPORT_ASSET_PATH);
+}
+
+export function gpsAlertIgnitionFailureMediaUrl(): string {
+  return waraPublicAssetUrl(GPS_ALERT_IGNITION_FAILURE_ASSET_PATH);
+}
+
+export function gpsStatusHasBanner(status: GpsAssessment["status"]): boolean {
+  return status === "missing_report" || status === "ignition_failure";
 }
 
 export type GpsSummaryInput = {
@@ -160,13 +169,19 @@ function positionLine(assessment: GpsAssessment): string {
   return `📍 Posición: hace ${elapsed}`;
 }
 
-export function buildStructuredGpsBody(unit: WaraUnidadEstado, assessment: GpsAssessment): string {
+export function buildStructuredGpsBody(
+  unit: WaraUnidadEstado,
+  assessment: GpsAssessment,
+  options?: { compactForBanner?: boolean },
+): string {
+  const compact = options?.compactForBanner === true;
   const label = formatGpsUnitLabel(unit);
-  const unitLine = `🚗 Unidad: *${label}*`;
+  const unitLine = compact ? null : `🚗 Unidad: *${label}*`;
   const map = mapsLine(unit);
+  const withUnit = (lines: Array<string | null>) => lines.filter(Boolean).join("\n");
 
   if (assessment.status === "ok") {
-    return [
+    return withUnit([
       "✅ *Funcionamiento normal*",
       unitLine,
       "📡 Envía reporte y posición actualizados.",
@@ -174,11 +189,11 @@ export function buildStructuredGpsBody(unit: WaraUnidadEstado, assessment: GpsAs
       reportLine(assessment),
       positionLine(assessment),
       map,
-    ].join("\n");
+    ]);
   }
 
   if (assessment.status === "coherent_pause") {
-    return [
+    return withUnit([
       "⏸ *Unidad detenida*",
       unitLine,
       "🔑 Ignición: *apagada*",
@@ -186,41 +201,41 @@ export function buildStructuredGpsBody(unit: WaraUnidadEstado, assessment: GpsAs
       positionLine(assessment),
       "Es normal que no actualice posición mientras está parada.",
       map,
-    ].join("\n");
+    ]);
   }
 
   if (assessment.status === "missing_report") {
-    return [
-      "⚠️ *Falta de reporte*",
+    return withUnit([
+      compact ? null : "⚠️ *Falta de reporte*",
       unitLine,
       ignitionLine(unit),
       reportLine(assessment),
       positionLine(assessment),
       "No está enviando reporte y posición al día.",
       map,
-    ].join("\n");
+    ]);
   }
 
   if (assessment.status === "ignition_failure") {
-    return [
-      "⚠️ *Falla de ignición*",
+    return withUnit([
+      compact ? null : "⚠️ *Falla de ignición*",
       unitLine,
       reportLine(assessment),
       positionLine(assessment),
       `🔑 Última ignición: hace ${formatMinutesAgo(assessment.ignitionElapsed)} (${ignitionLabel(unit)})`,
       "El reporte y la posición van al día, pero la ignición no acompaña.",
       map,
-    ].join("\n");
+    ]);
   }
 
-  return [
+  return withUnit([
     "⚠️ *Pérdida de señal satelital*",
     unitLine,
     reportLine(assessment),
     positionLine(assessment),
     assessment.reason,
     map,
-  ].join("\n");
+  ]);
 }
 
 function buildTicketFooter(input: GpsSummaryInput): string {
@@ -247,8 +262,13 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
   const label = formatGpsUnitLabel(input.unit);
   const plateIntro = formatGpsPlateIntro(input.unit);
   const intro = `El estado GPS de la unidad ${plateIntro} es el siguiente:`;
-  const header = ["📍 *Estado GPS*", `🚗 Unidad: *${label}*`].join("\n");
-  const body = buildStructuredGpsBody(input.unit, input.assessment);
+  const hasBanner = gpsStatusHasBanner(input.assessment.status);
+  const header = hasBanner
+    ? `🚗 Unidad: *${label}*`
+    : ["📍 *Estado GPS*", `🚗 Unidad: *${label}*`].join("\n");
+  const body = buildStructuredGpsBody(input.unit, input.assessment, {
+    compactForBanner: hasBanner,
+  });
   const parts = [intro, "", header, "", body];
 
   const ticketFooter = input.action === "ticket" ? buildTicketFooter(input) : "";
@@ -262,7 +282,12 @@ function buildTemplateSummary(input: GpsSummaryInput): string {
 /** Respuesta GPS ya viene formateada para WhatsApp — no pasar por agent_compose. */
 export function isStructuredGpsWhatsAppSummary(text: string | undefined | null): boolean {
   const t = String(text ?? "");
-  return t.includes("📍 *Estado GPS*") && t.includes("🚗 Unidad:");
+  if (t.includes("📍 *Estado GPS*") && t.includes("🚗 Unidad:")) return true;
+  return (
+    /El estado GPS de la unidad .+ es el siguiente:/i.test(t) &&
+    t.includes("🚗 Unidad:") &&
+    /Último reporte:|Posición:|Ignición:/i.test(t)
+  );
 }
 
 /** Análisis aclaratorio de posición — mismo passthrough que el resumen GPS. */
@@ -282,6 +307,9 @@ export function resolveGpsHeaderMediaUrl(
 ): string | undefined {
   if (status === "missing_report") {
     return gpsAlertMissingReportMediaUrl();
+  }
+  if (status === "ignition_failure") {
+    return gpsAlertIgnitionFailureMediaUrl();
   }
   return undefined;
 }
