@@ -13,63 +13,20 @@ import {
 } from "@/lib/waraGpsAssessment";
 import { withMediaUrlMarker } from "@/lib/mediaUrlMarker";
 
-const DUMMYIMAGE_BASE_URL = "https://dummyimage.com/1200x480";
+/** Asset estático en /public/gps (servido por wara.nivel41.com). */
+export const GPS_ALERT_MISSING_REPORT_ASSET_PATH = "/gps/alert-falta-reporte.jpg";
 
-function dummyImageCard(text: string, bgHex: string, fgHex: string): string {
-  // dummyimage acepta texto vía querystring; mantenemos un solo renglón.
-  const t = encodeURIComponent(text.trim());
-  return `${DUMMYIMAGE_BASE_URL}/${bgHex}/${fgHex}.png&text=${t}`;
+function waraPublicAssetUrl(relativePath: string): string {
+  const base =
+    process.env.WARA_PUBLIC_BASE_URL?.trim() ||
+    process.env.WARA_TURN_BASE_URL?.trim() ||
+    (process.env.VERCEL_URL?.trim() ? `https://${process.env.VERCEL_URL.trim()}` : "https://wara.nivel41.com");
+  const path = relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
+  return `${base.replace(/\/$/, "")}${path}`;
 }
 
-function gpsAlertCardTextForStatus(status: GpsAssessment["status"]): string {
-  switch (status) {
-    case "missing_report":
-      return "ATENCION: FALTA DE REPORTE";
-    case "ok":
-      return "REPORTANDO OK";
-    case "coherent_pause":
-      return "REPORTANDO OK";
-    case "ignition_failure":
-      return "ATENCION: FALLA DE IGNICION";
-    case "stale_position":
-      return "ATENCION: PERDIDA DE SEÑAL";
-    default:
-      return "ATENCION";
-  }
-}
-
-function gpsAlertCardColorsForStatus(status: GpsAssessment["status"]): { bg: string; fg: string } {
-  switch (status) {
-    case "ok":
-    case "coherent_pause":
-      return { bg: "16A34A", fg: "FFFFFF" }; // verde
-    case "missing_report":
-    case "ignition_failure":
-    case "stale_position":
-      return { bg: "F59E0B", fg: "000000" }; // amarillo/ambar
-    default:
-      return { bg: "64748B", fg: "FFFFFF" }; // gris
-  }
-}
-
-/** URL de una "card" (PNG) lista para pasar a `sendWhatsAppMessage({ mediaUrl })`. */
-export function gpsAlertCardMediaUrlFromStatus(
-  status: GpsAssessment["status"],
-): string {
-  const { bg, fg } = gpsAlertCardColorsForStatus(status);
-  const text = gpsAlertCardTextForStatus(status);
-  return dummyImageCard(text, bg, fg);
-}
-
-/**
- * Devuelve el resumen GPS con un marcador inicial que el runtime puede convertir en
- * `mediaUrl` (tarjeta amarilla/verde).
- */
-export function withGpsAlertCardMediaMarker(
-  text: string,
-  assessmentStatus: GpsAssessment["status"],
-): string {
-  return withMediaUrlMarker(text, gpsAlertCardMediaUrlFromStatus(assessmentStatus));
+export function gpsAlertMissingReportMediaUrl(): string {
+  return waraPublicAssetUrl(GPS_ALERT_MISSING_REPORT_ASSET_PATH);
 }
 
 export type GpsSummaryInput = {
@@ -318,28 +275,23 @@ export function isPassthroughGpsWhatsAppMessage(text: string | undefined | null)
   return isStructuredGpsWhatsAppSummary(text) || isGpsPositionClarificationSummary(text);
 }
 
-/** Mapa estático (OK/detenida) o tarjeta amarilla (alerta) para el encabezado visual en WhatsApp. */
+/** Imagen de encabezado WhatsApp (solo assets del cliente; sin dummyimage). */
 export function resolveGpsHeaderMediaUrl(
-  unit: WaraUnidadEstado,
+  _unit: WaraUnidadEstado,
   status: GpsAssessment["status"],
-): string {
-  if (status === "ok" || status === "coherent_pause") {
-    const lat = unit.ultima_posicion?.lat;
-    const lon = unit.ultima_posicion?.lon;
-    if (typeof lat === "number" && typeof lon === "number" && Number.isFinite(lat) && Number.isFinite(lon)) {
-      const center = `${lat},${lon}`;
-      const markers = `${lat},${lon},red-pushpin`;
-      return `https://staticmap.openstreetmap.de/staticmap.php?center=${encodeURIComponent(center)}&zoom=15&size=800x400&maptype=mapnik&markers=${encodeURIComponent(markers)}`;
-    }
+): string | undefined {
+  if (status === "missing_report") {
+    return gpsAlertMissingReportMediaUrl();
   }
-  return gpsAlertCardMediaUrlFromStatus(status);
+  return undefined;
 }
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {
   const template = buildTemplateSummary(input);
   const finalize = (text: string) =>
     ensureOdooCaseRefInClientMessage(text, input.odooRef, { reused: input.ticketReused });
-  return finalize(template);
+  const text = finalize(template);
+  return withMediaUrlMarker(text, resolveGpsHeaderMediaUrl(input.unit, input.assessment.status));
 }
 
 export { buildTemplateSummary, buildGpsFacts, ignitionLabel, formatMinutesAgo, assessUnitReporting };
