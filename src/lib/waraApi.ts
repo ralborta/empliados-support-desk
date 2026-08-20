@@ -1699,11 +1699,19 @@ export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null)
       n,
     );
   const brokenOrClaim =
-    /\b(reclamar|reclamo|reclam\w*|falla|fallando|mal|rota|roto|romper|no funciona|funcion\w*\s+mal|problema|averia|danad\w*|defectuos\w*|garantia)\b/.test(
+    /\b(reclamar|reclamo|reclam\w*|falla|fallando|mal|rota|roto|romper|no funciona|funcion\w*\s+mal|problema|averia|danad\w*|defectuos\w*|garantia|quiet\w*|clavad\w*|congelad\w*|tildad\w*|trabad\w*)\b/.test(
+      n,
+    );
+  const platformContext =
+    /\b(web|pagina|sitio|portal|plataforma|sistema|app|aplicacion|aplicativo)\b/.test(n);
+  const fleetWideSymptom =
+    /\b(las unidades|todas las unidades|varias unidades|queda\w* quiet\w*|estan quiet\w*|se quedan quiet\w*)\b/.test(
       n,
     );
   // Hardware físico roto → fuera de alcance aunque mencionen "gps" (ej. pantalla del equipo).
   if (hardwareOrPhysical && brokenOrClaim) return true;
+  // Falla general de web/plataforma con síntoma amplio de operación: necesita asesor.
+  if ((platformContext && brokenOrClaim) || (platformContext && fleetWideSymptom)) return true;
   // Trámites operativos de Atilio → no es "fuera de alcance".
   if (
     /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|reporte|sin reporte|no reporta|flota|patente|matricula|mantenimiento preventiv|mantenimiento correctiv)\b/.test(
@@ -1719,6 +1727,53 @@ export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null)
   return false;
 }
 
+/**
+ * Cliente pide explícitamente ABRIR UN CASO NUEVO (cerrar el anterior).
+ * Bug real 2026-08-20: "ABRIR UN NUEVO CASO" reutilizaba el caso abierto.
+ */
+export function looksLikeOpenNewCaseRequest(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "");
+  if (!n || n.length > 160) return false;
+  if (/\b(cerrar|cerrame|resolver)\s+(caso|ticket|reclamo)\b/.test(n)) return false;
+  if (
+    /\b(abrir|crear|generar|levantar)\b.{0,30}\b(nuevo|nueva|otro|otra)\b.{0,20}\b(caso|ticket|reclamo)\b/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(abrir|crear|generar|levantar)\b.{0,25}\b(caso|ticket|reclamo)\b.{0,15}\b(nuevo|nueva|otro|otra)\b/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (/^(abrir|crear|generar)\s+(un\s+)?(nuevo|otra?)\s+(caso|ticket|reclamo)\s*[.!]*$/.test(n)) {
+    return true;
+  }
+  if (/\b(necesito|quiero)\b.{0,25}\b(nuevo|otra?)\s+(caso|ticket|reclamo)\b/.test(n)) return true;
+  return false;
+}
+
+/**
+ * Síntoma GPS de plataforma (etapas/recorrido/historial) sin patente → asesor.
+ * Bug real 2026-08-20: "NO REPORTA ETAPAS DE LA VUELTA" se buscó como unidad «VUELTA».
+ */
+export function looksLikeGpsFeatureIssueForAdvisor(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "");
+  if (!n || n.length > 220) return false;
+  if (detectLoosePlate(text ?? "")) return false;
+  const featureCue =
+    /\b(etapas?\s+de\s+la\s+vuelta|etapas?\s+de\s+vuelta|etapas?\b|recorrido|historial)\b/.test(n) ||
+    (/\bvuelta\b/.test(n) && /\b(etapas?|reporta|muestra|aparece)\b/.test(n));
+  const problemCue =
+    /\b(no\s+reporta|no\s+muestra|no\s+aparece|no\s+figura|sin\s+reporte|falta|falla|problema|no\s+anda|no\s+funciona|no\s+veo)\b/.test(
+      n,
+    );
+  return featureCue && problemCue;
+}
+
 /** Cliente pide abrir reclamo/ticket/caso (no consulta GPS ni unidad). */
 export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
@@ -1726,6 +1781,8 @@ export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined
   if (looksLikeHumanAdvisorRequest(text)) return false;
   if (/\b(caso|ticket|reclamo)\s+(abierto|activo|pendiente)\b/.test(n)) return false;
   if (/\b(cerrar|cerrame|resolver)\s+(caso|ticket|reclamo)\b/.test(n)) return false;
+  if (looksLikeOpenNewCaseRequest(text)) return true;
+  if (looksLikeGpsFeatureIssueForAdvisor(text)) return true;
 
   if (
     /\b(gps|reporte|ignicion|offline|ubicacion|ultimo reporte|no reporta|sin reporte|patente|matricula)\b/.test(

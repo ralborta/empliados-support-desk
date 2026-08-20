@@ -15,9 +15,12 @@ import {
   consultarEstadoUnidades,
   looksLikeAtilioHelpRequest,
   looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGreeting,
   looksLikeHumanAdvisorRequest,
+  looksLikeOpenNewCaseRequest,
   looksLikeOutOfScopeSupportClaim,
+  looksLikeTechnicalSupportRequest,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
 } from "@/lib/waraApi";
@@ -39,8 +42,9 @@ import {
   looksLikeOpenCaseStatusInquiry,
 } from "@/lib/customerTicketInquiry";
 import {
-  findCustomerVisibleOdooCaseRef,
   buildCustomerOdooCaseAssignedReply,
+  findCustomerVisibleOdooCaseRef,
+  formatCustomerOdooCaseRefForWhatsApp,
 } from "@/lib/customerOdooCaseRef";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
@@ -129,6 +133,22 @@ function buildEvent(explicit: string | undefined, rawText: string | undefined): 
   return "Consulta/reclamo";
 }
 
+function buildAdvisorSupportFollowupMessage(rawText: string, opts?: { hasCaseRef?: boolean }): string {
+  const t = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const mentionsFleet = /\b(unidades|flota|moviles|movil)\b/.test(t);
+  const asksAboutWeb = /\b(web|pagina|portal|plataforma|sistema|app|aplicacion)\b/.test(t);
+  const prompt =
+    mentionsFleet || asksAboutWeb
+      ? "Contame, por favor, qué estabas intentando hacer, si te pasa con todas las unidades o solo algunas, y si te aparece algún error o imagen."
+      : "Contame, por favor, un poco más de detalle de lo que pasó y si te apareció algún error o imagen.";
+  return opts?.hasCaseRef
+    ? `Ya tenés un caso en revisión. Un asesor de Atención al cliente lo va a seguir por este medio. ${prompt}`
+    : `Ya derivé esto a un asesor de Atención al cliente para que lo revise. ${prompt}`;
+}
+
 /** Convierte segundos en un texto legible: "18 h", "3 d 4 h", "45 min". */
 function humanizeElapsed(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "";
@@ -198,6 +218,65 @@ async function findRecentOdooRef(rawPhone: string, plate?: string): Promise<stri
     customerId: customer.id,
     plate,
   });
+}
+
+/**
+ * Cierra el ticket local abierto para poder abrir un caso nuevo (pedido explícito del cliente).
+ * Conserva historial; marca RESOLVED con fuente customer_new_case_request.
+ */
+async function closeOpenTicketForNewCaseRequest(params: {
+  rawPhone: string;
+  messageText: string;
+}): Promise<{ closed: boolean; previousTicketId: string | null }> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, params.rawPhone);
+  if (!customer) return { closed: false, previousTicketId: null };
+
+  const openTicket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!openTicket) return { closed: false, previousTicketId: null };
+
+  const inboundText = params.messageText.trim() || "Cliente pidió abrir un nuevo caso";
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: openTicket.id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text: inboundText,
+      rawPayload: {
+        source: "customer_new_case_request",
+        customerRequestedNewCase: true,
+      },
+    },
+  });
+
+  await prisma.ticket.update({
+    where: { id: openTicket.id },
+    data: {
+      status: "RESOLVED",
+      resolution: "CHAT_RESOLVED",
+      lastMessageAt: new Date(),
+      aiSummary:
+        openTicket.aiSummary ??
+        `Cerrado a pedido del cliente para abrir un caso nuevo (${inboundText.slice(0, 120)}).`,
+    },
+  });
+
+  await prisma.ticketEvent.create({
+    data: {
+      ticketId: openTicket.id,
+      type: "STATUS_CHANGED",
+      payload: {
+        status: "RESOLVED",
+        resolution: "CHAT_RESOLVED",
+        source: "customer_whatsapp_new_case_request",
+        message: params.messageText,
+      },
+    },
+  });
+
+  return { closed: true, previousTicketId: openTicket.id };
 }
 
 function extractLastPlateFromThreadCompat(text: string): string | null {
@@ -442,26 +521,65 @@ export async function POST(req: NextRequest) {
   const event = buildEvent(data.event ?? data.evento, data.rawText);
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
   const advisorRequest = looksLikeHumanAdvisorRequest(data.rawText);
+  const outOfScopeSupport = looksLikeOutOfScopeSupportClaim(data.rawText);
+  const technicalSupport = looksLikeTechnicalSupportRequest(data.rawText);
+  const openNewCase = looksLikeOpenNewCaseRequest(data.rawText);
+  const gpsFeatureIssue = looksLikeGpsFeatureIssueForAdvisor(data.rawText);
+  const advisorSupportFollowup =
+    !openNewCase && (outOfScopeSupport || (technicalSupport && !advisorRequest));
   // Reclamo fuera de alcance Atilio (pantalla táctil, etc.) o pedido explícito de
   // reclamo/ticket → derivar y asignar SIN exigir patente ni # de caso previo.
   const handoffToAdvisor =
     advisorRequest ||
     looksLikeExplicitReclamoOrTicketRequest(data.rawText) ||
-    looksLikeOutOfScopeSupportClaim(data.rawText);
+    outOfScopeSupport;
 
   let advisorHandoffLocal: Awaited<ReturnType<typeof ensureRegisteredAdvisorHandoff>> | null =
     null;
+  let closedPreviousForNewCase = false;
 
   if (handoffToAdvisor) {
-    const existingAdvisorRef = await findRecentOdooRef(rawPhone, plate || undefined);
+    if (openNewCase && rawPhone) {
+      const closed = await closeOpenTicketForNewCaseRequest({
+        rawPhone,
+        messageText: rawText,
+      });
+      closedPreviousForNewCase = closed.closed;
+    }
+
+    // Pedido de caso NUEVO: no reutilizar el Odoo del caso que acabamos de cerrar.
+    const existingAdvisorRef = openNewCase
+      ? null
+      : await findRecentOdooRef(rawPhone, plate || undefined);
     if (existingAdvisorRef) {
-      const message = `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
+      const message = advisorSupportFollowup
+        ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: true })
+        : gpsFeatureIssue
+          ? `Perfecto, anoté este detalle en tu caso. Un asesor de Atención al cliente lo va a revisar con esa información.`
+          : `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
       await appendOutboundBotMessage(rawPhone, message, {
         source: "odoo_ticket",
-        stage: "advisor_existing_case",
+        stage: gpsFeatureIssue ? "advisor_case_supplement" : "advisor_existing_case",
         ref: existingAdvisorRef,
         plate: plate || undefined,
       });
+      if (localCustomer && gpsFeatureIssue) {
+        const openTicket = await prisma.ticket.findFirst({
+          where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+          orderBy: { lastMessageAt: "desc" },
+        });
+        if (openTicket) {
+          await prisma.ticketMessage.create({
+            data: {
+              ticketId: openTicket.id,
+              direction: "INBOUND",
+              from: "CUSTOMER",
+              text: rawText,
+              rawPayload: { source: "advisor_case_supplement", odooRef: existingAdvisorRef },
+            },
+          });
+        }
+      }
       return NextResponse.json({
         ok: true,
         ok_s: "true",
@@ -476,20 +594,31 @@ export async function POST(req: NextRequest) {
       advisorHandoffLocal = await ensureRegisteredAdvisorHandoff(prisma, rawPhone, {
         contactName: customerName || undefined,
         messageText: rawText || undefined,
-        source: "odoo_ticket",
-        title: advisorRequest
-          ? "Cliente solicita asesor humano"
-          : rawText.slice(0, 120).trim() || "Reclamo / soporte",
+        source: openNewCase ? "odoo_ticket_new_case" : "odoo_ticket",
+        title: openNewCase
+          ? "Cliente solicitó abrir un nuevo caso"
+          : advisorRequest
+            ? "Cliente solicita asesor humano"
+            : gpsFeatureIssue
+              ? rawText.slice(0, 120).trim() || "GPS: etapas / recorrido"
+              : rawText.slice(0, 120).trim() || "Reclamo / soporte",
       });
 
       if (!cfg) {
-        const message = advisorHandoffLocal.shouldNotifyCustomer
-          ? REGISTERED_ADVISOR_HANDOFF_REPLY
-          : REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY;
+        const message = openNewCase
+          ? closedPreviousForNewCase
+            ? "Cerré el caso anterior y abrí uno nuevo. Un asesor de Atención al cliente te va a contactar por este medio. Contame el detalle del reclamo."
+            : "Abrí un caso nuevo. Un asesor de Atención al cliente te va a contactar por este medio. Contame el detalle del reclamo."
+          : advisorSupportFollowup
+            ? buildAdvisorSupportFollowupMessage(rawText)
+            : advisorHandoffLocal.shouldNotifyCustomer
+              ? REGISTERED_ADVISOR_HANDOFF_REPLY
+              : REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY;
         await appendOutboundBotMessage(rawPhone, message, {
           source: "odoo_ticket",
-          stage: "advisor_handoff_local_only",
+          stage: openNewCase ? "advisor_handoff_new_case_local_only" : "advisor_handoff_local_only",
           ticketCode: advisorHandoffLocal.ticket.code,
+          closedPrevious: closedPreviousForNewCase,
         });
         return NextResponse.json({
           ok: true,
@@ -590,9 +719,13 @@ export async function POST(req: NextRequest) {
   const subject =
     explicitSubject ||
     (handoffToAdvisor && !plate
-      ? advisorRequest
-        ? "Cliente solicita asesor humano"
-        : (rawText.slice(0, 120).trim() || event || "Reclamo / soporte")
+      ? openNewCase
+        ? "Cliente solicitó abrir un nuevo caso"
+        : advisorRequest
+          ? "Cliente solicita asesor humano"
+          : gpsFeatureIssue
+            ? rawText.slice(0, 120).trim() || "GPS: etapas / recorrido"
+            : rawText.slice(0, 120).trim() || event || "Reclamo / soporte"
       : plate
         ? `${plate} - ${event}`
         : event);
@@ -646,7 +779,13 @@ export async function POST(req: NextRequest) {
 
       if (ensured.odooRef) {
         const ref = ensured.odooRef;
-        const message = buildCustomerOdooCaseAssignedReply(ref, { reused: !ensured.created });
+        const message = openNewCase
+          ? closedPreviousForNewCase
+            ? `Cerré el caso anterior y abrí el caso *${formatCustomerOdooCaseRefForWhatsApp(ref)}*. Un asesor de Atención al cliente lo va a revisar. Contame el detalle del reclamo si aún no lo hiciste.`
+            : `Abrí el caso *${formatCustomerOdooCaseRefForWhatsApp(ref)}*. Un asesor de Atención al cliente lo va a revisar. Contame el detalle del reclamo.`
+          : advisorSupportFollowup
+            ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: !ensured.created })
+            : buildCustomerOdooCaseAssignedReply(ref, { reused: !ensured.created });
 
         if (handoffToAdvisor) {
           try {
@@ -703,9 +842,11 @@ export async function POST(req: NextRequest) {
     });
 
     const ref = result.ref ?? null;
-    const message = ref
-      ? buildCustomerOdooCaseAssignedReply(ref)
-      : `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+    const message = advisorSupportFollowup
+      ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: !!ref })
+      : ref
+        ? buildCustomerOdooCaseAssignedReply(ref)
+        : `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
 
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",

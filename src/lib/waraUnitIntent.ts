@@ -44,6 +44,7 @@ import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
   looksLikeGreeting,
+  looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeConversationalUnitConcern,
@@ -524,6 +525,17 @@ const STOPWORDS = new Set([
   "hay",
   "estan",
   "están",
+  "reporta",
+  "reportan",
+  "reportando",
+  "etapas",
+  "etapa",
+  "vuelta",
+  "recorrido",
+  "historial",
+  "muestra",
+  "aparece",
+  "figura",
 ]);
 
 function normalizeToken(value: string): string {
@@ -1008,6 +1020,8 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return null;
   // Bug 2026-08-07: "CERRAR TICKETS" se buscaba en flota en vez de cerrar el caso.
   if (looksLikeCustomerConversationCloseRequest(raw)) return null;
+  // Bug 2026-08-20: "NO REPORTA ETAPAS DE LA VUELTA" → no buscar «VUELTA» en flota.
+  if (looksLikeGpsFeatureIssueForAdvisor(raw)) return null;
   if (looksLikeBareOdometerTopicMention(raw) || looksLikeExplicitOdometerUpdateRequest(raw)) return null;
   if (detectLoosePlate(raw) || extractPlatePrefixFromMessage(raw)) return null;
   // Referencias vagas al hilo ("la unidad mencionada") NO son un nombre a buscar.
