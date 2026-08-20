@@ -25,9 +25,16 @@ import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppForma
 import { askCertificateUnitMessage, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import {
+  looksLikeCustomerImageAttachmentCue,
+  looksLikeInboundMediaOnlyEvent,
+  NO_IMAGE_ANALYSIS_REPLY,
+  withNoImageAnalysisNotice,
+} from "@/lib/inboundImagePolicy";
+import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeChangeCompanyRequest,
   looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeGpsFeatureIssueForAdvisor,
   looksLikeHumanAdvisorRequest,
   looksLikeOutOfScopeSupportClaim,
   looksLikeTechnicalSupportRequest,
@@ -377,6 +384,49 @@ export async function runTurnExecutorPhase(params: {
         "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.",
       executor: "odoo_ticket",
       ok: execOk,
+    };
+  }
+
+  // Imagen/captura sola (BBC _event_image__): Atilio no analiza multimedia.
+  if (looksLikeInboundMediaOnlyEvent(selectionText)) {
+    return {
+      message: NO_IMAGE_ANALYSIS_REPLY,
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  // Texto + "adjunto imagen" / error GPS etapas → asesor, avisando que no analizamos la imagen.
+  if (
+    looksLikeCustomerImageAttachmentCue(selectionText) &&
+    (looksLikeGpsFeatureIssueForAdvisor(selectionText) ||
+      looksLikeExplicitReclamoOrTicketRequest(selectionText) ||
+      looksLikeOutOfScopeSupportClaim(selectionText) ||
+      looksLikeTechnicalSupportRequest(selectionText) ||
+      looksLikeHumanAdvisorRequest(selectionText))
+  ) {
+    const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    return {
+      message: withNoImageAnalysisNotice(
+        execMessage ||
+          "Anoté el reclamo por escrito. Un asesor de Atención al cliente lo va a revisar.",
+      ),
+      executor: "odoo_ticket",
+      ok: execOk,
+    };
+  }
+
+  // Solo avisa adjunto sin más detalle operativo → pedir texto.
+  if (
+    looksLikeCustomerImageAttachmentCue(selectionText) &&
+    !looksLikeSubstantiveCustomerMessage(selectionText.replace(/\b(adjunto|imagen|imagenes|captura|foto|fotos)\b/gi, " "))
+  ) {
+    return {
+      message: NO_IMAGE_ANALYSIS_REPLY,
+      executor: "info_guides",
+      ok: true,
     };
   }
 

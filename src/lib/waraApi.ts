@@ -1768,7 +1768,7 @@ export function looksLikeGpsFeatureIssueForAdvisor(text: string | undefined | nu
     /\b(etapas?\s+de\s+la\s+vuelta|etapas?\s+de\s+vuelta|etapas?\b|recorrido|historial)\b/.test(n) ||
     (/\bvuelta\b/.test(n) && /\b(etapas?|reporta|muestra|aparece)\b/.test(n));
   const problemCue =
-    /\b(no\s+reporta|no\s+muestra|no\s+aparece|no\s+figura|sin\s+reporte|falta|falla|problema|no\s+anda|no\s+funciona|no\s+veo)\b/.test(
+    /\b(no\s+reporta|no\s+muestra|no\s+aparece|no\s+figura|sin\s+reporte|falta|falla|problema|error|no\s+anda|no\s+funciona|no\s+veo)\b/.test(
       n,
     );
   return featureCue && problemCue;

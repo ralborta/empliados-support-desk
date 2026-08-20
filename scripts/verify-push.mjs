@@ -58,6 +58,7 @@ const PUSH_SUITES = [
   "verify-service-scope-consultation.mjs",
   "verify-advisor-derivation-flow.mjs",
   "verify-new-case-and-gps-etapas-advisor.mjs",
+  "verify-no-image-analysis.mjs",
   "verify-test-whitelist-open.mjs",
   "verify-unregistered-phone-handoff.mjs",
   "verify-mesa-entrada-advisor.mjs",
