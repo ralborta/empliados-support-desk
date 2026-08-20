@@ -412,37 +412,70 @@ export async function customerRegisteredContextResponse(
     const namedCompany =
       matchCompanyContinuationMention(selectionText, peekContacts) ??
       extractExplicitCompanyMention(selectionText, peekContacts);
-    // "Quiero operar con la empresa El Cacique" nombra una empresa: es elección, no reset.
-    if (!namedCompany) {
-      const reset = await resetCustomerCompanyMenu(prisma, trimmed);
-      const resolution = peek;
-      const customer = resolution.customer;
+    // "Quiero operar / cambiar al Cacique" nombra empresa: elegir de una, sin menú.
+    if (namedCompany) {
+      const picked = await selectCompanyForCustomer(prisma, trimmed, {
+        waraContactId: namedCompany.id,
+      });
+      const companyName =
+        picked.customer?.companyName?.trim() ||
+        namedCompany.empresa?.trim() ||
+        "tu empresa";
       return NextResponse.json({
-        registered: resolution.registered,
-        registered_s: resolution.registered ? "true" : "false",
+        registered: peek.registered,
+        registered_s: peek.registered ? "true" : "false",
         ignore: false,
         ignore_s: "false",
         phone: normalized,
-        name: customer?.name?.trim() || "",
-        companyName: "",
-        validationSource: resolution.source,
-        waraLookupConfigured: resolution.lookup?.configured ?? false,
-        waraContactsCount: reset.contacts.length,
-        waraContactId: reset.contacts[0]?.id ?? null,
-        waraContacts: reset.contacts,
-        waraContactsText: reset.waraContactsText,
-        requiresCompanySelection: reset.requiresCompanySelection,
-        requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
-        companyPickedThisTurn: false,
-        companyPickedThisTurn_s: "false",
+        name: peek.customer?.name?.trim() || "",
+        companyName,
+        validationSource: peek.source,
+        waraLookupConfigured: peek.lookup?.configured ?? false,
+        waraContactsCount: peekContacts.length,
+        waraContactId: namedCompany.id,
+        waraContacts: peekContacts,
+        requiresCompanySelection: false,
+        requiresCompanySelection_s: "false",
+        companyPickedThisTurn: true,
+        companyPickedThisTurn_s: "true",
         nextFlow: "reply",
         nextFlow_s: "reply",
         selectionFailed_s: "false",
-        message: reset.message,
-        testBlocked: resolution.testBlocked ?? false,
-        testBlocked_s: resolution.testBlocked ? "true" : "false",
+        message:
+          picked.menuMessage ?? formatCompanyConfirmMessage(companyName),
+        testBlocked: peek.testBlocked ?? false,
+        testBlocked_s: peek.testBlocked ? "true" : "false",
       });
     }
+
+    const reset = await resetCustomerCompanyMenu(prisma, trimmed);
+    const resolution = peek;
+    const customer = resolution.customer;
+    return NextResponse.json({
+      registered: resolution.registered,
+      registered_s: resolution.registered ? "true" : "false",
+      ignore: false,
+      ignore_s: "false",
+      phone: normalized,
+      name: customer?.name?.trim() || "",
+      companyName: "",
+      validationSource: resolution.source,
+      waraLookupConfigured: resolution.lookup?.configured ?? false,
+      waraContactsCount: reset.contacts.length,
+      waraContactId: reset.contacts[0]?.id ?? null,
+      waraContacts: reset.contacts,
+      waraContactsText: reset.waraContactsText,
+      requiresCompanySelection: reset.requiresCompanySelection,
+      requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
+      companyPickedThisTurn: false,
+      companyPickedThisTurn_s: "false",
+      nextFlow: "reply",
+      nextFlow_s: "reply",
+      selectionFailed_s: "false",
+      message: reset.message,
+      testBlocked: resolution.testBlocked ?? false,
+      testBlocked_s: resolution.testBlocked ? "true" : "false",
+    });
   }
 
   let resolution = await resolveCustomerForTurnContext(prisma, trimmed);

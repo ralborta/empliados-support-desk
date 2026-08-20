@@ -581,6 +581,8 @@ function strongCompanyNameMatch(contact: WaraEmpresaContact, mentionedNorm: stri
 const COMPANY_MENTION_EXACT_FILLERS = new Set([
   "en", "con", "de", "del", "la", "los", "las", "el", "al", "y", "o", "que", "mi", "tu", "su",
   "por", "para", "a", "dale", "ok", "porfa", "porfavor", "favor", "che", "bueno", "buena",
+  // Cortesía: "Gracias, quiero cambiar al cacique" no debe dejar «gracias» en el match.
+  "gracias", "grax", "thanks", "ty", "hola", "buenas", "buen", "dias", "tardes", "noches",
   // Bug 2026-08-18: "Quiero operar con la empresa El Cacique" dejaba «empresa» y no
   // matcheaba "El Cacique S.A.".
   "empresa", "empresas", "compania", "companias", "sa", "srl", "es",
@@ -590,7 +592,7 @@ const COMPANY_MENTION_EXACT_FILLERS = new Set([
 const COMPANY_MENTION_FILLER_STEMS = [
   "quier", "quisier", "necesit", "pued", "prefier", "gustar",
   "segu", "sig", "continu", "qued", "permanec",
-  "oper", "trabaj", "estar", "and", "pasar", "cambi", "mov", "ir",
+  "oper", "trabaj", "estar", "and", "pasar", "pasam", "cambi", "mov", "ir",
 ];
 function isCompanyMentionFiller(word: string): boolean {
   if (COMPANY_MENTION_EXACT_FILLERS.has(word)) return true;

@@ -65,11 +65,20 @@ const implicitSwitchPhrases = [
   "Quiero operar con la empresa El Cacique.",
   "Quiero operar con la empresa El Cacique",
   "quiero operar con el cacique",
+  // Bug real 2026-08-20: cortesía + cambiar al nombre → menú en vez de switch directo.
+  "Gracias, quiero cambiar al cacique",
+  "gracias quiero cambiar al cacique",
+  "pasame al cacique",
 ];
 for (const text of implicitSwitchPhrases) {
   const matched = matchCompanyContinuationMention(text, contacts);
   assert(!!matched, `matchCompanyContinuationMention("${text}") encuentra un contacto (verbo distinto de continuar/seguir)`);
 }
+assert(
+  matchCompanyContinuationMention("Gracias, quiero cambiar al cacique", contacts)?.empresa ===
+    "El Cacique S.A.",
+  "'Gracias, quiero cambiar al cacique' matchea El Cacique S.A. (sin menú)",
+);
 assert(
   matchCompanyContinuationMention("Quiero operar con la empresa El Cacique.", contacts)?.empresa ===
     "El Cacique S.A.",

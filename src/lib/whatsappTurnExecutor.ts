@@ -51,7 +51,6 @@ import {
   looksLikeOperationalMaintenanceIntent,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
-  resetCustomerCompanyMenu,
   threadHasRecentNoEquipmentExplanation,
   threadHasRecentUnitCaseOpened,
   looksLikeColloquialGratitudeAck,
@@ -343,6 +342,33 @@ export async function runTurnExecutorPhase(params: {
     looksLikeChangeCompanyRequest(selectionText) ||
     (await looksLikeChangeCompanyRequestHybrid(selectionText))
   ) {
+    const {
+      resolveCustomerByWaraPhone,
+      matchCompanyContinuationMention,
+      extractExplicitCompanyMention,
+      selectCompanyForCustomer,
+      formatCompanyConfirmMessage,
+      resetCustomerCompanyMenu,
+    } = await import("@/lib/waraApi");
+    const peek = await resolveCustomerByWaraPhone(prisma, rawPhone);
+    const contacts = peek.lookup?.contactos ?? [];
+    const named =
+      matchCompanyContinuationMention(selectionText, contacts) ??
+      extractExplicitCompanyMention(selectionText, contacts);
+    // "Gracias, quiero cambiar al cacique" → cambiar YA, sin menú de opciones.
+    if (named) {
+      const picked = await selectCompanyForCustomer(prisma, rawPhone, {
+        waraContactId: named.id,
+      });
+      const companyName =
+        picked.customer?.companyName?.trim() || named.empresa?.trim() || "tu empresa";
+      return {
+        message:
+          picked.menuMessage ?? formatCompanyConfirmMessage(companyName),
+        executor: "unidades",
+        ok: true,
+      };
+    }
     const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
     return { message: reset.message, executor: "unidades", ok: true };
   }
