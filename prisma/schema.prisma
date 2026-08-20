@@ -244,3 +244,18 @@ model BotPromptModule {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
+
+/// Estado del runtime BBC (WhatsApp / Meta). Una fila por servicio, p.ej. key="bbc".
+model OpsServiceHeartbeat {
+  key            String   @id
+  status         String
+  healthy        Boolean  @default(true)
+  host           String?
+  detail         String?  @db.Text
+  lastEventAt    DateTime?
+  lastOnlineAt   DateTime?
+  lastOfflineAt  DateTime?
+  restartCount   Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

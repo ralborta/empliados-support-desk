@@ -46,6 +46,20 @@ type WaraHealth = {
   httpStatus?: number;
 };
 
+type BbcHealth = {
+  status: string;
+  healthy: boolean;
+  host: string | null;
+  lastEventAt: string | null;
+  lastOnlineAt: string | null;
+  lastOfflineAt: string | null;
+  restartCount: number;
+  updatedAt: string;
+  apiProbeOk?: boolean;
+  apiProbeMessage?: string;
+  apiProbeHttpStatus?: number;
+};
+
 type MonitorResponse = {
   ok: boolean;
   generatedAt?: string;
@@ -55,6 +69,7 @@ type MonitorResponse = {
     messages: MonitorActivityMessage[];
   };
   wara?: WaraHealth;
+  bbc?: BbcHealth;
   error?: string;
 };
 
@@ -119,12 +134,70 @@ function waraStageLabel(stage: string): string {
   }
 }
 
+type Tone = "ok" | "warn" | "bad" | "neutral";
+
+function toneClasses(tone: Tone): { card: string; badge: string } {
+  switch (tone) {
+    case "ok":
+      return {
+        card: "border-emerald-800/60 bg-emerald-950/30",
+        badge: "bg-emerald-500/20 text-emerald-200",
+      };
+    case "warn":
+      return {
+        card: "border-amber-700/60 bg-amber-950/40",
+        badge: "bg-amber-500/20 text-amber-200",
+      };
+    case "bad":
+      return {
+        card: "border-red-800/70 bg-red-950/40",
+        badge: "bg-red-500/20 text-red-200",
+      };
+    default:
+      return {
+        card: "border-slate-800 bg-slate-900/50",
+        badge: "bg-slate-500/20 text-slate-300",
+      };
+  }
+}
+
+function StatusCard(props: {
+  title: string;
+  badge: string;
+  tone: Tone;
+  lines: string[];
+  footnote?: string;
+}) {
+  const c = toneClasses(props.tone);
+  return (
+    <section className={`rounded-xl border px-4 py-4 ${c.card}`}>
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+          {props.title}
+        </h2>
+        <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${c.badge}`}>
+          {props.badge}
+        </span>
+      </div>
+      <ul className="mt-3 space-y-1 text-sm text-slate-300">
+        {props.lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      {props.footnote ? (
+        <p className="mt-3 font-mono text-[11px] text-slate-500">{props.footnote}</p>
+      ) : null}
+    </section>
+  );
+}
+
 export default function MonitorPage() {
   const [password, setPassword] = useState<string>("");
   const [unlocked, setUnlocked] = useState(false);
   const [agents, setAgents] = useState<MonitorAgent[]>([]);
   const [activity, setActivity] = useState<MonitorResponse["activity"]>(undefined);
   const [wara, setWara] = useState<WaraHealth | null>(null);
+  const [bbc, setBbc] = useState<BbcHealth | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -156,6 +229,7 @@ export default function MonitorPage() {
       setAgents(data.agents ?? []);
       setActivity(data.activity);
       setWara(data.wara ?? null);
+      setBbc(data.bbc ?? null);
       setGeneratedAt(data.generatedAt ?? null);
       window.sessionStorage.setItem(STORAGE_KEY, pwd);
     } catch {
@@ -183,9 +257,9 @@ export default function MonitorPage() {
           }}
           className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-8 shadow-xl"
         >
-          <h1 className="mb-1 text-lg font-semibold text-slate-100">Monitor Wara</h1>
+          <h1 className="mb-1 text-lg font-semibold text-slate-100">Monitor de operaciones</h1>
           <p className="mb-6 text-sm text-slate-400">
-            Vista externa de solo lectura: presencia del equipo y actividad de pruebas por WhatsApp.
+            Vista externa (EasyPanel): estados BBC, API Wara, presencia y actividad WhatsApp.
           </p>
           <input
             type="password"
@@ -213,74 +287,108 @@ export default function MonitorPage() {
   const recentMessages = activity?.messages ?? [];
   const windowHours = summary ? Math.round(summary.windowMinutes / 60) : 3;
 
+  const bbcOk = Boolean(bbc?.healthy && bbc.apiProbeOk !== false);
+  const bbcTone: Tone = !bbc ? "neutral" : bbcOk ? "ok" : "bad";
+  const waraTone: Tone = !wara
+    ? "neutral"
+    : !wara.healthy
+      ? "bad"
+      : wara.configWarning
+        ? "warn"
+        : "ok";
+  const teamTone: Tone = onlineCount > 0 ? "ok" : "warn";
+
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-8">
       <div className="mx-auto max-w-6xl space-y-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold">Monitor Wara</h1>
+            <h1 className="text-xl font-semibold">Monitor de operaciones</h1>
             <p className="text-sm text-slate-400">
-              Presencia del panel · actividad WhatsApp (solo lectura)
+              BBC WhatsApp · API Wara · presencia · actividad
               {generatedAt ? ` · actualizado ${formatDateTime(generatedAt)}` : ""}
               {loading ? " · refrescando…" : ""}
             </p>
           </div>
-          <button
-            onClick={() => {
-              window.sessionStorage.removeItem(STORAGE_KEY);
-              setUnlocked(false);
-              setPassword("");
-            }}
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
-          >
-            Salir
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void fetchStatus(password)}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:text-white"
+            >
+              Actualizar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                window.sessionStorage.removeItem(STORAGE_KEY);
+                setUnlocked(false);
+                setPassword("");
+              }}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+            >
+              Salir
+            </button>
+          </div>
         </div>
 
-        {wara && (
-          <section
-            className={`rounded-xl border px-4 py-4 ${
-              wara.healthy
-                ? wara.configWarning
-                  ? "border-amber-700/60 bg-amber-950/40"
-                  : "border-emerald-800/60 bg-emerald-950/30"
-                : "border-red-800/70 bg-red-950/40"
-            }`}
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
-                  API Wara (Visionblo)
-                </h2>
-                <p className="mt-1 text-sm text-slate-300">{wara.message}</p>
-                {!wara.healthy && (
-                  <p className="mt-2 text-sm text-red-200">
-                    El bot sigue respondiendo por WhatsApp, pero no puede consultar unidades ni datos en Wara.
-                    Esto <strong>no es un fallo del bot</strong>.
-                  </p>
-                )}
-                {wara.configWarning && (
-                  <p className="mt-2 text-sm text-amber-200">{wara.configWarning}</p>
-                )}
-                <p className="mt-2 font-mono text-xs text-slate-500">{wara.apiBaseUrl}</p>
-              </div>
-              <div className="text-right">
-                <span
-                  className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${
-                    wara.healthy
-                      ? wara.configWarning
-                        ? "bg-amber-500/20 text-amber-200"
-                        : "bg-emerald-500/20 text-emerald-200"
-                      : "bg-red-500/20 text-red-200"
-                  }`}
-                >
-                  {wara.healthy ? (wara.configWarning ? "Advertencia" : "OK") : waraStageLabel(wara.stage)}
-                </span>
-                <p className="mt-2 text-xs text-slate-500">probado {formatDateTime(wara.checkedAt)}</p>
-              </div>
-            </div>
-          </section>
-        )}
+        <div className="grid gap-3 md:grid-cols-3">
+          <StatusCard
+            title="BBC / WhatsApp"
+            badge={bbc ? (bbcOk ? "ONLINE" : bbc.status || "OFFLINE") : "Sin datos"}
+            tone={bbcTone}
+            lines={
+              bbc
+                ? [
+                    `Runtime: ${bbc.status}${bbc.host ? ` · ${bbc.host}` : ""}`,
+                    bbc.apiProbeMessage || "Sonda API pendiente",
+                    `Reinicios detectados: ${bbc.restartCount}`,
+                    bbc.lastOnlineAt
+                      ? `Último ONLINE: ${formatDateTime(bbc.lastOnlineAt)}`
+                      : "Aún no hubo evento status.ready",
+                  ]
+                : ["Esperando primer chequeo…"]
+            }
+            footnote={bbc ? `actualizado ${formatDateTime(bbc.updatedAt)}` : undefined}
+          />
+
+          <StatusCard
+            title="API Wara"
+            badge={
+              wara
+                ? wara.healthy
+                  ? wara.configWarning
+                    ? "Advertencia"
+                    : "OK"
+                  : waraStageLabel(wara.stage)
+                : "Sin datos"
+            }
+            tone={waraTone}
+            lines={
+              wara
+                ? [
+                    wara.message,
+                    !wara.healthy
+                      ? "El bot puede seguir en WhatsApp, pero sin datos de flota."
+                      : "Consultas de unidades / empresas responden.",
+                  ]
+                : ["Esperando primer chequeo…"]
+            }
+            footnote={wara ? wara.apiBaseUrl : undefined}
+          />
+
+          <StatusCard
+            title="Equipo en panel"
+            badge={`${onlineCount}/${agents.length} online`}
+            tone={teamTone}
+            lines={[
+              onlineCount > 0
+                ? "Hay asesores/admins conectados para tomar casos."
+                : "Nadie conectado: los casos nuevos pueden quedar sin asignar.",
+              `Timeout de presencia: refresco cada ${REFRESH_MS / 1000}s`,
+            ]}
+          />
+        </div>
 
         {summary && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

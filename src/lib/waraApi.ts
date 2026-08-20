@@ -875,7 +875,19 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
 export function looksLikeOpcionesInfoRequest(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
   if (!t) return false;
-  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|odometro|horometro|certificado)\b/.test(t) && !/\b(agenda|contacto|notific|perfil|opciones)\b/.test(t)) {
+  // "ponerse en contacto" / "contacten conmigo" = humano, no módulo Contactos de Opciones.
+  // Bug real 2026-08-20: mensaje de etapas + "se pongan en contacto conmigo Emiliano"
+  // caía a guía Opciones por la palabra «contacto».
+  if (
+    /\b(ponerse|poner|pongan|ponganse|contactar|contacten|contactame|llamen|escribir)\b.{0,24}\bcontacto\b/.test(
+      t,
+    ) ||
+    /\ben\s+contacto\s+conmigo\b/.test(t) ||
+    /\bcontact\w*\s+conmigo\b/.test(t)
+  ) {
+    return false;
+  }
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|odometro|horometro|certificado|etapas?|vuelta|gps)\b/.test(t) && !/\b(agenda|notific|perfil|opciones)\b/.test(t)) {
     return false;
   }
   if (
@@ -1764,13 +1776,14 @@ export function looksLikeOpenNewCaseRequest(text: string | undefined | null): bo
  */
 export function looksLikeGpsFeatureIssueForAdvisor(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
-  if (!n || n.length > 220) return false;
+  if (!n || n.length > 500) return false;
   if (detectLoosePlate(text ?? "")) return false;
   const featureCue =
-    /\b(etapas?\s+de\s+la\s+vuelta|etapas?\s+de\s+vuelta|etapas?\b|recorrido|historial)\b/.test(n) ||
-    (/\bvuelta\b/.test(n) && /\b(etapas?|reporta|muestra|aparece)\b/.test(n));
+    /\b(etapas?\s+de\s+la\s+vuelta|etapas?\s+de\s+vuelta|cumplimiento\s+de\s+etapas?|etapas?\b|recorrido|historial)\b/.test(
+      n,
+    ) || (/\bvuelta\b/.test(n) && /\b(etapas?|reporta|muestra|aparece|cumplimiento)\b/.test(n));
   const problemCue =
-    /\b(no\s+reporta|no\s+muestra|no\s+aparece|no\s+figura|sin\s+reporte|falta|falla|problema|error|no\s+anda|no\s+funciona|no\s+veo)\b/.test(
+    /\b(no\s+reporta|no\s+muestra|no\s+aparece|no\s+figura|no\s+revisa|tampoco\s+revisa|sin\s+reporte|falta|falla|problema|error|no\s+anda|no\s+funciona|no\s+veo)\b/.test(
       n,
     );
   return featureCue && problemCue;

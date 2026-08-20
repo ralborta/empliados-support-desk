@@ -31,21 +31,23 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
 
   const url = `${BUILDERBOT_BASE_URL}/api/v2/${BOT_ID}/messages`;
 
-  const body: Record<string, any> = {
+  const body: Record<string, unknown> = {
     messages: {
       content: message,
+      ...(mediaUrl ? { mediaUrl } : {}),
     },
     number,
     checkIfExists,
   };
 
-  if (mediaUrl) {
-    body.messages.mediaUrl = mediaUrl;
-  }
+  // Serializar a Buffer UTF-8 explícito: evita mojibake (Ã©/Ã³) si algún
+  // intermediario interpreta el body JSON como Latin-1.
+  const payload = Buffer.from(JSON.stringify(body), "utf8");
 
   const headers = {
-    'Content-Type': 'application/json',
-    'x-api-builderbot': API_KEY,
+    "Content-Type": "application/json; charset=utf-8",
+    "x-api-builderbot": API_KEY,
+    "Content-Length": String(payload.length),
   };
 
   console.log('[BuilderBot] Enviando mensaje:', {
@@ -56,7 +58,11 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
   });
 
   try {
-    const response = await axios.post(url, body, { headers, timeout: 30000 });
+    const response = await axios.post(url, payload, {
+      headers,
+      timeout: 30000,
+      transformRequest: [(data) => data],
+    });
     console.log('[BuilderBot] ✅ Mensaje enviado exitosamente');
     return response.data;
   } catch (error: any) {

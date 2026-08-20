@@ -2514,15 +2514,17 @@ export function looksLikePostAdvisorCaseSupplement(
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-  if (!n || n.length > 220) return false;
+  if (!n || n.length > 500) return false;
   if (/^(si|sí|dale|ok)\b/.test(n) && n.length > 4) return true;
   if (/\b(hoy mismo|urgente|sumar|agregar|unidades sin reportar|sin reportar|solucionado)\b/.test(n)) {
     return true;
   }
-  // Bug real 2026-08-20: "NO REPORTA ETAPAS DE LA VUELTA" tras caso abierto →
-  // se buscó «VUELTA» en flota en vez de anotar el detalle al asesor.
+  // Bug real 2026-08-20: "NO REPORTA ETAPAS…" / "tampoco revisa cumplimiento de etapas"
+  // tras caso abierto → anotar al asesor (no guía Opciones ni flota).
   if (
-    /\b(no reporta|sin reporte|falta de reporte|offline|etapas|recorrido|historial|vuelta)\b/.test(n) &&
+    /\b(no reporta|sin reporte|falta de reporte|offline|etapas|cumplimiento|recorrido|historial|vuelta|javier|informado)\b/.test(
+      n,
+    ) &&
     !/\b(abrir|crear|generar)\b.{0,20}\b(nuevo|otra?)\b.{0,15}\b(caso|ticket|reclamo)\b/.test(n)
   ) {
     return true;

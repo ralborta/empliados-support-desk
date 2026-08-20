@@ -16,6 +16,7 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { Resend } from "resend";
 import type { WaraHealthStatus } from "@/lib/waraHealthCheck";
+import type { BbcRuntimeStatus } from "@/lib/bbcRuntimeMonitor";
 
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL?.trim() || "https://wara.nivel41.com";
 
@@ -197,10 +198,17 @@ export async function sendUnassignedTicketAlertEmail(params: {
 let lastWaraHealthAlertAt = 0;
 const WARA_HEALTH_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 
+function opsAlertRecipients(): string[] {
+  const raw =
+    process.env.WARA_OPS_ALERT_EMAIL?.trim() ||
+    process.env.PANEL_USER_ADMIN_EMAIL?.trim() ||
+    "";
+  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
 /** Email ops cuando Wara no responde (cron / monitor). Cooldown 30 min. */
 export async function sendWaraHealthAlertEmail(health: WaraHealthStatus): Promise<boolean> {
-  const raw = process.env.WARA_OPS_ALERT_EMAIL?.trim() || "";
-  const recipients = raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  const recipients = opsAlertRecipients();
   if (!recipients.length) return false;
 
   const now = Date.now();
@@ -225,6 +233,56 @@ export async function sendWaraHealthAlertEmail(health: WaraHealthStatus): Promis
   if (sent) {
     lastWaraHealthAlertAt = now;
     console.log("[panelEmail] Alerta Wara health enviada");
+  }
+  return sent;
+}
+
+let lastBbcAlertAt = 0;
+const BBC_ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** Email ops cuando BBC se reinicia o queda offline. Cooldown 5 min. */
+export async function sendBbcRuntimeAlertEmail(
+  bbc: BbcRuntimeStatus
+): Promise<boolean> {
+  const recipients = opsAlertRecipients();
+  if (!recipients.length) return false;
+
+  const now = Date.now();
+  if (now - lastBbcAlertAt < BBC_ALERT_COOLDOWN_MS) return false;
+
+  const kind = bbc.restarted
+    ? "reinicio"
+    : bbc.healthy
+      ? "estado"
+      : "offline";
+  const title =
+    kind === "reinicio"
+      ? "[BBC] Runtime se reinició y volvió ONLINE"
+      : kind === "offline"
+        ? `[BBC] Runtime ${bbc.status || "OFFLINE"}`
+        : `[BBC] Estado ${bbc.status}`;
+
+  const html = `
+    <p><strong>${escapeHtml(title)}</strong></p>
+    <p>Esto es el <strong>agente BuilderBot Cloud (WhatsApp/Meta)</strong>, no la API de Wara.</p>
+    <ul>
+      <li>Estado: ${escapeHtml(bbc.status)}${bbc.healthy ? " (healthy)" : " (no healthy)"}</li>
+      <li>Reinicios acumulados: ${bbc.restartCount}</li>
+      <li>Host: ${escapeHtml(bbc.host || "—")}</li>
+      <li>Último evento: ${escapeHtml(bbc.lastEventAt || "—")}</li>
+      <li>Último ONLINE: ${escapeHtml(bbc.lastOnlineAt || "—")}</li>
+      <li>Fuente: ${escapeHtml(bbc.source || "—")}</li>
+    </ul>
+    <p>Revisá <a href="${PANEL_BASE_URL}/monitor">monitor.nivel41.com</a> o la consola BBC (Session Status).</p>
+  `;
+
+  let sent = false;
+  for (const to of recipients) {
+    if (await sendEmail(to, title, html)) sent = true;
+  }
+  if (sent) {
+    lastBbcAlertAt = now;
+    console.log("[panelEmail] Alerta BBC runtime enviada:", kind);
   }
   return sent;
 }

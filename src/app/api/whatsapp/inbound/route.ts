@@ -63,6 +63,53 @@ export async function POST(req: Request) {
   console.log("📩 Webhook recibido de BuilderBot:", JSON.stringify(payload, null, 2));
 
   const eventName = typeof payload?.eventName === "string" ? payload.eventName : "";
+
+  // Estado del runtime BBC (status.ready al (re)arranque Meta, etc.)
+  if (/^status\./i.test(eventName)) {
+    try {
+      const { recordBbcStatusEvent } = await import("@/lib/bbcRuntimeMonitor");
+      const { sendBbcRuntimeAlertEmail } = await import("@/lib/panelEmail");
+      const data =
+        payload?.data && typeof payload.data === "object"
+          ? (payload.data as Record<string, unknown>)
+          : (payload as Record<string, unknown>);
+      const statusRaw =
+        (typeof data.status === "string" && data.status) ||
+        (typeof data?.body === "object" &&
+        data.body &&
+        typeof (data.body as { status?: string }).status === "string"
+          ? (data.body as { status: string }).status
+          : undefined) ||
+        (eventName.match(/status\.(.+)/i)?.[1] ?? undefined);
+      const host =
+        (typeof data.host === "string" && data.host) ||
+        (typeof data.phone === "string" && data.phone) ||
+        undefined;
+      const recorded = await recordBbcStatusEvent({
+        eventName,
+        status: statusRaw,
+        host,
+        raw: payload,
+        source: "webhook",
+      });
+      if (recorded.restarted || !recorded.healthy) {
+        await sendBbcRuntimeAlertEmail(recorded);
+      }
+      return NextResponse.json({
+        ok: true,
+        message: "Estado BBC registrado",
+        bbc: {
+          status: recorded.status,
+          healthy: recorded.healthy,
+          restarted: Boolean(recorded.restarted),
+        },
+      });
+    } catch (error) {
+      console.error("[inbound] Error registrando estado BBC:", error);
+      return NextResponse.json({ ok: true, message: "Estado BBC recibido (error al persistir)" });
+    }
+  }
+
   const incomingEvents = new Set(["message.incoming"]);
   const outgoingEvents = new Set([
     "message.outgoing",
