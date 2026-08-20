@@ -16,6 +16,8 @@ const bodySchema = z
     body: z.string().optional(),
     rawText: z.string().optional(),
     message: z.string().optional(),
+    /** Descripción multimodal de BBC cuando interpretImage está activo ({aiImage}). */
+    aiImage: z.string().optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -72,10 +74,12 @@ export async function POST(req: NextRequest) {
     parsed.data.message ??
     ""
   ).trim();
+  const aiImage = (parsed.data.aiImage ?? "").trim();
 
   const payload = await handleWhatsAppTurn({
     rawPhone,
     body,
+    aiImage: aiImage || undefined,
     apiKey: apiKey ?? "",
   });
 

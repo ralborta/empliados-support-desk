@@ -43,7 +43,12 @@ function turnHttpPlugin(apiKey, rules) {
       url: TURN_URL,
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-      body: { from: "{from}", body: "{body}", api_key: apiKey },
+      body: {
+        from: "{from}",
+        body: "{body}",
+        aiImage: "{aiImage}",
+        api_key: apiKey,
+      },
       messageMapping: "{message}",
       avoidResponse: false,
       rules,

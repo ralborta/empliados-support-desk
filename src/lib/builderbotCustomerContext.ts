@@ -13,7 +13,7 @@ import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
 import { threadHasInconclusiveTramite } from "@/lib/tramiteFlowControl";
 import { clearActiveUnit } from "@/lib/activeUnit";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation, buildPendingConfirmationPoliteAckReply } from "@/lib/pendingConfirmation";
-import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
+import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender, findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
   buildCompanyMenuPayload,
@@ -352,7 +352,35 @@ export async function customerRegisteredContextResponse(
   }
 
   const normalized = normalizeWhatsAppPhone(trimmed) || trimmed.replace(/\D/g, "");
+
+  // Takeover humano: si Atilio está pausado, NO desmutear/blacklist-remove y no responder.
+  // Bug real 2026-08-20: ensureBuilderBotContactActive deshacía el "Pausar Atilio" del panel
+  // en el siguiente mensaje del cliente, y la "derivación" de la comunicación no se sostenía.
+  const existingCustomer = await findCustomerByWhatsAppNumber(prisma, trimmed);
+  if (existingCustomer?.botPausedAt) {
+    return NextResponse.json({
+      registered: true,
+      registered_s: "true",
+      ignore: true,
+      ignore_s: "true",
+      nextFlow: "ignore",
+      nextFlow_s: "ignore",
+      phone: normalized,
+      name: existingCustomer.name?.trim() || "",
+      companyName: existingCustomer.companyName?.trim() || "",
+      validationSource: "human_takeover_bot_paused",
+      requiresCompanySelection: false,
+      requiresCompanySelection_s: "false",
+      botPaused: true,
+      botPaused_s: "true",
+      testBlocked: false,
+      testBlocked_s: "false",
+      message: "",
+    });
+  }
+
   // Cada mensaje humano válido debe poder hablar con el bot (evita quedar muteado 24h por un bug de flujo).
+  // Solo si NO hay takeover humano activo.
   void ensureBuilderBotContactActive(normalized);
 
   if (normalized.length < 8) {

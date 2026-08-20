@@ -4,6 +4,7 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
+import { pauseAtilioForCustomer, reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
 import { setBuilderBotCloudBlacklist, setBotBlacklist } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
@@ -77,28 +78,43 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const p = licensePlate?.trim();
     updateData.licensePlate = p ? p.replace(/\s+/g, " ") : null;
   }
-  if (botPaused !== undefined) {
-    updateData.botPausedAt = botPaused ? new Date() : null;
-  }
+  // botPaused lo aplica pauseAtilio / reactivateAtilio (DB + blacklist BBC).
 
   try {
-    const customer = await prisma.customer.update({
-      where: { id },
-      data: updateData,
-      include: {
-        _count: {
-          select: { tickets: true },
-        },
-      },
-    });
+    const hasFieldUpdates = Object.keys(updateData).length > 0;
+    let customer = hasFieldUpdates
+      ? await prisma.customer.update({
+          where: { id },
+          data: updateData,
+          include: {
+            _count: {
+              select: { tickets: true },
+            },
+          },
+        })
+      : await prisma.customer.findUniqueOrThrow({
+          where: { id },
+          include: {
+            _count: {
+              select: { tickets: true },
+            },
+          },
+        });
 
-    if (botPaused !== undefined && customer.phone) {
-      const intent = botPaused ? "add" : "remove";
-      await setBuilderBotCloudBlacklist(customer.phone, intent).catch((err: unknown) => {
-        console.error("[Clientes] Blacklist Cloud:", err instanceof Error ? err.message : err);
-      });
-      await setBotBlacklist(customer.phone, intent).catch((err: unknown) => {
-        console.error("[Clientes] Blacklist self-hosted:", err instanceof Error ? err.message : err);
+    if (botPaused === true) {
+      await pauseAtilioForCustomer(customer.id, prisma, "panel:bot-paused-toggle");
+    } else if (botPaused === false) {
+      await reactivateAtilioForCustomer(customer.id, prisma, "panel:bot-paused-toggle");
+    }
+
+    if (botPaused !== undefined) {
+      customer = await prisma.customer.findUniqueOrThrow({
+        where: { id },
+        include: {
+          _count: {
+            select: { tickets: true },
+          },
+        },
       });
     }
 

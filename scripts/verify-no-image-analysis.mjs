@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Bug real 2026-08-20: cliente manda captura GPS + "ADJUNTO IMAGEN".
- * Atilio no analiza imágenes; debe avisarlo y tomar el texto / derivar.
+ * Sin {aiImage} de BBC: pedir detalle por escrito / derivar con aviso.
+ * Con {aiImage}: ver scripts/verify-bbc-ai-image.mjs
  *
  * Uso: npx tsx scripts/verify-no-image-analysis.mjs
  */
@@ -36,10 +37,10 @@ assert(looksLikeCustomerImageAttachmentCue(msg), "detecta ADJUNTO IMAGEN");
 assert(looksLikeGpsFeatureIssueForAdvisor(msg), "error+etapa → GPS feature advisor");
 assert(classifyTurnExecutor(msg, "") === "odoo_ticket", "classify → odoo_ticket (no unidades)");
 
-console.log("\n— Copy de aviso —");
-assert(NO_IMAGE_ANALYSIS_REPLY.includes("no puedo analizar imágenes"), "reply fija");
+console.log("\n— Copy de aviso (sin visión BBC) —");
+assert(/no pude leer|no puedo analizar/i.test(NO_IMAGE_ANALYSIS_REPLY), "reply fija");
 assert(
-  withNoImageAnalysisNotice("Anoté el reclamo.").startsWith("Por este chat no puedo analizar"),
+  /no pude leer/i.test(withNoImageAnalysisNotice("Anoté el reclamo.")),
   "notice + body",
 );
 

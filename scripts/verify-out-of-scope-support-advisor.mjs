@@ -36,6 +36,18 @@ assert.equal(
   "pantalla táctil sin verbo reclamar",
 );
 
+const webIssue =
+  "OLA , ESTA FALLA LA WEB , LAS UNIDADES ESTAN QUIETAS";
+
+assert.equal(looksLikeOutOfScopeSupportClaim(webIssue), true, "out of scope: falla general web/plataforma");
+assert.equal(looksLikeTechnicalSupportRequest(webIssue), true, "tech support web");
+assert.equal(classifyTurnExecutor(webIssue, ""), "odoo_ticket", "web con unidades quietas → odoo_ticket");
+assert.equal(
+  shouldAutoAssignInboundMessage(detectIncidentType(webIssue), webIssue),
+  true,
+  "auto-asignar asesor por falla general web",
+);
+
 // Sigue en alcance Atilio (no robar GPS / odómetro).
 assert.equal(
   looksLikeOutOfScopeSupportClaim("la unidad AD356UQ no reporta"),

@@ -8,6 +8,7 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { summarizeConversation } from "@/lib/openai";
 import { uploadFileToBlob } from "@/lib/blob";
 import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+import { pauseAtilioForCustomer } from "@/lib/atilioBotPause";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import type { TicketStatus } from "@/lib/types";
 
@@ -106,14 +107,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   // Si es un mensaje OUTBOUND, enviarlo a BuilderBot primero
-  let ticketForStatus: { status: TicketStatus } | null = null;
+  let ticketForStatus: { status: TicketStatus; customerId: string } | null = null;
   if (direction === "OUTBOUND") {
     // Obtener el teléfono del cliente del ticket
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: { customer: true },
     });
-    ticketForStatus = ticket;
+    ticketForStatus = ticket
+      ? { status: ticket.status as TicketStatus, customerId: ticket.customerId }
+      : null;
 
     if (!ticket) {
       return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
@@ -190,6 +193,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         : {}),
     },
   });
+
+  // Asesor escribe al cliente → takeover: pausar Atilio (blacklist BBC) sin botón manual.
+  // Bug real 2026-08-20: la derivación de la comunicación no ocurría al atender el chat.
+  if (direction === "OUTBOUND" && from === "HUMAN" && ticketForStatus?.customerId) {
+    await pauseAtilioForCustomer(
+      ticketForStatus.customerId,
+      prisma,
+      "human_outbound_takeover",
+    ).catch((e) => console.error("[Messages] pauseAtilio takeover:", e));
+  }
 
   // Actualizar resumen con IA después de agregar el mensaje
   try {

@@ -28,6 +28,7 @@ import {
   looksLikeCustomerImageAttachmentCue,
   looksLikeInboundMediaOnlyEvent,
   NO_IMAGE_ANALYSIS_REPLY,
+  selectionHasAiImageContext,
   withNoImageAnalysisNotice,
 } from "@/lib/inboundImagePolicy";
 import {
@@ -387,8 +388,10 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  // Imagen/captura sola (BBC _event_image__): Atilio no analiza multimedia.
-  if (looksLikeInboundMediaOnlyEvent(selectionText)) {
+  const hasAiImage = selectionHasAiImageContext(selectionText);
+
+  // Imagen sola sin descripción BBC ({aiImage}): pedir texto.
+  if (looksLikeInboundMediaOnlyEvent(selectionText) && !hasAiImage) {
     return {
       message: NO_IMAGE_ANALYSIS_REPLY,
       executor: "info_guides",
@@ -396,7 +399,8 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  // Texto + "adjunto imagen" / error GPS etapas → asesor, avisando que no analizamos la imagen.
+  // Texto + "adjunto imagen" / error GPS etapas → asesor.
+  // Si ya hay {aiImage} en el turno, no digas que no podés leer la captura.
   if (
     looksLikeCustomerImageAttachmentCue(selectionText) &&
     (looksLikeGpsFeatureIssueForAdvisor(selectionText) ||
@@ -408,20 +412,23 @@ export async function runTurnExecutorPhase(params: {
     const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    const base =
+      execMessage ||
+      "Anoté el reclamo. Un asesor de Atención al cliente lo va a revisar.";
     return {
-      message: withNoImageAnalysisNotice(
-        execMessage ||
-          "Anoté el reclamo por escrito. Un asesor de Atención al cliente lo va a revisar.",
-      ),
+      message: hasAiImage ? base : withNoImageAnalysisNotice(base),
       executor: "odoo_ticket",
       ok: execOk,
     };
   }
 
-  // Solo avisa adjunto sin más detalle operativo → pedir texto.
+  // Solo avisa adjunto sin detalle y sin {aiImage} → pedir texto.
   if (
+    !hasAiImage &&
     looksLikeCustomerImageAttachmentCue(selectionText) &&
-    !looksLikeSubstantiveCustomerMessage(selectionText.replace(/\b(adjunto|imagen|imagenes|captura|foto|fotos)\b/gi, " "))
+    !looksLikeSubstantiveCustomerMessage(
+      selectionText.replace(/\b(adjunto|imagen|imagenes|captura|foto|fotos)\b/gi, " "),
+    )
   ) {
     return {
       message: NO_IMAGE_ANALYSIS_REPLY,

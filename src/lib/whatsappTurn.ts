@@ -5,6 +5,7 @@ import {
   recentLastInboundTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
+import { mergeInboundTextWithAiImage } from "@/lib/inboundImagePolicy";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import {
@@ -73,10 +74,12 @@ function buildTurnPayload(
 export async function handleWhatsAppTurn(params: {
   rawPhone: string;
   body: string;
+  /** Descripción de imagen/PDF de BBC ({aiImage}) cuando interpretImage está activo. */
+  aiImage?: string;
   apiKey: string;
 }): Promise<JsonRecord> {
   const { rawPhone, body, apiKey } = params;
-  const rawBody = body.trim();
+  const rawBody = mergeInboundTextWithAiImage(body.trim(), params.aiImage).trim();
   let selectionText = rawBody;
 
   if (!selectionText) {
@@ -151,9 +154,13 @@ export async function handleWhatsAppTurn(params: {
   if (contextNextFlow === "ignore") {
     const contextRegistered =
       context.registered === true || String(context.registered_s) === "true";
+    const humanTakeover =
+      context.botPaused === true || String(context.botPaused_s) === "true";
     // No bypassear ignore en números no registrados: ya están derivados a asesor;
     // si no, "Ad198en" u otro mensaje sustantivo reabría el router en loop.
+    // Tampoco bypassear si hay takeover humano (Atilio pausado en panel).
     if (
+      !humanTakeover &&
       contextRegistered &&
       (looksLikeSubstantiveCustomerMessage(selectionText) ||
         isBarePlatePrefixHint(selectionText) ||
@@ -168,8 +175,8 @@ export async function handleWhatsAppTurn(params: {
           skipResponse_s: "true",
           nextFlow: "ignore",
           nextFlow_s: "ignore",
-          executor: "context",
-          executor_s: "context",
+          executor: humanTakeover ? "human_takeover" : "context",
+          executor_s: humanTakeover ? "human_takeover" : "context",
         }),
       );
     }
