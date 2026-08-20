@@ -129,7 +129,18 @@ export function looksLikeBareNumericUnitId(value: string | null | undefined): bo
  * Detecta la primera patente REAL en el texto, ignorando las patentes de ejemplo
  * de los prompts. Si solo hay ejemplos, devuelve null.
  */
-const PLATE_STOPWORDS = new Set(["DEL", "LOS", "LAS", "UNA", "UNO", "CON", "POR", "SUS"]);
+const PLATE_STOPWORDS = new Set([
+  "DEL",
+  "LOS",
+  "LAS",
+  "UNA",
+  "UNO",
+  "CON",
+  "POR",
+  "SUS",
+  // Prefijo de interno de flota (INT 145 / INT-145), no patente Mercosur.
+  "INT",
+]);
 
 export function detectPlate(text: string): string | null {
   if (!text) return null;
@@ -193,7 +204,9 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
   // (que sí puede resolver contra el catálogo real vía filterUnitsByNombre).
   if (!/^[A-Za-z]{2,3}/.test(compact)) return false;
   const norm = normalizePlate(compact);
-  return !!(norm && !isExamplePlate(norm));
+  // INT145 u otros tokens con stopword / formato no-patente no cuentan como patente suelta.
+  if (!norm || isExamplePlate(norm) || !isPlausibleVehiclePlate(norm)) return false;
+  return true;
 }
 
 /** Prefijo suelto de patente (NKL, HEJ, AG) sin ser patente completa. */

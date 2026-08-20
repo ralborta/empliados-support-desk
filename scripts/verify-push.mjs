@@ -61,6 +61,7 @@ const PUSH_SUITES = [
   "verify-new-case-and-gps-etapas-advisor.mjs",
   "verify-no-image-analysis.mjs",
   "verify-bbc-ai-image.mjs",
+  "verify-int-unit-code-not-plate.mjs",
   "verify-test-whitelist-open.mjs",
   "verify-unregistered-phone-handoff.mjs",
   "verify-mesa-entrada-advisor.mjs",

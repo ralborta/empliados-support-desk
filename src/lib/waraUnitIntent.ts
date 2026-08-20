@@ -179,7 +179,11 @@ export function looksLikeUnitNameInMessage(rawText: string | undefined | null): 
     .trim()
     .replace(TYPOGRAPHIC_HYPHENS, "-");
   if (!norm) return false;
-  return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm) || extractMovilIdFromUnitMessage(norm) != null;
+  return (
+    /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm) ||
+    /\bINT\s*[-.]?\s*\d{2,4}\b/i.test(norm) ||
+    extractMovilIdFromUnitMessage(norm) != null
+  );
 }
 
 /**
@@ -1341,7 +1345,7 @@ export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string):
   });
 }
 
-/** Código interno Wara en el mensaje (ej. "Unidad: M600-020", "interno M300-083"). */
+/** Código interno Wara en el mensaje (ej. "Unidad: M600-020", "interno M300-083", "INT 145"). */
 export function extractExplicitUnitNameFromText(rawText: string): string | null {
   const text = String(rawText ?? "")
     .trim()
@@ -1351,6 +1355,9 @@ export function extractExplicitUnitNameFromText(rawText: string): string | null 
   if (labeled?.[1]) return labeled[1];
   const interno = text.match(/\binterno\s*[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (interno?.[1]) return interno[1];
+  // Bug real 2026-08-20: "INT 145" / "INT-145" se tomaba como patente INT145.
+  const intCode = text.match(/\bINT\s*[-.]?\s*(\d{2,4})\b/i);
+  if (intCode?.[1]) return `INT-${intCode[1]}`;
   const bare = text.match(/\b(M?\d{3}-\d{2,3})\b/i);
   return bare?.[1] ?? null;
 }
