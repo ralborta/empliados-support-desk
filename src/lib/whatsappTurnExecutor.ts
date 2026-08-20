@@ -23,6 +23,7 @@ import {
 } from "@/lib/utteranceUnderstanding";
 import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
 import { askCertificateUnitMessage, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
+import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import {
   buildUnexpectedTurnFallbackMessage,
   looksLikeChangeCompanyRequest,
@@ -363,6 +364,22 @@ export async function runTurnExecutorPhase(params: {
   const pendingAction = await getPendingAction(prisma, rawPhone);
   const thread = threadCtx.classificationThread;
 
+  // Cierre de conversación/caso: ANTES del agente (WARA_AGENT_MODE).
+  // Bug real 2026-08-20: "Quiero resolver conversacion" tras listado de flota quedaba
+  // mudo — el agente interceptaba el turno y no llegaba a /odoo/ticket.
+  if (looksLikeCustomerConversationCloseRequest(selectionText)) {
+    const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    return {
+      message:
+        execMessage ||
+        "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.",
+      executor: "odoo_ticket",
+      ok: execOk,
+    };
+  }
+
   // Cancelación explícita en cualquier servicio con trámite inconcluso.
   if (looksLikeTramiteCancellationIntent(selectionText)) {
     const inconclusive = threadHasInconclusiveTramite(thread, pendingAction);
@@ -584,13 +601,14 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // Pedido de operador / mesa de entrada-ayuda → Odoo ANTES que utterance IA
+  // Pedido de operador / mesa / cierre → Odoo ANTES que utterance IA
   // (bug real 2026-08-06: "comunicame a mesa de entrada" → pedía patente).
   if (
     looksLikeHumanAdvisorRequest(selectionText) ||
     looksLikeTechnicalSupportRequest(selectionText) ||
     looksLikeExplicitReclamoOrTicketRequest(selectionText) ||
-    looksLikeOutOfScopeSupportClaim(selectionText)
+    looksLikeOutOfScopeSupportClaim(selectionText) ||
+    looksLikeCustomerConversationCloseRequest(selectionText)
   ) {
     const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
