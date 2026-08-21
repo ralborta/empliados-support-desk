@@ -139,23 +139,37 @@ describe("waraGpsSummary formato WhatsApp", () => {
       ignicionEstado: false,
       ignicionHace: 7200,
     });
-    const ignitionUnit = telemetryUnit({
+    // Apagada con reporte al día = detenida (no falla). Para probar el banner de
+    // falla ignición usamos assessment sintético / sin estado parseable.
+    const parkedUnit = telemetryUnit({
       reporte: 400,
       posicion: 400,
       ignicionEstado: false,
       ignicionHace: 8000,
     });
+    const unknownIgnUnit = {
+      ...telemetryUnit({
+        reporte: 400,
+        posicion: 400,
+        ignicionEstado: false,
+        ignicionHace: 8000,
+      }),
+      ultima_ignicion: { hace_segundos: 8000, estado: "???" as unknown as boolean },
+    } as WaraUnidadEstado;
 
     const missingAssessment = assessUnitReporting(missingUnit)!;
-    const ignitionAssessment = assessUnitReporting(ignitionUnit)!;
+    const parkedAssessment = assessUnitReporting(parkedUnit)!;
+    const unknownAssessment = assessUnitReporting(unknownIgnUnit)!;
     assert.equal(missingAssessment.status, "missing_report");
-    assert.equal(ignitionAssessment.status, "ignition_failure");
+    assert.equal(parkedAssessment.status, "coherent_pause");
+    assert.equal(unknownAssessment.status, "ignition_failure");
 
     const missingUrl = resolveGpsHeaderMediaUrl(missingUnit, missingAssessment.status);
-    const ignitionUrl = resolveGpsHeaderMediaUrl(ignitionUnit, ignitionAssessment.status);
+    const ignitionUrl = resolveGpsHeaderMediaUrl(unknownIgnUnit, unknownAssessment.status);
     assert.equal(missingUrl, gpsAlertMissingReportMediaUrl());
     assert.equal(ignitionUrl, gpsAlertIgnitionFailureMediaUrl());
     assert.notEqual(missingUrl, ignitionUrl);
+    assert.equal(resolveGpsHeaderMediaUrl(parkedUnit, parkedAssessment.status), undefined);
 
     for (const status of ["ok", "coherent_pause", "stale_position"] as const) {
       assert.equal(resolveGpsHeaderMediaUrl(sampleUnit(), status), undefined);
@@ -169,8 +183,8 @@ describe("waraGpsSummary formato WhatsApp", () => {
     });
     const ignitionSummary = await buildGpsClientSummary({
       unitLabel: "AD 612 UQ (M400-099)",
-      unit: ignitionUnit,
-      assessment: ignitionAssessment,
+      unit: unknownIgnUnit,
+      assessment: unknownAssessment,
       action: "observation",
     });
 

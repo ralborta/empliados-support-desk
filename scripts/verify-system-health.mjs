@@ -366,7 +366,8 @@ const gps = [
   [unit(300, 400, 450, true), "ok"],
   [unit(5000, 5100, 5200, false), "coherent_pause"],
   [unit(7200, 15000, 7200, false), "missing_report"],
-  [unit(400, 400, 8000, false), "ignition_failure"],
+  [unit(400, 400, 8000, false), "coherent_pause"],
+  [unit(180, 16 * 60, 2 * 3600, false), "coherent_pause"],
   [unit(400, 9000, 400, false), "stale_position"],
 ];
 for (const [u, expect] of gps) {

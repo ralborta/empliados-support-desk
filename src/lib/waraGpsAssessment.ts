@@ -77,11 +77,18 @@ function isIgnitionUpdating(
   reportElapsed: number,
   positionElapsed: number,
   ignitionElapsed: number | null,
-  ignitionOn: boolean
+  ignitionOn: boolean,
+  ignitionOff: boolean
 ): boolean {
   // Ignición ON: "hace X minutos" es el último cambio a encendida. Puede quedar
   // quieto mientras el vehículo opera (reporte/posición al día). No es falla.
   if (ignitionOn) return true;
+  // Ignición OFF: el timestamp es el momento del apagado. El equipo sigue
+  // reportando por GPRS mientras está parado; la ignición no se actualiza
+  // hasta el próximo encendido. Bug real 2026-08-21: AG 562 SP (reporte 3 min,
+  // posición 16 min, ignición apagada hace 2 h) se tomaba como "falla ignición"
+  // y abría ticket — es unidad detenida, no error.
+  if (ignitionOff) return true;
   if (ignitionElapsed == null) return false;
   if (ignitionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
   if (ignitionElapsed > positionElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
@@ -110,12 +117,13 @@ function allTelemetryAligned(
  * 2. Reporte ≥ 10 min + paquete alineado + ignición OFF (< 24h) → detenida
  * 3. Reporte < 10 min y posición vieja vs reporte:
  *    a) Ignición ON → falta de reporte (van juntos)
- *    b) Ignición clavada mucho antes que posición → Caso 3
- *    c) Ignición OFF y posición alineada con ignición → unidad detenida
+ *    b) Ignición OFF (aunque el apagado sea viejo) → unidad detenida
+ *    c) Sin dato de ignición y timestamp clavado → inconsistencia (falla)
  *    d) Sino → pérdida de señal
  * 4. Reporte y posición OK:
  *    - Ignición ON → normal
- *    - Ignición OFF/sin dato desalineada vs reporte/posición → falla de ignición
+ *    - Ignición OFF → unidad detenida (no ticket: el apagado no se actualiza)
+ *    - Sin dato de ignición desalineado → falla de ignición
  */
 export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | null {
   const reportElapsed = reportElapsedSeconds(unit);
@@ -170,10 +178,28 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
       };
     }
 
+    // Apagada: detención normal si la posición no es mucho más antigua que el apagado.
+    // Bug real 2026-08-21 AG 562 SP: reporte 3 min / pos 16 min / apagada 2 h → detenida.
+    // Contraste: reporte fresco + posición muy vieja vs apagado reciente → pérdida de señal.
+    if (
+      ignitionOff &&
+      posElapsed != null &&
+      (ignitionElapsed == null ||
+        posElapsed <= ignitionElapsed + POSITION_REPORT_DRIFT_SECONDS)
+    ) {
+      return {
+        status: "coherent_pause",
+        reportElapsed,
+        positionElapsed: posElapsed,
+        ignitionElapsed: ignitionElapsed ?? posElapsed,
+      };
+    }
+
     if (
       posElapsed != null &&
       ignitionElapsed != null &&
       !ignitionOn &&
+      !ignitionOff &&
       ignitionElapsed > posElapsed + POSITION_REPORT_DRIFT_SECONDS
     ) {
       return {
@@ -181,20 +207,6 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
         reportElapsed,
         positionElapsed: posElapsed,
         ignitionElapsed,
-      };
-    }
-
-    if (
-      ignitionOff &&
-      posElapsed != null &&
-      ((ignitionElapsed != null && telemetryAligned(posElapsed, ignitionElapsed)) ||
-        (ignitionElapsed == null && !isPositionUpdating(reportElapsed, posElapsed)))
-    ) {
-      return {
-        status: "coherent_pause",
-        reportElapsed,
-        positionElapsed: posElapsed,
-        ignitionElapsed: ignitionElapsed ?? posElapsed,
       };
     }
 
@@ -212,12 +224,22 @@ export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | nul
 
   const posElapsed = positionElapsed as number;
 
-  if (!isIgnitionUpdating(reportElapsed, posElapsed, ignitionElapsed, ignitionOn)) {
+  if (!isIgnitionUpdating(reportElapsed, posElapsed, ignitionElapsed, ignitionOn, ignitionOff)) {
     return {
       status: "ignition_failure",
       reportElapsed,
       positionElapsed: posElapsed,
       ignitionElapsed,
+    };
+  }
+
+  // Reporte/posición al día + ignición apagada = detenida (observa, sin ticket).
+  if (ignitionOff) {
+    return {
+      status: "coherent_pause",
+      reportElapsed,
+      positionElapsed: posElapsed,
+      ignitionElapsed: ignitionElapsed ?? posElapsed,
     };
   }
 

@@ -1624,33 +1624,14 @@ export async function POST(req: NextRequest) {
               action,
             });
         } else if (assessment.status === "ignition_failure") {
-          action = "ticket";
-          const ignText =
-            assessment.ignitionElapsed != null
-              ? `hace ${minutesAgo(assessment.ignitionElapsed)}`
-              : "sin dato reciente";
-          ticketIssueDetail = `falla de ignición: reporte y posición al día pero la ignición no acompaña (última ignición ${ignText}, ${ignitionLabel(unit)})`;
-          const created = await createMissingReportTicket({
-            rawPhone,
-            unit,
-            companyName: pickOdooCompanyName(session.companyName, result.cliente),
-            contactName: session.contactName ?? "",
-            elapsedText,
-            issueDetail: ticketIssueDetail,
-            incidentType: "GENERAL_TECH",
-            ticketTitleSuffix: "Falla de ignición",
-          });
-          ticketRef = created.ref;
-          ticketReused = created.reused;
+          // Inconsistencia de dato de ignición: informar, no abrir ticket automático.
+          // Bug real 2026-08-21: ignición apagada en unidad detenida se ticketaba como falla.
+          action = "observation";
           summaryText = await buildGpsClientSummary({
               unitLabel: label,
               unit,
               assessment,
               action,
-              ticketRef: created.ref,
-              odooRef: created.odooRef ?? undefined,
-              ticketReused: created.reused,
-              ticketIssueDetail,
             });
         } else if (assessment.status === "stale_position") {
           action = "ticket";

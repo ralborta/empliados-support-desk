@@ -47,15 +47,21 @@ describe("waraGpsAssessment criterio GPRS 10 min", () => {
     assert.equal(a.status, "missing_report");
   });
 
-  it("reporte viejo → missing_report; reporte al día + ignición vieja → ignition_failure", () => {
+  it("reporte al día + ignición apagada (timestamp viejo) → detenida, no falla", () => {
     const missing = assessUnitReporting(
       unit({ reporte: 7200, posicion: 15000, ignicionEstado: false, ignicionHace: 7200 }),
     );
     assert.equal(missing?.status, "missing_report");
 
-    const ignition = assessUnitReporting(
+    // Bug real 2026-08-21 AG 562 SP: reporte/posición vivos + apagada hace horas ≠ ticket.
+    const parkedFresh = assessUnitReporting(
       unit({ reporte: 400, posicion: 400, ignicionEstado: false, ignicionHace: 8000 }),
     );
-    assert.equal(ignition?.status, "ignition_failure");
+    assert.equal(parkedFresh?.status, "coherent_pause");
+
+    const parkedSlightlyStalePos = assessUnitReporting(
+      unit({ reporte: 180, posicion: 16 * 60, ignicionEstado: false, ignicionHace: 2 * 3600 }),
+    );
+    assert.equal(parkedSlightlyStalePos?.status, "coherent_pause");
   });
 });
