@@ -150,7 +150,7 @@ export function buildGpsPositionClarificationAnalysis(
       break;
     case "ignition_failure":
       verdict = "✅ *Sí* respecto a la posición: el pin es el último punto que Wara recibió.";
-      detail = `Reporte y posición van al día (posición hace ${posElapsed}), pero hay una inconsistencia en los datos de ignición que conviene revisar con Atención al cliente.`;
+      detail = `Reporte y posición van al día (posición hace ${posElapsed}). El dato de ignición no llegó completo; no es por sí solo una falla de la unidad.`;
       break;
     default:
       verdict = "📍 *Sobre la posición*";
@@ -230,12 +230,12 @@ export function buildStructuredGpsBody(
 
   if (assessment.status === "ignition_failure") {
     return withUnit([
-      compact ? null : "⚠️ *Falla de ignición*",
+      compact ? null : "ℹ️ *Dato de ignición incompleto*",
       unitLine,
       reportLine(assessment),
       positionLine(assessment),
       `🔑 Última ignición: hace ${formatMinutesAgo(assessment.ignitionElapsed)} (${ignitionLabel(unit)})`,
-      "El reporte y la posición van al día, pero la ignición no acompaña.",
+      "Reporte y posición van al día; el estado de ignición no llegó claro. No abro ticket automático por eso.",
       map,
     ]);
   }

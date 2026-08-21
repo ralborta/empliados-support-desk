@@ -22,10 +22,12 @@ import {
   looksLikeLiveUnitConsultIntent,
   looksLikeGenericUnitConsultWithoutPlate,
   looksLikeConversationalUnitConcern,
+  looksLikeIgnitionDiagnosisDispute,
   looksLikeProblemClarificationPushback,
   looksLikeRouteHistoryOrMovementIssue,
   looksLikeUnitConsultFollowUp,
   looksLikeVagueUnitProblemReport,
+  threadHasRecentIgnitionFailureClaim,
   looksLikeMaintenanceConfirmationRejection,
   resolveConversationalUnitTurn,
   threadHasRecentGpsStatusSummary,
@@ -1545,11 +1547,54 @@ export async function POST(req: NextRequest) {
     });
     const positionClarification =
       looksLikeGpsPositionClarificationQuestion(rawText) && threadHasRecentGpsContext(threadText);
-    if (positionClarification) {
+    const rawNorm = (rawText ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    // Tras un falso “falla ignición”, el cliente discute: re-evaluar como V1
+    // (OFF + GPRS vivo = detenida, sin ticket) en vez de pushback genérico.
+    const ignitionDispute =
+      looksLikeIgnitionDiagnosisDispute(rawText) &&
+      (/\bignici/.test(rawNorm) ||
+        threadHasRecentIgnitionFailureClaim(threadText) ||
+        threadHasRecentGpsContext(threadText));
+    const disputeAssessment = ignitionDispute ? assessUnitReporting(unit) : null;
+    const disputeParkedCorrection =
+      !!disputeAssessment &&
+      (disputeAssessment.status === "coherent_pause" ||
+        (disputeAssessment.status === "ok" && ignitionLabel(unit) === "apagada") ||
+        (disputeAssessment.status === "ignition_failure" && ignitionLabel(unit) === "apagada"));
+    if (disputeParkedCorrection && disputeAssessment) {
+      const label = formatUnitLabel(unit);
+      action = "observation";
+      const correctedAssessment =
+        disputeAssessment.status === "coherent_pause"
+          ? disputeAssessment
+          : {
+              status: "coherent_pause" as const,
+              reportElapsed: disputeAssessment.reportElapsed,
+              positionElapsed: disputeAssessment.positionElapsed ?? disputeAssessment.reportElapsed,
+              ignitionElapsed: disputeAssessment.ignitionElapsed ?? disputeAssessment.reportElapsed,
+            };
+      const correction =
+        `Tenés razón: con ignición *apagada* no es una falla. ` +
+        `La unidad ${label} está *detenida*; el equipo puede seguir reportando por GPRS ` +
+        `sin que el timestamp de ignición se mueva. No corresponde ticket por eso.\n\n`;
+      summaryText =
+        correction +
+        (await buildGpsClientSummary({
+          unitLabel: label,
+          unit,
+          assessment: correctedAssessment,
+          action: "observation",
+        }));
+      dialogueState = null;
+    } else if (positionClarification) {
       const assessment = assessUnitReporting(unit);
       if (assessment) {
         summaryText = buildGpsPositionClarificationAnalysis(unit, assessment);
-        action = assessment.status === "ok" || assessment.status === "coherent_pause" ? "observation" : "ticket";
+        // Aclarar posición no reabre ticket; el diagnóstico previo ya lo hizo si hacía falta.
+        action = "observation";
       }
     } else if (conversationalReply) {
       summaryText = conversationalReply;

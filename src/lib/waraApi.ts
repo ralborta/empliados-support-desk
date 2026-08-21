@@ -1205,9 +1205,9 @@ export function looksLikeTicketCreationInfoQuestion(text: string | undefined | n
 
 export function buildTicketCreationInfoReply(): string {
   return [
-    "Por GPS y telemetría, suele generarse un caso cuando una unidad lleva mucho tiempo sin reportar, cuando hay pérdida de señal con reporte reciente, o cuando la ignición no acompaña al resto de los datos.",
+    "Por GPS y telemetría, suele generarse un caso cuando una unidad lleva mucho tiempo sin reportar, o cuando hay pérdida de señal satelital con reporte reciente.",
     "",
-    "Si la unidad está detenida con ignición apagada y todo alineado, normalmente no hace falta ticket.",
+    "Si la unidad está detenida con ignición apagada y el equipo sigue reportando, es normal: no es falla y no se abre ticket por eso.",
     "",
     "Para otros temas (acceso, facturación, fallas que no se resuelven por acá), escribí \"hablar con un asesor\".",
     "",
@@ -1330,6 +1330,44 @@ export function looksLikeProblemClarificationPushback(text: string | undefined |
   );
 }
 
+/**
+ * Cliente discute el diagnóstico de “falla de ignición”: apagada + reporte vivo
+ * es unidad detenida (criterio V1 Mesa), no un problema.
+ * Bug real 2026-08-21 AG 562 SP.
+ */
+export function looksLikeIgnitionDiagnosisDispute(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  const mentionsIgnition = /\bignici/.test(t);
+  const asksWhyProblem =
+    /\b(porque|por qu[eé]|porq)\b.{0,50}\b(crees|pensas|pens[aá]s|dijiste|decis|dec[ií]s)\b.{0,40}\b(problema|problemas|falla)\b/.test(
+      t,
+    ) ||
+    /\b(porque|por qu[eé]|porq)\b.{0,30}\b(hay|ves)\b.{0,25}\b(problema|problemas|falla)\b/.test(t);
+  if (!mentionsIgnition) {
+    // Sin nombrar ignición: solo “¿por qué creés que hay problema?” (el hilo aporta contexto).
+    return asksWhyProblem;
+  }
+  return (
+    asksWhyProblem ||
+    /\b(no veo|no es|no hay|no creo|no me parece|tampoco veo)\b.{0,60}\b(problema|falla|error)\b/.test(
+      t,
+    ) ||
+    /\b(no (es|hay) (un )?problema|no (es|hay) falla|esta bien|est[aá] bien|es normal)\b/.test(t)
+  );
+}
+
+/** El hilo reciente habló de falla/inconsistencia de ignición (falso positivo típico). */
+export function threadHasRecentIgnitionFailureClaim(threadText: string): boolean {
+  const tail = threadText.slice(-3500).toLowerCase();
+  return (
+    /falla de ignici/.test(tail) ||
+    /ignici[oó]n no acompa/.test(tail) ||
+    /inconsistencia (de |en )?(los datos de )?ignici/.test(tail) ||
+    /pero la ignici[oó]n no/.test(tail)
+  );
+}
+
 /** Turno de unidad que requiere escuchar antes de diagnosticar GPS o abrir ticket. */
 export function looksLikeConversationalUnitConcern(text: string | undefined | null): boolean {
   return (
@@ -1444,7 +1482,11 @@ export function looksLikeGpsPositionClarificationQuestion(text: string | undefin
     ) ||
     /\b(es\s+)?(la\s+)?ultima\s+(posicion|ubicacion)\b/.test(t) ||
     /\b(esta\s+)?(actualizada|al dia|reciente)\s+(la\s+)?(posicion|ubicacion)\b/.test(t) ||
-    /\b(el\s+)?(punto|pin)\s+(es\s+)?(correcto|actual|el\s+ultimo)\b/.test(t)
+    /\b(el\s+)?(punto|pin)\s+(es\s+)?(correcto|actual|el\s+ultimo)\b/.test(t) ||
+    /\b(pasame|pasa|dame|mandame|mostrame|mostra|quiero|necesito)\b.{0,30}\b(la\s+)?(ubicacion|posicion)(\s+actual)?\b/.test(
+      t,
+    ) ||
+    /\b(ubicacion|posicion)\s+actual\b/.test(t)
   );
 }
 

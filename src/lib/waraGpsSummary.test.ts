@@ -107,7 +107,8 @@ describe("waraGpsSummary formato WhatsApp", () => {
     assert.doesNotMatch(text, /📍 \*Estado GPS\*/);
     assert.equal((text.match(/🚗 Unidad:/g) ?? []).length, 1);
     assert.match(text, /Última ignición:/);
-    assert.match(text, /El reporte y la posición van al día/);
+    assert.match(text, /estado de ignición no llegó claro/);
+    assert.match(text, /No abro ticket automático/);
   });
 
   it("cada estado GPS adjunta solo su banner (falta reporte ≠ falla ignición)", async () => {

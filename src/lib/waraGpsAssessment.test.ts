@@ -63,5 +63,11 @@ describe("waraGpsAssessment criterio GPRS 10 min", () => {
       unit({ reporte: 180, posicion: 16 * 60, ignicionEstado: false, ignicionHace: 2 * 3600 }),
     );
     assert.equal(parkedSlightlyStalePos?.status, "coherent_pause");
+
+    // Captura cliente: reporte 9 min / pos 12 min / apagada 88 min → detenida V1, sin ticket.
+    const ag562sp = assessUnitReporting(
+      unit({ reporte: 9 * 60, posicion: 12 * 60, ignicionEstado: false, ignicionHace: 88 * 60 }),
+    );
+    assert.equal(ag562sp?.status, "coherent_pause");
   });
 });
