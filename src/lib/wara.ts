@@ -2620,7 +2620,8 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
     .toLowerCase()
     .replace(/[^a-z]/g, "");
   if (!t) return false;
-  if (t.startsWith("conf")) return true;
+  // "confirmo" y typos WhatsApp: comnfirmo, confimo, confimro, etc.
+  if (looksLikeFuzzyConfirmoToken(t)) return true;
   if (
     new Set([
       "si",
@@ -2657,6 +2658,55 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
     /\b(esa\s+(esta\s+)?(bien|es|correcta)|si\s+esa|est[aá]\s+bien|es\s+correcto|as[ií]\s+es|dale\s+esa|esa\s+misma)\b/.test(
       norm,
     ) || /\b(de\s+acuerdo|correcto\s+eso|esta\s+bien)\b/.test(norm)
+  );
+}
+
+/**
+ * Token único cercano a "confirmo" (typos de teclado / letras de más).
+ * Bug real 2026-08-21: "comnfirmo" no arranca con "conf" → se tomaba como detalle.
+ */
+export function looksLikeFuzzyConfirmoToken(token: string | undefined | null): boolean {
+  const t = String(token ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+  if (!t) return false;
+  if (t.startsWith("conf") && t.length >= 5 && t.length <= 14) return true;
+  if (t.length < 6 || t.length > 12) return false;
+  return levenshteinDistance(t, "confirmo") <= 2;
+}
+
+/**
+ * Ante un CONFIRMO pendiente el cliente pide ayuda o no entiende el paso
+ * ("como puedo hacer?", "no entiendo que queres hacer?") — no es detalle del trámite.
+ */
+export function looksLikePendingConfirmHelpOrConfusion(
+  text: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 180) return false;
+  if (looksLikeBriefConfirmation(raw) || looksLikeFuzzyConfirmoToken(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(cancel|desestim|no confirmo|olvidalo|dejalo)\b/.test(t)) return false;
+  return (
+    /\b(no entiendo|no te entiendo|no comprendo|estoy perdido|me perdi|me confundi)\b/.test(t) ||
+    /\b(que|q)\s+(hago|tengo que hacer|debo hacer|respondo|contesto|tengo que poner)\b/.test(t) ||
+    /\b(como|como hago|como puedo|como sigo)\b.{0,40}\b(hacer|hago|sigo|confirmar|registrar)?\b/.test(
+      t,
+    ) ||
+    /\b(como puedo hacer|como hago|como sigo|y ahora que|y ahora que hago)\b/.test(t) ||
+    /\b(que|q)\s+(queres|quiere|quieren)\s+(que\s+)?(haga|hacer|diga|responda|conteste)\b/.test(
+      t,
+    ) ||
+    /\b(ayuda|ayudame|explicame|explicame que|no se que hacer|no se que responder)\b/.test(t)
   );
 }
 

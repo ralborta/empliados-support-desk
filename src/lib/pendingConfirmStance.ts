@@ -275,3 +275,28 @@ export function buildPendingConfirmStillWaitingReminder(kind: PendingConfirmKind
   }
   return "El mantenimiento del resumen sigue pendiente: cuando quieras, respondé CONFIRMO, o decime qué corregir.";
 }
+
+/** Explica el paso CONFIRMO/CANCELAR sin pisar el detalle del resumen. */
+export function buildPendingConfirmHelpReply(kind: PendingConfirmKind): string {
+  const common = [
+    "Para *registrarlo* respondé *CONFIRMO*.",
+    "Si no querés cargarlo, respondé *CANCELAR*.",
+    "Si algún dato está mal, decime qué corregir.",
+  ];
+  if (kind === "mantenimiento") {
+    return [
+      "Tranqui: ya armé el resumen de la tarea de mantenimiento.",
+      ...common,
+    ].join("\n");
+  }
+  if (kind === "odometro") {
+    return [
+      "Tranqui: ya armé el resumen del odómetro/horómetro.",
+      ...common,
+    ].join("\n");
+  }
+  return [
+    "Tranqui: ya armé el resumen del certificado.",
+    ...common,
+  ].join("\n");
+}

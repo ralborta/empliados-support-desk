@@ -16,6 +16,8 @@ import {
   isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
   looksLikeBriefConfirmation,
+  looksLikePendingConfirmHelpOrConfusion,
+  looksLikeFuzzyConfirmoToken,
   normalizePlate,
   looksLikeHorometerOnlyIntent,
   looksLikeExplicitOdometerUpdateRequest,
@@ -224,7 +226,8 @@ function isConfirmed(value: string | undefined): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z]/g, "");
   if (!t) return false;
-  if (t.startsWith("conf")) return true;
+  // "confirmo" + typos WhatsApp (comnfirmo, confimo, …)
+  if (looksLikeFuzzyConfirmoToken(t)) return true;
   const accepted = new Set([
     "confirmo",
     "confirmar",
@@ -539,6 +542,37 @@ export async function POST(req: NextRequest) {
         cancelled: true,
         cancelled_s: "true",
         topicChange_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  // Con resumen pendiente: "como puedo hacer?" / "no entiendo" → explicar CONFIRMO,
+  // no rearmar el card con ese texto como Detalle.
+  if (
+    pendingMaintConfirm &&
+    !confirmed &&
+    looksLikePendingConfirmHelpOrConfusion(inboundForConfirm || rawInbound)
+  ) {
+    const message = [
+      "Tranqui: ya armé el resumen de la tarea de mantenimiento.",
+      "Para *registrarla* en Wara respondé *CONFIRMO*.",
+      "Si no querés cargarla, respondé *CANCELAR*.",
+      "Si el detalle o la unidad están mal, decime qué corregir.",
+    ].join("\n");
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "confirmation_help",
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        confirmationRequired: true,
+        confirmationRequired_s: "true",
       },
       { status: BB_STATUS },
     );

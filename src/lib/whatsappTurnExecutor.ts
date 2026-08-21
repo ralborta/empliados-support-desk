@@ -61,6 +61,7 @@ import {
   looksLikePendingConfirmPushback,
   reasonPendingConfirmationRejection,
   buildPendingConfirmStillWaitingReminder,
+  buildPendingConfirmHelpReply,
 } from "@/lib/pendingConfirmStance";
 import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
@@ -71,6 +72,7 @@ import {
   looksLikePendingTramiteAffirmation,
   looksLikeResumePausedTramite,
   looksLikePendingConfirmComprehensionAck,
+  looksLikePendingConfirmHelpOrConfusion,
   detectLoosePlate,
   extractPlatePrefixFromMessage,
   hasPendingMaintenancePlateRequest,
@@ -532,6 +534,20 @@ export async function runTurnExecutorPhase(params: {
     const prefix = looksLikeResumePausedTramite(selectionText) ? "Dale, seguimos. " : "Dale. ";
     return {
       message: `${prefix}${reminder}`,
+      executor:
+        pendingKind === "odometro"
+          ? "odometro"
+          : pendingKind === "certificados"
+            ? "certificados"
+            : "mantenimiento",
+      ok: true,
+    };
+  }
+  // "como puedo hacer?" / "no entiendo" con CONFIRMO pendiente: explicar el paso,
+  // no pisar el detalle ni saltar a otro trámite.
+  if (pendingKind && looksLikePendingConfirmHelpOrConfusion(selectionText)) {
+    return {
+      message: buildPendingConfirmHelpReply(pendingKind),
       executor:
         pendingKind === "odometro"
           ? "odometro"
