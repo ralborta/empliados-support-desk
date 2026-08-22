@@ -127,7 +127,7 @@ import {
   extractFreeTextUnitSearchCandidate,
   extractExplicitUnitNameFromText,
   extractMovilIdFromUnitMessage,
-  shouldPreferUnidadesOverMaintenancePlateSelection,
+  resolveExecutorOverStaleMaintenancePlateSelection,
 } from "@/lib/waraUnitIntent";
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
@@ -1382,19 +1382,33 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Selección de patente/prefijo/marca en mantenimiento pendiente → executor, no agente.
+  // Si el mensaje trae otro servicio explícito (estado/cert/odo) o el pedido GPS es más
+  // reciente, no secuestrar el turno hacia mantenimiento.
   if (
     hasPendingMaintenancePlateRequest(threadCtx.classificationThread) &&
-    isMaintenancePlateSelectionMessage(selectionText) &&
-    !shouldPreferUnidadesOverMaintenancePlateSelection(
+    isMaintenancePlateSelectionMessage(selectionText)
+  ) {
+    const override = resolveExecutorOverStaleMaintenancePlateSelection(
       selectionText,
       threadCtx.classificationThread,
-    )
-  ) {
-    const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
-    const execMessage = messageFromPayload(execResult);
-    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (execMessage) {
-      return { message: execMessage, executor: "mantenimiento", ok: execOk };
+    );
+    if (override) {
+      if (pendingAction?.type === "mantenimiento") {
+        await clearPendingAction(prisma, rawPhone);
+      }
+      const execResult = await invokeExecutor(override, rawPhone, selectionText, apiKey);
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (execMessage || !executorSkippedSilently(execResult)) {
+        return { message: execMessage, executor: override, ok: execOk };
+      }
+    } else {
+      const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (execMessage) {
+        return { message: execMessage, executor: "mantenimiento", ok: execOk };
+      }
     }
   }
 

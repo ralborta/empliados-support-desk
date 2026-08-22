@@ -71,7 +71,7 @@ import {
   looksLikeUnitListRequest,
   looksLikeUnitNameInMessage,
   looksLikeVagueUnitReference,
-  shouldPreferUnidadesOverMaintenancePlateSelection,
+  resolveExecutorOverStaleMaintenancePlateSelection,
   threadHasRecentFleetUnitSearchRequest,
 } from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
@@ -557,9 +557,8 @@ const TURN_RULES: TurnRule[] = [
       if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
         return null;
       }
-      if (shouldPreferUnidadesOverMaintenancePlateSelection(text, threadText)) {
-        return "unidades";
-      }
+      const override = resolveExecutorOverStaleMaintenancePlateSelection(text, threadText);
+      if (override) return override;
       if (threadHasRecentLiveUnitConsultIntent(threadText) && looksLikeVehicleBrandOrUnitSearch(text)) {
         return "unidades";
       }
@@ -616,14 +615,14 @@ const TURN_RULES: TurnRule[] = [
   {
     id: "pending_maintenance_plate_selection_redundant",
     reason: "Patente pedida en contexto de mantenimiento (también cubierto arriba; redundante por claridad).",
-    decide: ({ text, threadText }) =>
-      looksLikeCertificateIntent(text, threadText)
-        ? null
-        : certificateFlowState(threadText) === "none" &&
-            hasPendingMaintenancePlateRequest(threadText) &&
-            isUnitSelectionMessage(text, threadText)
-          ? "mantenimiento"
-          : null,
+    decide: ({ text, threadText }) => {
+      if (looksLikeCertificateIntent(text, threadText)) return null;
+      if (certificateFlowState(threadText) !== "none") return null;
+      if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
+        return null;
+      }
+      return resolveExecutorOverStaleMaintenancePlateSelection(text, threadText) ?? "mantenimiento";
+    },
   },
   {
     id: "maintenance_operational",

@@ -13,9 +13,10 @@ import {
   extractMovilIdFromUnitMessage,
   inferNumericExpectedFieldForThread,
   resolveUnitQuery,
-  shouldPreferUnidadesOverMaintenancePlateSelection,
+  resolveExecutorOverStaleMaintenancePlateSelection,
 } from "../src/lib/waraUnitIntent.ts";
 import {
+  hasPendingMaintenancePlateRequest,
   hasPendingUnitConsultPlateRequest,
   threadAwaitingOdometerPlate,
   threadHasActiveMeterValueRequest,
@@ -127,25 +128,56 @@ assert.equal(classifyTurnExecutor("Estado 900100", ""), "unidades");
 
 const maintThread =
   "Para programar mantenimiento preventivo necesito la patente de la unidad. Voy a registrar mantenimiento.";
-assert(
-  shouldPreferUnidadesOverMaintenancePlateSelection("Estado 900100", maintThread),
-  "Estado+interno gana sobre mantenimiento stale",
+assert.equal(
+  resolveExecutorOverStaleMaintenancePlateSelection("Estado 900100", maintThread),
+  "unidades",
+  "Estado+interno → unidades",
+);
+assert.equal(
+  resolveExecutorOverStaleMaintenancePlateSelection("Certificado 900100", maintThread),
+  "certificados",
+  "Certificado+interno → certificados",
+);
+assert.equal(
+  resolveExecutorOverStaleMaintenancePlateSelection("Odometro 900100", maintThread),
+  "odometro",
+  "Odometro+interno → odometro",
+);
+assert.equal(
+  resolveExecutorOverStaleMaintenancePlateSelection("Horometro 900079", maintThread),
+  "odometro",
+  "Horometro+interno → odometro",
 );
 assert.equal(
   classifyTurnExecutor("Estado 900100", maintThread),
   "unidades",
-  "router → unidades con mantenimiento stale",
+  "router Estado → unidades con mantenimiento stale",
+);
+assert.equal(
+  classifyTurnExecutor("Certificado 900100", maintThread),
+  "certificados",
+  "router Certificado → certificados con mantenimiento stale",
+);
+assert.equal(
+  classifyTurnExecutor("Odometro 900100", maintThread),
+  "odometro",
+  "router Odometro → odometro con mantenimiento stale",
 );
 
-const gpsAskThread =
+const gpsAskAfterMaint =
+  "Para programar mantenimiento preventivo necesito la patente de la unidad.\n" +
   "¿Podés darme la patente o el interno de la unidad? Consulto en Wara.";
-assert(hasPendingUnitConsultPlateRequest(gpsAskThread), "detecta pedido interno GPS");
-assert.equal(inferNumericExpectedFieldForThread(gpsAskThread), "unit");
-assert.equal(extractMovilIdFromUnitMessage("900100", { threadText: gpsAskThread }), 900100);
+assert(
+  !hasPendingMaintenancePlateRequest(gpsAskAfterMaint),
+  "pedido GPS más reciente anula mantenimiento stale",
+);
+assert(hasPendingUnitConsultPlateRequest(gpsAskAfterMaint), "detecta pedido interno GPS reciente");
+assert.equal(inferNumericExpectedFieldForThread(gpsAskAfterMaint), "unit");
+assert.equal(extractMovilIdFromUnitMessage("900100", { threadText: gpsAskAfterMaint }), 900100);
 assert.equal(
-  classifyTurnExecutor("900100", gpsAskThread),
+  classifyTurnExecutor("900100", gpsAskAfterMaint),
   "unidades",
-  "interno solo tras pedido GPS → unidades",
+  "interno solo tras pedido GPS reciente → unidades",
 );
 
 console.log("OK verify-service-plus-interno-same-message");

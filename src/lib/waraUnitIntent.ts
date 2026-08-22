@@ -2721,25 +2721,60 @@ export async function resolvePlateWithWaraFleet(
 }
 
 /**
- * GPS/estado o consulta de unidad pendiente manda sobre selección de patente de mantenimiento
- * arrastrada del hilo (bug 2026-08-22: "Estado 900100" / "900100" → mantenimiento AH 652).
+ * Servicio explícito (o hilo de unidad pendiente más reciente) gana sobre selección de
+ * patente de mantenimiento stale en el hilo.
+ * Bug 2026-08-22: "Estado/Certificado/Odómetro 900100" y "900100" tras pedido GPS
+ * caían a CONFIRMO de mantenimiento de otra unidad.
  */
-export function shouldPreferUnidadesOverMaintenancePlateSelection(
+export function resolveExecutorOverStaleMaintenancePlateSelection(
   text: string,
   threadText: string,
-): boolean {
+): "unidades" | "odometro" | "certificados" | null {
+  const intent = detectServiceIntentInMessage(text);
+  if (intent === "estado_gps") return "unidades";
+  if (intent === "certificado") return "certificados";
+  if (intent === "odometro" || intent === "horometro") return "odometro";
+  // mantenimiento explícito en el mensaje → dejar que continúe el flujo de mantenimiento
+  if (intent === "mantenimiento") return null;
+
   if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
-    return true;
+    return "unidades";
   }
-  if (detectServiceIntentInMessage(text) === "estado_gps") return true;
-  if (hasPendingUnitConsultPlateRequest(threadText)) return true;
+  if (looksLikeExplicitOdometerUpdateRequest(text) || looksLikeHorometerOnlyIntent(text)) {
+    return "odometro";
+  }
+
+  // Pedido GPS/unidad más reciente que mantenimiento + token de unidad.
+  if (
+    hasPendingUnitConsultPlateRequest(threadText) &&
+    extractMovilIdFromUnitMessage(text, { threadText }) != null
+  ) {
+    return "unidades";
+  }
   if (
     threadHasRecentLiveUnitConsultIntent(threadText) &&
     extractMovilIdFromUnitMessage(text, { threadText }) != null
   ) {
-    return true;
+    return "unidades";
   }
-  return false;
+
+  // Trámite odómetro/horómetro pidiendo unidad: el interno es para ese flujo.
+  if (
+    (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) &&
+    extractMovilIdFromUnitMessage(text, { threadText }) != null
+  ) {
+    return "odometro";
+  }
+
+  return null;
+}
+
+/** @deprecated usar resolveExecutorOverStaleMaintenancePlateSelection */
+export function shouldPreferUnidadesOverMaintenancePlateSelection(
+  text: string,
+  threadText: string,
+): boolean {
+  return resolveExecutorOverStaleMaintenancePlateSelection(text, threadText) === "unidades";
 }
 
 /** Marca/prefijo/nombre/patente parcial → executor unidades (búsqueda en flota), no agente. */

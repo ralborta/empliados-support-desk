@@ -2003,38 +2003,46 @@ export function resolveOdometerContextPlate(params: {
   return last ?? active ?? summary ?? maintSuccess ?? "";
 }
 
+/** Índice del último pedido de patente para mantenimiento operativo (o -1). */
+export function lastMaintenancePlateAskIndex(threadText: string): number {
+  const lower = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/mantenimiento/.test(lower)) return -1;
+  const markers = [
+    lower.lastIndexOf("para programar mantenimiento preventivo necesito la patente"),
+    lower.lastIndexOf("para registrar el mantenimiento necesito la patente"),
+    lower.lastIndexOf("necesito la patente de la unidad"),
+    lower.lastIndexOf("decime la patente de la unidad"),
+    lower.lastIndexOf("yo lo dejo cargado en wara"),
+    lower.lastIndexOf("puedo registrar o programar un mantenimiento"),
+  ].filter((i) => i >= 0);
+  if (!markers.length) {
+    if (/patente de la unidad/.test(lower) && /preventivo|correctivo/.test(lower)) {
+      return Math.max(lower.lastIndexOf("patente de la unidad"), 0);
+    }
+    return -1;
+  }
+  return Math.max(...markers);
+}
+
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */
 export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
   if (certificateFlowState(threadText) === "awaiting_unit") return false;
-  const tail = threadText.slice(-2500).toLowerCase();
-  const askedForPlate =
-    /para programar mantenimiento preventivo necesito la patente/.test(tail) ||
-    /para registrar el mantenimiento necesito la patente/.test(tail) ||
-    /necesito la patente de la unidad/.test(tail) ||
-    /decime la patente de la unidad/.test(tail) ||
-    (/patente de la unidad/.test(tail) && /preventivo o correctivo/.test(tail)) ||
-    (/yo lo dejo cargado en wara/.test(tail) && /patente/.test(tail)) ||
-    (/puedo registrar o programar un mantenimiento/.test(tail) && /patente/.test(tail));
-  return askedForPlate && /mantenimiento/.test(tail);
+  const maintAsk = lastMaintenancePlateAskIndex(threadText);
+  if (maintAsk < 0) return false;
+  // Si después hubo un pedido de consulta GPS/unidad, el mantenimiento queda stale.
+  const unitAsk = lastUnitConsultPlateAskIndex(threadText);
+  if (unitAsk > maintAsk) return false;
+  const meterAsk = lastMeterPlateAskIndex(threadText);
+  if (meterAsk > maintAsk) return false;
+  return true;
 }
 
-/** El bot pidió patente/nombre para consultar una unidad (GPS, estado, búsqueda), no odómetro/mantenimiento/cert. */
-export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
-  if (certificateFlowState(threadText) !== "none") return false;
-  if (hasPendingMaintenancePlateRequest(threadText)) return false;
-  // Bug prod 2026-08-17: aclaración de matrícula en trámite horómetro ≠ consulta GPS.
-  // No usar threadHasActiveOdometerFlow acá (recursión con threadAwaitingOdometerPlate).
-  if (threadHasRecentCustomerMeterUpdateIntent(threadText)) {
-    const meterTail = threadText.slice(-3500).toLowerCase();
-    if (
-      /matr[ií]cula exacta|confirm[aá].{0,30}matr[ií]cula|patente exacta|para registrar el cambio de hor[oó]metro|para registrar el cambio de od[oó]metro/.test(
-        meterTail,
-      )
-    ) {
-      return false;
-    }
-  }
-
+/** Índice del último pedido de unidad para GPS/estado (o -1). */
+export function lastUnitConsultPlateAskIndex(threadText: string): number {
   const lower = threadText
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -2067,14 +2075,10 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("última posición de la"),
     lower.lastIndexOf("ultima posición de la"),
     lower.lastIndexOf("última posicion de la"),
-    // Bug real 2026-08-03: pedido de otra unidad sin reporte ("Pasame la patente...
-    // sin reporte") no matcheaba ningún marcador y threadAwaitingOdometerPlate lo
-    // confundía con trámite de odómetro — "Perfecto, tomo AC 607 XB. ¿Cuál es el nuevo odómetro?"
     lower.lastIndexOf("otra unidad sin reporte"),
     lower.lastIndexOf("nombre de la otra unidad"),
     lower.lastIndexOf("pasame la patente o el nombre"),
     lower.lastIndexOf("la consulto en wara"),
-    // Pedido LN vía info_guides / utterance ("¿Me podés dar la patente o el prefijo…?")
     lower.lastIndexOf("patente o el prefijo"),
     lower.lastIndexOf("patente o prefijo"),
     lower.lastIndexOf("me podes dar la patente"),
@@ -2087,10 +2091,15 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("podés darme la patente o el interno"),
     lower.lastIndexOf("podes darme la patente o el interno"),
   ].filter((i) => i >= 0);
-  if (!unitConsultMarkers.length) return false;
+  return unitConsultMarkers.length ? Math.max(...unitConsultMarkers) : -1;
+}
 
-  const lastUnitAsk = Math.max(...unitConsultMarkers);
-  const odoMarkers = [
+function lastMeterPlateAskIndex(threadText: string): number {
+  const lower = threadText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const markers = [
     lower.lastIndexOf("para registrar el cambio de horómetro"),
     lower.lastIndexOf("para registrar el cambio de horometro"),
     lower.lastIndexOf("para registrar el cambio de odómetro"),
@@ -2101,9 +2110,38 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("cuál es el nuevo odómetro"),
     lower.lastIndexOf("cual es el nuevo odometro"),
   ].filter((i) => i >= 0);
-  const lastOdo = odoMarkers.length ? Math.max(...odoMarkers) : -1;
-  if (lastOdo >= 0 && lastOdo > lastUnitAsk) return false;
+  return markers.length ? Math.max(...markers) : -1;
+}
 
+/** El bot pidió patente/nombre para consultar una unidad (GPS, estado, búsqueda), no odómetro/mantenimiento/cert. */
+export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
+  if (certificateFlowState(threadText) !== "none") return false;
+  // Bug prod 2026-08-17: aclaración de matrícula en trámite horómetro ≠ consulta GPS.
+  // No usar threadHasActiveOdometerFlow acá (recursión con threadAwaitingOdometerPlate).
+  if (threadHasRecentCustomerMeterUpdateIntent(threadText)) {
+    const meterTail = threadText.slice(-3500).toLowerCase();
+    if (
+      /matr[ií]cula exacta|confirm[aá].{0,30}matr[ií]cula|patente exacta|para registrar el cambio de hor[oó]metro|para registrar el cambio de od[oó]metro/.test(
+        meterTail,
+      )
+    ) {
+      return false;
+    }
+  }
+
+  const lastUnitAsk = lastUnitConsultPlateAskIndex(threadText);
+  if (lastUnitAsk < 0) return false;
+
+  // Recencia: mantenimiento u odómetro más reciente gana.
+  const lastMaint = lastMaintenancePlateAskIndex(threadText);
+  if (lastMaint > lastUnitAsk) return false;
+  const lastOdo = lastMeterPlateAskIndex(threadText);
+  if (lastOdo > lastUnitAsk) return false;
+
+  const lower = threadText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
   const tail = lower.slice(lastUnitAsk, lastUnitAsk + 800);
   return (
     /para revisar el gps.*necesito la unidad/.test(tail) ||
