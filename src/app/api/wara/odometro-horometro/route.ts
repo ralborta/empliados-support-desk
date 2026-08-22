@@ -50,6 +50,7 @@ import {
   extractPlatePrefixFromMessage,
   lastTomoMeterKindInThreadTail,
   lastAwaitingMeterPromptInTail,
+  looksLikeBareMeterValue,
   stripMeterValuesMatchingUnitReference,
 } from "@/lib/wara";
 import {
@@ -908,11 +909,40 @@ export async function POST(req: NextRequest) {
   const activeUnitRecord = activeUnitRecordEarly;
   const awaitingOdometerKm = threadAwaitingOdometerKmValue(flowThreadText);
   const awaitingHorometerKm = threadAwaitingHorometerKmValue(flowThreadText);
+  // Bug real 2026-08-22: el router manda "128900" al executor por pendingAction=odometro
+  // aunque el hilo (BBC/notebook) no dispare threadAwaitingOdometerKmValue. Sin esto,
+  // el bare km no se parseaba → re-pedía valor+fecha, y en el turno de fecha la IA
+  // recuperaba los km del historial (desfase: “no te escuché” pero al confirmar sí).
+  const pendingMeterHasUnit =
+    hasLiveOdometerPendingAction &&
+    !!normalizePlate(String(dbPendingOdoAction?.payload?.patente ?? "")) &&
+    !hasPendingConfirmInThread;
+  const notebookAwaitingOdometerValue =
+    isConversationNotebookEnabled() && sessionNotebook?.awaiting === "odometro_value";
+  const notebookAwaitingHorometerValue =
+    isConversationNotebookEnabled() && sessionNotebook?.awaiting === "horometro_value";
+  const acceptBareOdometerKm =
+    !horometerFlowActive &&
+    !horometerOnlyIntent &&
+    (awaitingOdometerKm ||
+      notebookAwaitingOdometerValue ||
+      (pendingMeterHasUnit &&
+        typeof dbPendingOdoAction?.payload?.odometro !== "number" &&
+        looksLikeBareMeterValue(rawText)));
+  const acceptBareHorometerHs =
+    (horometerFlowActive || horometerOnlyIntent) &&
+    (awaitingHorometerKm ||
+      notebookAwaitingHorometerValue ||
+      (pendingMeterHasUnit &&
+        typeof dbPendingOdoAction?.payload?.horometro !== "number" &&
+        looksLikeBareMeterValue(rawText)));
   // CONFIRMO / sí / dale NO son búsqueda de flota (bug 2026-08-07: «CONFIRMO» → no encontré unidad).
   const isFleetUnitSelection =
     looksLikeFleetUnitSearchInput(rawText, flowThreadText) &&
     !awaitingOdometerKm &&
     !awaitingHorometerKm &&
+    !acceptBareOdometerKm &&
+    !acceptBareHorometerHs &&
     !isConfirmed(rawText) &&
     !looksLikeBriefConfirmation(rawText) &&
     !looksLikeFechaHoraLecturaMessage(rawText);
@@ -937,7 +967,10 @@ export async function POST(req: NextRequest) {
     explicitMessagePlate = normalizePlate(explicitMessagePlate || mergedFields.patente);
   }
   const lockedPlateFromTomoRaw =
-    awaitingHorometerKm || awaitingOdometerKm
+    awaitingHorometerKm ||
+    awaitingOdometerKm ||
+    acceptBareOdometerKm ||
+    acceptBareHorometerHs
       ? extractPlateFromPerfectoTomo(flowThreadText)
       : undefined;
   const lockedPlateFromTomo =
@@ -947,12 +980,16 @@ export async function POST(req: NextRequest) {
   const clockTimeOnlyReading =
     looksLikeClockTimeOnlyReading(rawText) || looksLikeFechaHoraLecturaMessage(rawText);
   const awaitingPlateSelection =
-    (threadAwaitingOdometerPlate(flowThreadText) && !awaitingOdometerKm) ||
-    (threadAwaitingHorometerPlate(flowThreadText) && !awaitingHorometerKm) ||
+    (threadAwaitingOdometerPlate(flowThreadText) && !awaitingOdometerKm && !acceptBareOdometerKm) ||
+    (threadAwaitingHorometerPlate(flowThreadText) &&
+      !awaitingHorometerKm &&
+      !acceptBareHorometerHs) ||
     (activeOdoFlow &&
       !hasPendingConfirmInThread &&
       !awaitingOdometerKm &&
-      !awaitingHorometerKm);
+      !awaitingHorometerKm &&
+      !acceptBareOdometerKm &&
+      !acceptBareHorometerHs);
   const freshOdometerIntentWithoutUnit =
     odometerIntentStart &&
     !hasUnitHintInCurrentMessage &&
@@ -969,7 +1006,11 @@ export async function POST(req: NextRequest) {
     dbPendingOdoAction?.payload?.patente &&
     !shouldClearOdometerPlateFromThread(rawText) &&
     !explicitPlateInCurrentMessage &&
-    (awaitingOdometerKm || awaitingHorometerKm || looksLikeFechaHoraLecturaMessage(rawText))
+    (awaitingOdometerKm ||
+      awaitingHorometerKm ||
+      acceptBareOdometerKm ||
+      acceptBareHorometerHs ||
+      looksLikeFechaHoraLecturaMessage(rawText))
   ) {
     patente = normalizePlate(String(dbPendingOdoAction.payload.patente));
   }
@@ -1144,7 +1185,7 @@ export async function POST(req: NextRequest) {
   const kmFromCurrentMessage = firstFiniteNumber(
     extractOdometroFromOdometerContext(rawText),
     parseFromText(rawText).odometro,
-    awaitingOdometerKm ? parseBareOdometerKm(rawText) : undefined,
+    acceptBareOdometerKm ? parseBareOdometerKm(rawText) : undefined,
   );
   const allowThreadKm =
     !nonDataCustomerTurn &&
@@ -1152,10 +1193,13 @@ export async function POST(req: NextRequest) {
     (explicitKmInMessage ||
       effectivePendingOdoConfirm ||
       awaitingOdometerKm ||
+      acceptBareOdometerKm ||
       (!isFleetUnitSelection && !awaitingPlateSelection));
 
-  const bareKmInMessage = awaitingOdometerKm ? parseBareOdometerKm(rawText) : undefined;
-  const bareHorometerInMessage = awaitingHorometerKm ? parseBareHorometerHours(rawText) : undefined;
+  const bareKmInMessage = acceptBareOdometerKm ? parseBareOdometerKm(rawText) : undefined;
+  const bareHorometerInMessage = acceptBareHorometerHs
+    ? parseBareHorometerHours(rawText)
+    : undefined;
 
   const rawOdometro = firstFiniteNumber(
     parsed.data.odometro,
@@ -1176,19 +1220,22 @@ export async function POST(req: NextRequest) {
   let odometro = isPlausibleOdometerReading(rawOdometro, rawText, {
     pendingConfirm: pendingOdoConfirm,
     explicitKmInMessage,
-    awaitingKmValue: awaitingOdometerKm,
+    awaitingKmValue: awaitingOdometerKm || acceptBareOdometerKm,
   })
     ? rawOdometro
     : undefined;
   // Solo eligió unidad (ej. "Es la saveiro"): no inventar/arrastrar km del bot.
+  // Pasar flowThreadText: sin hilo, "128900" matchea movil_id y borraba km reales
+  // (bug 2026-08-22).
   if (
     typeof kmFromCurrentMessage !== "number" &&
     !explicitKmInMessage &&
     !bareKmInMessage &&
     !bareNumericAmendmentValue &&
     !effectivePendingOdoConfirm &&
+    !acceptBareOdometerKm &&
     (looksLikeVehicleBrandOrUnitSearch(rawText) ||
-      looksLikeFleetUnitSearchInput(rawText) ||
+      looksLikeFleetUnitSearchInput(rawText, flowThreadText) ||
       looksLikeUnitNameInMessage(rawText))
   ) {
     odometro = undefined;
@@ -1933,20 +1980,19 @@ export async function POST(req: NextRequest) {
     // No mostrar CONFIRMO ni registrar con "ahora" en silencio.
     if (hasCompleteOdoPayload && !hasFechaHoraLectura) {
       const plateDisp = formatPlateWithSpaces(patente) ?? patente ?? "la unidad";
-      // Solo mostrar km si vinieron del cliente (no del "Tomé … (10500 km)" del bot).
+      // Si ya tenemos km/hs en mano, acusar recibo y pedir solo lo que falta.
+      // Antes showKmHint era demasiado estricto: con km en memoria pero sin match
+      // "del mensaje actual" re-pedía valor+fecha (bug 2026-08-22: "128900" →
+      // mismo prompt completo; después la fecha recuperaba los km igual).
       const showKmHint =
         !horometerFlowActive &&
         !horometerOnlyIntent &&
-        typeof odometro === "number" &&
-        (typeof kmFromCurrentMessage === "number" ||
-          explicitKmInMessage ||
-          typeof bareKmInMessage === "number" ||
-          typeof bareNumericAmendmentValue === "number" ||
-          (typeof dbPendingOdoAction?.payload?.odometro === "number" &&
-            dbPendingOdoAction.payload.odometro === odometro));
+        typeof odometro === "number";
+      const showHoroHint =
+        (horometerFlowActive || horometerOnlyIntent) && typeof horometro === "number";
       const valueHint = showKmHint
         ? ` (${odometro} km)`
-        : typeof horometro === "number"
+        : showHoroHint
           ? ` (${horometro} h)`
           : "";
       const odometroForPending = showKmHint ? odometro : undefined;
@@ -1962,7 +2008,7 @@ export async function POST(req: NextRequest) {
         ? formatMeterPartialAck({
             meter: meterKind,
             unitLabel: plateDisp,
-            value: showKmHint ? odometro : typeof horometro === "number" ? horometro : undefined,
+            value: showKmHint ? odometro : showHoroHint ? horometro : undefined,
             missing: "time",
             dateDisp: fechaDiaDisplay ?? undefined,
           })
@@ -1970,7 +2016,7 @@ export async function POST(req: NextRequest) {
           ? formatMeterPartialAck({
               meter: meterKind,
               unitLabel: plateDisp,
-              value: showKmHint ? odometro : typeof horometro === "number" ? horometro : undefined,
+              value: showKmHint ? odometro : showHoroHint ? horometro : undefined,
               missing: "datetime",
             })
           : formatMeterPartialAck({

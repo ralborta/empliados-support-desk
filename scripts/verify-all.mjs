@@ -44,6 +44,8 @@ const SUITES = [
   "verify-odometer-pending-confirm-context.mjs",
   "verify-odometer-after-fleet-list.mjs",
   "verify-odometer-bare-km.mjs",
+  "verify-odometer-bare-km-partial-ack.mjs",
+  "verify-odometer-bare-km-not-unit-search.mjs",
   "verify-odometer-horometer-fecha.mjs",
   "verify-odometer-ost225-confirm.mjs",
   "verify-odometer-nissan-stuck.mjs",
