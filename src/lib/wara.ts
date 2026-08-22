@@ -7,6 +7,7 @@ import {
   stripBotPromptExamples,
   stripBotOdometerBotSpeech,
 } from "@/lib/odometroFecha";
+import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
 
 export type WaraIncidentType =
   | "MISSING_REPORT"
@@ -2667,21 +2668,7 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
   );
 }
 
-/**
- * Token único cercano a "confirmo" (typos de teclado / letras de más).
- * Bug real 2026-08-21: "comnfirmo" no arranca con "conf" → se tomaba como detalle.
- */
-export function looksLikeFuzzyConfirmoToken(token: string | undefined | null): boolean {
-  const t = String(token ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z]/g, "");
-  if (!t) return false;
-  if (t.startsWith("conf") && t.length >= 5 && t.length <= 14) return true;
-  if (t.length < 6 || t.length > 12) return false;
-  return levenshteinDistance(t, "confirmo") <= 2;
-}
+export { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
 
 /**
  * Ante un CONFIRMO pendiente el cliente pide ayuda o no entiende el paso

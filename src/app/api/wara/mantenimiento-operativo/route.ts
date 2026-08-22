@@ -17,7 +17,6 @@ import {
   isPlausibleVehiclePlate,
   looksLikeBriefConfirmation,
   looksLikePendingConfirmHelpOrConfusion,
-  looksLikeFuzzyConfirmoToken,
   normalizePlate,
   looksLikeHorometerOnlyIntent,
   looksLikeExplicitOdometerUpdateRequest,
@@ -37,6 +36,7 @@ import {
   resolveMaintenanceDetailText,
 } from "@/lib/conversationNotebook";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceCapabilityQuestion,
@@ -212,50 +212,8 @@ function maintenanceCapabilityReply(): string {
   ].join("\n");
 }
 
-/**
- * Confirmación tolerante: acepta CONFIRMO en cualquier capitalización, con acentos,
- * espacios o puntuación de más, y también un "sí" claro (sí, dale, ok, listo, etc.).
- * No exige mayúsculas ni la palabra exacta.
- */
 function isConfirmed(value: string | undefined): boolean {
-  if (!value?.trim()) return false;
-  const t = value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z]/g, "");
-  if (!t) return false;
-  // "confirmo" + typos WhatsApp (comnfirmo, confimo, …)
-  if (looksLikeFuzzyConfirmoToken(t)) return true;
-  const accepted = new Set([
-    "confirmo",
-    "confirmar",
-    "confirmado",
-    "confirma",
-    "siconfirmo",
-    "si",
-    "sii",
-    "sip",
-    "dale",
-    "dalesi",
-    "sidale",
-    "ok",
-    "oka",
-    "okey",
-    "okay",
-    "listo",
-    "correcto",
-    "deacuerdo",
-    "registra",
-    "registralo",
-    "hacelo",
-    "adelante",
-    "avanza",
-    "vamos",
-    "perfecto",
-  ]);
-  return accepted.has(t);
+  return isConfirmedForPendingWrite(value);
 }
 
 /**

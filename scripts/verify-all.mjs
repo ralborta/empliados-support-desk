@@ -104,6 +104,7 @@ const SUITES = [
   "verify-certificate-prefix-clarification-continuity.mjs",
   "verify-conversation-notebook-maintenance.mjs",
   "verify-conversation-notebook-tramites.mjs",
+  "verify-confirmo-write-veto.mjs",
   "verify-maintenance-confirmation-rejection.mjs",
   "verify-maintenance-inherits-odometer-plate.mjs",
   "verify-maintenance-after-horometer.mjs",

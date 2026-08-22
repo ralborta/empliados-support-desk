@@ -10,7 +10,6 @@ import {
   looksLikeInboundMediaOnlyEvent,
   selectionHasAiImageContext,
   hasUsableAiImageDescription,
-  NO_IMAGE_ANALYSIS_REPLY,
 } from "@/lib/inboundImagePolicy";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
@@ -137,15 +136,17 @@ export async function handleWhatsAppTurn(params: {
     trimmedBody === "" &&
     !hasUsableAiImageDescription(params.aiImage)
   ) {
+    // Webhook vacío sin señal de media: no asumir imagen ni contestar al cliente.
     return deliverTurnToWhatsApp(
       rawPhone,
       buildTurnPayload(
         { registered: true, registered_s: "true" },
         {
-          message: NO_IMAGE_ANALYSIS_REPLY,
-          nextFlow: "reply",
-          nextFlow_s: "reply",
-          executor: "info_guides",
+          message: "",
+          skipResponse_s: "true",
+          nextFlow: "ignore",
+          nextFlow_s: "ignore",
+          executor: "context",
           executor_s: "empty_inbound_no_media",
         },
       ),

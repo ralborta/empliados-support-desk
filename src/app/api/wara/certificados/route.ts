@@ -7,6 +7,7 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
 import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadHasRecentCertificateSuccess, threadTextSinceCompanySelection } from "@/lib/wara";
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
@@ -81,41 +82,7 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
 }
 
 function isConfirmed(value: string | undefined): boolean {
-  if (!value?.trim()) return false;
-  const t = value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z]/g, "");
-  if (!t) return false;
-  // Tolerante a errores de tipeo: cualquier "conf..." (confirmo, confirmado, confimado, conforme).
-  if (t.startsWith("conf")) return true;
-  return new Set([
-    "confirmo",
-    "confirmar",
-    "confirmado",
-    "confirma",
-    "siconfirmo",
-    "si",
-    "sii",
-    "sip",
-    "dale",
-    "dalesi",
-    "sidale",
-    "ok",
-    "oka",
-    "okey",
-    "okay",
-    "listo",
-    "correcto",
-    "deacuerdo",
-    "hacelo",
-    "adelante",
-    "avanza",
-    "vamos",
-    "perfecto",
-  ]).has(t);
+  return isConfirmedForPendingWrite(value);
 }
 
 function isExplicitCertificateResendRequest(value: string): boolean {

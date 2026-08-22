@@ -147,7 +147,8 @@ import {
 } from "@/lib/turnLayerContract";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
-import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
+import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation } from "@/lib/pendingConfirmation";
+import { classifyConfirmoPhrase, buildConfirmoClarifyReply } from "@/lib/confirmoTokens";
 import {
   agentComposeRequested,
   parseExecutorDialogueState,
@@ -750,6 +751,24 @@ export async function runTurnExecutorPhase(params: {
 
   // Confirmación de trámite: el backend registra con los datos guardados — no dejar que
   // la IA reinterprete "Confirmo" / "esa está bien" (seguridad operativa).
+  if (
+    hasAnyPendingConfirmation(threadCtx.classificationThread) &&
+    classifyConfirmoPhrase(selectionText) === "clarify"
+  ) {
+    return {
+      message: buildConfirmoClarifyReply(),
+      executor:
+        pendingKind === "odometro"
+          ? "odometro"
+          : pendingKind === "certificados"
+            ? "certificados"
+            : pendingKind === "mantenimiento"
+              ? "mantenimiento"
+              : "info_guides",
+      ok: true,
+    };
+  }
+
   const pendingConfirmExecutor = resolvePendingConfirmationExecutor(
     threadCtx.classificationThread,
     selectionText,

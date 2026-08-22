@@ -1,5 +1,6 @@
 import type { Customer, PrismaClient } from "@prisma/client";
 import { formatGreeting, formatCompanySelected } from "@/lib/waraWhatsAppFormat";
+import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
 import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
@@ -685,7 +686,7 @@ function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean
     .toLowerCase();
   const t = stripped.replace(/[^a-z]/g, "");
   if (!t) return false;
-  if (t.startsWith("conf")) return true;
+  if (looksLikeFuzzyConfirmoToken(t)) return true;
   if (/\b(gracias|chau|chao|nosvemos|denada)\b/.test(t)) return false;
   return new Set(["si", "dale", "perfecto", "listo", "ok", "confirmo"]).has(t);
 }

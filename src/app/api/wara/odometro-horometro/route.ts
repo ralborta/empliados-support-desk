@@ -63,6 +63,7 @@ import {
 import { parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc, looksLikeMeterReadingWithoutFecha, customerFechaSourceText, looksLikeFechaHoraLecturaMessage, fechaWara, formatFechaDisplay, isFechaEnFuturo } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
 import {
   formatAskUnit,
@@ -303,37 +304,11 @@ function resolveHorometroForWara(opts: {
 }
 
 /**
- * Confirmación tolerante: acepta CONFIRMO en cualquier capitalización, con acentos,
- * espacios o puntuación de más (ej. "Confirm,o", "confirmo!"), y también un "sí" claro
- * (sí, dale, ok, listo, correcto, etc.). No exige mayúsculas ni la palabra exacta.
+ * Confirmación tolerante con veto de negación/ambigüedad antes de escribir.
  */
 function isConfirmed(value: string | undefined): boolean {
-  if (looksLikeBriefConfirmation(value)) return true;
-  if (looksLikePendingTramiteAffirmation(value)) return true;
   if (looksLikeConversationAcknowledgement(value)) return false;
-  if (!value?.trim()) return false;
-  const t = value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z]/g, "");
-  if (!t) return false;
-  if (t.startsWith("conf")) return true;
-  const accepted = new Set([
-    "confirmo",
-    "confirmar",
-    "confirmado",
-    "confirma",
-    "siconfirmo",
-    "si",
-    "sii",
-    "sip",
-    "dale",
-    "dalesi",
-    "sidale",
-  ]);
-  return accepted.has(t);
+  return isConfirmedForPendingWrite(value);
 }
 
 /** Primer número finito de una lista (los datos del body vienen como number|NaN). */
