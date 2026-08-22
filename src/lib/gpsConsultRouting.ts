@@ -99,7 +99,9 @@ export function shouldRouteGpsConsultToUnidades(text: string | undefined | null)
     looksLikeOperationalTelemetrySymptom(raw) ||
     looksLikeGpsPlatformUiSymptomOnly(raw) ||
     looksLikeGpsStatusConsultCue(raw) ||
-    /\b(gps|reporte|telemetria|ignicion|etapas?|historial|recorrido|cumplimiento|vuelta)\b/.test(n)
+    /\b(estado|gps|reporte|telemetria|ignicion|etapas?|historial|recorrido|cumplimiento|vuelta)\b/.test(
+      n,
+    )
   );
 }
 

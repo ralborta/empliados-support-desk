@@ -127,6 +127,7 @@ import {
   extractFreeTextUnitSearchCandidate,
   extractExplicitUnitNameFromText,
   extractMovilIdFromUnitMessage,
+  shouldPreferUnidadesOverMaintenancePlateSelection,
 } from "@/lib/waraUnitIntent";
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
@@ -1383,7 +1384,11 @@ export async function runTurnExecutorPhase(params: {
   // Selección de patente/prefijo/marca en mantenimiento pendiente → executor, no agente.
   if (
     hasPendingMaintenancePlateRequest(threadCtx.classificationThread) &&
-    isMaintenancePlateSelectionMessage(selectionText)
+    isMaintenancePlateSelectionMessage(selectionText) &&
+    !shouldPreferUnidadesOverMaintenancePlateSelection(
+      selectionText,
+      threadCtx.classificationThread,
+    )
   ) {
     const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);

@@ -217,6 +217,7 @@ export function looksLikeDefiniteUnitNameCode(rawText: string | undefined | null
 /** Campo numérico que el hilo espera (unidad vs valor de medidor). */
 export function inferNumericExpectedFieldForThread(threadText: string): NumericExpectedField {
   if (threadHasActiveMeterValueRequest(threadText)) return "meter_value";
+  if (hasPendingUnitConsultPlateRequest(threadText)) return "unit";
   if (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) {
     return "unit";
   }
@@ -2719,6 +2720,28 @@ export async function resolvePlateWithWaraFleet(
   return { ok: false, reason: "not_found" };
 }
 
+/**
+ * GPS/estado o consulta de unidad pendiente manda sobre selección de patente de mantenimiento
+ * arrastrada del hilo (bug 2026-08-22: "Estado 900100" / "900100" → mantenimiento AH 652).
+ */
+export function shouldPreferUnidadesOverMaintenancePlateSelection(
+  text: string,
+  threadText: string,
+): boolean {
+  if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+    return true;
+  }
+  if (detectServiceIntentInMessage(text) === "estado_gps") return true;
+  if (hasPendingUnitConsultPlateRequest(threadText)) return true;
+  if (
+    threadHasRecentLiveUnitConsultIntent(threadText) &&
+    extractMovilIdFromUnitMessage(text, { threadText }) != null
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Marca/prefijo/nombre/patente parcial → executor unidades (búsqueda en flota), no agente. */
 export function shouldRouteTurnToUnidadesExecutor(params: {
   selectionText: string;
@@ -2753,6 +2776,16 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   if (
     looksLikeLiveUnitConsultIntent(selectionText) ||
     looksLikeGpsOrUnitStatusQuestion(selectionText)
+  ) {
+    return true;
+  }
+
+  // Interno/movil_id tras pedido de unidad para GPS/estado (incl. "900100" solo).
+  if (
+    extractMovilIdFromUnitMessage(selectionText, { threadText }) != null &&
+    (hasPendingUnitConsultPlateRequest(threadText) ||
+      threadHasRecentLiveUnitConsultIntent(threadText) ||
+      detectServiceIntentInMessage(selectionText) === "estado_gps")
   ) {
     return true;
   }

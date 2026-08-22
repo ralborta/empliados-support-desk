@@ -2082,6 +2082,10 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("pasame la patente"),
     lower.lastIndexOf("pasame la matricula"),
     lower.lastIndexOf("pasame la matrícula"),
+    lower.lastIndexOf("patente o el interno"),
+    lower.lastIndexOf("interno de la unidad"),
+    lower.lastIndexOf("podés darme la patente o el interno"),
+    lower.lastIndexOf("podes darme la patente o el interno"),
   ].filter((i) => i >= 0);
   if (!unitConsultMarkers.length) return false;
 
@@ -2115,6 +2119,8 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     /consulto en wara/.test(tail) ||
     /pasame la patente o el nombre/.test(tail) ||
     /patente o (?:el )?prefijo/.test(tail) ||
+    /patente o el interno/.test(tail) ||
+    /interno de la unidad/.test(tail) ||
     /(?:me )?pode[s]?\s+dar la patente/.test(tail)
   );
 }

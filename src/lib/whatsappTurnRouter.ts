@@ -64,7 +64,16 @@ import {
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput, looksLikeUnitNameInMessage, looksLikeVagueUnitReference, threadHasRecentFleetUnitSearchRequest } from "@/lib/waraUnitIntent";
+import {
+  extractMovilIdFromUnitMessage,
+  isMaintenancePlateSelectionMessage,
+  looksLikeFleetUnitSearchInput,
+  looksLikeUnitListRequest,
+  looksLikeUnitNameInMessage,
+  looksLikeVagueUnitReference,
+  shouldPreferUnidadesOverMaintenancePlateSelection,
+  threadHasRecentFleetUnitSearchRequest,
+} from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
@@ -149,6 +158,7 @@ function isUnitSelectionMessage(text: string, threadText = ""): boolean {
     isBarePlatePrefixHint(text) ||
     !!extractPlatePrefixFromMessage(text) ||
     isMaintenancePlateSelectionMessage(text) ||
+    extractMovilIdFromUnitMessage(text, { threadText }) != null ||
     looksLikeCertificateUnitReply(text, threadText) ||
     looksLikeVehicleBrandOrUnitSearch(text) ||
     looksLikePlateCorrectionRequest(text) ||
@@ -546,6 +556,9 @@ const TURN_RULES: TurnRule[] = [
       if (certificateFlowState(threadText) !== "none") return null;
       if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
         return null;
+      }
+      if (shouldPreferUnidadesOverMaintenancePlateSelection(text, threadText)) {
+        return "unidades";
       }
       if (threadHasRecentLiveUnitConsultIntent(threadText) && looksLikeVehicleBrandOrUnitSearch(text)) {
         return "unidades";

@@ -13,8 +13,10 @@ import {
   extractMovilIdFromUnitMessage,
   inferNumericExpectedFieldForThread,
   resolveUnitQuery,
+  shouldPreferUnidadesOverMaintenancePlateSelection,
 } from "../src/lib/waraUnitIntent.ts";
 import {
+  hasPendingUnitConsultPlateRequest,
   threadAwaitingOdometerPlate,
   threadHasActiveMeterValueRequest,
 } from "../src/lib/wara.ts";
@@ -122,5 +124,28 @@ const resolved = await resolveUnitQuery({
 });
 assert.equal(resolved.plate, "AA900100");
 assert.equal(classifyTurnExecutor("Estado 900100", ""), "unidades");
+
+const maintThread =
+  "Para programar mantenimiento preventivo necesito la patente de la unidad. Voy a registrar mantenimiento.";
+assert(
+  shouldPreferUnidadesOverMaintenancePlateSelection("Estado 900100", maintThread),
+  "Estado+interno gana sobre mantenimiento stale",
+);
+assert.equal(
+  classifyTurnExecutor("Estado 900100", maintThread),
+  "unidades",
+  "router → unidades con mantenimiento stale",
+);
+
+const gpsAskThread =
+  "¿Podés darme la patente o el interno de la unidad? Consulto en Wara.";
+assert(hasPendingUnitConsultPlateRequest(gpsAskThread), "detecta pedido interno GPS");
+assert.equal(inferNumericExpectedFieldForThread(gpsAskThread), "unit");
+assert.equal(extractMovilIdFromUnitMessage("900100", { threadText: gpsAskThread }), 900100);
+assert.equal(
+  classifyTurnExecutor("900100", gpsAskThread),
+  "unidades",
+  "interno solo tras pedido GPS → unidades",
+);
 
 console.log("OK verify-service-plus-interno-same-message");

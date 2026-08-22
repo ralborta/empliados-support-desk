@@ -1267,6 +1267,23 @@ export async function POST(req: NextRequest) {
     looksLikeFleetListContinuation(effectiveRawText, threadText);
   let unitQuery = extractUnitQueryFromText(effectiveRawText);
 
+  // Interno/movil_id explícito → resolver por flota, no heredar patente del hilo.
+  if (result.ok && result.unidades.length > 0 && !explicitPlate) {
+    const movilId = extractMovilIdFromUnitMessage(effectiveRawText, {
+      threadText,
+      fleet: result.unidades,
+    });
+    if (movilId != null) {
+      const byMovil = result.unidades.filter((u) => Number(u.movil_id) === movilId);
+      if (byMovil.length === 1) {
+        const resolvedPlate = normalizeLoosePlate(byMovil[0].patente || byMovil[0].unidad || "");
+        if (resolvedPlate) {
+          explicitPlate = formatPlateWithSpaces(resolvedPlate) ?? resolvedPlate;
+        }
+      }
+    }
+  }
+
   // Si BBC mandó plate=600006 (código interno), igual hay que resolver por nombre de unidad.
   const bbcPlateRaw = (parsed.data.patente ?? parsed.data.plate ?? "").trim();
   const bbcPlateIsTrusted =
@@ -1430,10 +1447,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const messageMovilId = extractMovilIdFromUnitMessage(effectiveRawText, {
+    threadText,
+    fleet: result.ok ? result.unidades : undefined,
+  });
   const useThreadPlate =
     !forceListFleet &&
     !explicitPlate &&
     !unitQuery &&
+    messageMovilId == null &&
     !genericUnitConsultWithoutPlate &&
     !looksLikeGreeting(rawText.trim()) &&
     !looksLikeInternoMetaQuestion(rawText) &&
