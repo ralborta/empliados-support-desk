@@ -287,7 +287,7 @@ export default function MonitorPage() {
   const recentMessages = activity?.messages ?? [];
   const windowHours = summary ? Math.round(summary.windowMinutes / 60) : 3;
 
-  const bbcOk = Boolean(bbc?.healthy && bbc.apiProbeOk !== false);
+  const bbcOk = Boolean(bbc?.healthy);
   const bbcTone: Tone = !bbc ? "neutral" : bbcOk ? "ok" : "bad";
   const waraTone: Tone = !wara
     ? "neutral"
@@ -341,7 +341,7 @@ export default function MonitorPage() {
               bbc
                 ? [
                     `Runtime: ${bbc.status}${bbc.host ? ` · ${bbc.host}` : ""}`,
-                    bbc.apiProbeMessage || "Sonda API pendiente",
+                    bbc.apiProbeMessage || "Sonda cron pendiente",
                     `Reinicios detectados: ${bbc.restartCount}`,
                     bbc.lastOnlineAt
                       ? `Último ONLINE: ${formatDateTime(bbc.lastOnlineAt)}`

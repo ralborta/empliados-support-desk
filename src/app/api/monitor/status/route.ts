@@ -4,7 +4,7 @@ import { ADVISOR_PRESENCE_TIMEOUT_MS, isAdvisorPresentlyOnline } from "@/lib/adv
 import { getMonitorRecentActivity } from "@/lib/monitorActivity";
 import { getPanelScreenLabel } from "@/lib/panelScreenLabels";
 import { checkWaraApiHealth } from "@/lib/waraHealthCheck";
-import { getBbcRuntimeStatus, probeBbcMessagingApi } from "@/lib/bbcRuntimeMonitor";
+import { getBbcRuntimeStatus } from "@/lib/bbcRuntimeMonitor";
 
 /**
  * Pantalla externa de monitoreo (fuera del login normal del panel): quién está
@@ -63,25 +63,7 @@ export async function GET(req: NextRequest) {
 
   const activity = await getMonitorRecentActivity();
   const wara = await checkWaraApiHealth();
-  const bbcStored = await getBbcRuntimeStatus();
-  const bbcProbe = await probeBbcMessagingApi();
-  const bbc = {
-    ...(bbcStored ?? {
-      key: "bbc",
-      status: bbcProbe.ok ? "UNKNOWN" : "OFFLINE",
-      healthy: bbcProbe.ok,
-      host: null,
-      detail: null,
-      lastEventAt: null,
-      lastOnlineAt: null,
-      lastOfflineAt: null,
-      restartCount: 0,
-      updatedAt: new Date().toISOString(),
-    }),
-    apiProbeOk: bbcProbe.ok,
-    apiProbeMessage: bbcProbe.message,
-    apiProbeHttpStatus: bbcProbe.httpStatus,
-  };
+  const bbc = await getBbcRuntimeStatus();
 
   return NextResponse.json({
     ok: true,

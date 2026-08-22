@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getBbcRuntimeStatus,
+  markBbcAlertSent,
+  persistBbcCronProbe,
   probeBbcMessagingApi,
-  recordBbcStatusEvent,
+  shouldSendBbcTransitionAlert,
 } from "@/lib/bbcRuntimeMonitor";
-import { sendBbcRuntimeAlertEmail } from "@/lib/panelEmail";
+import { sendBbcTransitionAlertEmail } from "@/lib/panelEmail";
 
 export const maxDuration = 30;
 
@@ -16,10 +17,10 @@ function authorized(req: NextRequest): boolean {
 }
 
 /**
- * Cron: sonda la API de mensajes BBC y alerta si no responde.
- * Los reinicios se detectan mejor por webhook status.ready → /api/whatsapp/inbound.
+ * Cron: sonda la API de mensajes BBC, persiste estado y alerta solo en transición.
+ * Los reinicios se detectan por webhook status.ready → /api/whatsapp/inbound.
  *
- * Variables: CRON_SECRET, WARA_OPS_ALERT_EMAIL (o PANEL_USER_ADMIN_EMAIL)
+ * Variables: CRON_SECRET, WARA_BBC_ALERT_EMAIL (default ralborta@empliados.net)
  */
 export async function GET(req: NextRequest) {
   if (!authorized(req)) {
@@ -27,25 +28,29 @@ export async function GET(req: NextRequest) {
   }
 
   const probe = await probeBbcMessagingApi();
+  const { status, transition } = await persistBbcCronProbe({ probe });
+
   let emailed = false;
-  let recorded = null as Awaited<ReturnType<typeof recordBbcStatusEvent>> | null;
-
-  if (!probe.ok) {
-    recorded = await recordBbcStatusEvent({
-      eventName: "status.probe_failed",
-      status: "OFFLINE",
-      source: "cron_probe",
-      raw: probe,
+  const lastAlertAt = status.lastAlertAt ? new Date(status.lastAlertAt) : null;
+  if (
+    shouldSendBbcTransitionAlert({
+      transition,
+      lastAlertAt,
+    })
+  ) {
+    emailed = await sendBbcTransitionAlertEmail({
+      bbc: status,
+      transition,
+      probeMessage: probe.message,
     });
-    emailed = await sendBbcRuntimeAlertEmail(recorded);
+    if (emailed) await markBbcAlertSent();
   }
-
-  const current = recorded ?? (await getBbcRuntimeStatus());
 
   return NextResponse.json({
     ok: probe.ok,
     emailed,
+    transition,
     probe,
-    bbc: current,
+    bbc: status,
   });
 }

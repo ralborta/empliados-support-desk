@@ -67,8 +67,12 @@ export async function POST(req: Request) {
   // Estado del runtime BBC (status.ready al (re)arranque Meta, etc.)
   if (/^status\./i.test(eventName)) {
     try {
-      const { recordBbcStatusEvent } = await import("@/lib/bbcRuntimeMonitor");
-      const { sendBbcRuntimeAlertEmail } = await import("@/lib/panelEmail");
+      const {
+        markBbcAlertSent,
+        recordBbcStatusEvent,
+        shouldSendBbcTransitionAlert,
+      } = await import("@/lib/bbcRuntimeMonitor");
+      const { sendBbcTransitionAlertEmail } = await import("@/lib/panelEmail");
       const data =
         payload?.data && typeof payload.data === "object"
           ? (payload.data as Record<string, unknown>)
@@ -92,8 +96,18 @@ export async function POST(req: Request) {
         raw: payload,
         source: "webhook",
       });
-      if (recorded.restarted || !recorded.healthy) {
-        await sendBbcRuntimeAlertEmail(recorded);
+      const lastAlertAt = recorded.lastAlertAt ? new Date(recorded.lastAlertAt) : null;
+      if (
+        shouldSendBbcTransitionAlert({
+          transition: recorded.transition,
+          lastAlertAt,
+        })
+      ) {
+        const emailed = await sendBbcTransitionAlertEmail({
+          bbc: recorded,
+          transition: recorded.transition,
+        });
+        if (emailed) await markBbcAlertSent();
       }
       return NextResponse.json({
         ok: true,

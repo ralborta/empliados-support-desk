@@ -16,7 +16,7 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { Resend } from "resend";
 import type { WaraHealthStatus } from "@/lib/waraHealthCheck";
-import type { BbcRuntimeStatus } from "@/lib/bbcRuntimeMonitor";
+import type { BbcRuntimeStatus, BbcStatusTransition } from "@/lib/bbcRuntimeMonitor";
 
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL?.trim() || "https://wara.nivel41.com";
 
@@ -198,11 +198,18 @@ export async function sendUnassignedTicketAlertEmail(params: {
 let lastWaraHealthAlertAt = 0;
 const WARA_HEALTH_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 
+const DEFAULT_BBC_ALERT_EMAIL = "ralborta@empliados.net";
+
 function opsAlertRecipients(): string[] {
   const raw =
     process.env.WARA_OPS_ALERT_EMAIL?.trim() ||
     process.env.PANEL_USER_ADMIN_EMAIL?.trim() ||
     "";
+  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+function bbcAlertRecipients(): string[] {
+  const raw = process.env.WARA_BBC_ALERT_EMAIL?.trim() || DEFAULT_BBC_ALERT_EMAIL;
   return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
 }
 
@@ -237,43 +244,66 @@ export async function sendWaraHealthAlertEmail(health: WaraHealthStatus): Promis
   return sent;
 }
 
-let lastBbcAlertAt = 0;
-const BBC_ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+function formatIso(iso: string | null | undefined): string {
+  return iso ? escapeHtml(iso) : "—";
+}
 
-/** Email ops cuando BBC se reinicia o queda offline. Cooldown 5 min. */
-export async function sendBbcRuntimeAlertEmail(
-  bbc: BbcRuntimeStatus
-): Promise<boolean> {
-  const recipients = opsAlertRecipients();
+/** Email ops en transición de estado BBC (cron / webhook). Cooldown persistido en DB. */
+export async function sendBbcTransitionAlertEmail(params: {
+  bbc: BbcRuntimeStatus;
+  transition: BbcStatusTransition;
+  probeMessage?: string;
+}): Promise<boolean> {
+  const recipients = bbcAlertRecipients();
   if (!recipients.length) return false;
 
-  const now = Date.now();
-  if (now - lastBbcAlertAt < BBC_ALERT_COOLDOWN_MS) return false;
+  const { bbc, transition } = params;
+  const probeLine = params.probeMessage
+    ? `<li>Sonda cron: ${escapeHtml(params.probeMessage)}</li>`
+    : "";
 
-  const kind = bbc.restarted
-    ? "reinicio"
-    : bbc.healthy
-      ? "estado"
-      : "offline";
-  const title =
-    kind === "reinicio"
-      ? "[BBC] Runtime se reinició y volvió ONLINE"
-      : kind === "offline"
-        ? `[BBC] Runtime ${bbc.status || "OFFLINE"}`
-        : `[BBC] Estado ${bbc.status}`;
+  let title: string;
+  let headline: string;
+
+  switch (transition.alertKind) {
+    case "recovery":
+      title = "[BBC] Runtime recuperado — ONLINE";
+      headline = "El runtime BBC volvió a ONLINE";
+      break;
+    case "offline":
+      title = `[BBC] Runtime OFFLINE`;
+      headline = "El runtime BBC quedó OFFLINE";
+      break;
+    case "config_error":
+      title = "[BBC] Error de configuración";
+      headline = "BBC con error de configuración (credenciales o env vars)";
+      break;
+    case "degraded":
+      title = "[BBC] Runtime degradado";
+      headline = "El runtime BBC está DEGRADED";
+      break;
+    case "restart":
+      title = "[BBC] Runtime reiniciado";
+      headline = "El runtime BBC se reinició y volvió ONLINE";
+      break;
+    default:
+      return false;
+  }
 
   const html = `
-    <p><strong>${escapeHtml(title)}</strong></p>
+    <p><strong>${escapeHtml(headline)}</strong></p>
     <p>Esto es el <strong>agente BuilderBot Cloud (WhatsApp/Meta)</strong>, no la API de Wara.</p>
     <ul>
-      <li>Estado: ${escapeHtml(bbc.status)}${bbc.healthy ? " (healthy)" : " (no healthy)"}</li>
+      <li>Estado anterior: ${escapeHtml(transition.previousStatus || "—")}</li>
+      <li>Estado actual: ${escapeHtml(bbc.status)}${bbc.healthy ? " (healthy)" : " (no healthy)"}</li>
       <li>Reinicios acumulados: ${bbc.restartCount}</li>
       <li>Host: ${escapeHtml(bbc.host || "—")}</li>
-      <li>Último evento: ${escapeHtml(bbc.lastEventAt || "—")}</li>
-      <li>Último ONLINE: ${escapeHtml(bbc.lastOnlineAt || "—")}</li>
+      <li>Último evento: ${formatIso(bbc.lastEventAt)}</li>
+      <li>Último ONLINE: ${formatIso(bbc.lastOnlineAt)}</li>
+      ${probeLine}
       <li>Fuente: ${escapeHtml(bbc.source || "—")}</li>
     </ul>
-    <p>Revisá <a href="${PANEL_BASE_URL}/monitor">monitor.nivel41.com</a> o la consola BBC (Session Status).</p>
+    <p>Revisá <a href="${PANEL_BASE_URL}/monitor">monitor de operaciones</a> o la consola BBC (Session Status).</p>
   `;
 
   let sent = false;
@@ -281,10 +311,31 @@ export async function sendBbcRuntimeAlertEmail(
     if (await sendEmail(to, title, html)) sent = true;
   }
   if (sent) {
-    lastBbcAlertAt = now;
-    console.log("[panelEmail] Alerta BBC runtime enviada:", kind);
+    console.log("[panelEmail] Alerta BBC transición enviada:", transition.alertKind);
   }
   return sent;
+}
+
+/** @deprecated Usar sendBbcTransitionAlertEmail con transición explícita. */
+export async function sendBbcRuntimeAlertEmail(
+  bbc: BbcRuntimeStatus,
+): Promise<boolean> {
+  const transition: BbcStatusTransition = {
+    previousStatus: null,
+    nextStatus: bbc.status,
+    changed: true,
+    alertKind: bbc.restarted
+      ? "restart"
+      : bbc.healthy
+        ? null
+        : bbc.status === "CONFIG_ERROR"
+          ? "config_error"
+          : bbc.status === "DEGRADED"
+            ? "degraded"
+            : "offline",
+  };
+  if (!transition.alertKind) return false;
+  return sendBbcTransitionAlertEmail({ bbc, transition });
 }
 
 function escapeHtml(value: string): string {

@@ -11,6 +11,7 @@ const SUITES = [
   "verify-turn-routing.mjs",
   "verify-turn-ai-classifier.mjs",
   "verify-system-health.mjs",
+  "verify-bbc-monitor.mjs",
   "verify-unit-resolution-grounding.mjs",
   "verify-unit-name-vs-plate.mjs",
   "verify-unit-name-m600170.mjs",
