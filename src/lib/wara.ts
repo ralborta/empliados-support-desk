@@ -18,12 +18,8 @@ export type WaraIncidentType =
   | "ADMIN_DERIVATION"
   | "OTHER";
 
-export type ResolutionMode =
-  | "CHAT_RESOLVED"
-  | "PENDING_VALIDATION"
-  | "BACKOFFICE_DERIVED"
-  | "TECH_ESCALATED"
-  | "CLOSED_NO_ACTION";
+export type { ResolutionMode } from "@/lib/types";
+export { resolutionModeLabels } from "@/lib/types";
 
 export const waraIncidentLabels: Record<WaraIncidentType, string> = {
   MISSING_REPORT: "Falta de reporte",
@@ -58,14 +54,6 @@ export function shouldAutoAssignInboundTicket(incidentType: WaraIncidentType): b
   if (BOT_ONLY_INCIDENT_TYPES.has(incidentType)) return false;
   return ADVISOR_ASSIGN_INCIDENT_TYPES.has(incidentType);
 }
-
-export const resolutionModeLabels: Record<ResolutionMode, string> = {
-  CHAT_RESOLVED: "Resuelto en chat",
-  PENDING_VALIDATION: "Pendiente de validación",
-  BACKOFFICE_DERIVED: "Derivado a backoffice",
-  TECH_ESCALATED: "Escalado técnico",
-  CLOSED_NO_ACTION: "Cerrado sin acción",
-};
 
 const PLATE_REGEX_GLOBAL =
   /\b([A-Z]{2}[\s-]?\d{3}[\s-]?[A-Z]{2}|[A-Z]{3}[\s-]?\d{3}|[A-Z]{3}[\s-]?\d{4})\b/gi;

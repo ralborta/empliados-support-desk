@@ -15,7 +15,7 @@ import { V2OperationPanel } from "@/components/tickets/V2OperationPanel";
 import { TicketPriorityPanel } from "@/components/tickets/TicketPriorityPanel";
 import { TicketV2HeaderBadges } from "@/components/tickets/TicketV2HeaderBadges";
 import { ConversationThread, type ThreadMessage } from "@/components/tickets/ConversationThread";
-import { resolutionModeLabels } from "@/lib/wara";
+import { resolutionModeLabels } from "@/lib/types";
 import { formatDateTimeAR } from "@/lib/formatDateTimeAR";
 import { usePollWhenVisible } from "@/lib/hooks/usePollWhenVisible";
 import { waraAccent } from "@/lib/ui/waraTheme";
