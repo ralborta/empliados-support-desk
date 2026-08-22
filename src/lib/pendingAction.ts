@@ -62,7 +62,6 @@ export async function clearPendingAction(prisma: PrismaClient, phone: string): P
     .catch(() => undefined);
 }
 
-/** Lee el trámite pendiente vigente (no vencido) para un teléfono, o null. */
 export async function getPendingAction(
   prisma: PrismaClient,
   phone: string,
@@ -81,4 +80,47 @@ export async function getPendingAction(
     return null;
   }
   return record;
+}
+
+/** Fusiona campos en `payload` sin perder el trámite vigente. */
+export async function patchPendingActionPayload(
+  prisma: PrismaClient,
+  phone: string,
+  payloadPatch: Record<string, unknown>,
+): Promise<void> {
+  const current = await getPendingAction(prisma, phone);
+  if (!current) return;
+  const prevPayload = (current.payload ?? {}) as Record<string, unknown>;
+  const patchTurn = payloadPatch.turnLayer;
+  const mergedPayload: Record<string, unknown> = {
+    ...prevPayload,
+    ...payloadPatch,
+  };
+  if (patchTurn && typeof patchTurn === "object") {
+    mergedPayload.turnLayer = {
+      ...((prevPayload.turnLayer as Record<string, unknown>) ?? {}),
+      ...(patchTurn as Record<string, unknown>),
+    };
+  }
+  await setPendingAction(prisma, phone, current.type, {
+    summary: current.summary,
+    payload: mergedPayload,
+  });
+}
+
+/** Shell de recolección + turnLayer (bifurcación lateral) sin resumen CONFIRMO. */
+export async function ensureOdometerCollectingTurnLayer(
+  prisma: PrismaClient,
+  phone: string,
+  threadText: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const current = await getPendingAction(prisma, phone);
+  if (current?.type === "odometro") {
+    await patchPendingActionPayload(prisma, phone, payload);
+    return;
+  }
+  await setPendingAction(prisma, phone, "odometro", {
+    payload,
+  });
 }

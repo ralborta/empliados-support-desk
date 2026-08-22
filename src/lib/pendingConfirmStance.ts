@@ -34,6 +34,7 @@ import {
   threadOdometerRegistrationCompleted,
   looksLikeCustomerConsultationMessage,
 } from "@/lib/wara";
+import { looksLikeExplicitOtherTramiteIntent } from "@/lib/turnLayerContract";
 import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   looksLikeGpsOrUnitStatusQuestion,
@@ -365,6 +366,7 @@ export function classifyOdometerFlowSideQuestion(
   if (threadOdometerRegistrationCompleted(threadText)) return null;
   if (!text.trim()) return null;
   if (looksLikeOperationalOdometerAnswer(text, threadText)) return null;
+  if (looksLikeExplicitOtherTramiteIntent(text)) return "help";
 
   const t = normOdometerSideText(text);
   if (
@@ -428,7 +430,24 @@ export function buildOdometerFlowSideQuestionReply(
   threadText: string,
   customerText: string,
 ): string {
-  return kind === "info"
-    ? buildOdometerFlowSideInfoReply(threadText, customerText)
-    : buildOdometerFlowSideHelpReply(threadText);
+  const other = looksLikeExplicitOtherTramiteIntent(customerText);
+  const base =
+    kind === "info"
+      ? buildOdometerFlowSideInfoReply(threadText, customerText)
+      : buildOdometerFlowSideHelpReply(threadText);
+  if (other === "mantenimiento" && kind === "help") {
+    return [
+      "El *mantenimiento* (preventivo o correctivo) es otro trámite en Wara, distinto del cambio de odómetro/horómetro.",
+      "",
+      base,
+    ].join("\n");
+  }
+  if (other === "certificados" && kind === "help") {
+    return [
+      "El *certificado de cobertura* es otro trámite, distinto del cambio de odómetro/horómetro.",
+      "",
+      base,
+    ].join("\n");
+  }
+  return base;
 }

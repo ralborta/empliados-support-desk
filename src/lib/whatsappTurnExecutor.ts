@@ -128,7 +128,7 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
 import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
-import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
+import { getPendingAction, clearPendingAction, ensureOdometerCollectingTurnLayer, patchPendingActionPayload } from "@/lib/pendingAction";
 import {
   looksLikeTramiteCancellationIntent,
   threadHasInconclusiveTramite,
@@ -137,6 +137,14 @@ import {
   buildInconclusiveTramiteResumePrompt,
   resolveExecutorForInconclusiveTramite,
 } from "@/lib/tramiteFlowControl";
+import {
+  classifyTramiteForkChoiceResponse,
+  buildTramiteForkClarificationReply,
+  buildCollectingPayloadForFork,
+  isTurnLayerForkPending,
+  looksLikeExplicitOtherTramiteIntent,
+  threadAwaitingTramiteForkChoice,
+} from "@/lib/turnLayerContract";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
@@ -831,12 +839,88 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Bifurcación tras consulta lateral (contrato turn layer: fork_choice).
+  if (
+    threadAwaitingTramiteForkChoice(threadCtx.classificationThread) ||
+    isTurnLayerForkPending(pendingAction)
+  ) {
+    const fork = classifyTramiteForkChoiceResponse(selectionText);
+    const isHoro =
+      threadAwaitingHorometerKmValue(threadCtx.classificationThread) ||
+      /\bhor[oó]metro\b/i.test(threadCtx.classificationThread.slice(-1200));
+    if (fork === "resume") {
+      await patchPendingActionPayload(prisma, rawPhone, {
+        turnLayer: {
+          forkPending: false,
+          activeExpectation: null,
+          lateralPause: false,
+        },
+      }).catch(() => undefined);
+      return {
+        message: buildInconclusiveTramiteResumePrompt(
+          threadCtx.classificationThread,
+          pendingAction,
+        ),
+        executor: "odometro",
+        ok: true,
+      };
+    }
+    if (fork === "switch") {
+      await clearPendingAction(prisma, rawPhone);
+      const other = looksLikeExplicitOtherTramiteIntent(selectionText);
+      if (other === "mantenimiento") {
+        const execResult = await invokeExecutor(
+          "mantenimiento",
+          rawPhone,
+          selectionText,
+          apiKey,
+        );
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        return {
+          message: execMessage,
+          executor: "mantenimiento",
+          ok: execOk,
+        };
+      }
+      if (other === "certificados") {
+        const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        return {
+          message: execMessage,
+          executor: "certificados",
+          ok: execOk,
+        };
+      }
+      return {
+        message:
+          "Dale, cambiamos de requerimiento. ¿Querés *mantenimiento*, *certificado*, consultar el *estado de una unidad* u otra cosa?",
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+    if (fork === "ambiguous") {
+      return {
+        message: buildTramiteForkClarificationReply(isHoro),
+        executor: "odometro",
+        ok: true,
+      };
+    }
+  }
+
   // Consulta lateral durante odómetro activo (antes que datos operativos / utterance IA).
   const odometerSideQuestion = classifyOdometerFlowSideQuestion(
     selectionText,
     threadCtx.classificationThread,
   );
   if (odometerSideQuestion) {
+    await ensureOdometerCollectingTurnLayer(
+      prisma,
+      rawPhone,
+      threadCtx.classificationThread,
+      buildCollectingPayloadForFork(threadCtx.classificationThread, pendingAction?.payload),
+    );
     return {
       message: buildOdometerFlowSideQuestionReply(
         odometerSideQuestion,
