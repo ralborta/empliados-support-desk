@@ -585,19 +585,32 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // Laterales tipadas (empresa activa, guías de plataforma) sin perder trámite en curso.
+  // Laterales tipadas (empresa, guías, GPS) sin perder trámite en curso.
   const typedLateralKind = classifyTypedLateralQuery(selectionText);
   if (
     typedLateralKind &&
     tramiteAllowsTypedLateralOverlay(thread, pendingAction) &&
     !shouldSkipTypedLateralForOdometerFlow(selectionText, thread)
   ) {
-    const lateralBody = await buildTypedLateralReply(
-      prisma,
-      rawPhone,
-      typedLateralKind,
-      selectionText,
-    );
+    let lateralBody: string;
+    let lateralOk = true;
+    if (typedLateralKind === "gps_unit_status") {
+      const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+      lateralBody = messageFromPayload(execResult);
+      lateralOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (!lateralBody) {
+        lateralBody =
+          "No pude consultar el estado GPS ahora. Si querés, repetí la consulta con patente o interno.";
+        lateralOk = false;
+      }
+    } else {
+      lateralBody = await buildTypedLateralReply(
+        prisma,
+        rawPhone,
+        typedLateralKind,
+        selectionText,
+      );
+    }
     if (pendingKind) {
       return {
         message: `${lateralBody}\n\n${buildPendingConfirmStillWaitingReminder(pendingKind)}`,
@@ -607,7 +620,7 @@ export async function runTurnExecutorPhase(params: {
             : pendingKind === "certificados"
               ? "certificados"
               : "mantenimiento",
-        ok: true,
+        ok: lateralOk,
       };
     }
     if (
@@ -623,7 +636,7 @@ export async function runTurnExecutorPhase(params: {
       return {
         message: `${lateralBody}\n\n${buildOdometerFlowSideHelpReply(thread)}`,
         executor: "odometro",
-        ok: true,
+        ok: lateralOk,
       };
     }
     const inconclusiveExecutor =
@@ -631,11 +644,13 @@ export async function runTurnExecutorPhase(params: {
       pendingAction?.type === "mantenimiento" ||
       pendingAction?.type === "odometro"
         ? pendingAction.type
-        : "info_guides";
+        : typedLateralKind === "gps_unit_status"
+          ? "unidades"
+          : "info_guides";
     return {
       message: lateralBody,
       executor: inconclusiveExecutor,
-      ok: true,
+      ok: lateralOk,
     };
   }
 

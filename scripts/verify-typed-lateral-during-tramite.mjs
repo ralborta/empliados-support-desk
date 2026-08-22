@@ -31,6 +31,9 @@ assert.equal(
   "company_status",
 );
 assert.equal(classifyTypedLateralQuery("como funciona el modulo opciones"), "platform_opciones");
+assert.equal(classifyTypedLateralQuery("quiero saber el estado de la nissan"), "gps_unit_status");
+assert.equal(classifyTypedLateralQuery("no reporta la AC 574"), "gps_unit_status");
+assert.equal(classifyTypedLateralQuery("900079"), null, "interno operativo no es lateral GPS");
 assert.equal(classifyTypedLateralQuery("Cuanto tarda?"), null, "genérico sin patrón tipado");
 
 assert.equal(tramiteAllowsTypedLateralOverlay(threadAfterUnitAsk, null), true);

@@ -9,12 +9,16 @@ import {
   buildCompanyMenuPayload,
   buildCompanyStatusReply,
   looksLikeCompanyListQuestion,
+  looksLikeGpsOrUnitStatusQuestion,
+  looksLikeLiveUnitConsultIntent,
   resolveCustomerByWaraPhone,
 } from "@/lib/waraApi";
 import {
   hasPendingCertificateConfirmation,
   hasPendingMantenimientoConfirmation,
   hasPendingOdometerConfirmation,
+  looksLikeExplicitOdometerUpdateRequest,
+  looksLikeHorometerOnlyIntent,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
@@ -26,7 +30,14 @@ export type TypedLateralKind =
   | "company_status"
   | "platform_opciones"
   | "platform_unidades"
-  | "platform_mantenimiento";
+  | "platform_mantenimiento"
+  | "gps_unit_status";
+
+function classifyGpsUnitStatusLateral(text: string): boolean {
+  if (looksLikeExplicitOdometerUpdateRequest(text)) return false;
+  if (looksLikeHorometerOnlyIntent(text)) return false;
+  return looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text);
+}
 
 /** Clasificación cerrada — no usar looksLikeCustomerConsultationMessage. */
 export function classifyTypedLateralQuery(text: string | undefined | null): TypedLateralKind | null {
@@ -37,6 +48,7 @@ export function classifyTypedLateralQuery(text: string | undefined | null): Type
   if (guide === "opciones") return "platform_opciones";
   if (guide === "unidades") return "platform_unidades";
   if (guide === "mantenimiento") return "platform_mantenimiento";
+  if (classifyGpsUnitStatusLateral(raw)) return "gps_unit_status";
   return null;
 }
 
