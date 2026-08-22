@@ -32,7 +32,6 @@ import {
   threadHasActiveMeterValueRequest,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
-  looksLikeCustomerConsultationMessage,
 } from "@/lib/wara";
 import { looksLikeExplicitOtherTramiteIntent } from "@/lib/turnLayerContract";
 import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
@@ -331,7 +330,7 @@ function normOdometerSideText(text: string): string {
     .trim();
 }
 
-function looksLikeOperationalOdometerAnswer(text: string, threadText: string): boolean {
+export function isOperationalOdometerFlowMessage(text: string, threadText: string): boolean {
   if (looksLikeFechaHoraLecturaMessage(text)) return true;
   if (
     looksLikeBareMeterValue(text) &&
@@ -365,7 +364,7 @@ export function classifyOdometerFlowSideQuestion(
   if (!threadHasActiveOdometerFlow(threadText)) return null;
   if (threadOdometerRegistrationCompleted(threadText)) return null;
   if (!text.trim()) return null;
-  if (looksLikeOperationalOdometerAnswer(text, threadText)) return null;
+  if (isOperationalOdometerFlowMessage(text, threadText)) return null;
   if (looksLikeExplicitOtherTramiteIntent(text)) return "help";
 
   const t = normOdometerSideText(text);
@@ -380,9 +379,6 @@ export function classifyOdometerFlowSideQuestion(
     return "info";
   }
   if (looksLikePendingConfirmHelpOrConfusion(text)) {
-    return "help";
-  }
-  if (looksLikeCustomerConsultationMessage(text)) {
     return "help";
   }
   return null;

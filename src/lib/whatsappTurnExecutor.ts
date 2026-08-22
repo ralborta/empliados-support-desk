@@ -64,6 +64,7 @@ import {
   buildPendingConfirmHelpReply,
   classifyOdometerFlowSideQuestion,
   buildOdometerFlowSideQuestionReply,
+  buildOdometerFlowSideHelpReply,
 } from "@/lib/pendingConfirmStance";
 import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
@@ -149,6 +150,12 @@ import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation } from "@/lib/pendingConfirmation";
 import { classifyConfirmoPhrase, buildConfirmoClarifyReply } from "@/lib/confirmoTokens";
+import {
+  classifyTypedLateralQuery,
+  tramiteAllowsTypedLateralOverlay,
+  buildTypedLateralReply,
+  shouldSkipTypedLateralForOdometerFlow,
+} from "@/lib/typedLateralQueries";
 import {
   agentComposeRequested,
   parseExecutorDialogueState,
@@ -577,6 +584,61 @@ export async function runTurnExecutorPhase(params: {
       return { message: execMessage, executor: "certificados", ok: execOk };
     }
   }
+
+  // Laterales tipadas (empresa activa, guías de plataforma) sin perder trámite en curso.
+  const typedLateralKind = classifyTypedLateralQuery(selectionText);
+  if (
+    typedLateralKind &&
+    tramiteAllowsTypedLateralOverlay(thread, pendingAction) &&
+    !shouldSkipTypedLateralForOdometerFlow(selectionText, thread)
+  ) {
+    const lateralBody = await buildTypedLateralReply(
+      prisma,
+      rawPhone,
+      typedLateralKind,
+      selectionText,
+    );
+    if (pendingKind) {
+      return {
+        message: `${lateralBody}\n\n${buildPendingConfirmStillWaitingReminder(pendingKind)}`,
+        executor:
+          pendingKind === "odometro"
+            ? "odometro"
+            : pendingKind === "certificados"
+              ? "certificados"
+              : "mantenimiento",
+        ok: true,
+      };
+    }
+    if (
+      threadHasActiveOdometerFlow(thread) &&
+      !threadOdometerRegistrationCompleted(thread)
+    ) {
+      await ensureOdometerCollectingTurnLayer(
+        prisma,
+        rawPhone,
+        thread,
+        buildCollectingPayloadForFork(thread, pendingAction?.payload),
+      );
+      return {
+        message: `${lateralBody}\n\n${buildOdometerFlowSideHelpReply(thread)}`,
+        executor: "odometro",
+        ok: true,
+      };
+    }
+    const inconclusiveExecutor =
+      pendingAction?.type === "certificados" ||
+      pendingAction?.type === "mantenimiento" ||
+      pendingAction?.type === "odometro"
+        ? pendingAction.type
+        : "info_guides";
+    return {
+      message: lateralBody,
+      executor: inconclusiveExecutor,
+      ok: true,
+    };
+  }
+
   if (pendingKind && looksLikePendingConfirmPushback(selectionText, pendingKind)) {
     const stance = await reasonPendingConfirmationRejection({
       selectionText,

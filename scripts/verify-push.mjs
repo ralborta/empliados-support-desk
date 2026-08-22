@@ -55,6 +55,7 @@ const PUSH_SUITES = [
   "verify-maintenance-whatsapp-confirm-format.mjs",
   "verify-colloquial-argentine-confirm.mjs",
   "verify-confirmo-write-veto.mjs",
+  "verify-typed-lateral-during-tramite.mjs",
   "verify-colloquial-post-tramite-ack.mjs",
   "verify-service-scope-consultation.mjs",
   "verify-advisor-derivation-flow.mjs",

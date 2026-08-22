@@ -39,8 +39,8 @@ const helpReply = buildOdometerFlowSideHelpReply(threadAfterUnitAsk);
 assert.match(helpReply, /seguimos con el \*cambio de odómetro\*/i);
 assert.match(helpReply, /cambiar de requerimiento/i);
 
-assert.equal(classifyOdometerFlowSideQuestion("Cuanto tarda?", threadAfterUnitAsk), "help");
-assert.equal(classifyOdometerFlowSideQuestion("Puedo hacerlo mañana?", threadAfterUnitAsk), "help");
+assert.equal(classifyOdometerFlowSideQuestion("Cuanto tarda?", threadAfterUnitAsk), null);
+assert.equal(classifyOdometerFlowSideQuestion("Puedo hacerlo mañana?", threadAfterUnitAsk), null);
 assert.equal(classifyOdometerFlowSideQuestion("Quiero un certificado", threadAfterUnitAsk), "help");
 
 assert.equal(
