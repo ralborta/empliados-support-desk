@@ -11,6 +11,12 @@
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
+import {
+  hasPendingCertificateUnitRequest,
+  hasPendingMaintenancePlateRequest,
+  threadHasActiveOdometerFlow,
+} from "@/lib/wara";
+import { extractMovilIdFromUnitMessage, isMaintenancePlateSelectionMessage, isOdometerPlateSelectionMessage } from "@/lib/waraUnitIntent";
 
 const UNDERSTAND_TIMEOUT_MS = Math.min(OPENAI_DEFAULT_TIMEOUT_MS, 8_000);
 const MIN_CONFIDENCE = 0.72;
@@ -58,6 +64,7 @@ export function isUtteranceUnderstandingEnabled(): boolean {
 
 const SYSTEM_PROMPT = `Sos el intérprete de intención de Atilio (Mesa de Ayuda Wara por WhatsApp).
 Tu trabajo: RAZONAR a qué se refiere el mensaje_nuevo dado el historial (sobre todo la última pregunta del bot) y EXTRAER la referencia a unidad si la hay.
+La ÚLTIMA pregunta o pedido del bot en el historial es MANDATORIO: si pidió unidad/patente/interno/código, el mensaje_nuevo casi siempre responde ESO (no reinterpretes como caso/ticket salvo que el cliente lo diga explícito).
 NO inventes patentes, km ni trámites. Si dudás, pedí aclaración.
 Tolerá errores de escritura / typos / abreviaturas / desorden: interpretá la intención real, no el texto literal.
 Coloquial rioplatense (solo INTERPRETAR, no imitar al responder): porfa/porfis, dale nomás, joya, genial, barbaro, obvio, claro, avanzá/avanzame (typos: vancame, bamcame), metele, hacelo, registralo. "bancame" = esperá/aguardá (NO es confirmación). "gracias"/"genial" solos pueden ser cierre o visto bueno según contexto.
@@ -66,8 +73,8 @@ Devolvé SOLO JSON válido:
 {"referent":"vehicle_unit|admin_number|menu_option|confirmation|odometer_data|new_request|other|unclear","confidence":0.0-1.0,"clarify_question":string|null,"unit_ref":{"kind":"full_plate|prefix|suffix|brand|unit_name|none","value":string|null},"reason":"breve"}
 
 Significado de referent:
-- vehicle_unit — indica o busca una UNIDAD (patente, fragmento de matrícula, marca, nombre interno).
-- admin_number — número administrativo (caso/ticket/interno/teléfono), NO matrícula.
+- vehicle_unit — indica o busca una UNIDAD (patente, fragmento de matrícula, marca, nombre interno, interno/número de interno de flota).
+- admin_number — número administrativo (caso/ticket/teléfono de gestión), NO matrícula ni interno de unidad.
 - menu_option — opción de menú (empresa 1/2, sí/no de lista).
 - confirmation — confirma o rechaza (CONFIRMO, dale, ok, no, gracias como cierre).
 - odometer_data — km/hs/fecha para odómetro/horómetro en curso.
@@ -80,16 +87,18 @@ unit_ref (OBLIGATORIO razonarlo siempre):
 - prefix — el cliente apunta al COMIENZO de la patente (empieza/arranca/inicia/la que va con…), aunque el verbo o la frase estén mal escritos. value: solo las 2–3 letras/dígitos del prefijo (ej. "AD", "OST"), NUNCA la frase tipográfica completa.
 - suffix — apunta al FINAL de la patente (termina/finaliza en…). value: sufijo corto.
 - brand — marca o etiqueta de flota (Nissan, Altamiranda…). value: texto a buscar.
-- unit_name — nombre/código interno (M300-112, 300-112) o apellido/etiqueta listada. value: ese texto.
+- unit_name — nombre/código interno (M300-112, 300-112, interno 900079, número de interno 900079) o apellido/etiqueta listada. value: ese texto o dígitos.
 - none — no hay referencia a unidad en el mensaje_nuevo.
 
 Principios (generales):
 - Si el cliente pide LISTADO / FLOTA / TODAS las unidades ("listame", "dame el listado") → new_request, unit_ref none. NO pidas matrícula: quieren ver la lista.
 - Si el cliente pide estado/GPS por nombre o etiqueta que aparece en la flota (persona, chofer, alias listado) → vehicle_unit + unit_ref brand o unit_name. NUNCA pidas la matrícula: buscá por ese texto.
-- Si el hilo pide patente/prefijo/unidad y el mensaje parece un intento de identificarla → vehicle_unit + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
+- Si el hilo pide patente/prefijo/unidad/interno/código y el mensaje parece un intento de identificarla → vehicle_unit + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
+- Si la última pregunta del bot pide la unidad (patente, interno, código) y el cliente manda solo 5–7 dígitos (ej. 900079, 600088) → vehicle_unit + unit_name con esos dígitos. NO admin_number.
+- "interno" / "número de interno" / "nro de interno" en contexto de flota/odómetro/certificado/GPS = identificador de UNIDAD (vehicle_unit), no ticket de caso.
 - Si el hilo YA tiene una unidad activa/confirmada (el bot dijo "Con la unidad X…" o "contame qué problema") y el cliente pide estado/reporte/GPS sin repetir la patente ("Quiero el estado", "el reporte", "¿cómo está?") → vehicle_unit, unit_ref.none, clarify_question null. NUNCA pidas la matrícula de nuevo: usá la del hilo.
 - Matrícula reconocible (formato AR) → full_plate, no admin_number.
-- "NRO"/"N°"/"numero" sueltos → admin_number y unit_ref.none, SALVO que el cliente los marque explícitamente como parte de patente/prefijo.
+- "NRO"/"N°"/"numero" sueltos → admin_number y unit_ref.none, SALVO que el cliente los marque explícitamente como parte de patente/prefijo/interno de unidad.
 - Token de 2–3 letras solo es prefix/full_plate si el contexto es buscar/elegir unidad.
 - Si vehicle_unit pero sin dato usable → unit_ref.kind=none y pedí la chapa en clarify_question.
 - confidence < 0.75 → preferí unclear.
@@ -99,16 +108,35 @@ const FALLBACK_CLARIFY =
   "No te seguí del todo. ¿Me estás pasando una patente o parte de ella, o un número de otra cosa (caso, interno, opción)?";
 
 /**
- * Casi todo mensaje va a la IA. Solo se excluye vacío / demasiado largo.
- * Las exclusiones “esquemáticas” anteriores hacían respuestas de robot.
+ * Casi todo mensaje va a la IA. Se excluye vacío / demasiado largo y turnos donde
+ * las reglas operativas del trámite activo ya definen la respuesta (odómetro,
+ * certificado, mantenimiento esperando unidad).
  */
 export function shouldInterpretAmbiguousUtterance(
   selectionText: string,
-  _threadText = "",
+  threadText = "",
 ): boolean {
   const text = selectionText.trim();
   if (!text) return false;
   if (text.length > MAX_INTERPRET_CHARS) return false;
+
+  // Trámite de odómetro/horómetro activo → executor operativo (no aclaraciones genéricas).
+  if (threadHasActiveOdometerFlow(threadText)) return false;
+
+  // Certificado o mantenimiento esperando unidad → continuar recolección, no reinterpretar.
+  if (
+    hasPendingCertificateUnitRequest(threadText) &&
+    (extractMovilIdFromUnitMessage(text) != null || isOdometerPlateSelectionMessage(text))
+  ) {
+    return false;
+  }
+  if (
+    hasPendingMaintenancePlateRequest(threadText) &&
+    (extractMovilIdFromUnitMessage(text) != null || isMaintenancePlateSelectionMessage(text))
+  ) {
+    return false;
+  }
+
   return true;
 }
 

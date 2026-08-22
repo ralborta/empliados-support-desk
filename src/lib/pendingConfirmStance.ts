@@ -17,7 +17,24 @@ import {
   hasPendingOdometerConfirmation,
   looksLikeBareNegativeResponse,
   looksLikeUnitRejection,
+  threadAwaitingHorometerKmValue,
+  threadAwaitingOdometerKmValue,
+  threadAwaitingOdometerPlate,
+  threadAwaitingHorometerPlate,
+  detectLoosePlate,
+  extractUnitCodeNumbersFromMessage,
+  isPlausibleVehiclePlate,
+  looksLikeBareMeterValue,
+  looksLikeOdometerHelpRequest,
+  looksLikeOdometerInfoRequest,
+  looksLikePendingConfirmHelpOrConfusion,
+  normalizePlate,
+  threadHasActiveMeterValueRequest,
+  threadHasActiveOdometerFlow,
+  threadOdometerRegistrationCompleted,
+  looksLikeCustomerConsultationMessage,
 } from "@/lib/wara";
+import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
@@ -299,4 +316,119 @@ export function buildPendingConfirmHelpReply(kind: PendingConfirmKind): string {
     "Tranqui: ya armé el resumen del certificado.",
     ...common,
   ].join("\n");
+}
+
+export type OdometerFlowSideQuestionKind = "info" | "help";
+
+function normOdometerSideText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksLikeOperationalOdometerAnswer(text: string, threadText: string): boolean {
+  if (looksLikeFechaHoraLecturaMessage(text)) return true;
+  if (
+    looksLikeBareMeterValue(text) &&
+    (threadHasActiveMeterValueRequest(threadText) ||
+      threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText))
+  ) {
+    return true;
+  }
+  const compact = text.trim().replace(/\s+/g, "");
+  if (/^\d{5,7}$/.test(compact)) return true;
+  if (extractUnitCodeNumbersFromMessage(text).length > 0) return true;
+  const plate = detectLoosePlate(text);
+  if (plate && isPlausibleVehiclePlate(normalizePlate(plate))) return true;
+  return false;
+}
+
+function isHorometerSideContext(threadText: string): boolean {
+  if (threadAwaitingHorometerPlate(threadText) || threadAwaitingHorometerKmValue(threadText)) {
+    return true;
+  }
+  const tail = threadText.slice(-2000).toLowerCase();
+  return /\bhor[oó]metro\b/.test(tail) && !/\bod[oó]metro\b/.test(tail.slice(-800));
+}
+
+/** ¿Consulta lateral (no dato operativo) con odómetro/horómetro en curso? */
+export function classifyOdometerFlowSideQuestion(
+  text: string,
+  threadText: string,
+): OdometerFlowSideQuestionKind | null {
+  if (!threadHasActiveOdometerFlow(threadText)) return null;
+  if (threadOdometerRegistrationCompleted(threadText)) return null;
+  if (!text.trim()) return null;
+  if (looksLikeOperationalOdometerAnswer(text, threadText)) return null;
+
+  const t = normOdometerSideText(text);
+  if (
+    /\b(como funciona|como es|que es|que significa|para que sirve|para q sirve|me explicas|explicame|explic[aá]me)\b/.test(
+      t,
+    )
+  ) {
+    return "info";
+  }
+  if (looksLikeOdometerInfoRequest(text) || looksLikeOdometerHelpRequest(text)) {
+    return "info";
+  }
+  if (looksLikePendingConfirmHelpOrConfusion(text)) {
+    return "help";
+  }
+  if (looksLikeCustomerConsultationMessage(text)) {
+    return "help";
+  }
+  return null;
+}
+
+function buildOdometerSideExplanationText(customerText: string, isHoro: boolean): string {
+  const t = normOdometerSideText(customerText);
+  const horoInText =
+    /\b(hor[oó]metro|horas)\b/.test(t) && !/\b(od[oó]metro|kilometraje)\b/.test(t);
+  if (isHoro || horoInText) {
+    return [
+      "El cambio de horómetro en Wara sirve para actualizar las horas de motor cuando el GPS no coincide con el real (service, cambio de equipo o corrección).",
+      "",
+      "Así los planes por horas y los reportes quedan alineados con la unidad.",
+    ].join("\n");
+  }
+  return [
+    "El cambio de odómetro registra el kilometraje real cuando no coincide con lo que muestra el GPS (cambio físico, service o corrección).",
+    "",
+    "No es un mantenimiento: es actualizar el dato para que alertas, planes y reportes usen el km correcto.",
+  ].join("\n");
+}
+
+export function buildOdometerFlowSideInfoReply(threadText: string, customerText: string): string {
+  const isHoro = isHorometerSideContext(threadText);
+  const topic = isHoro ? "horómetro" : "odómetro";
+  const mentionsTopic = /\b(od[oó]metro|hor[oó]metro|kilometraje)\b/i.test(customerText);
+  const explanation = buildOdometerSideExplanationText(customerText, isHoro);
+  const lines: string[] = [];
+  if (!mentionsTopic) {
+    lines.push(`¿Te referís al *${topic}*?`, "");
+  }
+  lines.push(explanation, "", "Cuando quieras seguimos con el cambio que empezamos.");
+  return lines.join("\n");
+}
+
+export function buildOdometerFlowSideHelpReply(threadText: string): string {
+  const isHoro = isHorometerSideContext(threadText);
+  const topic = isHoro ? "horómetro" : "odómetro";
+  return `Te puedo ayudar. Pero antes: ¿seguimos con el *cambio de ${topic}* que tenemos en curso, o preferís *cambiar de requerimiento*?`;
+}
+
+export function buildOdometerFlowSideQuestionReply(
+  kind: OdometerFlowSideQuestionKind,
+  threadText: string,
+  customerText: string,
+): string {
+  return kind === "info"
+    ? buildOdometerFlowSideInfoReply(threadText, customerText)
+    : buildOdometerFlowSideHelpReply(threadText);
 }

@@ -1121,6 +1121,12 @@ export function extractUnitCodeNumbersFromMessage(rawText: string): number[] {
     const n = parseInt(m[1], 10);
     if (Number.isFinite(n)) out.push(n);
   }
+  for (const m of text.matchAll(
+    /\b(?:interno|nro\.?\s+de\s+interno|n[uú]mero\s+de\s+interno)\s*(?:n[°o.]?\s*)?(\d{5,7})\b/gi,
+  )) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n)) out.push(n);
+  }
   for (const m of text.matchAll(/\b(?:M|m)(\d{3})-(\d{2,3})\b/g)) {
     const n = parseInt(`${m[1]}${m[2]}`, 10);
     if (Number.isFinite(n)) out.push(n);
@@ -2707,6 +2713,55 @@ export function looksLikePendingConfirmHelpOrConfusion(
       t,
     ) ||
     /\b(ayuda|ayudame|explicame|explicame que|no se que hacer|no se que responder)\b/.test(t)
+  );
+}
+
+/**
+ * Consulta o pregunta del cliente (no dato operativo): interrogativa, pedido de ayuda,
+ * duda o cambio de tema. Usado con trámite activo para no pisar recolección de datos.
+ */
+export function looksLikeCustomerConsultationMessage(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 220) return false;
+  if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return false;
+  if (looksLikeFuzzyConfirmoToken(raw)) return false;
+  if (looksLikeResumePausedTramite(raw)) return false;
+
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(cancel|desestim|no confirmo|olvidalo|dejalo)\b/.test(t)) return false;
+
+  if (/[?¿]/.test(raw)) return true;
+  if (looksLikePendingConfirmHelpOrConfusion(raw)) return true;
+  if (looksLikeOdometerInfoRequest(raw) || looksLikeOdometerHelpRequest(raw)) return true;
+
+  if (
+    /\b(quiero|necesito)\b/.test(t) &&
+    !/\b(od[oó]metro|hor[oó]metro|kilometraje|confirmo|confirma)\b/.test(t)
+  ) {
+    return true;
+  }
+
+  return (
+    /\b(como|que|q|por\s*que|porque|cuando|donde|quien|cual|cuanto|cuantos)\b/.test(t) ||
+    /\b(puedo|podemos|se puede|debo|deberia|tengo que|hay que|hace falta|me conviene)\b/.test(
+      t,
+    ) ||
+    /\b(ayuda|ayudame|me ayudas|explicame|explic[aá]me|me explicas|contame|decime|aclarame)\b/.test(
+      t,
+    ) ||
+    /\b(no entiendo|no comprendo|no se|duda|aclarar|consulta|informacion|informaci[oó]n)\b/.test(
+      t,
+    ) ||
+    /\b(otra consulta|otro tema|otra cosa|cambiar de tema|algo mas|otro requerimiento)\b/.test(
+      t,
+    )
   );
 }
 

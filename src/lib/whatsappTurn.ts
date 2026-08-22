@@ -5,7 +5,13 @@ import {
   recentLastInboundTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import { mergeInboundTextWithAiImage } from "@/lib/inboundImagePolicy";
+import {
+  mergeInboundTextWithAiImage,
+  looksLikeInboundMediaOnlyEvent,
+  selectionHasAiImageContext,
+  hasUsableAiImageDescription,
+  NO_IMAGE_ANALYSIS_REPLY,
+} from "@/lib/inboundImagePolicy";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import {
@@ -76,11 +82,19 @@ export async function handleWhatsAppTurn(params: {
   body: string;
   /** Descripción de imagen/PDF de BBC ({aiImage}) cuando interpretImage está activo. */
   aiImage?: string;
+  /** BBC indica adjunto sin caption útil (imagen/PDF). */
+  hasMedia?: boolean;
   apiKey: string;
 }): Promise<JsonRecord> {
   const { rawPhone, body, apiKey } = params;
-  const rawBody = mergeInboundTextWithAiImage(body.trim(), params.aiImage).trim();
+  const trimmedBody = body.trim();
+  const rawBody = mergeInboundTextWithAiImage(trimmedBody, params.aiImage).trim();
   let selectionText = rawBody;
+
+  const inboundMediaOnly =
+    params.hasMedia === true ||
+    looksLikeInboundMediaOnlyEvent(trimmedBody) ||
+    looksLikeInboundMediaOnlyEvent(rawBody);
 
   if (!selectionText) {
     const lastInbound = await recentLastInboundTextForPhone(rawPhone);
@@ -101,13 +115,41 @@ export async function handleWhatsAppTurn(params: {
           ),
         );
       }
+      // No reusar lastInbound si el body vino vacío: suele ser imagen/archivo sin caption.
       if (
-        looksLikeOperationalIntent(lastInbound) ||
-        looksLikeSubstantiveCustomerMessage(lastInbound)
+        trimmedBody !== "" &&
+        (looksLikeOperationalIntent(lastInbound) ||
+          looksLikeSubstantiveCustomerMessage(lastInbound))
       ) {
         selectionText = lastInbound;
       }
     }
+  }
+
+  if (
+    inboundMediaOnly &&
+    !hasUsableAiImageDescription(params.aiImage) &&
+    !selectionHasAiImageContext(selectionText)
+  ) {
+    selectionText = rawBody || trimmedBody || "_event_image__";
+  } else if (
+    !selectionText &&
+    trimmedBody === "" &&
+    !hasUsableAiImageDescription(params.aiImage)
+  ) {
+    return deliverTurnToWhatsApp(
+      rawPhone,
+      buildTurnPayload(
+        { registered: true, registered_s: "true" },
+        {
+          message: NO_IMAGE_ANALYSIS_REPLY,
+          nextFlow: "reply",
+          nextFlow_s: "reply",
+          executor: "info_guides",
+          executor_s: "empty_inbound_no_media",
+        },
+      ),
+    );
   }
 
   if (rawBody) {
@@ -121,7 +163,7 @@ export async function handleWhatsAppTurn(params: {
     maybeEnqueueWaraV2ShadowCopy({
       rawPhone,
       text: selectionText,
-      hasAttachment: false,
+      hasAttachment: inboundMediaOnly || selectionHasAiImageContext(selectionText),
     });
   }
 
@@ -164,7 +206,9 @@ export async function handleWhatsAppTurn(params: {
       contextRegistered &&
       (looksLikeSubstantiveCustomerMessage(selectionText) ||
         isBarePlatePrefixHint(selectionText) ||
-        hasPendingMaintenancePlateRequest(threadCtx.classificationThread))
+        hasPendingMaintenancePlateRequest(threadCtx.classificationThread) ||
+        looksLikeInboundMediaOnlyEvent(selectionText) ||
+        selectionHasAiImageContext(selectionText))
     ) {
       // Bypass: /turn sigue procesando.
     } else {

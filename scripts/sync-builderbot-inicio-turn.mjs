@@ -47,6 +47,7 @@ function turnHttpPlugin(apiKey, rules) {
         from: "{from}",
         body: "{body}",
         aiImage: "{aiImage}",
+        hasMedia: "{hasMedia}",
         api_key: apiKey,
       },
       messageMapping: "{message}",

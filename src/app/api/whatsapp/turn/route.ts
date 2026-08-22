@@ -18,6 +18,9 @@ const bodySchema = z
     message: z.string().optional(),
     /** Descripción multimodal de BBC cuando interpretImage está activo ({aiImage}). */
     aiImage: z.string().optional(),
+    /** true cuando el mensaje trae imagen/PDF/video sin caption operativo. */
+    hasMedia: z.union([z.boolean(), z.string(), z.number()]).optional(),
+    has_media: z.union([z.boolean(), z.string(), z.number()]).optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -75,11 +78,18 @@ export async function POST(req: NextRequest) {
     ""
   ).trim();
   const aiImage = (parsed.data.aiImage ?? "").trim();
+  const hasMediaRaw = parsed.data.hasMedia ?? parsed.data.has_media;
+  const hasMedia =
+    hasMediaRaw === true ||
+    hasMediaRaw === "true" ||
+    hasMediaRaw === "1" ||
+    hasMediaRaw === 1;
 
   const payload = await handleWhatsAppTurn({
     rawPhone,
     body,
     aiImage: aiImage || undefined,
+    hasMedia: hasMedia || undefined,
     apiKey: apiKey ?? "",
   });
 

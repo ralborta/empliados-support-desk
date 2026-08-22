@@ -382,7 +382,7 @@ export function formatAskUnit(
   return [
     title,
     "",
-    "¿De qué unidad? Pasame la *patente* o el código (ej. M300-097, 600088).",
+    "¿De qué unidad? Pasame la *patente*, el *interno* o el código (ej. M300-097, 900079).",
   ].join("\n");
 }
 

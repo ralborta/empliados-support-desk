@@ -44,24 +44,27 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   return null;
 }
 
-function odometerInfoReply(rawText: string): string {
+export function buildOdometerInfoExplanation(
+  rawText: string,
+  opts?: { omitRegistrationCta?: boolean },
+): string {
   const t = norm(rawText);
+  let body: string;
   if (/\b(hor[oó]metro|horas)\b/.test(t) && !/\b(od[oó]metro|kilometraje)\b/.test(t)) {
-    return [
+    body = [
       "El cambio de horómetro en Wara sirve para actualizar las horas de motor de una unidad cuando el valor del GPS no coincide con el real (por ejemplo, después de un service o un cambio de equipo).",
       "",
       "Así los planes de mantenimiento por horas y los reportes quedan alineados con la realidad de la unidad.",
+    ].join("\n");
+  } else {
+    body = [
+      "El cambio de odómetro en Wara sirve para registrar el kilometraje real de una unidad cuando el valor que muestra el GPS no coincide (por ejemplo, después de cambiar el odómetro físico, un service o una corrección).",
       "",
-      "Si querés registrarlo por acá, decime la patente y el horómetro nuevo.",
+      "No es un mantenimiento en sí: es una actualización del dato para que alertas, planes preventivos y reportes usen el km correcto.",
     ].join("\n");
   }
-  return [
-    "El cambio de odómetro en Wara sirve para registrar el kilometraje real de una unidad cuando el valor que muestra el GPS no coincide (por ejemplo, después de cambiar el odómetro físico, un service o una corrección).",
-    "",
-    "No es un mantenimiento en sí: es una actualización del dato para que alertas, planes preventivos y reportes usen el km correcto.",
-    "",
-    "Si querés hacer el registro por WhatsApp, decime la patente y el odómetro nuevo en km.",
-  ].join("\n");
+  if (opts?.omitRegistrationCta) return body;
+  return `${body}\n\nSi querés hacer el registro por WhatsApp, decime la patente y el ${/\bhor/.test(t) ? "horómetro" : "odómetro"} nuevo en ${/\bhor/.test(t) ? "hs" : "km"}.`;
 }
 
 function norm(text: string): string {
@@ -256,7 +259,7 @@ export function buildInfoGuideReply(
   const detected = kind ?? detectInfoGuideKind(rawText);
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
-  else if (looksLikeOdometerInfoRequest(rawText)) message = odometerInfoReply(rawText);
+  else if (looksLikeOdometerInfoRequest(rawText)) message = buildOdometerInfoExplanation(rawText);
   else if (detected === "opciones") message = opcionesReply(rawText);
   else if (detected === "unidades") message = unidadesReply(rawText);
   else if (detected === "mantenimiento") message = mantenimientoReply(rawText);

@@ -35,6 +35,10 @@ import {
   looksLikeBareOdometerTopicMention,
   looksLikeHorometerOnlyIntent,
   looksLikePendingTramiteAffirmation,
+  looksLikePendingConfirmHelpOrConfusion,
+  looksLikeOdometerInfoRequest,
+  extractUnitCodeNumbersFromMessage,
+  looksLikeCustomerConsultationMessage,
 } from "@/lib/wara";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -207,6 +211,13 @@ export function extractMovilIdFromUnitMessage(rawText: string | undefined | null
   if (!text) return null;
   // "unida" sin d final — typo frecuente en WhatsApp (bug prod 2026-08-17).
   for (const m of text.matchAll(/\bunida[d]?\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n)) return n;
+  }
+  // Interno / número de interno (rioplatense: "interno 900079", "nro de interno 900079").
+  for (const m of text.matchAll(
+    /\b(?:interno|nro\.?\s+de\s+interno|n[uú]mero\s+de\s+interno)\s*(?:n[°o.]?\s*)?(\d{5,7})\b/gi,
+  )) {
     const n = parseInt(m[1], 10);
     if (Number.isFinite(n)) return n;
   }
@@ -2754,6 +2765,28 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   return false;
 }
 
+/** Consulta lateral durante odómetro activo — no enrutar al executor operativo. */
+function looksLikeOdometerFlowSideQuestionText(selectionText: string, threadText: string): boolean {
+  if (!threadHasActiveOdometerFlow(threadText)) return false;
+  const text = selectionText.trim();
+  if (!text) return false;
+  if (looksLikeFechaHoraLecturaMessage(text)) return false;
+  if (
+    looksLikeBareMeterValue(text) &&
+    (threadHasActiveMeterValueRequest(threadText) ||
+      threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText))
+  ) {
+    return false;
+  }
+  const compact = text.replace(/\s+/g, "");
+  if (/^\d{5,7}$/.test(compact)) return false;
+  if (extractUnitCodeNumbersFromMessage(text).length > 0) return false;
+  const plate = detectLoosePlate(text);
+  if (plate && isPlausibleVehiclePlate(normalizePlate(plate))) return false;
+  return looksLikeCustomerConsultationMessage(text);
+}
+
 /**
  * Turno que debe ir al executor de odómetro (no agente/consulta GPS) porque el trámite sigue activo.
  */
@@ -2796,6 +2829,7 @@ export function shouldRouteTurnToOdometerExecutor(params: {
     hasPendingOdometerConfirmation(threadText);
 
   if (!flowActive) return false;
+  if (looksLikeOdometerFlowSideQuestionText(selectionText, threadText)) return false;
   if (looksLikeFlowControlCommand(selectionText)) return false;
   if (looksLikeGreeting(selectionText)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(selectionText) || looksLikeLiveUnitConsultIntent(selectionText)) {

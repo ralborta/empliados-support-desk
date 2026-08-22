@@ -62,6 +62,8 @@ import {
   reasonPendingConfirmationRejection,
   buildPendingConfirmStillWaitingReminder,
   buildPendingConfirmHelpReply,
+  classifyOdometerFlowSideQuestion,
+  buildOdometerFlowSideQuestionReply,
 } from "@/lib/pendingConfirmStance";
 import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
@@ -119,6 +121,7 @@ import {
   looksLikeUnitNameInMessage,
   extractFreeTextUnitSearchCandidate,
   extractExplicitUnitNameFromText,
+  extractMovilIdFromUnitMessage,
 } from "@/lib/waraUnitIntent";
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
@@ -828,6 +831,39 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Consulta lateral durante odómetro activo (antes que datos operativos / utterance IA).
+  const odometerSideQuestion = classifyOdometerFlowSideQuestion(
+    selectionText,
+    threadCtx.classificationThread,
+  );
+  if (odometerSideQuestion) {
+    return {
+      message: buildOdometerFlowSideQuestionReply(
+        odometerSideQuestion,
+        threadCtx.classificationThread,
+        selectionText,
+      ),
+      executor: "odometro",
+      ok: true,
+    };
+  }
+
+  // Odómetro/horómetro activo: interno/unidad/patente/km → executor.
+  if (
+    shouldRouteTurnToOdometerExecutor({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+      pendingActionType: pendingAction?.type ?? null,
+    })
+  ) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+  }
+
   // ——— IA primero (casi todo el diálogo) ———
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
@@ -870,9 +906,11 @@ export async function runTurnExecutorPhase(params: {
       !!plateInMsg && isPlausibleVehiclePlate(normalizePlate(plateInMsg));
     const regexPrefix = extractPlatePrefixFromMessage(selectionText);
     const explicitUnitCode = extractExplicitUnitNameFromText(selectionText);
+    const movilIdFromMsg = extractMovilIdFromUnitMessage(selectionText);
     // Código interno (300-097) gana sobre marca/nombre libre de la IA — bug real 2026-08-06.
     const freeName =
       explicitUnitCode ||
+      (movilIdFromMsg != null ? String(movilIdFromMsg) : null) ||
       aiHint?.unitName ||
       aiHint?.brand ||
       extractFreeTextUnitSearchCandidate(selectionText) ||
@@ -882,6 +920,7 @@ export async function runTurnExecutorPhase(params: {
     const prefixHint = regexPrefix ?? aiHint?.platePrefix ?? null;
     const hasUsablePrefix = !!prefixHint;
     const hasUsableName = !!freeName;
+    const hasUsableMovilId = movilIdFromMsg != null;
     aiUnitExtras = {
       ...(prefixHint ? { platePrefix: prefixHint } : {}),
       ...(!regexPlateOk && aiHint?.plate ? { plate: aiHint.plate } : {}),
@@ -898,6 +937,7 @@ export async function runTurnExecutorPhase(params: {
       !hasUsablePlate &&
       !hasUsablePrefix &&
       !hasUsableName &&
+      !hasUsableMovilId &&
       !activeUnitForNl?.plate &&
       !threadAwaitingUnitProblem
     ) {
