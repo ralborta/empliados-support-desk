@@ -12,6 +12,7 @@ import {
   threadAwaitingTramiteForkChoice,
   looksLikeExplicitOtherTramiteIntent,
 } from "../src/lib/turnLayerContract.ts";
+import { classifyPivotForkChoiceResponse } from "../src/lib/tramitePivot.ts";
 
 const threadAfterUnitAsk = [
   "Cliente: odometro",
@@ -26,6 +27,8 @@ assert.match(maintReply, /cambiar de requerimiento/i);
 const threadFork = `${threadAfterUnitAsk}\nAtilio: Te puedo ayudar. Pero antes: ¿seguimos con el *cambio de odómetro* que tenemos en curso, o preferís *cambiar de requerimiento*?`;
 assert.equal(threadAwaitingTramiteForkChoice(threadFork), true);
 assert.equal(classifyTramiteForkChoiceResponse("seguimos con el odometro"), "resume");
+assert.equal(classifyPivotForkChoiceResponse("consultar ahora"), "switch");
+assert.equal(classifyPivotForkChoiceResponse("seguir con horometro"), "resume");
 assert.equal(classifyTramiteForkChoiceResponse("quiero mantenimiento preventivo"), "switch");
 assert.equal(looksLikeExplicitOtherTramiteIntent("mantenimiento preventivo"), "mantenimiento");
 

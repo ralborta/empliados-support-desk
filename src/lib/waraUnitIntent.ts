@@ -41,6 +41,7 @@ import {
 } from "@/lib/wara";
 import { classifyTypedLateralQuery } from "@/lib/typedLateralQueries";
 import { classifyOdometerFlowSideQuestion } from "@/lib/pendingConfirmStance";
+import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
@@ -2782,6 +2783,12 @@ function looksLikeOdometerFlowSideQuestionText(selectionText: string, threadText
   }
   const compact = text.replace(/\s+/g, "");
   if (/^\d{5,7}$/.test(compact)) return false;
+  if (
+    isOperationalMeterCollectionMessage(text, threadText) &&
+    !classifyTypedLateralQuery(text)
+  ) {
+    return false;
+  }
   if (extractUnitCodeNumbersFromMessage(text).length > 0) return false;
   const plate = detectLoosePlate(text);
   if (plate && isPlausibleVehiclePlate(normalizePlate(plate))) return false;

@@ -24,7 +24,7 @@ import {
 } from "@/lib/wara";
 import { threadHasInconclusiveTramite } from "@/lib/tramiteFlowControl";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
-import { isOperationalOdometerFlowMessage } from "@/lib/pendingConfirmStance";
+import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 
 export type TypedLateralKind =
   | "company_status"
@@ -106,5 +106,5 @@ export async function buildTypedLateralReply(
 }
 
 export function shouldSkipTypedLateralForOdometerFlow(selectionText: string, threadText: string): boolean {
-  return isOperationalOdometerFlowMessage(selectionText, threadText);
+  return isOperationalMeterCollectionMessage(selectionText, threadText);
 }

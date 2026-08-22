@@ -35,6 +35,7 @@ import {
 } from "@/lib/wara";
 import { looksLikeExplicitOtherTramiteIntent } from "@/lib/turnLayerContract";
 import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
+import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
@@ -331,21 +332,7 @@ function normOdometerSideText(text: string): string {
 }
 
 export function isOperationalOdometerFlowMessage(text: string, threadText: string): boolean {
-  if (looksLikeFechaHoraLecturaMessage(text)) return true;
-  if (
-    looksLikeBareMeterValue(text) &&
-    (threadHasActiveMeterValueRequest(threadText) ||
-      threadAwaitingOdometerKmValue(threadText) ||
-      threadAwaitingHorometerKmValue(threadText))
-  ) {
-    return true;
-  }
-  const compact = text.trim().replace(/\s+/g, "");
-  if (/^\d{5,7}$/.test(compact)) return true;
-  if (extractUnitCodeNumbersFromMessage(text).length > 0) return true;
-  const plate = detectLoosePlate(text);
-  if (plate && isPlausibleVehiclePlate(normalizePlate(plate))) return true;
-  return false;
+  return isOperationalMeterCollectionMessage(text, threadText);
 }
 
 function isHorometerSideContext(threadText: string): boolean {

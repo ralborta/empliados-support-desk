@@ -139,7 +139,15 @@ import {
   resolveExecutorForInconclusiveTramite,
 } from "@/lib/tramiteFlowControl";
 import {
-  classifyTramiteForkChoiceResponse,
+  classifyPivotForkChoiceResponse,
+  buildPivotForkClarificationReply,
+  buildCollectingPayloadForPivot,
+  buildResumeTurnLayerPatch,
+  prepareStatusPivotDuringTramite,
+  readPivotIntent,
+  logTramitePivotTrace,
+} from "@/lib/tramitePivot";
+import {
   buildTramiteForkClarificationReply,
   buildCollectingPayloadForFork,
   isTurnLayerForkPending,
@@ -381,6 +389,16 @@ export async function runTurnExecutorPhase(params: {
       const picked = await selectCompanyForCustomer(prisma, rawPhone, {
         waraContactId: named.id,
       });
+      await patchPendingActionPayload(prisma, rawPhone, {
+        pivotIntent: null,
+        turnLayer: {
+          forkPending: false,
+          lateralPause: false,
+          activeExpectation: null,
+          pausedExpectation: null,
+        },
+      }).catch(() => undefined);
+      logTramitePivotTrace({ decision: "pivot_invalid_company_change", company: named.empresa });
       const companyName =
         picked.customer?.companyName?.trim() || named.empresa?.trim() || "tu empresa";
       return {
@@ -582,6 +600,121 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage || !executorSkippedSilently(execResult)) {
       return { message: execMessage, executor: "certificados", ok: execOk };
+    }
+  }
+
+  // Bifurcación pivot / lateral (fork_choice en DB o hilo) — antes que laterales tipadas.
+  if (threadAwaitingTramiteForkChoice(thread) || isTurnLayerForkPending(pendingAction)) {
+    const fork = classifyPivotForkChoiceResponse(selectionText);
+    const isHoro =
+      threadAwaitingHorometerKmValue(thread) ||
+      /\bhor[oó]metro\b/i.test(thread.slice(-1200));
+    const pivotForFork = readPivotIntent(pendingAction);
+    if (fork === "resume") {
+      const resumePatch = buildResumeTurnLayerPatch(pendingAction);
+      await patchPendingActionPayload(prisma, rawPhone, {
+        turnLayer: resumePatch,
+        pivotIntent: null,
+      }).catch(() => undefined);
+      logTramitePivotTrace({
+        decision: "fork_resume_tramite",
+        restoredExpectation: resumePatch.activeExpectation,
+        pivot: pivotForFork?.unitRef?.value,
+      });
+      return {
+        message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
+        executor: "odometro",
+        ok: true,
+      };
+    }
+    if (fork === "switch") {
+      const pivot = pivotForFork;
+      if (pivot) {
+        logTramitePivotTrace({
+          decision: "fork_switch_consult",
+          pivot: pivot.unitRef.value,
+          originalText: pivot.originalText,
+        });
+        await clearPendingAction(prisma, rawPhone);
+        const execResult = await invokeExecutor("unidades", rawPhone, pivot.originalText, apiKey);
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        return {
+          message: execMessage,
+          executor: "unidades",
+          ok: execOk,
+        };
+      }
+      await clearPendingAction(prisma, rawPhone);
+      const other = looksLikeExplicitOtherTramiteIntent(selectionText);
+      if (other === "mantenimiento") {
+        const execResult = await invokeExecutor(
+          "mantenimiento",
+          rawPhone,
+          selectionText,
+          apiKey,
+        );
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        return {
+          message: execMessage,
+          executor: "mantenimiento",
+          ok: execOk,
+        };
+      }
+      if (other === "certificados") {
+        const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        return {
+          message: execMessage,
+          executor: "certificados",
+          ok: execOk,
+        };
+      }
+      return {
+        message:
+          "Dale, cambiamos de requerimiento. ¿Querés *mantenimiento*, *certificado*, consultar el *estado de una unidad* u otra cosa?",
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+    if (fork === "ambiguous") {
+      return {
+        message: pivotForFork
+          ? buildPivotForkClarificationReply(thread)
+          : buildTramiteForkClarificationReply(isHoro),
+        executor: "odometro",
+        ok: true,
+      };
+    }
+  }
+
+  // Pivot estado/GPS de otra unidad durante recolección — fork sin ejecutar herramientas.
+  if (
+    !pendingKind &&
+    (pendingAction?.type === "odometro" ||
+      (threadHasActiveOdometerFlow(thread) && !threadOdometerRegistrationCompleted(thread)))
+  ) {
+    const pivotPrep = await prepareStatusPivotDuringTramite({
+      prisma,
+      rawPhone,
+      selectionText,
+      threadText: thread,
+      pendingAction,
+    });
+    if (pivotPrep?.kind === "fork") {
+      await ensureOdometerCollectingTurnLayer(
+        prisma,
+        rawPhone,
+        thread,
+        buildCollectingPayloadForPivot(thread, pivotPrep.pivot, pendingAction?.payload),
+      );
+      return {
+        message: pivotPrep.message,
+        executor: "odometro",
+        ok: true,
+      };
     }
   }
 
@@ -932,76 +1065,6 @@ export async function runTurnExecutorPhase(params: {
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
     if (execMessage) {
       return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
-    }
-  }
-
-  // Bifurcación tras consulta lateral (contrato turn layer: fork_choice).
-  if (
-    threadAwaitingTramiteForkChoice(threadCtx.classificationThread) ||
-    isTurnLayerForkPending(pendingAction)
-  ) {
-    const fork = classifyTramiteForkChoiceResponse(selectionText);
-    const isHoro =
-      threadAwaitingHorometerKmValue(threadCtx.classificationThread) ||
-      /\bhor[oó]metro\b/i.test(threadCtx.classificationThread.slice(-1200));
-    if (fork === "resume") {
-      await patchPendingActionPayload(prisma, rawPhone, {
-        turnLayer: {
-          forkPending: false,
-          activeExpectation: null,
-          lateralPause: false,
-        },
-      }).catch(() => undefined);
-      return {
-        message: buildInconclusiveTramiteResumePrompt(
-          threadCtx.classificationThread,
-          pendingAction,
-        ),
-        executor: "odometro",
-        ok: true,
-      };
-    }
-    if (fork === "switch") {
-      await clearPendingAction(prisma, rawPhone);
-      const other = looksLikeExplicitOtherTramiteIntent(selectionText);
-      if (other === "mantenimiento") {
-        const execResult = await invokeExecutor(
-          "mantenimiento",
-          rawPhone,
-          selectionText,
-          apiKey,
-        );
-        const execMessage = messageFromPayload(execResult);
-        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-        return {
-          message: execMessage,
-          executor: "mantenimiento",
-          ok: execOk,
-        };
-      }
-      if (other === "certificados") {
-        const execResult = await invokeExecutor("certificados", rawPhone, selectionText, apiKey);
-        const execMessage = messageFromPayload(execResult);
-        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-        return {
-          message: execMessage,
-          executor: "certificados",
-          ok: execOk,
-        };
-      }
-      return {
-        message:
-          "Dale, cambiamos de requerimiento. ¿Querés *mantenimiento*, *certificado*, consultar el *estado de una unidad* u otra cosa?",
-        executor: "info_guides",
-        ok: true,
-      };
-    }
-    if (fork === "ambiguous") {
-      return {
-        message: buildTramiteForkClarificationReply(isHoro),
-        executor: "odometro",
-        ok: true,
-      };
     }
   }
 

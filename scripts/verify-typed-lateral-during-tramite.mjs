@@ -40,6 +40,11 @@ assert.equal(tramiteAllowsTypedLateralOverlay(threadAfterUnitAsk, null), true);
 assert.equal(tramiteAllowsTypedLateralOverlay(threadPendingConfirm, null), true);
 assert.equal(shouldSkipTypedLateralForOdometerFlow("900097", threadAfterUnitAsk), true);
 assert.equal(
+  shouldSkipTypedLateralForOdometerFlow("Estado de la unidad 900088", threadAfterUnitAsk),
+  false,
+  "estado explícito no es dato operativo",
+);
+assert.equal(
   classifyOdometerFlowSideQuestion("¿qué empresa tengo activa?", threadAfterUnitAsk),
   null,
   "empresa tipada no pasa por heurística odómetro genérica",

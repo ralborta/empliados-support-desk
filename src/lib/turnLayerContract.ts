@@ -72,9 +72,10 @@ export function inferActiveExpectationFromThread(threadText: string): ActiveExpe
   return null;
 }
 
-/** El bot acaba de pedir bifurcación tras consulta lateral. */
+/** El bot acaba de pedir bifurcación tras consulta lateral o pivot de unidad. */
 export function threadAwaitingTramiteForkChoice(threadText: string): boolean {
-  const tail = threadText.slice(-2800);
+  const tail = threadText.slice(-3200);
+  if (/\bconsultar ahora\b/i.test(tail) && /\bseguir con\b/i.test(tail)) return true;
   return (
     /\bcambiar de requerimiento\b/i.test(tail) &&
     /\bseguimos con el\b/i.test(tail)

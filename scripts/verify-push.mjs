@@ -36,6 +36,7 @@ const PUSH_SUITES = [
   "verify-odometer-flow-side-questions.mjs",
   "verify-odometer-interno-900079.mjs",
   "verify-turn-layer-fork.mjs",
+  "verify-tramite-pivot-fork.mjs",
   "verify-tramite-cancel-resume.mjs",
   "verify-meter-incomplete-data.mjs",
   "verify-ai-first-dialogue.mjs",
