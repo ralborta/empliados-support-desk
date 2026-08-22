@@ -16,7 +16,17 @@ import {
   hasPendingMaintenancePlateRequest,
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
-import { extractMovilIdFromUnitMessage, isMaintenancePlateSelectionMessage, isOdometerPlateSelectionMessage } from "@/lib/waraUnitIntent";
+import {
+  extractMovilIdFromUnitMessage,
+  inferNumericExpectedFieldForThread,
+  isMaintenancePlateSelectionMessage,
+  isOdometerPlateSelectionMessage,
+} from "@/lib/waraUnitIntent";
+import {
+  detectServiceIntentInMessage,
+  extractEmbeddedNumericReferences,
+  resolveUnitReferenceFromMessage,
+} from "@/lib/unitReferenceParser";
 
 const UNDERSTAND_TIMEOUT_MS = Math.min(OPENAI_DEFAULT_TIMEOUT_MS, 8_000);
 const MIN_CONFIDENCE = 0.72;
@@ -123,16 +133,32 @@ export function shouldInterpretAmbiguousUtterance(
   // Trámite de odómetro/horómetro activo → executor operativo (no aclaraciones genéricas).
   if (threadHasActiveOdometerFlow(threadText)) return false;
 
+  const expectedField = inferNumericExpectedFieldForThread(threadText);
+  const resolution = resolveUnitReferenceFromMessage({
+    rawText: text,
+    serviceIntent: detectServiceIntentInMessage(text),
+    expectedField,
+  });
+  if (resolution.unitMovilId != null) return false;
+  if (
+    detectServiceIntentInMessage(text) !== "none" &&
+    extractEmbeddedNumericReferences(text).some((c) => c.source === "embedded")
+  ) {
+    return false;
+  }
+
   // Certificado o mantenimiento esperando unidad → continuar recolección, no reinterpretar.
   if (
     hasPendingCertificateUnitRequest(threadText) &&
-    (extractMovilIdFromUnitMessage(text) != null || isOdometerPlateSelectionMessage(text))
+    (extractMovilIdFromUnitMessage(text, { threadText }) != null ||
+      isOdometerPlateSelectionMessage(text))
   ) {
     return false;
   }
   if (
     hasPendingMaintenancePlateRequest(threadText) &&
-    (extractMovilIdFromUnitMessage(text) != null || isMaintenancePlateSelectionMessage(text))
+    (extractMovilIdFromUnitMessage(text, { threadText }) != null ||
+      isMaintenancePlateSelectionMessage(text))
   ) {
     return false;
   }

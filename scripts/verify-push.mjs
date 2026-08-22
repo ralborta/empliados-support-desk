@@ -11,6 +11,7 @@ const PUSH_SUITES = [
   "verify-turn-ai-classifier.mjs",
   "verify-system-health.mjs",
   "verify-bbc-monitor.mjs",
+  "verify-service-plus-interno-same-message.mjs",
   "verify-unit-resolution-grounding.mjs",
   "verify-unit-name-vs-plate.mjs",
   "verify-unit-name-m600170.mjs",

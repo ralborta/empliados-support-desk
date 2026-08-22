@@ -1149,7 +1149,9 @@ export async function runTurnExecutorPhase(params: {
       !!plateInMsg && isPlausibleVehiclePlate(normalizePlate(plateInMsg));
     const regexPrefix = extractPlatePrefixFromMessage(selectionText);
     const explicitUnitCode = extractExplicitUnitNameFromText(selectionText);
-    const movilIdFromMsg = extractMovilIdFromUnitMessage(selectionText);
+    const movilIdFromMsg = extractMovilIdFromUnitMessage(selectionText, {
+      threadText: threadCtx.classificationThread,
+    });
     // Código interno (300-097) gana sobre marca/nombre libre de la IA — bug real 2026-08-06.
     const freeName =
       explicitUnitCode ||

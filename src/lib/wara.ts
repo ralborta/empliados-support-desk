@@ -7,6 +7,11 @@ import {
   stripBotPromptExamples,
   stripBotOdometerBotSpeech,
 } from "@/lib/odometroFecha";
+import {
+  extractUnitMovilIdsFromMessage,
+  type FleetUnitRef,
+  type NumericExpectedField,
+} from "@/lib/unitReferenceParser";
 import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
 
 export type WaraIncidentType =
@@ -1103,28 +1108,18 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
 }
 
 /** Números que identifican unidad (código interno / movil_id), no lectura de medidor — cualquier prefijo numérico. */
-export function extractUnitCodeNumbersFromMessage(rawText: string): number[] {
-  const out: number[] = [];
-  const text = String(rawText ?? "");
-  for (const m of text.matchAll(/\bunida[d]?\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
-    const n = parseInt(m[1], 10);
-    if (Number.isFinite(n)) out.push(n);
-  }
-  for (const m of text.matchAll(
-    /\b(?:interno|nro\.?\s+de\s+interno|n[uú]mero\s+de\s+interno)\s*(?:n[°o.]?\s*)?(\d{5,7})\b/gi,
-  )) {
-    const n = parseInt(m[1], 10);
-    if (Number.isFinite(n)) out.push(n);
-  }
-  for (const m of text.matchAll(/\b(?:M|m)(\d{3})-(\d{2,3})\b/g)) {
-    const n = parseInt(`${m[1]}${m[2]}`, 10);
-    if (Number.isFinite(n)) out.push(n);
-  }
-  const compact = text.trim().replace(/[\s\-_.]+/g, "");
-  if (/^\d{5,7}$/.test(compact)) {
-    out.push(parseInt(compact, 10));
-  }
-  return out;
+export function extractUnitCodeNumbersFromMessage(
+  rawText: string,
+  opts?: {
+    expectedField?: NumericExpectedField;
+    fleet?: FleetUnitRef[];
+  },
+): number[] {
+  return extractUnitMovilIdsFromMessage({
+    rawText,
+    expectedField: opts?.expectedField ?? "none",
+    fleet: opts?.fleet,
+  });
 }
 
 /** Descarta km/hs que en realidad son código de unidad (ej. 900114 tras "unidad"). */

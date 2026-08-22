@@ -39,6 +39,12 @@ import {
   looksLikeOdometerInfoRequest,
   extractUnitCodeNumbersFromMessage,
 } from "@/lib/wara";
+import {
+  detectServiceIntentInMessage,
+  resolveUnitReferenceFromMessage,
+  type FleetUnitRef,
+  type NumericExpectedField,
+} from "@/lib/unitReferenceParser";
 import { classifyTypedLateralQuery } from "@/lib/typedLateralQueries";
 import { classifyOdometerFlowSideQuestion } from "@/lib/pendingConfirmStance";
 import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
@@ -208,28 +214,50 @@ export function looksLikeDefiniteUnitNameCode(rawText: string | undefined | null
   return !isPlausibleVehiclePlate(compact);
 }
 
-export function extractMovilIdFromUnitMessage(rawText: string | undefined | null): number | null {
+/** Campo numérico que el hilo espera (unidad vs valor de medidor). */
+export function inferNumericExpectedFieldForThread(threadText: string): NumericExpectedField {
+  if (threadHasActiveMeterValueRequest(threadText)) return "meter_value";
+  if (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) {
+    return "unit";
+  }
+  return "none";
+}
+
+export function extractMovilIdFromUnitMessage(
+  rawText: string | undefined | null,
+  opts?: { threadText?: string; fleet?: FleetUnitRef[] },
+): number | null {
   const text = String(rawText ?? "").trim();
   if (!text) return null;
-  // "unida" sin d final — typo frecuente en WhatsApp (bug prod 2026-08-17).
-  for (const m of text.matchAll(/\bunida[d]?\s+(?:n[°o.]?\s*)?(\d{5,7})\b/gi)) {
-    const n = parseInt(m[1], 10);
-    if (Number.isFinite(n)) return n;
+
+  const threadText = opts?.threadText ?? "";
+  const expectedField = threadText ? inferNumericExpectedFieldForThread(threadText) : "none";
+  const resolution = resolveUnitReferenceFromMessage({
+    rawText: text,
+    serviceIntent: detectServiceIntentInMessage(text),
+    expectedField,
+    fleet: opts?.fleet,
+  });
+
+  if (resolution.kind === "dual" && resolution.unitMovilId != null) {
+    return resolution.unitMovilId;
   }
-  // Interno / número de interno (rioplatense: "interno 900079", "nro de interno 900079").
-  for (const m of text.matchAll(
-    /\b(?:interno|nro\.?\s+de\s+interno|n[uú]mero\s+de\s+interno)\s*(?:n[°o.]?\s*)?(\d{5,7})\b/gi,
-  )) {
-    const n = parseInt(m[1], 10);
-    if (Number.isFinite(n)) return n;
-  }
-  // Solo dígitos sueltos (900114). NO códigos con guión (300-092 → nombre M300-092).
-  const digitsOnly = text.replace(/\s+/g, "");
-  if (/^\d{5,7}$/.test(digitsOnly)) {
-    const n = parseInt(digitsOnly, 10);
-    if (Number.isFinite(n)) return n;
-  }
+  if (resolution.unitMovilId != null) return resolution.unitMovilId;
   return null;
+}
+
+export function resolveUnitReferenceClarification(
+  rawText: string,
+  opts?: { threadText?: string; fleet?: FleetUnitRef[] },
+): string | null {
+  const threadText = opts?.threadText ?? "";
+  const resolution = resolveUnitReferenceFromMessage({
+    rawText,
+    serviceIntent: detectServiceIntentInMessage(rawText),
+    expectedField: threadText ? inferNumericExpectedFieldForThread(threadText) : "none",
+    fleet: opts?.fleet,
+  });
+  return resolution.kind === "ambiguous" ? resolution.clarification ?? null : null;
 }
 
 function movilIdMatches(unitMovilId: unknown, target: number): boolean {
@@ -371,7 +399,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string, threadText = ""):
   ) {
     return false;
   }
-  if (extractMovilIdFromUnitMessage(text) != null) return true;
+  if (extractMovilIdFromUnitMessage(text, { threadText }) != null) return true;
   return (
     !!detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
@@ -1876,7 +1904,7 @@ function resolveByMovilIdOrUnitCode(
   rawText: string,
   units: WaraUnidadEstado[],
 ): UnitQueryResolution | null {
-  const movilId = extractMovilIdFromUnitMessage(rawText);
+  const movilId = extractMovilIdFromUnitMessage(rawText, { fleet: units });
   if (movilId != null) {
     const byId = units.filter((u) => movilIdMatches(u.movil_id, movilId));
     if (byId.length === 1) {

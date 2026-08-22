@@ -2,17 +2,20 @@
  * Precedencia compartida: intención explícita estado/GPS gana sobre parse operativo
  * (interno/patente/km) en overlay lateral y router de odómetro/horómetro.
  */
+import type { NumericExpectedField } from "@/lib/unitReferenceParser";
+import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   looksLikeBareMeterValue,
   threadAwaitingOdometerKmValue,
   threadAwaitingHorometerKmValue,
+  threadAwaitingOdometerPlate,
+  threadAwaitingHorometerPlate,
   threadHasActiveMeterValueRequest,
   extractUnitCodeNumbersFromMessage,
   detectLoosePlate,
   normalizePlate,
   isPlausibleVehiclePlate,
 } from "@/lib/wara";
-import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
@@ -49,7 +52,12 @@ export function isOperationalMeterCollectionMessage(text: string, threadText: st
   }
   const compact = text.trim().replace(/\s+/g, "");
   if (/^\d{5,7}$/.test(compact)) return true;
-  if (extractUnitCodeNumbersFromMessage(text).length > 0) return true;
+  let expectedField: NumericExpectedField = "none";
+  if (threadHasActiveMeterValueRequest(threadText)) expectedField = "meter_value";
+  else if (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) {
+    expectedField = "unit";
+  }
+  if (extractUnitCodeNumbersFromMessage(text, { expectedField }).length > 0) return true;
   const plate = detectLoosePlate(text);
   if (plate && isPlausibleVehiclePlate(normalizePlate(plate))) return true;
   return false;
