@@ -41,6 +41,8 @@ export function classifyConfirmoPhrase(text: string | undefined | null): Confirm
 
   const token = lettersOnly(raw);
   if (CONFIRMO_TYPO_WHITELIST.has(token) || token === "confirmo") return "confirm";
+  // Imperativo / infinitivo que el cliente usa en vez de CONFIRMO literal.
+  if (token === "confirmar" || token === "confirma" || token === "confirmacion") return "confirm";
 
   return "none";
 }

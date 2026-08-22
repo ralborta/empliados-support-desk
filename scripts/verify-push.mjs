@@ -45,6 +45,7 @@ const PUSH_SUITES = [
   "verify-certificate-flow-continuity.mjs",
   "verify-certificate-unit-code-continuation.mjs",
   "verify-certificate-unit-pivot-during-confirm.mjs",
+  "verify-certificate-confirmar-not-mantenimiento.mjs",
   "verify-certificate-not-greeting-loop.mjs",
   "verify-certificate-flow-superseded.mjs",
   "verify-delivery-critical-fixes.mjs",

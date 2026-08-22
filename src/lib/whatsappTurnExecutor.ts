@@ -1033,7 +1033,14 @@ export async function runTurnExecutorPhase(params: {
     looksLikePendingTramiteAffirmation(selectionText) &&
     (pendingConfirmExecutor || (pendingTramiteType && pendingAction?.payload))
   ) {
-    const executor = pendingConfirmExecutor ?? pendingTramiteType!;
+    // Thread CONFIRMO (cert/odo) manda sobre pendingAction stale de mantenimiento.
+    const executor =
+      pendingConfirmExecutor ??
+      (hasPendingCertificateConfirmation(threadCtx.classificationThread)
+        ? "certificados"
+        : hasPendingOdometerConfirmation(threadCtx.classificationThread)
+          ? "odometro"
+          : pendingTramiteType!);
     const execResult = await invokeExecutor(executor, rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
@@ -1382,11 +1389,13 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Selección de patente/prefijo/marca en mantenimiento pendiente → executor, no agente.
-  // Si el mensaje trae otro servicio explícito (estado/cert/odo) o el pedido GPS es más
-  // reciente, no secuestrar el turno hacia mantenimiento.
+  // Nunca si hay un resumen CONFIRMO más reciente (cert/odo/maint) o afirmación de trámite.
   if (
     hasPendingMaintenancePlateRequest(threadCtx.classificationThread) &&
-    isMaintenancePlateSelectionMessage(selectionText)
+    isMaintenancePlateSelectionMessage(selectionText) &&
+    !hasPendingCertificateConfirmation(threadCtx.classificationThread) &&
+    !hasPendingOdometerConfirmation(threadCtx.classificationThread) &&
+    !hasPendingMantenimientoConfirmation(threadCtx.classificationThread)
   ) {
     const override = resolveExecutorOverStaleMaintenancePlateSelection(
       selectionText,

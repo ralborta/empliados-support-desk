@@ -2437,10 +2437,11 @@ function maintenanceConfirmSummaryPending(tail: string, summaryStart: number): b
 }
 
 export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
-  // Odómetro/horómetro en curso manda sobre un resumen viejo de mantenimiento en el hilo.
+  // Odómetro/horómetro o certificado en CONFIRMO mandan sobre un resumen viejo de mantenimiento.
   if (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText)) {
     return false;
   }
+  if (certificateFlowState(threadText) === "awaiting_confirm") return false;
   const tail = normThreadText(threadText.slice(-4000));
   const newStart = tail.lastIndexOf("confirmar mantenimiento");
   if (newStart >= 0 && maintenanceConfirmSummaryPending(tail, newStart)) return true;
@@ -2658,6 +2659,8 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
   if (!t) return false;
   // "confirmo" y typos WhatsApp: comnfirmo, confimo, confimro, etc.
   if (looksLikeFuzzyConfirmoToken(t)) return true;
+  // "confirmar" / "confirmá" / "confirmacion" — clientes no siempre escriben CONFIRMO.
+  if (/^confirma(r|cion)?$/.test(t)) return true;
   if (
     new Set([
       "si",
@@ -2836,7 +2839,7 @@ export function looksLikePendingTramiteAffirmation(text: string | undefined | nu
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (
-    !/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|de acuerdo|joya|genial|porfa|porfavor|porfis|avanza|avanzame|obvio|claro)\b/.test(
+    !/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|confirmar|confirmacion|de acuerdo|joya|genial|porfa|porfavor|porfis|avanza|avanzame|obvio|claro)\b/.test(
       norm,
     ) &&
     !/^ahora\s+(si|sí)\b/.test(norm) &&

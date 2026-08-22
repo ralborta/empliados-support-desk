@@ -421,6 +421,8 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  // Nunca tratar "confirmar"/"confirmá" como patente (bug 2026-08-22 → mantenimiento).
+  if (/^confirm[aá](r|cion)?[!?.]*$/i.test(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
   if (extractPlatePrefixFromMessage(text) || isBarePlatePrefixHint(text)) return true;
   if (looksLikeVehicleBrandOrUnitSearch(text)) return true;
@@ -432,7 +434,7 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   if (looksLikeVagueUnitReference(text)) return true;
   return (
     text.length <= 16 &&
-    !/\b(mantenimiento|preventiv\w*|correctiv\w*|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
+    !/\b(mantenimiento|preventiv\w*|correctiv\w*|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar|confirm\w*)\b/i.test(
       text,
     )
   );
