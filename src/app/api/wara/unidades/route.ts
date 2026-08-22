@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { looksLikeGpsPlatformUiSymptomOnly } from "@/lib/gpsConsultRouting";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -1661,13 +1662,42 @@ export async function POST(req: NextRequest) {
         let ticketIssueDetail: string | undefined;
         let ticketReused = false;
         if (assessment.status === "ok" || assessment.status === "coherent_pause") {
-          action = "observation";
-          summaryText = await buildGpsClientSummary({
+          if (looksLikeGpsPlatformUiSymptomOnly(rawText)) {
+            action = "ticket";
+            ticketIssueDetail =
+              String(rawText ?? "").trim().slice(0, 220) ||
+              "reclamo de etapas/historial en plataforma con telemetría operativa";
+            const created = await createMissingReportTicket({
+              rawPhone,
+              unit,
+              companyName: pickOdooCompanyName(session.companyName, result.cliente),
+              contactName: session.contactName ?? "",
+              elapsedText,
+              issueDetail: ticketIssueDetail,
+              incidentType: "GENERAL_TECH",
+              ticketTitleSuffix: "Plataforma GPS / etapas",
+            });
+            ticketRef = created.ref;
+            ticketReused = created.reused;
+            summaryText = await buildGpsClientSummary({
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+              ticketRef: created.ref,
+              odooRef: created.odooRef ?? undefined,
+              ticketReused: created.reused,
+              ticketIssueDetail,
+            });
+          } else {
+            action = "observation";
+            summaryText = await buildGpsClientSummary({
               unitLabel: label,
               unit,
               assessment,
               action,
             });
+          }
         } else if (assessment.status === "ignition_failure") {
           // Inconsistencia de dato de ignición: informar, no abrir ticket automático.
           // Bug real 2026-08-21: ignición apagada en unidad detenida se ticketaba como falla.

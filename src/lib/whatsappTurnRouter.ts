@@ -1,4 +1,5 @@
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
+import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
 import { looksLikeOpenCaseStatusInquiry, looksLikeCaseResolutionEtaInquiry } from "@/lib/customerTicketInquiry";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
 import { looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
@@ -367,6 +368,12 @@ const TURN_RULES: TurnRule[] = [
     decide: ({ text }) => (looksLikeOpenNewCaseRequest(text) ? "odoo_ticket" : null),
   },
   {
+    id: "resolvable_unit_telemetry_consult",
+    reason:
+      "Unidad identificable + síntoma GPS → consultar telemetría en unidades antes de asesor.",
+    decide: ({ text }) => (shouldRouteGpsConsultToUnidades(text) ? "unidades" : null),
+  },
+  {
     id: "gps_feature_issue_advisor",
     reason: "GPS etapas/recorrido/historial sin patente → asesor (no buscar flota).",
     decide: ({ text }) => (looksLikeGpsFeatureIssueForAdvisor(text) ? "odoo_ticket" : null),
@@ -658,6 +665,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "conversation_close_request",
   "open_case_status_inquiry",
   "open_new_case_request",
+  "resolvable_unit_telemetry_consult",
   "gps_feature_issue_advisor",
   "human_advisor_request",
   "out_of_scope_support_claim",

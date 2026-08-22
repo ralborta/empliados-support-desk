@@ -15,7 +15,7 @@ import {
   selectionHasAiImageContext,
   withNoImageAnalysisNotice,
 } from "../src/lib/inboundImagePolicy.ts";
-import { looksLikeGpsFeatureIssueForAdvisor } from "../src/lib/waraApi.ts";
+import { shouldRouteGpsConsultToUnidades } from "../src/lib/gpsConsultRouting.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 
 let failed = 0;
@@ -43,10 +43,9 @@ assert(selectionHasAiImageContext(mergedOnly), "prefijo en merge");
 assert(mergedOnly.includes("M400-130"), "incluye unidad de la visión");
 assert(!looksLikeInboundMediaOnlyEvent(mergedOnly), "ya no es media-only");
 assert(
-  classifyTurnExecutor(mergedOnly, "") === "odoo_ticket" ||
-    classifyTurnExecutor(mergedOnly, "") === "unidades" ||
-    looksLikeGpsFeatureIssueForAdvisor(mergedOnly),
-  "texto de visión usable para routing (ticket/GPS/unidades)",
+  classifyTurnExecutor(mergedOnly, "") === "unidades" ||
+    shouldRouteGpsConsultToUnidades(mergedOnly),
+  "visión con unidad → unidades",
 );
 
 console.log("\n— Merge caption + aiImage —");
@@ -55,7 +54,11 @@ const caption =
 const mergedCap = mergeInboundTextWithAiImage(caption, vision);
 assert(looksLikeCustomerImageAttachmentCue(mergedCap), "sigue detectando adjunto");
 assert(mergedCap.includes(AI_IMAGE_CONTEXT_PREFIX), "suma descripción");
-assert(looksLikeGpsFeatureIssueForAdvisor(mergedCap), "GPS etapas con caption+visión");
+assert(
+  classifyTurnExecutor(mergedCap, "") === "unidades" ||
+    shouldRouteGpsConsultToUnidades(mergedCap),
+  "caption+visión con unidad → unidades (telemetría primero)",
+);
 
 console.log("\n— Sin aiImage: fallback escrito —");
 assert(mergeInboundTextWithAiImage("_event_image__", "") === "_event_image__", "sin merge");

@@ -74,7 +74,7 @@ export function mergeInboundTextWithAiImage(
 }
 
 export const NO_IMAGE_ANALYSIS_REPLY =
-  "Por este chat no pude leer la imagen (aún sin descripción automática). Escribime en texto la unidad y qué está pasando (ej. M400-130 error de GPS en etapas) y lo derivo a un asesor.";
+  "No pude leer la imagen automáticamente por este chat. Escribime la unidad (patente, interno o M400-105) y qué está pasando; con eso reviso el estado GPS o derivo si hace falta.";
 
 /** Aviso corto cuando adjuntó imagen pero no hubo descripción usable de BBC. */
 export const NO_IMAGE_ANALYSIS_NOTICE =

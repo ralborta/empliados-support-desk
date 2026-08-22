@@ -13,6 +13,7 @@ import {
   withNoImageAnalysisNotice,
 } from "../src/lib/inboundImagePolicy.ts";
 import { looksLikeGpsFeatureIssueForAdvisor } from "../src/lib/waraApi.ts";
+import { shouldRouteGpsConsultToUnidades } from "../src/lib/gpsConsultRouting.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 
 let failed = 0;
@@ -34,8 +35,9 @@ console.log("\n— Cue adjunto imagen —");
 const msg =
   "BUENAS TARDES ERROR DE GPS UNIDAD M400-130 ETAPA DE IDA TALCAHUANO Y SAN VICENTE , CUANDO LA UNIDAD PASA POR ETAPA , ADJUNTO IMAGEN";
 assert(looksLikeCustomerImageAttachmentCue(msg), "detecta ADJUNTO IMAGEN");
-assert(looksLikeGpsFeatureIssueForAdvisor(msg), "error+etapa → GPS feature advisor");
-assert(classifyTurnExecutor(msg, "") === "odoo_ticket", "classify → odoo_ticket (no unidades)");
+assert(shouldRouteGpsConsultToUnidades(msg), "unidad M400-130 + etapas → telemetría primero");
+assert(!looksLikeGpsFeatureIssueForAdvisor(msg), "con unidad NO es advisor-only GPS");
+assert(classifyTurnExecutor(msg, "") === "unidades", "classify → unidades (sin aiImage)");
 
 console.log("\n— Copy de aviso (sin visión BBC) —");
 assert(/no pude leer|no puedo analizar/i.test(NO_IMAGE_ANALYSIS_REPLY), "reply fija");

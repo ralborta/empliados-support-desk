@@ -25,6 +25,10 @@ import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppForma
 import { askCertificateUnitMessage, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import {
+  extractUnitCandidatesFromVisionText,
+  shouldRouteGpsConsultToUnidades,
+} from "@/lib/gpsConsultRouting";
+import {
   looksLikeCustomerImageAttachmentCue,
   looksLikeInboundMediaOnlyEvent,
   NO_IMAGE_ANALYSIS_REPLY,
@@ -464,7 +468,42 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  // Texto + "adjunto imagen" / error GPS etapas → asesor.
+  // Visión con candidato de unidad → telemetría primero (no ticket directo).
+  if (
+    hasAiImage &&
+    (shouldRouteGpsConsultToUnidades(selectionText) ||
+      extractUnitCandidatesFromVisionText(selectionText).length > 0)
+  ) {
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    return {
+      message:
+        execMessage ||
+        "Reviso el estado GPS de la unidad y te respondo en un momento.",
+      executor: "unidades",
+      ok: execOk,
+    };
+  }
+
+  // Texto + "adjunto imagen" con unidad identificable → telemetría antes que asesor.
+  if (
+    looksLikeCustomerImageAttachmentCue(selectionText) &&
+    shouldRouteGpsConsultToUnidades(selectionText)
+  ) {
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    return {
+      message:
+        execMessage ||
+        "Reviso el estado GPS de la unidad y te respondo en un momento.",
+      executor: "unidades",
+      ok: execOk,
+    };
+  }
+
+  // Texto + "adjunto imagen" / error GPS etapas sin unidad → asesor.
   // Si ya hay {aiImage} en el turno, no digas que no podés leer la captura.
   if (
     looksLikeCustomerImageAttachmentCue(selectionText) &&

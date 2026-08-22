@@ -13,6 +13,7 @@ import {
   type NumericExpectedField,
 } from "@/lib/unitReferenceParser";
 import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
+import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
 
 export type WaraIncidentType =
   | "MISSING_REPORT"
@@ -2499,6 +2500,7 @@ export function looksLikePostAdvisorCaseSupplement(
   threadText: string | undefined | null,
 ): boolean {
   if (!looksLikePostAdvisorCaseThread(threadText)) return false;
+  if (shouldRouteGpsConsultToUnidades(text)) return false;
   const n = String(text ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

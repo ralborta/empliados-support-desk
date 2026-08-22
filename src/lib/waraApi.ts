@@ -1,6 +1,7 @@
 import type { Customer, PrismaClient } from "@prisma/client";
 import { formatGreeting, formatCompanySelected } from "@/lib/waraWhatsAppFormat";
 import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
+import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
 import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
@@ -1816,8 +1817,12 @@ export function looksLikeOpenNewCaseRequest(text: string | undefined | null): bo
 /**
  * Síntoma GPS de plataforma (etapas/recorrido/historial) sin patente → asesor.
  * Bug real 2026-08-20: "NO REPORTA ETAPAS DE LA VUELTA" se buscó como unidad «VUELTA».
+ *
+ * Si hay unidad resoluble + síntoma operativo → consultar telemetría primero (unidades).
  */
 export function looksLikeGpsFeatureIssueForAdvisor(text: string | undefined | null): boolean {
+  if (shouldRouteGpsConsultToUnidades(text)) return false;
+
   const n = normCompanyToken(text ?? "");
   if (!n || n.length > 500) return false;
   if (detectLoosePlate(text ?? "")) return false;
