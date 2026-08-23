@@ -49,6 +49,7 @@ const PUSH_SUITES = [
   "verify-certificate-not-greeting-loop.mjs",
   "verify-certificate-flow-superseded.mjs",
   "verify-delivery-critical-fixes.mjs",
+  "verify-protected-turn-delivery.mjs",
   "verify-nissan-problem-list-offer.mjs",
   "verify-brand-mention-in-question.mjs",
   "verify-brand-marca-modelo-search.mjs",

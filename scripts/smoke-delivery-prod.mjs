@@ -36,7 +36,7 @@ loadEnvFile(".env.local");
 
 const args = process.argv.slice(2);
 const phoneArg = args.find((a) => a.startsWith("--phone="));
-const phone = phoneArg?.split("=", 2)[1]?.trim() ?? process.env.TEST_WA_PHONE?.trim() ?? "5492612478856";
+const phone = phoneArg?.split("=", 2)[1]?.trim() ?? process.env.TEST_WA_PHONE?.trim() ?? "5491133788190";
 const base = process.env.WARA_TURN_BASE_URL?.trim() || "https://wara.nivel41.com";
 const apiKey =
   process.env.PULZE_API_KEY?.trim() || process.env.BUILDERBOT_CONTEXT_API_KEY?.trim();

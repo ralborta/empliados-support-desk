@@ -83,12 +83,44 @@ export async function handleWhatsAppTurn(params: {
   aiImage?: string;
   /** BBC indica adjunto sin caption útil (imagen/PDF). */
   hasMedia?: boolean;
+  /** Id del mensaje WhatsApp (wamid) — dedup y protección anti-smoke en clientes. */
+  messageId?: string;
   apiKey: string;
 }): Promise<JsonRecord> {
-  const { rawPhone, body, apiKey } = params;
+  const { rawPhone, body, apiKey, messageId } = params;
   const trimmedBody = body.trim();
   const rawBody = mergeInboundTextWithAiImage(trimmedBody, params.aiImage).trim();
   let selectionText = rawBody;
+
+  const deliver = (payload: JsonRecord) =>
+    deliverTurnToWhatsApp(rawPhone, {
+      ...payload,
+      turnSelectionText: selectionText,
+      turnMessageId: messageId ?? "",
+    });
+
+  const turnMessageId = String(messageId ?? "").trim();
+  if (turnMessageId) {
+    const prior = await prisma.ticketMessage.findFirst({
+      where: { externalMessageId: turnMessageId },
+      select: { id: true },
+    });
+    if (prior) {
+      return deliver(
+        buildTurnPayload(
+          { registered: true, registered_s: "true" },
+          {
+            message: "",
+            skipResponse_s: "true",
+            nextFlow: "ignore",
+            nextFlow_s: "ignore",
+            executor: "context",
+            executor_s: "duplicate_message_id",
+          },
+        ),
+      );
+    }
+  }
 
   const inboundMediaOnly =
     params.hasMedia === true ||
@@ -99,8 +131,7 @@ export async function handleWhatsAppTurn(params: {
     const lastInbound = await recentLastInboundTextForPhone(rawPhone);
     if (lastInbound) {
       if (await shouldIgnoreDuplicateInicioTurn(rawPhone, lastInbound)) {
-        return deliverTurnToWhatsApp(
-          rawPhone,
+        return deliver(
           buildTurnPayload(
             { registered: true, registered_s: "true" },
             {
@@ -137,8 +168,7 @@ export async function handleWhatsAppTurn(params: {
     !hasUsableAiImageDescription(params.aiImage)
   ) {
     // Webhook vacío sin señal de media: no asumir imagen ni contestar al cliente.
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(
         { registered: true, registered_s: "true" },
         {
@@ -154,9 +184,10 @@ export async function handleWhatsAppTurn(params: {
   }
 
   if (rawBody) {
-    await persistCustomerInbound(rawPhone, rawBody, { source: "whatsapp_turn" }).catch(
-      () => undefined,
-    );
+    await persistCustomerInbound(rawPhone, rawBody, {
+      source: "whatsapp_turn",
+      ...(turnMessageId ? { messageId: turnMessageId } : {}),
+    }).catch(() => undefined);
   }
 
   // Fase 10A: copia shadow desacoplada (no-op si flags off / kill / sin API V2)
@@ -171,8 +202,7 @@ export async function handleWhatsAppTurn(params: {
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
 
   if (!allowPhoneRequest(rawPhone, 20)) {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(
         { registered: true, registered_s: "true" },
         {
@@ -213,8 +243,7 @@ export async function handleWhatsAppTurn(params: {
     ) {
       // Bypass: /turn sigue procesando.
     } else {
-      return deliverTurnToWhatsApp(
-        rawPhone,
+      return deliver(
         buildTurnPayload(context, {
           message: "",
           skipResponse_s: "true",
@@ -228,8 +257,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   if (contextNextFlow === "derivar") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         nextFlow: "derivar",
         nextFlow_s: "derivar",
@@ -240,8 +268,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   if (contextNextFlow === "reply") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         nextFlow: "reply",
         nextFlow_s: "reply",
@@ -259,8 +286,7 @@ export async function handleWhatsAppTurn(params: {
     const resetMessage = firstName
       ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
       : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         message: resetMessage,
         nextFlow: "reply",
@@ -274,8 +300,7 @@ export async function handleWhatsAppTurn(params: {
   if (shouldDeferTurnExecutor()) {
     scheduleDeferredTurnExecutor({ rawPhone, selectionText, apiKey });
     // Sin mensaje intermedio: el cliente recibe solo la respuesta real vía waitUntil + API WA.
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         message: "",
         skipResponse_s: "true",
@@ -289,8 +314,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   const execPhase = await runTurnExecutorPhase({ rawPhone, selectionText, apiKey });
-  return deliverTurnToWhatsApp(
-    rawPhone,
+  return deliver(
     buildTurnPayload(context, {
       ok: execPhase.ok,
       ok_s: execPhase.ok ? "true" : "false",

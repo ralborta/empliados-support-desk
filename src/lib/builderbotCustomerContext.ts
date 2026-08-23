@@ -787,6 +787,12 @@ export async function customerRegisteredContextResponse(
   } else if (looksLikeGreeting(selectionText)) {
     const threadForGreeting = scopedThreadText || fullThreadText;
     const pendingActionRecord = await getPendingAction(prisma, trimmed);
+    if (
+      await shouldIgnoreDuplicateInicioTurn(trimmed, selectionText)
+    ) {
+      nextFlow = "ignore";
+      responseMessage = "";
+    } else {
     const inconclusive = threadHasInconclusiveTramite(threadForGreeting, pendingActionRecord);
     // Saludo = arrancar de cero aunque haya trámite inconcluso (bug prod 2026-08-17).
     if (inconclusive) {
@@ -815,6 +821,7 @@ export async function customerRegisteredContextResponse(
           pendingAction: greetingPending,
         });
       }
+    }
     }
   } else if (selectionText && looksLikeConversationClosing(selectionText)) {
     const pendingNow =
@@ -986,8 +993,6 @@ export async function customerRegisteredContextResponse(
   } else if (
     duplicateInicioTurn &&
     selectionText &&
-    !looksLikeGreeting(selectionText) &&
-    !looksLikeSubstantiveCustomerMessage(selectionText) &&
     !isBarePlatePrefixHint(selectionText) &&
     !detectLoosePlate(selectionText) &&
     !hasPendingMaintenancePlateRequest(threadForMaintIntent)

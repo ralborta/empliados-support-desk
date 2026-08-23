@@ -21,6 +21,8 @@ const bodySchema = z
     /** true cuando el mensaje trae imagen/PDF/video sin caption operativo. */
     hasMedia: z.union([z.boolean(), z.string(), z.number()]).optional(),
     has_media: z.union([z.boolean(), z.string(), z.number()]).optional(),
+    messageId: z.string().optional(),
+    message_id: z.string().optional(),
     api_key: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     key: z.string().min(1).optional(),
@@ -85,11 +87,14 @@ export async function POST(req: NextRequest) {
     hasMediaRaw === "1" ||
     hasMediaRaw === 1;
 
+  const messageId = (parsed.data.messageId ?? parsed.data.message_id ?? "").trim();
+
   const payload = await handleWhatsAppTurn({
     rawPhone,
     body,
     aiImage: aiImage || undefined,
     hasMedia: hasMedia || undefined,
+    messageId: messageId || undefined,
     apiKey: apiKey ?? "",
   });
 

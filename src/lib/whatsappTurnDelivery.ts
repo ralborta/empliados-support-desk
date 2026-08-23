@@ -1,5 +1,10 @@
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
+import { prisma } from "@/lib/db";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
+import { findPlatformPresavedOutboundDuplicate } from "@/lib/outboundMessageDedup";
+import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
+import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
+import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 
 type JsonRecord = Record<string, unknown>;
@@ -36,6 +41,55 @@ export async function deliverTurnToWhatsApp(
 
   if (nextFlow === "router") {
     return { ...payload, message, skipResponse_s: "true", nextFlow, nextFlow_s: nextFlow };
+  }
+
+  const selectionText = String(payload.turnSelectionText ?? "").trim();
+  const turnMessageId = String(payload.turnMessageId ?? "").trim() || undefined;
+
+  if (
+    !(await shouldDeliverWhatsAppToProtectedClient(rawPhone, selectionText, {
+      messageId: turnMessageId,
+    }))
+  ) {
+    return {
+      ...payload,
+      message: "",
+      summaryText: "",
+      skipResponse_s: "true",
+      waDelivery: "protected_blocked",
+      waDelivery_s: "protected_blocked",
+    };
+  }
+
+  const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (customer) {
+    const ticket =
+      (await prisma.ticket.findFirst({
+        where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+        orderBy: { lastMessageAt: "desc" },
+      })) ??
+      (await prisma.ticket.findFirst({
+        where: { customerId: customer.id },
+        orderBy: { lastMessageAt: "desc" },
+      }));
+    if (ticket) {
+      const dup = await findPlatformPresavedOutboundDuplicate(prisma, {
+        ticketId: ticket.id,
+        text: message,
+        windowMs: 120_000,
+      });
+      if (dup) {
+        console.log("[whatsappTurn] Skip outbound duplicado (mismo texto <120s)", rawPhone);
+        return {
+          ...payload,
+          message: "",
+          summaryText: "",
+          skipResponse_s: "true",
+          duplicateOutbound_s: "true",
+          waDelivery: "duplicate_skipped",
+        };
+      }
+    }
   }
 
   const persistMeta = {
