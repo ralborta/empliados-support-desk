@@ -1256,12 +1256,31 @@ export async function POST(req: NextRequest) {
     horometro = undefined;
   }
 
-  let strippedMeters = stripMeterValuesMatchingUnitReference(rawText, { odometro, horometro });
+  // Bug prod 2026-08-23: strip agresivo trataba "176433" (km suelto en fase lectura) como
+  // interno y borraba odometro → re-pedía valor+fecha en loop. Solo strip en arranque
+  // servicio+interno; en fase km/hs/fecha preservar lecturas del cliente.
+  const preserveMeterStrip =
+    acceptBareOdometerKm ||
+    acceptBareHorometerHs ||
+    looksLikeFechaHoraLecturaMessage(rawText) ||
+    clockTimeOnlyReading ||
+    ((awaitingOdometerKm || awaitingHorometerKm || hasLiveOdometerPendingAction) &&
+      looksLikeBareMeterValue(rawText));
+  let strippedMeters = stripMeterValuesMatchingUnitReference(
+    rawText,
+    { odometro, horometro },
+    { preserveMeterValues: preserveMeterStrip },
+  );
   odometro = strippedMeters.odometro;
   horometro = strippedMeters.horometro;
   // También descartar lecturas que coinciden con internos mencionados en el hilo reciente
   // (bug prod 2026-08-23: mergedFields reinyectaba 900133 hs desde «Horometro 900133» viejo).
-  if (typeof odometro === "number" || typeof horometro === "number") {
+  // No aplicar sobre el hilo cuando el cliente está cargando km/hs/fecha (176433 en hilo).
+  if (
+    !preserveMeterStrip &&
+    blockThreadMeterInference &&
+    (typeof odometro === "number" || typeof horometro === "number")
+  ) {
     strippedMeters = stripMeterValuesMatchingUnitReference(
       [rawText, flowThreadText.slice(-2000)].filter(Boolean).join("\n"),
       { odometro, horometro },

@@ -70,4 +70,32 @@ assert.equal(threadAwaitingOdometerKmValue(odoThread), true);
 assert.equal(threadAwaitingHorometerKmValue(odoThread), false);
 check("Tomé con km sigue en flujo odómetro", threadAwaitingOdometerKmValue(odoThread));
 
+console.log("▶ Bare km 176433 en fase lectura NO se stripée como interno (regresión 2026-08-23)");
+assert.deepEqual(extractUnitCodeNumbersFromMessage("176433"), [176433], "176433 parece interno bare");
+const strippedBareBad = stripMeterValuesMatchingUnitReference("176433", { odometro: 176433 });
+assert.equal(strippedBareBad.odometro, undefined, "sin preserve, strip borra km (bug)");
+const strippedBareOk = stripMeterValuesMatchingUnitReference(
+  "176433",
+  { odometro: 176433 },
+  { preserveMeterValues: true },
+);
+assert.equal(strippedBareOk.odometro, 176433, "con preserve, km se conserva");
+check("preserveMeterValues conserva km suelto", strippedBareOk.odometro === 176433);
+
+const fechaThread = [
+  "Cliente: Cambiar el odometro",
+  "Atilio: 🛣️ *Odómetro* — Unidad: AI 154 GC — Pasame el valor…",
+  "Cliente: 176433",
+].join("\n");
+const strippedThreadBad = stripMeterValuesMatchingUnitReference(fechaThread, { odometro: 176433 });
+assert.equal(
+  strippedThreadBad.odometro,
+  undefined,
+  "strip en hilo con km del cliente borra lectura (bug fecha)",
+);
+check(
+  "strip solo en servicio+interno, no en hilo con km cliente",
+  stripMeterValuesMatchingUnitReference(startMsg, { horometro: 900114 }).horometro === undefined,
+);
+
 console.log(`\nOK — ${passed} checks`);

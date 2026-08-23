@@ -1165,7 +1165,9 @@ export function extractUnitCodeNumbersFromMessage(
 export function stripMeterValuesMatchingUnitReference(
   rawText: string,
   values: { odometro?: number; horometro?: number },
+  opts?: { preserveMeterValues?: boolean },
 ): { odometro?: number; horometro?: number } {
+  if (opts?.preserveMeterValues) return values;
   const unitCodes = new Set(extractUnitCodeNumbersFromMessage(rawText));
   if (!unitCodes.size) return values;
   let { odometro, horometro } = values;

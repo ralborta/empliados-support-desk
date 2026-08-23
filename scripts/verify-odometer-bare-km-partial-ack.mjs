@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import {
   looksLikeBareMeterValue,
+  stripMeterValuesMatchingUnitReference,
   threadAwaitingOdometerKmValue,
 } from "../src/lib/wara.ts";
 import {
@@ -30,6 +31,21 @@ assert.equal(
   "con hilo en fase km, 128900 NO es búsqueda de flota",
 );
 assert.equal(classifyTurnExecutor("128900", thread), "odometro", "enruta a odometro");
+
+const strippedWithoutPreserve = stripMeterValuesMatchingUnitReference("128900", {
+  odometro: 128900,
+});
+assert.equal(
+  strippedWithoutPreserve.odometro,
+  undefined,
+  "sin preserve, strip confunde km con interno",
+);
+const strippedWithPreserve = stripMeterValuesMatchingUnitReference(
+  "128900",
+  { odometro: 128900 },
+  { preserveMeterValues: true },
+);
+assert.equal(strippedWithPreserve.odometro, 128900, "preserveMeterValues conserva km suelto");
 
 const partialAck = formatMeterPartialAck({
   meter: "odometer",
