@@ -1780,11 +1780,19 @@ export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null)
     return true;
   }
 
-  // 3) Temas operativos / guías que Atilio SÍ atiende → no derivar.
-  if (isAtilioInScopeOperationalTopic(n)) return false;
+  // 3) Falla general de web/plataforma (o flota quieta en la web).
+  // Antes el paso "en alcance" matcheaba "unidades" y bloqueaba casos reales
+  // ("falla la web, las unidades están quietas" → odoo_ticket, 2026-08-07).
+  const narrowWaraModule =
+    /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|mantenimiento|preventiv\w*|correctiv\w*|etapas?|historial|recorrido|cumplimiento|telemetr\w*|reporte|sin reporte|no reporta)\b/.test(
+      n,
+    );
+  if ((platformContext && brokenOrClaim) || (platformContext && fleetWideSymptom)) {
+    if (!narrowWaraModule) return true;
+  }
 
-  // 4) Falla general de web/plataforma SIN tema operativo Wara.
-  if ((platformContext && brokenOrClaim) || (platformContext && fleetWideSymptom)) return true;
+  // 4) Temas operativos / guías que Atilio SÍ atiende → no derivar.
+  if (isAtilioInScopeOperationalTopic(n)) return false;
 
   // 5) "necesito reclamar X" genérico (X no es trámite Atilio — ya filtrado).
   if (/\b(necesito|quiero|vengo a|tengo que|hay que)\b.{0,40}\breclam\w*\b/.test(n)) {
