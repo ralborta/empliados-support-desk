@@ -3,7 +3,10 @@
  * Sin importar waraUnitIntent/waraApi (evita ciclos).
  */
 import { detectLoosePlate, isPlausibleVehiclePlate, normalizePlate } from "@/lib/wara";
-import { extractEmbeddedNumericReferences } from "@/lib/unitReferenceParser";
+import {
+  extractEmbeddedNumericReferences,
+  looksLikeNamedServiceWithUnitReference,
+} from "@/lib/unitReferenceParser";
 
 function norm(text: string): string {
   return text
@@ -32,6 +35,8 @@ export function looksLikeResolvableUnitReferenceInMessage(
   if (/\binterno\b/i.test(raw) && extractEmbeddedNumericReferences(raw).length > 0) {
     return true;
   }
+  // "GPS 900133" / "Estado 900079" / "Reporte 900100" — servicio + interno.
+  if (looksLikeNamedServiceWithUnitReference(raw)) return true;
   const bare = raw.replace(/\s+/g, "");
   if (/^\d{5,7}$/.test(bare)) return true;
   return false;

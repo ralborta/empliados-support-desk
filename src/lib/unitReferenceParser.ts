@@ -116,6 +116,22 @@ export function detectServiceIntentInMessage(text: string): ServiceIntentKind {
   return "none";
 }
 
+/**
+ * "Certificado 900133" / "GPS 900079" / "Mantenimiento M900-112" / "Horometro 900133":
+ * nombre de servicio + referencia de unidad, sin verbo.
+ * Bug 2026-08-23: solo odómetro/horómetro estaba cubierto; el resto podía silenciarse.
+ */
+export function looksLikeNamedServiceWithUnitReference(
+  text: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 200) return false;
+  if (detectServiceIntentInMessage(raw) === "none") return false;
+  if (extractEmbeddedNumericReferences(raw).length > 0) return true;
+  if (/\bM?\d{3}-\d{2,3}\b/i.test(raw)) return true;
+  return false;
+}
+
 export function fleetHasMovilId(fleet: FleetUnitRef[] | undefined, movilId: number): boolean {
   if (!fleet?.length) return false;
   return fleet.some((u) => Number(u.movil_id) === movilId);

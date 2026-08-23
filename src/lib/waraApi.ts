@@ -28,6 +28,7 @@ import {
   looksLikeGenericCorrectionIntent,
   looksLikeCertificateKeyword,
   looksLikeMaintenanceKeyword,
+  looksLikeNamedServiceWithUnitReference,
   normalizePlate,
   shouldAutoAssignInboundTicket,
   type WaraIncidentType,
@@ -1038,6 +1039,14 @@ export function looksLikeMaintenanceExplorationRequest(raw: string | undefined |
 export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = ""): boolean {
   const text = normCompanyToken(raw);
   if (looksLikeMaintenanceExplorationRequest(raw)) return false;
+  // "Mantenimiento 900133" / "Preventivo M900-112" — servicio + unidad sin verbo.
+  // Sin esto, con menú/guía en el hilo el route devolvía message="" (silencio).
+  if (
+    looksLikeNamedServiceWithUnitReference(raw) &&
+    /\b(mantenimiento|preventiv\w*|correctiv\w*)\b/.test(text)
+  ) {
+    return true;
+  }
   if (
     /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta|puedo)\b/.test(
       text,
@@ -1108,6 +1117,13 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan de mantenimiento)\b/.test(t)) return false;
+  // "GPS 900133" / "Estado 900079" / "Reporte 900100" — arranque con interno.
+  if (
+    looksLikeNamedServiceWithUnitReference(text) &&
+    /\b(estado|gps|reporte|ignicio|ignicion|posicion|ubicacion)\b/.test(t)
+  ) {
+    return true;
+  }
   if (looksLikeUnitReportingStatusCue(text)) return true;
   if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|dejo de reportar|offline|sin señal|sin senal)\b/.test(t)) {
     return true;

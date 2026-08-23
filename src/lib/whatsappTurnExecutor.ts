@@ -1761,6 +1761,12 @@ export async function runTurnExecutorPhase(params: {
     if (executor === "mantenimiento") {
       finalMessage =
         "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
+    } else if (executor === "certificados") {
+      finalMessage =
+        "Para el certificado de cobertura necesito la unidad: pasame la patente o el interno (ej. 900133) y te lo armo.";
+    } else if (executor === "odometro") {
+      finalMessage =
+        "Para el cambio de odómetro/horómetro necesito la unidad (patente o interno) y el valor. ¿Me los pasás?";
     } else if (
       executor === "unidades" &&
       (looksLikeLiveUnitConsultIntent(selectionText) ||

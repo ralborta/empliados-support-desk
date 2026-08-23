@@ -11,11 +11,14 @@ import {
   detectServiceIntentInMessage,
   extractEmbeddedNumericReferences,
   extractUnitMovilIdsFromMessage,
+  looksLikeNamedServiceWithUnitReference,
   type FleetUnitRef,
   type NumericExpectedField,
 } from "@/lib/unitReferenceParser";
 import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
 import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
+
+export { looksLikeNamedServiceWithUnitReference };
 
 export type WaraIncidentType =
   | "MISSING_REPORT"
@@ -1791,9 +1794,7 @@ export function looksLikeOdometerServiceWithUnitReference(
   if (looksLikeOdometerInfoRequest(raw)) return false;
   const intent = detectServiceIntentInMessage(raw);
   if (intent !== "odometro" && intent !== "horometro") return false;
-  if (extractEmbeddedNumericReferences(raw).length > 0) return true;
-  if (/\bM?\d{3}-\d{2,3}\b/i.test(raw)) return true;
-  return false;
+  return looksLikeNamedServiceWithUnitReference(raw);
 }
 
 /** Mensaje actual pide trámite de actualización de odómetro (no guía ni otro módulo). */
