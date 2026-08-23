@@ -799,16 +799,20 @@ export async function customerRegisteredContextResponse(
         inconclusive ||
         looksLikeRepeatGreetingInSession(threadForGreeting, selectionText) ||
         !!(lastTicket && (lastKnownPlate || lastTicket.code));
+      const greetingThread = inconclusive ? "" : threadForGreeting;
+      const greetingPending = inconclusive ? null : pendingActionRecord;
       if (repeatGreeting && multiCompany && waraContactsText && !inconclusive) {
         responseMessage = buildAtilioStructuredGreeting({
-          threadText: threadForGreeting,
+          threadText: greetingThread,
           companyListBlock: waraContactsText,
+          pendingAction: greetingPending,
         });
       } else {
         responseMessage = buildAtilioStructuredGreeting({
-          threadText: threadForGreeting,
+          threadText: greetingThread,
           companyName: activeCompany,
-          repeatGreeting,
+          repeatGreeting: inconclusive ? false : repeatGreeting,
+          pendingAction: greetingPending,
         });
       }
     }
