@@ -102,6 +102,7 @@ const SUITES = [
   "verify-delivery-critical-fixes.mjs",
   "verify-never-silent-delivery.mjs",
   "verify-turn-delivery-presave-integration.mjs",
+  "verify-turn-delivery-ledger-pg.mjs",
   "verify-consult-failure-handoff.mjs",
   "verify-out-of-scope-platform-handoff.mjs",
   "verify-out-of-scope-guardrails.mjs",

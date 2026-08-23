@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -11,13 +12,15 @@ export type WaTurnDeliveryMeta = {
   waOutboundProviderId?: string;
   /** Epoch ms — reserva atómica de envío (no confundir con entrega WA). */
   sendInitiatedAt?: number;
+  /** Identificador de la reserva actual; release/mark exigen coincidencia. */
+  attemptId?: string;
 };
 
 /** Tras este TTL, `send_initiated` sin provider id puede reclamarse (crash intermedio). */
 export const SEND_INITIATED_STALE_MS = 120_000;
 
 export type AcquireInboundDeliveryResult =
-  | { status: "acquired" }
+  | { status: "acquired"; attemptId: string }
   | { status: "already_delivered"; outboundProviderId: string }
   | { status: "in_progress" }
   | { status: "lost_race" };
@@ -46,6 +49,7 @@ function readDeliveryMeta(rawPayload: unknown): WaTurnDeliveryMeta {
     waOutboundProviderId:
       typeof m.waOutboundProviderId === "string" ? m.waOutboundProviderId.trim() : undefined,
     sendInitiatedAt,
+    attemptId: typeof m.attemptId === "string" ? m.attemptId.trim() : undefined,
   };
 }
 
@@ -76,6 +80,7 @@ export function isInboundTurnDeliveryComplete(rawPayload: unknown): boolean {
 export function isInboundTurnDeliveryInProgress(rawPayload: unknown): boolean {
   const meta = readDeliveryMeta(rawPayload);
   if (meta.waDeliveryState !== "send_initiated") return false;
+  if (meta.waOutboundProviderId) return true;
   const at = meta.sendInitiatedAt ?? 0;
   if (!at) return true;
   return Date.now() - at < SEND_INITIATED_STALE_MS;
@@ -97,6 +102,7 @@ function buildWaTurnDeliveryPatch(
     waDeliveryState: patch.waDeliveryState ?? priorMeta.waDeliveryState,
     waOutboundProviderId: patch.waOutboundProviderId ?? priorMeta.waOutboundProviderId,
     sendInitiatedAt: patch.sendInitiatedAt ?? priorMeta.sendInitiatedAt,
+    attemptId: patch.attemptId ?? priorMeta.attemptId,
   };
   return {
     ...prior,
@@ -130,6 +136,7 @@ export async function resolveInboundDeliveryContext(
   inboundMessageId?: string;
   deliveryState?: WaTurnDeliveryState;
   outboundProviderId?: string;
+  attemptId?: string;
 }> {
   const customer = await findCustomerByWhatsAppNumber(client, rawPhone);
   if (!customer) return {};
@@ -190,33 +197,15 @@ export async function resolveInboundDeliveryContext(
     inboundMessageId: inbound.id,
     deliveryState: meta.waDeliveryState,
     outboundProviderId: meta.waOutboundProviderId,
+    attemptId: meta.attemptId,
   };
-}
-
-async function mergeInboundDeliveryMeta(
-  client: PrismaClient,
-  inboundMessageId: string,
-  patch: WaTurnDeliveryMeta,
-): Promise<void> {
-  const row = await client.ticketMessage.findUnique({
-    where: { id: inboundMessageId },
-    select: { rawPayload: true },
-  });
-  if (!row) return;
-  const prior = priorPayloadObject(row.rawPayload);
-  await client.ticketMessage.update({
-    where: { id: inboundMessageId },
-    data: {
-      rawPayload: buildWaTurnDeliveryPatch(prior, patch),
-    },
-  });
 }
 
 function evaluateAcquireFromMeta(meta: WaTurnDeliveryMeta): AcquireInboundDeliveryResult | null {
   if (meta.waDeliveryState === "delivered" && meta.waOutboundProviderId) {
     return { status: "already_delivered", outboundProviderId: meta.waOutboundProviderId };
   }
-  if (meta.waOutboundProviderId && meta.waDeliveryState === "send_initiated") {
+  if (meta.waOutboundProviderId) {
     return { status: "already_delivered", outboundProviderId: meta.waOutboundProviderId };
   }
   if (meta.waDeliveryState === "send_initiated") {
@@ -229,7 +218,7 @@ function evaluateAcquireFromMeta(meta: WaTurnDeliveryMeta): AcquireInboundDelive
 }
 
 /**
- * Reserva atómica del derecho de envío para un inbound (SELECT FOR UPDATE + condicional).
+ * Reserva atómica del derecho de envío (SELECT FOR UPDATE + UPDATE condicional JSONB).
  */
 export async function tryAcquireInboundDeliverySendRight(
   inboundMessageId: string,
@@ -252,28 +241,34 @@ export async function tryAcquireInboundDeliverySendRight(
 
     const nowMs = Date.now();
     const staleThreshold = nowMs - SEND_INITIATED_STALE_MS;
+    const attemptId = randomUUID();
     const nextPayload = buildWaTurnDeliveryPatch(prior, {
       inboundDeliveryKey,
       waDeliveryState: "send_initiated",
       sendInitiatedAt: nowMs,
+      attemptId,
     });
 
-    const updated = await tx.$executeRaw`
-      UPDATE "TicketMessage"
-      SET "rawPayload" = ${nextPayload}::jsonb
-      WHERE id = ${inboundMessageId}
-      AND (
-        ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') IS NULL
-        OR ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') NOT IN ('delivered', 'send_initiated')
-        OR (
-          ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') = 'send_initiated'
-          AND (
-            ("rawPayload"->'waTurnDelivery'->>'sendInitiatedAt') IS NULL
-            OR (("rawPayload"->'waTurnDelivery'->>'sendInitiatedAt')::bigint < ${staleThreshold})
-          )
-        )
-      )
-    `;
+    const updated = await tx.$executeRawUnsafe(
+      `UPDATE "TicketMessage"
+       SET "rawPayload" = $1::jsonb
+       WHERE id = $2
+       AND (
+         ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') IS NULL
+         OR ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') NOT IN ('delivered', 'send_initiated')
+         OR (
+           ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') = 'send_initiated'
+           AND ("rawPayload"->'waTurnDelivery'->>'waOutboundProviderId') IS NULL
+           AND (
+             ("rawPayload"->'waTurnDelivery'->>'sendInitiatedAt') IS NULL
+             OR (("rawPayload"->'waTurnDelivery'->>'sendInitiatedAt')::bigint < $3)
+           )
+         )
+       )`,
+      JSON.stringify(nextPayload),
+      inboundMessageId,
+      staleThreshold,
+    );
 
     if (Number(updated) === 0) {
       const again = await tx.ticketMessage.findUnique({
@@ -286,38 +281,88 @@ export async function tryAcquireInboundDeliverySendRight(
       return retry ?? { status: "lost_race" };
     }
 
-    return { status: "acquired" };
+    return { status: "acquired", attemptId };
   });
 }
 
-/** Libera reserva tras fallo API (permite BBC fallback o reintento). */
-export async function releaseInboundDeliverySendRight(
+/** Tras API OK: guarda provider id en inbound antes de marcar delivered (evita reenvío si falla persistencia). */
+export async function recordInboundWaProviderAccepted(
   inboundMessageId: string,
   inboundDeliveryKey: string,
+  attemptId: string,
+  waOutboundProviderId: string,
   client: PrismaClient = prisma,
-): Promise<void> {
-  await client.$transaction(async (tx) => {
+): Promise<boolean> {
+  return client.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT 1 FROM "TicketMessage" WHERE id = ${inboundMessageId} FOR UPDATE`;
     const row = await tx.ticketMessage.findUnique({
       where: { id: inboundMessageId },
       select: { rawPayload: true },
     });
-    if (!row) return;
+    if (!row) return false;
     const prior = priorPayloadObject(row.rawPayload);
     const meta = readDeliveryMeta(prior);
-    if (meta.waDeliveryState === "delivered") return;
-    await tx.ticketMessage.update({
-      where: { id: inboundMessageId },
-      data: {
-        rawPayload: {
-          ...prior,
-          waTurnDelivery: {
-            inboundDeliveryKey,
-            waDeliveryState: "presaved",
-          },
-        } as Prisma.InputJsonObject,
-      },
+    const nextPayload = buildWaTurnDeliveryPatch(prior, {
+      inboundDeliveryKey,
+      waDeliveryState: "send_initiated",
+      waOutboundProviderId,
+      sendInitiatedAt: meta.sendInitiatedAt,
+      attemptId,
     });
+    const updated = await tx.$executeRawUnsafe(
+      `UPDATE "TicketMessage"
+       SET "rawPayload" = $1::jsonb
+       WHERE id = $2
+       AND ("rawPayload"->'waTurnDelivery'->>'attemptId') = $3
+       AND ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') = 'send_initiated'
+       AND ("rawPayload"->'waTurnDelivery'->>'waOutboundProviderId') IS NULL`,
+      JSON.stringify(nextPayload),
+      inboundMessageId,
+      attemptId,
+    );
+    return Number(updated) > 0;
+  });
+}
+
+/**
+ * Libera reserva solo si coincide attemptId y la API nunca devolvió provider id.
+ * Fallo antes/durante POST sin aceptación → permite BBC fallback.
+ */
+export async function releaseInboundDeliverySendRight(
+  inboundMessageId: string,
+  inboundDeliveryKey: string,
+  attemptId: string,
+  client: PrismaClient = prisma,
+): Promise<boolean> {
+  return client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "TicketMessage" WHERE id = ${inboundMessageId} FOR UPDATE`;
+    const row = await tx.ticketMessage.findUnique({
+      where: { id: inboundMessageId },
+      select: { rawPayload: true },
+    });
+    if (!row) return false;
+    const prior = priorPayloadObject(row.rawPayload);
+    const meta = readDeliveryMeta(prior);
+    if (meta.waDeliveryState === "delivered" || meta.waOutboundProviderId) return false;
+    const nextPayload = {
+      ...prior,
+      waTurnDelivery: {
+        inboundDeliveryKey,
+        waDeliveryState: "presaved",
+      },
+    };
+    const updated = await tx.$executeRawUnsafe(
+      `UPDATE "TicketMessage"
+       SET "rawPayload" = $1::jsonb
+       WHERE id = $2
+       AND ("rawPayload"->'waTurnDelivery'->>'attemptId') = $3
+       AND ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') = 'send_initiated'
+       AND ("rawPayload"->'waTurnDelivery'->>'waOutboundProviderId') IS NULL`,
+      JSON.stringify(nextPayload),
+      inboundMessageId,
+      attemptId,
+    );
+    return Number(updated) > 0;
   });
 }
 
@@ -325,13 +370,33 @@ export async function markInboundDeliveryDelivered(
   inboundMessageId: string,
   inboundDeliveryKey: string,
   waOutboundProviderId: string,
+  attemptId: string,
   client: PrismaClient = prisma,
-): Promise<void> {
-  await mergeInboundDeliveryMeta(client, inboundMessageId, {
-    inboundDeliveryKey,
-    waDeliveryState: "delivered",
-    waOutboundProviderId,
-    sendInitiatedAt: undefined,
+): Promise<boolean> {
+  return client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "TicketMessage" WHERE id = ${inboundMessageId} FOR UPDATE`;
+    const row = await tx.ticketMessage.findUnique({
+      where: { id: inboundMessageId },
+      select: { rawPayload: true },
+    });
+    if (!row) return false;
+    const prior = priorPayloadObject(row.rawPayload);
+    const nextPayload = buildWaTurnDeliveryPatch(prior, {
+      inboundDeliveryKey,
+      waDeliveryState: "delivered",
+      waOutboundProviderId,
+    });
+    const updated = await tx.$executeRawUnsafe(
+      `UPDATE "TicketMessage"
+       SET "rawPayload" = $1::jsonb
+       WHERE id = $2
+       AND ("rawPayload"->'waTurnDelivery'->>'attemptId') = $3
+       AND ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') = 'send_initiated'`,
+      JSON.stringify(nextPayload),
+      inboundMessageId,
+      attemptId,
+    );
+    return Number(updated) > 0;
   });
 }
 

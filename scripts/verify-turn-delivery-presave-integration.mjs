@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 const { createDeliverTurnToWhatsApp } = await import("../src/lib/whatsappTurnDelivery.ts");
 const {
   inboundDeliveryKeyFromParts,
+  releaseInboundDeliverySendRight,
   SEND_INITIATED_STALE_MS,
   simulateExecutorPresaveOutbound,
   tryAcquireInboundDeliverySendRight,
@@ -37,6 +38,54 @@ function createMockPrisma() {
   const messages = [];
   let seq = 0;
 
+  function parsePayloadJson(raw) {
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  }
+
+  function applyMockLedgerSql(sql, values) {
+    if (sql.includes("FOR UPDATE")) return 1;
+    if (!sql.includes("UPDATE")) return 0;
+
+    const inboundId = values[1];
+    const row = messages.find((m) => m.id === inboundId);
+    if (!row) return 0;
+    const meta = readWaMeta(row);
+    const nextPayload = parsePayloadJson(values[0]);
+
+    if (sql.includes("::bigint < $3")) {
+      if (meta.waDeliveryState === "delivered") return 0;
+      if (meta.waDeliveryState === "send_initiated" && meta.waOutboundProviderId) return 0;
+      const staleThreshold = values[2];
+      if (
+        meta.waDeliveryState === "send_initiated" &&
+        meta.sendInitiatedAt != null &&
+        Number(meta.sendInitiatedAt) >= Number(staleThreshold)
+      ) {
+        return 0;
+      }
+      row.rawPayload = nextPayload;
+      return 1;
+    }
+
+    const attemptId = values[2];
+    if (meta.attemptId !== attemptId) return 0;
+
+    if (sql.includes("waOutboundProviderId') IS NULL")) {
+      if (meta.waOutboundProviderId) return 0;
+      if (meta.waDeliveryState !== "send_initiated") return 0;
+      row.rawPayload = nextPayload;
+      return 1;
+    }
+
+    if (sql.includes("waDeliveryState') = 'send_initiated'")) {
+      if (meta.waDeliveryState !== "send_initiated") return 0;
+      row.rawPayload = nextPayload;
+      return 1;
+    }
+
+    return 0;
+  }
+
   const prisma = {
     customer: {
       findUnique: async ({ where }) =>
@@ -44,32 +93,9 @@ function createMockPrisma() {
     },
     $queryRaw: async () => [],
     $transaction: async (fn) => fn(prisma),
-    $executeRaw: async (strings, ...values) => {
-      const sql = strings.join("?");
-      if (sql.includes("FOR UPDATE")) return 1;
-      if (sql.includes("UPDATE")) {
-        const nextPayload = values[0];
-        const inboundId = values[1];
-        const staleThreshold = values[2];
-        const row = messages.find((m) => m.id === inboundId);
-        if (!row) return 0;
-        const meta = readWaMeta(row);
-        const state = meta.waDeliveryState;
-        const at = meta.sendInitiatedAt;
-        if (state === "delivered") return 0;
-        if (
-          state === "send_initiated" &&
-          at != null &&
-          Number(at) >= Number(staleThreshold)
-        ) {
-          return 0;
-        }
-        row.rawPayload =
-          typeof nextPayload === "object" ? nextPayload : row.rawPayload;
-        return 1;
-      }
-      return 0;
-    },
+    $executeRaw: async (strings, ...values) =>
+      applyMockLedgerSql(strings.join("?"), values),
+    $executeRawUnsafe: async (sql, ...values) => applyMockLedgerSql(sql, values),
     ticket: {
       findFirst: async () => ticket,
       update: async () => ticket,
@@ -404,9 +430,9 @@ const runtimeDedup = spawnSync("npx", ["tsx", "scripts/verify-builderbot-no-text
 });
 assert.equal(runtimeDedup.status, 0, `builderbot runtime dedup: ${runtimeDedup.stderr || runtimeDedup.stdout}`);
 
-console.log("— 13) Crash simulado: API OK pero mark delivered falla → no BBC duplicado —");
+console.log("— 13) API OK + fallo mark delivered → delivery_persist_failed, sin BBC ni reenvío —");
 const WAMID_MARK_FAIL = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0EB";
-const inboundMarkFail = await prisma.ticketMessage.create({
+await prisma.ticketMessage.create({
   data: {
     ticketId: ticket.id,
     direction: "INBOUND",
@@ -417,14 +443,14 @@ const inboundMarkFail = await prisma.ticketMessage.create({
 });
 const markFailPrisma = {
   ...prisma,
-  ticketMessage: {
-    ...prisma.ticketMessage,
-    update: async ({ where, data }) => {
-      if (data?.rawPayload?.waTurnDelivery?.waDeliveryState === "delivered") {
-        throw new Error("simulated crash before delivered mark");
-      }
-      return prisma.ticketMessage.update({ where, data });
-    },
+  $transaction: async (fn) => fn(markFailPrisma),
+  $executeRawUnsafe: async (sql, ...args) => {
+    const payload =
+      typeof args[0] === "string" ? JSON.parse(args[0]) : args[0];
+    if (payload?.waTurnDelivery?.waDeliveryState === "delivered") {
+      throw new Error("simulated crash before delivered mark");
+    }
+    return prisma.$executeRawUnsafe(sql, ...args);
   },
 };
 const crashDeliver = createDeliverTurnToWhatsApp({
@@ -437,18 +463,68 @@ const crashResult = await crashDeliver(
   PHONE,
   makePayload("Crash mark delivered", WAMID_MARK_FAIL, "Odometro 900125"),
 );
-assert.equal(crashResult.waDelivery, "bbc_fallback");
-assert.equal(crashResult.skipResponse_s, "false");
+assert.equal(sendCalls, 1, "exactamente un POST API");
+assert.equal(crashResult.waDelivery, "delivery_persist_failed");
+assert.equal(crashResult.skipResponse_s, "true", "sin BBC fallback");
+assert.equal(crashResult.message, "");
+assert.ok(crashResult.waOutboundProviderId, "provider id en resultado");
 sendCalls = 0;
 const afterCrash = await deliver(
   PHONE,
   makePayload("Crash mark delivered", WAMID_MARK_FAIL, "Odometro 900125"),
 );
-assert.notEqual(afterCrash.waDelivery, "bbc_fallback", "reintento no duplica BBC");
+assert.equal(sendCalls, 0, "sin segundo POST inmediato");
 assert.ok(
-  afterCrash.waDelivery === "backend" ||
-    afterCrash.waDelivery === "idempotent_inbound" ||
+  afterCrash.waDelivery === "idempotent_inbound" ||
     afterCrash.waDelivery === "send_in_progress",
 );
 
-console.log("\n✓ verify-turn-delivery-presave-integration OK (13 escenarios)");
+console.log("— 14) Carrera: A vence, B reclama, A no puede liberar tarde —");
+const WAMID_RACE = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0EC";
+const inboundRace = await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: "Odometro 900126",
+    externalMessageId: WAMID_RACE,
+  },
+});
+const keyRace = inboundDeliveryKeyFromParts({ turnMessageId: WAMID_RACE });
+const acquireA = await tryAcquireInboundDeliverySendRight(
+  inboundRace.id,
+  keyRace,
+  prisma,
+);
+assert.equal(acquireA.status, "acquired");
+const attemptA = acquireA.attemptId;
+const raceRow = messages.find((m) => m.id === inboundRace.id);
+raceRow.rawPayload = {
+  ...raceRow.rawPayload,
+  waTurnDelivery: {
+    inboundDeliveryKey: keyRace,
+    waDeliveryState: "send_initiated",
+    sendInitiatedAt: Date.now() - SEND_INITIATED_STALE_MS - 5000,
+    attemptId: attemptA,
+  },
+};
+const acquireB = await tryAcquireInboundDeliverySendRight(
+  inboundRace.id,
+  keyRace,
+  prisma,
+);
+assert.equal(acquireB.status, "acquired");
+const attemptB = acquireB.attemptId;
+assert.notEqual(attemptA, attemptB);
+const lateRelease = await releaseInboundDeliverySendRight(
+  inboundRace.id,
+  keyRace,
+  attemptA,
+  prisma,
+);
+assert.equal(lateRelease, false, "A no libera reserva de B");
+const raceMeta = readWaMeta(messages.find((m) => m.id === inboundRace.id));
+assert.equal(raceMeta.attemptId, attemptB);
+assert.equal(raceMeta.waDeliveryState, "send_initiated");
+
+console.log("\n✓ verify-turn-delivery-presave-integration OK (14 escenarios)");

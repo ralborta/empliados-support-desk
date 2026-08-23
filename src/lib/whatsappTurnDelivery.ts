@@ -10,6 +10,7 @@ import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
 import {
   markInboundDeliveryDelivered,
+  recordInboundWaProviderAccepted,
   releaseInboundDeliverySendRight,
   resolveInboundDeliveryContext,
   tryAcquireInboundDeliverySendRight,
@@ -151,6 +152,8 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
       };
     }
 
+    let deliveryAttemptId: string | undefined;
+
     if (inboundCtx.inboundMessageId && inboundCtx.inboundDeliveryKey) {
       const acquire = await tryAcquireInboundDeliverySendRight(
         inboundCtx.inboundMessageId,
@@ -181,70 +184,79 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
           inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
         };
       }
+      if (acquire.status === "acquired") {
+        deliveryAttemptId = acquire.attemptId;
+      }
     }
 
-    try {
-      const sendResult = await deps.sendWhatsApp({ number: rawPhone, message, mediaUrl });
+    const inboundMessageId = inboundCtx.inboundMessageId;
+    const inboundDeliveryKey = inboundCtx.inboundDeliveryKey;
+    const ledger =
+      inboundMessageId && inboundDeliveryKey && deliveryAttemptId
+        ? {
+            inboundMessageId,
+            inboundDeliveryKey,
+            attemptId: deliveryAttemptId,
+          }
+        : undefined;
 
-      if (sendResult.skippedDuplicate) {
-        const providerId = String(sendResult.providerMessageId ?? "").trim();
-        if (
-          inboundCtx.inboundMessageId &&
-          inboundCtx.inboundDeliveryKey &&
-          providerId
-        ) {
-          await markInboundDeliveryDelivered(
-            inboundCtx.inboundMessageId,
-            inboundCtx.inboundDeliveryKey,
+    const finishBackendDelivery = async (
+      providerId: string,
+      waDeliveryLabel: string,
+    ): Promise<JsonRecord> => {
+      if (ledger) {
+        try {
+          const accepted = await recordInboundWaProviderAccepted(
+            ledger.inboundMessageId,
+            ledger.inboundDeliveryKey,
+            ledger.attemptId,
             providerId,
             deps.prisma,
           );
+          if (!accepted) {
+            throw new Error("recordInboundWaProviderAccepted returned false");
+          }
+          const marked = await markInboundDeliveryDelivered(
+            ledger.inboundMessageId,
+            ledger.inboundDeliveryKey,
+            providerId,
+            ledger.attemptId,
+            deps.prisma,
+          );
+          if (!marked) {
+            throw new Error("markInboundDeliveryDelivered returned false");
+          }
+        } catch (persistError) {
+          const detail =
+            persistError instanceof Error ? persistError.message : String(persistError);
+          console.error("[whatsappTurn] API aceptó WA pero persistencia inbound falló", {
+            inboundMessageId: ledger.inboundMessageId,
+            attemptId: ledger.attemptId,
+            waOutboundProviderId: providerId,
+            error: detail,
+          });
+          return {
+            ...payload,
+            message: "",
+            summaryText: "",
+            skipResponse_s: "true",
+            waSent_s: "true",
+            waDelivery: "delivery_persist_failed",
+            waDelivery_s: "delivery_persist_failed",
+            waDeliveryPersistFailed_s: "true",
+            waOutboundProviderId: providerId,
+            inboundDeliveryKey: ledger.inboundDeliveryKey,
+            inboundDeliveryAttemptId: ledger.attemptId,
+            waDeliveryPersistError: detail,
+          };
         }
-        await persistCustomerBotReply(rawPhone, message, {
-          ...persistMeta,
-          waDelivery: providerId ? "backend" : "idempotent_api_dedup",
-          ...(providerId
-            ? { waOutboundProviderId: providerId, waDeliveryState: "delivered" }
-            : {}),
-          inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
-        }, deps.prisma).catch(() => undefined);
-
-        return {
-          ...payload,
-          message: "",
-          summaryText: "",
-          deliveredMessage: message,
-          deliveredMessage_s: message,
-          skipResponse_s: "true",
-          waSent_s: providerId ? "true" : "false",
-          waDelivery: providerId ? "backend" : "idempotent_api_dedup",
-          waDelivery_s: providerId ? "backend" : "idempotent_api_dedup",
-          ...(providerId ? { waOutboundProviderId: providerId } : {}),
-          inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
-          waSkippedDuplicate_s: "true",
-          ...(mediaUrl ? { mediaUrl: "", mediaUrl_s: "" } : {}),
-        };
-      }
-
-      const providerId = String(sendResult.providerMessageId ?? "").trim();
-      if (!providerId) {
-        throw new Error("BuilderBot API OK sin identificador de mensaje saliente");
-      }
-
-      if (inboundCtx.inboundMessageId && inboundCtx.inboundDeliveryKey) {
-        await markInboundDeliveryDelivered(
-          inboundCtx.inboundMessageId,
-          inboundCtx.inboundDeliveryKey,
-          providerId,
-          deps.prisma,
-        );
       }
 
       await persistCustomerBotReply(rawPhone, message, {
         ...persistMeta,
-        waDelivery: "backend",
+        waDelivery: waDeliveryLabel,
         waOutboundProviderId: providerId,
-        inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
+        inboundDeliveryKey: ledger?.inboundDeliveryKey ?? inboundDeliveryKey,
         waDeliveryState: "delivered",
       }, deps.prisma).catch(() => undefined);
 
@@ -256,18 +268,49 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
         deliveredMessage_s: message,
         skipResponse_s: "true",
         waSent_s: "true",
-        waDelivery: "backend",
+        waDelivery: waDeliveryLabel,
         waOutboundProviderId: providerId,
-        inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
+        inboundDeliveryKey: ledger?.inboundDeliveryKey ?? inboundDeliveryKey,
         ...(mediaUrl ? { mediaUrl: "", mediaUrl_s: "" } : {}),
       };
+    };
+
+    try {
+      const sendResult = await deps.sendWhatsApp({ number: rawPhone, message, mediaUrl });
+
+      if (sendResult.skippedDuplicate) {
+        const providerId = String(sendResult.providerMessageId ?? "").trim();
+        if (!providerId) {
+          return {
+            ...payload,
+            message: "",
+            summaryText: "",
+            skipResponse_s: "true",
+            waSent_s: "false",
+            waDelivery: "idempotent_api_dedup",
+            waDelivery_s: "idempotent_api_dedup",
+            inboundDeliveryKey,
+            waSkippedDuplicate_s: "true",
+            ...(mediaUrl ? { mediaUrl: "", mediaUrl_s: "" } : {}),
+          };
+        }
+        return await finishBackendDelivery(providerId, "backend");
+      }
+
+      const providerId = String(sendResult.providerMessageId ?? "").trim();
+      if (!providerId) {
+        throw new Error("BuilderBot API OK sin identificador de mensaje saliente");
+      }
+
+      return await finishBackendDelivery(providerId, "backend");
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       console.error("[whatsappTurn] Envío WA falló, fallback BBC messageMapping:", detail);
-      if (inboundCtx.inboundMessageId && inboundCtx.inboundDeliveryKey) {
+      if (ledger) {
         await releaseInboundDeliverySendRight(
-          inboundCtx.inboundMessageId,
-          inboundCtx.inboundDeliveryKey,
+          ledger.inboundMessageId,
+          ledger.inboundDeliveryKey,
+          ledger.attemptId,
           deps.prisma,
         ).catch(() => undefined);
       }

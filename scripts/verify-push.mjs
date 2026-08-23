@@ -50,6 +50,7 @@ const PUSH_SUITES = [
   "verify-certificate-flow-superseded.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-turn-delivery-presave-integration.mjs",
+  "verify-turn-delivery-ledger-pg.mjs",
   "verify-protected-turn-delivery.mjs",
   "verify-nissan-problem-list-offer.mjs",
   "verify-brand-mention-in-question.mjs",
