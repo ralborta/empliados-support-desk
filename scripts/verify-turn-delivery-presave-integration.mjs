@@ -527,4 +527,61 @@ const raceMeta = readWaMeta(messages.find((m) => m.id === inboundRace.id));
 assert.equal(raceMeta.attemptId, attemptB);
 assert.equal(raceMeta.waDeliveryState, "send_initiated");
 
-console.log("\n✓ verify-turn-delivery-presave-integration OK (14 escenarios)");
+console.log("— 15) record accepted falla, stale 120s, reintento → sin segundo POST —");
+const WAMID_RECORD_FAIL = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0ED";
+const inboundRecordFail = await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: "Odometro 900127",
+    externalMessageId: WAMID_RECORD_FAIL,
+  },
+});
+const recordFailPrisma = {
+  ...prisma,
+  $transaction: async (fn) => fn(recordFailPrisma),
+  $executeRawUnsafe: async (sql, ...args) => {
+    const payload =
+      typeof args[0] === "string" ? JSON.parse(args[0]) : args[0];
+    const meta = payload?.waTurnDelivery;
+    if (
+      sql.includes("waOutboundProviderId') IS NULL") &&
+      meta?.waOutboundProviderId
+    ) {
+      throw new Error("simulated recordInboundWaProviderAccepted fail");
+    }
+    return prisma.$executeRawUnsafe(sql, ...args);
+  },
+};
+const recordFailDeliver = createDeliverTurnToWhatsApp({
+  prisma: recordFailPrisma,
+  sendWhatsApp: mockSend,
+  sendWhatsAppMessage: mockSendMessage,
+});
+sendCalls = 0;
+const recordFailResult = await recordFailDeliver(
+  PHONE,
+  makePayload("Record fail stash", WAMID_RECORD_FAIL, "Odometro 900127"),
+);
+assert.equal(sendCalls, 1, "un POST API en primer intento");
+assert.equal(recordFailResult.waDelivery, "delivery_persist_failed");
+assert.ok(recordFailResult.waOutboundProviderId, "provider id en resultado");
+const recordFailRow = messages.find((m) => m.id === inboundRecordFail.id);
+assert.ok(readWaMeta(recordFailRow).waOutboundProviderId, "stash en inbound tras fallo record");
+recordFailRow.rawPayload = {
+  ...recordFailRow.rawPayload,
+  waTurnDelivery: {
+    ...readWaMeta(recordFailRow),
+    sendInitiatedAt: Date.now() - SEND_INITIATED_STALE_MS - 8000,
+  },
+};
+sendCalls = 0;
+const staleRetry = await deliver(
+  PHONE,
+  makePayload("Record fail stash", WAMID_RECORD_FAIL, "Odometro 900127"),
+);
+assert.equal(sendCalls, 0, "sin segundo POST tras 120s stale");
+assert.equal(staleRetry.waDelivery, "idempotent_inbound");
+
+console.log("\n✓ verify-turn-delivery-presave-integration OK (15 escenarios)");

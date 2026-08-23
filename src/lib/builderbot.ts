@@ -20,6 +20,12 @@ export interface SendWhatsAppOptions {
 
 /**
  * Envía un mensaje de WhatsApp vía BuilderBot Cloud (API v2).
+ *
+ * Idempotencia externa: BuilderBot v2 `/messages` no expone clave de idempotencia
+ * por request (solo `checkIfExists`, no reenvío seguro). Política WARA ante POST
+ * ambiguo (timeout/red sin body): priorizar evitar duplicados — no reenviar si el
+ * ledger inbound ya tiene `waOutboundProviderId`; devolver `delivery_persist_failed`
+ * sin BBC fallback. Ver `ensureInboundWaProviderIdStashed` y turnWhatsAppDeliveryLedger.
  */
 export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
   const { message, mediaUrl, checkIfExists = false } = options;

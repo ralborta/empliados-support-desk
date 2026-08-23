@@ -400,6 +400,41 @@ export async function markInboundDeliveryDelivered(
   });
 }
 
+/**
+ * Best-effort tras API OK: guarda provider id en inbound para bloquear reenvío
+ * si falló record/mark (evita segundo POST en reintentos stale).
+ */
+export async function ensureInboundWaProviderIdStashed(
+  inboundMessageId: string,
+  inboundDeliveryKey: string,
+  waOutboundProviderId: string,
+  attemptId?: string,
+  client: PrismaClient = prisma,
+): Promise<void> {
+  await client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "TicketMessage" WHERE id = ${inboundMessageId} FOR UPDATE`;
+    const row = await tx.ticketMessage.findUnique({
+      where: { id: inboundMessageId },
+      select: { rawPayload: true },
+    });
+    if (!row) return;
+    const prior = priorPayloadObject(row.rawPayload);
+    const meta = readDeliveryMeta(prior);
+    if (meta.waDeliveryState === "delivered" && meta.waOutboundProviderId) return;
+    const nextPayload = buildWaTurnDeliveryPatch(prior, {
+      inboundDeliveryKey,
+      waDeliveryState: meta.waDeliveryState ?? "send_initiated",
+      waOutboundProviderId,
+      attemptId: meta.attemptId ?? attemptId,
+      sendInitiatedAt: meta.sendInitiatedAt,
+    });
+    await tx.ticketMessage.update({
+      where: { id: inboundMessageId },
+      data: { rawPayload: nextPayload },
+    });
+  });
+}
+
 /** Presave del executor: OUTBOUND en panel sin estado de entrega WA. */
 export async function simulateExecutorPresaveOutbound(
   client: PrismaClient,

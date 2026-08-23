@@ -6,6 +6,7 @@
  * Uso: npx tsx scripts/verify-turn-delivery-ledger-pg.mjs
  */
 import { PrismaClient } from "@prisma/client";
+import { requireDatabaseUrl } from "./load-verify-env.mjs";
 import {
   inboundDeliveryKeyFromParts,
   markInboundDeliveryDelivered,
@@ -36,10 +37,7 @@ function readMeta(rawPayload) {
 }
 
 async function main() {
-  if (!process.env.DATABASE_URL) {
-    console.log("SKIP: falta DATABASE_URL");
-    return;
-  }
+  requireDatabaseUrl("verify-turn-delivery-ledger-pg.mjs");
 
   console.log("— Ledger PG: acquire JSON.stringify::jsonb + attemptId —");
 

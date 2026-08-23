@@ -9,6 +9,7 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
 import {
+  ensureInboundWaProviderIdStashed,
   markInboundDeliveryDelivered,
   recordInboundWaProviderAccepted,
   releaseInboundDeliverySendRight,
@@ -229,9 +230,18 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
         } catch (persistError) {
           const detail =
             persistError instanceof Error ? persistError.message : String(persistError);
+          if (ledger) {
+            await ensureInboundWaProviderIdStashed(
+              ledger.inboundMessageId,
+              ledger.inboundDeliveryKey,
+              providerId,
+              ledger.attemptId,
+              deps.prisma,
+            ).catch(() => undefined);
+          }
           console.error("[whatsappTurn] API aceptó WA pero persistencia inbound falló", {
-            inboundMessageId: ledger.inboundMessageId,
-            attemptId: ledger.attemptId,
+            inboundMessageId: ledger?.inboundMessageId,
+            attemptId: ledger?.attemptId,
             waOutboundProviderId: providerId,
             error: detail,
           });
