@@ -1701,7 +1701,9 @@ export function shouldSkipStrayMaintenanceRequest(
 }
 
 export function looksLikeGreeting(text: string | undefined | null): boolean {
-  const norm = normCompanyToken(text ?? "");
+  const norm = normCompanyToken(text ?? "")
+    .replace(/[!?.¡¿]+$/g, "")
+    .trim();
   if (!norm) return true;
   return /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|que tal|menu|inicio)$/.test(
     norm

@@ -15,6 +15,7 @@ import {
   looksLikeRepeatGreetingInSession,
 } from "../src/lib/waraApi.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
+import { shouldRouteTurnToOdometerExecutor } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -51,6 +52,23 @@ assert(
 
 console.log("— Cuerpo vacío (bug BBC) no debe repetir saludo operativo —");
 assert(looksLikeGreeting(""), "documenta: texto vacío = saludo (por eso hay que tratarlo aparte)");
+assert(looksLikeGreeting("Buenas tardes?"), "saludo con interrogación");
+assert(looksLikeGreeting("Hola!"), "saludo con exclamación");
+assert(!looksLikeGreeting("Buenas tardes, quiero el certificado"), "saludo + trámite no es solo saludo");
+
+console.log("— saludo no reabre horómetro pendiente —");
+const horoThread = [
+  "Cliente: Horometro 900133",
+  "Atilio: Valor anotado. Me falta solo la fecha y hora.",
+].join("\n");
+assert(
+  !shouldRouteTurnToOdometerExecutor({
+    selectionText: "Buenas tardes?",
+    threadText: horoThread,
+    pendingActionType: "odometro",
+  }),
+  "Buenas tardes? no continúa odómetro con pending",
+);
 assert(
   !looksLikeRepeatGreetingInSession(threadAfterGreeting, certMsg),
   "certificado concreto no es saludo repetido",
