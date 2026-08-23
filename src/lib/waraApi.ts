@@ -818,6 +818,15 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   ) {
     return true;
   }
+  // Arranque explícito de medidor (con o sin verbo) gana sobre hilo superseded.
+  // Bug 2026-08-23: "Horometro 900133" tras menú caía a topicChange vacío.
+  if (
+    looksLikeHorometerOnlyIntent(text) ||
+    looksLikeExplicitOdometerUpdateRequest(text) ||
+    looksLikeOdometerIntentStart(text)
+  ) {
+    return true;
+  }
   if (isOdometerFlowSuperseded(threadText)) return false;
   const odometerFlowAwaitingInput =
     threadAwaitingOdometerPlate(threadText) ||

@@ -1517,8 +1517,17 @@ export async function runTurnExecutorPhase(params: {
     const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (execMessage || !executorSkippedSilently(execResult)) {
+    // Nunca devolver silencio: skip vacío o message="" deben caer al fallback genérico.
+    if (execMessage.trim()) {
       return { message: execMessage, executor: "odometro", ok: execOk };
+    }
+    if (!executorSkippedSilently(execResult)) {
+      return {
+        message:
+          "Para el cambio de odómetro/horómetro necesito la unidad (patente o interno) y el valor. ¿Me los pasás?",
+        executor: "odometro",
+        ok: false,
+      };
     }
   }
 

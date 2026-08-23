@@ -43,6 +43,7 @@ const SUITES = [
   "verify-odometer-vague-unit-start.mjs",
   "verify-odometer-pending-confirm-context.mjs",
   "verify-odometer-confirm-structured-switch.mjs",
+  "verify-horometro-interno-no-silence.mjs",
   "verify-odometer-after-fleet-list.mjs",
   "verify-odometer-bare-km.mjs",
   "verify-odometer-bare-km-partial-ack.mjs",

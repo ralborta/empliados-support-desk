@@ -31,6 +31,7 @@ import {
   looksLikeOdometerHelpRequest,
   looksLikeOdometerIntentStart,
   looksLikeBareOdometerTopicMention,
+  looksLikeOdometerServiceWithUnitReference,
   looksLikeOdometerPendingDataAmendment,
   looksLikeGenericCorrectionIntent,
   looksLikeBriefConfirmation,
@@ -497,7 +498,13 @@ export async function POST(req: NextRequest) {
   const odometerIntentStart = looksLikeOdometerIntentStart(rawText);
   const odometerHelpStart = looksLikeOdometerHelpRequest(rawText);
   const horometerOnlyIntent = looksLikeHorometerOnlyIntent(rawText);
-  const odometerFlowStart = odometerIntentStart || odometerHelpStart;
+  // Bug 2026-08-23: "Horometro 900133" no tenía verbo → odometerFlowStart=false y, con
+  // hilo superseded, el early-exit topicChange devolvía message="" (silencio total).
+  const odometerFlowStart =
+    odometerIntentStart ||
+    odometerHelpStart ||
+    horometerOnlyIntent ||
+    looksLikeOdometerServiceWithUnitReference(rawText);
   const bareOdometerTopic = looksLikeBareOdometerTopicMention(rawText);
 
   // Solo dijo "odómetro" / "ODOMETRO" sin verbo: preguntar qué quiere hacer
