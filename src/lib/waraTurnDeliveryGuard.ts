@@ -58,7 +58,7 @@ export async function shouldDeliverWhatsAppToProtectedClient(
   if (!customer) return false;
 
   const since = new Date(Date.now() - 3 * 60 * 1000);
-  const inbound = await client.ticketMessage.findFirst({
+  const inboundWithWamid = await client.ticketMessage.findFirst({
     where: {
       ticket: { customerId: customer.id },
       direction: "INBOUND",
@@ -72,10 +72,21 @@ export async function shouldDeliverWhatsAppToProtectedClient(
     },
     orderBy: { createdAt: "desc" },
   });
+  if (inboundWithWamid) return true;
 
-  if (!inbound) {
-    console.log("[waraTurnDeliveryGuard] blocked protected phone without wamid inbound", rawPhone);
-    return false;
-  }
-  return true;
+  // BBC a veces no pasa wamid en messageId del turn; /turn ya persistió el inbound del cliente.
+  const inboundPersisted = await client.ticketMessage.findFirst({
+    where: {
+      ticket: { customerId: customer.id },
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text,
+      createdAt: { gte: since },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (inboundPersisted) return true;
+
+  console.log("[waraTurnDeliveryGuard] blocked protected phone without inbound match", rawPhone);
+  return false;
 }

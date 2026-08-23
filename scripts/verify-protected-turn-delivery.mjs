@@ -26,4 +26,10 @@ assert.equal(allowedWamid, true, "wamid en turn permite entrega");
 const unprotected = await shouldDeliverWhatsAppToProtectedClient("5491133788190", "Hola");
 assert.equal(unprotected, true, "teléfono no protegido siempre entrega");
 
+const blockedNoInbound = await shouldDeliverWhatsAppToProtectedClient(
+  "5492612478856",
+  `no-inbound-probe-${Date.now()}`,
+);
+assert.equal(blockedNoInbound, false, "sin inbound ni wamid sigue bloqueado");
+
 console.log("OK verify-protected-turn-delivery");

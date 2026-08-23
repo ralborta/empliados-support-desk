@@ -138,6 +138,7 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
 import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
+import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
 import { getPendingAction, clearPendingAction, ensureOdometerCollectingTurnLayer, patchPendingActionPayload } from "@/lib/pendingAction";
 import {
   looksLikeTramiteCancellationIntent,
@@ -343,6 +344,15 @@ export function scheduleDeferredTurnExecutor(params: {
       try {
         const result = await runTurnExecutorPhase(params);
         if (!result.message && !result.mediaUrl) return;
+        if (
+          !(await shouldDeliverWhatsAppToProtectedClient(params.rawPhone, params.selectionText))
+        ) {
+          console.log(
+            "[whatsappTurn] deferred delivery blocked for protected client",
+            params.rawPhone,
+          );
+          return;
+        }
         await sendWhatsAppTextWithOptionalMedia({
           number: params.rawPhone,
           message: result.message,
