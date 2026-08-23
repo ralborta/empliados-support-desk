@@ -121,6 +121,7 @@ const SUITES = [
   "verify-turn-layer-fork.mjs",
   "verify-odometer-flow-side-questions.mjs",
   "verify-odometer-interno-900079.mjs",
+  "verify-odometer-interno-900117-e2e.mjs",
   "verify-maintenance-confirmation-rejection.mjs",
   "verify-maintenance-inherits-odometer-plate.mjs",
   "verify-maintenance-after-horometer.mjs",

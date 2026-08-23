@@ -1907,7 +1907,11 @@ function resolveByMovilIdOrUnitCode(
   rawText: string,
   units: WaraUnidadEstado[],
 ): UnitQueryResolution | null {
-  const movilId = extractMovilIdFromUnitMessage(rawText, { fleet: units });
+  // Con flota, resolveNumericRole marca ambiguous si el interno del mensaje no es
+  // movil_id — no perder el candidato antes de buscar por nombre/código en flota.
+  const movilIdFromText = extractMovilIdFromUnitMessage(rawText);
+  const movilId =
+    movilIdFromText ?? extractMovilIdFromUnitMessage(rawText, { fleet: units });
   if (movilId != null) {
     const byId = units.filter((u) => movilIdMatches(u.movil_id, movilId));
     if (byId.length === 1) {
