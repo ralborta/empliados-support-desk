@@ -56,17 +56,26 @@ assert(
   "certificado concreto no es saludo repetido",
 );
 
-console.log("— needsCompanyMenu no bloquea trámites operativos —");
+console.log("— needsCompanyMenu BLOQUEA trámites hasta elegir empresa —");
 function nextFlowAfterCompanyMenu(selectionText, needsCompanyMenu, registered = true) {
+  // Alineado con builderbotCustomerContext (fix 2026-08-23):
+  // sin empresa no se ejecuta el trámite (evita menú + "unidad no encontrada").
+  if (needsCompanyMenu) return "reply";
   if (selectionText && looksLikeOperationalIntent(selectionText)) return "router";
-  if (needsCompanyMenu && selectionText && !looksLikeOperationalIntent(selectionText)) return "reply";
-  if (needsCompanyMenu && !selectionText.trim()) return "reply";
   if (registered && selectionText.trim()) return "router";
   return "reply";
 }
 assert(
-  nextFlowAfterCompanyMenu(certMsg, true) === "router",
-  "certificado con menú empresa pendiente va a router",
+  nextFlowAfterCompanyMenu(certMsg, true) === "reply",
+  "certificado con menú empresa pendiente se queda en reply (pedir empresa)",
+);
+assert(
+  nextFlowAfterCompanyMenu("Horometro 900133", true) === "reply",
+  "horómetro+interno con menú empresa pendiente pide empresa (no silencia ni busca unidad)",
+);
+assert(
+  nextFlowAfterCompanyMenu(certMsg, false) === "router",
+  "certificado con empresa ya elegida va a router",
 );
 assert(
   nextFlowAfterCompanyMenu("WARA", true) === "reply",

@@ -957,21 +957,25 @@ export async function customerRegisteredContextResponse(
       formatCompanyConfirmMessage(
         picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
       );
-  } else if (selectionText && looksLikeOperationalIntent(selectionText)) {
-    // Trámites operativos (certificado, odómetro, etc.) van al router aunque falte menú empresa.
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (needsCompanyMenu && selectionText && looksLikeCompanySelection(selectionText)) {
+  } else if (needsCompanyMenu) {
+    // Bug real 2026-08-23: con menú de empresa pendiente, el trámite operativo
+    // (Horometro 900133) iba igual al router → 1) menú empresa + 2) "no identifiqué
+    // la unidad" en el mismo segundo. Sin empresa no hay flota confiable: parar acá.
     nextFlow = "reply";
-    if (!responseMessage) {
+    if (!responseMessage && waraContactsText) {
+      responseMessage =
+        `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
+        `${waraContactsText}\n\n` +
+        `Respondé con el número de la opción o con el nombre de la empresa.`;
+    } else if (!responseMessage && selectionText && looksLikeCompanySelection(selectionText)) {
       responseMessage =
         `No pude registrar esa opción. ¿De cuál empresa escribís?\n\n${waraContactsText}\n\n` +
         `Respondé con el número de la opción o con el nombre de la empresa.`;
     }
-  } else if (needsCompanyMenu && selectionText && !looksLikeOperationalIntent(selectionText)) {
-    nextFlow = "reply";
-  } else if (needsCompanyMenu && !selectionText.trim()) {
-    nextFlow = "reply";
+  } else if (selectionText && looksLikeOperationalIntent(selectionText)) {
+    // Ya hay empresa (o no hace falta menú): trámites operativos al router.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     nextFlow = "reply";
   } else if (
