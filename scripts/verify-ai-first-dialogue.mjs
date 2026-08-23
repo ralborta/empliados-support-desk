@@ -16,6 +16,10 @@ import {
 
 assert.equal(looksLikeExplicitCapabilityMenuRequest("qué gestiones puedo hacer con vos"), true);
 assert.equal(looksLikeExplicitCapabilityMenuRequest("qué puedo gestionar"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("QUE MAS PODES HACER"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué más podés hacer"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué cosas podés hacer"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué servicios tenés"), true);
 assert.equal(
   looksLikeExplicitCapabilityMenuRequest("Quiero hacer otra consulta"),
   false,

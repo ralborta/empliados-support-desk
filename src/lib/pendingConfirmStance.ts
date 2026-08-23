@@ -25,6 +25,9 @@ import {
   extractUnitCodeNumbersFromMessage,
   isPlausibleVehiclePlate,
   looksLikeBareMeterValue,
+  looksLikeBareOdometerTopicMention,
+  looksLikeBareHorometerTopicMention,
+  looksLikeHorometerOnlyIntent,
   looksLikeOdometerHelpRequest,
   looksLikeOdometerInfoRequest,
   looksLikePendingConfirmHelpOrConfusion,
@@ -354,6 +357,16 @@ export function classifyOdometerFlowSideQuestion(
   if (isOperationalOdometerFlowMessage(text, threadText)) return null;
   if (looksLikeExplicitOtherTramiteIntent(text)) return "help";
 
+  // Otro medidor distinto al del CONFIRMO pendiente → fork, no clarify del mismo.
+  if (hasPendingOdometerConfirmation(threadText)) {
+    const pendingHoro =
+      /\bconfirmar hor[oó]metro\b/i.test(threadText.slice(-2500)) &&
+      !/\bconfirmar od[oó]metro\b/i.test(threadText.slice(-1200));
+    const asksHoro = looksLikeHorometerOnlyIntent(text) || looksLikeBareHorometerTopicMention(text);
+    const asksOdo = looksLikeBareOdometerTopicMention(text);
+    if ((asksHoro && !pendingHoro) || (asksOdo && pendingHoro)) return "help";
+  }
+
   const t = normOdometerSideText(text);
   if (
     /\b(como funciona|como es|que es|que significa|para que sirve|para q sirve|me explicas|explicame|explic[aá]me)\b/.test(
@@ -408,12 +421,49 @@ export function buildOdometerFlowSideHelpReply(threadText: string): string {
   return `Te puedo ayudar. Pero antes: ¿seguimos con el *cambio de ${topic}* que tenemos en curso, o preferís *cambiar de requerimiento*?`;
 }
 
+/**
+ * Odómetro en CONFIRMO y el cliente pide horómetro (o al revés).
+ * Bug 2026-08-23: "Horometro" con resumen estructurado pendiente caía a
+ * "qué necesitás con el odómetro" en vez de ofrecer concluir o cambiar.
+ */
+export function buildMeterCrossSwitchWhileConfirmReply(params: {
+  pendingIsHorometer: boolean;
+  askedHorometer: boolean;
+}): string {
+  const pending = params.pendingIsHorometer ? "horómetro" : "odómetro";
+  const asked = params.askedHorometer ? "horómetro" : "odómetro";
+  if (pending === asked) {
+    return buildOdometerFlowSideHelpReply(
+      params.pendingIsHorometer ? "horómetro CONFIRMO" : "odómetro CONFIRMO",
+    );
+  }
+  return [
+    `Todavía tengo pendiente confirmar el *cambio de ${pending}*.`,
+    "",
+    `¿Seguimos con eso (*CONFIRMO* / *CANCELAR*) o preferís *cambiar* y arrancar el *${asked}*?`,
+  ].join("\n");
+}
+
 export function buildOdometerFlowSideQuestionReply(
   kind: OdometerFlowSideQuestionKind,
   threadText: string,
   customerText: string,
 ): string {
   const other = looksLikeExplicitOtherTramiteIntent(customerText);
+  if (hasPendingOdometerConfirmation(threadText)) {
+    const pendingHoro =
+      /\bconfirmar hor[oó]metro\b/i.test(threadText.slice(-2500)) &&
+      !/\bconfirmar od[oó]metro\b/i.test(threadText.slice(-1200));
+    const asksHoro =
+      looksLikeHorometerOnlyIntent(customerText) || looksLikeBareHorometerTopicMention(customerText);
+    const asksOdo = looksLikeBareOdometerTopicMention(customerText);
+    if ((asksHoro && !pendingHoro) || (asksOdo && pendingHoro)) {
+      return buildMeterCrossSwitchWhileConfirmReply({
+        pendingIsHorometer: pendingHoro,
+        askedHorometer: asksHoro,
+      });
+    }
+  }
   const base =
     kind === "info"
       ? buildOdometerFlowSideInfoReply(threadText, customerText)

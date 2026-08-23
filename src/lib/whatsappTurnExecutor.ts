@@ -44,6 +44,8 @@ import {
   looksLikeOutOfScopeSupportClaim,
   looksLikeTechnicalSupportRequest,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
+  looksLikeExplicitCapabilityMenuRequest,
+  buildAtilioHelpCapabilitiesReply,
   looksLikeServiceScopeConsultationMeta,
   looksLikeGenericUnitConsultWithoutPlate,
   looksLikeGpsOrUnitStatusQuestion,
@@ -97,6 +99,8 @@ import {
   shouldContinueCertificateUnitCollection,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
+  looksLikeBareOdometerTopicMention,
+  looksLikeBareHorometerTopicMention,
   hasPendingMantenimientoConfirmation,
   extractPendingMaintenanceDetalle,
   isOdometerFlowSuperseded,
@@ -457,6 +461,22 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // “Qué más podés hacer?” → menú de capacidades en lenguaje natural.
+  // Antes del follow-up de unidad activa / caso recién abierto (bug 2026-08-23).
+  if (looksLikeExplicitCapabilityMenuRequest(selectionText)) {
+    const { clearActiveUnit } = await import("@/lib/activeUnit");
+    await clearActiveUnit(prisma, rawPhone).catch(() => undefined);
+    const companyName =
+      waraResolution.selectedCompanyName?.trim() ||
+      waraResolution.customer?.companyName?.trim() ||
+      undefined;
+    return {
+      message: buildAtilioHelpCapabilitiesReply(undefined, companyName),
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
   // Cierre de conversación/caso: ANTES del agente (WARA_AGENT_MODE).
   // Bug real 2026-08-20: "Quiero resolver conversacion" tras listado de flota quedaba
   // mudo — el agente interceptaba el turno y no llegaba a /odoo/ticket.
@@ -521,11 +541,27 @@ export async function runTurnExecutorPhase(params: {
 
   // Texto + "adjunto imagen" / error GPS etapas sin unidad → asesor.
   // Si ya hay {aiImage} en el turno, no digas que no podés leer la captura.
+  // Fuera de alcance + imagen → panel Wara solamente (sin Odoo).
+  if (
+    looksLikeCustomerImageAttachmentCue(selectionText) &&
+    looksLikeOutOfScopeSupportClaim(selectionText)
+  ) {
+    const { resolveOutOfScopePlatformHandoff } = await import("@/lib/advisorHandoff");
+    const handoff = await resolveOutOfScopePlatformHandoff(prisma, rawPhone, {
+      messageText: selectionText,
+      seed: rawPhone,
+      source: "turn_executor_out_of_scope_image",
+    });
+    return {
+      message: hasAiImage ? handoff.message : withNoImageAnalysisNotice(handoff.message),
+      executor: "odoo_ticket",
+      ok: true,
+    };
+  }
   if (
     looksLikeCustomerImageAttachmentCue(selectionText) &&
     (looksLikeGpsFeatureIssueForAdvisor(selectionText) ||
       looksLikeExplicitReclamoOrTicketRequest(selectionText) ||
-      looksLikeOutOfScopeSupportClaim(selectionText) ||
       looksLikeTechnicalSupportRequest(selectionText) ||
       looksLikeHumanAdvisorRequest(selectionText))
   ) {
@@ -724,6 +760,21 @@ export async function runTurnExecutorPhase(params: {
         return {
           message: execMessage,
           executor: "certificados",
+          ok: execOk,
+        };
+      }
+      if (
+        looksLikeHorometerOnlyIntent(selectionText) ||
+        looksLikeBareHorometerTopicMention(selectionText) ||
+        looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+        looksLikeBareOdometerTopicMention(selectionText)
+      ) {
+        const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        return {
+          message: execMessage,
+          executor: "odometro",
           ok: execOk,
         };
       }
@@ -979,11 +1030,20 @@ export async function runTurnExecutorPhase(params: {
 
   // Pedido de operador / mesa / cierre → Odoo ANTES que utterance IA
   // (bug real 2026-08-06: "comunicame a mesa de entrada" → pedía patente).
+  // Fuera de alcance: SOLO panel Wara (sin Odoo) + mensaje natural + pausa bot.
+  if (looksLikeOutOfScopeSupportClaim(selectionText)) {
+    const { resolveOutOfScopePlatformHandoff } = await import("@/lib/advisorHandoff");
+    const handoff = await resolveOutOfScopePlatformHandoff(prisma, rawPhone, {
+      messageText: selectionText,
+      seed: rawPhone,
+      source: "turn_executor_out_of_scope",
+    });
+    return { message: handoff.message, executor: "odoo_ticket", ok: true };
+  }
   if (
     looksLikeHumanAdvisorRequest(selectionText) ||
     looksLikeTechnicalSupportRequest(selectionText) ||
     looksLikeExplicitReclamoOrTicketRequest(selectionText) ||
-    looksLikeOutOfScopeSupportClaim(selectionText) ||
     looksLikeCustomerConversationCloseRequest(selectionText)
   ) {
     const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);

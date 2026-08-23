@@ -1746,12 +1746,15 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
 
 /**
  * Soporte fuera del alcance operativo de Atilio (GPS, odómetro, certificado, flota,
- * mantenimiento programable). Ej.: pantalla táctil, hardware físico, garantía.
- * Debe derivar a asesor y asignar caso — no preguntar patente ni # de ticket previo.
+ * mantenimiento programable, guías de app). Ej.: pantalla táctil, hardware físico, factura.
+ * Debe derivar a operador por panel Wara — no preguntar patente ni # de ticket previo.
+ *
+ * OJO: no derivar consultas operativas en alcance. Hardware físico sí deriva aunque digan "gps".
  */
 export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
   if (!n || n.length > 280) return false;
+
   const hardwareOrPhysical =
     /\b(pantalla|tactil|touch\s*screen|display|teclado|botonera|cargador|fuente|cable|antena|modem|router|tablet|impresora|hardware|garantia)\b/.test(
       n,
@@ -1766,23 +1769,44 @@ export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null)
     /\b(las unidades|todas las unidades|varias unidades|queda\w* quiet\w*|estan quiet\w*|se quedan quiet\w*)\b/.test(
       n,
     );
-  // Hardware físico roto → fuera de alcance aunque mencionen "gps" (ej. pantalla del equipo).
+  const billingOrAdmin =
+    /\b(factura|facturacion|cobro|cobranza|pago|abono|contrato|cuit|razon social|deuda)\b/.test(n);
+
+  // 1) Hardware físico roto → fuera de alcance (aunque mencionen "gps" / unidad).
   if (hardwareOrPhysical && brokenOrClaim) return true;
-  // Falla general de web/plataforma con síntoma amplio de operación: necesita asesor.
-  if ((platformContext && brokenOrClaim) || (platformContext && fleetWideSymptom)) return true;
-  // Trámites operativos de Atilio → no es "fuera de alcance".
-  if (
-    /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|reporte|sin reporte|no reporta|flota|patente|matricula|mantenimiento preventiv|mantenimiento correctiv)\b/.test(
-      n,
-    )
-  ) {
-    return false;
+
+  // 2) Facturación / admin comercial.
+  if (billingOrAdmin && (brokenOrClaim || /\b(reclamar|reclamo|reclam\w*|consulta|problema)\b/.test(n))) {
+    return true;
   }
-  // "necesito reclamar X" genérico (X no es trámite Atilio).
+
+  // 3) Temas operativos / guías que Atilio SÍ atiende → no derivar.
+  if (isAtilioInScopeOperationalTopic(n)) return false;
+
+  // 4) Falla general de web/plataforma SIN tema operativo Wara.
+  if ((platformContext && brokenOrClaim) || (platformContext && fleetWideSymptom)) return true;
+
+  // 5) "necesito reclamar X" genérico (X no es trámite Atilio — ya filtrado).
   if (/\b(necesito|quiero|vengo a|tengo que|hay que)\b.{0,40}\breclam\w*\b/.test(n)) {
     return true;
   }
   return false;
+}
+
+/** Temas que Atilio debe atender (no derivar como "fuera de alcance"). */
+function isAtilioInScopeOperationalTopic(norm: string): boolean {
+  return (
+    /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|reporte|sin reporte|no reporta|flota|patente|matricula|mantenimiento|preventiv\w*|correctiv\w*|gps|estado|unidad|unidades|posicion|ubicacion|telemetr\w*|etapas?|historial|recorrido|cumplimiento|vuelta|odometro|horometro)\b/.test(
+      norm,
+    ) ||
+    /\b(modulo|opciones|perfiles|atajos|agenda de contactos|como uso|como configuro|como cargo|paso a paso)\b/.test(
+      norm,
+    ) ||
+    /\b(que\s+mas\s+(podes|pod[eé]s|puedo)|que\s+(puedo|podes|pod[eé]s)\s+hacer|que\s+servicios?|me\s+(podes|pod[eé]s)\s+ayud)\b/.test(
+      norm,
+    ) ||
+    /\b(m\d{3}-\d{2,3}|interno\s+\d{3,7})\b/.test(norm)
+  );
 }
 
 /**
@@ -2032,7 +2056,11 @@ export function looksLikeServiceScopeConsultationMeta(text: string | undefined |
 
 /**
  * Pregunta EXPLÍCITA de menú de capacidades ("qué gestiones puedo hacer", "qué puedo
- * gestionar/pedir/consultar"). Solo esto merece el panfleto fijo — el resto va a IA.
+ * gestionar/pedir/consultar", "qué más podés hacer"). Solo esto merece el menú fijo —
+ * el resto va a IA.
+ *
+ * Bug real 2026-08-23: "QUE MAS PODES HACER" no matcheaba (faltaba "más"/"cosas") y,
+ * con caso GPS recién abierto, caía a follow-up de unidad activa en vez de capacidades.
  */
 export function looksLikeExplicitCapabilityMenuRequest(
   text: string | undefined | null,
@@ -2042,12 +2070,28 @@ export function looksLikeExplicitCapabilityMenuRequest(
   if (looksLikeHumanAdvisorRequest(text)) return false;
   if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
   if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
+  if (/\bque\s+(gestiones?|tramites?|servicios?|cosas)\s+(puedo|podes|pod[eé]s)\s+(hacer|ofrec)/.test(norm)) {
+    return true;
+  }
   if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
+  // "qué más podés hacer", "qué cosas puedo pedir", "qué más hacés"
+  if (
+    /\bque\s+(mas|más|otras?\s+cosas?|cosas)\s+(puedo|podria|podr[ií]a|podes|pod[eé]s|haces|hac[eé]s)\b/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
   if (
     /\bque\s+(puedo|podria|podr[ií]a|podes|pod[eé]s)\s+(hacer|pedirte|pedir|consultar|gestionar|solicitar|tramitar|realizar)\b/.test(
       norm,
     )
   ) {
+    return true;
+  }
+  // "más podés hacer?", "qué servicios tenés?"
+  if (/\b(mas|más)\s+(podes|pod[eé]s|puedo)\s+hacer\b/.test(norm)) return true;
+  if (/\bque\s+servicios?\s+(tenes|ten[eé]s|ofreces|ofrec[eé]s|podes|pod[eé]s)\b/.test(norm)) {
     return true;
   }
   return false;
@@ -2135,11 +2179,21 @@ export function buildAtilioHelpCapabilitiesReply(
   _firstName?: string,
   companyName?: string,
 ): string {
-  return formatGreeting({
-    introduced: true,
-    companyName: companyName?.trim() || null,
-    pendingTaskLabel: null,
-  });
+  const company = companyName?.trim();
+  const lines = [
+    company
+      ? `Dale, con *${company}* te puedo ayudar por acá con esto:`
+      : "Dale, por acá te puedo ayudar con esto:",
+    "",
+    "• 🛣 Cambio de odómetro / ⏱ horómetro",
+    "• 📍 Estados GPS y reportes de unidades",
+    "• 📋 Certificados de cobertura",
+    "• 🔧 Agenda de mantenimientos",
+    "• 📱 Soporte sobre el uso de la app Wara",
+    "",
+    "Contame qué necesitás y lo vemos.",
+  ];
+  return lines.join("\n");
 }
 
 function companySelectionMenuMessage(
@@ -3334,7 +3388,7 @@ function normalizeWaraUnidadEstado(raw: unknown): WaraUnidadEstado | null {
   const marca = marcaRaw.trim();
   const modelo = modeloRaw.trim();
   if (!patente.trim() && !unidad.trim()) return null;
-  return {
+  const base = {
     ...(raw as WaraUnidadEstado),
     movil_id: coerceWaraMovilId(row.movil_id),
     patente,
@@ -3342,6 +3396,30 @@ function normalizeWaraUnidadEstado(raw: unknown): WaraUnidadEstado | null {
     ...(marca ? { marca } : {}),
     ...(modelo ? { modelo } : {}),
   };
+  const posRaw = row.ultima_posicion;
+  if (posRaw && typeof posRaw === "object") {
+    const pos = posRaw as Record<string, unknown>;
+    const lat = coerceWaraCoordinate(pos.lat ?? pos.latitude);
+    const lon = coerceWaraCoordinate(pos.lon ?? pos.lng ?? pos.longitude);
+    base.ultima_posicion = {
+      ...(pos as WaraUnidadEstado["ultima_posicion"]),
+      ...(lat != null ? { lat } : {}),
+      ...(lon != null ? { lon } : {}),
+    };
+  }
+  return base;
+}
+
+/** lat/lon pueden venir como string desde Wara. */
+function coerceWaraCoordinate(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim().replace(",", ".");
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 export async function consultarEstadoUnidades(

@@ -502,8 +502,10 @@ export async function POST(req: NextRequest) {
 
   // Solo dijo "odómetro" / "ODOMETRO" sin verbo: preguntar qué quiere hacer
   // (bug 2026-08-07: se ignoraba o se pedía síntoma GPS).
+  // No aplica a "horómetro" ni con CONFIRMO pendiente (bug 2026-08-23).
   if (bareOdometerTopic) {
     const preliminaryForClarify = await recentThreadText(rawPhone);
+    if (!hasPendingOdometerConfirmation(preliminaryForClarify)) {
     const unitHint =
       formatPlateWithSpaces(extractLastPlateFromThread(preliminaryForClarify) ?? "") ||
       extractLastPlateFromThread(preliminaryForClarify);
@@ -525,6 +527,7 @@ export async function POST(req: NextRequest) {
       { ok: true, ok_s: "true", flowComplete_s: "true", message },
       { status: BB_STATUS },
     );
+    }
   }
 
   // Bug real, producción 2026-07-23: "hagamos un cambio de odómetro de ESA unidad"
@@ -913,9 +916,15 @@ export async function POST(req: NextRequest) {
   // aunque el hilo (BBC/notebook) no dispare threadAwaitingOdometerKmValue. Sin esto,
   // el bare km no se parseaba → re-pedía valor+fecha, y en el turno de fecha la IA
   // recuperaba los km del historial (desfase: “no te escuché” pero al confirmar sí).
+  // Patente del pending O, si faltara, la unidad activa (BBC a veces pide km sin
+  // payload.patente y el bare km no entraba → re-pedía valor+fecha).
   const pendingMeterHasUnit =
     hasLiveOdometerPendingAction &&
-    !!normalizePlate(String(dbPendingOdoAction?.payload?.patente ?? "")) &&
+    !!normalizePlate(
+      String(
+        dbPendingOdoAction?.payload?.patente ?? activeUnitRecordEarly?.plate ?? "",
+      ),
+    ) &&
     !hasPendingConfirmInThread;
   const notebookAwaitingOdometerValue =
     isConversationNotebookEnabled() && sessionNotebook?.awaiting === "odometro_value";

@@ -19,7 +19,8 @@ export function confirmFooter(): string {
 export function isStructuredWhatsAppTemplate(text: string | undefined | null): boolean {
   const t = String(text ?? "").trim();
   if (!t) return false;
-  return /^[📍🛣⏱📋🔧👋🚗🔢📅🕐📌🏢🙏👍⚡🛠📝]/.test(t);
+  // Incluye variantes con VS16 (p. ej. 🛣️ = 🛣 + FE0F) que WhatsApp normaliza al mostrar.
+  return /^(?:📍|🛣|🛣️|⏱|📋|🔧|👋|🚗|🔢|📅|🕐|📌|🏢|🙏|👍|⚡|🛠|📝)/u.test(t);
 }
 
 export type FleetListUnitRow = {
@@ -192,8 +193,8 @@ export function formatMeterPartialAck(input: {
     lines.push(`📅 Fecha: *${input.dateDisp}*`, "", "🕐 ¿A qué hora fue la lectura?", "_Ej.: 14:30_");
   } else if (input.missing === "datetime") {
     lines.push(
-      "📅 Me falta la *fecha y hora* de la lectura.",
-      "_Ej.: 05/08/26 a las 14:30_",
+      "✅ Valor anotado. Me falta *solo* la fecha y hora de la lectura.",
+      "_Ej.: ayer 20:30 · 05/08/26 a las 14:30_",
     );
   } else {
     lines.push(
@@ -315,7 +316,7 @@ export function formatMeterConfirm(input: {
     `📅 Fecha: *${input.dateDisp}*`,
     `🕐 Hora: *${input.time}*`,
     "",
-    "¿Confirmás el registro?",
+    "Ya junté km + fecha/hora. ¿Confirmás el registro en Wara?",
     confirmFooter(),
   ].join("\n");
 }

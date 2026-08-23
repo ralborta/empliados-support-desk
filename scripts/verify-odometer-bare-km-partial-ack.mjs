@@ -38,7 +38,8 @@ const partialAck = formatMeterPartialAck({
   missing: "datetime",
 });
 assert.match(partialAck, /Valor: \*128900\* km/, "ack muestra los km");
-assert.match(partialAck, /Me falta la \*fecha y hora\*/, "pide solo fecha/hora");
+assert.match(partialAck, /Valor anotado/, "acusa recibo del valor");
+assert.match(partialAck, /\*solo\* la fecha y hora/, "pide solo fecha/hora");
 assert.doesNotMatch(
   partialAck,
   /Pasame el valor del odómetro en \*km\* y la fecha/,

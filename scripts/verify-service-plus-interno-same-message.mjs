@@ -164,6 +164,20 @@ assert.equal(
   "router Odometro → odometro con mantenimiento stale",
 );
 
+// Sin hilo de mantenimiento: "Odometro + interno" igual debe ir a odómetro
+assert.equal(
+  classifyTurnExecutor("Odometro 900112", ""),
+  "odometro",
+  "Odometro+interno sin hilo → odometro",
+);
+const gpsListenPrompt =
+  "Con AD 427 MC, contame qué problema estás viendo: ¿no reporta ahora, no ves movimiento/recorrido en el historial, ignición, u otra cosa?";
+assert.equal(
+  classifyTurnExecutor("Odometro 900112", gpsListenPrompt),
+  "odometro",
+  "Odometro+interno gana sobre prompt GPS de síntoma",
+);
+
 const gpsAskAfterMaint =
   "Para programar mantenimiento preventivo necesito la patente de la unidad.\n" +
   "¿Podés darme la patente o el interno de la unidad? Consulto en Wara.";

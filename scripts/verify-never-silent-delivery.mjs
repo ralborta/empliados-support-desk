@@ -62,4 +62,14 @@ assert.equal(shouldTurnSendWhatsAppToCustomer(), true, "true explícito");
 if (prev === undefined) delete process.env.WARA_TURN_BACKEND_SEND;
 else process.env.WARA_TURN_BACKEND_SEND = prev;
 
+// Contrato anti-duplicado (bug 2026-08-23): tras envío API, BBC no debe recibir el texto.
+{
+  const src = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../src/lib/whatsappTurnDelivery.ts", import.meta.url), "utf8"),
+  );
+  assert.match(src, /deliveredMessage/, "guarda deliveredMessage para auditoría");
+  assert.match(src, /message:\s*""/, "vacía message tras API OK");
+  assert.match(src, /summaryText:\s*""/, "vacía summaryText tras API OK");
+}
+
 console.log("✓ verify-never-silent-delivery OK");

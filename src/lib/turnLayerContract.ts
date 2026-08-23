@@ -107,8 +107,13 @@ export function looksLikeTramiteForkSwitchIntent(text: string): boolean {
     /\b(cambiar de requerimiento|cambiar de tema|otro requerimiento|otro tramite|otra cosa|otro tema)\b/.test(
       t,
     ) ||
-    /\b(prefiero|quiero)\b.{0,24}\b(mantenimiento|certificado|cobertura)\b/.test(t) ||
-    /\b(el|la)\s+(mantenimiento|certificado)\b/.test(t)
+    /\b(prefiero|quiero)\b.{0,24}\b(mantenimiento|certificado|cobertura|horometro|odometro)\b/.test(
+      t,
+    ) ||
+    /\b(el|la)\s+(mantenimiento|certificado)\b/.test(t) ||
+    // Pivote medidor ↔ medidor (ej. CONFIRMO odómetro + "Horometro")
+    /^(el\s+|la\s+)?(horometro|odometro|kilometraje)s?$/.test(t) ||
+    /\bcambiar\b/.test(t)
   );
 }
 

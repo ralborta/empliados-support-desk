@@ -8,6 +8,7 @@ import {
   formatGpsUnitLabel,
   gpsAlertIgnitionFailureMediaUrl,
   gpsAlertMissingReportMediaUrl,
+  mapsLinkForUnit,
   resolveGpsHeaderMediaUrl,
   threadHasRecentGpsContext,
 } from "./waraGpsSummary";
@@ -48,7 +49,24 @@ describe("waraGpsSummary formato WhatsApp", () => {
     assert.match(body, /Último reporte: hace menos de 2 minutos/);
     assert.match(body, /Posición: hace menos de 2 minutos/);
     assert.match(body, /Ignición: \*encendida\*/);
-    assert.match(body, /\[Ver ubicación\]\(https:\/\/maps\.google\.com\/\?q=-32\.978322,-68\.7397865\)/);
+    assert.match(
+      body,
+      /Ver ubicación:\nhttps:\/\/www\.google\.com\/maps\?q=-32\.978322%2C-68\.7397865/,
+    );
+  });
+
+  it("mapsLinkForUnit encodea la coma (WhatsApp no corta el preview)", () => {
+    assert.equal(
+      mapsLinkForUnit(sampleUnit()),
+      "https://www.google.com/maps?q=-32.978322%2C-68.7397865",
+    );
+    assert.equal(
+      mapsLinkForUnit({
+        ...sampleUnit(),
+        ultima_posicion: { lat: "-32.978322" as unknown as number, lon: "-68.7397865" as unknown as number },
+      }),
+      "https://www.google.com/maps?q=-32.978322%2C-68.7397865",
+    );
   });
 
   it("buildTemplateSummary arma encabezado completo", () => {
@@ -86,7 +104,8 @@ describe("waraGpsSummary formato WhatsApp", () => {
     assert.doesNotMatch(text, /⚠️ \*Falta de reporte\*/);
     assert.equal((text.match(/🚗 Unidad:/g) ?? []).length, 1);
     assert.match(text, /#37183/);
-    assert.match(text, /\[Ver ubicación\]/);
+    assert.match(text, /Ver ubicación:/);
+    assert.match(text, /maps\?q=-32\.978322%2C-68\.7397865/);
   });
 
   it("falla de ignición usa banner y texto compacto sin duplicar estado", () => {
@@ -213,7 +232,7 @@ describe("waraGpsSummary formato WhatsApp", () => {
     });
     assert.match(text, /Sí.*última posición/i);
     assert.match(text, /reporte hace/i);
-    assert.match(text, /\[Ver ubicación\]/);
+    assert.match(text, /Ver ubicación:/);
   });
 
   it("threadHasRecentGpsContext reconoce resumen estructurado", () => {

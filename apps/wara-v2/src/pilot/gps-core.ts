@@ -246,9 +246,12 @@ export function buildGpsLabSummary(unit: WaraUnidadEstado, assessment: GpsAssess
 function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
   const lat = unit.ultima_posicion?.lat;
   const lon = unit.ultima_posicion?.lon;
-  if (typeof lat !== "number" || typeof lon !== "number") return null;
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  return `https://maps.google.com/?q=${lat},${lon}`;
+  const latN = typeof lat === "number" ? lat : typeof lat === "string" ? Number(String(lat).trim().replace(",", ".")) : NaN;
+  const lonN = typeof lon === "number" ? lon : typeof lon === "string" ? Number(String(lon).trim().replace(",", ".")) : NaN;
+  if (!Number.isFinite(latN) || !Number.isFinite(lonN)) return null;
+  if (latN < -90 || latN > 90 || lonN < -180 || lonN > 180) return null;
+  // %2C: WhatsApp corta URLs en la coma y el preview cae en homepage (mapa por IP del crawler).
+  return `https://www.google.com/maps?q=${latN}%2C${lonN}`;
 }
 
 export type GpsTicketStatus =

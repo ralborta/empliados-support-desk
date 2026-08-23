@@ -85,17 +85,36 @@ export function formatGpsUnitLabel(unit: WaraUnidadEstado): string {
   return plate || nombre || "la unidad";
 }
 
-function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
-  const lat = unit.ultima_posicion?.lat;
-  const lon = unit.ultima_posicion?.lon;
-  if (typeof lat !== "number" || typeof lon !== "number") return null;
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  return `https://maps.google.com/?q=${lat},${lon}`;
+/** Wara a veces manda lat/lon como string; WhatsApp además corta URLs en la coma. */
+export function coerceGpsCoordinate(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim().replace(",", ".");
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+/**
+ * Link de mapa robusto para WhatsApp:
+ * - `www.google.com/maps` (mejor OG que `maps.google.com/?q=`)
+ * - coma encodeada (`%2C`) para que el preview no se corte en el primer número
+ *   y caiga en el homepage de Maps (preview por IP del crawler → p.ej. Europa).
+ */
+export function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
+  const lat = coerceGpsCoordinate(unit.ultima_posicion?.lat);
+  const lon = coerceGpsCoordinate(unit.ultima_posicion?.lon);
+  if (lat == null || lon == null) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return `https://www.google.com/maps?q=${lat}%2C${lon}`;
 }
 
 function mapsLine(unit: WaraUnidadEstado): string {
   const url = mapsLinkForUnit(unit);
-  return url ? `🗺️ [Ver ubicación](${url})` : "🗺️ Sin coordenadas de última posición en WARA.";
+  // WhatsApp no renderiza markdown `[texto](url)`; URL en texto plano en su línea.
+  return url ? `🗺️ Ver ubicación:\n${url}` : "🗺️ Sin coordenadas de última posición en WARA.";
 }
 
 function gpsClosingQuestion(): string {

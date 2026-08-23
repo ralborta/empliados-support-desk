@@ -8,6 +8,8 @@ import {
   stripBotOdometerBotSpeech,
 } from "@/lib/odometroFecha";
 import {
+  detectServiceIntentInMessage,
+  extractEmbeddedNumericReferences,
   extractUnitMovilIdsFromMessage,
   type FleetUnitRef,
   type NumericExpectedField,
@@ -591,6 +593,38 @@ export function threadHasAgentStyleOdometerConfirmPending(threadText: string): b
   );
 }
 
+/**
+ * Resumen WhatsApp estructurado (🛣 *Confirmar odómetro* / ⏱ *Confirmar horómetro*).
+ * Bug real 2026-08-23: formatMeterConfirm ya no dice "Voy a registrar:" →
+ * hasPendingOdometerConfirmation quedaba false → "Horometro" caía a clarify de odómetro
+ * en vez de preguntar si concluir el pendiente o cambiar de trámite.
+ */
+export function threadHasStructuredMeterConfirmPending(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
+  const tail = threadText.slice(-2500).toLowerCase();
+  const lastConfirmIdx = Math.max(
+    tail.lastIndexOf("confirmar odómetro"),
+    tail.lastIndexOf("confirmar odometro"),
+    tail.lastIndexOf("confirmar horómetro"),
+    tail.lastIndexOf("confirmar horometro"),
+  );
+  if (lastConfirmIdx < 0) return false;
+  const afterLastConfirm = tail.slice(lastConfirmIdx);
+  const reopenedAfterConfirm =
+    /perfecto, tomo /.test(afterLastConfirm.slice(18)) ||
+    /cu[aá]l es el nuevo (od[oó]metro|hor[oó]metro)/.test(afterLastConfirm.slice(18)) ||
+    /necesito la patente/.test(afterLastConfirm.slice(18)) ||
+    /pasame el valor del (od[oó]metro|hor[oó]metro)/.test(afterLastConfirm.slice(18)) ||
+    /valor anotado/.test(afterLastConfirm.slice(18));
+  if (reopenedAfterConfirm) return false;
+  return (
+    /respond[eé]\s+\*?confirmo/.test(afterLastConfirm) ||
+    /confirm[aá]s el registro/.test(afterLastConfirm) ||
+    /\bconfirmo\b/.test(afterLastConfirm)
+  );
+}
+
 /** Resumen de odómetro pendiente de confirmación (ChatPDF o backend). */
 export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
@@ -600,6 +634,7 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
   if (threadHasOdometerConfirmStillPendingCue(threadText)) return true;
   if (isOdometerFlowSuperseded(threadText)) return false;
   if (threadHasAgentStyleOdometerConfirmPending(threadText)) return true;
+  if (threadHasStructuredMeterConfirmPending(threadText)) return true;
   // Bug real, producción 2026-07-28: tras confirmar patente incorrecta ("Voy a
   // registrar: Patente LWK 7902...respondé CONFIRMO"), el cliente corrigió la unidad
   // ("no para la unidad HEJ") y el bot volvió a preguntar el valor ("Perfecto, tomo
@@ -1521,9 +1556,10 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
 }
 
 /**
- * Solo menciona odómetro/horómetro sin decir qué hacer (ej. "ODOMETRO", "el odómetro").
+ * Solo menciona odómetro/kilometraje sin decir qué hacer (ej. "ODOMETRO", "el odómetro").
  * Bug 2026-08-07: tras elegir unidad, "ODOMETRO" se ignoraba / se trataba como síntoma GPS
  * en vez de preguntar si quiere corregir km u otra cosa.
+ * No incluye horómetro: eso es looksLikeBareHorometerTopicMention / looksLikeHorometerOnlyIntent.
  */
 export function looksLikeBareOdometerTopicMention(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
@@ -1532,6 +1568,7 @@ export function looksLikeBareOdometerTopicMention(text: string | undefined | nul
   if (looksLikeOdometerInfoRequest(raw)) return false;
   if (looksLikeOdometerProblemReport(raw)) return false;
   if (looksLikeOdometerHelpRequest(raw)) return false;
+  if (looksLikeHorometerOnlyIntent(raw)) return false;
   if (detectLoosePlate(raw) || detectPlate(raw)) return false;
   const t = raw
     .normalize("NFD")
@@ -1539,7 +1576,21 @@ export function looksLikeBareOdometerTopicMention(text: string | undefined | nul
     .toLowerCase()
     .replace(/[!?.¡¿]+/g, "")
     .trim();
-  return /^(el\s+|la\s+|del\s+|sobre\s+(el\s+)?)?(od[oó]metro|hor[oó]metro|kilometraje)s?$/.test(t);
+  return /^(el\s+|la\s+|del\s+|sobre\s+(el\s+)?)?(od[oó]metro|kilometraje)s?$/.test(t);
+}
+
+/** Solo "horómetro" / "el horómetro" sin verbo de acción. */
+export function looksLikeBareHorometerTopicMention(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 40) return false;
+  if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[!?.¡¿]+/g, "")
+    .trim();
+  return /^(el\s+|la\s+|del\s+|sobre\s+(el\s+)?)?hor[oó]metros?$/.test(t);
 }
 
 /**
@@ -1726,11 +1777,31 @@ export function looksLikeStructuredOdometerUpdateRequest(text: string | undefine
   return false;
 }
 
+/**
+ * "Odometro 900112" / "horómetro M900-112" — servicio + unidad sin verbo
+ * (cambiar/actualizar). Bug real 2026-08-23: no matcheaba intentStart ni bare
+ * mention y, con prompt GPS en el hilo, caía a unidades pidiendo "matrícula exacta".
+ */
+export function looksLikeOdometerServiceWithUnitReference(
+  text: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 200) return false;
+  if (looksLikeOdometerProblemReport(raw)) return false;
+  if (looksLikeOdometerInfoRequest(raw)) return false;
+  const intent = detectServiceIntentInMessage(raw);
+  if (intent !== "odometro" && intent !== "horometro") return false;
+  if (extractEmbeddedNumericReferences(raw).length > 0) return true;
+  if (/\bM?\d{3}-\d{2,3}\b/i.test(raw)) return true;
+  return false;
+}
+
 /** Mensaje actual pide trámite de actualización de odómetro (no guía ni otro módulo). */
 export function looksLikeExplicitOdometerUpdateRequest(text: string | undefined | null): boolean {
   if (looksLikeOdometerProblemReport(text)) return false;
   if (looksLikeOdometerInfoRequest(text)) return false;
   if (looksLikeStructuredOdometerUpdateRequest(text)) return true;
+  if (looksLikeOdometerServiceWithUnitReference(text)) return true;
   return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }
 

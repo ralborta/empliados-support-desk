@@ -1,6 +1,6 @@
 import type { Customer, PrismaClient, Ticket } from "@prisma/client";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
-import { reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
+import { pauseAtilioForCustomer, reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
 import {
   findOpenConversationTicket,
   mergeDuplicateOpenTicketsForCustomer,
@@ -17,6 +17,25 @@ export const REGISTERED_ADVISOR_HANDOFF_REPLY =
 export const REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY =
   "Ya tenemos tu consulta: un asesor de Atención al Cliente te va a atender lo antes posible por este medio.";
 
+/** Fuera de alcance Atilio → transferir por panel Wara (sin Odoo). */
+const OUT_OF_SCOPE_HANDOFF_VARIANTS = [
+  "No puedo ayudarte con ese tema, pero te transfiero de inmediato con un operador para que te ayude.",
+  "Eso queda fuera de lo que puedo resolver yo. Te derivo ahora mismo con un operador para que te atiendan por este medio.",
+  "Con ese tema no te puedo ayudar desde acá. Te paso de inmediato con un operador para que te den una mano.",
+];
+
+function hashSeed(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+export function pickOutOfScopeHandoffReply(seed = ""): string {
+  const day = new Date().toISOString().slice(0, 10);
+  const idx = hashSeed(`${seed}|oos|${day}`) % OUT_OF_SCOPE_HANDOFF_VARIANTS.length;
+  return OUT_OF_SCOPE_HANDOFF_VARIANTS[idx]!;
+}
+
 export type RegisteredAdvisorHandoffResult = {
   customer: Customer;
   ticket: Ticket;
@@ -27,7 +46,7 @@ export type RegisteredAdvisorHandoffResult = {
 
 /**
  * Cliente registrado pide hablar con un asesor → ticket local + auto-asignación.
- * Odoo Helpdesk es opcional (capa aparte); el panel siempre debe quedar informado.
+ * Solo plataforma Wara (mesa/panel). No crea caso Odoo.
  */
 export async function ensureRegisteredAdvisorHandoff(
   prisma: PrismaClient,
@@ -37,12 +56,19 @@ export async function ensureRegisteredAdvisorHandoff(
     messageText?: string;
     source?: string;
     title?: string;
+    /**
+     * true = pausar bot (blacklist) para que tome el operador.
+     * false/omitido = mantener Atilio activo (comportamiento histórico).
+     */
+    pauseBot?: boolean;
+    aiSummary?: string;
   },
 ): Promise<RegisteredAdvisorHandoffResult> {
   const contactName = opts?.contactName?.trim() || "Cliente Wara";
   const messageText = opts?.messageText?.trim() || "";
   const source = opts?.source ?? "registered_advisor_handoff";
   const title = opts?.title?.trim() || "Cliente solicita asesor humano";
+  const pauseBot = opts?.pauseBot === true;
 
   const customer = await resolveCustomerByWhatsAppNumber(prisma, rawPhone, {
     name: contactName,
@@ -66,7 +92,9 @@ export async function ensureRegisteredAdvisorHandoff(
         category: "OTHER",
         incidentType: "otro",
         channel: "WHATSAPP",
-        aiSummary: "Cliente solicita asesor humano por WhatsApp.",
+        aiSummary:
+          opts?.aiSummary?.trim() ||
+          "Cliente solicita asesor humano por WhatsApp.",
       },
     });
     isNewTicket = true;
@@ -90,7 +118,7 @@ export async function ensureRegisteredAdvisorHandoff(
           direction: "INBOUND",
           from: "CUSTOMER",
           text: messageText,
-          rawPayload: { source, registeredAdvisorHandoff: true },
+          rawPayload: { source, registeredAdvisorHandoff: true, platformOnly: true },
         },
       });
       await prisma.ticket.update({
@@ -118,6 +146,7 @@ export async function ensureRegisteredAdvisorHandoff(
           reason: "registered_advisor_handoff_notice",
           source,
           phone: customer.phone,
+          platformOnly: true,
         },
       },
     });
@@ -139,9 +168,15 @@ export async function ensureRegisteredAdvisorHandoff(
     console.error("[advisorHandoff] autoAssign:", e);
   }
 
-  await reactivateAtilioForCustomer(customer.id, prisma, "advisor_handoff_keep_active").catch(
-    (e) => console.error("[advisorHandoff] reactivateAtilio:", e),
-  );
+  if (pauseBot) {
+    await pauseAtilioForCustomer(customer.id, prisma, source).catch((e) =>
+      console.error("[advisorHandoff] pauseAtilio:", e),
+    );
+  } else {
+    await reactivateAtilioForCustomer(customer.id, prisma, "advisor_handoff_keep_active").catch(
+      (e) => console.error("[advisorHandoff] reactivateAtilio:", e),
+    );
+  }
 
   const refreshed =
     (await prisma.ticket.findUnique({ where: { id: ticket.id } })) ?? ticket;
@@ -151,5 +186,33 @@ export async function ensureRegisteredAdvisorHandoff(
     ticket: refreshed,
     isNewTicket,
     shouldNotifyCustomer,
+  };
+}
+
+/**
+ * Fuera de alcance operativo → ticket en panel Wara + mensaje natural.
+ * No crea ni toca Odoo.
+ */
+export async function resolveOutOfScopePlatformHandoff(
+  prisma: PrismaClient,
+  rawPhone: string,
+  opts?: { messageText?: string; seed?: string; source?: string },
+): Promise<{ message: string; ticketCode?: string }> {
+  const handoff = await ensureRegisteredAdvisorHandoff(prisma, rawPhone, {
+    messageText: opts?.messageText,
+    source: opts?.source ?? "out_of_scope_platform_handoff",
+    title: "Fuera de alcance Atilio — derivación a operador",
+    aiSummary: "Consulta fuera del alcance operativo de Atilio; derivada al panel Wara.",
+    pauseBot: true,
+  });
+  if (!handoff.shouldNotifyCustomer) {
+    return {
+      message: REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY,
+      ticketCode: handoff.ticket.code,
+    };
+  }
+  return {
+    message: pickOutOfScopeHandoffReply(opts?.seed ?? rawPhone),
+    ticketCode: handoff.ticket.code,
   };
 }

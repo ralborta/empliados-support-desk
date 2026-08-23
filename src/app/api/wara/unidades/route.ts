@@ -61,6 +61,7 @@ import {
   buildGpsClientSummary,
   isStructuredGpsWhatsAppSummary,
   buildGpsPositionClarificationAnalysis,
+  mapsLinkForUnit,
   threadHasRecentGpsContext,
 } from "@/lib/waraGpsSummary";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
@@ -250,13 +251,12 @@ function looksLikeLocationRequest(text: string | undefined | null): boolean {
 }
 
 function formatLocationAppendix(unit: WaraUnidadEstado): string {
-  const lat = unit.ultima_posicion?.lat;
-  const lon = unit.ultima_posicion?.lon;
-  if (typeof lat !== "number" || typeof lon !== "number") return "";
+  const url = mapsLinkForUnit(unit);
+  if (!url) return "";
   const posAgo = minutesAgo(unit.ultima_posicion?.hace_segundos);
   const fecha = formatWaraDateLocal(unit.ultima_posicion?.fecha);
   const when = fecha ? ` (${fecha})` : "";
-  return `\n\nÚltima ubicación conocida hace ${posAgo}${when}: https://www.google.com/maps?q=${lat},${lon}`;
+  return `\n\nÚltima ubicación conocida hace ${posAgo}${when}:\n${url}`;
 }
 
 function appendLocationIfRequested(summary: string, unit: WaraUnidadEstado, rawText: string): string {

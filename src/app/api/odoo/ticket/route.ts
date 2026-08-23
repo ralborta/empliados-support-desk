@@ -602,7 +602,34 @@ export async function POST(req: NextRequest) {
             : gpsFeatureIssue
               ? rawText.slice(0, 120).trim() || "GPS: etapas / recorrido"
               : rawText.slice(0, 120).trim() || "Reclamo / soporte",
+        // Fuera de alcance: solo mesa Wara; pausar bot para el operador.
+        pauseBot: outOfScopeSupport,
+        aiSummary: outOfScopeSupport
+          ? "Fuera de alcance Atilio — derivación a operador (panel Wara, sin Odoo)."
+          : undefined,
       });
+
+      // Fuera de alcance: NUNCA crear Helpdesk Odoo — solo ticket local + mensaje.
+      if (outOfScopeSupport) {
+        const { pickOutOfScopeHandoffReply } = await import("@/lib/advisorHandoff");
+        const message = advisorHandoffLocal.shouldNotifyCustomer
+          ? pickOutOfScopeHandoffReply(rawPhone)
+          : REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY;
+        await appendOutboundBotMessage(rawPhone, message, {
+          source: "odoo_ticket",
+          stage: "out_of_scope_platform_only",
+          ticketCode: advisorHandoffLocal.ticket.code,
+        });
+        return NextResponse.json({
+          ok: true,
+          ok_s: "true",
+          message,
+          ticketCode: advisorHandoffLocal.ticket.code,
+          skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
+          flowComplete_s: "true",
+          platformOnly_s: "true",
+        });
+      }
 
       if (!cfg) {
         const message = openNewCase

@@ -395,7 +395,8 @@ const TURN_RULES: TurnRule[] = [
   },
   {
     id: "out_of_scope_support_claim",
-    reason: "Soporte fuera de alcance Atilio (hardware, pantalla, etc.) → asesor.",
+    reason:
+      "Soporte fuera de alcance Atilio → operador por panel Wara (sin Odoo).",
     decide: ({ text }) => (looksLikeOutOfScopeSupportClaim(text) ? "odoo_ticket" : null),
   },
   {
