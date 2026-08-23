@@ -99,6 +99,7 @@ const SUITES = [
   "verify-odometer-bare-numeric-amendment.mjs",
   "verify-delivery-critical-fixes.mjs",
   "verify-never-silent-delivery.mjs",
+  "verify-consult-failure-handoff.mjs",
   "verify-conversation-closing.mjs",
   "verify-atilio-reactivate-on-close.mjs",
   "verify-generic-unit-consult-and-ticket-info.mjs",

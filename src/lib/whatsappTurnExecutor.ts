@@ -442,6 +442,21 @@ export async function runTurnExecutorPhase(params: {
   const pendingAction = await getPendingAction(prisma, rawPhone);
   const thread = threadCtx.classificationThread;
 
+  // Cliente insiste (“Y?”) tras consulta de unidad/GPS sin respuesta útil → disculpa + asesor.
+  // Bug real 2026-08-22/23: “Indícame el reporte de la nissan” → silencio → “Y?”.
+  {
+    const { shouldHandoffImpatientUnitConsultFollowUp, resolveConsultFailureAdvisorHandoff } =
+      await import("@/lib/consultFailureHandoff");
+    if (shouldHandoffImpatientUnitConsultFollowUp(selectionText, thread)) {
+      const handoff = await resolveConsultFailureAdvisorHandoff(prisma, rawPhone, {
+        messageText: selectionText,
+        seed: rawPhone,
+        source: "impatient_unit_consult_followup",
+      });
+      return { message: handoff.message, executor: "odoo_ticket", ok: true };
+    }
+  }
+
   // Cierre de conversación/caso: ANTES del agente (WARA_AGENT_MODE).
   // Bug real 2026-08-20: "Quiero resolver conversacion" tras listado de flota quedaba
   // mudo — el agente interceptaba el turno y no llegaba a /odoo/ticket.
@@ -1577,6 +1592,20 @@ export async function runTurnExecutorPhase(params: {
     if (execMessage || !executorSkippedSilently(execResult)) {
       return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
     }
+    // Consulta GPS/reporte sin mensaje → nunca silencio: disculpa + operador.
+    if (
+      looksLikeLiveUnitConsultIntent(selectionText) ||
+      looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+      shouldRouteGpsConsultToUnidades(selectionText)
+    ) {
+      const { resolveConsultFailureAdvisorHandoff } = await import("@/lib/consultFailureHandoff");
+      const handoff = await resolveConsultFailureAdvisorHandoff(prisma, rawPhone, {
+        messageText: selectionText,
+        seed: rawPhone,
+        source: "unidades_empty_live_consult",
+      });
+      return { message: handoff.message, executor: "odoo_ticket", ok: true };
+    }
   }
 
   // Prefijo/marca/patente parcial en trámite odómetro/horómetro activo → executor (no agente).
@@ -1663,16 +1692,23 @@ export async function runTurnExecutorPhase(params: {
     if (executor === "mantenimiento") {
       finalMessage =
         "Para registrar el mantenimiento necesito la patente de la unidad (formato AA123BB o ABC123) junto con un breve detalle y, si querés, la prioridad.";
-    } else if (executor === "unidades" && looksLikeFleetUnitSearchInput(selectionText)) {
-      finalMessage = buildFleetUnitNotFoundMessage({ rawText: selectionText });
     } else if (
       executor === "unidades" &&
       (looksLikeLiveUnitConsultIntent(selectionText) ||
         looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+        shouldRouteGpsConsultToUnidades(selectionText) ||
         looksLikeGenericUnitConsultWithoutPlate(selectionText))
     ) {
-      finalMessage =
-        "Para revisar el GPS, la ignición o el reporte necesito la unidad: pasame la patente (ej. AD427MC), el código (ej. M300-097) o el número de unidad (ej. 600088).";
+      const { resolveConsultFailureAdvisorHandoff } = await import("@/lib/consultFailureHandoff");
+      const handoff = await resolveConsultFailureAdvisorHandoff(prisma, rawPhone, {
+        messageText: selectionText,
+        seed: rawPhone,
+        source: "unidades_fallback_empty",
+      });
+      finalMessage = handoff.message;
+      executor = "odoo_ticket";
+    } else if (executor === "unidades" && looksLikeFleetUnitSearchInput(selectionText)) {
+      finalMessage = buildFleetUnitNotFoundMessage({ rawText: selectionText });
     } else if (pendingKind) {
       finalMessage = buildPendingConfirmStillWaitingReminder(pendingKind);
     } else {
