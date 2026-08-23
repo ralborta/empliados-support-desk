@@ -26,6 +26,7 @@ import {
   panelMessageIdKind,
   preferExternalMessageId,
 } from "../src/lib/outboundMessageDedup.ts";
+import { inboundDeliveryKeyFromParts } from "../src/lib/turnWhatsAppDeliveryLedger.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -131,9 +132,16 @@ assert(
   "mergeWebhookIntoPlatformOutbound exportada",
 );
 
-console.log("\n— Turn /turn: presave del executor (sin wamid) no debe bloquear envío WA —");
-assert(panelMessageIdKind(null) === "empty", "appendOutboundBotMessage sin externalMessageId");
-assert(panelMessageIdKind("wamid.HBg") === "wamid", "solo wamid confirma envío real");
+console.log("\n— Idempotencia WA por inbound wamid (no por texto) —");
+assert(
+  typeof inboundDeliveryKeyFromParts === "function",
+  "inboundDeliveryKeyFromParts exportada",
+);
+assert(
+  inboundDeliveryKeyFromParts({ turnMessageId: "wamid.HBgLTEST" }) === "wamid.HBgLTEST",
+  "clave inbound usa wamid entrante",
+);
+console.log("  (integración completa: verify-turn-delivery-presave-integration.mjs)");
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

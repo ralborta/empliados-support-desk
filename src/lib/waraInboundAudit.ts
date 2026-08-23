@@ -30,10 +30,9 @@ export function bbcShouldSendExecutorMessage(): boolean {
  * BBC queda mudo (skipResponse_s=true) salvo fallback si falla el envío.
  *
  * Por defecto true: nunca depender solo de BBC (silencios 2026-08-22/23).
- * Rollback explícito: WARA_TURN_BACKEND_SEND=false.
+ * Rollback explícito: WARA_TURN_BACKEND_SEND=false → deliverTurnToWhatsApp delega a BBC.
  *
- * Nota: `deliverTurnToWhatsApp` siempre intenta API primero; este flag alinea
- * skipResponse en el payload previo a la entrega.
+ * `deliverTurnToWhatsApp` consulta este flag antes de llamar a la API.
  */
 export function shouldTurnSendWhatsAppToCustomer(): boolean {
   const raw = process.env.WARA_TURN_BACKEND_SEND?.trim().toLowerCase();
