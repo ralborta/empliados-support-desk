@@ -1,7 +1,7 @@
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { prisma } from "@/lib/db";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
-import { findPlatformPresavedOutboundDuplicate } from "@/lib/outboundMessageDedup";
+import { findPlatformPresavedOutboundDuplicate, panelMessageIdKind } from "@/lib/outboundMessageDedup";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -79,15 +79,21 @@ export async function deliverTurnToWhatsApp(
         windowMs: 120_000,
       });
       if (dup) {
-        console.log("[whatsappTurn] Skip outbound duplicado (mismo texto <120s)", rawPhone);
-        return {
-          ...payload,
-          message: "",
-          summaryText: "",
-          skipResponse_s: "true",
-          duplicateOutbound_s: "true",
-          waDelivery: "duplicate_skipped",
-        };
+        const dupKind = panelMessageIdKind(dup.externalMessageId);
+        // Bug prod 2026-08-23: ejecutores (odómetro, etc.) hacen appendOutboundBotMessage
+        // antes de /turn entregar por API. Sin wamid eso es presave en panel, NO envío WA.
+        // Si saltamos ahí, el cliente queda en silencio (Hola sí, Odometro no).
+        if (dupKind === "wamid" || dupKind === "v3") {
+          console.log("[whatsappTurn] Skip outbound duplicado (mismo texto <120s)", rawPhone);
+          return {
+            ...payload,
+            message: "",
+            summaryText: "",
+            skipResponse_s: "true",
+            duplicateOutbound_s: "true",
+            waDelivery: "duplicate_skipped",
+          };
+        }
       }
     }
   }

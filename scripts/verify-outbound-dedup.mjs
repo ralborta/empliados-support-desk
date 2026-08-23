@@ -131,6 +131,10 @@ assert(
   "mergeWebhookIntoPlatformOutbound exportada",
 );
 
+console.log("\n— Turn /turn: presave del executor (sin wamid) no debe bloquear envío WA —");
+assert(panelMessageIdKind(null) === "empty", "appendOutboundBotMessage sin externalMessageId");
+assert(panelMessageIdKind("wamid.HBg") === "wamid", "solo wamid confirma envío real");
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);
