@@ -16,6 +16,7 @@ import {
 } from "../src/lib/waraApi.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import { shouldRouteTurnToOdometerExecutor } from "../src/lib/waraUnitIntent.ts";
+import { stripMeterValuesMatchingUnitReference } from "../src/lib/wara.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -69,6 +70,10 @@ assert(
   }),
   "Buenas tardes? no continúa odómetro con pending",
 );
+const stripped = stripMeterValuesMatchingUnitReference("Horometro 900133", {
+  horometro: 900133,
+});
+assert(stripped.horometro === undefined, "interno 900133 no es lectura de horómetro");
 assert(
   !looksLikeRepeatGreetingInSession(threadAfterGreeting, certMsg),
   "certificado concreto no es saludo repetido",

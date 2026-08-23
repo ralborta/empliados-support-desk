@@ -791,6 +791,7 @@ export async function customerRegisteredContextResponse(
     // Saludo = arrancar de cero aunque haya trámite inconcluso (bug prod 2026-08-17).
     if (inconclusive) {
       await clearPendingAction(prisma, trimmed);
+      await clearActiveUnit(prisma, trimmed);
     }
     nextFlow = "reply";
     if (!responseMessage) {

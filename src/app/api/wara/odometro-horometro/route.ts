@@ -64,6 +64,7 @@ import {
 } from "@/lib/waraUnitIntent";
 import { parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHora, mergeFechaConHoraSuelt, stripBotPromptExamples, stripBotOdometerBotSpeech, fechaLocalNaiveToWaraUtc, looksLikeMeterReadingWithoutFecha, customerFechaSourceText, looksLikeFechaHoraLecturaMessage, fechaWara, formatFechaDisplay, isFechaEnFuturo } from "@/lib/odometroFecha";
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
+import { clearActiveUnit } from "@/lib/activeUnit";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
@@ -765,73 +766,22 @@ export async function POST(req: NextRequest) {
     activeUnitPlate: activeUnitRecordEarly?.plate,
   });
 
+  // Saludo / cambio de tema: no retomar trámite stale (bug prod 2026-08-23: «Buenas tardes?»
+  // con pending horómetro erróneo volvía a «Valor anotado 900133 hs» en vez de saludar).
   if (looksLikeGreeting(rawText) && !shouldContinueOdometerFlow(rawText, threadText)) {
-    const pendingPayload =
-      dbPendingOdoAction?.type === "odometro" ? dbPendingOdoAction.payload : undefined;
-    const resumePlateRaw =
-      (pendingPayload?.patente ? String(pendingPayload.patente) : null) || contextUnitPlate;
-    const awaitingKmOnly =
-      threadAwaitingOdometerKmValue(flowThreadText) ||
-      threadAwaitingHorometerKmValue(flowThreadText);
-    const awaitingOdometerInput =
-      awaitingKmOnly ||
-      threadAwaitingOdometerPlate(flowThreadText) ||
-      threadAwaitingHorometerPlate(flowThreadText) ||
-      (hasLiveOdometerPendingAction &&
-        !!resumePlateRaw &&
-        typeof pendingPayload?.odometro !== "number" &&
-        typeof pendingPayload?.horometro !== "number" &&
-        !hasThreadPendingConfirm);
-    if (resumePlateRaw && awaitingOdometerInput && !hasThreadPendingConfirm) {
-      const wantsHorometroResume =
-        horometerFlowActive ||
-        horometerOnlyIntent ||
-        pendingPayload?.meterType === "horometro";
-      const unitLabel = formatFleetUnitLabel(
-        formatPlateWithSpaces(resumePlateRaw) ?? resumePlateRaw,
-        pendingPayload?.unidad ? String(pendingPayload.unidad) : null,
-      );
-      const pendingHoro =
-        typeof pendingPayload?.horometro === "number" ? pendingPayload.horometro : undefined;
-      const pendingOdo =
-        typeof pendingPayload?.odometro === "number" ? pendingPayload.odometro : undefined;
-      const hasPartialValue = wantsHorometroResume
-        ? pendingHoro != null
-        : pendingOdo != null;
-      const message = hasPartialValue
-        ? formatMeterAsk({
-            meter: wantsHorometroResume ? "hourmeter" : "odometer",
-            unitLabel,
-            expected: "datetime",
-          })
-        : formatMeterAsk({
-            meter: wantsHorometroResume ? "hourmeter" : "odometer",
-            unitLabel,
-            expected: "value",
-          });
-      const tail = flowThreadText.slice(-1200);
-      if (tail.includes(message.trim())) {
-        return NextResponse.json(
-          {
-            ok: true,
-            ok_s: "true",
-            flowComplete_s: "true",
-            message: "",
-            skipResponse_s: "true",
-            duplicatePrompt_s: "true",
-          },
-          { status: BB_STATUS },
-        );
-      }
-      await appendOutboundBotMessage(rawPhone, message, {
-        source: "wara_odometro_response",
-        stage: "greeting_resume_meter_ask",
-      });
-      return NextResponse.json(
-        { ok: false, ok_s: "false", error: "Falta odómetro u horómetro", message },
-        { status: BB_STATUS },
-      );
-    }
+    await clearPendingAction(prisma, rawPhone);
+    await clearActiveUnit(prisma, rawPhone);
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message: "",
+        skipResponse_s: "true",
+        topicChange_s: "true",
+      },
+      { status: BB_STATUS },
+    );
   }
 
   if (
@@ -848,6 +798,7 @@ export async function POST(req: NextRequest) {
   ) {
     if (looksLikeGreeting(rawText)) {
       await clearPendingAction(prisma, rawPhone);
+      await clearActiveUnit(prisma, rawPhone);
     }
     return NextResponse.json(
       {
@@ -1260,16 +1211,20 @@ export async function POST(req: NextRequest) {
   }
   const combinedText = [flowThreadText, rawText].filter(Boolean).join("\n");
   const clockScanText = [rawText, flowThreadText.slice(-800)].filter(Boolean).join("\n");
+  const blockThreadMeterInference =
+    nonDataCustomerTurn || looksLikeOdometerServiceWithUnitReference(rawText);
   let horometro = stripHorometroConfusedWithClockTime(
     rawText,
     resolveHorometroForWara({
       explicitHorometro: firstFiniteNumber(parsed.data.horometro, parsed.data.hourmeter),
       parsedHorometro: firstFiniteNumber(
         (horometerFlowActive || horometerOnlyIntent) ? bareNumericAmendmentValue : undefined,
-        mergedFields.horometro,
+        blockThreadMeterInference ? undefined : mergedFields.horometro,
         bareHorometerInMessage,
-        fromText.horometro,
-        treatAsBlankFlowStart ? undefined : threadParsed.horometro,
+        blockThreadMeterInference ? undefined : fromText.horometro,
+        treatAsBlankFlowStart || blockThreadMeterInference
+          ? undefined
+          : threadParsed.horometro,
       ),
       combinedText: treatAsBlankFlowStart ? rawText : combinedText,
     }),
@@ -1301,9 +1256,27 @@ export async function POST(req: NextRequest) {
     horometro = undefined;
   }
 
-  const strippedMeters = stripMeterValuesMatchingUnitReference(rawText, { odometro, horometro });
+  let strippedMeters = stripMeterValuesMatchingUnitReference(rawText, { odometro, horometro });
   odometro = strippedMeters.odometro;
   horometro = strippedMeters.horometro;
+  // También descartar lecturas que coinciden con internos mencionados en el hilo reciente
+  // (bug prod 2026-08-23: mergedFields reinyectaba 900133 hs desde «Horometro 900133» viejo).
+  if (typeof odometro === "number" || typeof horometro === "number") {
+    strippedMeters = stripMeterValuesMatchingUnitReference(
+      [rawText, flowThreadText.slice(-2000)].filter(Boolean).join("\n"),
+      { odometro, horometro },
+    );
+    odometro = strippedMeters.odometro;
+    horometro = strippedMeters.horometro;
+  }
+  if (odometerFlowStart && looksLikeOdometerServiceWithUnitReference(rawText)) {
+    const serviceUnitStrip = stripMeterValuesMatchingUnitReference(rawText, {
+      odometro,
+      horometro,
+    });
+    odometro = serviceUnitStrip.odometro;
+    horometro = serviceUnitStrip.horometro;
+  }
 
   const rawExplicitlyMentionsHorometerOnly =
     /\bhor[oó]metro\b/i.test(rawText) && !/\bod[oó]metro\b/i.test(rawText);
