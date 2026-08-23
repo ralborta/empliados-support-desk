@@ -10,8 +10,9 @@ import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
 import {
   markInboundDeliveryDelivered,
-  markInboundDeliverySendInitiated,
+  releaseInboundDeliverySendRight,
   resolveInboundDeliveryContext,
+  tryAcquireInboundDeliverySendRight,
 } from "@/lib/turnWhatsAppDeliveryLedger";
 
 type JsonRecord = Record<string, unknown>;
@@ -151,15 +152,80 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
     }
 
     if (inboundCtx.inboundMessageId && inboundCtx.inboundDeliveryKey) {
-      await markInboundDeliverySendInitiated(
+      const acquire = await tryAcquireInboundDeliverySendRight(
         inboundCtx.inboundMessageId,
         inboundCtx.inboundDeliveryKey,
         deps.prisma,
       );
+      if (acquire.status === "already_delivered") {
+        return {
+          ...payload,
+          message: "",
+          summaryText: "",
+          skipResponse_s: "true",
+          waDelivery: "idempotent_inbound",
+          waDelivery_s: "idempotent_inbound",
+          inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
+          waOutboundProviderId: acquire.outboundProviderId,
+          duplicateInbound_s: "true",
+        };
+      }
+      if (acquire.status === "in_progress" || acquire.status === "lost_race") {
+        return {
+          ...payload,
+          message: "",
+          summaryText: "",
+          skipResponse_s: "true",
+          waDelivery: "send_in_progress",
+          waDelivery_s: "send_in_progress",
+          inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
+        };
+      }
     }
 
     try {
       const sendResult = await deps.sendWhatsApp({ number: rawPhone, message, mediaUrl });
+
+      if (sendResult.skippedDuplicate) {
+        const providerId = String(sendResult.providerMessageId ?? "").trim();
+        if (
+          inboundCtx.inboundMessageId &&
+          inboundCtx.inboundDeliveryKey &&
+          providerId
+        ) {
+          await markInboundDeliveryDelivered(
+            inboundCtx.inboundMessageId,
+            inboundCtx.inboundDeliveryKey,
+            providerId,
+            deps.prisma,
+          );
+        }
+        await persistCustomerBotReply(rawPhone, message, {
+          ...persistMeta,
+          waDelivery: providerId ? "backend" : "idempotent_api_dedup",
+          ...(providerId
+            ? { waOutboundProviderId: providerId, waDeliveryState: "delivered" }
+            : {}),
+          inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
+        }, deps.prisma).catch(() => undefined);
+
+        return {
+          ...payload,
+          message: "",
+          summaryText: "",
+          deliveredMessage: message,
+          deliveredMessage_s: message,
+          skipResponse_s: "true",
+          waSent_s: providerId ? "true" : "false",
+          waDelivery: providerId ? "backend" : "idempotent_api_dedup",
+          waDelivery_s: providerId ? "backend" : "idempotent_api_dedup",
+          ...(providerId ? { waOutboundProviderId: providerId } : {}),
+          inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
+          waSkippedDuplicate_s: "true",
+          ...(mediaUrl ? { mediaUrl: "", mediaUrl_s: "" } : {}),
+        };
+      }
+
       const providerId = String(sendResult.providerMessageId ?? "").trim();
       if (!providerId) {
         throw new Error("BuilderBot API OK sin identificador de mensaje saliente");
@@ -193,12 +259,18 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
         waDelivery: "backend",
         waOutboundProviderId: providerId,
         inboundDeliveryKey: inboundCtx.inboundDeliveryKey,
-        ...(sendResult.skippedDuplicate ? { waSkippedDuplicate_s: "true" } : {}),
         ...(mediaUrl ? { mediaUrl: "", mediaUrl_s: "" } : {}),
       };
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       console.error("[whatsappTurn] Envío WA falló, fallback BBC messageMapping:", detail);
+      if (inboundCtx.inboundMessageId && inboundCtx.inboundDeliveryKey) {
+        await releaseInboundDeliverySendRight(
+          inboundCtx.inboundMessageId,
+          inboundCtx.inboundDeliveryKey,
+          deps.prisma,
+        ).catch(() => undefined);
+      }
       await persistCustomerBotReply(rawPhone, message, {
         ...persistMeta,
         waDelivery: "bbc_fallback",

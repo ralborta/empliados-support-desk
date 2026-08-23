@@ -1,19 +1,30 @@
 #!/usr/bin/env node
 /**
- * Integración: executor presave + deliverTurnToWhatsApp + contrato BBC.
+ * Integración: executor presave + deliverTurnToWhatsApp + contrato BBC + builderbot.
  *
  * Uso: npx tsx scripts/verify-turn-delivery-presave-integration.mjs
  */
 import assert from "node:assert/strict";
-import { createDeliverTurnToWhatsApp } from "../src/lib/whatsappTurnDelivery.ts";
-import {
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const { createDeliverTurnToWhatsApp } = await import("../src/lib/whatsappTurnDelivery.ts");
+const {
   inboundDeliveryKeyFromParts,
+  SEND_INITIATED_STALE_MS,
   simulateExecutorPresaveOutbound,
-} from "../src/lib/turnWhatsAppDeliveryLedger.ts";
-import { shouldTurnSendWhatsAppToCustomer } from "../src/lib/waraInboundAudit.ts";
+  tryAcquireInboundDeliverySendRight,
+} = await import("../src/lib/turnWhatsAppDeliveryLedger.ts");
+const { shouldTurnSendWhatsAppToCustomer } = await import("../src/lib/waraInboundAudit.ts");
 
 const PHONE = "5491133788190";
 const WAMID = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0E1";
+
+function readWaMeta(row) {
+  return row?.rawPayload?.waTurnDelivery ?? {};
+}
 
 function createMockPrisma() {
   const customer = { id: "cust-1", phone: PHONE, name: "Raúl A." };
@@ -32,6 +43,33 @@ function createMockPrisma() {
         where.phone === PHONE ? customer : null,
     },
     $queryRaw: async () => [],
+    $transaction: async (fn) => fn(prisma),
+    $executeRaw: async (strings, ...values) => {
+      const sql = strings.join("?");
+      if (sql.includes("FOR UPDATE")) return 1;
+      if (sql.includes("UPDATE")) {
+        const nextPayload = values[0];
+        const inboundId = values[1];
+        const staleThreshold = values[2];
+        const row = messages.find((m) => m.id === inboundId);
+        if (!row) return 0;
+        const meta = readWaMeta(row);
+        const state = meta.waDeliveryState;
+        const at = meta.sendInitiatedAt;
+        if (state === "delivered") return 0;
+        if (
+          state === "send_initiated" &&
+          at != null &&
+          Number(at) >= Number(staleThreshold)
+        ) {
+          return 0;
+        }
+        row.rawPayload =
+          typeof nextPayload === "object" ? nextPayload : row.rawPayload;
+        return 1;
+      }
+      return 0;
+    },
     ticket: {
       findFirst: async () => ticket,
       update: async () => ticket,
@@ -39,7 +77,12 @@ function createMockPrisma() {
     ticketMessage: {
       create: async ({ data }) => {
         const id = `msg-${++seq}`;
-        const row = { ...data, id, createdAt: new Date() };
+        const row = {
+          ...data,
+          id,
+          createdAt: new Date(),
+          rawPayload: data.rawPayload ?? {},
+        };
         messages.push(row);
         return row;
       },
@@ -48,10 +91,9 @@ function createMockPrisma() {
         if (where.ticket) {
           const t = where.ticket;
           if (t.customerId) {
-            pool = pool.filter((m) => {
-              const ticketRow = m.ticketId === ticket.id;
-              return ticketRow && t.customerId === customer.id;
-            });
+            pool = pool.filter(
+              (m) => m.ticketId === ticket.id && t.customerId === customer.id,
+            );
           }
         }
         if (where.direction) pool = pool.filter((m) => m.direction === where.direction);
@@ -60,11 +102,21 @@ function createMockPrisma() {
         if (where.externalMessageId) {
           pool = pool.filter((m) => m.externalMessageId === where.externalMessageId);
         }
+        if (where.NOT) {
+          const not = where.NOT;
+          if (not.direction && not.from) {
+            pool = pool.filter(
+              (m) => m.direction !== not.direction || m.from !== not.from,
+            );
+          }
+        }
         if (where.createdAt && typeof where.createdAt === "object") {
           const gte = where.createdAt.gte;
           if (gte) pool = pool.filter((m) => m.createdAt >= gte);
         }
-        if (orderBy?.createdAt === "desc") pool.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        if (orderBy?.createdAt === "desc") {
+          pool.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        }
         return pool[0] ?? null;
       },
       findUnique: async ({ where }) =>
@@ -94,12 +146,10 @@ function makePayload(message, wamid, selectionText) {
 }
 
 let sendCalls = 0;
-const sentProviderIds = [];
 
 async function mockSend(params) {
   sendCalls++;
   const id = `bbc-out-${sendCalls}`;
-  sentProviderIds.push(id);
   return { providerMessageId: id, rawResponse: { ref: id } };
 }
 
@@ -148,11 +198,8 @@ assert.equal(first.waDelivery, "backend");
 assert.ok(first.waOutboundProviderId, "id proveedor presente");
 
 const inbound = messages.find((m) => m.externalMessageId === WAMID);
-assert.equal(inbound?.rawPayload?.waTurnDelivery?.waDeliveryState, "delivered");
-assert.equal(
-  inbound?.rawPayload?.waTurnDelivery?.waOutboundProviderId,
-  first.waOutboundProviderId,
-);
+assert.equal(readWaMeta(inbound).waDeliveryState, "delivered");
+assert.equal(readWaMeta(inbound).waOutboundProviderId, first.waOutboundProviderId);
 
 console.log("— 3) Reintento mismo wamid → idempotente, sin segundo envío —");
 sendCalls = 0;
@@ -225,13 +272,183 @@ await deliver(PHONE, makePayload(sameReply, WAMID4, "Odometro 900120"));
 assert.equal(sendCalls, 2, "dos envíos con mismo texto en turnos distintos");
 
 console.log("— 7) Clave inbound estable (wamid vs inbound:id) —");
+assert.equal(inboundDeliveryKeyFromParts({ turnMessageId: WAMID }), WAMID);
 assert.equal(
-  inboundDeliveryKeyFromParts({ turnMessageId: WAMID }),
-  WAMID,
-);
-assert.equal(
-  inboundDeliveryKeyFromParts({ inboundMessageId: "msg-42", inboundExternalMessageId: null }),
+  inboundDeliveryKeyFromParts({
+    inboundMessageId: "msg-42",
+    inboundExternalMessageId: null,
+  }),
   "inbound:msg-42",
 );
 
-console.log("\n✓ verify-turn-delivery-presave-integration OK");
+console.log("— 8) Concurrencia: dos deliveries mismo wamid → un solo envío API —");
+const WAMID_CONC = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0D7";
+const inboundConc = await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: "Odometro 900121",
+    externalMessageId: WAMID_CONC,
+  },
+});
+sendCalls = 0;
+const [concA, concB] = await Promise.all([
+  deliver(PHONE, makePayload("Respuesta concurrente", WAMID_CONC, "Odometro 900121")),
+  deliver(PHONE, makePayload("Respuesta concurrente", WAMID_CONC, "Odometro 900121")),
+]);
+assert.equal(sendCalls, 1, "solo un POST API bajo concurrencia");
+const concResults = [concA.waDelivery, concB.waDelivery].sort();
+assert.ok(
+  concResults.includes("backend") || concResults.includes("idempotent_inbound"),
+  "un resultado entrega y el otro idempotente/in_progress",
+);
+assert.equal(readWaMeta(inboundConc).waDeliveryState, "delivered");
+
+console.log("— 9) Crash tras API: send_initiated stale → reintento seguro —");
+const WAMID_CRASH = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0D8";
+const inboundCrash = await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: "Odometro 900122",
+    externalMessageId: WAMID_CRASH,
+  },
+});
+const keyCrash = inboundDeliveryKeyFromParts({ turnMessageId: WAMID_CRASH });
+const acquired = await tryAcquireInboundDeliverySendRight(
+  inboundCrash.id,
+  keyCrash,
+  prisma,
+);
+assert.equal(acquired.status, "acquired");
+const crashInbound = messages.find((m) => m.id === inboundCrash.id);
+crashInbound.rawPayload = {
+  ...crashInbound.rawPayload,
+  waTurnDelivery: {
+    inboundDeliveryKey: keyCrash,
+    waDeliveryState: "send_initiated",
+    sendInitiatedAt: Date.now() - SEND_INITIATED_STALE_MS - 1000,
+  },
+};
+sendCalls = 0;
+const recovered = await deliver(
+  PHONE,
+  makePayload("Recuperación tras crash", WAMID_CRASH, "Odometro 900122"),
+);
+assert.equal(sendCalls, 1, "reintento tras send_initiated stale");
+assert.equal(recovered.waDelivery, "backend");
+assert.equal(readWaMeta(crashInbound).waDeliveryState, "delivered");
+
+console.log("— 10) Webhook presave inbound antes de delivery —");
+const WAMID_WEBHOOK = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0D9";
+const webhookInbound = await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: "Odometro 900123",
+    externalMessageId: WAMID_WEBHOOK,
+    rawPayload: {
+      source: "whatsapp_inbound_webhook",
+      eventName: "message.incoming",
+      messageId: WAMID_WEBHOOK,
+    },
+  },
+});
+sendCalls = 0;
+const webhookDelivery = await deliver(
+  PHONE,
+  makePayload("Tras webhook inbound", WAMID_WEBHOOK, "Odometro 900123"),
+);
+assert.equal(sendCalls, 1, "delivery con inbound webhook previo");
+assert.equal(webhookDelivery.waDelivery, "backend");
+assert.equal(readWaMeta(webhookInbound).waDeliveryState, "delivered");
+
+console.log("— 11) skippedDuplicate sin providerId → no BBC fallback —");
+const WAMID_SKIP = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0EA";
+await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: "Odometro 900124",
+    externalMessageId: WAMID_SKIP,
+  },
+});
+const skipDeliver = createDeliverTurnToWhatsApp({
+  prisma,
+  sendWhatsApp: async () => ({ skippedDuplicate: true }),
+  sendWhatsAppMessage: mockSendMessage,
+});
+const skipped = await skipDeliver(
+  PHONE,
+  makePayload("Skip dup test", WAMID_SKIP, "Odometro 900124"),
+);
+assert.equal(skipped.skipResponse_s, "true", "no activar BBC");
+assert.equal(skipped.waDelivery, "idempotent_api_dedup");
+assert.equal(skipped.message, "");
+
+console.log("— 12) builderbot.ts: dedup textual eliminado —");
+const builderbotSrc = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../src/lib/builderbot.ts"),
+  "utf8",
+);
+assert.ok(!builderbotSrc.includes("shouldSkipDuplicateWaSend"), "sin shouldSkipDuplicateWaSend");
+assert.ok(!builderbotSrc.includes("RECENT_WA_SEND_DEDUP_MS"), "sin ventana dedup 8s");
+assert.ok(!builderbotSrc.includes("skippedDuplicate"), "sendWhatsAppMessage no devuelve skippedDuplicate");
+const runtimeDedup = spawnSync("npx", ["tsx", "scripts/verify-builderbot-no-text-dedup.mjs"], {
+  cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
+  encoding: "utf8",
+});
+assert.equal(runtimeDedup.status, 0, `builderbot runtime dedup: ${runtimeDedup.stderr || runtimeDedup.stdout}`);
+
+console.log("— 13) Crash simulado: API OK pero mark delivered falla → no BBC duplicado —");
+const WAMID_MARK_FAIL = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0EB";
+const inboundMarkFail = await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: "Odometro 900125",
+    externalMessageId: WAMID_MARK_FAIL,
+  },
+});
+const markFailPrisma = {
+  ...prisma,
+  ticketMessage: {
+    ...prisma.ticketMessage,
+    update: async ({ where, data }) => {
+      if (data?.rawPayload?.waTurnDelivery?.waDeliveryState === "delivered") {
+        throw new Error("simulated crash before delivered mark");
+      }
+      return prisma.ticketMessage.update({ where, data });
+    },
+  },
+};
+const crashDeliver = createDeliverTurnToWhatsApp({
+  prisma: markFailPrisma,
+  sendWhatsApp: mockSend,
+  sendWhatsAppMessage: mockSendMessage,
+});
+sendCalls = 0;
+const crashResult = await crashDeliver(
+  PHONE,
+  makePayload("Crash mark delivered", WAMID_MARK_FAIL, "Odometro 900125"),
+);
+assert.equal(crashResult.waDelivery, "bbc_fallback");
+assert.equal(crashResult.skipResponse_s, "false");
+sendCalls = 0;
+const afterCrash = await deliver(
+  PHONE,
+  makePayload("Crash mark delivered", WAMID_MARK_FAIL, "Odometro 900125"),
+);
+assert.notEqual(afterCrash.waDelivery, "bbc_fallback", "reintento no duplica BBC");
+assert.ok(
+  afterCrash.waDelivery === "backend" ||
+    afterCrash.waDelivery === "idempotent_inbound" ||
+    afterCrash.waDelivery === "send_in_progress",
+);
+
+console.log("\n✓ verify-turn-delivery-presave-integration OK (13 escenarios)");

@@ -1,6 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 
 /** Presave en panel (executor) ≠ envío iniciado ≠ aceptado por WhatsApp. */
@@ -10,7 +9,18 @@ export type WaTurnDeliveryMeta = {
   inboundDeliveryKey?: string;
   waDeliveryState?: WaTurnDeliveryState;
   waOutboundProviderId?: string;
+  /** Epoch ms — reserva atómica de envío (no confundir con entrega WA). */
+  sendInitiatedAt?: number;
 };
+
+/** Tras este TTL, `send_initiated` sin provider id puede reclamarse (crash intermedio). */
+export const SEND_INITIATED_STALE_MS = 120_000;
+
+export type AcquireInboundDeliveryResult =
+  | { status: "acquired" }
+  | { status: "already_delivered"; outboundProviderId: string }
+  | { status: "in_progress" }
+  | { status: "lost_race" };
 
 function readDeliveryMeta(rawPayload: unknown): WaTurnDeliveryMeta {
   if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) return {};
@@ -22,12 +32,20 @@ function readDeliveryMeta(rawPayload: unknown): WaTurnDeliveryMeta {
     state === "send_initiated" || state === "delivered" || state === "presaved"
       ? (state as WaTurnDeliveryState)
       : undefined;
+  const sendInitiatedAtRaw = m.sendInitiatedAt;
+  const sendInitiatedAt =
+    typeof sendInitiatedAtRaw === "number"
+      ? sendInitiatedAtRaw
+      : typeof sendInitiatedAtRaw === "string" && /^\d+$/.test(sendInitiatedAtRaw.trim())
+        ? Number(sendInitiatedAtRaw.trim())
+        : undefined;
   return {
     inboundDeliveryKey:
       typeof m.inboundDeliveryKey === "string" ? m.inboundDeliveryKey.trim() : undefined,
     waDeliveryState,
     waOutboundProviderId:
       typeof m.waOutboundProviderId === "string" ? m.waOutboundProviderId.trim() : undefined,
+    sendInitiatedAt,
   };
 }
 
@@ -48,6 +66,58 @@ export function inboundDeliveryKeyFromParts(params: {
   const inboundId = String(params.inboundMessageId ?? "").trim();
   if (inboundId) return `inbound:${inboundId}`;
   return undefined;
+}
+
+export function isInboundTurnDeliveryComplete(rawPayload: unknown): boolean {
+  const meta = readDeliveryMeta(rawPayload);
+  return meta.waDeliveryState === "delivered" && !!meta.waOutboundProviderId;
+}
+
+export function isInboundTurnDeliveryInProgress(rawPayload: unknown): boolean {
+  const meta = readDeliveryMeta(rawPayload);
+  if (meta.waDeliveryState !== "send_initiated") return false;
+  const at = meta.sendInitiatedAt ?? 0;
+  if (!at) return true;
+  return Date.now() - at < SEND_INITIATED_STALE_MS;
+}
+
+function priorPayloadObject(rawPayload: unknown): Record<string, unknown> {
+  return rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
+    ? (rawPayload as Record<string, unknown>)
+    : {};
+}
+
+function buildWaTurnDeliveryPatch(
+  prior: Record<string, unknown>,
+  patch: WaTurnDeliveryMeta,
+): Prisma.InputJsonObject {
+  const priorMeta = readDeliveryMeta(prior);
+  const merged: WaTurnDeliveryMeta = {
+    inboundDeliveryKey: patch.inboundDeliveryKey ?? priorMeta.inboundDeliveryKey,
+    waDeliveryState: patch.waDeliveryState ?? priorMeta.waDeliveryState,
+    waOutboundProviderId: patch.waOutboundProviderId ?? priorMeta.waOutboundProviderId,
+    sendInitiatedAt: patch.sendInitiatedAt ?? priorMeta.sendInitiatedAt,
+  };
+  return {
+    ...prior,
+    waTurnDelivery: merged,
+  } as Prisma.InputJsonObject;
+}
+
+export async function findInboundByExternalWamid(
+  client: PrismaClient,
+  wamid: string,
+): Promise<{ id: string; rawPayload: unknown } | null> {
+  const id = String(wamid ?? "").trim();
+  if (!isInboundWamid(id)) return null;
+  return client.ticketMessage.findFirst({
+    where: {
+      externalMessageId: id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+    },
+    select: { id: true, rawPayload: true },
+  });
 }
 
 export async function resolveInboundDeliveryContext(
@@ -133,35 +203,121 @@ async function mergeInboundDeliveryMeta(
     select: { rawPayload: true },
   });
   if (!row) return;
-  const prior =
-    row.rawPayload && typeof row.rawPayload === "object" && !Array.isArray(row.rawPayload)
-      ? (row.rawPayload as Record<string, unknown>)
-      : {};
-  const priorMeta = readDeliveryMeta(prior);
-  const merged: WaTurnDeliveryMeta = {
-    inboundDeliveryKey: patch.inboundDeliveryKey ?? priorMeta.inboundDeliveryKey,
-    waDeliveryState: patch.waDeliveryState ?? priorMeta.waDeliveryState,
-    waOutboundProviderId: patch.waOutboundProviderId ?? priorMeta.waOutboundProviderId,
-  };
+  const prior = priorPayloadObject(row.rawPayload);
   await client.ticketMessage.update({
     where: { id: inboundMessageId },
     data: {
-      rawPayload: {
-        ...prior,
-        waTurnDelivery: merged,
-      } as Prisma.InputJsonObject,
+      rawPayload: buildWaTurnDeliveryPatch(prior, patch),
     },
   });
 }
 
-export async function markInboundDeliverySendInitiated(
+function evaluateAcquireFromMeta(meta: WaTurnDeliveryMeta): AcquireInboundDeliveryResult | null {
+  if (meta.waDeliveryState === "delivered" && meta.waOutboundProviderId) {
+    return { status: "already_delivered", outboundProviderId: meta.waOutboundProviderId };
+  }
+  if (meta.waOutboundProviderId && meta.waDeliveryState === "send_initiated") {
+    return { status: "already_delivered", outboundProviderId: meta.waOutboundProviderId };
+  }
+  if (meta.waDeliveryState === "send_initiated") {
+    const at = meta.sendInitiatedAt ?? 0;
+    if (!at || Date.now() - at < SEND_INITIATED_STALE_MS) {
+      return { status: "in_progress" };
+    }
+  }
+  return null;
+}
+
+/**
+ * Reserva atómica del derecho de envío para un inbound (SELECT FOR UPDATE + condicional).
+ */
+export async function tryAcquireInboundDeliverySendRight(
+  inboundMessageId: string,
+  inboundDeliveryKey: string,
+  client: PrismaClient = prisma,
+): Promise<AcquireInboundDeliveryResult> {
+  return client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "TicketMessage" WHERE id = ${inboundMessageId} FOR UPDATE`;
+
+    const row = await tx.ticketMessage.findUnique({
+      where: { id: inboundMessageId },
+      select: { rawPayload: true },
+    });
+    if (!row) return { status: "lost_race" };
+
+    const prior = priorPayloadObject(row.rawPayload);
+    const meta = readDeliveryMeta(prior);
+    const precheck = evaluateAcquireFromMeta(meta);
+    if (precheck) return precheck;
+
+    const nowMs = Date.now();
+    const staleThreshold = nowMs - SEND_INITIATED_STALE_MS;
+    const nextPayload = buildWaTurnDeliveryPatch(prior, {
+      inboundDeliveryKey,
+      waDeliveryState: "send_initiated",
+      sendInitiatedAt: nowMs,
+    });
+
+    const updated = await tx.$executeRaw`
+      UPDATE "TicketMessage"
+      SET "rawPayload" = ${nextPayload}::jsonb
+      WHERE id = ${inboundMessageId}
+      AND (
+        ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') IS NULL
+        OR ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') NOT IN ('delivered', 'send_initiated')
+        OR (
+          ("rawPayload"->'waTurnDelivery'->>'waDeliveryState') = 'send_initiated'
+          AND (
+            ("rawPayload"->'waTurnDelivery'->>'sendInitiatedAt') IS NULL
+            OR (("rawPayload"->'waTurnDelivery'->>'sendInitiatedAt')::bigint < ${staleThreshold})
+          )
+        )
+      )
+    `;
+
+    if (Number(updated) === 0) {
+      const again = await tx.ticketMessage.findUnique({
+        where: { id: inboundMessageId },
+        select: { rawPayload: true },
+      });
+      if (!again) return { status: "lost_race" };
+      const retryMeta = readDeliveryMeta(again.rawPayload);
+      const retry = evaluateAcquireFromMeta(retryMeta);
+      return retry ?? { status: "lost_race" };
+    }
+
+    return { status: "acquired" };
+  });
+}
+
+/** Libera reserva tras fallo API (permite BBC fallback o reintento). */
+export async function releaseInboundDeliverySendRight(
   inboundMessageId: string,
   inboundDeliveryKey: string,
   client: PrismaClient = prisma,
 ): Promise<void> {
-  await mergeInboundDeliveryMeta(client, inboundMessageId, {
-    inboundDeliveryKey,
-    waDeliveryState: "send_initiated",
+  await client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "TicketMessage" WHERE id = ${inboundMessageId} FOR UPDATE`;
+    const row = await tx.ticketMessage.findUnique({
+      where: { id: inboundMessageId },
+      select: { rawPayload: true },
+    });
+    if (!row) return;
+    const prior = priorPayloadObject(row.rawPayload);
+    const meta = readDeliveryMeta(prior);
+    if (meta.waDeliveryState === "delivered") return;
+    await tx.ticketMessage.update({
+      where: { id: inboundMessageId },
+      data: {
+        rawPayload: {
+          ...prior,
+          waTurnDelivery: {
+            inboundDeliveryKey,
+            waDeliveryState: "presaved",
+          },
+        } as Prisma.InputJsonObject,
+      },
+    });
   });
 }
 
@@ -175,6 +331,7 @@ export async function markInboundDeliveryDelivered(
     inboundDeliveryKey,
     waDeliveryState: "delivered",
     waOutboundProviderId,
+    sendInitiatedAt: undefined,
   });
 }
 

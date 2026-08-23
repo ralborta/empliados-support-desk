@@ -1,5 +1,13 @@
 import axios from 'axios';
 
+type AxiosPost = typeof axios.post;
+let httpPost: AxiosPost = axios.post.bind(axios);
+
+/** Solo scripts de verificación: evita HTTP real y valida comportamiento del sender. */
+export function setBuilderBotHttpPostForTests(post: AxiosPost | null): void {
+  httpPost = post ?? axios.post.bind(axios);
+}
+
 const BUILDERBOT_BASE_URL =
   process.env.BUILDERBOT_BASE_URL || 'https://app.builderbot.cloud';
 
@@ -8,27 +16,6 @@ export interface SendWhatsAppOptions {
   message: string; // contenido del mensaje
   mediaUrl?: string; // opcional
   checkIfExists?: boolean; // default false
-}
-
-/** Evita doble POST API (p. ej. backend + segundo camino) en ventana corta. */
-const RECENT_WA_SEND_DEDUP_MS = 8_000;
-const recentWaSends = new Map<string, number>();
-
-function waSendDedupKey(number: string, message: string, mediaUrl?: string): string {
-  return `${number}|${mediaUrl ?? ""}|${message}`;
-}
-
-function shouldSkipDuplicateWaSend(key: string): boolean {
-  const now = Date.now();
-  const prev = recentWaSends.get(key);
-  if (prev != null && now - prev < RECENT_WA_SEND_DEDUP_MS) return true;
-  recentWaSends.set(key, now);
-  if (recentWaSends.size > 500) {
-    for (const [k, ts] of recentWaSends) {
-      if (now - ts > RECENT_WA_SEND_DEDUP_MS) recentWaSends.delete(k);
-    }
-  }
-  return false;
 }
 
 /**
@@ -48,16 +35,6 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
     throw new Error(
       'BuilderBot no configurado: define BUILDERBOT_BOT_ID y BUILDERBOT_API_KEY'
     );
-  }
-
-  const dedupKey = waSendDedupKey(number, message, mediaUrl);
-  if (shouldSkipDuplicateWaSend(dedupKey)) {
-    console.log("[BuilderBot] Skip envío duplicado (ventana corta):", {
-      number,
-      messageLength: message.length,
-      hasMediaUrl: !!mediaUrl,
-    });
-    return { skippedDuplicate: true };
   }
 
   const url = `${BUILDERBOT_BASE_URL}/api/v2/${BOT_ID}/messages`;
@@ -89,7 +66,7 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
   });
 
   try {
-    const response = await axios.post(url, payload, {
+    const response = await httpPost(url, payload, {
       headers,
       timeout: 30000,
       transformRequest: [(data) => data],
@@ -97,7 +74,6 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
     console.log('[BuilderBot] ✅ Mensaje enviado exitosamente');
     return response.data;
   } catch (error: any) {
-    recentWaSends.delete(dedupKey);
     console.error('[BuilderBot] ❌ Error al enviar mensaje:', {
       message: error.message,
       status: error.response?.status,

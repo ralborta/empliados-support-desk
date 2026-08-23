@@ -23,6 +23,11 @@ import {
   isBarePlatePrefixHint,
 } from "@/lib/wara";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
+import {
+  findInboundByExternalWamid,
+  isInboundTurnDeliveryComplete,
+  isInboundTurnDeliveryInProgress,
+} from "@/lib/turnWhatsAppDeliveryLedger";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
 import {
   runTurnExecutorPhase,
@@ -101,24 +106,62 @@ export async function handleWhatsAppTurn(params: {
 
   const turnMessageId = String(messageId ?? "").trim();
   if (turnMessageId) {
-    const prior = await prisma.ticketMessage.findFirst({
-      where: { externalMessageId: turnMessageId },
-      select: { id: true },
-    });
-    if (prior) {
-      return deliver(
-        buildTurnPayload(
-          { registered: true, registered_s: "true" },
-          {
-            message: "",
-            skipResponse_s: "true",
-            nextFlow: "ignore",
-            nextFlow_s: "ignore",
-            executor: "context",
-            executor_s: "duplicate_message_id",
-          },
-        ),
-      );
+    const priorInbound = await findInboundByExternalWamid(prisma, turnMessageId);
+    if (priorInbound) {
+      if (isInboundTurnDeliveryComplete(priorInbound.rawPayload)) {
+        return deliver(
+          buildTurnPayload(
+            { registered: true, registered_s: "true" },
+            {
+              message: "",
+              skipResponse_s: "true",
+              nextFlow: "ignore",
+              nextFlow_s: "ignore",
+              executor: "context",
+              executor_s: "duplicate_turn_delivered",
+            },
+          ),
+        );
+      }
+      if (isInboundTurnDeliveryInProgress(priorInbound.rawPayload)) {
+        return deliver(
+          buildTurnPayload(
+            { registered: true, registered_s: "true" },
+            {
+              message: "",
+              skipResponse_s: "true",
+              nextFlow: "ignore",
+              nextFlow_s: "ignore",
+              executor: "context",
+              executor_s: "duplicate_turn_in_progress",
+            },
+          ),
+        );
+      }
+      // Inbound ya persistido (webhook u otro camino): continuar el turno.
+    } else {
+      const priorCollision = await prisma.ticketMessage.findFirst({
+        where: {
+          externalMessageId: turnMessageId,
+          NOT: { direction: "INBOUND", from: "CUSTOMER" },
+        },
+        select: { id: true },
+      });
+      if (priorCollision) {
+        return deliver(
+          buildTurnPayload(
+            { registered: true, registered_s: "true" },
+            {
+              message: "",
+              skipResponse_s: "true",
+              nextFlow: "ignore",
+              nextFlow_s: "ignore",
+              executor: "context",
+              executor_s: "duplicate_message_id",
+            },
+          ),
+        );
+      }
     }
   }
 
