@@ -13,9 +13,10 @@ export async function sendWhatsAppTextWithOptionalMedia(params: {
   const mediaUrl = params.mediaUrl?.trim();
 
   if (mediaUrl) {
+    // No usar " " como caption: WhatsApp/BBC lo muestran como "." (bug 2026-08-23).
     await sendWhatsAppMessage({
       number: params.number,
-      message: " ",
+      message: "📍",
       mediaUrl,
     });
     if (message) {

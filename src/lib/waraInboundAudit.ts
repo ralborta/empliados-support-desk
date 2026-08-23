@@ -29,12 +29,15 @@ export function bbcShouldSendExecutorMessage(): boolean {
  * Fase 2 — el turno (/api/whatsapp/turn) envía WhatsApp por API (sendWhatsAppMessage).
  * BBC queda mudo (skipResponse_s=true) salvo fallback si falla el envío.
  *
- * Rollback: WARA_TURN_BACKEND_SEND=false en Vercel → vuelve messageMapping de BBC.
+ * Por defecto true: nunca depender solo de BBC (silencios 2026-08-22/23).
+ * Rollback explícito: WARA_TURN_BACKEND_SEND=false.
+ *
+ * Nota: `deliverTurnToWhatsApp` siempre intenta API primero; este flag alinea
+ * skipResponse en el payload previo a la entrega.
  */
 export function shouldTurnSendWhatsAppToCustomer(): boolean {
   const raw = process.env.WARA_TURN_BACKEND_SEND?.trim().toLowerCase();
   if (raw === "false" || raw === "0" || raw === "no" || raw === "legacy") return false;
   if (raw === "true" || raw === "1" || raw === "yes") return true;
-  // Emergencia: BBC envía vía messageMapping hasta validar Fase 2 en producción.
-  return false;
+  return true;
 }

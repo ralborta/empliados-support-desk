@@ -1397,9 +1397,17 @@ export async function POST(req: NextRequest) {
           rawText: effectiveRawText,
           resolutionSource: resolved.source,
         });
+        // message + summaryText: el turn siempre debe poder entregar por API
+        // (bug 2026-08-22: “no encontré Nissan” existía pero el cliente no lo vio).
         return NextResponse.json(
-          { ok: true, summaryText: clarification, action: "none" as const, unidadesCount: 0 },
-          { status: BB_STATUS }
+          {
+            ok: true,
+            summaryText: clarification,
+            message: clarification,
+            action: "none" as const,
+            unidadesCount: 0,
+          },
+          { status: BB_STATUS },
         );
       } else if (resolved.plate) {
         const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
