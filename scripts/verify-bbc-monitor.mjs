@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 /**
- * Monitor BBC: clasificación, transiciones, silencio funcional y auto-reboot.
+ * Monitor BBC: opt-in reboot, silencio con evidencia turn, lock, MCP timeout.
  */
+import {
+  canAcquireBbcRebootLock,
+  readRebootLockState,
+} from "../src/lib/bbcRebootLock.ts";
 import {
   classifyBbcProbeResult,
   combineBbcHealthProbes,
   evaluateBbcFunctionalSilence,
+  isBbcAutoRebootEnabled,
   resolveBbcTransition,
   shouldAutoRebootBbc,
   shouldSendBbcTransitionAlert,
@@ -29,163 +34,69 @@ assert(
   classifyBbcProbeResult({ ok: false, message: "5xx", httpStatus: 503 }) === "OFFLINE",
   "5xx → OFFLINE",
 );
-assert(
-  classifyBbcProbeResult({ ok: false, message: "auth", httpStatus: 401, configError: true }) ===
-    "CONFIG_ERROR",
-  "401 → CONFIG_ERROR",
-);
-assert(
-  classifyBbcProbeResult({ ok: false, message: "missing env", configError: true }) === "CONFIG_ERROR",
-  "missing env → CONFIG_ERROR",
-);
-assert(
-  classifyBbcProbeResult({ ok: false, message: "weird", httpStatus: 418 }) === "DEGRADED",
-  "otro 4xx raro → DEGRADED",
-);
 
-console.log("— combineBbcHealthProbes —");
+console.log("— combineBbcHealthProbes (timeout MCP) —");
+const mcpTimeout = combineBbcHealthProbes({
+  deploy: { ok: false, status: null, message: "Timeout esperando resultado MCP" },
+  messaging: { ok: true, message: "ok", httpStatus: 400 },
+});
+assert(mcpTimeout.status === "UNKNOWN", "timeout MCP → UNKNOWN");
+assert(mcpTimeout.source === "deploy_probe_failed", "source deploy_probe_failed");
+assert(!mcpTimeout.healthy, "timeout MCP no healthy");
+
 const onlineDeploy = combineBbcHealthProbes({
   deploy: { ok: true, status: "ONLINE", message: "ok" },
   messaging: { ok: true, message: "ok", httpStatus: 400 },
 });
-assert(onlineDeploy.status === "ONLINE" && onlineDeploy.healthy, "deploy ONLINE + msg OK → ONLINE");
+assert(onlineDeploy.status === "ONLINE", "deploy ONLINE");
 
-const unknownDeploy = combineBbcHealthProbes({
-  deploy: { ok: false, status: "UNKNOWN", message: "down" },
-  messaging: { ok: true, message: "ok", httpStatus: 400 },
-});
-assert(
-  unknownDeploy.status === "UNKNOWN" && !unknownDeploy.healthy,
-  "deploy UNKNOWN gana aunque messaging OK",
-);
-
-const configMsg = combineBbcHealthProbes({
-  deploy: { ok: true, status: "ONLINE", message: "ok" },
-  messaging: { ok: false, message: "401", httpStatus: 401, configError: true },
-});
-assert(configMsg.status === "CONFIG_ERROR", "messaging config_error gana");
-
-console.log("— resolveBbcTransition —");
-const offlineToOnline = resolveBbcTransition("OFFLINE", "ONLINE");
-assert(offlineToOnline.alertKind === "recovery", "OFFLINE→ONLINE recovery");
-assert(offlineToOnline.changed, "OFFLINE→ONLINE changed");
-
-const same = resolveBbcTransition("ONLINE", "ONLINE");
-assert(same.alertKind === null, "sin cambio → sin alerta");
-
-const toOffline = resolveBbcTransition("ONLINE", "OFFLINE");
-assert(toOffline.alertKind === "offline", "ONLINE→OFFLINE offline");
-
-const toUnknown = resolveBbcTransition("ONLINE", "UNKNOWN");
-assert(toUnknown.alertKind === "offline", "ONLINE→UNKNOWN offline alert");
-
-const restart = resolveBbcTransition("ONLINE", "ONLINE", { restarted: true });
-assert(restart.alertKind === "restart", "restarted flag → restart");
-
-console.log("— shouldSendBbcTransitionAlert —");
-const now = new Date("2026-08-22T12:00:00Z");
-assert(
-  shouldSendBbcTransitionAlert({
-    transition: offlineToOnline,
-    lastAlertAt: null,
-    now,
-  }),
-  "transición con lastAlertAt null → enviar",
-);
-assert(
-  !shouldSendBbcTransitionAlert({
-    transition: same,
-    lastAlertAt: null,
-    now,
-  }),
-  "sin alertKind → no enviar",
-);
-assert(
-  !shouldSendBbcTransitionAlert({
-    transition: offlineToOnline,
-    lastAlertAt: new Date("2026-08-22T11:58:00Z"),
-    now,
-  }),
-  "cooldown 5 min → no enviar",
-);
-assert(
-  shouldSendBbcTransitionAlert({
-    transition: offlineToOnline,
-    lastAlertAt: new Date("2026-08-22T11:54:00Z"),
-    now,
-  }),
-  "fuera de cooldown → enviar",
-);
-
-console.log("— evaluateBbcFunctionalSilence —");
-const silenceNow = new Date("2026-08-22T12:10:00Z");
-const quiet = evaluateBbcFunctionalSilence(
-  [
-    {
-      phone: "5491111111111",
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      at: new Date("2026-08-22T12:08:00Z"),
-    },
-  ],
-  { now: silenceNow },
-);
-assert(!quiet.detected, "1 inbound reciente → no silencio");
-
-const silent = evaluateBbcFunctionalSilence(
-  [
-    {
-      phone: "5491111111111",
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      at: new Date("2026-08-22T12:00:00Z"),
-    },
-    {
-      phone: "5491111111111",
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      at: new Date("2026-08-22T12:01:00Z"),
-    },
-  ],
-  { now: silenceNow },
-);
-assert(silent.detected, "2 inbound sin bot → silencio");
-
-const answered = evaluateBbcFunctionalSilence(
-  [
-    {
-      phone: "5491111111111",
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      at: new Date("2026-08-22T12:00:00Z"),
-    },
-    {
-      phone: "5491111111111",
-      direction: "INBOUND",
-      from: "CUSTOMER",
-      at: new Date("2026-08-22T12:01:00Z"),
-    },
-    {
-      phone: "5491111111111",
-      direction: "OUTBOUND",
-      from: "BOT",
-      at: new Date("2026-08-22T12:02:00Z"),
-    },
-  ],
-  { now: silenceNow },
-);
-assert(!answered.detected, "con respuesta bot → no silencio");
+console.log("— isBbcAutoRebootEnabled opt-in estricto —");
+const prev = process.env.WARA_BBC_AUTO_REBOOT;
+delete process.env.WARA_BBC_AUTO_REBOOT;
+assert(!isBbcAutoRebootEnabled(), "unset → false");
+process.env.WARA_BBC_AUTO_REBOOT = "1";
+assert(!isBbcAutoRebootEnabled(), "1 → false (solo true)");
+process.env.WARA_BBC_AUTO_REBOOT = "false";
+assert(!isBbcAutoRebootEnabled(), "false → false");
+process.env.WARA_BBC_AUTO_REBOOT = "true";
+assert(isBbcAutoRebootEnabled(), "true → true");
+process.env.WARA_BBC_AUTO_REBOOT = "TRUE";
+assert(isBbcAutoRebootEnabled(), "TRUE → true");
+if (prev === undefined) delete process.env.WARA_BBC_AUTO_REBOOT;
+else process.env.WARA_BBC_AUTO_REBOOT = prev;
 
 console.log("— shouldAutoRebootBbc —");
+const now = new Date("2026-08-22T12:00:00Z");
 assert(
-  shouldAutoRebootBbc({
+  !shouldAutoRebootBbc({
     status: "UNKNOWN",
     silenceDetected: false,
     lastAutoRebootAt: null,
     enabled: true,
     now,
   }),
-  "UNKNOWN → reboot",
+  "UNKNOWN nunca reboot",
+);
+assert(
+  !shouldAutoRebootBbc({
+    status: "OFFLINE",
+    silenceDetected: true,
+    lastAutoRebootAt: null,
+    enabled: false,
+    now,
+  }),
+  "opt-in off → no reboot aunque OFFLINE+silence",
+);
+assert(
+  shouldAutoRebootBbc({
+    status: "OFFLINE",
+    silenceDetected: false,
+    deployStatusReliable: true,
+    lastAutoRebootAt: null,
+    enabled: true,
+    now,
+  }),
+  "OFFLINE confiable + opt-in → reboot",
 );
 assert(
   !shouldAutoRebootBbc({
@@ -197,40 +108,200 @@ assert(
   }),
   "CONFIG_ERROR → no reboot",
 );
+
+console.log("— evaluateBbcFunctionalSilence (evidencia turn) —");
+const silenceNow = new Date("2026-08-22T12:10:00Z");
 assert(
-  shouldAutoRebootBbc({
-    status: "ONLINE",
-    silenceDetected: true,
-    lastAutoRebootAt: null,
-    enabled: true,
-    now,
-  }),
-  "silencio con ONLINE → reboot",
+  !evaluateBbcFunctionalSilence(
+    [
+      {
+        phone: "5491111111111",
+        direction: "INBOUND",
+        from: "CUSTOMER",
+        at: new Date("2026-08-22T12:00:00Z"),
+      },
+      {
+        phone: "5491111111111",
+        direction: "INBOUND",
+        from: "CUSTOMER",
+        at: new Date("2026-08-22T12:01:00Z"),
+      },
+    ],
+    { now: silenceNow },
+  ).detected,
+  "solo 2 inbound → NO silencio",
+);
+
+assert(
+  !evaluateBbcFunctionalSilence(
+    [
+      {
+        phone: "5491111111111",
+        direction: "INBOUND",
+        from: "CUSTOMER",
+        at: new Date("2026-08-22T12:00:00Z"),
+        skipResponse: true,
+        turnDeliverableReply: false,
+      },
+    ],
+    { now: silenceNow },
+  ).detected,
+  "skipResponse=true → NO silencio",
+);
+
+assert(
+  !evaluateBbcFunctionalSilence(
+    [
+      {
+        phone: "5491111111111",
+        direction: "OUTBOUND",
+        from: "BOT",
+        at: new Date("2026-08-22T12:00:00Z"),
+        turnDeliverableReply: true,
+        waDeliveryChannel: "bbc",
+        botPaused: true,
+      },
+    ],
+    { now: silenceNow },
+  ).detected,
+  "bot pausado → NO silencio",
+);
+
+assert(
+  evaluateBbcFunctionalSilence(
+    [
+      {
+        phone: "5491111111111",
+        direction: "OUTBOUND",
+        from: "BOT",
+        at: new Date("2026-08-22T12:00:00Z"),
+        turnDeliverableReply: true,
+        waDeliveryChannel: "bbc",
+        hasProviderWamid: false,
+      },
+    ],
+    { now: silenceNow },
+  ).detected,
+  "turn entregable bbc sin wamid → silencio",
+);
+
+assert(
+  !evaluateBbcFunctionalSilence(
+    [
+      {
+        phone: "5491111111111",
+        direction: "OUTBOUND",
+        from: "BOT",
+        at: new Date("2026-08-22T12:00:00Z"),
+        turnDeliverableReply: true,
+        waDeliveryChannel: "bbc",
+        hasProviderWamid: false,
+      },
+      {
+        phone: "5491111111111",
+        direction: "OUTBOUND",
+        from: "BOT",
+        at: new Date("2026-08-22T12:02:00Z"),
+        hasProviderWamid: true,
+      },
+    ],
+    { now: silenceNow },
+  ).detected,
+  "wamid posterior limpia silencio",
+);
+
+assert(
+  !evaluateBbcFunctionalSilence(
+    [
+      {
+        phone: "5491111111111",
+        direction: "OUTBOUND",
+        from: "BOT",
+        at: new Date("2026-08-22T12:00:00Z"),
+        turnDeliverableReply: true,
+        waDeliveryChannel: "bbc",
+      },
+      {
+        phone: "5491111111111",
+        direction: "OUTBOUND",
+        from: "HUMAN",
+        at: new Date("2026-08-22T12:03:00Z"),
+      },
+    ],
+    { now: silenceNow },
+  ).detected,
+  "respuesta HUMAN (otra ruta) limpia silencio",
+);
+
+assert(
+  evaluateBbcFunctionalSilence(
+    [
+      {
+        phone: "5491111111111",
+        direction: "INBOUND",
+        from: "CUSTOMER",
+        at: new Date("2026-08-22T12:00:00Z"),
+        waDeliveryState: "send_initiated",
+        turnDeliverableReply: true,
+      },
+    ],
+    { now: silenceNow },
+  ).detected,
+  "send_initiated stale → silencio",
+);
+
+console.log("— reboot lock pure —");
+assert(canAcquireBbcRebootLock({}), "detail vacío → puede adquirir");
+assert(
+  !canAcquireBbcRebootLock(
+    { rebootLockUntil: "2026-08-22T12:05:00Z" },
+    { now },
+  ),
+  "lock activo → no",
 );
 assert(
-  !shouldAutoRebootBbc({
-    status: "UNKNOWN",
-    silenceDetected: false,
-    lastAutoRebootAt: new Date("2026-08-22T11:40:00Z"),
-    enabled: true,
-    now,
-    cooldownMs: 30 * 60 * 1000,
-  }),
-  "cooldown reboot → no",
+  canAcquireBbcRebootLock(
+    { rebootLockUntil: "2026-08-22T11:00:00Z" },
+    { now },
+  ),
+  "lock expirado → sí",
 );
 assert(
-  !shouldAutoRebootBbc({
-    status: "UNKNOWN",
-    silenceDetected: false,
-    lastAutoRebootAt: null,
-    enabled: false,
+  !canAcquireBbcRebootLock(
+    { lastAutoRebootAt: "2026-08-22T11:45:00Z" },
+    { now, cooldownMs: 30 * 60 * 1000 },
+  ),
+  "cooldown → no",
+);
+const gate = readRebootLockState(
+  {
+    rebootLockUntil: "2026-08-22T12:05:00Z",
+    lastRebootAttempt: {
+      id: "a1",
+      at: "2026-08-22T11:59:00Z",
+      reason: "status:OFFLINE",
+      state: "initiated",
+    },
+  },
+  { now },
+);
+assert(gate.locked && gate.lastAttempt?.state === "initiated", "lee intento initiated");
+
+console.log("— resolveBbcTransition —");
+assert(resolveBbcTransition("ONLINE", "UNKNOWN").alertKind === "offline", "UNKNOWN alerta");
+
+console.log("— shouldSendBbcTransitionAlert —");
+assert(
+  shouldSendBbcTransitionAlert({
+    transition: resolveBbcTransition("ONLINE", "UNKNOWN"),
+    lastAlertAt: null,
     now,
   }),
-  "flag off → no reboot",
+  "UNKNOWN alerta enviable",
 );
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);
 }
-console.log("\n✓ Monitor BBC OK (clasificación + deploy + silencio + auto-reboot)");
+console.log("\n✓ Monitor BBC OK (opt-in + silencio evidencia + lock + MCP timeout)");

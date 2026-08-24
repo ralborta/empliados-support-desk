@@ -502,6 +502,16 @@ export function combineBbcHealthProbes(params: {
     return { status: "CONFIG_ERROR", healthy: false, source: "messaging_config" };
   }
 
+  // Timeout / fallo MCP sin status explícito → UNKNOWN (alerta, no reboot).
+  if (
+    params.deploy &&
+    !params.deploy.configError &&
+    !params.deploy.status &&
+    !params.deploy.ok
+  ) {
+    return { status: "UNKNOWN", healthy: false, source: "deploy_probe_failed" };
+  }
+
   if (params.deploy && !params.deploy.configError && params.deploy.status) {
     const deployStatus = classifyDeployStatusProbe(params.deploy);
     if (deployStatus !== "ONLINE") {
@@ -530,6 +540,15 @@ export type BbcSilenceSample = {
   from: string;
   at: Date;
   botPaused?: boolean;
+  /** Turn pidió no enviar (ignore / skip). Nunca cuenta como entregable. */
+  skipResponse?: boolean;
+  /** /turn generó mensaje destinado al cliente (skipResponse=false). */
+  turnDeliverableReply?: boolean;
+  waDeliveryState?: string | null;
+  /** Canal declarado al persistir (bbc | backend | …). */
+  waDeliveryChannel?: string | null;
+  /** Wamid / provider id → outbound confirmado por Meta/BBC. */
+  hasProviderWamid?: boolean;
 };
 
 export type BbcSilenceCheck = {
@@ -538,14 +557,43 @@ export type BbcSilenceCheck = {
   affectedPhones: string[];
 };
 
-/** Detecta inbound reciente sin respuesta BOT (runtime “zombie” con Meta aún ONLINE). */
+function isDeliverableTurnEvidence(s: BbcSilenceSample): boolean {
+  if (s.skipResponse) return false;
+  if (s.turnDeliverableReply) return true;
+  const state = String(s.waDeliveryState ?? "").trim();
+  if (state === "send_initiated" || state === "presaved") return true;
+  if (
+    s.direction === "OUTBOUND" &&
+    s.from === "BOT" &&
+    !s.hasProviderWamid &&
+    (s.waDeliveryChannel === "bbc" ||
+      s.waDeliveryChannel === "bbc_fallback" ||
+      s.waDeliveryChannel === "gps_media_bbc_text")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function clearsSilenceAfter(s: BbcSilenceSample, evidenceAt: Date): boolean {
+  if (s.at.getTime() < evidenceAt.getTime()) return false;
+  if (s.direction !== "OUTBOUND") return false;
+  if (s.from === "HUMAN") return true;
+  if (s.from === "BOT" && s.hasProviderWamid) return true;
+  if (s.from === "BOT" && s.waDeliveryState === "delivered") return true;
+  return false;
+}
+
+/**
+ * Silencio funcional: requiere evidencia de respuesta entregable de /turn
+ * y ausencia de outbound confirmado (BBC/Meta) u otra ruta. No basta con N inbounds.
+ */
 export function evaluateBbcFunctionalSilence(
   samples: BbcSilenceSample[],
-  opts?: { now?: Date; lookbackMs?: number; minInbound?: number; minAgeMs?: number },
+  opts?: { now?: Date; lookbackMs?: number; minAgeMs?: number },
 ): BbcSilenceCheck {
   const now = opts?.now ?? new Date();
   const lookbackMs = opts?.lookbackMs ?? BBC_SILENCE_LOOKBACK_MS;
-  const minInbound = opts?.minInbound ?? BBC_SILENCE_MIN_INBOUND;
   const minAgeMs = opts?.minAgeMs ?? BBC_SILENCE_MIN_AGE_MS;
   const since = now.getTime() - lookbackMs;
 
@@ -564,17 +612,12 @@ export function evaluateBbcFunctionalSilence(
 
   const affected: string[] = [];
   for (const [phone, msgs] of byPhone) {
-    const inbounds = msgs.filter((m) => m.direction === "INBOUND");
-    if (inbounds.length < minInbound) continue;
-    const lastInbound = inbounds[inbounds.length - 1]!;
-    if (now.getTime() - lastInbound.at.getTime() < minAgeMs) continue;
-    const botAfter = msgs.some(
-      (m) =>
-        m.direction === "OUTBOUND" &&
-        m.from === "BOT" &&
-        m.at.getTime() >= lastInbound.at.getTime(),
-    );
-    if (!botAfter) affected.push(phone);
+    const evidence = msgs.filter(isDeliverableTurnEvidence);
+    if (!evidence.length) continue;
+    const lastEv = evidence[evidence.length - 1]!;
+    if (now.getTime() - lastEv.at.getTime() < minAgeMs) continue;
+    const cleared = msgs.some((m) => clearsSilenceAfter(m, lastEv.at));
+    if (!cleared) affected.push(phone);
   }
 
   if (!affected.length) {
@@ -582,8 +625,48 @@ export function evaluateBbcFunctionalSilence(
   }
   return {
     detected: true,
-    detail: `${affected.length} teléfono(s) con inbound sin respuesta bot (≥${minInbound} msgs, >${Math.round(minAgeMs / 60000)} min)`,
+    detail: `${affected.length} teléfono(s) con turn entregable sin outbound BBC/Meta confirmado (>${Math.round(minAgeMs / 60000)} min)`,
     affectedPhones: affected,
+  };
+}
+
+function readTurnMetaFromPayload(raw: unknown): {
+  skipResponse?: boolean;
+  turnDeliverableReply?: boolean;
+  waDeliveryState?: string | null;
+  waDeliveryChannel?: string | null;
+} {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const p = raw as Record<string, unknown>;
+  const nested = p.waTurnDelivery;
+  const delivery =
+    nested && typeof nested === "object" && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : {};
+  const skipRaw = p.skipResponse_s ?? p.skipResponse;
+  const skipResponse =
+    skipRaw === true || String(skipRaw ?? "").trim().toLowerCase() === "true";
+  const message = String(p.message ?? p.summaryText ?? p.deliveredMessage ?? "").trim();
+  const channel = String(p.waDelivery ?? p.waDelivery_s ?? "").trim() || null;
+  const state =
+    typeof delivery.waDeliveryState === "string"
+      ? delivery.waDeliveryState
+      : typeof p.waDeliveryState === "string"
+        ? p.waDeliveryState
+        : null;
+  const turnDeliverableReply =
+    !skipResponse &&
+    (message.length > 0 ||
+      state === "send_initiated" ||
+      state === "presaved" ||
+      channel === "bbc" ||
+      channel === "backend" ||
+      channel === "bbc_fallback");
+  return {
+    skipResponse,
+    turnDeliverableReply: turnDeliverableReply || undefined,
+    waDeliveryState: state,
+    waDeliveryChannel: channel,
   };
 }
 
@@ -601,6 +684,8 @@ export async function probeBbcFunctionalSilence(
         direction: true,
         from: true,
         createdAt: true,
+        externalMessageId: true,
+        rawPayload: true,
         ticket: {
           select: {
             customer: { select: { phone: true, botPausedAt: true } },
@@ -611,13 +696,22 @@ export async function probeBbcFunctionalSilence(
       take: 400,
     });
     return evaluateBbcFunctionalSilence(
-      rows.map((r) => ({
-        phone: r.ticket.customer.phone,
-        direction: r.direction as "INBOUND" | "OUTBOUND",
-        from: r.from,
-        at: r.createdAt,
-        botPaused: Boolean(r.ticket.customer.botPausedAt),
-      })),
+      rows.map((r) => {
+        const meta = readTurnMetaFromPayload(r.rawPayload);
+        const ext = String(r.externalMessageId ?? "").trim();
+        return {
+          phone: r.ticket.customer.phone,
+          direction: r.direction as "INBOUND" | "OUTBOUND",
+          from: r.from,
+          at: r.createdAt,
+          botPaused: Boolean(r.ticket.customer.botPausedAt),
+          skipResponse: meta.skipResponse,
+          turnDeliverableReply: meta.turnDeliverableReply,
+          waDeliveryState: meta.waDeliveryState,
+          waDeliveryChannel: meta.waDeliveryChannel,
+          hasProviderWamid: /^wamid\./i.test(ext),
+        };
+      }),
     );
   } catch (error) {
     console.error("[bbcRuntimeMonitor] silence probe failed:", error);
@@ -629,10 +723,9 @@ export async function probeBbcFunctionalSilence(
   }
 }
 
+/** Opt-in estricto: solo `true` exacto (case-insensitive). Default = desactivado. */
 export function isBbcAutoRebootEnabled(): boolean {
-  const raw = process.env.WARA_BBC_AUTO_REBOOT?.trim().toLowerCase();
-  if (raw === "0" || raw === "false" || raw === "off" || raw === "no") return false;
-  return true;
+  return process.env.WARA_BBC_AUTO_REBOOT?.trim().toLowerCase() === "true";
 }
 
 export function bbcAutoRebootCooldownMs(): number {
@@ -641,10 +734,17 @@ export function bbcAutoRebootCooldownMs(): number {
   return Math.round(mins * 60_000);
 }
 
-/** Reboot automático: runtime caído o silencio funcional. Nunca ante CONFIG_ERROR. */
+/**
+ * Reboot automático (solo si opt-in).
+ * - Nunca CONFIG_ERROR
+ * - Nunca UNKNOWN (timeout/fallo MCP → solo alerta)
+ * - Silencio solo con evidencia de turn entregable
+ */
 export function shouldAutoRebootBbc(params: {
   status: BbcRuntimeStatusKind;
   silenceDetected: boolean;
+  /** false si UNKNOWN viene de timeout/error MCP sin status explícito */
+  deployStatusReliable?: boolean;
   lastAutoRebootAt: Date | null;
   enabled?: boolean;
   now?: Date;
@@ -652,6 +752,7 @@ export function shouldAutoRebootBbc(params: {
 }): boolean {
   if (!(params.enabled ?? isBbcAutoRebootEnabled())) return false;
   if (params.status === "CONFIG_ERROR") return false;
+  if (params.status === "UNKNOWN") return false;
   const now = params.now ?? new Date();
   const cooldown = params.cooldownMs ?? bbcAutoRebootCooldownMs();
   if (
@@ -661,9 +762,9 @@ export function shouldAutoRebootBbc(params: {
     return false;
   }
   if (params.silenceDetected) return true;
+  if (params.deployStatusReliable === false) return false;
   return (
     params.status === "OFFLINE" ||
-    params.status === "UNKNOWN" ||
     params.status === "READY_TO_SCAN" ||
     params.status === "INITIALIZATION"
   );
@@ -675,14 +776,23 @@ export type BbcCronHealthCycleResult = {
   silence: BbcSilenceCheck;
   messaging: BbcProbeResult;
   deploy: BuilderBotDeployStatusProbe | null;
-  reboot: { attempted: boolean; ok: boolean; message: string | null };
+  reboot: {
+    attempted: boolean;
+    ok: boolean;
+    message: string | null;
+    skippedReason?: string | null;
+  };
   alertKinds: Array<NonNullable<BbcStatusTransition["alertKind"]>>;
 };
 
 /**
- * Ciclo completo del cron: sondas → persistir → silencio → reboot opcional.
+ * Ciclo completo del cron: sondas → persistir → silencio → reboot opt-in con lock.
  */
 export async function runBbcHealthCronCycle(): Promise<BbcCronHealthCycleResult> {
+  const { finalizeBbcRebootAttempt, tryAcquireBbcRebootLock } = await import(
+    "@/lib/bbcRebootLock"
+  );
+
   const botId = process.env.BUILDERBOT_BOT_ID?.trim() || "";
   const messaging = await probeBbcMessagingApi();
   let deploy: BuilderBotDeployStatusProbe | null = null;
@@ -714,38 +824,61 @@ export async function runBbcHealthCronCycle(): Promise<BbcCronHealthCycleResult>
     attempted: false,
     ok: false,
     message: null,
+    skippedReason: null,
   };
 
+  const deployStatusReliable = Boolean(deploy?.status && !deploy.configError);
   const wantReboot = shouldAutoRebootBbc({
     status: combined.status,
     silenceDetected: silence.detected,
+    deployStatusReliable,
     lastAutoRebootAt,
   });
 
   const now = new Date();
-  let autoRebootAt = lastAutoRebootAtRaw;
-  let restartCount = prev?.restartCount ?? 0;
 
   if (wantReboot && botId) {
-    reboot.attempted = true;
-    const result = await rebootBuilderBotDeploy(botId);
-    reboot.ok = result.ok;
-    reboot.message = result.message;
-    if (result.ok) {
-      autoRebootAt = now.toISOString();
-      restartCount += 1;
+    const reason = silence.detected ? `silence:${silence.detail}` : `status:${combined.status}`;
+    const lock = await tryAcquireBbcRebootLock({ reason, now });
+    if (!lock.acquired) {
+      reboot.skippedReason = lock.reason;
+      reboot.message = `Lock no adquirido (${lock.reason})`;
+    } else {
+      reboot.attempted = true;
+      const result = await rebootBuilderBotDeploy(botId);
+      reboot.ok = result.ok;
+      reboot.message = result.message;
+      await finalizeBbcRebootAttempt({
+        attemptId: lock.attempt.id,
+        ok: result.ok,
+        message: result.message,
+        now,
+      });
     }
+  } else if (wantReboot && !botId) {
+    reboot.skippedReason = "missing_bot_id";
+  } else if (!isBbcAutoRebootEnabled()) {
+    reboot.skippedReason = "auto_reboot_disabled";
   }
 
-  const healthy =
-    isHealthyStatus(combined.status) && !silence.detected;
+  const after = await prisma.opsServiceHeartbeat.findUnique({
+    where: { key: BBC_HEARTBEAT_KEY },
+  });
+  const afterDetail = parseDetail(after?.detail);
+  const autoRebootAt =
+    typeof afterDetail.lastAutoRebootAt === "string"
+      ? afterDetail.lastAutoRebootAt
+      : lastAutoRebootAtRaw;
+  const restartCount = after?.restartCount ?? prev?.restartCount ?? 0;
+
+  const healthy = isHealthyStatus(combined.status) && !silence.detected;
   const alertKinds: BbcCronHealthCycleResult["alertKinds"] = [];
   if (transition.alertKind) alertKinds.push(transition.alertKind);
   if (silence.detected) alertKinds.push("silence");
   if (reboot.attempted) alertKinds.push("auto_reboot");
 
   const mergedDetail = {
-    ...prevDetail,
+    ...afterDetail,
     lastProbe: {
       at: now.toISOString(),
       ok: messaging.ok,
@@ -758,8 +891,9 @@ export async function runBbcHealthCronCycle(): Promise<BbcCronHealthCycleResult>
           ok: deploy.ok,
           status: deploy.status,
           message: deploy.message,
+          reliable: deployStatusReliable,
         }
-      : prevDetail.lastDeployProbe ?? null,
+      : afterDetail.lastDeployProbe ?? null,
     lastSilence: {
       at: now.toISOString(),
       detected: silence.detected,
@@ -767,14 +901,6 @@ export async function runBbcHealthCronCycle(): Promise<BbcCronHealthCycleResult>
       phones: silence.affectedPhones.slice(0, 8),
     },
     lastAutoRebootAt: autoRebootAt,
-    lastRebootAttempt: reboot.attempted
-      ? {
-          at: now.toISOString(),
-          ok: reboot.ok,
-          message: reboot.message,
-          reason: silence.detected ? "silence" : combined.status,
-        }
-      : prevDetail.lastRebootAttempt ?? null,
     source: "cron_probe",
     combineSource: combined.source,
     at: now.toISOString(),
@@ -817,4 +943,3 @@ export async function runBbcHealthCronCycle(): Promise<BbcCronHealthCycleResult>
     alertKinds: [...new Set(alertKinds)],
   };
 }
-
