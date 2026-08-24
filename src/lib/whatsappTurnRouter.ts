@@ -75,6 +75,12 @@ import {
   threadHasRecentFleetUnitSearchRequest,
 } from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import type { PendingActionRecord } from "@/lib/pendingAction";
+import {
+  hasPendingOdometerActionChoice,
+  looksLikeOdometerActionChoiceReply,
+  shouldSupersedeOdometerActionChoice,
+} from "@/lib/odometerActionChoice";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
 export type TurnExecutorId =
@@ -339,7 +345,11 @@ function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
  * por rama) — ver docs/FASE-1.md y scripts/turn-classification.snapshot.json
  * para el comportamiento congelado que esta tabla debe reproducir exactamente.
  */
-type TurnRuleContext = { text: string; threadText: string };
+type TurnRuleContext = {
+  text: string;
+  threadText: string;
+  pendingAction?: PendingActionRecord | null;
+};
 type TurnRule = {
   id: string;
   reason: string;
@@ -413,6 +423,16 @@ const TURN_RULES: TurnRule[] = [
     id: "odometer_problem_report",
     reason: "Falla/desfase de odómetro es soporte, no menú de guías ni pedir km.",
     decide: ({ text }) => (looksLikeOdometerProblemReport(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "odometer_action_choice_reply",
+    reason:
+      "Respuesta corregir/actualizar con expectativa odometer_action_choice en DB (no inferir del texto del bot).",
+    decide: ({ text, pendingAction }) => {
+      if (!hasPendingOdometerActionChoice(pendingAction)) return null;
+      if (shouldSupersedeOdometerActionChoice(text)) return null;
+      return looksLikeOdometerActionChoiceReply(text) ? "odometro" : null;
+    },
   },
   {
     id: "explicit_odometer_horometer_start",
@@ -701,8 +721,9 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
 export function classifyTurnExecutorSafetyGuards(
   selectionText: string,
   threadText: string,
+  pendingAction?: PendingActionRecord | null,
 ): { executor: TurnExecutorId; ruleId: string } | null {
-  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText };
+  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText, pendingAction };
   for (const rule of TURN_RULES) {
     if (!TURN_SAFETY_GUARD_RULE_IDS.has(rule.id)) continue;
     const executor = rule.decide(ctx);
@@ -717,8 +738,12 @@ export function classifyTurnExecutorSafetyGuards(
  * Reglas explícitas y ordenadas en TURN_RULES — agregar una regla nueva implica decidir
  * conscientemente en qué posición de la lista va, no adivinar el orden de un cascade de `if`.
  */
-export function classifyTurnExecutor(selectionText: string, threadText: string): TurnExecutorId {
-  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText };
+export function classifyTurnExecutor(
+  selectionText: string,
+  threadText: string,
+  pendingAction?: PendingActionRecord | null,
+): TurnExecutorId {
+  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText, pendingAction };
   for (const rule of TURN_RULES) {
     const executor = rule.decide(ctx);
     if (executor) return executor;

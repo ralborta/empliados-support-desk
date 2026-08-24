@@ -38,6 +38,8 @@ const PUSH_SUITES = [
   "verify-odometer-flow-side-questions.mjs",
   "verify-odometer-interno-900079.mjs",
   "verify-odometer-interno-900117-e2e.mjs",
+  "verify-odometer-action-choice-continuity.mjs",
+  "verify-odometer-action-choice-route-e2e.mjs",
   "verify-turn-layer-fork.mjs",
   "verify-tramite-pivot-fork.mjs",
   "verify-tramite-cancel-resume.mjs",

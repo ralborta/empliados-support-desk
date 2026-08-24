@@ -34,7 +34,7 @@ export async function setPendingAction(
   phone: string,
   type: PendingActionType,
   opts?: { summary?: string; payload?: Record<string, unknown> },
-): Promise<void> {
+): Promise<boolean> {
   const record: PendingActionRecord = {
     type,
     summary: opts?.summary,
@@ -42,13 +42,21 @@ export async function setPendingAction(
     createdAt: new Date().toISOString(),
   };
   const normalized = normalizeWhatsAppPhone(phone);
-  if (!normalized) return;
-  await prisma.customer
-    .update({
+  if (!normalized) return false;
+  try {
+    await prisma.customer.update({
       where: { phone: normalized },
       data: { pendingAction: record as unknown as Prisma.InputJsonValue },
-    })
-    .catch(() => undefined);
+    });
+    return true;
+  } catch (err) {
+    console.error("[pendingAction] setPendingAction failed", {
+      phone: normalized,
+      type,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
 }
 
 export async function clearPendingAction(prisma: PrismaClient, phone: string): Promise<void> {

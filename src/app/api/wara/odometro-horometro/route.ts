@@ -66,6 +66,13 @@ import { parseFechaFromText, looksLikeAhoraComoFechaLectura, fechaLecturaTieneHo
 import { resolveOdometerHorometerFields, looksLikeClockTimeOnlyReading, stripHorometroConfusedWithClockTime } from "@/lib/odometroHorometroExtract";
 import { clearActiveUnit } from "@/lib/activeUnit";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import {
+  hasPendingOdometerActionChoice,
+  looksLikeOdometerActionChoiceReply,
+  ODOMETER_ACTION_CHOICE_STAGE,
+  parseOdometerActionChoice,
+  shouldSupersedeOdometerActionChoice,
+} from "@/lib/odometerActionChoice";
 import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
 import {
@@ -471,6 +478,92 @@ async function resolvePatenteFromFleetForMeterTramite(params: {
   return { kind: "not_found" };
 }
 
+/** Retoma trámite tras consumir expectativa odometer_action_choice (corregir/actualizar). */
+async function resumeOdometerAfterActionChoice(params: {
+  rawPhone: string;
+  rawText: string;
+  patente: string;
+  flowThreadText: string;
+  choice: "corregir" | "actualizar";
+}): Promise<NextResponse> {
+  const safePersistFailMessage =
+    "Para registrar el cambio de odómetro necesito la unidad (patente o interno) y el kilometraje con fecha y hora de la lectura. ¿Me los pasás?";
+
+  async function respondPendingActionPersistFailed(stage: string): Promise<NextResponse> {
+    console.error("[wara_odometro] setPendingAction failed", {
+      phone: params.rawPhone,
+      stage,
+    });
+    await appendOutboundBotMessage(params.rawPhone, safePersistFailMessage, {
+      source: "wara_odometro_response",
+      stage: "action_choice_persist_failed",
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        flowComplete_s: "true",
+        message: safePersistFailMessage,
+        error: "pending_action_persist_failed",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
+  const patente = normalizePlate(params.patente);
+  if (!patente) {
+    const message =
+      "Para registrar el cambio de odómetro necesito la patente de la unidad. ¿Cuál es? (podés usar guiones, ej. AB 006 EX, o decime la marca/nombre)";
+    const persisted = await setPendingAction(prisma, params.rawPhone, "odometro", {
+      summary: message,
+      payload: { stage: "missing_plate" },
+    });
+    if (!persisted) {
+      return await respondPendingActionPersistFailed("missing_plate");
+    }
+    await appendOutboundBotMessage(params.rawPhone, message, {
+      source: "wara_odometro_response",
+      stage: "missing_plate",
+    });
+    return NextResponse.json(
+      { ok: false, error: "Falta patente", message },
+      { status: BB_STATUS },
+    );
+  }
+  const plateDisplay = formatFleetUnitLabel(formatPlateWithSpaces(patente) ?? patente);
+  const fallbackTemplate = formatMeterAskWithReading({ meter: "odometer", unitLabel: plateDisplay });
+  const message = await composeOdometerDialogueReply({
+    situation: "missing_value",
+    history: params.flowThreadText,
+    lastCustomerMessage: params.rawText,
+    requiredTokens: [plateDisplay],
+    fieldHint: "odometro",
+    fallbackTemplate,
+  });
+  await setActiveUnit(prisma, params.rawPhone, patente, { source: "odometro" });
+  const persisted = await setPendingAction(prisma, params.rawPhone, "odometro", {
+    summary: message,
+    payload: {
+      patente,
+      meterType: "odometro",
+      stage: "collecting",
+      actionChoiceConsumed: params.choice,
+    },
+  });
+  if (!persisted) {
+    return await respondPendingActionPersistFailed("collecting");
+  }
+  await appendOutboundBotMessage(params.rawPhone, message, {
+    source: "wara_odometro_response",
+    stage: "missing_value_fecha_hora",
+    actionChoice: params.choice,
+  });
+  return NextResponse.json(
+    { ok: false, error: "Falta odómetro u horómetro", message },
+    { status: BB_STATUS },
+  );
+}
+
 export async function POST(req: NextRequest) {
   if (!isCustomerContextAuthConfigured()) {
     return NextResponse.json(
@@ -508,6 +601,31 @@ export async function POST(req: NextRequest) {
     looksLikeOdometerServiceWithUnitReference(rawText);
   const bareOdometerTopic = looksLikeBareOdometerTopicMention(rawText);
 
+  const preliminaryPendingAction = await getPendingAction(prisma, rawPhone);
+  if (hasPendingOdometerActionChoice(preliminaryPendingAction)) {
+    if (shouldSupersedeOdometerActionChoice(rawText)) {
+      await clearPendingAction(prisma, rawPhone);
+    } else if (looksLikeOdometerActionChoiceReply(rawText)) {
+      const choice = parseOdometerActionChoice(rawText);
+      if (choice) {
+        const preliminaryThread = await recentThreadText(rawPhone);
+        const activeUnitForChoice = await getActiveUnit(prisma, rawPhone);
+        const patente =
+          String(preliminaryPendingAction?.payload?.patente ?? "").trim() ||
+          activeUnitForChoice?.plate ||
+          extractLastPlateFromThread(preliminaryThread) ||
+          "";
+        return await resumeOdometerAfterActionChoice({
+          rawPhone,
+          rawText,
+          patente,
+          flowThreadText: preliminaryThread,
+          choice,
+        });
+      }
+    }
+  }
+
   // Solo dijo "odómetro" / "ODOMETRO" sin verbo: preguntar qué quiere hacer
   // (bug 2026-08-07: se ignoraba o se pedía síntoma GPS).
   // No aplica a "horómetro" ni con CONFIRMO pendiente (bug 2026-08-23).
@@ -527,6 +645,42 @@ export async function POST(req: NextRequest) {
       fieldHint: "odometro",
       fallbackTemplate,
     });
+    const activeUnitForClarify = await getActiveUnit(prisma, rawPhone);
+    const plateFromThread = extractLastPlateFromThread(preliminaryForClarify);
+    const patenteForChoice = activeUnitForClarify?.plate ?? plateFromThread;
+    const persisted = await setPendingAction(prisma, rawPhone, "odometro", {
+      summary: message,
+      payload: {
+        stage: ODOMETER_ACTION_CHOICE_STAGE,
+        patente: patenteForChoice ? normalizePlate(patenteForChoice) : undefined,
+        unitLabel: unitHint || undefined,
+        clarifyStage: "clarify_odometer_intent",
+      },
+    });
+    if (!persisted) {
+      console.error("[wara_odometro] setPendingAction failed — odometer_action_choice", {
+        phone: rawPhone,
+      });
+      const safeMessage =
+        "Para registrar el cambio de odómetro necesito la unidad (patente o interno) y el kilometraje con fecha y hora de la lectura. ¿Me los pasás?";
+      await appendOutboundBotMessage(rawPhone, safeMessage, {
+        source: "wara_odometro_response",
+        stage: "action_choice_persist_failed",
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          flowComplete_s: "true",
+          message: safeMessage,
+          error: "pending_action_persist_failed",
+        },
+        { status: BB_STATUS },
+      );
+    }
+    if (patenteForChoice) {
+      await setActiveUnit(prisma, rawPhone, patenteForChoice, { source: "odometro" });
+    }
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_odometro_response",
       stage: "clarify_odometer_intent",

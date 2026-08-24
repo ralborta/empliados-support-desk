@@ -161,8 +161,9 @@ export async function classifyTurnWithAi(
 export async function resolveTurnExecutor(
   selectionText: string,
   threadText: string,
+  pendingAction?: import("@/lib/pendingAction").PendingActionRecord | null,
 ): Promise<TurnExecutorResolution> {
-  const guard = classifyTurnExecutorSafetyGuards(selectionText, threadText);
+  const guard = classifyTurnExecutorSafetyGuards(selectionText, threadText, pendingAction);
   if (guard) {
     return { executor: guard.executor, source: "safety_guard", ruleId: guard.ruleId };
   }
@@ -175,7 +176,10 @@ export async function resolveTurnExecutor(
   const certificadoPivot = /\b(certificado|certficado|cobertura|monitoreo|constancia)\b/.test(normalized);
   const inOdometerFlow =
     !threadOdometerRegistrationCompleted(threadText) &&
-    (threadHasActiveOdometerFlow(threadText) || threadAwaitingHorometerKmValue(threadText));
+    (threadHasActiveOdometerFlow(threadText) ||
+      threadAwaitingHorometerKmValue(threadText) ||
+      (pendingAction?.type === "odometro" &&
+        pendingAction.payload?.stage === "odometer_action_choice"));
   const hardOdooIntent =
     looksLikeCustomerConversationCloseRequest(text) ||
     looksLikeHumanAdvisorRequest(text) ||
@@ -207,6 +211,6 @@ export async function resolveTurnExecutor(
     }
   }
 
-  const rulesExecutor = classifyTurnExecutor(selectionText, threadText);
+  const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
   return { executor: rulesExecutor, source: "rules" };
 }

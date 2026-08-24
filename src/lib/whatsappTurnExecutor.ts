@@ -139,7 +139,17 @@ import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
 import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
-import { getPendingAction, clearPendingAction, ensureOdometerCollectingTurnLayer, patchPendingActionPayload } from "@/lib/pendingAction";
+import {
+  getPendingAction,
+  clearPendingAction,
+  ensureOdometerCollectingTurnLayer,
+  patchPendingActionPayload,
+} from "@/lib/pendingAction";
+import {
+  hasPendingOdometerActionChoice,
+  looksLikeOdometerActionChoiceReply,
+  shouldSupersedeOdometerActionChoice,
+} from "@/lib/odometerActionChoice";
 import {
   looksLikeTramiteCancellationIntent,
   threadHasInconclusiveTramite,
@@ -453,8 +463,13 @@ export async function runTurnExecutorPhase(params: {
   }
 
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
-  const pendingAction = await getPendingAction(prisma, rawPhone);
+  let pendingAction = await getPendingAction(prisma, rawPhone);
   const thread = threadCtx.classificationThread;
+
+  if (hasPendingOdometerActionChoice(pendingAction) && shouldSupersedeOdometerActionChoice(selectionText)) {
+    await clearPendingAction(prisma, rawPhone);
+    pendingAction = null;
+  }
 
   // Cliente insiste (“Y?”) tras consulta de unidad/GPS sin respuesta útil → disculpa + asesor.
   // Bug real 2026-08-22/23: “Indícame el reporte de la nissan” → silencio → “Y?”.
@@ -1726,6 +1741,11 @@ export async function runTurnExecutorPhase(params: {
 
   let executor: TurnExecutorId;
   if (
+    hasPendingOdometerActionChoice(pendingAction) &&
+    looksLikeOdometerActionChoiceReply(selectionText)
+  ) {
+    executor = "odometro";
+  } else if (
     pendingAction?.type === "certificados" &&
     pendingAction.payload?.stage === "awaiting_unit" &&
     shouldContinueCertificateUnitCollection(selectionText, threadCtx.classificationThread, pendingAction) &&
@@ -1737,10 +1757,18 @@ export async function runTurnExecutorPhase(params: {
       threadCtx.classificationThread,
       selectionText,
     );
-    const resolved = await resolveTurnExecutor(selectionText, threadCtx.classificationThread);
+    const resolved = await resolveTurnExecutor(
+      selectionText,
+      threadCtx.classificationThread,
+      pendingAction,
+    );
     executor = pendingConfirm ?? pendingAction?.type ?? resolved.executor;
   } else {
-    const resolved = await resolveTurnExecutor(selectionText, threadCtx.classificationThread);
+    const resolved = await resolveTurnExecutor(
+      selectionText,
+      threadCtx.classificationThread,
+      pendingAction,
+    );
     executor = resolved.executor;
   }
 
