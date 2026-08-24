@@ -121,6 +121,7 @@ const SUITES = [
   "verify-turn-layer-fork.mjs",
   "verify-operation-precedence-matrix.mjs",
   "verify-operation-precedence-incident-e2e.mjs",
+  "verify-meter-authority-continuity-e2e.mjs",
   "verify-operation-fork-multi-module-e2e.mjs",
   "verify-unit-ref-clarification-continuity.mjs",
   "verify-overlay-resume-hint-and-persist.mjs",

@@ -466,27 +466,36 @@ const TURN_RULES: TurnRule[] = [
         : null,
   },
   {
-    id: "certificate_unit_context_selection",
-    reason: "Respuesta de unidad tras pedido de unidad/patente del flujo de certificado.",
-    decide: ({ text, threadText }) =>
-      certificateFlowState(threadText) === "awaiting_unit" &&
-      (isUnitSelectionMessage(text, threadText) ||
-        shouldContinueCertificateUnitCollection(text, threadText))
-        ? "certificados"
-        : null,
+    id: "gps_or_live_unit_consult",
+    reason:
+      "GPS/ignición/reporte en vivo — autoridad read; no etiquetar certificado por historial stale.",
+    decide: ({ text, pendingAction }) => {
+      const isGps =
+        looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text);
+      if (!isGps) return null;
+      // Solo un certificado VIVO en DB puede competir; el historial de hilo no secuestra GPS.
+      if (pendingAction?.type === "certificados") return null;
+      return "unidades";
+    },
   },
   {
-    id: "gps_or_live_unit_consult",
-    reason: "GPS/ignición/reporte en vivo — prioridad sobre guías y mantenimiento arrastrado del hilo.",
-    decide: ({ text, threadText }) => {
+    id: "certificate_unit_context_selection",
+    reason: "Respuesta de unidad tras pedido de unidad/patente del flujo de certificado.",
+    decide: ({ text, threadText, pendingAction }) => {
+      // Requiere pending DB vivo o, en su defecto, awaiting_unit sin ser consulta GPS.
+      if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+        return null;
+      }
       if (
-        certificateFlowState(threadText) === "awaiting_unit" &&
-        (isUnitSelectionMessage(text, threadText) ||
-          shouldContinueCertificateUnitCollection(text, threadText))
+        pendingAction?.type !== "certificados" &&
+        certificateFlowState(threadText) !== "awaiting_unit"
       ) {
         return null;
       }
-      return looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? "unidades" : null;
+      return isUnitSelectionMessage(text, threadText) ||
+        shouldContinueCertificateUnitCollection(text, threadText)
+        ? "certificados"
+        : null;
     },
   },
   {

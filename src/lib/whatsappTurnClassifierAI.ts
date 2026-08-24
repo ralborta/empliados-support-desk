@@ -23,11 +23,14 @@ import {
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeTechnicalSupportRequest,
   looksLikeOperationalMaintenanceIntent,
+  looksLikeGpsOrUnitStatusQuestion,
+  looksLikeLiveUnitConsultIntent,
 } from "@/lib/waraApi";
 import {
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
 } from "@/lib/wara";
+import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
 
 const TURN_AI_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_CONFIDENCE = 0.78;
@@ -169,6 +172,20 @@ export async function resolveTurnExecutor(
   }
 
   const text = selectionText.trim();
+  // GPS read tipado: nunca etiquetar certificado por historial stale sin pending DB.
+  if (
+    (looksLikeGpsOrUnitStatusQuestion(text) ||
+      looksLikeLiveUnitConsultIntent(text) ||
+      shouldRouteGpsConsultToUnidades(text)) &&
+    pendingAction?.type !== "certificados"
+  ) {
+    return {
+      executor: "unidades",
+      source: "safety_guard",
+      ruleId: "gps_status_read_authority",
+    };
+  }
+
   const normalized = text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

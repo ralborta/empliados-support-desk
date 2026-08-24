@@ -381,12 +381,13 @@ async function executeOverlayReadKeepPending(opts: {
     plateDisplayFallback: tramiteAnchor?.displayLabel ?? tramiteAnchor?.plate ?? null,
   });
 
-  let executor: TurnExecutorId = "odometro";
-  if (currentPending?.type === "certificados" || pendingKind === "certificados") {
+  let executor: TurnExecutorId = "unidades";
+  if (currentPending?.type === "certificados") {
     executor = "certificados";
-  } else if (currentPending?.type === "mantenimiento" || pendingKind === "mantenimiento") {
+  } else if (currentPending?.type === "mantenimiento") {
     executor = "mantenimiento";
-  } else if (currentPending?.type === "odometro" || pendingKind === "odometro") {
+  } else if (currentPending?.type === "odometro") {
+    // Overlay GPS durante write: label del write pendiente (contrato explícito).
     executor = "odometro";
   } else if (usedGpsUnidades) {
     executor = "unidades";

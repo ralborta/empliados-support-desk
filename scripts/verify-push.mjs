@@ -47,6 +47,7 @@ const PUSH_SUITES = [
   "verify-gps-read-overlay-keeps-horometer.mjs",
   "verify-operation-precedence-matrix.mjs",
   "verify-operation-precedence-incident-e2e.mjs",
+  "verify-meter-authority-continuity-e2e.mjs",
   "verify-operation-fork-multi-module-e2e.mjs",
   "verify-gps-overlay-phone-concurrency.mjs",
   "verify-unit-ref-clarification-continuity.mjs",
