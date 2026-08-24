@@ -16,6 +16,7 @@ import {
   hasPendingMaintenancePlateRequest,
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
+import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import {
   extractMovilIdFromUnitMessage,
   inferNumericExpectedFieldForThread,
@@ -69,7 +70,30 @@ export type UtteranceUnderstanding = {
   clarifyQuestion: string | null;
   reason?: string;
   unitRef?: UnitRef;
+  /**
+   * Acción estructurada (autoridad semántica). Reconocer una unidad (referent)
+   * NO implica por sí sola consulta GPS ni escritura.
+   */
+  action?: UtteranceAction;
 };
+
+/** Acción conversacional estructurada — no se infiere solo del referent. */
+export type UtteranceAction =
+  | "unit_status_read"
+  | "unit_reference"
+  | "unit_correction"
+  | "new_write"
+  | "continue_field"
+  | "none";
+
+const VALID_ACTIONS: UtteranceAction[] = [
+  "unit_status_read",
+  "unit_reference",
+  "unit_correction",
+  "new_write",
+  "continue_field",
+  "none",
+];
 
 export function isUtteranceUnderstandingEnabled(): boolean {
   const raw = process.env.WARA_UTTERANCE_UNDERSTANDING?.trim().toLowerCase();
@@ -78,14 +102,14 @@ export function isUtteranceUnderstandingEnabled(): boolean {
 }
 
 const SYSTEM_PROMPT = `Sos el intérprete de intención de Atilio (Mesa de Ayuda Wara por WhatsApp).
-Tu trabajo: RAZONAR a qué se refiere el mensaje_nuevo dado el historial (sobre todo la última pregunta del bot) y EXTRAER la referencia a unidad si la hay.
+Tu trabajo: RAZONAR a qué se refiere el mensaje_nuevo dado el historial (sobre todo la última pregunta del bot), EXTRAER la referencia a unidad si la hay, y declarar la ACCIÓN estructurada.
 La ÚLTIMA pregunta o pedido del bot en el historial es MANDATORIO: si pidió unidad/patente/interno/código, el mensaje_nuevo casi siempre responde ESO (no reinterpretes como caso/ticket salvo que el cliente lo diga explícito).
 NO inventes patentes, km ni trámites. Si dudás, pedí aclaración.
 Tolerá errores de escritura / typos / abreviaturas / desorden: interpretá la intención real, no el texto literal.
 Coloquial rioplatense (solo INTERPRETAR, no imitar al responder): porfa/porfis, dale nomás, joya, genial, barbaro, obvio, claro, avanzá/avanzame (typos: vancame, bamcame), metele, hacelo, registralo. "bancame" = esperá/aguardá (NO es confirmación). "gracias"/"genial" solos pueden ser cierre o visto bueno según contexto.
 
 Devolvé SOLO JSON válido:
-{"referent":"vehicle_unit|admin_number|menu_option|confirmation|odometer_data|new_request|other|unclear","confidence":0.0-1.0,"clarify_question":string|null,"unit_ref":{"kind":"full_plate|prefix|suffix|brand|unit_name|none","value":string|null},"reason":"breve"}
+{"referent":"vehicle_unit|admin_number|menu_option|confirmation|odometer_data|new_request|other|unclear","action":"unit_status_read|unit_reference|unit_correction|new_write|continue_field|none","confidence":0.0-1.0,"clarify_question":string|null,"unit_ref":{"kind":"full_plate|prefix|suffix|brand|unit_name|none","value":string|null},"reason":"breve"}
 
 Significado de referent:
 - vehicle_unit — indica o busca una UNIDAD (patente, fragmento de matrícula, marca, nombre interno, interno/número de interno de flota).
@@ -96,6 +120,18 @@ Significado de referent:
 - new_request — trámite o tema nuevo.
 - other — saludo/chitchat entendible.
 - unclear — no se entiende con seguridad.
+
+Significado de action (OBLIGATORIO; independiente de referent):
+- unit_status_read — el cliente pide ESTADO/GPS/ubicación/reporte/ignición de una unidad (incluye typos de esas palabras de pedido). SOLO con esta action se autoriza una consulta de telemetría.
+- unit_reference — solo nombra o selecciona una unidad SIN pedir estado/GPS (ej. "900121", "la NKL 952", "M900-100"). NO autoriza GPS.
+- unit_correction — corrige/rechaza la unidad ("no era esa", "es la otra", "cambiame de unidad") SIN pedir telemetría.
+- new_write — inicia o pide otro trámite de escritura (certificado, mantenimiento, otro odómetro/horómetro).
+- continue_field — aporta el dato que el bot ya pidió (km, horas, fecha, patente del trámite en curso).
+- none — ninguna de las anteriores.
+
+IMPORTANTE: referent=vehicle_unit + unit_ref NO implica action=unit_status_read. Si solo hay entidad sin pedido de estado, usá unit_reference.
+Si el mensaje parece un typo o variante de ESTADO/GPS/UBICACIÓN/REPORTE + referencia de unidad (ej. "estao de la NKL", "ubicaion 900100", "reportee el interno") → action=unit_status_read SIEMPRE, aunque el hilo esté pidiendo horas/km del medidor. NO uses continue_field ni unit_reference para un pedido de estado mal escrito.
+Heurística tipográfica (general): si la primera palabra del mensaje está a 1 letra de distancia de "estado"/"gps"/"ubicacion"/"reporte" (cambio, omisión o inserción) y el resto trae patente/interno/código, es unit_status_read aunque esa palabra exista en el diccionario con otro significado. El typo no convierte la consulta en mera referencia de unidad.
 
 unit_ref (OBLIGATORIO razonarlo siempre):
 - full_plate — matrícula completa usable (value: letras+dígitos compactos, ej. "AD427MC").
@@ -108,11 +144,11 @@ unit_ref (OBLIGATORIO razonarlo siempre):
 Principios (generales):
 - COMPARACIÓN / RANKING entre unidades de la flota ("cuál unidad tiene más/menos/peor/mejor…", "la que más lleva sin reportar") → referent=new_request, clarify_question=null. NO pidas patente para "identificar cuál gana el ranking": eso NO se puede resolver unidad por unidad con una sola chapa.
 - Si el cliente pide LISTADO / FLOTA / TODAS las unidades ("listame", "dame el listado") → new_request, unit_ref none. NO pidas matrícula: quieren ver la lista.
-- Si el cliente pide estado/GPS por nombre o etiqueta que aparece en la flota (persona, chofer, alias listado) → vehicle_unit + unit_ref brand o unit_name. NUNCA pidas la matrícula: buscá por ese texto.
-- Si el hilo pide patente/prefijo/unidad/interno/código y el mensaje parece un intento de identificarla → vehicle_unit + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
-- Si la última pregunta del bot pide la unidad (patente, interno, código) y el cliente manda solo 5–7 dígitos (ej. 900079, 600088) → vehicle_unit + unit_name con esos dígitos. NO admin_number.
+- Si el cliente pide estado/GPS por nombre o etiqueta que aparece en la flota (persona, chofer, alias listado) → vehicle_unit + action=unit_status_read + unit_ref brand o unit_name. NUNCA pidas la matrícula: buscá por ese texto.
+- Si el hilo pide patente/prefijo/unidad/interno/código y el mensaje parece un intento de identificarla → vehicle_unit + action=unit_reference|continue_field + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
+- Si la última pregunta del bot pide la unidad (patente, interno, código) y el cliente manda solo 5–7 dígitos (ej. 900079, 600088) → vehicle_unit + action=continue_field|unit_reference + unit_name con esos dígitos. NO admin_number.
 - "interno" / "número de interno" / "nro de interno" en contexto de flota/odómetro/certificado/GPS = identificador de UNIDAD (vehicle_unit), no ticket de caso.
-- Si el hilo YA tiene una unidad activa/confirmada (el bot dijo "Con la unidad X…" o "contame qué problema") y el cliente pide estado/reporte/GPS sin repetir la patente ("Quiero el estado", "el reporte", "¿cómo está?") → vehicle_unit, unit_ref.none, clarify_question null. NUNCA pidas la matrícula de nuevo: usá la del hilo.
+- Si el hilo YA tiene una unidad activa/confirmada (el bot dijo "Con la unidad X…" o "contame qué problema") y el cliente pide estado/reporte/GPS sin repetir la patente ("Quiero el estado", "el reporte", "¿cómo está?") → vehicle_unit, action=unit_status_read, unit_ref.none, clarify_question null. NUNCA pidas la matrícula de nuevo: usá la del hilo.
 - Matrícula reconocible (formato AR) → full_plate, no admin_number.
 - "NRO"/"N°"/"numero" sueltos → admin_number y unit_ref.none, SALVO que el cliente los marque explícitamente como parte de patente/prefijo/interno de unidad.
 - Token de 2–3 letras solo es prefix/full_plate si el contexto es buscar/elegir unidad.
@@ -140,8 +176,15 @@ export function shouldInterpretAmbiguousUtterance(
   if (classifyFleetQueryKind(text).kind === "aggregate_comparison") return false;
   if (classifyFleetQueryKind(text).kind === "fleet_list") return false;
 
-  // Trámite de odómetro/horómetro activo → executor operativo (no aclaraciones genéricas).
-  if (threadHasActiveOdometerFlow(threadText)) return false;
+  // Trámite de medidor activo: solo omitir semántica si el mensaje ya satisface
+  // el campo esperado (parser operativo). Si no, permitir interpretación (typos,
+  // consultas laterales, etc.) sin hardcodear frases.
+  if (
+    threadHasActiveOdometerFlow(threadText) &&
+    isOperationalMeterCollectionMessage(text, threadText)
+  ) {
+    return false;
+  }
 
   const expectedField = inferNumericExpectedFieldForThread(threadText);
   const resolution = resolveUnitReferenceFromMessage({
@@ -205,6 +248,7 @@ function parseUnderstanding(raw: string): UtteranceUnderstanding | null {
   try {
     const parsed = JSON.parse(raw) as {
       referent?: string;
+      action?: string;
       confidence?: number;
       clarify_question?: string | null;
       reason?: string;
@@ -228,16 +272,65 @@ function parseUnderstanding(raw: string): UtteranceUnderstanding | null {
       typeof parsed.clarify_question === "string" && parsed.clarify_question.trim()
         ? parsed.clarify_question.trim().slice(0, 280)
         : null;
+    const actionRaw = String(parsed.action ?? "").trim() as UtteranceAction;
+    const action = VALID_ACTIONS.includes(actionRaw) ? actionRaw : "none";
     return {
       referent,
       confidence: Math.max(0, Math.min(1, confidence)),
       clarifyQuestion: clarify,
       reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
       unitRef: parseUnitRef(parsed.unit_ref),
+      action,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Riesgo de acción desde understanding estructurado.
+ * vehicle_unit solo NO autoriza read: hace falta action=unit_status_read.
+ */
+export function actionRiskFromUnderstanding(
+  understanding: UtteranceUnderstanding | null,
+): "read" | "write" | null {
+  if (!understanding || understanding.confidence < MIN_CONFIDENCE) return null;
+  if (understanding.action === "unit_status_read") return "read";
+  if (understanding.action === "new_write") return "write";
+  return null;
+}
+
+/** Unidad reconocida sin acción de lectura/escritura clara → aclarar, no ejecutar GPS. */
+export function shouldClarifyUnitWithoutStatusAction(
+  understanding: UtteranceUnderstanding | null,
+): boolean {
+  if (!understanding || understanding.confidence < MIN_CONFIDENCE) return false;
+  if (understanding.referent !== "vehicle_unit") return false;
+  if (understanding.action === "unit_status_read") return false;
+  if (understanding.action === "new_write") return false;
+  if (understanding.action === "continue_field") return false;
+  const ref = understanding.unitRef;
+  if (!ref || ref.kind === "none" || !ref.value) return false;
+  return (
+    understanding.action === "unit_reference" ||
+    understanding.action === "unit_correction" ||
+    understanding.action === "none" ||
+    understanding.action == null
+  );
+}
+
+export function buildUnitReferenceClarifyReply(
+  understanding: UtteranceUnderstanding | null,
+): string {
+  const label = understanding?.unitRef?.value?.trim();
+  if (understanding?.action === "unit_correction") {
+    return label
+      ? `Entendido, no era esa. ¿Querés el *estado/GPS* de ${label}, o seguimos con el trámite en curso?`
+      : "Entendido. ¿Querés consultar el *estado/GPS* de otra unidad, o seguimos con el trámite en curso?";
+  }
+  return label
+    ? `Tomé la referencia *${label}*. ¿Querés el *estado/GPS* de esa unidad, o es el dato para el trámite en curso?`
+    : "Tomé una referencia de unidad. ¿Querés el *estado/GPS*, o es el dato para el trámite en curso?";
 }
 
 export async function understandUserUtterance(

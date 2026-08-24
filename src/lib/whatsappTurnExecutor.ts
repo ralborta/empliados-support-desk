@@ -19,6 +19,9 @@ import {
   shouldProceedAsVehicleUnit,
   understandUserUtterance,
   unitSearchHintFromUnderstanding,
+  actionRiskFromUnderstanding,
+  shouldClarifyUnitWithoutStatusAction,
+  buildUnitReferenceClarifyReply,
   type UtteranceUnderstanding,
 } from "@/lib/utteranceUnderstanding";
 import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
@@ -70,7 +73,6 @@ import {
   buildPendingConfirmHelpReply,
   classifyOdometerFlowSideQuestion,
   buildOdometerFlowSideQuestionReply,
-  buildOdometerFlowSideHelpReply,
 } from "@/lib/pendingConfirmStance";
 import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
@@ -165,11 +167,11 @@ import {
 import {
   classifyPivotForkChoiceResponse,
   buildPivotForkClarificationReply,
-  buildCollectingPayloadForPivot,
   buildResumeTurnLayerPatch,
   prepareStatusPivotDuringTramite,
   readPivotIntent,
   logTramitePivotTrace,
+  extractTramiteUnitAnchorFromThread,
 } from "@/lib/tramitePivot";
 import {
   buildTramiteForkClarificationReply,
@@ -177,6 +179,11 @@ import {
   isTurnLayerForkPending,
   looksLikeExplicitOtherTramiteIntent,
   threadAwaitingTramiteForkChoice,
+  readPendingClarification,
+  readTurnLayer,
+  buildUnitRefClarificationTurnLayer,
+  clearClarificationRestoreExpectation,
+  classifyUnitRefClarificationChoice,
 } from "@/lib/turnLayerContract";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
@@ -187,7 +194,18 @@ import {
   tramiteAllowsTypedLateralOverlay,
   buildTypedLateralReply,
   shouldSkipTypedLateralForOdometerFlow,
+  type TypedLateralKind,
 } from "@/lib/typedLateralQueries";
+import {
+  decidePendingWriteInterference,
+  actionRiskFromTypedLateralKind,
+  isPendingWriteActionType,
+  buildOverlayResumeHintFromCurrentPending,
+  composeOverlayReadKeepPendingReply,
+  buildUnitRefClarificationPersistFailureReply,
+  type ActionWriteRisk,
+} from "@/lib/pendingWriteInterference";
+import { isExplicitUnitStatusQuery } from "@/lib/tramiteMeterPrecedence";
 import {
   agentComposeRequested,
   parseExecutorDialogueState,
@@ -197,6 +215,7 @@ import {
 } from "@/lib/atilioDialogueCompose";
 import { isPassthroughGpsWhatsAppMessage } from "@/lib/waraGpsSummary";
 import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
+import type { PendingActionRecord } from "@/lib/pendingAction";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -211,6 +230,18 @@ const EXECUTOR_HANDLERS: Record<TurnExecutorId, ExecutorHandler> = {
   info_guides: infoGuidesPost,
 };
 
+type OverlayUnidadesExtras = {
+  platePrefix?: string;
+  plate?: string;
+  unitSearchText?: string;
+};
+
+type OverlayReadKeepPendingResult = {
+  message: string;
+  executor: TurnExecutorId;
+  ok: boolean;
+};
+
 function looksLikePendingCertificateUnitReply(text: string, threadText = ""): boolean {
   return shouldContinueCertificateUnitCollection(text, threadText);
 }
@@ -218,7 +249,12 @@ function looksLikePendingCertificateUnitReply(text: string, threadText = ""): bo
 function executorBody(
   rawPhone: string,
   body: string,
-  extras?: { platePrefix?: string; plate?: string; unitSearchText?: string },
+  extras?: {
+    platePrefix?: string;
+    plate?: string;
+    unitSearchText?: string;
+    ephemeralOverlayRead?: boolean;
+  },
 ): JsonRecord {
   return {
     from: rawPhone,
@@ -228,6 +264,7 @@ function executorBody(
     ...(extras?.platePrefix ? { platePrefix: extras.platePrefix } : {}),
     ...(extras?.plate ? { patente: extras.plate, plate: extras.plate } : {}),
     ...(extras?.unitSearchText ? { unitSearchText: extras.unitSearchText } : {}),
+    ...(extras?.ephemeralOverlayRead ? { ephemeralOverlayRead: true } : {}),
   };
 }
 
@@ -236,7 +273,12 @@ async function invokeExecutor(
   rawPhone: string,
   body: string,
   apiKey: string,
-  extras?: { platePrefix?: string; plate?: string; unitSearchText?: string },
+  extras?: {
+    platePrefix?: string;
+    plate?: string;
+    unitSearchText?: string;
+    ephemeralOverlayRead?: boolean;
+  },
 ): Promise<JsonRecord> {
   const handler = EXECUTOR_HANDLERS[executor];
   const req = new NextRequest(`http://internal${TURN_EXECUTOR_PATH[executor]}`, {
@@ -249,6 +291,150 @@ async function invokeExecutor(
   });
   const res = await handler(req);
   return (await res.json().catch(() => ({}))) as JsonRecord;
+}
+
+/**
+ * Única ruta de overlay read-keep-pending.
+ * Solo aquí se invoca unidades con ephemeralOverlayRead, se arma el hint
+ * declarativo y se compone la respuesta. Ramas tipada / explícita / semántica
+ * deben converger aquí.
+ *
+ * Tras la herramienta, relee pendingAction: el hint refleja el estado actual
+ * (trámite avanzó / terminó / canceló mientras esperaba telemetría).
+ */
+async function executeOverlayReadKeepPending(opts: {
+  rawPhone: string;
+  selectionText: string;
+  apiKey: string;
+  thread: string;
+  pendingAction: PendingActionRecord | null | undefined;
+  pendingKind: string | null | undefined;
+  mode: "gps_unidades" | "typed_lateral";
+  typedLateralKind?: TypedLateralKind | null;
+  unidadesExtras?: OverlayUnidadesExtras;
+  prepareStatusPivot?: boolean;
+}): Promise<OverlayReadKeepPendingResult | null> {
+  const {
+    rawPhone,
+    selectionText,
+    apiKey,
+    thread,
+    pendingAction,
+    pendingKind,
+    mode,
+    typedLateralKind,
+    unidadesExtras,
+    prepareStatusPivot,
+  } = opts;
+
+  let lateralBody = "";
+  let lateralOk = true;
+  let usedGpsUnidades = false;
+
+  if (mode === "gps_unidades") {
+    if (prepareStatusPivot) {
+      await prepareStatusPivotDuringTramite({
+        prisma,
+        rawPhone,
+        selectionText,
+        threadText: thread,
+        pendingAction: pendingAction ?? null,
+      }).catch(() => null);
+    }
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey, {
+      ephemeralOverlayRead: true,
+      ...(unidadesExtras ?? {}),
+    });
+    lateralBody = messageFromPayload(execResult);
+    lateralOk = execResult.ok !== false && execResult.ok_s !== "false";
+    usedGpsUnidades = true;
+    if (!lateralBody) {
+      lateralBody =
+        "No pude consultar el estado ahora. Si querés, repetí la consulta con patente o interno.";
+      lateralOk = false;
+    }
+  } else if (typedLateralKind) {
+    lateralBody = await buildTypedLateralReply(
+      prisma,
+      rawPhone,
+      typedLateralKind,
+      selectionText,
+    );
+  } else {
+    return null;
+  }
+
+  if (!lateralBody.trim()) return null;
+
+  // Releer pending: no usar snapshot previo para el resume hint.
+  const currentPending = await getPendingAction(prisma, rawPhone);
+  const tramiteAnchor = extractTramiteUnitAnchorFromThread(thread);
+  const resumeHint = buildOverlayResumeHintFromCurrentPending({
+    pendingAction: currentPending,
+    pendingKind: currentPending ? pendingKind : null,
+    threadText: thread,
+    plateDisplayFallback: tramiteAnchor?.displayLabel ?? tramiteAnchor?.plate ?? null,
+  });
+
+  let executor: TurnExecutorId = "odometro";
+  if (currentPending?.type === "certificados" || pendingKind === "certificados") {
+    executor = "certificados";
+  } else if (currentPending?.type === "mantenimiento" || pendingKind === "mantenimiento") {
+    executor = "mantenimiento";
+  } else if (currentPending?.type === "odometro" || pendingKind === "odometro") {
+    executor = "odometro";
+  } else if (usedGpsUnidades) {
+    executor = "unidades";
+  } else if (typedLateralKind === "gps_unit_status") {
+    executor = "unidades";
+  } else {
+    executor = "info_guides";
+  }
+
+  return {
+    message: composeOverlayReadKeepPendingReply(lateralBody, resumeHint),
+    executor,
+    ok: lateralOk,
+  };
+}
+
+/** Respuesta segura si no se pudo persistir pendingClarification (sin falsa continuidad). */
+function buildClarificationPersistFailureReply(unitLabel?: string | null): string {
+  return buildUnitRefClarificationPersistFailureReply(unitLabel);
+}
+
+async function persistUnitRefClarificationOrSafeReply(opts: {
+  rawPhone: string;
+  thread: string;
+  pendingAction: PendingActionRecord | null | undefined;
+  understanding: UtteranceUnderstanding | null;
+  unitKind: string;
+  unitValue: string;
+}): Promise<{ message: string; executor: TurnExecutorId; ok: boolean }> {
+  const persisted = await patchPendingActionPayload(prisma, opts.rawPhone, {
+    turnLayer: buildUnitRefClarificationTurnLayer(opts.thread, opts.pendingAction, {
+      kind: opts.unitKind,
+      value: opts.unitValue,
+    }),
+  }).catch((err) => {
+    console.warn(
+      "[pendingClarification] persist failed",
+      err instanceof Error ? err.message : err,
+    );
+    return false;
+  });
+  if (!persisted) {
+    return {
+      message: buildClarificationPersistFailureReply(opts.unitValue),
+      executor: "odometro",
+      ok: true,
+    };
+  }
+  return {
+    message: buildUnitReferenceClarifyReply(opts.understanding),
+    executor: "odometro",
+    ok: true,
+  };
 }
 
 function rawMessageFromPayload(data: JsonRecord): string {
@@ -833,101 +1019,238 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // Pivot estado/GPS de otra unidad durante recolección — fork sin ejecutar herramientas.
-  if (
-    !pendingKind &&
-    (pendingAction?.type === "odometro" ||
-      (threadHasActiveOdometerFlow(thread) && !threadOdometerRegistrationCompleted(thread)))
-  ) {
-    const pivotPrep = await prepareStatusPivotDuringTramite({
-      prisma,
-      rawPhone,
-      selectionText,
-      threadText: thread,
-      pendingAction,
-    });
-    if (pivotPrep?.kind === "fork") {
-      await ensureOdometerCollectingTurnLayer(
-        prisma,
-        rawPhone,
-        thread,
-        buildCollectingPayloadForPivot(thread, pivotPrep.pivot, pendingAction?.payload),
-      );
+  // XOR: aclaración unit_ref con expectativa estructurada (no pregunta suelta).
+  {
+    const layer = readTurnLayer(pendingAction);
+    const pendingClarification = readPendingClarification(pendingAction);
+    if (layer?.activeExpectation === "clarification" && pendingClarification) {
+      const choice = classifyUnitRefClarificationChoice(selectionText);
+      const unitValue = pendingClarification.unitRef.value;
+      if (choice === "status") {
+        const cleared = await patchPendingActionPayload(prisma, rawPhone, {
+          turnLayer: clearClarificationRestoreExpectation(pendingAction),
+        }).catch((err) => {
+          console.warn(
+            "[pendingClarification] clear-before-status failed",
+            err instanceof Error ? err.message : err,
+          );
+          return false;
+        });
+        if (!cleared) {
+          return {
+            message:
+              "No pude actualizar el contexto ahora. El trámite en curso sigue; " +
+              "si querés el estado/GPS, pedilo de nuevo en un momento.",
+            executor: "odometro",
+            ok: true,
+          };
+        }
+        const refreshed = await getPendingAction(prisma, rawPhone);
+        const overlay = await executeOverlayReadKeepPending({
+          rawPhone,
+          selectionText: `Estado ${unitValue}`,
+          apiKey,
+          thread,
+          pendingAction: refreshed,
+          pendingKind,
+          mode: "gps_unidades",
+          unidadesExtras: { unitSearchText: unitValue },
+        });
+        if (overlay) return overlay;
+      }
+      if (choice === "continue") {
+        const paused = readTurnLayer(pendingAction)?.pausedExpectation;
+        const cleared = await patchPendingActionPayload(prisma, rawPhone, {
+          turnLayer: clearClarificationRestoreExpectation(pendingAction),
+        }).catch((err) => {
+          console.warn(
+            "[pendingClarification] clear-before-continue failed",
+            err instanceof Error ? err.message : err,
+          );
+          return false;
+        });
+        if (!cleared) {
+          return {
+            message:
+              "No pude actualizar el contexto ahora. El trámite en curso sigue igual; " +
+              "reintentá en un momento.",
+            executor: "odometro",
+            ok: true,
+          };
+        }
+        // Si la expectativa pausada era elegir unidad, el unitRef es el dato del trámite.
+        // Si era km/fecha/etc., no reinyectar la ref como cambio de unidad (contaminaría).
+        if (paused === "unit") {
+          const execResult = await invokeExecutor("odometro", rawPhone, unitValue, apiKey);
+          const execMessage = messageFromPayload(execResult);
+          const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+          if (execMessage || !executorSkippedSilently(execResult)) {
+            return phaseFromExecResult(execResult, execMessage, "odometro", execOk);
+          }
+        }
+        return {
+          message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
+          executor: "odometro",
+          ok: true,
+        };
+      }
+      // Respuesta no clasificable: re-preguntar sin romper XOR ni inventar continuidad.
       return {
-        message: pivotPrep.message,
+        message: buildUnitReferenceClarifyReply({
+          referent: "vehicle_unit",
+          confidence: 0.9,
+          clarifyQuestion: null,
+          action: "unit_reference",
+          unitRef: {
+            kind: pendingClarification.unitRef.kind as
+              | "full_plate"
+              | "prefix"
+              | "suffix"
+              | "brand"
+              | "unit_name"
+              | "none",
+            value: pendingClarification.unitRef.value,
+          },
+        }),
         executor: "odometro",
         ok: true,
       };
     }
   }
 
-  // Laterales tipadas (empresa, guías, GPS) sin perder trámite en curso.
+  // Política central read/write: metadata estructurada → interferencia.
+  // prepareStatusPivotDuringTramite ya no abre fork por lectura GPS.
+  const hasPendingWrite =
+    isPendingWriteActionType(pendingAction?.type) ||
+    (threadHasActiveOdometerFlow(thread) && !threadOdometerRegistrationCompleted(thread)) ||
+    Boolean(pendingKind);
+  const incomingMatchesExpectedField = shouldSkipTypedLateralForOdometerFlow(
+    selectionText,
+    thread,
+  );
   const typedLateralKind = classifyTypedLateralQuery(selectionText);
+  let incomingActionRisk: ActionWriteRisk | null = actionRiskFromTypedLateralKind(typedLateralKind);
+  if (!incomingActionRisk && isExplicitUnitStatusQuery(selectionText)) {
+    incomingActionRisk = "read";
+  }
+  if (!incomingActionRisk) {
+    const otherWrite = looksLikeExplicitOtherTramiteIntent(selectionText);
+    if (otherWrite) incomingActionRisk = "write";
+    else if (
+      looksLikeHorometerOnlyIntent(selectionText) ||
+      looksLikeBareHorometerTopicMention(selectionText) ||
+      looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+      looksLikeBareOdometerTopicMention(selectionText)
+    ) {
+      // Solo si el pending no es el mismo medidor en recolección esperada —
+      // el match de campo esperado tiene prioridad en la policy.
+      if (hasPendingWrite && !incomingMatchesExpectedField) {
+        incomingActionRisk = "write";
+      }
+    }
+  }
+
+  if (hasPendingWrite && incomingActionRisk) {
+    const interference = decidePendingWriteInterference({
+      hasPendingWrite: true,
+      incomingActionRisk,
+      incomingMatchesExpectedField,
+    });
+
+    if (interference === "overlay_read_keep_pending") {
+      const isGpsRead =
+        typedLateralKind === "gps_unit_status" || isExplicitUnitStatusQuery(selectionText);
+      const overlay = await executeOverlayReadKeepPending({
+        rawPhone,
+        selectionText,
+        apiKey,
+        thread,
+        pendingAction,
+        pendingKind,
+        mode: isGpsRead ? "gps_unidades" : "typed_lateral",
+        typedLateralKind,
+        prepareStatusPivot: isGpsRead,
+      });
+      if (overlay) return overlay;
+    }
+
+    if (interference === "fork_incompatible_write" && !pendingKind) {
+      // Fork solo write/write. El builder de fork de GPS ya no aplica a lecturas.
+      const tramiteUnit = extractTramiteUnitAnchorFromThread(thread);
+      const other = looksLikeExplicitOtherTramiteIntent(selectionText);
+      if (tramiteUnit && other) {
+        await ensureOdometerCollectingTurnLayer(
+          prisma,
+          rawPhone,
+          thread,
+          buildCollectingPayloadForFork(thread, pendingAction?.payload),
+        );
+        return {
+          message: [
+            `Estás con un trámite en curso de *${tramiteUnit.displayLabel}*.`,
+            `Pediste *${other === "certificados" ? "certificado" : "mantenimiento"}*.`,
+            "",
+            "¿Qué preferís?",
+            "• *Cambiar de requerimiento* — dejamos el trámite actual y arrancamos el nuevo.",
+            "• *Seguir con el trámite* — terminamos lo pendiente primero.",
+          ].join("\n"),
+          executor: "odometro",
+          ok: true,
+        };
+      }
+    }
+  }
+
+  // Laterales tipadas sin escritura pendiente (o continue_expected_field cae al routing normal).
   if (
     typedLateralKind &&
     tramiteAllowsTypedLateralOverlay(thread, pendingAction) &&
     !shouldSkipTypedLateralForOdometerFlow(selectionText, thread)
   ) {
-    let lateralBody: string;
-    let lateralOk = true;
-    if (typedLateralKind === "gps_unit_status") {
-      const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
-      lateralBody = messageFromPayload(execResult);
-      lateralOk = execResult.ok !== false && execResult.ok_s !== "false";
-      if (!lateralBody) {
-        lateralBody =
-          "No pude consultar el estado GPS ahora. Si querés, repetí la consulta con patente o interno.";
-        lateralOk = false;
-      }
-    } else {
-      lateralBody = await buildTypedLateralReply(
-        prisma,
+    const interference = decidePendingWriteInterference({
+      hasPendingWrite,
+      incomingActionRisk: "read",
+      incomingMatchesExpectedField: false,
+    });
+    if (interference === "overlay_read_keep_pending") {
+      const overlay = await executeOverlayReadKeepPending({
         rawPhone,
-        typedLateralKind,
         selectionText,
-      );
-    }
-    if (pendingKind) {
-      return {
-        message: `${lateralBody}\n\n${buildPendingConfirmStillWaitingReminder(pendingKind)}`,
-        executor:
-          pendingKind === "odometro"
-            ? "odometro"
-            : pendingKind === "certificados"
-              ? "certificados"
-              : "mantenimiento",
-        ok: lateralOk,
-      };
-    }
-    if (
-      threadHasActiveOdometerFlow(thread) &&
-      !threadOdometerRegistrationCompleted(thread)
-    ) {
-      await ensureOdometerCollectingTurnLayer(
-        prisma,
-        rawPhone,
+        apiKey,
         thread,
-        buildCollectingPayloadForFork(thread, pendingAction?.payload),
-      );
+        pendingAction,
+        pendingKind,
+        mode: typedLateralKind === "gps_unit_status" ? "gps_unidades" : "typed_lateral",
+        typedLateralKind,
+      });
+      if (overlay) return overlay;
+    }
+    if (interference === "normal_route") {
+      let lateralBody: string;
+      let lateralOk = true;
+      if (typedLateralKind === "gps_unit_status") {
+        const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+        lateralBody = messageFromPayload(execResult);
+        lateralOk = execResult.ok !== false && execResult.ok_s !== "false";
+        if (!lateralBody) {
+          lateralBody =
+            "No pude consultar el estado GPS ahora. Si querés, repetí la consulta con patente o interno.";
+          lateralOk = false;
+        }
+      } else {
+        lateralBody = await buildTypedLateralReply(
+          prisma,
+          rawPhone,
+          typedLateralKind,
+          selectionText,
+        );
+      }
       return {
-        message: `${lateralBody}\n\n${buildOdometerFlowSideHelpReply(thread)}`,
-        executor: "odometro",
+        message: lateralBody,
+        executor: typedLateralKind === "gps_unit_status" ? "unidades" : "info_guides",
         ok: lateralOk,
       };
     }
-    const inconclusiveExecutor =
-      pendingAction?.type === "certificados" ||
-      pendingAction?.type === "mantenimiento" ||
-      pendingAction?.type === "odometro"
-        ? pendingAction.type
-        : typedLateralKind === "gps_unit_status"
-          ? "unidades"
-          : "info_guides";
-    return {
-      message: lateralBody,
-      executor: inconclusiveExecutor,
-      ok: lateralOk,
-    };
   }
 
   if (pendingKind && looksLikePendingConfirmPushback(selectionText, pendingKind)) {
@@ -1302,6 +1625,31 @@ export async function runTurnExecutorPhase(params: {
       threadCtx.classificationThread,
     );
     lastUnderstanding = understanding;
+
+    // Unidad reconocida sin action de lectura → aclarar; XOR con pendingClarification+unitRef.
+    if (hasPendingWrite && shouldClarifyUnitWithoutStatusAction(understanding)) {
+      const unitRef = understanding!.unitRef!;
+      const unitValue = String(unitRef.value ?? "").trim();
+      if (!unitValue) {
+        return {
+          message: buildUnitReferenceClarifyReply(understanding),
+          executor: "odometro",
+          ok: true,
+        };
+      }
+      console.info(
+        `[utteranceUnderstanding] clarify-unit-no-status-action phone=${rawPhone.slice(0, 4)}… action=${understanding?.action}`,
+      );
+      return persistUnitRefClarificationOrSafeReply({
+        rawPhone,
+        thread,
+        pendingAction,
+        understanding,
+        unitKind: unitRef.kind,
+        unitValue,
+      });
+    }
+
     const aiHint = unitSearchHintFromUnderstanding(understanding);
     const plateInMsg = detectLoosePlate(selectionText);
     const regexPlateOk =
@@ -1450,6 +1798,77 @@ export async function runTurnExecutorPhase(params: {
         console.info(
           `[utteranceUnderstanding] hilo-unidad-activa phone=${rawPhone.slice(0, 4)}… plate=${activeUnitForNl?.plate}`,
         );
+      }
+
+      // Solo action=unit_status_read autoriza overlay GPS. vehicle_unit solo → aclarar.
+      const semanticRisk = actionRiskFromUnderstanding(understanding);
+      if (hasPendingWrite && shouldClarifyUnitWithoutStatusAction(understanding)) {
+        const unitRef = understanding!.unitRef!;
+        const unitValue = String(unitRef.value ?? "").trim();
+        console.info(
+          `[utteranceUnderstanding] unit-sin-accion-read phone=${rawPhone.slice(0, 4)}… action=${understanding?.action}`,
+        );
+        if (!unitValue) {
+          return {
+            message: buildUnitReferenceClarifyReply(understanding),
+            executor: "odometro",
+            ok: true,
+          };
+        }
+        return persistUnitRefClarificationOrSafeReply({
+          rawPhone,
+          thread,
+          pendingAction,
+          understanding,
+          unitKind: unitRef.kind,
+          unitValue,
+        });
+      }
+      if (semanticRisk) {
+        const semanticInterference = decidePendingWriteInterference({
+          hasPendingWrite,
+          incomingActionRisk: semanticRisk,
+          incomingMatchesExpectedField: shouldSkipTypedLateralForOdometerFlow(
+            selectionText,
+            thread,
+          ),
+        });
+        if (semanticInterference === "overlay_read_keep_pending") {
+          const overlay = await executeOverlayReadKeepPending({
+            rawPhone,
+            selectionText,
+            apiKey,
+            thread,
+            pendingAction,
+            pendingKind,
+            mode: "gps_unidades",
+            unidadesExtras: aiUnitExtras,
+          });
+          if (overlay) return overlay;
+        }
+        if (semanticInterference === "fork_incompatible_write" && !pendingKind) {
+          await ensureOdometerCollectingTurnLayer(
+            prisma,
+            rawPhone,
+            thread,
+            buildCollectingPayloadForFork(thread, pendingAction?.payload),
+          );
+          const tramiteUnit = extractTramiteUnitAnchorFromThread(thread);
+          return {
+            message: [
+              tramiteUnit
+                ? `Estás con un trámite en curso de *${tramiteUnit.displayLabel}*.`
+                : "Estás con un trámite de escritura en curso.",
+              "Pediste otro requerimiento incompatible.",
+              "",
+              "¿Qué preferís?",
+              "• *Cambiar de requerimiento* — dejamos el trámite actual y arrancamos el nuevo.",
+              "• *Seguir con el trámite* — terminamos lo pendiente primero.",
+            ].join("\n"),
+            executor: "odometro",
+            ok: true,
+          };
+        }
       }
     } else if (
       understanding &&

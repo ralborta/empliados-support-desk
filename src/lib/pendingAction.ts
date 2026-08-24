@@ -90,14 +90,16 @@ export async function getPendingAction(
   return record;
 }
 
-/** Fusiona campos en `payload` sin perder el trámite vigente. */
+/** Fusiona campos en `payload` sin perder el trámite vigente.
+ * @returns true si se persistió; false si no hay pending o falló el write.
+ */
 export async function patchPendingActionPayload(
   prisma: PrismaClient,
   phone: string,
   payloadPatch: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   const current = await getPendingAction(prisma, phone);
-  if (!current) return;
+  if (!current) return false;
   const prevPayload = (current.payload ?? {}) as Record<string, unknown>;
   const patchTurn = payloadPatch.turnLayer;
   const mergedPayload: Record<string, unknown> = {
@@ -110,7 +112,7 @@ export async function patchPendingActionPayload(
       ...(patchTurn as Record<string, unknown>),
     };
   }
-  await setPendingAction(prisma, phone, current.type, {
+  return setPendingAction(prisma, phone, current.type, {
     summary: current.summary,
     payload: mergedPayload,
   });

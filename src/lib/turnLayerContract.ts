@@ -26,7 +26,15 @@ export type ActiveExpectationField =
   | "fecha_hora"
   | "fork_choice"
   | "confirmo"
-  | "detail";
+  | "detail"
+  | "clarification";
+
+export type TurnLayerPendingClarification = {
+  kind: "unit_ref_action";
+  /** Referencia de unidad conservada (XOR: esta expectativa domina). */
+  unitRef: { kind: string; value: string };
+  purpose: "choose_status_or_continue";
+};
 
 export type TurnLayerPayload = {
   activeExpectation?: ActiveExpectationField | null;
@@ -36,6 +44,11 @@ export type TurnLayerPayload = {
   forkPending?: boolean;
   /** Pausa informativa (CONFIRMO u otro); no cancela el trámite. */
   lateralPause?: boolean;
+  /**
+   * Aclaración estructurada (XOR con campo operativo).
+   * Si está presente, activeExpectation debe ser "clarification".
+   */
+  pendingClarification?: TurnLayerPendingClarification | null;
 };
 
 export type TramiteForkChoice = "resume" | "switch" | "ambiguous";
@@ -183,4 +196,95 @@ export function buildCollectingPayloadForFork(
       pausedExpectation,
     },
   };
+}
+
+export function readPendingClarification(
+  pendingAction: PendingActionRecord | null | undefined,
+): TurnLayerPendingClarification | null {
+  const layer = readTurnLayer(pendingAction);
+  const c = layer?.pendingClarification;
+  if (!c || typeof c !== "object") return null;
+  if (c.kind !== "unit_ref_action") return null;
+  if (c.purpose !== "choose_status_or_continue") return null;
+  const unitRef = c.unitRef;
+  if (!unitRef || typeof unitRef !== "object") return null;
+  const value = typeof unitRef.value === "string" ? unitRef.value.trim() : "";
+  const kind = typeof unitRef.kind === "string" ? unitRef.kind.trim() : "";
+  if (!value || !kind || kind === "none") return null;
+  return {
+    kind: "unit_ref_action",
+    purpose: "choose_status_or_continue",
+    unitRef: { kind, value },
+  };
+}
+
+/**
+ * XOR: pausa el campo operativo y fija activeExpectation=clarification
+ * con unitRef persistido. No deja fork abierto.
+ */
+export function buildUnitRefClarificationTurnLayer(
+  threadText: string,
+  pendingAction: PendingActionRecord | null | undefined,
+  unitRef: { kind: string; value: string },
+): TurnLayerPayload {
+  const prev = readTurnLayer(pendingAction) ?? {};
+  const paused =
+    prev.activeExpectation && prev.activeExpectation !== "clarification"
+      ? prev.activeExpectation
+      : inferActiveExpectationFromThread(threadText);
+  return {
+    ...prev,
+    activeExpectation: "clarification",
+    pausedExpectation: paused,
+    forkPending: false,
+    lateralPause: true,
+    pendingClarification: {
+      kind: "unit_ref_action",
+      purpose: "choose_status_or_continue",
+      unitRef: { kind: unitRef.kind, value: unitRef.value },
+    },
+  };
+}
+
+/** Restaura el campo operativo y limpia la aclaración (XOR). */
+export function clearClarificationRestoreExpectation(
+  pendingAction: PendingActionRecord | null | undefined,
+): TurnLayerPayload {
+  const prev = readTurnLayer(pendingAction) ?? {};
+  const restored =
+    prev.pausedExpectation && prev.pausedExpectation !== "clarification"
+      ? prev.pausedExpectation
+      : "km";
+  return {
+    ...prev,
+    activeExpectation: restored,
+    pausedExpectation: null,
+    forkPending: false,
+    lateralPause: false,
+    pendingClarification: null,
+  };
+}
+
+/**
+ * Respuesta a pendingClarification unit_ref_action.
+ * status → overlay GPS con unitRef; continue → retomar trámite.
+ */
+export function classifyUnitRefClarificationChoice(
+  text: string,
+): "status" | "continue" | "unclear" {
+  const t = String(text || "").trim().toLowerCase();
+  if (!t) return "unclear";
+  if (
+    /\b(gps|estado|telemetr[ií]a|ubicaci[oó]n|reporte|consultar|consulta)\b/.test(t) ||
+    /^(gps|estado)$/i.test(t)
+  ) {
+    return "status";
+  }
+  if (
+    /\b(tr[aá]mite|dato|hor[oó]metro|od[oó]metro|seguir|continu|medidor|es el dato)\b/.test(t) ||
+    /dato del tr[aá]mite/i.test(t)
+  ) {
+    return "continue";
+  }
+  return "unclear";
 }

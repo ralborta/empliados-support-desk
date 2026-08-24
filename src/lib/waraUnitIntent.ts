@@ -88,6 +88,10 @@ export function buildFleetUnitNotFoundMessage(opts: {
    * parece que el bot ignoró por completo lo que le pasaron.
    */
   searchedText?: string | null;
+  /** Coincidencias cercanas (solo sugerencia; nunca auto-seleccionadas). */
+  nearbyUnits?: WaraUnidadEstado[] | null;
+  /** Ofrecer «cambiar empresa» solo si el contacto tiene otra empresa. */
+  canSwitchCompany?: boolean;
 }): string {
   const company = opts.companyName?.trim() || "tu empresa";
   const prefixFromText = opts.rawText ? extractPlatePrefixFromMessage(opts.rawText) : null;
@@ -100,6 +104,11 @@ export function buildFleetUnitNotFoundMessage(opts: {
           .toUpperCase()
       : null;
   const prefix = (opts.prefix ?? prefixFromText ?? barePrefix)?.trim().toUpperCase() || null;
+  const nearbyLines = formatNearbyUnitSuggestions(opts.nearbyUnits);
+  const switchCompanyLine =
+    opts.canSwitchCompany === true
+      ? "Si la unidad es de otra empresa, escribí «cambiar empresa»."
+      : null;
 
   if (prefix) {
     return [
@@ -107,6 +116,8 @@ export function buildFleetUnitNotFoundMessage(opts: {
       "",
       `No encontré ninguna unidad en ${company} con patente que empiece con *${prefix}*.`,
       "Pasame la matrícula completa (ej. OST 223) o escribí «listado de mis unidades».",
+      ...nearbyLines,
+      ...(switchCompanyLine ? [switchCompanyLine] : []),
     ].join("\n");
   }
 
@@ -116,7 +127,13 @@ export function buildFleetUnitNotFoundMessage(opts: {
       "🚗 *Unidad no encontrada*",
       "",
       `La patente *${display}* no está en la flota de ${company}.`,
-      "Revisá que esté bien escrita. Si la unidad es de otra empresa, escribí «cambiar empresa».",
+      "Revisá que esté bien escrita.",
+      ...nearbyLines,
+      ...(switchCompanyLine
+        ? [switchCompanyLine]
+        : opts.canSwitchCompany === false
+          ? []
+          : ["Si la unidad es de otra empresa, escribí «cambiar empresa»."]),
     ].join("\n");
   }
 
@@ -127,6 +144,8 @@ export function buildFleetUnitNotFoundMessage(opts: {
       "",
       `No encontré ninguna unidad que coincida con «${searched}» en la flota de ${company}.`,
       "Revisá que esté bien escrito o pasame la matrícula completa (ej. NKL 952).",
+      ...nearbyLines,
+      ...(switchCompanyLine ? [switchCompanyLine] : []),
       "Si querés ver opciones de tu flota, escribí «listado de mis unidades».",
     ].join("\n");
   }
@@ -140,6 +159,73 @@ export function buildFleetUnitNotFoundMessage(opts: {
     `¿Cuál unidad? Pasame la matrícula completa o el nombre/marca exacto para buscarla en la flota de ${company}. ` +
     `Si querés ver todas, escribí «listado de mis unidades».`
   );
+}
+
+function formatNearbyUnitSuggestions(units: WaraUnidadEstado[] | null | undefined): string[] {
+  if (!units?.length) return [];
+  const labels = units
+    .slice(0, 5)
+    .map((u) => formatUnitListLabel(u))
+    .filter(Boolean);
+  if (!labels.length) return [];
+  return [
+    "",
+    "Coincidencias cercanas en esta empresa (no seleccioné ninguna):",
+    ...labels.map((l) => `• ${l}`),
+    "Si alguna es la correcta, pasame la matrícula o el nombre exacto.",
+  ];
+}
+
+/**
+ * Sugerencias cercanas por similitud de dígitos/código de unidad.
+ * Nunca selecciona ni muta estado — solo ranking para el mensaje not-found.
+ */
+export function findNearbyFleetUnits(
+  units: WaraUnidadEstado[],
+  searchedText: string,
+  limit = 5,
+): WaraUnidadEstado[] {
+  const needle = String(searchedText ?? "").trim();
+  if (!needle || !units.length) return [];
+  const needleDigits = needle.replace(/\D/g, "");
+  const needleNorm = normalizeUnitNameToken(needle);
+  const scored: Array<{ unit: WaraUnidadEstado; score: number }> = [];
+
+  for (const unit of units) {
+    const field = String(unit.unidad || "").replace(TYPOGRAPHIC_HYPHENS, "-");
+    const plate = normalizeLoosePlate(unit.patente || "");
+    const unitNorm = normalizeUnitNameToken(field);
+    const unitDigits = `${field}${plate}${unit.movil_id ?? ""}`.replace(/\D/g, "");
+    let score = 0;
+    if (needleNorm && unitNorm && needleNorm === unitNorm) score += 100;
+    if (needleDigits.length >= 4 && unitDigits.includes(needleDigits)) score += 40;
+    if (needleDigits.length >= 4 && unitDigits) {
+      const prefixLen = sharedNumericPrefixLength(needleDigits, unitDigits);
+      if (prefixLen >= 3) score += prefixLen * 3;
+      const dist = levenshteinDistance(needleDigits.slice(0, 8), unitDigits.slice(0, 8));
+      if (dist <= 2) score += 20 - dist * 5;
+    }
+    if (score > 0) scored.push({ unit, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const out: WaraUnidadEstado[] = [];
+  const seen = new Set<string>();
+  for (const { unit } of scored) {
+    const key = `${unit.movil_id ?? ""}|${normalizeLoosePlate(unit.patente || "")}|${normalizeUnitNameToken(unit.unidad || "")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(unit);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function sharedNumericPrefixLength(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i += 1;
+  return i;
 }
 
 /**

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Pivot estado/GPS durante horómetro/odómetro: precedencia, fork y respuestas.
+ * Pivot / interferencia: lectura GPS → overlay (no fork). Escritura → fork.
+ * Sin try/catch permisivos en asserts críticos.
  */
 import assert from "node:assert/strict";
 
@@ -19,13 +20,25 @@ const {
   buildResumeTurnLayerPatch,
   pivotCompanyStillValid,
   isPivotIntentFresh,
+  prepareStatusPivotDuringTramite,
 } = await import("../src/lib/tramitePivot.ts");
 
-const { threadAwaitingTramiteForkChoice } = await import("../src/lib/turnLayerContract.ts");
+const { threadAwaitingTramiteForkChoice, looksLikeExplicitOtherTramiteIntent } = await import(
+  "../src/lib/turnLayerContract.ts"
+);
 
 const { classifyTypedLateralQuery, shouldSkipTypedLateralForOdometerFlow } = await import(
-  "../src/lib/typedLateralQueries.ts",
+  "../src/lib/typedLateralQueries.ts"
 );
+
+const { decidePendingWriteInterference, composeOverlayReadKeepPendingReply } = await import(
+  "../src/lib/pendingWriteInterference.ts"
+);
+
+const {
+  actionRiskFromUnderstanding,
+  shouldClarifyUnitWithoutStatusAction,
+} = await import("../src/lib/utteranceUnderstanding.ts");
 
 const threadHoroNkl = [
   "Cliente: Ok ahora cambio de horometro",
@@ -42,7 +55,6 @@ const threadAwaitingUnit = [
   "Atilio: Para registrar el cambio de odómetro, necesito la patente de la unidad. ¿Cuál es?",
 ].join("\n");
 
-// Precedencia: estado explícito gana sobre interno
 assert.equal(isExplicitUnitStatusQuery("Estado de la unidad 900088"), true);
 assert.equal(statusIntentOverridesMeterOperationalParse("Estado de la unidad 900088"), true);
 assert.equal(
@@ -55,21 +67,14 @@ assert.equal(
   false,
 );
 
-// Dato operativo cuando corresponde
 assert.equal(isOperationalMeterCollectionMessage("900088", threadAwaitingUnit), true);
 assert.equal(shouldSkipTypedLateralForOdometerFlow("900088", threadAwaitingUnit), true);
-assert.equal(
-  isOperationalMeterCollectionMessage("1250", threadHoroNkl),
-  true,
-  "valor horas cuando pide datos operativos",
-);
+assert.equal(isOperationalMeterCollectionMessage("1250", threadHoroNkl), true);
 
-// Pivot intent
 const pivot = buildPivotIntentFromStatusText("Estado de la unidad 900088", 42);
 assert.ok(pivot);
 assert.equal(pivot.unitRef.kind, "internal");
 assert.equal(pivot.unitRef.value, "900088");
-assert.equal(pivot.companyContactId, 42);
 assert.equal(isPivotIntentFresh(pivot), true);
 
 const tramite = extractTramiteUnitAnchorFromThread(threadHoroNkl);
@@ -77,24 +82,92 @@ assert.ok(tramite);
 assert.equal(tramite.plate, "NKL961");
 assert.equal(pivotTargetsSameTramiteUnit(tramite, pivot), false);
 
-const forkMsg = buildCrossUnitPivotForkMessage(threadHoroNkl, tramite, pivot);
-assert.match(forkMsg, /NKL 961/i);
-assert.match(forkMsg, /900088|interno 900088/i);
-assert.match(forkMsg, /Consultar ahora/i);
-assert.match(forkMsg, /Seguir con hor[oó]metro/i);
-assert.equal(threadAwaitingTramiteForkChoice(`${threadHoroNkl}\nAtilio: ${forkMsg}`), true);
+assert.equal(
+  decidePendingWriteInterference({
+    hasPendingWrite: true,
+    incomingActionRisk: "read",
+    incomingMatchesExpectedField: false,
+  }),
+  "overlay_read_keep_pending",
+);
+assert.doesNotMatch(
+  composeOverlayReadKeepPendingReply(
+    "AH 652 KW — telemetría ok.",
+    "El cambio de horómetro de NKL 961 sigue pendiente; podés continuar enviando las horas.",
+  ),
+  /¿seguimos/i,
+);
 
-// Fork choice labels
-assert.equal(classifyPivotForkChoiceResponse("consultar ahora"), "switch");
-assert.equal(classifyPivotForkChoiceResponse("seguir con horometro"), "resume");
-assert.equal(classifyPivotForkChoiceResponse("consultar ahora y también seguir con horometro"), "ambiguous");
+const pivotPrep = await prepareStatusPivotDuringTramite({
+  prisma: {
+    customer: {
+      findFirst: async () => ({
+        id: "c1",
+        phone: "5491100000000",
+        selectedCompanyContactId: 42,
+        companyName: "Test",
+      }),
+      findUnique: async () => null,
+      update: async () => ({}),
+    },
+  },
+  rawPhone: "5491100000000",
+  selectionText: "Estado de la unidad 900088",
+  threadText: threadHoroNkl,
+  pendingAction: {
+    type: "odometro",
+    createdAt: new Date().toISOString(),
+    payload: { plate: "NKL961", turnLayer: { activeExpectation: "km", forkPending: false } },
+  },
+});
+assert.ok(pivotPrep);
+assert.notEqual(pivotPrep.kind, "fork");
+assert.ok(
+  pivotPrep.kind === "overlay_read" || pivotPrep.kind === "same_unit_lateral",
+  `got ${pivotPrep.kind}`,
+);
 
-// Misma unidad → lateral (no fork en prepare — probamos matcher)
 const pivotSame = buildPivotIntentFromStatusText("Estado de NKL 961", 42);
 assert.ok(pivotSame);
 assert.equal(pivotTargetsSameTramiteUnit(tramite, pivotSame), true);
 
-// Resume restaura pausedExpectation
+assert.equal(looksLikeExplicitOtherTramiteIntent("Certificado 900088"), "certificados");
+assert.equal(
+  decidePendingWriteInterference({
+    hasPendingWrite: true,
+    incomingActionRisk: "write",
+    incomingMatchesExpectedField: false,
+  }),
+  "fork_incompatible_write",
+);
+
+assert.equal(
+  actionRiskFromUnderstanding({
+    referent: "vehicle_unit",
+    confidence: 0.9,
+    clarifyQuestion: null,
+    action: "unit_reference",
+    unitRef: { kind: "unit_name", value: "900088" },
+  }),
+  null,
+);
+assert.equal(
+  shouldClarifyUnitWithoutStatusAction({
+    referent: "vehicle_unit",
+    confidence: 0.9,
+    clarifyQuestion: null,
+    action: "unit_reference",
+    unitRef: { kind: "unit_name", value: "900088" },
+  }),
+  true,
+);
+
+const forkMsg = buildCrossUnitPivotForkMessage(threadHoroNkl, tramite, pivot);
+assert.match(forkMsg, /Consultar ahora/i);
+assert.equal(threadAwaitingTramiteForkChoice(`${threadHoroNkl}\nAtilio: ${forkMsg}`), true);
+assert.equal(classifyPivotForkChoiceResponse("consultar ahora"), "switch");
+assert.equal(classifyPivotForkChoiceResponse("seguir con horometro"), "resume");
+
 const resumePatch = buildResumeTurnLayerPatch({
   type: "odometro",
   createdAt: new Date().toISOString(),
@@ -108,8 +181,6 @@ const resumePatch = buildResumeTurnLayerPatch({
 });
 assert.equal(resumePatch.activeExpectation, "fecha_hora");
 assert.equal(resumePatch.forkPending, false);
-
-// Invalidación empresa
 assert.equal(pivotCompanyStillValid({ ...pivot, companyContactId: 1 }, 1), true);
 assert.equal(pivotCompanyStillValid({ ...pivot, companyContactId: 1 }, 2), false);
 

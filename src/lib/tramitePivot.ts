@@ -408,6 +408,7 @@ export async function prepareStatusPivotDuringTramite(params: {
   pendingAction: PendingActionRecord | null;
 }): Promise<
   | { kind: "same_unit_lateral" }
+  | { kind: "overlay_read" }
   | { kind: "fork"; message: string; pivot: PivotIntent }
   | null
 > {
@@ -417,13 +418,22 @@ export async function prepareStatusPivotDuringTramite(params: {
     return null;
   }
 
-  const resolution = await resolveCustomerByWaraPhone(prisma, rawPhone);
-  const companyContactId = resolution.customer?.selectedCompanyContactId ?? undefined;
+  let companyContactId: number | undefined;
+  try {
+    const resolution = await resolveCustomerByWaraPhone(prisma, rawPhone);
+    companyContactId = resolution.customer?.selectedCompanyContactId ?? undefined;
+  } catch {
+    companyContactId = undefined;
+  }
 
   let pivot = buildPivotIntentFromStatusText(selectionText, companyContactId);
   if (!pivot) return null;
 
-  pivot = await enrichPivotIntentWithFleet(prisma, rawPhone, pivot);
+  try {
+    pivot = await enrichPivotIntentWithFleet(prisma, rawPhone, pivot);
+  } catch {
+    // Flota no disponible: igual se puede decidir overlay de lectura.
+  }
 
   if (!pivotCompanyStillValid(pivot, companyContactId)) {
     logTramitePivotTrace({
@@ -445,13 +455,13 @@ export async function prepareStatusPivotDuringTramite(params: {
 
   if (!tramiteUnit) return null;
 
-  const message = buildCrossUnitPivotForkMessage(threadText, tramiteUnit, pivot);
+  // Lectura (estado/GPS) durante escritura: overlay, nunca fork.
+  // El fork queda reservado a write/write vía decidePendingWriteInterference.
+  void pendingAction;
   logTramitePivotTrace({
-    decision: "fork_offer",
+    decision: "overlay_read_keep_pending",
     tramite: tramiteUnit.displayLabel,
     pivot: pivotDisplayLabel(pivot),
-    pausedExpectation: inferPausedExpectationForPivot(threadText, pendingAction?.payload),
   });
-
-  return { kind: "fork", message, pivot };
+  return { kind: "overlay_read" };
 }
