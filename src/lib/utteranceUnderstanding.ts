@@ -23,10 +23,15 @@ import {
   isOdometerPlateSelectionMessage,
 } from "@/lib/waraUnitIntent";
 import {
+  buildAggregateFleetComparisonLimitReply,
+  classifyFleetQueryKind,
+} from "@/lib/fleetQueryKind";
+import {
   detectServiceIntentInMessage,
   extractEmbeddedNumericReferences,
   resolveUnitReferenceFromMessage,
 } from "@/lib/unitReferenceParser";
+import { looksLikeExplicitCapabilityMenuRequest } from "@/lib/waraApi";
 
 const UNDERSTAND_TIMEOUT_MS = Math.min(OPENAI_DEFAULT_TIMEOUT_MS, 8_000);
 const MIN_CONFIDENCE = 0.72;
@@ -101,6 +106,7 @@ unit_ref (OBLIGATORIO razonarlo siempre):
 - none — no hay referencia a unidad en el mensaje_nuevo.
 
 Principios (generales):
+- COMPARACIÓN / RANKING entre unidades de la flota ("cuál unidad tiene más/menos/peor/mejor…", "la que más lleva sin reportar") → referent=new_request, clarify_question=null. NO pidas patente para "identificar cuál gana el ranking": eso NO se puede resolver unidad por unidad con una sola chapa.
 - Si el cliente pide LISTADO / FLOTA / TODAS las unidades ("listame", "dame el listado") → new_request, unit_ref none. NO pidas matrícula: quieren ver la lista.
 - Si el cliente pide estado/GPS por nombre o etiqueta que aparece en la flota (persona, chofer, alias listado) → vehicle_unit + unit_ref brand o unit_name. NUNCA pidas la matrícula: buscá por ese texto.
 - Si el hilo pide patente/prefijo/unidad/interno/código y el mensaje parece un intento de identificarla → vehicle_unit + unit_ref concreto. No preguntes si el texto crudo tipográfico "es la patente".
@@ -129,6 +135,10 @@ export function shouldInterpretAmbiguousUtterance(
   const text = selectionText.trim();
   if (!text) return false;
   if (text.length > MAX_INTERPRET_CHARS) return false;
+
+  if (looksLikeExplicitCapabilityMenuRequest(text)) return false;
+  if (classifyFleetQueryKind(text).kind === "aggregate_comparison") return false;
+  if (classifyFleetQueryKind(text).kind === "fleet_list") return false;
 
   // Trámite de odómetro/horómetro activo → executor operativo (no aclaraciones genéricas).
   if (threadHasActiveOdometerFlow(threadText)) return false;
@@ -312,6 +322,10 @@ export function clarificationFromUnderstanding(
     lowConfidence;
 
   if (!needsClarify) return null;
+
+  if (classifyFleetQueryKind(rawText ?? "").kind === "aggregate_comparison") {
+    return buildAggregateFleetComparisonLimitReply();
+  }
 
   if (understanding.referent === "admin_number") {
     return (

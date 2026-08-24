@@ -76,6 +76,10 @@ import { buildOpenCaseStatusReply } from "@/lib/customerTicketInquiry";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import { shouldRouteTurnToFleetListExecutorHybrid } from "@/lib/fleetListIntentAI";
 import {
+  buildAggregateFleetComparisonLimitReply,
+  classifyFleetQueryKind,
+} from "@/lib/fleetQueryKind";
+import {
   isBarePlatePrefixHint,
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
@@ -488,15 +492,23 @@ export async function runTurnExecutorPhase(params: {
 
   // “Qué más podés hacer?” → menú de capacidades en lenguaje natural.
   // Antes del follow-up de unidad activa / caso recién abierto (bug 2026-08-23).
+  // No cancela pendingAction ni activeUnit (trámite sigue en DB).
   if (looksLikeExplicitCapabilityMenuRequest(selectionText)) {
-    const { clearActiveUnit } = await import("@/lib/activeUnit");
-    await clearActiveUnit(prisma, rawPhone).catch(() => undefined);
     const companyName =
       waraResolution.selectedCompanyName?.trim() ||
       waraResolution.customer?.companyName?.trim() ||
       undefined;
     return {
       message: buildAtilioHelpCapabilitiesReply(undefined, companyName),
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  // Comparación/ranking entre unidades sin target concreto → límite operativo fijo.
+  if (classifyFleetQueryKind(selectionText).kind === "aggregate_comparison") {
+    return {
+      message: buildAggregateFleetComparisonLimitReply(),
       executor: "info_guides",
       ok: true,
     };

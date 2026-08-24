@@ -720,16 +720,9 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
   } else if (
     selectionText &&
-    looksLikeExplicitCapabilityMenuRequest(selectionText) &&
-    // Con CONFIRMO pendiente, no cortar: el turn/IA decide.
-    !(
-      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
-      (await getPendingAction(prisma, trimmed))?.payload
-    )
+    looksLikeExplicitCapabilityMenuRequest(selectionText)
   ) {
-    // Solo "qué puedo hacer / qué gestiones…" → menú fijo. El resto (otra consulta,
-    // ayuda genérica, topic-switch) va al turn/IA — menos heurística, más diálogo.
-    await clearActiveUnit(prisma, trimmed);
+    // Menú fijo de capacidades — gana sobre tema anterior; no cancela trámite en DB.
     const firstName = customer?.name?.trim().split(/\s+/)[0];
     responseMessage = buildAtilioHelpCapabilitiesReply(firstName, activeCompany);
     await persistCustomerBotReply(trimmed, responseMessage, {
