@@ -1190,6 +1190,19 @@ export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null
   if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|dejo de reportar|offline|sin señal|sin senal)\b/.test(t)) {
     return true;
   }
+  // Bug real, producción 2026-08-24: "Gps" / "reporte" solos no tenían questionCue
+  // y caían a isBarePlatePrefixHint → "patente que empiece con GPS". Pedido explícito
+  // de telemetría sin unidad = consulta de estado (el executor pide la patente).
+  if (
+    /^(el\s+|la\s+|un\s+|una\s+|mi\s+)?(estado|gps|reporte|ignicio|ignicion|posicion|ubicacion)(\s+(de\s+)?(la\s+|el\s+)?unidad)?$/.test(
+      t,
+    ) ||
+    /^(quiero|necesito|dame|pasame|decime|ver|consultar|mostrar)\s+(el\s+|la\s+)?(estado|gps|reporte|ignicio|ignicion|posicion|ubicacion)$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
   // "Quiero el estado" / "dame el estado" / "quiero saber el estado" — pedido explícito
   // (bug real 2026-08-06: tras NKL961 el bot pedía de nuevo la matrícula;
   // bug 2026-08-10: "Quiero saber el estado de la Nissan" no matcheaba por el "saber").

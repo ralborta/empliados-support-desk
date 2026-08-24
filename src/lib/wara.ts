@@ -290,6 +290,31 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "nah",
   // Bug real, producción 2026-07-31: "La veo detenida" → prefijo VEO (verbo "veo", no patente).
   "veo",
+  // Bug real, producción 2026-08-24: "Gps" solo → prefijo GPS → "unidad no encontrada"
+  // en vez de pedir la patente para el reporte de estado.
+  "gps",
+  "estado",
+  "reporte",
+  "ignicion",
+  "posicion",
+  "ubicacion",
+  "odometro",
+  "horometro",
+  "certificado",
+  "cobertura",
+  "mantenimiento",
+  "preventivo",
+  "correctivo",
+  "flota",
+  "unidad",
+  "unidades",
+  "patente",
+  "matricula",
+  "ticket",
+  "voltaje",
+  "telemetria",
+  "senal",
+  "offline",
 ]);
 
 // Tolerantes a la letra de más/de menos más común en "empieza"/"comienza"

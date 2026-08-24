@@ -9,6 +9,11 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "unos", "unas", "de", "del", "al", "en", "para", "a", "no", "nop", "nope", "nel", "nah", "veo",
   "si", "sii", "sip", "dale", "ok", "okey", "listo", "yes",
   "es", "su", "sus", "ha", "he", "mi", "ya", "va", "da",
+  // Paridad V1 2026-08-24: "Gps" solo no es prefijo de patente.
+  "gps", "estado", "reporte", "ignicion", "posicion", "ubicacion",
+  "odometro", "horometro", "certificado", "cobertura", "mantenimiento",
+  "preventivo", "correctivo", "flota", "unidad", "unidades", "patente", "matricula",
+  "ticket", "voltaje", "telemetria", "senal", "offline",
 ]);
 
 const EMPIEZA_RE = "emp(?:ie|i|e)za(?:n)?";
