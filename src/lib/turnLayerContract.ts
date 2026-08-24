@@ -183,8 +183,16 @@ export function buildCollectingPayloadForFork(
   threadText: string,
   existingPayload?: Record<string, unknown> | null,
 ): Record<string, unknown> {
-  const pausedExpectation = inferActiveExpectationFromThread(threadText);
   const prevLayer = (existingPayload?.turnLayer as TurnLayerPayload | undefined) ?? {};
+  const fromDb = prevLayer.activeExpectation;
+  const pausedExpectation =
+    fromDb && fromDb !== "fork_choice" && fromDb !== "clarification"
+      ? fromDb
+      : prevLayer.pausedExpectation &&
+          prevLayer.pausedExpectation !== "fork_choice" &&
+          prevLayer.pausedExpectation !== "clarification"
+        ? prevLayer.pausedExpectation
+        : inferActiveExpectationFromThread(threadText);
   return {
     ...(existingPayload ?? {}),
     stage: existingPayload?.stage ?? "collecting",
@@ -196,6 +204,86 @@ export function buildCollectingPayloadForFork(
       pausedExpectation,
     },
   };
+}
+
+/**
+ * Resuelve pausedExpectation para fork: DB activeExpectation primero;
+ * fallback histórico de hilo solo si falta.
+ */
+export function resolvePausedExpectationForFork(params: {
+  pendingAction: PendingActionRecord | null | undefined;
+  pausedExpectation?: string | null;
+  pendingOperation?: string | null;
+  threadText?: string;
+}): ActiveExpectationField {
+  const layer = readTurnLayer(params.pendingAction);
+  const dbActive = layer?.activeExpectation;
+  if (
+    dbActive &&
+    dbActive !== "fork_choice" &&
+    dbActive !== "clarification"
+  ) {
+    return dbActive;
+  }
+  const hinted = params.pausedExpectation;
+  if (
+    hinted &&
+    hinted !== "fork_choice" &&
+    hinted !== "clarification" &&
+    isActiveExpectationField(hinted)
+  ) {
+    return hinted;
+  }
+  if (params.threadText) {
+    const inferred = inferActiveExpectationFromThread(params.threadText);
+    if (inferred) return inferred;
+  }
+  const op = params.pendingOperation ?? "";
+  if (op === "certificados") return "unit";
+  if (op === "mantenimiento") return "detail";
+  if (op === "meter_horometro" || op === "meter_odometro") return "km";
+  return "unit";
+}
+
+function isActiveExpectationField(value: string): value is ActiveExpectationField {
+  return (
+    value === "unit" ||
+    value === "km" ||
+    value === "fecha_hora" ||
+    value === "detail" ||
+    value === "confirmo" ||
+    value === "fork_choice" ||
+    value === "clarification"
+  );
+}
+
+/**
+ * turnLayer de fork multi-módulo: no toca type/payload/unidad del trámite.
+ */
+export function buildPendingOperationForkTurnLayer(params: {
+  pendingAction: PendingActionRecord | null | undefined;
+  pendingOperation?: string | null;
+  pausedExpectation?: string | null;
+  threadText?: string;
+}): TurnLayerPayload {
+  const prev = readTurnLayer(params.pendingAction) ?? {};
+  const pausedExpectation = resolvePausedExpectationForFork(params);
+  return {
+    ...prev,
+    activeExpectation: "fork_choice",
+    pausedExpectation,
+    forkPending: true,
+    lateralPause: true,
+    pendingClarification: null,
+  };
+}
+
+/** Sin menú falso si falló persistir el fork. */
+export function buildForkLayerPersistFailureReply(): string {
+  return (
+    "No pude guardar las opciones de bifurcación ahora. " +
+    "El trámite en curso sigue igual; si querés cambiar de requerimiento, pedilo de nuevo en un momento."
+  );
 }
 
 export function readPendingClarification(
@@ -266,14 +354,21 @@ export function clearClarificationRestoreExpectation(
 }
 
 /**
- * Respuesta a pendingClarification unit_ref_action.
- * status → overlay GPS con unitRef; continue → retomar trámite.
+ * Respuesta a pendingClarification unit_ref_action (upstream tipado).
+ * status → overlay GPS con unitRef; continue → retomar trámite;
+ * cancel → cerrar aclaración; ambiguous → repregunta.
  */
 export function classifyUnitRefClarificationChoice(
   text: string,
-): "status" | "continue" | "unclear" {
+): "status" | "continue" | "cancel" | "ambiguous" {
   const t = String(text || "").trim().toLowerCase();
-  if (!t) return "unclear";
+  if (!t) return "ambiguous";
+  if (
+    /^(cancelar|cancela|cancelalo|cancelala|anular)$/i.test(t) ||
+    /\b(cancelar la aclaraci[oó]n|olvidate|dejalo)\b/.test(t)
+  ) {
+    return "cancel";
+  }
   if (
     /\b(gps|estado|telemetr[ií]a|ubicaci[oó]n|reporte|consultar|consulta)\b/.test(t) ||
     /^(gps|estado)$/i.test(t)
@@ -286,5 +381,5 @@ export function classifyUnitRefClarificationChoice(
   ) {
     return "continue";
   }
-  return "unclear";
+  return "ambiguous";
 }
