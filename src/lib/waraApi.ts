@@ -25,6 +25,7 @@ import {
   looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerPendingDataAmendment,
   looksLikeUnitRejection,
+  looksLikeBareNegativeResponse,
   looksLikeGenericCorrectionIntent,
   looksLikeCertificateKeyword,
   looksLikeMaintenanceKeyword,
@@ -39,6 +40,7 @@ import {
   threadHasOdometerUnitClarificationPending,
   threadAwaitingOdometerConfirmDetails,
   threadHasPendingUnitStatusCheckOffer,
+  threadBotRecentlyAskedPlateReference,
   detectLoosePlate,
   detectPlate,
   extractPlatePrefixFromMessage,
@@ -753,6 +755,66 @@ export function looksLikeConversationClosing(text: string | undefined | null): b
   if (!raw || raw.length > 140) return false;
   const t = normCompanyToken(raw);
   return /\b(adios|adi[oó]s|chau|chao|hasta luego|hasta pronto|nos vemos|bye|nada mas|no gracias|no nada mas|no nada|eso es todo|eso seria todo|nada por ahora|nada mas por ahora)\b/.test(
+    t,
+  );
+}
+
+/**
+ * El bot ofreció seguir ayudando ("¿Necesitás algo más?" / "¿En qué más te ayudo?").
+ * Un "No" suelto después de eso es cierre, no rechazo de patente ni cancelación de CONFIRMO.
+ * Bug real, producción 2026-08-24: Atilio → "De nada, Daniel. ¿Necesitás algo más?" →
+ * cliente "No" caía al router y no cerraba.
+ */
+export function threadBotOfferedMoreHelp(threadText: string | undefined | null): boolean {
+  const raw = String(threadText ?? "");
+  if (!raw.trim()) return false;
+  const norm = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const offerRes = [
+    /necesitas algo mas/,
+    /en que mas te ayudo/,
+    /en que mas puedo ayudarte/,
+    /queres algo mas/,
+    /algo mas\s*\?/,
+  ];
+  let lastOffer = -1;
+  for (const re of offerRes) {
+    let m: RegExpExecArray | null;
+    const g = new RegExp(re.source, "gi");
+    while ((m = g.exec(norm)) !== null) {
+      lastOffer = Math.max(lastOffer, m.index);
+    }
+  }
+  if (lastOffer < 0) return false;
+  const after = norm.slice(lastOffer);
+  // Si después del offer el bot ya pidió otra cosa operativa, no es este speech-act.
+  if (
+    /(pasame|necesito la|respond[eé]\s+confirmo|te refer[ií]s|voy a registrar|cual es el nuevo)/.test(
+      after.slice(50),
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** "No" / "nada" / "por ahora no" declinando la oferta de más ayuda del bot. */
+export function looksLikeDeclineMoreHelpOffer(
+  text: string | undefined | null,
+  threadText: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 48) return false;
+  if (!threadBotOfferedMoreHelp(threadText)) return false;
+  // "No" tras aclaración de patente / oferta de estado GPS no es cierre social.
+  if (threadBotRecentlyAskedPlateReference(String(threadText ?? ""))) return false;
+  if (threadHasPendingUnitStatusCheckOffer(String(threadText ?? ""))) return false;
+
+  const t = normCompanyToken(raw);
+  if (looksLikeBareNegativeResponse(raw)) return true;
+  return /^(no gracias|gracias no|nada|nada mas|por ahora no|mejor no|no por ahora|eso es todo|asi esta bien|ta bien)$/.test(
     t,
   );
 }
@@ -3022,7 +3084,11 @@ export async function resetCustomerCompanyMenu(
   const normalized = normalizeWhatsAppPhone(rawPhone);
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (customer) {
-    await clearCustomerTicketHistory(prisma, rawPhone);
+    // Conservar inbound reciente (wamid del turno) para que el delivery guard
+    // de teléfonos protegidos no silencie el menú de empresas tras el reset.
+    await clearCustomerTicketHistory(prisma, rawPhone, {
+      preserveInboundSince: new Date(Date.now() - 5 * 60_000),
+    });
     await clearActiveUnit(prisma, rawPhone);
     await clearPendingAction(prisma, rawPhone);
     await prisma.customer.update({
