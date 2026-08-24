@@ -271,12 +271,12 @@ export async function sendBbcTransitionAlertEmail(params: {
       headline = "El runtime BBC volvió a ONLINE";
       break;
     case "offline":
-      title = `[BBC] Runtime OFFLINE`;
-      headline = "El runtime BBC quedó OFFLINE";
+      title = `[BBC] Runtime OFFLINE / sesión caída`;
+      headline = "El runtime BBC (Meta) no está ONLINE";
       break;
     case "config_error":
       title = "[BBC] Error de configuración";
-      headline = "BBC con error de configuración (credenciales o env vars)";
+      headline = "BBC con error de configuración (credenciales o env vars) — no se hace reboot automático";
       break;
     case "degraded":
       title = "[BBC] Runtime degradado";
@@ -286,9 +286,28 @@ export async function sendBbcTransitionAlertEmail(params: {
       title = "[BBC] Runtime reiniciado";
       headline = "El runtime BBC se reinició y volvió ONLINE";
       break;
+    case "silence":
+      title = "[BBC] Silencio funcional — inbound sin respuesta";
+      headline = "Hay mensajes de clientes sin respuesta del bot (posible runtime zombie)";
+      break;
+    case "auto_reboot":
+      title = "[BBC] Auto-reboot ejecutado";
+      headline = "Se solicitó reboot automático del runtime BBC (Meta)";
+      break;
     default:
       return false;
   }
+
+  const silenceLine =
+    bbc.silenceDetected || transition.alertKind === "silence"
+      ? `<li>Silencio funcional: ${escapeHtml(bbc.silenceDetail || "detectado")}</li>`
+      : "";
+  const deployLine = bbc.deployProbeMessage
+    ? `<li>Deploy/Meta: ${escapeHtml(bbc.deployProbeMessage)}${bbc.deployStatus ? ` (${escapeHtml(bbc.deployStatus)})` : ""}</li>`
+    : "";
+  const rebootLine = bbc.lastAutoRebootAt
+    ? `<li>Último auto-reboot: ${formatIso(bbc.lastAutoRebootAt)}</li>`
+    : "";
 
   const html = `
     <p><strong>${escapeHtml(headline)}</strong></p>
@@ -300,11 +319,15 @@ export async function sendBbcTransitionAlertEmail(params: {
       <li>Host: ${escapeHtml(bbc.host || "—")}</li>
       <li>Último evento: ${formatIso(bbc.lastEventAt)}</li>
       <li>Último ONLINE: ${formatIso(bbc.lastOnlineAt)}</li>
+      ${deployLine}
+      ${silenceLine}
+      ${rebootLine}
       ${probeLine}
       <li>Fuente: ${escapeHtml(bbc.source || "—")}</li>
     </ul>
     <p>Revisá <a href="${PANEL_BASE_URL}/monitor">monitor de operaciones</a> o la consola BBC (Session Status).</p>
   `;
+
 
   let sent = false;
   for (const to of recipients) {

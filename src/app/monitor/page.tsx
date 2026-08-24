@@ -58,6 +58,12 @@ type BbcHealth = {
   apiProbeOk?: boolean;
   apiProbeMessage?: string;
   apiProbeHttpStatus?: number;
+  deployStatus?: string | null;
+  deployProbeOk?: boolean;
+  deployProbeMessage?: string;
+  silenceDetected?: boolean;
+  silenceDetail?: string | null;
+  lastAutoRebootAt?: string | null;
 };
 
 type MonitorResponse = {
@@ -287,8 +293,14 @@ export default function MonitorPage() {
   const recentMessages = activity?.messages ?? [];
   const windowHours = summary ? Math.round(summary.windowMinutes / 60) : 3;
 
-  const bbcOk = Boolean(bbc?.healthy);
-  const bbcTone: Tone = !bbc ? "neutral" : bbcOk ? "ok" : "bad";
+  const bbcOk = Boolean(bbc?.healthy) && !bbc?.silenceDetected;
+  const bbcTone: Tone = !bbc
+    ? "neutral"
+    : bbc.silenceDetected
+      ? "warn"
+      : bbcOk
+        ? "ok"
+        : "bad";
   const waraTone: Tone = !wara
     ? "neutral"
     : !wara.healthy
@@ -297,6 +309,14 @@ export default function MonitorPage() {
         ? "warn"
         : "ok";
   const teamTone: Tone = onlineCount > 0 ? "ok" : "warn";
+
+  const bbcBadge = !bbc
+    ? "Sin datos"
+    : bbc.silenceDetected
+      ? "SILENCIO"
+      : bbcOk
+        ? "ONLINE"
+        : bbc.status || "OFFLINE";
 
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-8">
@@ -334,15 +354,25 @@ export default function MonitorPage() {
 
         <div className="grid gap-3 md:grid-cols-3">
           <StatusCard
-            title="BBC / WhatsApp"
-            badge={bbc ? (bbcOk ? "ONLINE" : bbc.status || "OFFLINE") : "Sin datos"}
+            title="BBC / WhatsApp Meta"
+            badge={bbcBadge}
             tone={bbcTone}
             lines={
               bbc
                 ? [
                     `Runtime: ${bbc.status}${bbc.host ? ` · ${bbc.host}` : ""}`,
-                    bbc.apiProbeMessage || "Sonda cron pendiente",
+                    bbc.deployProbeMessage ||
+                      (bbc.deployStatus
+                        ? `Deploy: ${bbc.deployStatus}`
+                        : "Sonda deploy pendiente (MCP)"),
+                    bbc.apiProbeMessage || "Sonda API mensajes pendiente",
+                    bbc.silenceDetected
+                      ? bbc.silenceDetail || "Silencio funcional detectado"
+                      : "Sin silencio funcional",
                     `Reinicios detectados: ${bbc.restartCount}`,
+                    bbc.lastAutoRebootAt
+                      ? `Último auto-reboot: ${formatDateTime(bbc.lastAutoRebootAt)}`
+                      : "Sin auto-reboot reciente",
                     bbc.lastOnlineAt
                       ? `Último ONLINE: ${formatDateTime(bbc.lastOnlineAt)}`
                       : "Aún no hubo evento status.ready",

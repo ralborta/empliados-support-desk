@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  markBbcAlertSent,
-  persistBbcCronProbe,
-  probeBbcMessagingApi,
-  shouldSendBbcTransitionAlert,
-} from "@/lib/bbcRuntimeMonitor";
-import { sendBbcTransitionAlertEmail } from "@/lib/panelEmail";
+import { runBbcHealthCronCycle } from "@/lib/bbcRuntimeMonitor";
+import { sendBbcCycleAlerts } from "@/lib/bbcHealthAlerts";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET?.trim();
@@ -17,40 +12,31 @@ function authorized(req: NextRequest): boolean {
 }
 
 /**
- * Cron: sonda la API de mensajes BBC, persiste estado y alerta solo en transición.
- * Los reinicios se detectan por webhook status.ready → /api/whatsapp/inbound.
+ * Cron: sonda deploy Meta/BBC (MCP) + API mensajes + silencio funcional.
+ * Alerta en transición; 1 reboot automático ante caída/silencio (cooldown).
  *
- * Variables: CRON_SECRET, WARA_BBC_ALERT_EMAIL (default ralborta@empliados.net)
+ * Variables: CRON_SECRET, BUILDERBOT_BOT_ID, BUILDERBOT_API_KEY,
+ * BUILDERBOT_MCP_API_KEY, WARA_BBC_ALERT_EMAIL, WARA_BBC_AUTO_REBOOT
  */
 export async function GET(req: NextRequest) {
   if (!authorized(req)) {
     return NextResponse.json({ ok: false, error: "No autorizado" }, { status: 401 });
   }
 
-  const probe = await probeBbcMessagingApi();
-  const { status, transition } = await persistBbcCronProbe({ probe });
-
-  let emailed = false;
-  const lastAlertAt = status.lastAlertAt ? new Date(status.lastAlertAt) : null;
-  if (
-    shouldSendBbcTransitionAlert({
-      transition,
-      lastAlertAt,
-    })
-  ) {
-    emailed = await sendBbcTransitionAlertEmail({
-      bbc: status,
-      transition,
-      probeMessage: probe.message,
-    });
-    if (emailed) await markBbcAlertSent();
-  }
+  const cycle = await runBbcHealthCronCycle();
+  const emailed = await sendBbcCycleAlerts(cycle);
 
   return NextResponse.json({
-    ok: probe.ok,
+    ok: cycle.status.healthy,
     emailed,
-    transition,
-    probe,
-    bbc: status,
+    alertKinds: cycle.alertKinds,
+    transition: cycle.transition,
+    silence: cycle.silence,
+    reboot: cycle.reboot,
+    deploy: cycle.deploy
+      ? { ok: cycle.deploy.ok, status: cycle.deploy.status, message: cycle.deploy.message }
+      : null,
+    messaging: cycle.messaging,
+    bbc: cycle.status,
   });
 }

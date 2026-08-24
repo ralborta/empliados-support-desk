@@ -1,4 +1,9 @@
 import { prisma } from "@/lib/db";
+import {
+  probeBuilderBotDeployStatus,
+  rebootBuilderBotDeploy,
+  type BuilderBotDeployStatusProbe,
+} from "@/lib/builderbotMcpClient";
 
 export const BBC_HEARTBEAT_KEY = "bbc";
 
@@ -26,6 +31,12 @@ export type BbcRuntimeStatus = {
   apiProbeOk?: boolean;
   apiProbeMessage?: string;
   apiProbeHttpStatus?: number;
+  deployStatus?: string | null;
+  deployProbeOk?: boolean;
+  deployProbeMessage?: string;
+  silenceDetected?: boolean;
+  silenceDetail?: string | null;
+  lastAutoRebootAt?: string | null;
   /** true si este evento indica que el runtime acaba de volver (reinicio). */
   restarted?: boolean;
   source?: string;
@@ -42,10 +53,22 @@ export type BbcStatusTransition = {
   previousStatus: BbcRuntimeStatusKind | null;
   nextStatus: BbcRuntimeStatusKind;
   changed: boolean;
-  alertKind: "offline" | "degraded" | "config_error" | "recovery" | "restart" | null;
+  alertKind:
+    | "offline"
+    | "degraded"
+    | "config_error"
+    | "recovery"
+    | "restart"
+    | "silence"
+    | "auto_reboot"
+    | null;
 };
 
 const ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+export const BBC_AUTO_REBOOT_COOLDOWN_MS = 30 * 60 * 1000;
+export const BBC_SILENCE_LOOKBACK_MS = 12 * 60 * 1000;
+export const BBC_SILENCE_MIN_INBOUND = 2;
+export const BBC_SILENCE_MIN_AGE_MS = 3 * 60 * 1000;
 
 function iso(d: Date | null | undefined): string | null {
   return d ? d.toISOString() : null;
@@ -67,14 +90,39 @@ function readProbeFromDetail(detail: Record<string, unknown>): {
   apiProbeOk?: boolean;
   apiProbeMessage?: string;
   apiProbeHttpStatus?: number;
+  deployStatus?: string | null;
+  deployProbeOk?: boolean;
+  deployProbeMessage?: string;
+  silenceDetected?: boolean;
+  silenceDetail?: string | null;
+  lastAutoRebootAt?: string | null;
 } {
   const probe = detail.lastProbe;
-  if (!probe || typeof probe !== "object" || Array.isArray(probe)) return {};
-  const p = probe as Record<string, unknown>;
+  const p =
+    probe && typeof probe === "object" && !Array.isArray(probe)
+      ? (probe as Record<string, unknown>)
+      : {};
+  const deploy = detail.lastDeployProbe;
+  const d =
+    deploy && typeof deploy === "object" && !Array.isArray(deploy)
+      ? (deploy as Record<string, unknown>)
+      : {};
+  const silence = detail.lastSilence;
+  const s =
+    silence && typeof silence === "object" && !Array.isArray(silence)
+      ? (silence as Record<string, unknown>)
+      : {};
   return {
     apiProbeOk: typeof p.ok === "boolean" ? p.ok : undefined,
     apiProbeMessage: typeof p.message === "string" ? p.message : undefined,
     apiProbeHttpStatus: typeof p.httpStatus === "number" ? p.httpStatus : undefined,
+    deployStatus: typeof d.status === "string" ? d.status : null,
+    deployProbeOk: typeof d.ok === "boolean" ? d.ok : undefined,
+    deployProbeMessage: typeof d.message === "string" ? d.message : undefined,
+    silenceDetected: typeof s.detected === "boolean" ? s.detected : undefined,
+    silenceDetail: typeof s.detail === "string" ? s.detail : null,
+    lastAutoRebootAt:
+      typeof detail.lastAutoRebootAt === "string" ? detail.lastAutoRebootAt : null,
   };
 }
 
@@ -160,6 +208,13 @@ export function resolveBbcTransition(
   if (nextStatus === "ONLINE" && previousStatus != null && previousStatus !== "ONLINE") {
     alertKind = "recovery";
   } else if (nextStatus === "OFFLINE") {
+    alertKind = "offline";
+  } else if (
+    nextStatus === "UNKNOWN" ||
+    nextStatus === "READY_TO_SCAN" ||
+    nextStatus === "INITIALIZATION"
+  ) {
+    // Meta Cloud: READY_TO_SCAN/UNKNOWN suelen ser runtime BBC caído, no QR.
     alertKind = "offline";
   } else if (nextStatus === "CONFIG_ERROR") {
     alertKind = "config_error";
@@ -424,3 +479,342 @@ export async function probeBbcMessagingApi(): Promise<BbcProbeResult> {
     return { ok: false, message: `No se pudo contactar BBC API: ${detail}` };
   }
 }
+
+export function classifyDeployStatusProbe(
+  probe: BuilderBotDeployStatusProbe,
+): BbcRuntimeStatusKind {
+  if (probe.configError && !probe.status) return "CONFIG_ERROR";
+  if (!probe.status) return "UNKNOWN";
+  return normalizeStatus(probe.status);
+}
+
+/**
+ * Combina sonda de deploy (Meta/runtime) + API de mensajes.
+ * Prioridad: CONFIG_ERROR de credenciales → status de deploy → messaging.
+ */
+export function combineBbcHealthProbes(params: {
+  deploy: BuilderBotDeployStatusProbe | null;
+  messaging: BbcProbeResult;
+}): { status: BbcRuntimeStatusKind; healthy: boolean; source: string } {
+  const messagingStatus = classifyBbcProbeResult(params.messaging);
+
+  if (params.messaging.configError) {
+    return { status: "CONFIG_ERROR", healthy: false, source: "messaging_config" };
+  }
+
+  if (params.deploy && !params.deploy.configError && params.deploy.status) {
+    const deployStatus = classifyDeployStatusProbe(params.deploy);
+    if (deployStatus !== "ONLINE") {
+      return { status: deployStatus, healthy: false, source: "deploy_status" };
+    }
+    if (messagingStatus === "OFFLINE") {
+      return { status: "OFFLINE", healthy: false, source: "messaging_offline" };
+    }
+    if (messagingStatus === "DEGRADED") {
+      return { status: "DEGRADED", healthy: true, source: "deploy_online_messaging_degraded" };
+    }
+    return { status: "ONLINE", healthy: true, source: "deploy_and_messaging" };
+  }
+
+  // Sin MCP key / deploy probe: caer a messaging (comportamiento histórico).
+  return {
+    status: messagingStatus,
+    healthy: isHealthyStatus(messagingStatus),
+    source: params.deploy?.configError ? "messaging_fallback_mcp_missing" : "messaging_only",
+  };
+}
+
+export type BbcSilenceSample = {
+  phone: string;
+  direction: "INBOUND" | "OUTBOUND";
+  from: string;
+  at: Date;
+  botPaused?: boolean;
+};
+
+export type BbcSilenceCheck = {
+  detected: boolean;
+  detail: string;
+  affectedPhones: string[];
+};
+
+/** Detecta inbound reciente sin respuesta BOT (runtime “zombie” con Meta aún ONLINE). */
+export function evaluateBbcFunctionalSilence(
+  samples: BbcSilenceSample[],
+  opts?: { now?: Date; lookbackMs?: number; minInbound?: number; minAgeMs?: number },
+): BbcSilenceCheck {
+  const now = opts?.now ?? new Date();
+  const lookbackMs = opts?.lookbackMs ?? BBC_SILENCE_LOOKBACK_MS;
+  const minInbound = opts?.minInbound ?? BBC_SILENCE_MIN_INBOUND;
+  const minAgeMs = opts?.minAgeMs ?? BBC_SILENCE_MIN_AGE_MS;
+  const since = now.getTime() - lookbackMs;
+
+  const active = samples
+    .filter((s) => s.at.getTime() >= since && !s.botPaused)
+    .sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  const byPhone = new Map<string, BbcSilenceSample[]>();
+  for (const s of active) {
+    const phone = s.phone.replace(/\D/g, "");
+    if (phone.length < 8) continue;
+    const list = byPhone.get(phone) ?? [];
+    list.push(s);
+    byPhone.set(phone, list);
+  }
+
+  const affected: string[] = [];
+  for (const [phone, msgs] of byPhone) {
+    const inbounds = msgs.filter((m) => m.direction === "INBOUND");
+    if (inbounds.length < minInbound) continue;
+    const lastInbound = inbounds[inbounds.length - 1]!;
+    if (now.getTime() - lastInbound.at.getTime() < minAgeMs) continue;
+    const botAfter = msgs.some(
+      (m) =>
+        m.direction === "OUTBOUND" &&
+        m.from === "BOT" &&
+        m.at.getTime() >= lastInbound.at.getTime(),
+    );
+    if (!botAfter) affected.push(phone);
+  }
+
+  if (!affected.length) {
+    return { detected: false, detail: "Sin silencio funcional", affectedPhones: [] };
+  }
+  return {
+    detected: true,
+    detail: `${affected.length} teléfono(s) con inbound sin respuesta bot (≥${minInbound} msgs, >${Math.round(minAgeMs / 60000)} min)`,
+    affectedPhones: affected,
+  };
+}
+
+export async function probeBbcFunctionalSilence(
+  lookbackMs = BBC_SILENCE_LOOKBACK_MS,
+): Promise<BbcSilenceCheck> {
+  const since = new Date(Date.now() - lookbackMs);
+  try {
+    const rows = await prisma.ticketMessage.findMany({
+      where: {
+        createdAt: { gte: since },
+        direction: { in: ["INBOUND", "OUTBOUND"] },
+      },
+      select: {
+        direction: true,
+        from: true,
+        createdAt: true,
+        ticket: {
+          select: {
+            customer: { select: { phone: true, botPausedAt: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 400,
+    });
+    return evaluateBbcFunctionalSilence(
+      rows.map((r) => ({
+        phone: r.ticket.customer.phone,
+        direction: r.direction as "INBOUND" | "OUTBOUND",
+        from: r.from,
+        at: r.createdAt,
+        botPaused: Boolean(r.ticket.customer.botPausedAt),
+      })),
+    );
+  } catch (error) {
+    console.error("[bbcRuntimeMonitor] silence probe failed:", error);
+    return {
+      detected: false,
+      detail: "No se pudo evaluar silencio (error DB)",
+      affectedPhones: [],
+    };
+  }
+}
+
+export function isBbcAutoRebootEnabled(): boolean {
+  const raw = process.env.WARA_BBC_AUTO_REBOOT?.trim().toLowerCase();
+  if (raw === "0" || raw === "false" || raw === "off" || raw === "no") return false;
+  return true;
+}
+
+export function bbcAutoRebootCooldownMs(): number {
+  const mins = Number(process.env.WARA_BBC_AUTO_REBOOT_COOLDOWN_MIN?.trim() || "30");
+  if (!Number.isFinite(mins) || mins < 5) return BBC_AUTO_REBOOT_COOLDOWN_MS;
+  return Math.round(mins * 60_000);
+}
+
+/** Reboot automático: runtime caído o silencio funcional. Nunca ante CONFIG_ERROR. */
+export function shouldAutoRebootBbc(params: {
+  status: BbcRuntimeStatusKind;
+  silenceDetected: boolean;
+  lastAutoRebootAt: Date | null;
+  enabled?: boolean;
+  now?: Date;
+  cooldownMs?: number;
+}): boolean {
+  if (!(params.enabled ?? isBbcAutoRebootEnabled())) return false;
+  if (params.status === "CONFIG_ERROR") return false;
+  const now = params.now ?? new Date();
+  const cooldown = params.cooldownMs ?? bbcAutoRebootCooldownMs();
+  if (
+    params.lastAutoRebootAt &&
+    now.getTime() - params.lastAutoRebootAt.getTime() < cooldown
+  ) {
+    return false;
+  }
+  if (params.silenceDetected) return true;
+  return (
+    params.status === "OFFLINE" ||
+    params.status === "UNKNOWN" ||
+    params.status === "READY_TO_SCAN" ||
+    params.status === "INITIALIZATION"
+  );
+}
+
+export type BbcCronHealthCycleResult = {
+  status: BbcRuntimeStatus;
+  transition: BbcStatusTransition;
+  silence: BbcSilenceCheck;
+  messaging: BbcProbeResult;
+  deploy: BuilderBotDeployStatusProbe | null;
+  reboot: { attempted: boolean; ok: boolean; message: string | null };
+  alertKinds: Array<NonNullable<BbcStatusTransition["alertKind"]>>;
+};
+
+/**
+ * Ciclo completo del cron: sondas → persistir → silencio → reboot opcional.
+ */
+export async function runBbcHealthCronCycle(): Promise<BbcCronHealthCycleResult> {
+  const botId = process.env.BUILDERBOT_BOT_ID?.trim() || "";
+  const messaging = await probeBbcMessagingApi();
+  let deploy: BuilderBotDeployStatusProbe | null = null;
+  if (botId) {
+    deploy = await probeBuilderBotDeployStatus(botId);
+  } else {
+    deploy = {
+      ok: false,
+      status: null,
+      message: "Falta BUILDERBOT_BOT_ID",
+      configError: true,
+    };
+  }
+
+  const combined = combineBbcHealthProbes({ deploy, messaging });
+  const silence = await probeBbcFunctionalSilence();
+  const prev = await prisma.opsServiceHeartbeat.findUnique({
+    where: { key: BBC_HEARTBEAT_KEY },
+  });
+  const prevDetail = parseDetail(prev?.detail);
+  const previousStatus = prev ? normalizeStatus(prev.status) : null;
+  const transition = resolveBbcTransition(previousStatus, combined.status);
+
+  const lastAutoRebootAtRaw =
+    typeof prevDetail.lastAutoRebootAt === "string" ? prevDetail.lastAutoRebootAt : null;
+  const lastAutoRebootAt = lastAutoRebootAtRaw ? new Date(lastAutoRebootAtRaw) : null;
+
+  let reboot: BbcCronHealthCycleResult["reboot"] = {
+    attempted: false,
+    ok: false,
+    message: null,
+  };
+
+  const wantReboot = shouldAutoRebootBbc({
+    status: combined.status,
+    silenceDetected: silence.detected,
+    lastAutoRebootAt,
+  });
+
+  const now = new Date();
+  let autoRebootAt = lastAutoRebootAtRaw;
+  let restartCount = prev?.restartCount ?? 0;
+
+  if (wantReboot && botId) {
+    reboot.attempted = true;
+    const result = await rebootBuilderBotDeploy(botId);
+    reboot.ok = result.ok;
+    reboot.message = result.message;
+    if (result.ok) {
+      autoRebootAt = now.toISOString();
+      restartCount += 1;
+    }
+  }
+
+  const healthy =
+    isHealthyStatus(combined.status) && !silence.detected;
+  const alertKinds: BbcCronHealthCycleResult["alertKinds"] = [];
+  if (transition.alertKind) alertKinds.push(transition.alertKind);
+  if (silence.detected) alertKinds.push("silence");
+  if (reboot.attempted) alertKinds.push("auto_reboot");
+
+  const mergedDetail = {
+    ...prevDetail,
+    lastProbe: {
+      at: now.toISOString(),
+      ok: messaging.ok,
+      message: messaging.message,
+      httpStatus: messaging.httpStatus ?? null,
+    },
+    lastDeployProbe: deploy
+      ? {
+          at: now.toISOString(),
+          ok: deploy.ok,
+          status: deploy.status,
+          message: deploy.message,
+        }
+      : prevDetail.lastDeployProbe ?? null,
+    lastSilence: {
+      at: now.toISOString(),
+      detected: silence.detected,
+      detail: silence.detail,
+      phones: silence.affectedPhones.slice(0, 8),
+    },
+    lastAutoRebootAt: autoRebootAt,
+    lastRebootAttempt: reboot.attempted
+      ? {
+          at: now.toISOString(),
+          ok: reboot.ok,
+          message: reboot.message,
+          reason: silence.detected ? "silence" : combined.status,
+        }
+      : prevDetail.lastRebootAttempt ?? null,
+    source: "cron_probe",
+    combineSource: combined.source,
+    at: now.toISOString(),
+  };
+
+  const row = await prisma.opsServiceHeartbeat.upsert({
+    where: { key: BBC_HEARTBEAT_KEY },
+    create: {
+      key: BBC_HEARTBEAT_KEY,
+      status: silence.detected && combined.status === "ONLINE" ? "DEGRADED" : combined.status,
+      healthy,
+      detail: JSON.stringify(mergedDetail),
+      lastEventAt: now,
+      lastOnlineAt: healthy ? now : null,
+      lastOfflineAt: healthy ? null : now,
+      restartCount,
+    },
+    update: {
+      status: silence.detected && combined.status === "ONLINE" ? "DEGRADED" : combined.status,
+      healthy,
+      detail: JSON.stringify(mergedDetail),
+      lastEventAt: now,
+      restartCount,
+      ...(healthy ? { lastOnlineAt: now } : { lastOfflineAt: now }),
+    },
+  });
+
+  const persistedStatus = normalizeStatus(row.status);
+  return {
+    status: rowToStatus(row, {
+      source: "cron_probe",
+      silenceDetected: silence.detected,
+      silenceDetail: silence.detail,
+    }),
+    transition: resolveBbcTransition(previousStatus, persistedStatus),
+    silence,
+    messaging,
+    deploy,
+    reboot,
+    alertKinds: [...new Set(alertKinds)],
+  };
+}
+
