@@ -124,7 +124,8 @@ const { buildUnitReferenceClarifyReply } = await import(
 console.log("=== Helpers XOR unit_ref clarification ===");
 assert.equal(classifyUnitRefClarificationChoice("GPS"), "status");
 assert.equal(classifyUnitRefClarificationChoice("es el dato del trámite"), "continue");
-assert.equal(classifyUnitRefClarificationChoice("tal vez"), "unclear");
+assert.equal(classifyUnitRefClarificationChoice("tal vez"), "ambiguous");
+assert.equal(classifyUnitRefClarificationChoice("cancelar"), "cancel");
 
 const clarifyLayer = buildUnitRefClarificationTurnLayer(
   "Pasame el nuevo horómetro en horas",
@@ -336,6 +337,130 @@ assert.equal(readPendingClarification(customerData.pendingAction)?.unitRef.value
   });
   assert.equal(restored.activeExpectation, "km");
   assert.equal(restored.pendingClarification, null);
+}
+
+console.log("=== Caso 3: aclaración → estado → consulta 900121 ===");
+resetClarificationState();
+telemetryHits = 0;
+lastTelemetryBody = "";
+{
+  const res = await runTurnExecutorPhase({
+    rawPhone: PHONE,
+    selectionText: "estado",
+    apiKey: API_KEY,
+  });
+  assert.ok(res.message?.trim());
+  assert.ok(telemetryHits >= 1, "estado debe consultar telemetría");
+  assert.match(
+    `${lastTelemetryBody} ${res.message}`,
+    /900121|M900-121|AG\s*382\s*QB/i,
+  );
+  const pending = await getPendingAction(mockPrisma, PHONE);
+  assert.equal(readPendingClarification(pending), null);
+}
+
+console.log("=== Caso 4: respuesta ambigua → repregunta conservando 900121 ===");
+resetClarificationState();
+{
+  const res = await runTurnExecutorPhase({
+    rawPhone: PHONE,
+    selectionText: "tal vez",
+    apiKey: API_KEY,
+  });
+  assert.match(res.message, /900121/);
+  assert.match(res.message, /estado|GPS|trámite/i);
+  const pending = await getPendingAction(mockPrisma, PHONE);
+  assert.equal(readPendingClarification(pending)?.unitRef.value, "900121");
+  assert.equal(readTurnLayer(pending)?.activeExpectation, "clarification");
+}
+
+console.log("=== Caso 5: sin pending clarif + Estado 900121 → overlay normal ===");
+{
+  messages.length = 0;
+  messages.push({
+    id: "m1",
+    ticketId: ticket.id,
+    direction: "OUTBOUND",
+    from: "BOT",
+    text: "⏱ *Horómetro*\n\nPasame el nuevo horómetro en horas.",
+    createdAt: new Date(Date.now() - 60_000),
+    rawPayload: {},
+  });
+  const pendingAction = structuredClone(basePending);
+  pendingAction.createdAt = new Date().toISOString();
+  pendingAction.payload.turnLayer = { activeExpectation: "km" };
+  customerData.pendingAction = pendingAction;
+  customerData.activeUnit = {
+    plate: "NKL952",
+    label: "NKL 952",
+    source: "odometro",
+    resolvedAt: new Date().toISOString(),
+  };
+
+  telemetryHits = 0;
+  lastTelemetryBody = "";
+  const res = await runTurnExecutorPhase({
+    rawPhone: PHONE,
+    selectionText: "Estado 900121",
+    apiKey: API_KEY,
+  });
+  assert.ok(res.message?.trim());
+  assert.ok(telemetryHits >= 1, "overlay normal debe consultar");
+  assert.match(
+    `${lastTelemetryBody} ${res.message}`,
+    /900121|M900-121|AG\s*382\s*QB/i,
+  );
+  const pending = await getPendingAction(mockPrisma, PHONE);
+  assert.equal(readPendingClarification(pending), null);
+  assert.equal(readTurnLayer(pending)?.activeExpectation, "km");
+}
+
+console.log("=== Caso 6: misma política en certificado (clarif + GPS) ===");
+{
+  messages.length = 0;
+  messages.push({
+    id: "m1",
+    ticketId: ticket.id,
+    direction: "OUTBOUND",
+    from: "BOT",
+    text: "📋 *Confirmar certificado*\n¿Cuál unidad?",
+    createdAt: new Date(Date.now() - 60_000),
+    rawPayload: {},
+  });
+  const certPending = {
+    type: "certificados",
+    createdAt: new Date().toISOString(),
+    payload: {
+      stage: "awaiting_unit",
+      turnLayer: buildUnitRefClarificationTurnLayer(
+        "¿Cuál unidad?",
+        {
+          type: "certificados",
+          createdAt: new Date().toISOString(),
+          payload: { stage: "awaiting_unit", turnLayer: { activeExpectation: "unit" } },
+        },
+        { kind: "unit_name", value: "900121" },
+      ),
+    },
+  };
+  customerData.pendingAction = certPending;
+  customerData.activeUnit = null;
+
+  telemetryHits = 0;
+  lastTelemetryBody = "";
+  const res = await runTurnExecutorPhase({
+    rawPhone: PHONE,
+    selectionText: "GPS",
+    apiKey: API_KEY,
+  });
+  assert.ok(res.message?.trim());
+  assert.ok(telemetryHits >= 1);
+  assert.match(
+    `${lastTelemetryBody} ${res.message}`,
+    /900121|M900-121|AG\s*382\s*QB/i,
+  );
+  const pending = await getPendingAction(mockPrisma, PHONE);
+  assert.equal(readPendingClarification(pending), null);
 }
 
 globalThis.fetch = originalFetch;

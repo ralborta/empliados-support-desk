@@ -417,7 +417,7 @@ console.log("=== Integración: clear clarification falla → sin falsa continuid
   });
   failPendingWrites = false;
 
-  assert.match(res.message, /No pude actualizar el contexto/i);
+  assert.match(res.message, /no pude guardar el contexto/i);
   assert.doesNotMatch(res.message, /¿Querés el \*estado\/GPS\*/i);
   assert.equal(
     readTurnLayer(customerData.pendingAction)?.activeExpectation,

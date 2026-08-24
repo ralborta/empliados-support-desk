@@ -149,6 +149,7 @@ import {
   getPendingAction,
   clearPendingAction,
   ensureOdometerCollectingTurnLayer,
+  ensurePendingOperationForkLayer,
   patchPendingActionPayload,
 } from "@/lib/pendingAction";
 import {
@@ -176,6 +177,7 @@ import {
 import {
   buildTramiteForkClarificationReply,
   buildCollectingPayloadForFork,
+  buildForkLayerPersistFailureReply,
   isTurnLayerForkPending,
   looksLikeExplicitOtherTramiteIntent,
   threadAwaitingTramiteForkChoice,
@@ -183,7 +185,6 @@ import {
   readTurnLayer,
   buildUnitRefClarificationTurnLayer,
   clearClarificationRestoreExpectation,
-  classifyUnitRefClarificationChoice,
 } from "@/lib/turnLayerContract";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
@@ -205,6 +206,10 @@ import {
   buildUnitRefClarificationPersistFailureReply,
   type ActionWriteRisk,
 } from "@/lib/pendingWriteInterference";
+import {
+  classifyOperationPrecedence,
+  buildIncompatibleWriteForkReply,
+} from "@/lib/operationModuleAdapters";
 import { isExplicitUnitStatusQuery } from "@/lib/tramiteMeterPrecedence";
 import {
   agentComposeRequested,
@@ -410,6 +415,8 @@ async function persistUnitRefClarificationOrSafeReply(opts: {
   understanding: UtteranceUnderstanding | null;
   unitKind: string;
   unitValue: string;
+  /** Executor/adaptador dueño del trámite (no hardcodear odómetro). */
+  executor: TurnExecutorId;
 }): Promise<{ message: string; executor: TurnExecutorId; ok: boolean }> {
   const persisted = await patchPendingActionPayload(prisma, opts.rawPhone, {
     turnLayer: buildUnitRefClarificationTurnLayer(opts.thread, opts.pendingAction, {
@@ -426,13 +433,52 @@ async function persistUnitRefClarificationOrSafeReply(opts: {
   if (!persisted) {
     return {
       message: buildClarificationPersistFailureReply(opts.unitValue),
-      executor: "odometro",
+      executor: opts.executor,
       ok: true,
     };
   }
   return {
     message: buildUnitReferenceClarifyReply(opts.understanding),
-    executor: "odometro",
+    executor: opts.executor,
+    ok: true,
+  };
+}
+
+function executorFromPendingAction(
+  pendingAction: PendingActionRecord | null | undefined,
+): TurnExecutorId {
+  if (pendingAction?.type === "certificados") return "certificados";
+  if (pendingAction?.type === "mantenimiento") return "mantenimiento";
+  return "odometro";
+}
+
+async function openIncompatibleWriteForkOrSafeReply(opts: {
+  rawPhone: string;
+  thread: string;
+  pendingAction: PendingActionRecord | null | undefined;
+  pendingOperation: string | null;
+  pausedExpectation?: string | null;
+  executor: TurnExecutorId;
+  message?: string;
+}): Promise<{ message: string; executor: TurnExecutorId; ok: boolean }> {
+  const forkOk = await ensurePendingOperationForkLayer({
+    prisma,
+    phone: opts.rawPhone,
+    pendingAction: opts.pendingAction,
+    pendingOperation: opts.pendingOperation,
+    pausedExpectation: opts.pausedExpectation,
+    threadText: opts.thread,
+  });
+  if (!forkOk.ok) {
+    return {
+      message: buildForkLayerPersistFailureReply(),
+      executor: opts.executor,
+      ok: true,
+    };
+  }
+  return {
+    message: opts.message ?? buildIncompatibleWriteForkReply(opts.pendingOperation),
+    executor: opts.executor,
     ok: true,
   };
 }
@@ -841,11 +887,227 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Autoridad DB + precedencia general (antes de ramas legacy derivadas del hilo).
+  // Solo `normal_route` continúa al router / pendingKind / certificateFlowState de hilo.
+  if (isPendingWriteActionType(pendingAction?.type)) {
+    const classified = classifyOperationPrecedence({
+      pendingAction,
+      selectionText,
+      threadText: thread,
+    });
+    console.info(
+      `[operationPrecedence] phone=${rawPhone.slice(0, 4)}… decision=${classified.decision} op=${classified.authority.pendingOperation} exp=${classified.authority.activeExpectation} field=${classified.structuredField} match=${classified.authority.incomingMatchesExpectedField} hasClarif=${classified.authority.hasPendingClarification} choice=${classified.authority.pendingClarificationChoice} openClarif=${classified.authority.incomingStructuredClarification} risk=${classified.authority.incomingActionRisk}`,
+    );
+
+    if (classified.decision === "resolve_pending_clarification") {
+      const pendingClarification = readPendingClarification(pendingAction);
+      const unitValue = pendingClarification?.unitRef.value ?? "";
+      const choice = classified.authority.pendingClarificationChoice;
+      const execId = classified.adapter?.executor ?? "odometro";
+
+      if (!pendingClarification || !unitValue) {
+        return {
+          message:
+            "Hubo un problema con la aclaración pendiente. ¿Querés el *estado/GPS* de una unidad o seguimos con el trámite?",
+          executor: execId,
+          ok: true,
+        };
+      }
+
+      if (choice === "status") {
+        const cleared = await patchPendingActionPayload(prisma, rawPhone, {
+          turnLayer: clearClarificationRestoreExpectation(pendingAction),
+        }).catch(() => false);
+        if (!cleared) {
+          return {
+            message: buildUnitRefClarificationPersistFailureReply(unitValue),
+            executor: execId,
+            ok: true,
+          };
+        }
+        const refreshed = await getPendingAction(prisma, rawPhone);
+        const overlay = await executeOverlayReadKeepPending({
+          rawPhone,
+          selectionText: `Estado ${unitValue}`,
+          apiKey,
+          thread,
+          pendingAction: refreshed,
+          pendingKind: null,
+          mode: "gps_unidades",
+          unidadesExtras: { unitSearchText: unitValue },
+        });
+        if (overlay) return overlay;
+        return {
+          message: `No pude consultar el estado de *${unitValue}* ahora. El trámite sigue pendiente.`,
+          executor: execId,
+          ok: true,
+        };
+      }
+
+      if (choice === "continue") {
+        const paused = readTurnLayer(pendingAction)?.pausedExpectation;
+        const cleared = await patchPendingActionPayload(prisma, rawPhone, {
+          turnLayer: clearClarificationRestoreExpectation(pendingAction),
+        }).catch(() => false);
+        if (!cleared) {
+          return {
+            message: buildUnitRefClarificationPersistFailureReply(unitValue),
+            executor: execId,
+            ok: true,
+          };
+        }
+        if (paused === "unit") {
+          const execResult = await invokeExecutor(execId, rawPhone, unitValue, apiKey);
+          const execMessage = messageFromPayload(execResult);
+          const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+          if (execMessage || !executorSkippedSilently(execResult)) {
+            return phaseFromExecResult(execResult, execMessage, execId, execOk);
+          }
+        }
+        return {
+          message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
+          executor: execId,
+          ok: true,
+        };
+      }
+
+      if (choice === "cancel") {
+        const cleared = await patchPendingActionPayload(prisma, rawPhone, {
+          turnLayer: clearClarificationRestoreExpectation(pendingAction),
+        }).catch(() => false);
+        if (!cleared) {
+          return {
+            message: buildUnitRefClarificationPersistFailureReply(unitValue),
+            executor: execId,
+            ok: true,
+          };
+        }
+        return {
+          message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
+          executor: execId,
+          ok: true,
+        };
+      }
+
+      // ambiguous | null → repregunta conservando unitRef
+      return {
+        message: buildUnitReferenceClarifyReply({
+          referent: "vehicle_unit",
+          confidence: 0.9,
+          clarifyQuestion: null,
+          action: "unit_reference",
+          unitRef: {
+            kind: pendingClarification.unitRef.kind as
+              | "full_plate"
+              | "prefix"
+              | "suffix"
+              | "brand"
+              | "unit_name"
+              | "none",
+            value: unitValue,
+          },
+        }),
+        executor: execId,
+        ok: true,
+      };
+    }
+
+    if (classified.decision === "continue_expected_field" && classified.adapter) {
+      const layer = readTurnLayer(pendingAction);
+      if (!layer?.activeExpectation && classified.authority.activeExpectation) {
+        await patchPendingActionPayload(prisma, rawPhone, {
+          stage:
+            typeof pendingAction?.payload?.stage === "string"
+              ? pendingAction.payload.stage
+              : "collecting",
+          turnLayer: {
+            activeExpectation: classified.authority.activeExpectation,
+          },
+        }).catch(() => false);
+      }
+      const execResult = await invokeExecutor(
+        classified.adapter.executor,
+        rawPhone,
+        selectionText,
+        apiKey,
+      );
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      if (execMessage || !executorSkippedSilently(execResult)) {
+        return phaseFromExecResult(
+          execResult,
+          execMessage,
+          classified.adapter.executor,
+          execOk,
+        );
+      }
+      return {
+        message:
+          execMessage ||
+          "Seguimos con el trámite en curso. ¿Me pasás el dato que falta?",
+        executor: classified.adapter.executor,
+        ok: execOk,
+      };
+    } else if (classified.decision === "overlay_read_keep_pending") {
+      const overlay = await executeOverlayReadKeepPending({
+        rawPhone,
+        selectionText,
+        apiKey,
+        thread,
+        pendingAction,
+        pendingKind: null,
+        mode: "gps_unidades",
+        prepareStatusPivot: true,
+      });
+      if (overlay) return overlay;
+    } else if (classified.decision === "fork_incompatible_write") {
+      return openIncompatibleWriteForkOrSafeReply({
+        rawPhone,
+        thread,
+        pendingAction,
+        pendingOperation: classified.authority.pendingOperation,
+        pausedExpectation: classified.authority.activeExpectation,
+        executor: classified.adapter?.executor ?? executorFromPendingAction(pendingAction),
+      });
+    } else if (classified.decision === "structured_clarification") {
+      // Apertura de aclaración NUEVA (no hay XOR pendiente en DB).
+      const clarifExecutor =
+        classified.adapter?.executor ?? executorFromPendingAction(pendingAction);
+      if (classified.structuredField === "unit_ref") {
+        const unitValue = selectionText.trim();
+        return persistUnitRefClarificationOrSafeReply({
+          rawPhone,
+          thread,
+          pendingAction,
+          understanding: {
+            referent: "vehicle_unit",
+            confidence: 0.9,
+            clarifyQuestion: null,
+            action: "unit_reference",
+            unitRef: { kind: "unit_name", value: unitValue },
+          },
+          unitKind: "unit_name",
+          unitValue,
+          executor: clarifExecutor,
+        });
+      }
+      return {
+        message:
+          "Tomé tu mensaje, pero necesito aclarar si es dato del trámite en curso o una consulta aparte (por ejemplo estado/GPS).",
+        executor: clarifExecutor,
+        ok: true,
+      };
+    }
+    // normal_route → legacy abajo
+  }
+
   // Retomar trámite inconcluso (sin CONFIRMO): preguntar antes de continuar.
+  // No interceptar si hay fork_choice XOR pendiente (menú cambiar vs seguir).
   if (
     looksLikeResumeInconclusiveTramite(selectionText) &&
     threadHasInconclusiveTramite(thread, pendingAction) &&
-    !detectPendingConfirmKind(thread)
+    !detectPendingConfirmKind(thread) &&
+    !isTurnLayerForkPending(pendingAction)
   ) {
     const executor = resolveExecutorForInconclusiveTramite(thread, pendingAction);
     return {
@@ -937,7 +1199,7 @@ export async function runTurnExecutorPhase(params: {
       });
       return {
         message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
-        executor: "odometro",
+        executor: resolveExecutorForInconclusiveTramite(thread, pendingAction),
         ok: true,
       };
     }
@@ -1019,107 +1281,9 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // XOR: aclaración unit_ref con expectativa estructurada (no pregunta suelta).
-  {
-    const layer = readTurnLayer(pendingAction);
-    const pendingClarification = readPendingClarification(pendingAction);
-    if (layer?.activeExpectation === "clarification" && pendingClarification) {
-      const choice = classifyUnitRefClarificationChoice(selectionText);
-      const unitValue = pendingClarification.unitRef.value;
-      if (choice === "status") {
-        const cleared = await patchPendingActionPayload(prisma, rawPhone, {
-          turnLayer: clearClarificationRestoreExpectation(pendingAction),
-        }).catch((err) => {
-          console.warn(
-            "[pendingClarification] clear-before-status failed",
-            err instanceof Error ? err.message : err,
-          );
-          return false;
-        });
-        if (!cleared) {
-          return {
-            message:
-              "No pude actualizar el contexto ahora. El trámite en curso sigue; " +
-              "si querés el estado/GPS, pedilo de nuevo en un momento.",
-            executor: "odometro",
-            ok: true,
-          };
-        }
-        const refreshed = await getPendingAction(prisma, rawPhone);
-        const overlay = await executeOverlayReadKeepPending({
-          rawPhone,
-          selectionText: `Estado ${unitValue}`,
-          apiKey,
-          thread,
-          pendingAction: refreshed,
-          pendingKind,
-          mode: "gps_unidades",
-          unidadesExtras: { unitSearchText: unitValue },
-        });
-        if (overlay) return overlay;
-      }
-      if (choice === "continue") {
-        const paused = readTurnLayer(pendingAction)?.pausedExpectation;
-        const cleared = await patchPendingActionPayload(prisma, rawPhone, {
-          turnLayer: clearClarificationRestoreExpectation(pendingAction),
-        }).catch((err) => {
-          console.warn(
-            "[pendingClarification] clear-before-continue failed",
-            err instanceof Error ? err.message : err,
-          );
-          return false;
-        });
-        if (!cleared) {
-          return {
-            message:
-              "No pude actualizar el contexto ahora. El trámite en curso sigue igual; " +
-              "reintentá en un momento.",
-            executor: "odometro",
-            ok: true,
-          };
-        }
-        // Si la expectativa pausada era elegir unidad, el unitRef es el dato del trámite.
-        // Si era km/fecha/etc., no reinyectar la ref como cambio de unidad (contaminaría).
-        if (paused === "unit") {
-          const execResult = await invokeExecutor("odometro", rawPhone, unitValue, apiKey);
-          const execMessage = messageFromPayload(execResult);
-          const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-          if (execMessage || !executorSkippedSilently(execResult)) {
-            return phaseFromExecResult(execResult, execMessage, "odometro", execOk);
-          }
-        }
-        return {
-          message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
-          executor: "odometro",
-          ok: true,
-        };
-      }
-      // Respuesta no clasificable: re-preguntar sin romper XOR ni inventar continuidad.
-      return {
-        message: buildUnitReferenceClarifyReply({
-          referent: "vehicle_unit",
-          confidence: 0.9,
-          clarifyQuestion: null,
-          action: "unit_reference",
-          unitRef: {
-            kind: pendingClarification.unitRef.kind as
-              | "full_plate"
-              | "prefix"
-              | "suffix"
-              | "brand"
-              | "unit_name"
-              | "none",
-            value: pendingClarification.unitRef.value,
-          },
-        }),
-        executor: "odometro",
-        ok: true,
-      };
-    }
-  }
-
   // Política central read/write: metadata estructurada → interferencia.
   // prepareStatusPivotDuringTramite ya no abre fork por lectura GPS.
+  // (pendingClarification XOR se resuelve solo en el gate operationPrecedence arriba).
   const hasPendingWrite =
     isPendingWriteActionType(pendingAction?.type) ||
     (threadHasActiveOdometerFlow(thread) && !threadOdometerRegistrationCompleted(thread)) ||
@@ -1179,13 +1343,18 @@ export async function runTurnExecutorPhase(params: {
       const tramiteUnit = extractTramiteUnitAnchorFromThread(thread);
       const other = looksLikeExplicitOtherTramiteIntent(selectionText);
       if (tramiteUnit && other) {
-        await ensureOdometerCollectingTurnLayer(
-          prisma,
+        return openIncompatibleWriteForkOrSafeReply({
           rawPhone,
           thread,
-          buildCollectingPayloadForFork(thread, pendingAction?.payload),
-        );
-        return {
+          pendingAction,
+          pendingOperation:
+            pendingAction?.type === "certificados"
+              ? "certificados"
+              : pendingAction?.type === "mantenimiento"
+                ? "mantenimiento"
+                : "meter_odometro",
+          pausedExpectation: readTurnLayer(pendingAction)?.activeExpectation ?? null,
+          executor: executorFromPendingAction(pendingAction),
           message: [
             `Estás con un trámite en curso de *${tramiteUnit.displayLabel}*.`,
             `Pediste *${other === "certificados" ? "certificado" : "mantenimiento"}*.`,
@@ -1194,9 +1363,7 @@ export async function runTurnExecutorPhase(params: {
             "• *Cambiar de requerimiento* — dejamos el trámite actual y arrancamos el nuevo.",
             "• *Seguir con el trámite* — terminamos lo pendiente primero.",
           ].join("\n"),
-          executor: "odometro",
-          ok: true,
-        };
+        });
       }
     }
   }
@@ -1556,12 +1723,26 @@ export async function runTurnExecutorPhase(params: {
     threadCtx.classificationThread,
   );
   if (odometerSideQuestion) {
-    await ensureOdometerCollectingTurnLayer(
-      prisma,
-      rawPhone,
-      threadCtx.classificationThread,
-      buildCollectingPayloadForFork(threadCtx.classificationThread, pendingAction?.payload),
-    );
+    // Legacy estricto odómetro/horómetro: no contaminar cert/maint.
+    if (pendingAction?.type === "odometro" || !pendingAction) {
+      await ensureOdometerCollectingTurnLayer(
+        prisma,
+        rawPhone,
+        threadCtx.classificationThread,
+        buildCollectingPayloadForFork(
+          threadCtx.classificationThread,
+          pendingAction?.payload,
+        ),
+      );
+    } else {
+      await ensurePendingOperationForkLayer({
+        prisma,
+        phone: rawPhone,
+        pendingAction,
+        pausedExpectation: readTurnLayer(pendingAction)?.activeExpectation ?? null,
+        threadText: threadCtx.classificationThread,
+      });
+    }
     return {
       message: buildOdometerFlowSideQuestionReply(
         odometerSideQuestion,
@@ -1633,7 +1814,7 @@ export async function runTurnExecutorPhase(params: {
       if (!unitValue) {
         return {
           message: buildUnitReferenceClarifyReply(understanding),
-          executor: "odometro",
+          executor: executorFromPendingAction(pendingAction),
           ok: true,
         };
       }
@@ -1647,6 +1828,7 @@ export async function runTurnExecutorPhase(params: {
         understanding,
         unitKind: unitRef.kind,
         unitValue,
+        executor: executorFromPendingAction(pendingAction),
       });
     }
 
@@ -1811,7 +1993,7 @@ export async function runTurnExecutorPhase(params: {
         if (!unitValue) {
           return {
             message: buildUnitReferenceClarifyReply(understanding),
-            executor: "odometro",
+            executor: executorFromPendingAction(pendingAction),
             ok: true,
           };
         }
@@ -1822,6 +2004,7 @@ export async function runTurnExecutorPhase(params: {
           understanding,
           unitKind: unitRef.kind,
           unitValue,
+          executor: executorFromPendingAction(pendingAction),
         });
       }
       if (semanticRisk) {
@@ -1847,14 +2030,19 @@ export async function runTurnExecutorPhase(params: {
           if (overlay) return overlay;
         }
         if (semanticInterference === "fork_incompatible_write" && !pendingKind) {
-          await ensureOdometerCollectingTurnLayer(
-            prisma,
+          const tramiteUnit = extractTramiteUnitAnchorFromThread(thread);
+          return openIncompatibleWriteForkOrSafeReply({
             rawPhone,
             thread,
-            buildCollectingPayloadForFork(thread, pendingAction?.payload),
-          );
-          const tramiteUnit = extractTramiteUnitAnchorFromThread(thread);
-          return {
+            pendingAction,
+            pendingOperation:
+              pendingAction?.type === "certificados"
+                ? "certificados"
+                : pendingAction?.type === "mantenimiento"
+                  ? "mantenimiento"
+                  : "meter_odometro",
+            pausedExpectation: readTurnLayer(pendingAction)?.activeExpectation ?? null,
+            executor: executorFromPendingAction(pendingAction),
             message: [
               tramiteUnit
                 ? `Estás con un trámite en curso de *${tramiteUnit.displayLabel}*.`
@@ -1865,9 +2053,7 @@ export async function runTurnExecutorPhase(params: {
               "• *Cambiar de requerimiento* — dejamos el trámite actual y arrancamos el nuevo.",
               "• *Seguir con el trámite* — terminamos lo pendiente primero.",
             ].join("\n"),
-            executor: "odometro",
-            ok: true,
-          };
+          });
         }
       }
     } else if (
