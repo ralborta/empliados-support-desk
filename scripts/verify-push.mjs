@@ -22,6 +22,7 @@ const PUSH_SUITES = [
   "verify-another-unit-consult-pivot.mjs",
   "verify-shared-plate-disambiguation.mjs",
   "verify-active-unit-memory.mjs",
+  "verify-unit-status-structured-decision.mjs",
   "verify-context-continuity-safety.mjs",
   "verify-ac574-reporting-thread.mjs",
   "verify-more-units-request-routing.mjs",

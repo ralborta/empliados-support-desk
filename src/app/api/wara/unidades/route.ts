@@ -115,6 +115,19 @@ const bodySchema = z
      * ni notebook. Entidad lateral efímera.
      */
     ephemeralOverlayRead: z.boolean().optional(),
+    /**
+     * Acción estructurada del intérprete (unit_status_read → telemetría directa).
+     */
+    utteranceAction: z
+      .enum([
+        "unit_status_read",
+        "unit_reference",
+        "unit_correction",
+        "new_write",
+        "continue_field",
+        "none",
+      ])
+      .optional(),
     unidad: z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]).optional(),
     unidades: z.array(z.union([z.number(), z.string()])).optional(),
     patentes: z.array(z.string()).optional(),
@@ -1662,6 +1675,7 @@ export async function POST(req: NextRequest) {
       rawText,
       threadText,
       unitLabel: formatUnitLabel(unit),
+      utteranceAction: parsed.data.utteranceAction ?? null,
     });
     const positionClarification =
       looksLikeGpsPositionClarificationQuestion(rawText) && threadHasRecentGpsContext(threadText);

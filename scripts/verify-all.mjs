@@ -45,6 +45,7 @@ const SUITES = [
   "verify-odometer-confirm-structured-switch.mjs",
   "verify-horometro-interno-no-silence.mjs",
   "verify-bare-gps-not-plate-prefix.mjs",
+  "verify-unit-status-structured-decision.mjs",
   "verify-odometer-after-fleet-list.mjs",
   "verify-odometer-bare-km.mjs",
   "verify-odometer-bare-km-partial-ack.mjs",

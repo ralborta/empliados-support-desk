@@ -1527,15 +1527,25 @@ export function buildUnitProblemClarificationReply(
 /**
  * Antes de diagnosticar GPS en vivo: escuchar al cliente si el problema es vago,
  * es de historial/recorrido, o ya rechazó la respuesta anterior.
+ *
+ * Si `utteranceAction === "unit_status_read"`, no hay menú de síntomas (telemetría).
+ * Esa es la única autoridad aquí; no hay flag paralelo ni re-parse semántico extra.
  */
 export function resolveConversationalUnitTurn(params: {
   rawText: string;
   threadText: string;
   unitLabel: string;
+  /** Decisión estructurada del intérprete (opcional). */
+  utteranceAction?: string | null;
 }): string | null {
-  const { rawText, threadText, unitLabel } = params;
+  const { rawText, threadText, unitLabel, utteranceAction } = params;
   const norm = normCompanyToken(rawText);
   const label = unitLabel.trim() || "la unidad";
+
+  // unit_status_read → telemetría; limpia de facto la expectativa residual del menú.
+  if (utteranceAction === "unit_status_read") {
+    return null;
+  }
 
   // Trámite odómetro/horómetro — no escuchar como consulta GPS ni repetir pushback.
   if (looksLikeExplicitOdometerUpdateRequest(rawText) || looksLikeHorometerOnlyIntent(rawText)) {

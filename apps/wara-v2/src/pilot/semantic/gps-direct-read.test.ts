@@ -119,6 +119,26 @@ describe("GPS lectura directa + saludo + anti-genérico", () => {
     assert.doesNotMatch(msg, /Querés el reporte GPS|Recibí el dato/i);
   });
 
+  /**
+   * Aceptación Emii-like (casos de prueba: "misma unidad" / "cómo ves" / "indicámelo vos"):
+   * selectedUnit persistido + parentIntent/intent gps → telemetría directa.
+   * No portamos forceTelemetry ni matchers V1; solo el recorrido estructurado.
+   */
+  it("aceptación: selectedUnit + intent gps → telemetría (sin ask patente ni síntomas)", () => {
+    const st = seedActive();
+    assert.ok(st.selectedUnit?.patente);
+
+    const cont = continueAfterUnitResolved(st, UNIT, { parentIntent: "gps" });
+    assert.match(cont.message, /AD 307 VQ|Funcionamiento|reporte|posición|posicion/i);
+    assert.doesNotMatch(
+      cont.message,
+      /contame qué problema|me adelanté|matrícula|pasame la patente|Querés el reporte GPS/i,
+    );
+    assert.equal(st.pendingConfirmation, null);
+    // Expectativa residual de pregunta no queda colgada tras entrega GPS.
+    assert.equal(st.lastAgentQuestion, null);
+  });
+
   it("unidad activa → me das el reporte → reporte directo", async () => {
     seedActive();
     const msg = msgOf(await turn("me das el reporte?"));

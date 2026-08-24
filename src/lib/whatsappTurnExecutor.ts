@@ -24,6 +24,11 @@ import {
   buildUnitReferenceClarifyReply,
   type UtteranceUnderstanding,
 } from "@/lib/utteranceUnderstanding";
+import {
+  canReuseContextUnitForTurn,
+  decideUnitConsultMode,
+} from "@/lib/unitConsultTurnDecision";
+import { getSessionNotebook, resolveContextUnitPlate } from "@/lib/conversationNotebook";
 import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
 import { askCertificateUnitMessage, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
@@ -239,6 +244,8 @@ type OverlayUnidadesExtras = {
   platePrefix?: string;
   plate?: string;
   unitSearchText?: string;
+  /** Acción estructurada del intérprete — autoridad telemetría vs síntoma. */
+  utteranceAction?: string;
 };
 
 type OverlayReadKeepPendingResult = {
@@ -259,6 +266,7 @@ function executorBody(
     plate?: string;
     unitSearchText?: string;
     ephemeralOverlayRead?: boolean;
+    utteranceAction?: string;
   },
 ): JsonRecord {
   return {
@@ -270,6 +278,7 @@ function executorBody(
     ...(extras?.plate ? { patente: extras.plate, plate: extras.plate } : {}),
     ...(extras?.unitSearchText ? { unitSearchText: extras.unitSearchText } : {}),
     ...(extras?.ephemeralOverlayRead ? { ephemeralOverlayRead: true } : {}),
+    ...(extras?.utteranceAction ? { utteranceAction: extras.utteranceAction } : {}),
   };
 }
 
@@ -283,6 +292,7 @@ async function invokeExecutor(
     plate?: string;
     unitSearchText?: string;
     ephemeralOverlayRead?: boolean;
+    utteranceAction?: string;
   },
 ): Promise<JsonRecord> {
   const handler = EXECUTOR_HANDLERS[executor];
@@ -1775,8 +1785,21 @@ export async function runTurnExecutorPhase(params: {
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
   let lastUnderstanding: UtteranceUnderstanding | null = null;
-  let aiUnitExtras: { platePrefix?: string; plate?: string; unitSearchText?: string } | undefined;
+  let aiUnitExtras:
+    | {
+        platePrefix?: string;
+        plate?: string;
+        unitSearchText?: string;
+        utteranceAction?: string;
+      }
+    | undefined;
   const activeUnitForNl = await getActiveUnit(prisma, rawPhone);
+  const sessionNotebookForNl = await getSessionNotebook(prisma, rawPhone).catch(() => null);
+  const persistedContextPlate = resolveContextUnitPlate({
+    sessionNotebook: sessionNotebookForNl,
+    activeUnitPlate: activeUnitForNl?.plate,
+  });
+  const hasPersistedContextUnit = !!persistedContextPlate;
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
   );
@@ -1860,20 +1883,50 @@ export async function runTurnExecutorPhase(params: {
       ...(prefixHint ? { platePrefix: prefixHint } : {}),
       ...(!regexPlateOk && aiHint?.plate ? { plate: aiHint.plate } : {}),
       ...(freeName ? { unitSearchText: freeName } : {}),
+      ...(understanding?.action ? { utteranceAction: understanding.action } : {}),
     };
-    if (!aiUnitExtras.platePrefix && !aiUnitExtras.plate && !aiUnitExtras.unitSearchText) {
+    if (
+      !aiUnitExtras.platePrefix &&
+      !aiUnitExtras.plate &&
+      !aiUnitExtras.unitSearchText &&
+      !aiUnitExtras.utteranceAction
+    ) {
       aiUnitExtras = undefined;
     }
+
+    const hasUsableUnitInMessage =
+      hasUsablePlate || hasUsablePrefix || hasUsableName || hasUsableMovilId;
+    const reuseContextUnit = canReuseContextUnitForTurn({
+      utteranceAction: understanding?.action,
+      unitRefKind: understanding?.unitRef?.kind,
+      hasUsableUnitInMessage,
+      hasPersistedContextUnit,
+    });
+    if (reuseContextUnit && !aiUnitExtras?.plate && !aiUnitExtras?.unitSearchText) {
+      if (persistedContextPlate) {
+        aiUnitExtras = {
+          ...(aiUnitExtras ?? {}),
+          plate: persistedContextPlate.replace(/\s+/g, "").toUpperCase(),
+          ...(understanding?.action ? { utteranceAction: understanding.action } : {}),
+        };
+      }
+    }
+
+    const unitConsultMode = decideUnitConsultMode({
+      utteranceAction: understanding?.action,
+      unitRefKind: understanding?.unitRef?.kind,
+      hasUsableUnitInMessage,
+      hasPersistedContextUnit,
+      listenCandidate: false,
+    });
 
     // Si el mensaje (o la IA) ya trae patente/prefijo/nombre usable, no preguntar — ejecutar flota.
     const clarify = clarificationFromUnderstanding(understanding, selectionText);
     if (
       clarify &&
-      !hasUsablePlate &&
-      !hasUsablePrefix &&
-      !hasUsableName &&
-      !hasUsableMovilId &&
-      !activeUnitForNl?.plate &&
+      !hasUsableUnitInMessage &&
+      !reuseContextUnit &&
+      !hasPersistedContextUnit &&
       !threadAwaitingUnitProblem
     ) {
       if (shouldContinueCertificateUnitCollection(selectionText, threadCtx.classificationThread, pendingAction)) {
@@ -1891,17 +1944,17 @@ export async function runTurnExecutorPhase(params: {
       );
       return { message: clarify, executor: "info_guides", ok: true };
     }
-    // Pedir matrícula SOLO si no hay unidad/prefijo/nombre en contexto.
+    // Pedir matrícula: ask_unit estructurado, o vehicle_unit sin dato ni contexto persistido.
     if (
       understanding &&
       shouldProceedAsVehicleUnit(understanding) &&
-      !hasUsablePlate &&
-      !hasUsablePrefix &&
-      !hasUsableName &&
+      !hasUsableUnitInMessage &&
+      !reuseContextUnit &&
+      !hasPersistedContextUnit &&
       !isBarePlatePrefixHint(selectionText) &&
       !looksLikeFleetUnitSearchInput(selectionText) &&
-      !activeUnitForNl?.plate &&
-      !threadAwaitingUnitProblem
+      !threadAwaitingUnitProblem &&
+      (unitConsultMode === "ask_unit" || understanding.action !== "unit_status_read")
     ) {
       if (shouldContinueCertificateUnitCollection(selectionText, threadCtx.classificationThread, pendingAction)) {
         console.info(
@@ -1914,7 +1967,7 @@ export async function runTurnExecutorPhase(params: {
         };
       }
       console.info(
-        `[utteranceUnderstanding] unidad-sin-dato phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent}`,
+        `[utteranceUnderstanding] unidad-sin-dato phone=${rawPhone.slice(0, 4)}… referent=${understanding.referent} action=${understanding.action}`,
       );
       return {
         message:
@@ -1926,7 +1979,7 @@ export async function runTurnExecutorPhase(params: {
     }
     if (
       !hasUsablePlate &&
-      !activeUnitForNl?.plate &&
+      !hasPersistedContextUnit &&
       shouldAnswerOpenCaseFromUnderstanding(
         understanding,
         selectionText,
@@ -1943,13 +1996,15 @@ export async function runTurnExecutorPhase(params: {
       };
     }
     const keepActiveUnitThread =
-      !!activeUnitForNl?.plate &&
+      !!hasPersistedContextUnit &&
       !looksLikeAnotherUnitConsultRequest(selectionText) &&
-      (threadAwaitingUnitProblem ||
+      (reuseContextUnit ||
+        threadAwaitingUnitProblem ||
         looksLikeUnitConsultFollowUp(selectionText) ||
         looksLikeUnitReportingStatusCue(selectionText) ||
         looksLikeGpsOrUnitStatusQuestion(selectionText) ||
         looksLikeLiveUnitConsultIntent(selectionText) ||
+        understanding?.action === "unit_status_read" ||
         looksLikeSubstantiveCustomerMessage(selectionText));
     // Con unidad activa, NUNCA saltear flota por un referent IA raro ("new_request" en
     // "Quiero el estado"): el hilo ya tiene la patente.
@@ -1979,7 +2034,7 @@ export async function runTurnExecutorPhase(params: {
         );
       } else {
         console.info(
-          `[utteranceUnderstanding] hilo-unidad-activa phone=${rawPhone.slice(0, 4)}… plate=${activeUnitForNl?.plate}`,
+          `[utteranceUnderstanding] contexto-unidad-persistido phone=${rawPhone.slice(0, 4)}… plate=${persistedContextPlate}`,
         );
       }
 
