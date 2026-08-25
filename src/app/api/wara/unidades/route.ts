@@ -89,6 +89,11 @@ import {
   findNearbyFleetUnits,
 } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback, extractActiveUnitNameCode, type ActiveUnitRecord } from "@/lib/activeUnit";
+import { movilIdFromMessageUnderStatusRead } from "@/lib/unitConsultTurnDecision";
+import {
+  hasEmbeddedUnitInternoCandidate,
+  type FleetUnitRef,
+} from "@/lib/unitReferenceParser";
 import { formatFleetListWhatsApp, looksLikeMoreFleetListRequest, nextFleetListOffset } from "@/lib/waraWhatsAppFormat";
 import { clearPendingAction } from "@/lib/pendingAction";
 import {
@@ -287,6 +292,49 @@ function appendLocationIfRequested(summary: string, unit: WaraUnidadEstado, rawT
 
 function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
+}
+
+/** Interno del mensaje: extractor clásico, o dominio unit_status_read (sin ampliar intent textual). */
+function resolveMessageMovilId(params: {
+  rawText: string;
+  threadText?: string;
+  fleet?: FleetUnitRef[];
+  utteranceAction?: z.infer<typeof bodySchema>["utteranceAction"];
+}): number | null {
+  return (
+    extractMovilIdFromUnitMessage(params.rawText, {
+      threadText: params.threadText,
+      fleet: params.fleet,
+    }) ??
+    movilIdFromMessageUnderStatusRead({
+      utteranceAction: params.utteranceAction ?? null,
+      rawText: params.rawText,
+      fleet: params.fleet,
+    })
+  );
+}
+
+/**
+ * Hay entidad de unidad en el request/mensaje → no caer en activeUnit en silencio
+ * (aunque el match de flota falle después).
+ */
+function hasExplicitUnitEntitySignal(params: {
+  rawText: string;
+  platePrefix?: string | null;
+  unitSearchText?: string | null;
+  utteranceAction?: z.infer<typeof bodySchema>["utteranceAction"];
+  threadText?: string;
+  fleet?: FleetUnitRef[];
+}): boolean {
+  if (params.platePrefix?.trim() || params.unitSearchText?.trim()) return true;
+  if (resolveMessageMovilId(params) != null) return true;
+  if (
+    params.utteranceAction === "unit_status_read" &&
+    hasEmbeddedUnitInternoCandidate(params.rawText)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
@@ -1359,9 +1407,11 @@ export async function POST(req: NextRequest) {
 
   // Interno/movil_id explícito → resolver por flota, no heredar patente del hilo.
   if (result.ok && result.unidades.length > 0 && !explicitPlate) {
-    const movilId = extractMovilIdFromUnitMessage(effectiveRawText, {
+    const movilId = resolveMessageMovilId({
+      rawText: effectiveRawText,
       threadText,
       fleet: result.unidades,
+      utteranceAction: parsed.data.utteranceAction,
     });
     if (movilId != null) {
       const byMovil = result.unidades.filter((u) => Number(u.movil_id) === movilId);
@@ -1408,9 +1458,16 @@ export async function POST(req: NextRequest) {
     // heredando una patente vieja que ya se corrigió en extractSearchTerms.
     // Ampliado 2026-07-29: también aplica si el cliente sigue un hilo conversacional
     // (problema vago, historial/recorrido, pushback) sin nombrar de nuevo la unidad.
+    const messageUnitEntity = hasExplicitUnitEntitySignal({
+      rawText: effectiveRawText,
+      platePrefix: parsed.data.platePrefix,
+      unitSearchText: parsed.data.unitSearchText,
+      utteranceAction: parsed.data.utteranceAction,
+      threadText,
+      fleet: result.unidades,
+    });
     if (
-      !parsed.data.platePrefix?.trim() &&
-      extractMovilIdFromUnitMessage(effectiveRawText) == null &&
+      !messageUnitEntity &&
       (liveUnitConsult || conversationalConcern || gpsLoopFollowUp) &&
       shouldUseActiveUnitFallback(effectiveRawText) &&
       activeUnitRecord?.plate &&
@@ -1452,7 +1509,7 @@ export async function POST(req: NextRequest) {
       } else if (
         resolved.intent === "need_clarification" &&
         resolved.candidatePlates.length === 0 &&
-        extractMovilIdFromUnitMessage(effectiveRawText) == null &&
+        !messageUnitEntity &&
         shouldUseActiveUnitFallback(effectiveRawText) &&
         activeUnitRecord?.plate &&
         filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
@@ -1464,11 +1521,16 @@ export async function POST(req: NextRequest) {
         explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
       } else if (resolved.intent === "need_clarification") {
         const companyName = session.companyName || result.cliente || "tu empresa";
-        const explicitMovilId = extractMovilIdFromUnitMessage(effectiveRawText);
+        const explicitMovilId = resolveMessageMovilId({
+          rawText: effectiveRawText,
+          utteranceAction: parsed.data.utteranceAction,
+          fleet: result.unidades,
+        });
         const ambiguousToken =
           explicitMovilId == null
             ? extractAmbiguousUnitCodeToken(effectiveRawText) ||
-              extractExplicitUnitSearchLabel(effectiveRawText)
+              extractExplicitUnitSearchLabel(effectiveRawText) ||
+              (parsed.data.unitSearchText?.trim() || null)
             : null;
         const clarification =
           resolved.clarificationQuestion ??
@@ -1480,7 +1542,9 @@ export async function POST(req: NextRequest) {
                 searchedText:
                   explicitMovilId != null
                     ? String(explicitMovilId)
-                    : extractExplicitUnitSearchLabel(effectiveRawText) ?? undefined,
+                    : parsed.data.unitSearchText?.trim() ||
+                      extractExplicitUnitSearchLabel(effectiveRawText) ||
+                      undefined,
               }));
         await appendOutboundBotMessage(rawPhone, clarification, {
           source: "wara_unidades_clarification",
@@ -1503,7 +1567,11 @@ export async function POST(req: NextRequest) {
         const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
         if (plateMatches.length === 0) {
           const companyName = session.companyName || result.cliente || "tu empresa";
-          const explicitMovilId = extractMovilIdFromUnitMessage(effectiveRawText);
+          const explicitMovilId = resolveMessageMovilId({
+            rawText: effectiveRawText,
+            utteranceAction: parsed.data.utteranceAction,
+            fleet: result.unidades,
+          });
           const ambiguousToken =
             explicitMovilId == null ? extractAmbiguousUnitCodeToken(effectiveRawText) : null;
           const notFound =
@@ -1545,15 +1613,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const messageMovilId = extractMovilIdFromUnitMessage(effectiveRawText, {
+  const messageMovilId = resolveMessageMovilId({
+    rawText: effectiveRawText,
     threadText,
     fleet: result.ok ? result.unidades : undefined,
+    utteranceAction: parsed.data.utteranceAction,
   });
   const useThreadPlate =
     !forceListFleet &&
     !explicitPlate &&
     !unitQuery &&
     messageMovilId == null &&
+    !parsed.data.unitSearchText?.trim() &&
+    !parsed.data.platePrefix?.trim() &&
     !genericUnitConsultWithoutPlate &&
     !looksLikeGreeting(rawText.trim()) &&
     !looksLikeInternoMetaQuestion(rawText) &&
@@ -1900,7 +1972,11 @@ export async function POST(req: NextRequest) {
   }
 
   if (!summaryText.trim() && looksLikeFleetUnitSearchInput(effectiveRawText)) {
-    const explicitMovilId = extractMovilIdFromUnitMessage(effectiveRawText);
+    const explicitMovilId = resolveMessageMovilId({
+      rawText: effectiveRawText,
+      utteranceAction: parsed.data.utteranceAction,
+      fleet: result.ok ? result.unidades : undefined,
+    });
     const ambiguousToken =
       explicitMovilId == null ? extractAmbiguousUnitCodeToken(effectiveRawText) : null;
     summaryText = ambiguousToken

@@ -27,6 +27,8 @@ import {
 import {
   canReuseContextUnitForTurn,
   decideUnitConsultMode,
+  hasStatusReadMessageUnitEntity,
+  movilIdFromMessageUnderStatusRead,
 } from "@/lib/unitConsultTurnDecision";
 import { getSessionNotebook, resolveContextUnitPlate } from "@/lib/conversationNotebook";
 import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
@@ -1862,10 +1864,16 @@ export async function runTurnExecutorPhase(params: {
       !!plateInMsg && isPlausibleVehiclePlate(normalizePlate(plateInMsg));
     const regexPrefix = extractPlatePrefixFromMessage(selectionText);
     const explicitUnitCode = extractExplicitUnitNameFromText(selectionText);
-    const movilIdFromMsg = extractMovilIdFromUnitMessage(selectionText, {
+    const movilIdClassic = extractMovilIdFromUnitMessage(selectionText, {
       threadText: threadCtx.classificationThread,
     });
-    // Código interno (300-097) gana sobre marca/nombre libre de la IA — bug real 2026-08-06.
+    // Bajo unit_status_read: interno embebido (900118) es entidad del mensaje — no reusar activeUnit.
+    const movilIdStatusRead = movilIdFromMessageUnderStatusRead({
+      utteranceAction: understanding?.action,
+      rawText: selectionText,
+    });
+    const movilIdFromMsg = movilIdClassic ?? movilIdStatusRead;
+    // unit_ref LLM (plate/prefix arriba); interno/código del mensaje gana sobre marca libre IA.
     const freeName =
       explicitUnitCode ||
       (movilIdFromMsg != null ? String(movilIdFromMsg) : null) ||
@@ -1879,6 +1887,14 @@ export async function runTurnExecutorPhase(params: {
     const hasUsablePrefix = !!prefixHint;
     const hasUsableName = !!freeName;
     const hasUsableMovilId = movilIdFromMsg != null;
+    const hasClassicUnitInMessage =
+      hasUsablePlate || hasUsablePrefix || hasUsableName || hasUsableMovilId;
+    // Candidato de formato admitido bajo status_read bloquea reuso aunque aún no haya match.
+    const hasUsableUnitInMessage = hasStatusReadMessageUnitEntity({
+      utteranceAction: understanding?.action,
+      rawText: selectionText,
+      hasUsableUnitInMessage: hasClassicUnitInMessage,
+    });
     aiUnitExtras = {
       ...(prefixHint ? { platePrefix: prefixHint } : {}),
       ...(!regexPlateOk && aiHint?.plate ? { plate: aiHint.plate } : {}),
@@ -1894,14 +1910,13 @@ export async function runTurnExecutorPhase(params: {
       aiUnitExtras = undefined;
     }
 
-    const hasUsableUnitInMessage =
-      hasUsablePlate || hasUsablePrefix || hasUsableName || hasUsableMovilId;
     const reuseContextUnit = canReuseContextUnitForTurn({
       utteranceAction: understanding?.action,
       unitRefKind: understanding?.unitRef?.kind,
       hasUsableUnitInMessage,
       hasPersistedContextUnit,
     });
+    // Solo inyectar contexto si no hay entidad de mensaje (incluye candidato sin match aún).
     if (reuseContextUnit && !aiUnitExtras?.plate && !aiUnitExtras?.unitSearchText) {
       if (persistedContextPlate) {
         aiUnitExtras = {

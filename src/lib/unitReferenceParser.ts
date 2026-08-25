@@ -262,6 +262,36 @@ export function resolveUnitReferenceFromMessage(params: {
   });
 }
 
+/**
+ * Dominio ya fijado por decisión semántica (`unit_status_read`):
+ * interpreta internos 5–7 dígitos / embebidos como unidad (`expectedField=unit`).
+ *
+ * No amplía `detectServiceIntentInMessage` ni routing por frase ("cómo ves", etc.).
+ * Solo llamar cuando el intérprete ya declaró lectura de estado.
+ */
+export function resolveMovilIdUnderUnitStatusReadDomain(
+  rawText: string,
+  opts?: { fleet?: FleetUnitRef[] },
+): number | null {
+  const resolution = resolveUnitReferenceFromMessage({
+    rawText,
+    expectedField: "unit",
+    fleet: opts?.fleet,
+  });
+  if (
+    (resolution.kind === "unit" || resolution.kind === "dual") &&
+    resolution.unitMovilId != null
+  ) {
+    return resolution.unitMovilId;
+  }
+  return null;
+}
+
+/** ¿Hay candidato numérico de interno en el mensaje? (formato admitido, sin rol aún). */
+export function hasEmbeddedUnitInternoCandidate(rawText: string): boolean {
+  return extractEmbeddedNumericReferences(rawText).length > 0;
+}
+
 /** Internos resueltos como unidad (compat con extractUnitCodeNumbersFromMessage). */
 export function extractUnitMovilIdsFromMessage(params: {
   rawText: string;

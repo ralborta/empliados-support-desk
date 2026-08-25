@@ -5,12 +5,17 @@
  * Aceptación (NO matchers): "misma unidad" / "cómo ves" = casos de prueba vía
  * UtteranceAction + contexto persistido (activeUnit/unitFocus).
  * Sin extractLastPlateFromThread ni forceTelemetry paralelo.
+ *
+ * Bajo unit_status_read: interno embebido del mensaje gana sobre activeUnit
+ * (parser condicionado; no amplía detectServiceIntent).
  */
 import assert from "node:assert/strict";
 import {
   canReuseContextUnitForTurn,
   decideUnitConsultMode,
+  hasStatusReadMessageUnitEntity,
   isUnitStatusReadAction,
+  movilIdFromMessageUnderStatusRead,
 } from "../src/lib/unitConsultTurnDecision.ts";
 import { resolveConversationalUnitTurn } from "../src/lib/waraApi.ts";
 
@@ -23,6 +28,8 @@ const gpsExplainedThread =
   "Atilio: El estado GPS de la unidad OST 225 es el siguiente:\n" +
   "📍 Estado GPS\nLa unidad está detenida. Ignición está apagada. Funcionamiento normal.\n" +
   "Por el momento no se generará un ticket.";
+
+const msg900118 = "Indícame cómo ves la 900118";
 
 console.log("— Ambiguity: unit_status_read sin unidad ni estado persistido → ask_unit —");
 assert.equal(
@@ -142,6 +149,142 @@ assert.equal(
     utteranceAction: "unit_status_read",
   }),
   null,
+);
+
+console.log("— Activa M900-102 + unit_status_read + 900118 → entidad mensaje (no reuso) —");
+assert.equal(
+  movilIdFromMessageUnderStatusRead({
+    utteranceAction: "unit_status_read",
+    rawText: msg900118,
+  }),
+  900118,
+);
+assert.equal(
+  hasStatusReadMessageUnitEntity({
+    utteranceAction: "unit_status_read",
+    rawText: msg900118,
+    hasUsableUnitInMessage: false,
+  }),
+  true,
+);
+assert.equal(
+  canReuseContextUnitForTurn({
+    utteranceAction: "unit_status_read",
+    unitRefKind: "none",
+    hasUsableUnitInMessage: true,
+    hasPersistedContextUnit: true,
+  }),
+  false,
+  "activo M900-102 no debe pisar 900118",
+);
+assert.equal(
+  decideUnitConsultMode({
+    utteranceAction: "unit_status_read",
+    unitRefKind: "none",
+    hasUsableUnitInMessage: true,
+    hasPersistedContextUnit: true,
+    listenCandidate: false,
+  }),
+  "telemetry",
+);
+
+console.log("— Activa + unit_status_read sin referencia → reutiliza —");
+assert.equal(
+  movilIdFromMessageUnderStatusRead({
+    utteranceAction: "unit_status_read",
+    rawText: "quiero el estado",
+  }),
+  null,
+);
+assert.equal(
+  canReuseContextUnitForTurn({
+    utteranceAction: "unit_status_read",
+    unitRefKind: "none",
+    hasUsableUnitInMessage: false,
+    hasPersistedContextUnit: true,
+  }),
+  true,
+);
+
+console.log("— Sin activa + unit_status_read + 900118 → consulta ese interno —");
+assert.equal(
+  movilIdFromMessageUnderStatusRead({
+    utteranceAction: "unit_status_read",
+    rawText: msg900118,
+  }),
+  900118,
+);
+assert.equal(
+  decideUnitConsultMode({
+    utteranceAction: "unit_status_read",
+    unitRefKind: "none",
+    hasUsableUnitInMessage: true,
+    hasPersistedContextUnit: false,
+    listenCandidate: false,
+  }),
+  "telemetry",
+);
+
+console.log("— Sin activa ni referencia → pide unidad una vez —");
+assert.equal(
+  decideUnitConsultMode({
+    utteranceAction: "unit_status_read",
+    unitRefKind: "none",
+    hasUsableUnitInMessage: false,
+    hasPersistedContextUnit: false,
+    listenCandidate: false,
+  }),
+  "ask_unit",
+);
+
+console.log("— Número con acción ≠ unit_status_read → no es unidad automática —");
+assert.equal(
+  movilIdFromMessageUnderStatusRead({
+    utteranceAction: "continue_field",
+    rawText: msg900118,
+  }),
+  null,
+);
+assert.equal(
+  movilIdFromMessageUnderStatusRead({
+    utteranceAction: "unit_reference",
+    rawText: "el odómetro quedó en 150000",
+  }),
+  null,
+);
+assert.equal(
+  hasStatusReadMessageUnitEntity({
+    utteranceAction: "continue_field",
+    rawText: msg900118,
+    hasUsableUnitInMessage: false,
+  }),
+  false,
+);
+
+console.log("— Referencia explícita (aunque no resuelva en flota) → no reuso silencioso —");
+assert.equal(
+  canReuseContextUnitForTurn({
+    utteranceAction: "unit_status_read",
+    unitRefKind: "none",
+    hasUsableUnitInMessage: hasStatusReadMessageUnitEntity({
+      utteranceAction: "unit_status_read",
+      rawText: "estado de la 999999",
+      hasUsableUnitInMessage: false,
+    }),
+    hasPersistedContextUnit: true,
+  }),
+  false,
+);
+
+console.log("— unit_ref ≠ none (patente explícita vs activo) → no reuso —");
+assert.equal(
+  canReuseContextUnitForTurn({
+    utteranceAction: "unit_status_read",
+    unitRefKind: "full_plate",
+    hasUsableUnitInMessage: true,
+    hasPersistedContextUnit: true,
+  }),
+  false,
 );
 
 console.log("\n✓ verify-unit-status-structured-decision OK");
