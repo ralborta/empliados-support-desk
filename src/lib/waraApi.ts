@@ -713,19 +713,27 @@ function looksLikeAcknowledgementWithOperationalFollowUp(text: string | undefine
   );
 }
 
+/** Token corto de agradecimiento (incl. abreviaturas rioplatenses: gr, grx). */
+function looksLikeGratitudeAckToken(t: string): boolean {
+  if (
+    /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias|thanks|thank you|ty|thx|tks|grx|grac)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return /^(ok|listo|perfecto|genial|joya|barbaro|obvio|claro|exacto|buenisimo|buenisima|dale|bueno)?\s*(gr|grx|grac|gracias|thanks|ty|thx|tks|agradezco)[\s!.,¡¿]*$/.test(
+    t,
+  );
+}
+
 /** Agradecimiento o cierre breve — no es confirmación operativa ni continuación de trámite. */
 export function looksLikeConversationAcknowledgement(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 140) return false;
   if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
   const t = normCompanyToken(raw);
-  if (
-    /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias|thanks|thank you|ty|thx|tks)\b/.test(
-      t,
-    )
-  ) {
-    return true;
-  }
+  if (looksLikeGratitudeAckToken(t)) return true;
   return /^(ok|listo|perfecto|genial|joya|barbaro|obvio|claro|exacto|buenisimo|buenisima|dale gracias|tks|ty|thx|thanks)[\s!.,¡¿]*$/.test(
     t,
   );
@@ -1672,6 +1680,7 @@ export function threadHasRecentNoEquipmentExplanation(threadText: string): boole
 export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {
   const text = (raw ?? "").trim();
   if (text.length < 4) return false;
+  if (looksLikeConversationAcknowledgement(text)) return false;
   const norm = normCompanyToken(text);
   if (
     /^(ok|si|no|gracias|muchas gracias|listo|dale|bueno|perfecto|genial|entendido|de acuerdo|confirmo)$/.test(
@@ -2250,9 +2259,9 @@ export function looksLikeThanksOnlyAcknowledgement(text: string | undefined | nu
   if (!raw || raw.length > 140) return false;
   if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
   const t = normCompanyToken(raw);
-  return /^(muchas\s+)?(gracias|agradezco|thanks|thank you|ty|thx|tks)([\s!.,¡¿]*|(\s+(total|mil|de verdad|che))?[\s!.,¡¿]*)$/.test(
+  return /^(muchas\s+)?(gracias|agradezco|thanks|thank you|ty|thx|tks|grx|grac)([\s!.,¡¿]*|(\s+(total|mil|de verdad|che))?[\s!.,¡¿]*)$/.test(
     t,
-  );
+  ) || /^(ok\s+)?(gr|grx|grac)[\s!.,¡¿]*$/.test(t);
 }
 
 /**

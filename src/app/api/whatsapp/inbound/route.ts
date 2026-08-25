@@ -1055,7 +1055,7 @@ function isDespedidaWara(text: string): boolean {
   if (/\b(chau|chao)\b|nos vemos|que estés bien|que te vaya bien|cuídate|hasta luego|hasta pronto/i.test(t)) {
     return true;
   }
-  if (t.length <= 88 && /^(ok\s*)?(no\s*,?\s*)?(nada\s*)?(gracias|muchas gracias|te agradezco)[\s!.,¡¿]*$/i.test(t)) {
+  if (t.length <= 88 && /^(ok\s*)?(no\s*,?\s*)?(nada\s*)?(gracias|muchas gracias|te agradezco|gr|grx|grac)[\s!.,¡¿]*$/i.test(t)) {
     return true;
   }
   if (t.length <= 48 && /^(ok\s*)?(chau|chao|nos vemos)[\s!.,¡¿]*$/i.test(t)) {

@@ -31,7 +31,7 @@ import {
   movilIdFromMessageUnderStatusRead,
 } from "@/lib/unitConsultTurnDecision";
 import { getSessionNotebook, resolveContextUnitPlate } from "@/lib/conversationNotebook";
-import { buildBriefServiceScopeConsultationReply } from "@/lib/waraWhatsAppFormat";
+import { buildBriefServiceScopeConsultationReply, formatSoftClose } from "@/lib/waraWhatsAppFormat";
 import { askCertificateUnitMessage, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
 import {
@@ -2290,6 +2290,19 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Follow-up conversacional sobre unidad activa → executor con hechos, antes del agente.
+  // Tras menú de síntomas, "Ok GR" / gracias breve = cierre social — no reabrir escucha.
+  if (
+    (looksLikeConversationAcknowledgement(selectionText) ||
+      looksLikeColloquialGratitudeAck(selectionText)) &&
+    threadHasRecentUnitProblemListenPrompt(threadCtx.classificationThread)
+  ) {
+    return {
+      message: formatSoftClose("thanks"),
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
   // Si la IA ya dijo que NO es unidad (ej. "nro de ticket"), no forzar flota.
   const threadForFollowUp = threadCtx.classificationThread;
   if (

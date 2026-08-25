@@ -21,6 +21,7 @@
 import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
+  looksLikeSubstantiveCustomerMessage,
 } from "../src/lib/waraApi.ts";
 import { looksLikeBriefConfirmation, looksLikeOdometerPendingDataAmendment, extractHorometroFromOdometerSummary } from "../src/lib/wara.ts";
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationCloseDetect.ts";
@@ -52,7 +53,7 @@ for (const text of farewells) {
 }
 
 console.log("\n— Sanity: agradecimiento simple sigue siendo un ack normal (puede seguir pidiendo cosas) —");
-const plainAcks = ["Ok gracias", "gracias", "perfecto gracias", "listo", "dale gracias"];
+const plainAcks = ["Ok gracias", "Ok GR", "ok gr", "Ok grx", "gracias", "perfecto gracias", "listo", "dale gracias"];
 for (const text of plainAcks) {
   assert(
     looksLikeConversationAcknowledgement(text),
@@ -89,6 +90,15 @@ for (const text of thanksWithNewTramite) {
     `looksLikeConversationAcknowledgement("${text}") === false (sigue con trámite nuevo)`,
   );
 }
+
+console.log(
+  "\n— Bug 2026-08-25: 'Ok GR' (gr=gracias) tras menú de síntomas — ack, no reabrir escucha —",
+);
+assert(looksLikeConversationAcknowledgement("Ok GR"), 'looksLikeConversationAcknowledgement("Ok GR")');
+assert(
+  !looksLikeSubstantiveCustomerMessage("Ok GR"),
+  'looksLikeSubstantiveCustomerMessage("Ok GR") === false',
+);
 
 console.log("\n— Bug 2026-07-29: 'Perfecto' confirma trámite, no es cierre social —");
 assert(looksLikeBriefConfirmation("Perfecto") === true, "Perfecto es confirmación breve");
