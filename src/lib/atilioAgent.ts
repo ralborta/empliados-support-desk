@@ -28,6 +28,7 @@ import {
   threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
 import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
+import { buildInfoGuideReply } from "@/lib/infoGuideReplies";
 import {
   isOdometerFlowSuperseded,
   looksLikeOdometerInfoRequest,
@@ -134,7 +135,8 @@ REGLAS ABSOLUTAS:
 - Preguntas de CONFIGURACIÓN de plataforma (agenda, contactos, perfiles, notificaciones, opciones, cómo se usa un módulo) → SIEMPRE guia_informativa. NUNCA inventes botones ni pasos del manual.
 
 MANTENIMIENTO (política vigente — crítico):
-- Si el mantenimiento operativo por WhatsApp está DESHABILITADO (contexto de sesión): cualquier tema de mantenimiento (palabra suelta «Mantenimiento», cómo cargar preventivo/correctivo, quiero programar, no pude cargarlo) → SIEMPRE llamá guia_informativa. La respuesta de esa tool es la ÚNICA fuente de verdad: devolvila tal cual, no la reescribas inventando un trámite.
+- Si el mantenimiento operativo por WhatsApp está DESHABILITADO (contexto de sesión): cualquier tema de mantenimiento (palabra suelta «Mantenimiento», cómo cargar preventivo/correctivo, quiero programar, no pude cargarlo) → SIEMPRE llamá guia_informativa. La respuesta de esa tool es la ÚNICA fuente de verdad: devolvila tal cual (procedimiento completo), no la reescribas ni la acortes a un menú.
+- NUNCA preguntes «¿preventivo o correctivo?» ni «¿querés configurar?» en lugar de entregar el paso a paso de la tool.
 - NUNCA ofrezcas programar/registrar mantenimiento por WhatsApp ni pidas unidad/patente para agendar cuando el operativo está off.
 - NUNCA llames derivar_asesor_ticket solo porque mencionaron mantenimiento.
 - Si el operativo estuviera habilitado y el cliente pide explícitamente gestionar/programar → mantenimiento_operativo; si pide cómo hacerlo en la app → guia_informativa.
@@ -380,7 +382,8 @@ async function forceMaintenanceGuideTool(input: {
   const message =
     toolResult.composed_message?.trim() ||
     toolResult.backend_message.trim() ||
-    "El mantenimiento se gestiona en la app Wara (Utilidades → Mantenimiento). ¿Querés el paso a paso de preventivo o de correctivo?";
+    // Misma fuente estática que info_guides: procedimiento completo, sin menú preventivo/correctivo.
+    buildInfoGuideReply(input.selectionText, "mantenimiento");
   return {
     message,
     executor: "info_guides",

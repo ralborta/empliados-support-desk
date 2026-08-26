@@ -238,7 +238,7 @@ También desde Unidades: abrí la unidad (chevron) → MIS ATAJOS → Tareas cor
 3. Si es plan preventivo: Utilidades → Mantenimiento → creá/seleccioná el plan → asociá ESA unidad.
 4. Cargá detalle / frecuencia o la falla, guardá y seguí el estado.
 
-== CONSUMO / RENDIMIENTO TEÓRICO ==
+== CONSUMO / RENDIMIENTO TEÓRICO (solo si preguntan por consumo o rendimiento) ==
 1. Módulo de Mantenimiento → buscá la unidad.
 2. Entrá a la configuración de consumo/rendimiento.
 3. Cargá el rendimiento teórico esperado.

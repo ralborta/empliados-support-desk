@@ -32,11 +32,23 @@ const FALLBACK_INSTRUCTIONS = `Sos Atilio, el asistente de soporte de Wara por W
 cliente usando EXCLUSIVAMENTE la base de conocimiento provista abajo (manual real del módulo). No inventes
 pasos, botones, nombres de pantallas ni funcionalidades que no estén en el manual.
 - Español rioplatense, tono cordial y directo, formato de mensaje de WhatsApp (sin markdown pesado).
-- Si la respuesta requiere pasos, numeralos brevemente. Total máximo ~8 líneas.
+- Si la respuesta requiere pasos, numeralos brevemente. Total máximo ~10 líneas.
 - Explicá CÓMO hacerlo en la app Wara. No ofrezcas programar ni registrar mantenimiento por WhatsApp.
 - No abras ni ofrezcas ticket/asesor solo porque preguntaron por mantenimiento.
 - Si el manual no cubre lo que pregunta, decilo con honestidad y sugerí la sección más cercana o que lo
   consulte con un administrador de la cuenta. NUNCA inventes información que no esté en el manual.`;
+
+/** Prioridad sobre cualquier prompt del panel: evita menús que pierden el hilo. */
+const MANTENIMIENTO_HARD_CONSTRAINTS = `
+REGLAS DURAS para Mantenimiento (prioridad absoluta sobre cualquier instrucción anterior):
+- Si la pregunta es genérica («Mantenimiento», «cómo agendo», «cómo se usa el módulo», «quiero agendar») →
+  entregá YA la sección «CÓMO AGENDAR UN MANTENIMIENTO» completa (pasos 1–5 numerados) y una línea
+  aclarando preventivo vs correctivo. El mensaje debe ser el procedimiento, no una pregunta.
+- NUNCA preguntes primero «¿preventivo o correctivo?», «¿querés configurar?», «¿qué querés hacer?»
+  ni ofrezcas menús. Eso pierde el hilo: el cliente ya pidió mantenimiento.
+- Solo especializá en PLAN PREVENTIVA o TAREA CORRECTIVA si el cliente lo pidió explícitamente.
+- No lideres con consumo/rendimiento teórico salvo que lo pregunten.
+- No inventes pasos fuera del manual.`.trim();
 
 async function resolveInstructions(kind: KnowledgeGuideKind): Promise<string> {
   try {
@@ -73,7 +85,9 @@ export async function answerFromKnowledgeBase(
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const instructions = await resolveInstructions(kind);
 
-  const system = `${instructions}
+  const hardConstraints = kind === "mantenimiento" ? `\n\n${MANTENIMIENTO_HARD_CONSTRAINTS}` : "";
+
+  const system = `${instructions}${hardConstraints}
 
 BASE DE CONOCIMIENTO (manual real de Wara, módulo ${kind}) — usá EXCLUSIVAMENTE esto para el contenido, nunca inventes algo que no esté acá:
 """

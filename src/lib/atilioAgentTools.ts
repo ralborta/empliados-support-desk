@@ -93,7 +93,7 @@ const BASE_AGENT_TOOLS: OpenAiToolDef[] = [
     function: {
       name: "guia_informativa",
       description:
-        "Fuente de verdad para módulos Wara (Opciones, Unidades, Mantenimiento): cómo usar la app, paso a paso preventivo/correctivo, troubleshooting si no pudo cargar, o la palabra suelta «Mantenimiento». Sin acciones en vivo. Con mantenimiento operativo deshabilitado por WhatsApp, SIEMPRE usá esta tool para cualquier tema de mantenimiento — NUNCA inventes programar/registrar por chat ni pidas unidad para agendar.",
+        "Fuente de verdad para módulos Wara (Opciones, Unidades, Mantenimiento): cómo usar la app. Con «Mantenimiento» o cómo agendar, la tool ya trae el procedimiento completo — devolvilo tal cual, sin preguntar preventivo/correctivo ni configurar. Troubleshooting si no pudo cargar. Sin acciones en vivo. Con mantenimiento operativo deshabilitado, SIEMPRE esta tool — NUNCA inventes programar por chat ni pidas unidad para agendar.",
       parameters: { type: "object", properties: {} },
     },
   },

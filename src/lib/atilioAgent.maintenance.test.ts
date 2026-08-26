@@ -136,8 +136,12 @@ describe("guía autoservicio (fuente de verdad)", () => {
   it("Mantenimiento → intro app, sin pedir unidad ni programar por WA", () => {
     const msg = buildInfoGuideReply("Mantenimiento", "mantenimiento");
     assert.match(msg, /Utilidades → Mantenimiento|Así se agenda/i);
-    assert.doesNotMatch(msg, /patente|unidad necesitas|programar.*WhatsApp|por este chat program|¿Querés el paso a paso de preventivo o de correctivo/i);
+    assert.doesNotMatch(
+      msg,
+      /patente|unidad necesitas|programar.*WhatsApp|por este chat program|¿Querés el paso a paso de preventivo o de correctivo|¿querés configurar/i,
+    );
     assert.match(msg, /preventiv|correctiv|Guardá/i);
+    assert.match(msg, /\n1\./);
   });
 
   it("Cómo cargo un preventivo → paso a paso", () => {

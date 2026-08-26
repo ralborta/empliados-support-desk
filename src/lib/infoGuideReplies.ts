@@ -274,8 +274,8 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
   }
   if (detected === "mantenimiento") {
     return [
-      "Ya te pasé ese paso a paso de Mantenimiento. Contame si tu duda es sobre preventivo o correctivo,",
-      "o qué paso puntual no te quedó claro en la app.",
+      "Ya te pasé el paso a paso para agendar en Utilidades → Mantenimiento.",
+      "Decime qué paso puntual no te quedó claro (unidad, frecuencia, guardar, o atajos desde Unidades).",
     ].join("\n");
   }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
@@ -320,6 +320,21 @@ export function buildInfoGuideReply(
  * preguntas puntuales se contestan con el procedimiento real. Si la IA no está
  * disponible o falla, cae al comportamiento estático (nunca deja al cliente sin respuesta).
  */
+/** IA que solo pregunta (menú) en vez de dar el procedimiento → inválida; usamos plantilla KB. */
+function looksLikeWeakMaintenanceGuideAnswer(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  const hasNumberedSteps = /\n\s*1[\).\]]/.test(`\n${t}`) || /^\s*1[\).\]]/.test(t);
+  const hasAppPath = /Utilidades\s*[→\-]\s*Mantenimiento/i.test(t);
+  if (hasNumberedSteps || hasAppPath) return false;
+  return (
+    /preventivo o (de )?correctivo/i.test(t) ||
+    /quer[eé]s (el paso a paso|configurar|que te (explique|pase))/i.test(t) ||
+    /decime si quer[eé]s/i.test(t) ||
+    /\?\s*$/.test(t)
+  );
+}
+
 export async function buildGroundedInfoGuideReply(
   rawText: string,
   kind?: InfoGuideKind | null,
@@ -330,7 +345,10 @@ export async function buildGroundedInfoGuideReply(
 
   if (detected === "opciones" || detected === "unidades" || detected === "mantenimiento") {
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText);
-    if (grounded) {
+    if (
+      grounded &&
+      !(detected === "mantenimiento" && looksLikeWeakMaintenanceGuideAnswer(grounded))
+    ) {
       if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
         return buildRepeatFallback(detected);
       }
