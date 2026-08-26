@@ -276,7 +276,6 @@ describe("runIdleConversationFollowupCycle (mock DB+WA)", () => {
           sent.push(p);
           return { ok: true } as never;
         },
-        isProtectedPhone: () => false,
         clearPending: async () => undefined,
         reactivateAfterClose: async () => true,
       },
@@ -336,7 +335,6 @@ describe("runIdleConversationFollowupCycle (mock DB+WA)", () => {
           sent.push(p.message);
           return { ok: true } as never;
         },
-        isProtectedPhone: () => false,
         clearPending: async (_db, phone) => {
           clearedPhone = phone;
         },
@@ -381,7 +379,6 @@ describe("runIdleConversationFollowupCycle (mock DB+WA)", () => {
         sendWhatsApp: async () => {
           throw new Error("bbc down");
         },
-        isProtectedPhone: () => false,
         clearPending: async () => undefined,
         reactivateAfterClose: async () => true,
       },

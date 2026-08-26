@@ -12,7 +12,6 @@ import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { clearPendingAction } from "@/lib/pendingAction";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { reactivateAtilioAfterTicketClosed } from "@/lib/atilioBotPause";
-import { isProtectedClientPhone } from "@/lib/waraTurnDeliveryGuard";
 
 export const IDLE_NUDGE_KIND = "idle_nudge";
 export const IDLE_CLOSE_KIND = "idle_close";
@@ -118,14 +117,12 @@ export type IdleFollowupDeps = {
   sendWhatsApp: typeof sendWhatsAppMessage;
   clearPending: typeof clearPendingAction;
   reactivateAfterClose: typeof reactivateAtilioAfterTicketClosed;
-  isProtectedPhone: typeof isProtectedClientPhone;
 };
 
 const defaultDeps: IdleFollowupDeps = {
   sendWhatsApp: sendWhatsAppMessage,
   clearPending: clearPendingAction,
   reactivateAfterClose: reactivateAtilioAfterTicketClosed,
-  isProtectedPhone: isProtectedClientPhone,
 };
 
 async function sendAndPersistBotMessage(params: {
@@ -137,12 +134,8 @@ async function sendAndPersistBotMessage(params: {
   now: Date;
   deps: IdleFollowupDeps;
 }): Promise<boolean> {
-  // Clientes protegidos solo reciben WA anclado a inbound real; el cron no aplica.
-  if (params.deps.isProtectedPhone(params.phone)) {
-    console.warn(`[idleFollowup] protegido, no envío ${params.kind} a ${params.phone}`);
-    return false;
-  }
-
+  // Idle es proactivo tras un hilo real: también aplica a teléfonos "protegidos"
+  // (el guard de turn solo bloquea envíos sin inbound wamid; acá el chat ya existió).
   try {
     await params.deps.sendWhatsApp({ number: params.phone, message: params.message });
   } catch (err) {
