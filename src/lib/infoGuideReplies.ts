@@ -1,5 +1,4 @@
 import {
-  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
   looksLikeMaintenanceAppGuideRequest,
   looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceGuideContextInThread,
@@ -211,57 +210,46 @@ function mantenimientoTroubleshootingReply(): string {
 
 function mantenimientoReply(rawText: string): string {
   const t = norm(rawText);
-  const appOnlyNote = !MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED
-    ? "Por WhatsApp no programo ni registro mantenimientos: se hace en la app Wara."
-    : null;
-
   if (looksLikeMaintenanceLoadTrouble(rawText)) {
     return mantenimientoTroubleshootingReply();
   }
   if (/\b(preventiv\w*|plan)\b/.test(t)) {
     return [
-      appOnlyNote,
-      "Para planes y tareas preventivas en el módulo Mantenimiento:",
+      "Para agendar un plan o tarea preventiva en Wara:",
       "",
       "1. Entrá a Utilidades → Mantenimiento.",
       "2. Creá o seleccioná un plan preventivo.",
       "3. Asociá las unidades que correspondan.",
-      "4. Definí periodicidad y responsables si el módulo lo permite.",
-      "5. Hacé seguimiento del estado hasta el cierre.",
-      "",
-      "Todo el agendamiento se hace desde la plataforma Wara (Utilidades → Mantenimiento).",
-    ]
-      .filter(Boolean)
-      .join("\n");
+      "4. Definí periodicidad (fecha, km u horas, según el módulo).",
+      "5. Guardá y verificá que el plan quede activo.",
+    ].join("\n");
   }
-  if (/\b(correctiv\w*|averia|falla|programar|registrar|agendar)\b/.test(t)) {
+  if (/\b(correctiv\w*|averia|falla|orden de trabajo)\b/.test(t)) {
     return [
-      appOnlyNote,
-      "Para una tarea correctiva en Mantenimiento:",
+      "Para agendar una tarea o orden correctiva en Wara:",
       "",
-      "1. Entrá a Utilidades → Mantenimiento.",
+      "1. Entrá a Utilidades → Mantenimiento (o desde la ficha de la unidad).",
       "2. Creá una tarea u orden correctiva.",
       "3. Seleccioná la unidad afectada.",
-      "4. Describí la falla o trabajo a realizar.",
+      "4. Describí la falla o el trabajo a realizar.",
       "5. Guardá y hacé seguimiento hasta el cierre.",
       "",
-      "Eso se realiza desde WARA (Utilidades → Mantenimiento), no por este chat.",
-    ]
-      .filter(Boolean)
-      .join("\n");
+      "También: Unidades → chevron de la unidad → MIS ATAJOS → Tareas correctivas / Agregar orden de trabajo.",
+    ].join("\n");
   }
+  // «Mantenimiento» / cómo agendo: explicar el cómo, no un menú vacío.
   return [
-    appOnlyNote,
-    "El módulo de mantenimiento sirve para gestionar tareas preventivas y correctivas:",
+    "Así se agenda un mantenimiento en Wara:",
     "",
-    "1. Preventivo: planes periódicos asociados a unidades.",
-    "2. Correctivo: órdenes por falla o reparación puntual.",
-    "3. El agendamiento se hace en la app Wara: Utilidades → Mantenimiento.",
+    "1. Entrá a Utilidades → Mantenimiento.",
+    "2. Elegí plan/tarea preventiva o tarea/orden correctiva.",
+    "3. Seleccioná la unidad (o unidades).",
+    "4. Completá descripción y, si aplica, frecuencia (fecha, km u horas).",
+    "5. Guardá y seguí el estado desde el mismo módulo.",
     "",
-    "¿Querés el paso a paso de preventivo o de correctivo?",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    "Preventivo = plan programado. Correctivo = falla o reparación puntual.",
+    "Desde una unidad: Unidades → chevron → MIS ATAJOS → Tareas correctivas / Orden de trabajo.",
+  ].join("\n");
 }
 
 /**
@@ -327,13 +315,10 @@ export function buildInfoGuideReply(
 }
 
 /**
- * Igual que `buildInfoGuideReply`, pero para "opciones" y "unidades" intenta primero
- * responder con IA anclada al manual real de Wara (`@/lib/knowledgeBaseAI`) en vez de la
- * plantilla fija por palabra clave — así preguntas puntuales ("qué es un perfil", "cómo
- * registro un contacto") se contestan con precisión real y no con el bloque genérico del
- * módulo. Si la IA no está disponible o falla, cae al comportamiento estático de siempre
- * (nunca deja al cliente sin respuesta). "mantenimiento" no tiene manual cargado todavía,
- * así que sigue usando solo las plantillas estáticas.
+ * Igual que `buildInfoGuideReply`, pero intenta primero responder con IA anclada al
+ * manual/KB de Wara (`@/lib/knowledgeBaseAI`) en vez de la plantilla fija — así
+ * preguntas puntuales se contestan con el procedimiento real. Si la IA no está
+ * disponible o falla, cae al comportamiento estático (nunca deja al cliente sin respuesta).
  */
 export async function buildGroundedInfoGuideReply(
   rawText: string,
@@ -343,15 +328,15 @@ export async function buildGroundedInfoGuideReply(
 ): Promise<string> {
   const detected = kind ?? detectInfoGuideKind(rawText);
 
-  if (detected !== "opciones" && detected !== "unidades") {
-    return buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
+  if (detected === "opciones" || detected === "unidades" || detected === "mantenimiento") {
+    const grounded = await answerFromKnowledgeBase(detected, rawText, threadText);
+    if (grounded) {
+      if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
+        return buildRepeatFallback(detected);
+      }
+      return grounded;
+    }
   }
 
-  const grounded = await answerFromKnowledgeBase(detected, rawText, threadText);
-  if (!grounded) return buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
-
-  if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
-    return buildRepeatFallback(detected);
-  }
-  return grounded;
+  return buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
 }

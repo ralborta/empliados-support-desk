@@ -191,3 +191,58 @@ Resumen de accesos rápidos:
 - Crear un nuevo grupo: pie del panel → botón "Crear Grupo".
 - Mover unidades entre grupos: pie del panel → botón "Mover unidades".
 `.trim();
+
+/**
+ * Guía del módulo Mantenimiento (cómo agendar en la app Wara).
+ * No hay PDF embebido como Opciones/Unidades: el contenido operativo viene del
+ * flujo histórico «Información Mantenimiento» + how-to de plataforma.
+ * Con MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED=false no se ofrece registrar por chat.
+ */
+export const MANTENIMIENTO_KNOWLEDGE_BASE = `
+Módulo de Mantenimiento — Plataforma Wara
+
+¿Qué es? Sirve para agendar y gestionar mantenimientos de la flota: planes preventivos (programados por km, horas o fecha) y tareas/órdenes correctivas (por falla o reparación puntual).
+No confundir con cambiar odómetro/horómetro (eso es otro trámite).
+No se abre un ticket de soporte solo por preguntar cómo usar el módulo.
+
+Acceso principal: Utilidades → Mantenimiento.
+
+== CÓMO AGENDAR UN MANTENIMIENTO (guía general) ==
+1. Entrá a Utilidades → Mantenimiento.
+2. Elegí si vas a cargar un plan/tarea preventiva o una tarea/orden correctiva.
+3. Seleccioná la unidad (o las unidades) involucrada(s).
+4. Completá la descripción y, si aplica, la frecuencia o condición (fecha, kilometraje u horas).
+5. Guardá y seguí el estado de la tarea o del plan desde el mismo módulo.
+
+== PLAN / TAREA PREVENTIVA ==
+1. Utilidades → Mantenimiento.
+2. Creá o seleccioná un plan preventivo.
+3. Asociá las unidades que correspondan.
+4. Definí la frecuencia o condición de disparo (fecha, km u horas, según lo que permita el módulo).
+5. Guardá el plan y verificá que quede activo.
+Así organizás mantenimientos programados sin abrir un reclamo técnico.
+
+== TAREA / ORDEN CORRECTIVA ==
+1. Utilidades → Mantenimiento (o desde la ficha de la unidad).
+2. Creá una tarea u orden correctiva.
+3. Seleccioná la unidad afectada.
+4. Describí la falla o el trabajo a realizar.
+5. Asigná prioridad/responsable si el módulo lo permite.
+6. Guardá y hacé seguimiento hasta el cierre.
+
+También desde Unidades: abrí la unidad (chevron) → MIS ATAJOS → Tareas correctivas o Agregar orden de trabajo (reparación, inspección o servicio).
+
+== UNA UNIDAD EN PARTICULAR ==
+1. Módulo Unidades (ícono del auto) → buscá la unidad → chevron (ficha expandida).
+2. MIS ATAJOS → Tareas correctivas (pendientes) o Agregar orden de trabajo.
+3. Si es plan preventivo: Utilidades → Mantenimiento → creá/seleccioná el plan → asociá ESA unidad.
+4. Cargá detalle / frecuencia o la falla, guardá y seguí el estado.
+
+== CONSUMO / RENDIMIENTO TEÓRICO ==
+1. Módulo de Mantenimiento → buscá la unidad.
+2. Entrá a la configuración de consumo/rendimiento.
+3. Cargá el rendimiento teórico esperado.
+4. Guardá: el módulo lo usa como referencia para control preventivo.
+
+El odómetro/horómetro de la ficha de la unidad alimenta los planes preventivos; si el km/hs del GPS no coincide con el real, primero hay que actualizar odómetro/horómetro (otro trámite).
+`.trim();

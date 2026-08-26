@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
-import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE } from "@/lib/knowledgeBase";
+import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE, MANTENIMIENTO_KNOWLEDGE_BASE } from "@/lib/knowledgeBase";
 import { getBotPromptModule } from "@/lib/botPromptStore";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -8,11 +8,12 @@ import { getBotPromptModule } from "@/lib/botPromptStore";
 // para no caer al fallback estático por una demora de red normal.
 const KNOWLEDGE_BASE_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 3_000;
 
-export type KnowledgeGuideKind = "opciones" | "unidades";
+export type KnowledgeGuideKind = "opciones" | "unidades" | "mantenimiento";
 
 const KNOWLEDGE_BY_KIND: Record<KnowledgeGuideKind, string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
   unidades: UNIDADES_KNOWLEDGE_BASE,
+  mantenimiento: MANTENIMIENTO_KNOWLEDGE_BASE,
 };
 
 // Clave del módulo en el panel "Configuración → Prompts por trámite" (tabla
@@ -24,13 +25,16 @@ const KNOWLEDGE_BY_KIND: Record<KnowledgeGuideKind, string> = {
 const PROMPT_MODULE_KEY_BY_KIND: Record<KnowledgeGuideKind, string> = {
   opciones: "opciones_info",
   unidades: "unidades_info",
+  mantenimiento: "mantenimiento_info",
 };
 
 const FALLBACK_INSTRUCTIONS = `Sos Atilio, el asistente de soporte de Wara por WhatsApp. Respondé la pregunta del
 cliente usando EXCLUSIVAMENTE la base de conocimiento provista abajo (manual real del módulo). No inventes
 pasos, botones, nombres de pantallas ni funcionalidades que no estén en el manual.
 - Español rioplatense, tono cordial y directo, formato de mensaje de WhatsApp (sin markdown pesado).
-- Si la respuesta requiere pasos, numeralos brevemente. Total máximo ~6 líneas.
+- Si la respuesta requiere pasos, numeralos brevemente. Total máximo ~8 líneas.
+- Explicá CÓMO hacerlo en la app Wara. No ofrezcas programar ni registrar mantenimiento por WhatsApp.
+- No abras ni ofrezcas ticket/asesor solo porque preguntaron por mantenimiento.
 - Si el manual no cubre lo que pregunta, decilo con honestidad y sugerí la sección más cercana o que lo
   consulte con un administrador de la cuenta. NUNCA inventes información que no esté en el manual.`;
 
@@ -49,8 +53,8 @@ async function resolveInstructions(kind: KnowledgeGuideKind): Promise<string> {
 }
 
 /**
- * Responde preguntas de guía informativa (Opciones/Unidades) usando el manual real de
- * Wara como base de conocimiento, en vez de las plantillas fijas por palabra clave de
+ * Responde preguntas de guía informativa (Opciones/Unidades/Mantenimiento) usando el
+ * manual/KB de Wara, en vez de plantillas fijas por palabra clave de
  * `@/lib/infoGuideReplies`. Las instrucciones de estilo/reglas vienen del mismo módulo
  * editable en Configuración → "Prompts por trámite" (tabla BotPromptModule), con
  * fallback genérico si no hay contenido cargado ahí. Devuelve null si no hay

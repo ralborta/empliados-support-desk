@@ -135,9 +135,9 @@ describe("regresión post-guía mantenimiento: tema nuevo no fuerza guía", () =
 describe("guía autoservicio (fuente de verdad)", () => {
   it("Mantenimiento → intro app, sin pedir unidad ni programar por WA", () => {
     const msg = buildInfoGuideReply("Mantenimiento", "mantenimiento");
-    assert.match(msg, /Utilidades → Mantenimiento|app Wara/i);
-    assert.doesNotMatch(msg, /patente|unidad necesitas|programar.*WhatsApp|por este chat program/i);
-    assert.match(msg, /no programo ni registro|app Wara/i);
+    assert.match(msg, /Utilidades → Mantenimiento|Así se agenda/i);
+    assert.doesNotMatch(msg, /patente|unidad necesitas|programar.*WhatsApp|por este chat program|¿Querés el paso a paso de preventivo o de correctivo/i);
+    assert.match(msg, /preventiv|correctiv|Guardá/i);
   });
 
   it("Cómo cargo un preventivo → paso a paso", () => {
@@ -145,16 +145,17 @@ describe("guía autoservicio (fuente de verdad)", () => {
     const msg = buildInfoGuideReply("Cómo cargo un preventivo", "mantenimiento");
     assert.match(msg, /preventiv/i);
     assert.match(msg, /Utilidades → Mantenimiento/);
-    assert.match(msg, /Creá o seleccioná un plan preventivo/);
+    assert.match(msg, /plan preventivo/);
     assert.doesNotMatch(msg, /¿Para qué unidad/i);
   });
 
   it("Quiero programar un correctivo → desde WARA, no WA", () => {
     assert.equal(looksLikeMaintenanceAppGuideRequest("Quiero programar un correctivo"), true);
     const msg = buildInfoGuideReply("Quiero programar un correctivo", "mantenimiento");
-    assert.match(msg, /correctiv|WARA|Wara/i);
-    assert.match(msg, /no programo ni registro|se realiza desde WARA|app Wara/i);
-    assert.doesNotMatch(msg, /pasame la patente|¿Para qué unidad/i);
+    // Sin "correctivo" explícito en matcher de plantilla si solo dice programar…
+    // El inbound trae correctivo → rama correctiva.
+    assert.match(msg, /correctiv|Utilidades → Mantenimiento/i);
+    assert.doesNotMatch(msg, /pasame la patente|¿Para qué unidad|programo ni registro/i);
   });
 
   it("No pude cargar el mantenimiento → troubleshooting sin ticket automático", () => {
