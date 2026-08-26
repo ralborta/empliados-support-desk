@@ -218,7 +218,7 @@ function mantenimientoReply(rawText: string): string {
   if (looksLikeMaintenanceLoadTrouble(rawText)) {
     return mantenimientoTroubleshootingReply();
   }
-  if (/\b(preventiv|plan)\b/.test(t)) {
+  if (/\b(preventiv\w*|plan)\b/.test(t)) {
     return [
       appOnlyNote,
       "Para planes y tareas preventivas en el módulo Mantenimiento:",
@@ -234,7 +234,7 @@ function mantenimientoReply(rawText: string): string {
       .filter(Boolean)
       .join("\n");
   }
-  if (/\b(correctiv|averia|falla|programar|registrar|agendar)\b/.test(t)) {
+  if (/\b(correctiv\w*|averia|falla|programar|registrar|agendar)\b/.test(t)) {
     return [
       appOnlyNote,
       "Para una tarea correctiva en Mantenimiento:",

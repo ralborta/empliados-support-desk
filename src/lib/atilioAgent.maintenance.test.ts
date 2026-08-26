@@ -145,6 +145,7 @@ describe("guía autoservicio (fuente de verdad)", () => {
     const msg = buildInfoGuideReply("Cómo cargo un preventivo", "mantenimiento");
     assert.match(msg, /preventiv/i);
     assert.match(msg, /Utilidades → Mantenimiento/);
+    assert.match(msg, /Creá o seleccioná un plan preventivo/);
     assert.doesNotMatch(msg, /¿Para qué unidad/i);
   });
 
