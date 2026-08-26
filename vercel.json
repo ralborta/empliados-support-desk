@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/bbc-health",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/idle-conversation",
+      "schedule": "*/2 * * * *"
     }
   ]
 }
