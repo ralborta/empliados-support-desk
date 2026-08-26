@@ -58,6 +58,26 @@ describe("waraWhatsAppFormat", () => {
     assert.match(msg, /• 🛣 Odómetro/);
   });
 
+  it("saludo con hilo previo igual presenta Soy Atilio (no forma corta)", () => {
+    const msg = buildAtilioStructuredGreeting({
+      threadText: "👋 *Hola, soy Atilio*\nAsistente virtual de WARA.\n🏢 Seguimos con *El Cacique S.A.*.",
+      companyName: "El Cacique S.A.",
+      repeatGreeting: true,
+    });
+    assert.match(msg, /👋 \*Hola, soy Atilio\*/);
+    assert.doesNotMatch(msg, /^👋 \*Hola\*$/m);
+  });
+
+  it("omitIntroduction permite saludo corto (mención bare Atilio)", () => {
+    const msg = buildAtilioStructuredGreeting({
+      threadText: "",
+      companyName: "El Cacique S.A.",
+      omitIntroduction: true,
+    });
+    assert.match(msg, /^👋 \*Hola\*/);
+    assert.doesNotMatch(msg, /soy Atilio/i);
+  });
+
   it("resolvePendingTaskLabelV1 infiere horómetro desde el hilo", () => {
     const thread = [
       "⏱ *Horómetro*",

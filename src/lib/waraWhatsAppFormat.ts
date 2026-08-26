@@ -421,10 +421,14 @@ export function buildAtilioStructuredGreeting(input: {
   companyName?: string | null;
   companyListBlock?: string | null;
   pendingAction?: PendingActionRecord | null;
+  /** @deprecated No suprime la presentación; usar omitIntroduction. */
   repeatGreeting?: boolean;
+  /** Solo menciones bare "Atilio": saludo corto sin re-presentarse. */
+  omitIntroduction?: boolean;
 }): string {
-  const introduced =
-    threadIntroducedAtilio(input.threadText) || input.repeatGreeting === true;
+  // Saludados estructurados V1 siempre lideran con "soy Atilio", salvo omit explícito.
+  // Antes, repeatGreeting (casi siempre true por ticket abierto) forzaba "👋 Hola" sin presentación.
+  const introduced = input.omitIntroduction === true;
   return formatGreeting({
     introduced,
     companyName: input.companyListBlock ? null : input.companyName ?? null,

@@ -706,7 +706,6 @@ export async function runTurnExecutorPhase(params: {
       message: buildAtilioStructuredGreeting({
         threadText: "",
         companyName,
-        repeatGreeting: true,
       }),
       executor: "unidades",
       ok: true,

@@ -690,7 +690,7 @@ export async function customerRegisteredContextResponse(
     responseMessage = buildAtilioStructuredGreeting({
       threadText: scopedThreadText || fullThreadText,
       companyName: activeCompany,
-      repeatGreeting: true,
+      omitIntroduction: true,
     });
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
@@ -787,7 +787,7 @@ export async function customerRegisteredContextResponse(
       nextFlow = "ignore";
       responseMessage = "";
     } else {
-    const forceRestart = looksLikeSoftFlowRestart(selectionText);
+      const forceRestart = looksLikeSoftFlowRestart(selectionText);
     const inconclusive =
       forceRestart || threadHasInconclusiveTramite(threadForGreeting, pendingActionRecord);
     // Saludo = arrancar de cero aunque haya trámite inconcluso (bug prod 2026-08-17).
@@ -797,13 +797,13 @@ export async function customerRegisteredContextResponse(
     }
     nextFlow = "reply";
     if (!responseMessage) {
-      const repeatGreeting =
-        inconclusive ||
+      // Menú multi-empresa solo en reingresos de sesión (no primer contacto).
+      const sessionReturn =
         looksLikeRepeatGreetingInSession(threadForGreeting, selectionText) ||
         !!(lastTicket && (lastKnownPlate || lastTicket.code));
       const greetingThread = inconclusive ? "" : threadForGreeting;
       const greetingPending = inconclusive ? null : pendingActionRecord;
-      if (repeatGreeting && multiCompany && waraContactsText && !inconclusive) {
+      if (sessionReturn && multiCompany && waraContactsText && !inconclusive) {
         responseMessage = buildAtilioStructuredGreeting({
           threadText: greetingThread,
           companyListBlock: waraContactsText,
@@ -813,7 +813,6 @@ export async function customerRegisteredContextResponse(
         responseMessage = buildAtilioStructuredGreeting({
           threadText: greetingThread,
           companyName: activeCompany,
-          repeatGreeting: inconclusive ? false : repeatGreeting,
           pendingAction: greetingPending,
         });
       }
