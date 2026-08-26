@@ -1174,7 +1174,7 @@ export function looksLikeMaintenanceAppGuideRequest(
   if (looksLikeMaintenanceStepByStepOnlyRequest(raw, threadText)) return true;
   if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
     if (looksLikeMaintenanceCapabilityQuestion(raw, threadText)) return true;
-    if (looksLikeOperationalMaintenanceIntentCore(raw, threadText)) return true;
+    if (looksLikeOperationalMaintenanceIntentCore(raw ?? "", threadText)) return true;
     const text = normCompanyToken(raw ?? "").trim();
     if (text === "mantenimiento") return true;
   }

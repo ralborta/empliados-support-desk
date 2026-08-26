@@ -708,7 +708,7 @@ export async function runTurnExecutorPhase(params: {
         companyName,
         repeatGreeting: true,
       }),
-      executor: "context",
+      executor: "unidades",
       ok: true,
     };
   }
