@@ -24,7 +24,6 @@ const { resolvePendingConfirmationExecutor } = await import("../src/lib/pendingC
 const { classifyTurnExecutor } = await import("../src/lib/whatsappTurnRouter.ts");
 const { shouldRouteTurnToOdometerExecutor } = await import("../src/lib/waraUnitIntent.ts");
 const { looksLikeOperationalMaintenanceIntent } = await import("../src/lib/waraApi.ts");
-const { isMaintenancePlateSelectionMessage } = await import("../src/lib/waraUnitIntent.ts");
 const {
   extractPlateFromMaintenanceSuccess,
   resolveOdometerContextPlate,
@@ -33,7 +32,6 @@ const {
   resolvePlateFromConversationContext,
   shouldUseActiveUnitFallback,
 } = await import("../src/lib/activeUnit.ts");
-
 console.log("▶ Mantenimiento con marca en el mismo mensaje (operativo WA off → guía app)");
 const maintNissan = "Quiero agendar un mantenimiento para la Nissan";
 check("operativo WA deshabilitado", !looksLikeOperationalMaintenanceIntent(maintNissan));
