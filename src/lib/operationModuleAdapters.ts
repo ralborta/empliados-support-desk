@@ -205,9 +205,11 @@ export function classifyIncomingActionRisk(
   ) {
     return "write";
   }
-  // Mismo dominio write explícito (reinicio): fork — nunca consumir como detail/campo.
-  // Política A: fork_incompatible_write (no auto-reinicio silencioso).
-  if (explicitCert || explicitMaint || explicitMeter) return "write";
+  // Mismo dominio medidor: el ejecutor reinicia/cambia meterType (mensaje actual manda).
+  // Fork aquí secuestraba "Quiero cambiar el horómetro" con pending vivo → fork_choice
+  // y nunca persistía unit/km (bug prod 2026-08-26 / E2E agent).
+  if (explicitMeter) return null;
+  if (explicitCert || explicitMaint) return "write";
 
   return null;
 }

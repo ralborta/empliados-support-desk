@@ -1617,13 +1617,30 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Valor numérico (km/hs) con patente ya confirmada → odómetro, antes que confirmaciones stale.
+  // Autoridad DB: activeExpectation=km/fecha_hora manda aunque el hilo tenga "dame la patente".
+  const pendingMeterExpectation = (() => {
+    if (pendingAction?.type !== "odometro") return null;
+    const layer = pendingAction.payload?.turnLayer;
+    if (!layer || typeof layer !== "object") return null;
+    const exp = (layer as { activeExpectation?: unknown }).activeExpectation;
+    return typeof exp === "string" ? exp : null;
+  })();
   const meterValuePendingFromDb =
     pendingAction?.type === "odometro" &&
     !!pendingAction.payload?.patente &&
-    !hasPendingOdometerConfirmation(threadCtx.classificationThread);
+    !hasPendingOdometerConfirmation(threadCtx.classificationThread) &&
+    (pendingMeterExpectation === "km" ||
+      pendingMeterExpectation === "fecha_hora" ||
+      // Pending sin turnLayer (legado): si ya hay patente y no hay CONFIRMO, el número es valor.
+      (pendingMeterExpectation == null && !!pendingAction.payload?.patente));
   if (
     looksLikeBareMeterValue(selectionText) &&
-    (threadHasActiveMeterValueRequest(threadCtx.classificationThread) || meterValuePendingFromDb)
+    pendingMeterExpectation !== "unit" &&
+    pendingMeterExpectation !== "fork_choice" &&
+    pendingMeterExpectation !== "clarification" &&
+    (threadHasActiveMeterValueRequest(threadCtx.classificationThread) ||
+      meterValuePendingFromDb ||
+      pendingMeterExpectation === "km")
   ) {
     if (pendingAction?.type === "mantenimiento") {
       await clearPendingAction(prisma, rawPhone);
@@ -2253,10 +2270,18 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // Arranque explícito odómetro/horómetro — antes de unidades/agente (también con marca en el mensaje).
+  // Arranque explícito / mención bare odómetro/horómetro — antes de unidades/agente.
+  // Bug prod 2026-08-26: "Odometro" caía al agente, improvisaba pedido de patente sin
+  // persistir pendingAction/activeExpectation → luego 121988 iba a unidades.
+  const meterCorrectionInMessage =
+    (/\bod[oó]metro\b/i.test(selectionText) && !/\bhor[oó]metro\b/i.test(selectionText)) ||
+    (/\bhor[oó]metro\b/i.test(selectionText) && !/\bod[oó]metro\b/i.test(selectionText));
   if (
     looksLikeExplicitOdometerUpdateRequest(selectionText) ||
-    looksLikeHorometerOnlyIntent(selectionText)
+    looksLikeHorometerOnlyIntent(selectionText) ||
+    looksLikeBareOdometerTopicMention(selectionText) ||
+    looksLikeBareHorometerTopicMention(selectionText) ||
+    (pendingAction?.type === "odometro" && meterCorrectionInMessage)
   ) {
     if (pendingAction?.type === "mantenimiento") {
       await clearPendingAction(prisma, rawPhone);

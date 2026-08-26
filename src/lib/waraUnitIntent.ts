@@ -33,6 +33,7 @@ import {
   looksLikeBriefConfirmation,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeBareOdometerTopicMention,
+  looksLikeBareHorometerTopicMention,
   looksLikeHorometerOnlyIntent,
   looksLikePendingTramiteAffirmation,
   looksLikePendingConfirmHelpOrConfusion,
@@ -3006,9 +3007,12 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   // Arranque explícito (p. ej. tras consulta GPS u horómetro previo) → executor SIEMPRE,
   // antes de "superseded" o registro completado en el hilo (bug 2026-08-17: "cambiar odómetro
   // unidad 900080" caía al follow-up GPS por isOdometerFlowSuperseded).
+  // Incluye mención bare: sin esto WARA_AGENT_MODE improvisaba pedido de patente sin persistir.
   if (
     looksLikeExplicitOdometerUpdateRequest(selectionText) ||
-    looksLikeHorometerOnlyIntent(selectionText)
+    looksLikeHorometerOnlyIntent(selectionText) ||
+    looksLikeBareOdometerTopicMention(selectionText) ||
+    looksLikeBareHorometerTopicMention(selectionText)
   ) {
     return true;
   }

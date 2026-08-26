@@ -9,7 +9,7 @@
  * - XOR turnLayer: activeExpectation / pendingClarification / fork_choice.
  */
 import type { PendingActionRecord } from "@/lib/pendingAction";
-import { getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import type { PrismaClient } from "@prisma/client";
 import { readTurnLayer, type ActiveExpectationField } from "@/lib/turnLayerContract";
 
@@ -222,4 +222,48 @@ export async function persistOdometerPendingState(params: {
     summary: params.summary ?? current?.summary,
     payload: mergedPayload,
   });
+}
+
+/**
+ * Cambia meterType conservando patente/unidad.
+ * Limpia solo valores incompatibles (lectura del otro medidor + fecha).
+ * No borra el trámite entero desde la perspectiva del cliente: la unidad sigue.
+ */
+export async function switchOdometerMeterKindKeepingUnit(params: {
+  prisma: PrismaClient;
+  phone: string;
+  nextMeterType: MeterKindAuthority;
+  summary?: string;
+}): Promise<{
+  ok: boolean;
+  patente: string | null;
+  activeExpectation: ActiveExpectationField;
+}> {
+  const current = await getPendingAction(params.prisma, params.phone);
+  const prev =
+    current?.type === "odometro" && current.payload && typeof current.payload === "object"
+      ? { ...(current.payload as Record<string, unknown>) }
+      : {};
+  const patenteRaw = String(prev.patente ?? prev.plate ?? "").trim();
+  const patente = patenteRaw || null;
+  const activeExpectation: ActiveExpectationField = patente ? "km" : "unit";
+
+  // clear + recreate: persist rechaza transición de kind sin clear.
+  await clearPendingAction(params.prisma, params.phone);
+
+  const payloadPatch: Record<string, unknown> = {
+    meterType: params.nextMeterType,
+  };
+  if (patente) payloadPatch.patente = patente;
+
+  const ok = await persistOdometerPendingState({
+    prisma: params.prisma,
+    phone: params.phone,
+    summary: params.summary,
+    payloadPatch,
+    meterType: params.nextMeterType,
+    activeExpectation,
+    stage: patente ? "missing_value_fecha_hora" : "missing_plate",
+  });
+  return { ok, patente, activeExpectation };
 }

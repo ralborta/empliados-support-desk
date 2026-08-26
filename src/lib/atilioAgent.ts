@@ -32,12 +32,50 @@ import {
   isOdometerFlowSuperseded,
   looksLikeOdometerInfoRequest,
   looksLikeStructuredOdometerUpdateRequest,
+  looksLikeExplicitOdometerUpdateRequest,
+  looksLikeHorometerOnlyIntent,
+  looksLikeBareOdometerTopicMention,
+  looksLikeBareHorometerTopicMention,
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
   looksLikeAnotherUnitConsultRequest,
 } from "@/lib/wara";
 import { shouldRouteTurnToOdometerExecutor, shouldRouteTurnToFleetListExecutor, shouldRouteTurnToUnidadesExecutor } from "@/lib/waraUnitIntent";
 import { looksLikePossibleFleetListRequest } from "@/lib/fleetListIntentAI";
+
+/** Pregunta operativa de captura (patente/valor/fecha/CONFIRMO) sin tool = invariante rota. */
+export function looksLikeUnauthorizedMeterCaptureQuestion(text: string): boolean {
+  const t = String(text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!t.trim()) return false;
+  if (/respond[eé]\s*\*?confirmo|voy a registrar:/.test(t)) return true;
+  if (
+    /pasame el valor|nuevo od[oó]metro|nuevo hor[oó]metro|valor del (od[oó]metro|hor[oó]metro)|fecha y hora de la lectura/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /(patente|interno|matricula)/.test(t) &&
+    /(od[oó]metro|hor[oó]metro|registrar el cambio|para el cambio)/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function shouldRequireMeterRegistrationTool(selectionText: string): boolean {
+  return (
+    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+    looksLikeHorometerOnlyIntent(selectionText) ||
+    looksLikeBareOdometerTopicMention(selectionText) ||
+    looksLikeBareHorometerTopicMention(selectionText) ||
+    looksLikeStructuredOdometerUpdateRequest(selectionText)
+  );
+}
 
 export { isAtilioAgentEnabled, composeAgentReplyFromDialogueState, type ComposeDialogueInput } from "@/lib/atilioDialogueCompose";
 
@@ -239,6 +277,10 @@ function shouldRequireToolCall(params: {
     return true;
   }
 
+  if (shouldRequireMeterRegistrationTool(selectionText)) {
+    return true;
+  }
+
   if (looksLikeOdometerInfoRequest(selectionText)) {
     return true;
   }
@@ -347,6 +389,32 @@ async function forceMaintenanceGuideTool(input: {
   };
 }
 
+/** Invariante: captura operativa de odómetro/horómetro solo vía executor (persiste expectativa). */
+async function forceMeterRegistrationTool(input: {
+  rawPhone: string;
+  selectionText: string;
+  apiKey: string;
+  threadText: string;
+}): Promise<AtilioAgentTurnResult> {
+  const toolResult = await executeAtilioAgentTool({
+    toolName: "registrar_odometro_horometro",
+    rawPhone: input.rawPhone,
+    customerMessage: input.selectionText,
+    apiKey: input.apiKey,
+    threadText: input.threadText,
+  });
+  const message =
+    toolResult.composed_message?.trim() ||
+    toolResult.backend_message.trim() ||
+    "Para el cambio de odómetro/horómetro necesito la unidad (patente o interno) y el valor. ¿Me los pasás?";
+  return {
+    message,
+    executor: "odometro",
+    ok: toolResult.ok,
+    usedAgent: true,
+  };
+}
+
 export async function runAtilioAgentTurn(
   input: AtilioAgentTurnInput,
 ): Promise<AtilioAgentTurnResult | null> {
@@ -360,8 +428,10 @@ export async function runAtilioAgentTurn(
     selectionText: input.selectionText,
     threadText,
   });
+  const requireMeterRegistration = shouldRequireMeterRegistrationTool(input.selectionText);
   const requireTool =
     requireMaintenanceGuide ||
+    requireMeterRegistration ||
     shouldRequireToolCall({
       session,
       threadText,
@@ -385,6 +455,9 @@ export async function runAtilioAgentTurn(
     requireMaintenanceGuide
       ? "requiere_guia_mantenimiento: true — llamá guia_informativa; no improvises trámite por WhatsApp"
       : "",
+    requireMeterRegistration
+      ? "requiere_registrar_odometro_horometro: true — NO preguntes patente/valor/fecha sin esa tool (persiste el estado)"
+      : "",
     "",
     "=== HISTORIAL RECIENTE (más abajo = más reciente) ===",
     threadText || "(sin historial previo)",
@@ -402,6 +475,7 @@ export async function runAtilioAgentTurn(
   let lastExecutor: TurnExecutorId = "unidades";
   let lastOk = true;
   let usedGuideTool = false;
+  let usedMeterTool = false;
 
   try {
     const businessKnowledge = await loadBusinessKnowledgeAppendix();
@@ -423,9 +497,11 @@ export async function runAtilioAgentTurn(
           tool_choice:
             round === 0 && requireMaintenanceGuide
               ? { type: "function", function: { name: "guia_informativa" } }
-              : round === 0 && requireTool
-                ? "required"
-                : "auto",
+              : round === 0 && requireMeterRegistration
+                ? { type: "function", function: { name: "registrar_odometro_horometro" } }
+                : round === 0 && requireTool
+                  ? "required"
+                  : "auto",
           temperature: 0.55,
         },
         { signal: controller.signal },
@@ -444,8 +520,25 @@ export async function runAtilioAgentTurn(
             threadText,
           });
         }
+        if (requireMeterRegistration) {
+          return forceMeterRegistrationTool({
+            rawPhone: input.rawPhone,
+            selectionText: input.selectionText,
+            apiKey: input.apiKey,
+            threadText,
+          });
+        }
         const text = choice.content?.trim();
         if (!text) return null;
+        // Invariante: nunca emitir pregunta de captura operativa sin haber persistido vía tool.
+        if (!usedMeterTool && looksLikeUnauthorizedMeterCaptureQuestion(text)) {
+          return forceMeterRegistrationTool({
+            rawPhone: input.rawPhone,
+            selectionText: input.selectionText,
+            apiKey: input.apiKey,
+            threadText,
+          });
+        }
         return {
           message: text,
           executor: lastExecutor,
@@ -462,11 +555,24 @@ export async function runAtilioAgentTurn(
         if (!toolName) continue;
 
         if (toolName === "guia_informativa") usedGuideTool = true;
+        if (toolName === "registrar_odometro_horometro") usedMeterTool = true;
         if (
           requireMaintenanceGuide &&
           toolName === "derivar_asesor_ticket"
         ) {
           return forceMaintenanceGuideTool({
+            rawPhone: input.rawPhone,
+            selectionText: input.selectionText,
+            apiKey: input.apiKey,
+            threadText,
+          });
+        }
+        if (
+          requireMeterRegistration &&
+          toolName !== "registrar_odometro_horometro" &&
+          toolName !== "guia_informativa"
+        ) {
+          return forceMeterRegistrationTool({
             rawPhone: input.rawPhone,
             selectionText: input.selectionText,
             apiKey: input.apiKey,
@@ -546,7 +652,23 @@ export async function runAtilioAgentTurn(
         threadText,
       });
     }
+    if (requireMeterRegistration && !usedMeterTool) {
+      return forceMeterRegistrationTool({
+        rawPhone: input.rawPhone,
+        selectionText: input.selectionText,
+        apiKey: input.apiKey,
+        threadText,
+      });
+    }
     if (!text) return null;
+    if (!usedMeterTool && looksLikeUnauthorizedMeterCaptureQuestion(text)) {
+      return forceMeterRegistrationTool({
+        rawPhone: input.rawPhone,
+        selectionText: input.selectionText,
+        apiKey: input.apiKey,
+        threadText,
+      });
+    }
     return {
       message: text,
       executor: lastExecutor,
@@ -558,6 +680,18 @@ export async function runAtilioAgentTurn(
     if (requireMaintenanceGuide) {
       try {
         return await forceMaintenanceGuideTool({
+          rawPhone: input.rawPhone,
+          selectionText: input.selectionText,
+          apiKey: input.apiKey,
+          threadText,
+        });
+      } catch {
+        return null;
+      }
+    }
+    if (requireMeterRegistration) {
+      try {
+        return await forceMeterRegistrationTool({
           rawPhone: input.rawPhone,
           selectionText: input.selectionText,
           apiKey: input.apiKey,
