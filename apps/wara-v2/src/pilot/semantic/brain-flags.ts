@@ -8,6 +8,16 @@ export function isUnifiedSemanticBrainEnabled(env: NodeJS.ProcessEnv = process.e
   return v === "true" || v === "1" || v === "yes";
 }
 
+/**
+ * Saludo humano determinístico (nombre + franja horaria AR).
+ * Solo aplica a TurnDecision ya clasificado como saludo (socialAct=greeting).
+ * Off por defecto.
+ */
+export function isHumanizedGreetingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.WARA_V2_HUMANIZED_GREETING?.trim().toLowerCase();
+  return v === "true" || v === "1" || v === "yes";
+}
+
 export function semanticModelName(env: NodeJS.ProcessEnv = process.env): string {
   return env.WARA_V2_SEMANTIC_MODEL?.trim() || "gpt-4o-mini";
 }

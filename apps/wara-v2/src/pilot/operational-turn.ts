@@ -82,6 +82,7 @@ import {
   pendingTramiteFromState,
   type TurnDecision,
 } from "./turn-decision.js";
+import type { TurnDecision as SemanticTurnDecision } from "./semantic/turn-decision-schema.js";
 import {
   beginSemanticTrace,
   finishSemanticTrace,
@@ -89,8 +90,13 @@ import {
   isSemanticTraceEnabled,
   traceRuleSemantic,
 } from "./semantic-trace.js";
-import { isUnifiedSemanticBrainEnabled, logBrainMetrics } from "./semantic/brain-flags.js";
+import { isUnifiedSemanticBrainEnabled, logBrainMetrics, isHumanizedGreetingEnabled } from "./semantic/brain-flags.js";
 import { interpretTurn } from "./semantic/interpret-turn.js";
+import {
+  formatHumanizedGreeting,
+  maybeApplyHumanizedGreeting,
+  summarizePendingForGreeting,
+} from "./semantic/humanized-greeting.js";
 import { buildInterpretTurnInput } from "./semantic/build-context.js";
 import { applySemanticPolicy } from "./semantic/policy-engine.js";
 import { executeTurnDecision } from "./semantic/execute-decision.js";
@@ -434,33 +440,27 @@ function buildFirstContactPresentation(state: PilotConversationState): string {
   );
 }
 
-function summarizePendingForGreeting(state: PilotConversationState): string | null {
-  if (state.pendingConfirmation?.action === "gps_report") {
-    return `el reporte GPS de ${state.pendingConfirmation.unit.label}`;
-  }
-  if (state.pendingConfirmation?.action === "certificate_issue") {
-    return `el certificado de ${state.pendingConfirmation.unit.label}`;
-  }
-  if (state.pendingConfirmation?.action === "odometer_write") {
-    return `la confirmación de odómetro de ${state.pendingConfirmation.unit.label}`;
-  }
-  if (state.activeTramite === "odometer_update") {
-    const u = state.odometerDraft?.unit?.label ?? state.selectedUnit?.label ?? "la unidad";
-    return `la actualización de odómetro/horómetro de ${u}`;
-  }
-  if (state.activeTramite === "certificate_issue") {
-    return `el certificado${state.selectedUnit ? ` de ${state.selectedUnit.label}` : ""}`;
-  }
-  if (state.suspendedTramite) {
-    return `un trámite suspendido (${state.suspendedTramite.tramite})`;
-  }
-  return null;
-}
-
-function buildGreetingReply(state: PilotConversationState): { handler: string; message: string } {
+function buildGreetingReply(
+  state: PilotConversationState,
+  env: NodeJS.ProcessEnv = process.env,
+): { handler: string; message: string } {
   ensureConversationMetadata(state);
   const now = new Date().toISOString();
   const pending = summarizePendingForGreeting(state);
+
+  if (isHumanizedGreetingEnabled(env)) {
+    const introducedBefore = state.conversationMetadata.introducedAtilio;
+    const message = formatHumanizedGreeting({
+      customerName: state.customerName,
+      introducedAtilio: introducedBefore,
+      pendingSummary: pending,
+      localNow: DateTime.now().setZone(DEFAULT_TENANT_TZ),
+    });
+    state.conversationMetadata.introducedAtilio = true;
+    state.conversationMetadata.greetedAt = now;
+    return { handler: "greet", message };
+  }
+
   if (!state.conversationMetadata.introducedAtilio) {
     state.conversationMetadata.introducedAtilio = true;
     state.conversationMetadata.greetedAt = now;
@@ -486,6 +486,28 @@ function buildGreetingReply(state: PilotConversationState): { handler: string; m
     };
   }
   return { handler: "greet", message: "Hola, ¿en qué te ayudo?" };
+}
+
+async function publishUnifiedBrainReply(
+  state: PilotConversationState,
+  draftMessage: string,
+  decision: SemanticTurnDecision,
+  ctx: {
+    env: NodeJS.ProcessEnv;
+    userMessage: string;
+    handler?: string;
+  },
+): Promise<string> {
+  // Solo saludo clasificado (flag off → borrador intacto). Sin renderer LLM general.
+  const message = maybeApplyHumanizedGreeting({
+    draftMessage,
+    decision,
+    state,
+    env: ctx.env,
+    handler: ctx.handler,
+  });
+  appendAssistantTurn(state, message, decision);
+  return message;
 }
 
 async function resolveInheritedGpsPending(input: {
@@ -789,7 +811,11 @@ export async function resolveOperationalTurn(input: {
             ? String(decision.entity.value).trim()
             : text;
         const msg = await selectCompany(state, key, env);
-        appendAssistantTurn(state, msg, decision);
+        const outMsg = await publishUnifiedBrainReply(state, msg, decision, {
+          env,
+          userMessage: text,
+          handler: "company_select",
+        });
         savePilotConversationState(state);
         recordLabTurnDiagnosis({
           at: new Date().toISOString(),
@@ -809,7 +835,7 @@ export async function resolveOperationalTurn(input: {
           llm_called: true,
           error: null,
         });
-        return { kind: "reply", message: msg, state };
+        return { kind: "reply", message: outMsg, state };
       }
 
       // Campo esperado del menú: índice/nombre válido → select (no routing de intención).
@@ -826,7 +852,11 @@ export async function resolveOperationalTurn(input: {
           decision.entity?.value != null ? String(decision.entity.value) : text,
           env,
         );
-        appendAssistantTurn(state, msg, decision);
+        const outMsg = await publishUnifiedBrainReply(state, msg, decision, {
+          env,
+          userMessage: text,
+          handler: "company_select_expected_field",
+        });
         savePilotConversationState(state);
         recordLabTurnDiagnosis({
           at: new Date().toISOString(),
@@ -846,11 +876,16 @@ export async function resolveOperationalTurn(input: {
           llm_called: true,
           error: null,
         });
-        return { kind: "reply", message: msg, state };
+        return { kind: "reply", message: outMsg, state };
       }
 
       if (reducedEarly.responsePlan.kind === "reply" && reducedEarly.responsePlan.message) {
-        appendAssistantTurn(state, reducedEarly.responsePlan.message, decision);
+        const outMsg = await publishUnifiedBrainReply(
+          state,
+          reducedEarly.responsePlan.message,
+          decision,
+          { env, userMessage: text, handler: reducedEarly.action.type },
+        );
         savePilotConversationState(state);
         recordLabTurnDiagnosis({
           at: new Date().toISOString(),
@@ -870,13 +905,17 @@ export async function resolveOperationalTurn(input: {
           llm_called: true,
           error: reducedEarly.invariantError,
         });
-        return { kind: "reply", message: reducedEarly.responsePlan.message, state };
+        return { kind: "reply", message: outMsg, state };
       }
       if (decision.action === "clarify" && decision.ambiguity?.question) {
         const q = decision.ambiguity.question;
-        appendAssistantTurn(state, q, decision);
+        const outMsg = await publishUnifiedBrainReply(state, q, decision, {
+          env,
+          userMessage: text,
+          handler: "clarify",
+        });
         savePilotConversationState(state);
-        return { kind: "reply", message: q, state };
+        return { kind: "reply", message: outMsg, state };
       }
       const intro = buildFirstContactPresentation(state);
       setLastAgentQuestion(state, {
@@ -885,7 +924,11 @@ export async function resolveOperationalTurn(input: {
         expectedAnswerType: "company",
         pendingAction: null,
       });
-      appendAssistantTurn(state, intro, decision);
+      const outIntro = await publishUnifiedBrainReply(state, intro, decision, {
+        env,
+        userMessage: text,
+        handler: "company_intro",
+      });
       savePilotConversationState(state);
       recordLabTurnDiagnosis({
         at: new Date().toISOString(),
@@ -903,12 +946,15 @@ export async function resolveOperationalTurn(input: {
         llm_called: true,
         error: null,
       });
-      return { kind: "reply", message: intro, state };
+      return { kind: "reply", message: outIntro, state };
     }
 
     const fleet = await fetchFleet(state, env);
     if (!fleet.ok) {
-      appendAssistantTurn(state, fleet.error, decision);
+      const outErr = await publishUnifiedBrainReply(state, fleet.error, decision, {
+        env,
+        userMessage: text,
+      });
       savePilotConversationState(state);
       recordLabTurnDiagnosis({
         at: new Date().toISOString(),
@@ -926,7 +972,7 @@ export async function resolveOperationalTurn(input: {
         llm_called: true,
         error: fleet.error.slice(0, 80),
       });
-      return { kind: "reply", message: fleet.error, state };
+      return { kind: "reply", message: outErr, state };
     }
 
     let reclass = { attempted: false, reasons: [] as string[] };
@@ -937,7 +983,11 @@ export async function resolveOperationalTurn(input: {
       deletePilotConversationState(tenantId, input.phone);
       state = applyCompanyChangeReset(state);
       const msg = buildCompanyResetMessage(state.contacts);
-      appendAssistantTurn(state, msg, decision);
+      const outMsg = await publishUnifiedBrainReply(state, msg, decision, {
+        env,
+        userMessage: text,
+        handler: "company_change",
+      });
       savePilotConversationState(state);
       recordLabTurnDiagnosis({
         at: new Date().toISOString(),
@@ -957,10 +1007,15 @@ export async function resolveOperationalTurn(input: {
         llm_called: true,
         error: null,
       });
-      return { kind: "reply", message: msg, state };
+      return { kind: "reply", message: outMsg, state };
     }
     if (reduced.responsePlan.kind === "reply" && reduced.responsePlan.message) {
-      appendAssistantTurn(state, reduced.responsePlan.message, decision);
+      const outMsg = await publishUnifiedBrainReply(
+        state,
+        reduced.responsePlan.message,
+        decision,
+        { env, userMessage: text, handler: reduced.action.type },
+      );
       savePilotConversationState(state);
       recordLabTurnDiagnosis({
         at: new Date().toISOString(),
@@ -980,7 +1035,7 @@ export async function resolveOperationalTurn(input: {
         llm_called: true,
         error: reduced.invariantError,
       });
-      return { kind: "reply", message: reduced.responsePlan.message, state };
+      return { kind: "reply", message: outMsg, state };
     }
 
     const exec = await runWithUnifiedBrainContext(
@@ -1010,13 +1065,17 @@ export async function resolveOperationalTurn(input: {
       },
     );
 
-    appendAssistantTurn(state, exec.message, decision);
+    const outExecMsg = await publishUnifiedBrainReply(state, exec.message, decision, {
+      env,
+      userMessage: text,
+      handler: exec.handler,
+    });
     if (decision.action === "clarify") {
       // already set in executeTurnDecision
     } else if (decision.action === "query_context") {
       /* keep previous meta */
     } else {
-      state.lastAgentQuestion = state.lastAgentQuestion ?? exec.message;
+      state.lastAgentQuestion = state.lastAgentQuestion ?? outExecMsg;
     }
     savePilotConversationState(state);
     logBrainMetrics({
@@ -1056,7 +1115,7 @@ export async function resolveOperationalTurn(input: {
         certificateDraft: state.certificateDraft?.step ?? null,
       },
     });
-    return { kind: "reply", message: exec.message, state };
+    return { kind: "reply", message: outExecMsg, state };
   }
 
   beginSemanticTrace(text, state);

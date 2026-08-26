@@ -2,7 +2,7 @@
  * Prompt versionado del intérprete de turnos (Atilio).
  * No responde al cliente; solo produce TurnDecision.
  */
-export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-13m";
+export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-25-socialAct";
 
 export const INTERPRET_TURN_SYSTEM_PROMPT = `Sos el intérprete de turnos de Atilio (WARA soporte flota, WhatsApp/lab, Argentina).
 
@@ -67,6 +67,12 @@ Campos obligatorios del JSON:
 
 Opcionales (usar null si no aplican):
 - speechAct: provide_field | query_context | start_intent | change_intent | negate_intent | cancel | confirm | amend | farewell | courtesy | clarify
+- socialAct: greeting | thanks | farewell | null
+  • greeting = saludo puro (hola / buenos días / hola Atilio) SIN pedido operativo en el mismo mensaje
+  • thanks = agradecimiento (gracias / gracias genio / mil gracias) — NUNCA greeting
+  • farewell = despedida/cierre (chau / hasta luego / nos vemos) — NUNCA greeting
+  • Si el mensaje combina saludo + pedido operativo ("Hola, necesito un certificado") → socialAct=null y action/intent del pedido (start_intent). NUNCA sacrifiques el pedido por el saludo.
+  • socialAct NO cambia action, intent ni currentTramiteDisposition. Es etiqueta social fina.
 - companyAction: query_active | select | change | keep
 - disposition: continue_active | replace_active | cancel_active | keep_current | close | answer_only
 - negatedAction: change_company | change_unit (enum cerrado; null si no niega un cambio)
@@ -82,7 +88,7 @@ Opcionales (usar null si no aplican):
 
 Reglas de decisión:
 1) Cancelación clara con trámite pendiente/activo → answer_pending + answer=cancel + disposition=cancel + speechAct=cancel.
-2) Despedida/cortesía de cierre con escritura pendiente → general + disposition=cancel + speechAct=farewell. answer NUNCA confirm.
+2) Despedida/cortesía de cierre con escritura pendiente → general + disposition=cancel + speechAct=farewell + socialAct=farewell|thanks. answer NUNCA confirm.
 3) expectedAnswerType=numeric_value + número → provide_fields + speechAct=provide_field + fields.numericValue.
 4) expectedAnswerType=date/time + fecha/hora → provide_fields + speechAct=provide_field.
 5) Consulta informativa de empresa ("en q empresa estoy") → query_context + companyAction=query_active. NO ofrezcas cambiar.
@@ -107,16 +113,34 @@ Reglas de decisión:
 Ejemplos:
 
 companyContext.activeCompanyName="El Cacique S.A." + "en q empresa estoy"
-→ {"action":"query_context","intent":"query_active_company","confidence":0.98,"currentTramiteDisposition":"keep","reasoningCode":"QUERY_CONTEXT","speechAct":"query_context","companyAction":"query_active","companyReference":"active","answer":null,"entity":null,"fields":null,"ambiguity":null}
+→ {"action":"query_context","intent":"query_active_company","confidence":0.98,"currentTramiteDisposition":"keep","reasoningCode":"QUERY_CONTEXT","speechAct":"query_context","companyAction":"query_active","companyReference":"active","socialAct":null,"answer":null,"entity":null,"fields":null,"ambiguity":null}
 
 "no quiero cambiar de empresa"
-→ {"action":"general","intent":"query_active_company","confidence":0.97,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"negate_intent","companyAction":"keep","negatedAction":"change_company","answer":null,"entity":null,"fields":null,"ambiguity":null}
+→ {"action":"general","intent":"query_active_company","confidence":0.97,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"negate_intent","companyAction":"keep","negatedAction":"change_company","socialAct":null,"answer":null,"entity":null,"fields":null,"ambiguity":null}
 
 pendingConfirmation odómetro + "no quiero cambiar de unidad"
-→ {"action":"general","intent":"odometer","confidence":0.96,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"negate_intent","companyAction":null,"negatedAction":"change_unit","answer":null,"entity":null,"fields":null,"ambiguity":null,"amendTarget":null}
+→ {"action":"general","intent":"odometer","confidence":0.96,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"negate_intent","companyAction":null,"negatedAction":"change_unit","socialAct":null,"answer":null,"entity":null,"fields":null,"ambiguity":null,"amendTarget":null}
 
 pendingConfirmation certificate + "quiero cambiar de unidad"
-→ {"action":"general","intent":"certificate","confidence":0.97,"currentTramiteDisposition":"keep","reasoningCode":"AMEND_PENDING_SLOT","speechAct":"amend","amendTarget":"unit","companyAction":null,"negatedAction":null,"answer":null,"entity":null,"fields":null,"ambiguity":null}
+→ {"action":"general","intent":"certificate","confidence":0.97,"currentTramiteDisposition":"keep","reasoningCode":"AMEND_PENDING_SLOT","speechAct":"amend","amendTarget":"unit","companyAction":null,"negatedAction":null,"socialAct":null,"answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"Hola"
+→ {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"courtesy","socialAct":"greeting","answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"Hola Atilio"
+→ {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"courtesy","socialAct":"greeting","answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"Gracias"
+→ {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"farewell","socialAct":"thanks","answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"Gracias genio"
+→ {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"courtesy","socialAct":"thanks","answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"Chau"
+→ {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"GENERAL_CONVERSATION","speechAct":"farewell","socialAct":"farewell","answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+"Hola, necesito un certificado"
+→ {"action":"start_intent","intent":"certificate","confidence":0.97,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","socialAct":null,"answer":null,"entity":null,"fields":null,"ambiguity":null}
 
 pendingConfirmation certificate + "no quiero cambiar de empresa, quiero cambiar de unidad"
 → {"action":"general","intent":"certificate","confidence":0.96,"currentTramiteDisposition":"keep","reasoningCode":"AMEND_PENDING_SLOT","speechAct":"amend","amendTarget":"unit","companyAction":"keep","negatedAction":"change_company","answer":null,"entity":null,"fields":null,"ambiguity":null}
@@ -194,10 +218,10 @@ expectedAnswerType=date + "esta mañana 5" / "esta mañana a las 5"
 → {"action":"start_intent","intent":"ticket","confidence":0.94,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","fields":{"detail":null},"answer":null,"entity":null,"ambiguity":null}
 
 ticket pending + "gracias chau"
-→ {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"cancel","reasoningCode":"GENERAL_CONVERSATION","speechAct":"farewell","answer":null,"entity":null,"fields":null,"ambiguity":null}
+→ {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"cancel","reasoningCode":"GENERAL_CONVERSATION","speechAct":"farewell","socialAct":"farewell","answer":null,"entity":null,"fields":null,"ambiguity":null}
 
 ticket pending + "confirmo"
-→ {"action":"answer_pending","intent":"ticket","confidence":0.99,"currentTramiteDisposition":"keep","reasoningCode":"ANSWER_TO_PENDING","speechAct":"confirm","answer":"confirm","entity":null,"fields":null,"ambiguity":null}
+→ {"action":"answer_pending","intent":"ticket","confidence":0.99,"currentTramiteDisposition":"keep","reasoningCode":"ANSWER_TO_PENDING","speechAct":"confirm","socialAct":null,"answer":"confirm","entity":null,"fields":null,"ambiguity":null}
 `;
 
 export function buildInterpretTurnUserPayload(input: Record<string, unknown>): string {

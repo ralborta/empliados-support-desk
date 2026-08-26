@@ -97,6 +97,13 @@ export const SpeechActSchema = z.enum([
   "clarify",
 ]);
 
+/**
+ * Acto social fino (saludo / agradecimiento / despedida).
+ * No reemplaza speechAct ni modifica action/intent/disposition.
+ * Solo presentación (p. ej. humanizar saludo).
+ */
+export const SocialActSchema = z.enum(["greeting", "thanks", "farewell"]);
+
 export const CompanyActionSchema = z.enum(["query_active", "select", "change", "keep"]);
 
 /** Qué intención/cambio niega el usuario. Enum cerrado — no inspeccionar texto libre. */
@@ -153,6 +160,11 @@ export const TurnDecisionSchema = z.object({
   answer: z.enum(["confirm", "reject", "cancel"]).nullable().optional(),
   /** Acto de habla explícito — autoridad semántica del turno. */
   speechAct: SpeechActSchema.nullable().optional(),
+  /**
+   * Acto social fino (greeting|thanks|farewell).
+   * No altera action/intent/disposition; no autoriza escrituras.
+   */
+  socialAct: SocialActSchema.nullable().optional(),
   /** Acción de empresa (query/select/change/keep). Nunca inferir por includes. */
   companyAction: CompanyActionSchema.nullable().optional(),
   /** Disposition extendida (opcional; mapea a currentTramiteDisposition). */
@@ -220,6 +232,11 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
   const nullish = (v: unknown) => (v === "" || v === undefined ? null : v);
   if ("answer" in o) o.answer = nullish(o.answer);
   if ("speechAct" in o) o.speechAct = nullish(o.speechAct);
+  if ("socialAct" in o) {
+    const v = nullish(o.socialAct);
+    const allowed = SocialActSchema.safeParse(v);
+    o.socialAct = allowed.success ? allowed.data : null;
+  }
   if ("companyAction" in o) o.companyAction = nullish(o.companyAction);
   if ("disposition" in o) o.disposition = nullish(o.disposition);
   if ("negatedAction" in o) {
@@ -325,6 +342,7 @@ export function safeClarifyDecision(question?: string): TurnDecision {
     intent: "none",
     confidence: 0.2,
     currentTramiteDisposition: "keep",
+    socialAct: null,
     ambiguity: {
       candidates: ["no_entendido", "repetir"],
       question:

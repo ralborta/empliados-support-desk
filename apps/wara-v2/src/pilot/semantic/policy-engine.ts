@@ -124,7 +124,7 @@ function pendingImpliesIntent(state: PilotConversationState): string | null {
 /**
  * Consistencia estructural: intent de servicio + action=general no es ejecutable
  * (cae al menú y deja pending vivo). No lee el texto del usuario.
- * Preserva amend / negate / farewell / company actions.
+ * Preserva amend / negate / farewell / company actions / socialAct (no lo infiere).
  */
 function coerceGeneralServiceStart(
   decision: TurnDecision,
@@ -636,6 +636,8 @@ export function applySemanticPolicy(
           currentTramiteDisposition: "cancel",
           reasoningCode: "GENERAL_CONVERSATION",
           ambiguity: null,
+          // Preservar socialAct del LLM; no inferir.
+          socialAct: decision.socialAct ?? null,
         },
       };
     }
