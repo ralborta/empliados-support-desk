@@ -12,7 +12,7 @@ import { getPendingAction, type PendingActionRecord } from "@/lib/pendingAction"
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import type { TurnExecutorId } from "@/lib/whatsappTurnRouter";
 import {
-  ATILIO_AGENT_TOOLS,
+  buildAtilioAgentTools,
   executeAtilioAgentTool,
   type AgentToolName,
 } from "@/lib/atilioAgentTools";
@@ -20,7 +20,9 @@ import { listBotPromptModules } from "@/lib/botPromptStore";
 import { formatCalendarContextBlock } from "@/lib/odometroFecha";
 import { isAtilioAgentEnabled } from "@/lib/atilioDialogueCompose";
 import {
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
+  looksLikeMaintenanceAppGuideRequest,
   looksLikeSubstantiveCustomerMessage,
   looksLikeUnitConsultFollowUp,
   threadHasRecentUnitCaseOpened,
@@ -92,6 +94,12 @@ REGLAS ABSOLUTAS:
 - Si el hilo tiene trámite de ODÓMETRO/HORÓMETRO activo, usá registrar_odometro_horometro — NUNCA consultar_unidades salvo que pida explícitamente estado GPS o cambie de tema.
 - Preguntas INFORMATIVAS sobre odómetro/horómetro ("¿para qué sirve?", "¿qué es?", "me explicás") → guia_informativa — NO registrar_odometro_horometro ni pedir km.
 - Preguntas de CONFIGURACIÓN de plataforma (agenda, contactos, perfiles, notificaciones, opciones, cómo se usa un módulo) → SIEMPRE guia_informativa. NUNCA inventes botones ni pasos del manual.
+
+MANTENIMIENTO (política vigente — crítico):
+- Si el mantenimiento operativo por WhatsApp está DESHABILITADO (contexto de sesión): cualquier tema de mantenimiento (palabra suelta «Mantenimiento», cómo cargar preventivo/correctivo, quiero programar, no pude cargarlo) → SIEMPRE llamá guia_informativa. La respuesta de esa tool es la ÚNICA fuente de verdad: devolvila tal cual, no la reescribas inventando un trámite.
+- NUNCA ofrezcas programar/registrar mantenimiento por WhatsApp ni pidas unidad/patente para agendar cuando el operativo está off.
+- NUNCA llames derivar_asesor_ticket solo porque mencionaron mantenimiento.
+- Si el operativo estuviera habilitado y el cliente pide explícitamente gestionar/programar → mantenimiento_operativo; si pide cómo hacerlo en la app → guia_informativa.
 
 CONSULTAS (alcance y brevedad):
 - Meta-consulta sin tema ("¿puedo hacer una consulta?", "tengo una duda"): respondé MUY breve (2-3 líneas) — solo GPS/reporte, odómetro/horómetro, certificados, mantenimiento y guías Wara. Invitá a concretar. NO repitas menú largo ni diagnósticos.
@@ -166,6 +174,11 @@ function buildSessionContextBlock(opts: {
       lines.push(`datos_pendientes: ${JSON.stringify(opts.pendingAction.payload)}`);
     }
   }
+  lines.push(
+    MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED
+      ? "mantenimiento_whatsapp_operativo: habilitado"
+      : "mantenimiento_whatsapp_operativo: DESHABILITADO — solo guia_informativa; nunca programar por chat",
+  );
   const threadText = opts.threadText?.trim() ?? "";
   if (
     threadText &&
@@ -194,12 +207,37 @@ async function loadAgentSessionContext(rawPhone: string) {
   };
 }
 
+/**
+ * Cuando el operativo WA está off, el agente no puede improvisar sobre mantenimiento:
+ * debe invocar guia_informativa si el MENSAJE ACTUAL pide guía/mantenimiento
+ * (detectores existentes en waraApi). Una pregunta nueva de otro tema reemplaza el hilo:
+ * el contexto histórico de mantenimiento solo NO fuerza la tool.
+ */
+export function shouldRequireMaintenanceGuideTool(params: {
+  selectionText: string;
+  threadText: string;
+  operativeEnabled?: boolean;
+}): boolean {
+  const operative =
+    params.operativeEnabled ?? MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED;
+  if (operative) return false;
+  // Solo el mensaje actual (looksLikeMaintenanceAppGuideRequest ya contempla
+  // "Mantenimiento", how-to, preventivo/correctivo, "no pude cargar el mantenimiento").
+  // threadText se pasa por compatibilidad de firma / detectors internos, pero NO
+  // usamos "guía en hilo + mensaje sustantivo" para forzar — eso secuestraba GPS/cert/odo.
+  return looksLikeMaintenanceAppGuideRequest(params.selectionText, params.threadText);
+}
+
 function shouldRequireToolCall(params: {
   session: Awaited<ReturnType<typeof loadAgentSessionContext>>;
   threadText: string;
   selectionText: string;
 }): boolean {
   const { session, threadText, selectionText } = params;
+
+  if (shouldRequireMaintenanceGuideTool({ selectionText, threadText })) {
+    return true;
+  }
 
   if (looksLikeOdometerInfoRequest(selectionText)) {
     return true;
@@ -279,9 +317,34 @@ function shouldPassthroughBackendMessage(msg: string): boolean {
   );
 }
 
-function parseToolName(name: string): AgentToolName | null {
-  const allowed = new Set(ATILIO_AGENT_TOOLS.map((t) => t.function.name));
-  return allowed.has(name) ? (name as AgentToolName) : null;
+function parseToolName(name: string, tools = buildAtilioAgentTools()): AgentToolName | null {
+  const allowed = new Set(tools.map((t) => t.function.name));
+  return allowed.has(name as AgentToolName) ? (name as AgentToolName) : null;
+}
+
+async function forceMaintenanceGuideTool(input: {
+  rawPhone: string;
+  selectionText: string;
+  apiKey: string;
+  threadText: string;
+}): Promise<AtilioAgentTurnResult> {
+  const toolResult = await executeAtilioAgentTool({
+    toolName: "guia_informativa",
+    rawPhone: input.rawPhone,
+    customerMessage: input.selectionText,
+    apiKey: input.apiKey,
+    threadText: input.threadText,
+  });
+  const message =
+    toolResult.composed_message?.trim() ||
+    toolResult.backend_message.trim() ||
+    "El mantenimiento se gestiona en la app Wara (Utilidades → Mantenimiento). ¿Querés el paso a paso de preventivo o de correctivo?";
+  return {
+    message,
+    executor: "info_guides",
+    ok: toolResult.ok,
+    usedAgent: true,
+  };
 }
 
 export async function runAtilioAgentTurn(
@@ -293,11 +356,18 @@ export async function runAtilioAgentTurn(
   const session = await loadAgentSessionContext(input.rawPhone);
   const threadText =
     input.threadCtx.scopedThread.trim() || input.threadCtx.classificationThread.trim() || "";
-  const requireTool = shouldRequireToolCall({
-    session,
-    threadText,
+  const requireMaintenanceGuide = shouldRequireMaintenanceGuideTool({
     selectionText: input.selectionText,
+    threadText,
   });
+  const requireTool =
+    requireMaintenanceGuide ||
+    shouldRequireToolCall({
+      session,
+      threadText,
+      selectionText: input.selectionText,
+    });
+  const agentTools = buildAtilioAgentTools();
 
   const userBlock = [
     "=== FECHA DE REFERENCIA (obligatoria para hoy/ayer/anteayer) ===",
@@ -311,7 +381,10 @@ export async function runAtilioAgentTurn(
       activeUnit: session.activeUnit,
       threadText,
     }),
-    requireTool ? "requiere_herramienta: true (hay unidad activa o trámite — NO respondas sin tool)" : "",
+    requireTool ? "requiere_herramienta: true (NO respondas sin tool)" : "",
+    requireMaintenanceGuide
+      ? "requiere_guia_mantenimiento: true — llamá guia_informativa; no improvises trámite por WhatsApp"
+      : "",
     "",
     "=== HISTORIAL RECIENTE (más abajo = más reciente) ===",
     threadText || "(sin historial previo)",
@@ -328,6 +401,7 @@ export async function runAtilioAgentTurn(
 
   let lastExecutor: TurnExecutorId = "unidades";
   let lastOk = true;
+  let usedGuideTool = false;
 
   try {
     const businessKnowledge = await loadBusinessKnowledgeAppendix();
@@ -345,8 +419,13 @@ export async function runAtilioAgentTurn(
         {
           model: agentModel(),
           messages,
-          tools: ATILIO_AGENT_TOOLS as OpenAI.Chat.Completions.ChatCompletionTool[],
-          tool_choice: round === 0 && requireTool ? "required" : "auto",
+          tools: agentTools as OpenAI.Chat.Completions.ChatCompletionTool[],
+          tool_choice:
+            round === 0 && requireMaintenanceGuide
+              ? { type: "function", function: { name: "guia_informativa" } }
+              : round === 0 && requireTool
+                ? "required"
+                : "auto",
           temperature: 0.55,
         },
         { signal: controller.signal },
@@ -357,6 +436,14 @@ export async function runAtilioAgentTurn(
 
       if (!choice.tool_calls?.length) {
         if (requireTool && round === 0) continue;
+        if (requireMaintenanceGuide) {
+          return forceMaintenanceGuideTool({
+            rawPhone: input.rawPhone,
+            selectionText: input.selectionText,
+            apiKey: input.apiKey,
+            threadText,
+          });
+        }
         const text = choice.content?.trim();
         if (!text) return null;
         return {
@@ -371,8 +458,21 @@ export async function runAtilioAgentTurn(
 
       for (const call of choice.tool_calls) {
         if (call.type !== "function") continue;
-        const toolName = parseToolName(call.function.name);
+        const toolName = parseToolName(call.function.name, agentTools);
         if (!toolName) continue;
+
+        if (toolName === "guia_informativa") usedGuideTool = true;
+        if (
+          requireMaintenanceGuide &&
+          toolName === "derivar_asesor_ticket"
+        ) {
+          return forceMaintenanceGuideTool({
+            rawPhone: input.rawPhone,
+            selectionText: input.selectionText,
+            apiKey: input.apiKey,
+            threadText,
+          });
+        }
 
         const toolResult = await executeAtilioAgentTool({
           toolName,
@@ -383,6 +483,7 @@ export async function runAtilioAgentTurn(
         });
         lastExecutor = toolResult.executor;
         lastOk = toolResult.ok;
+        if (toolResult.executor === "info_guides") usedGuideTool = true;
 
         if (toolResult.skip_response) {
           return {
@@ -420,7 +521,9 @@ export async function runAtilioAgentTurn(
             dialogue_state: toolResult.dialogue_state ?? null,
             backend_message: toolResult.backend_message,
             hint:
-              "Redactá conversacional: respondé la intención del cliente, aplicá criterio sobre los hechos (no copies la plantilla), derivá solo si los hechos lo indican, una pregunta abierta si falta algo.",
+              toolResult.executor === "info_guides"
+                ? "Devolvé el backend_message tal cual al cliente (fuente de verdad). No inventes programar por WhatsApp."
+                : "Redactá conversacional: respondé la intención del cliente, aplicá criterio sobre los hechos (no copies la plantilla), derivá solo si los hechos lo indican, una pregunta abierta si falta algo.",
           }),
         });
       }
@@ -435,6 +538,14 @@ export async function runAtilioAgentTurn(
       { signal: controller.signal },
     );
     const text = final.choices[0]?.message?.content?.trim();
+    if (requireMaintenanceGuide && !usedGuideTool) {
+      return forceMaintenanceGuideTool({
+        rawPhone: input.rawPhone,
+        selectionText: input.selectionText,
+        apiKey: input.apiKey,
+        threadText,
+      });
+    }
     if (!text) return null;
     return {
       message: text,
@@ -444,6 +555,18 @@ export async function runAtilioAgentTurn(
     };
   } catch (err) {
     console.error("[atilioAgent] turn failed:", err);
+    if (requireMaintenanceGuide) {
+      try {
+        return await forceMaintenanceGuideTool({
+          rawPhone: input.rawPhone,
+          selectionText: input.selectionText,
+          apiKey: input.apiKey,
+          threadText,
+        });
+      } catch {
+        return null;
+      }
+    }
     return null;
   } finally {
     clearTimeout(timer);

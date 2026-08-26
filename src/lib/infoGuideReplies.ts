@@ -2,6 +2,7 @@ import {
   MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
   looksLikeMaintenanceAppGuideRequest,
   looksLikeMaintenanceExplorationRequest,
+  looksLikeMaintenanceGuideContextInThread,
   looksLikeMaintenanceInfoRequest,
   looksLikeMaintenanceStepByStepOnlyRequest,
   looksLikeOpcionesInfoRequest,
@@ -188,10 +189,38 @@ function unidadesReply(rawText: string): string {
   ].join("\n");
 }
 
+function looksLikeMaintenanceLoadTrouble(rawText: string): boolean {
+  const t = norm(rawText);
+  return /\b(no pude|no puedo|no me deja|no me dejo|error|falla al|problema al|no carga|no carg|no funciona|trabe|trab[eé]|no guarda|no guardar)\b/.test(
+    t,
+  );
+}
+
+function mantenimientoTroubleshootingReply(): string {
+  return [
+    "Si no pudiste cargar el mantenimiento en Wara, probá esto:",
+    "",
+    "1. Entrá de nuevo a Utilidades → Mantenimiento.",
+    "2. Confirmá que elegiste la empresa y la unidad correctas.",
+    "3. Revisá que todos los campos obligatorios estén completos antes de guardar.",
+    "4. Si sigue fallando, anotá el mensaje de error exacto o una captura y pedí ayuda a tu administrador Wara.",
+    "",
+    "Por este chat no registro ni abro ticket automático solo por el mantenimiento: primero te ayudo a resolverlo en la app.",
+  ].join("\n");
+}
+
 function mantenimientoReply(rawText: string): string {
   const t = norm(rawText);
+  const appOnlyNote = !MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED
+    ? "Por WhatsApp no programo ni registro mantenimientos: se hace en la app Wara."
+    : null;
+
+  if (looksLikeMaintenanceLoadTrouble(rawText)) {
+    return mantenimientoTroubleshootingReply();
+  }
   if (/\b(preventiv|plan)\b/.test(t)) {
     return [
+      appOnlyNote,
       "Para planes y tareas preventivas en el módulo Mantenimiento:",
       "",
       "1. Entrá a Utilidades → Mantenimiento.",
@@ -201,10 +230,13 @@ function mantenimientoReply(rawText: string): string {
       "5. Hacé seguimiento del estado hasta el cierre.",
       "",
       "Todo el agendamiento se hace desde la plataforma Wara (Utilidades → Mantenimiento).",
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
-  if (/\b(correctiv|averia|falla)\b/.test(t)) {
+  if (/\b(correctiv|averia|falla|programar|registrar|agendar)\b/.test(t)) {
     return [
+      appOnlyNote,
       "Para una tarea correctiva en Mantenimiento:",
       "",
       "1. Entrá a Utilidades → Mantenimiento.",
@@ -212,9 +244,14 @@ function mantenimientoReply(rawText: string): string {
       "3. Seleccioná la unidad afectada.",
       "4. Describí la falla o trabajo a realizar.",
       "5. Guardá y hacé seguimiento hasta el cierre.",
-    ].join("\n");
+      "",
+      "Eso se realiza desde WARA (Utilidades → Mantenimiento), no por este chat.",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   return [
+    appOnlyNote,
     "El módulo de mantenimiento sirve para gestionar tareas preventivas y correctivas:",
     "",
     "1. Preventivo: planes periódicos asociados a unidades.",
@@ -222,7 +259,9 @@ function mantenimientoReply(rawText: string): string {
     "3. El agendamiento se hace en la app Wara: Utilidades → Mantenimiento.",
     "",
     "¿Querés el paso a paso de preventivo o de correctivo?",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /**
@@ -258,14 +297,23 @@ export function buildInfoGuideReply(
   rawText: string,
   kind?: InfoGuideKind | null,
   lastBotMessage?: string | null,
+  threadText?: string | null,
 ): string {
   const detected = kind ?? detectInfoGuideKind(rawText);
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
   else if (looksLikeOdometerInfoRequest(rawText)) message = buildOdometerInfoExplanation(rawText);
-  else if (detected === "opciones") message = opcionesReply(rawText);
+  else if (
+    looksLikeMaintenanceLoadTrouble(rawText) &&
+    (detected === "mantenimiento" ||
+      looksLikeMaintenanceAppGuideRequest(rawText, threadText ?? "") ||
+      looksLikeMaintenanceGuideContextInThread(threadText ?? ""))
+  ) {
+    message = mantenimientoTroubleshootingReply();
+  } else if (detected === "opciones") message = opcionesReply(rawText);
   else if (detected === "unidades") message = unidadesReply(rawText);
   else if (detected === "mantenimiento") message = mantenimientoReply(rawText);
+  else if (looksLikeMaintenanceLoadTrouble(rawText)) message = mantenimientoTroubleshootingReply();
   else
     message = [
       "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
@@ -294,14 +342,13 @@ export async function buildGroundedInfoGuideReply(
   threadText?: string,
 ): Promise<string> {
   const detected = kind ?? detectInfoGuideKind(rawText);
-  const fallback = () => buildInfoGuideReply(rawText, detected, lastBotMessage);
 
   if (detected !== "opciones" && detected !== "unidades") {
-    return fallback();
+    return buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
   }
 
   const grounded = await answerFromKnowledgeBase(detected, rawText, threadText);
-  if (!grounded) return fallback();
+  if (!grounded) return buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
 
   if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
     return buildRepeatFallback(detected);

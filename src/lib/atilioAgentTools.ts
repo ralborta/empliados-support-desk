@@ -14,6 +14,7 @@ import {
   parseExecutorDialogueState,
 } from "@/lib/executorDialogueState";
 import { composeAgentReplyFromDialogueState } from "@/lib/atilioDialogueCompose";
+import { MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED } from "@/lib/waraApi";
 
 const EXECUTOR_HANDLERS: Record<TurnExecutorId, (req: NextRequest) => Promise<Response>> = {
   unidades: unidadesPost,
@@ -41,9 +42,18 @@ const TOOL_TO_EXECUTOR: Record<AgentToolName, TurnExecutorId> = {
   guia_informativa: "info_guides",
 };
 
-export const ATILIO_AGENT_TOOLS = [
+type OpenAiToolDef = {
+  type: "function";
+  function: {
+    name: AgentToolName;
+    description: string;
+    parameters: { type: "object"; properties: Record<string, unknown> };
+  };
+};
+
+const BASE_AGENT_TOOLS: OpenAiToolDef[] = [
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "consultar_unidades",
       description:
@@ -52,7 +62,7 @@ export const ATILIO_AGENT_TOOLS = [
     },
   },
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "registrar_odometro_horometro",
       description:
@@ -61,7 +71,7 @@ export const ATILIO_AGENT_TOOLS = [
     },
   },
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "certificado_cobertura",
       description:
@@ -70,33 +80,61 @@ export const ATILIO_AGENT_TOOLS = [
     },
   },
   {
-    type: "function" as const,
-    function: {
-      name: "mantenimiento_operativo",
-      description:
-        "Programar o registrar mantenimiento preventivo/correctivo operativo (no guía informativa).",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "derivar_asesor_ticket",
       description:
-        "Derivar a asesor humano y asignar caso: reclamo/ticket, soporte fuera del alcance de Atilio (pantalla táctil, hardware, garantía, facturación), hablar con operador/mesa, o falla técnica que no sea GPS/odómetro/certificado/mantenimiento. Usar de inmediato — NO pedir número de caso previo ni patente si el tema no es de una unidad GPS.",
+        "Derivar a asesor humano y asignar caso: reclamo/ticket, soporte fuera del alcance de Atilio (pantalla táctil, hardware, garantía, facturación), hablar con operador/mesa, o falla técnica que no sea GPS/odómetro/certificado/mantenimiento. Usar de inmediato — NO pedir número de caso previo ni patente si el tema no es de una unidad GPS. NUNCA uses esta tool solo porque el cliente mencionó mantenimiento.",
       parameters: { type: "object", properties: {} },
     },
   },
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "guia_informativa",
       description:
-        "Explicar cómo usar módulos de la plataforma Wara (Opciones, Unidades, Mantenimiento informativo): agenda, contactos, atajos, grupos, etc. Sin acciones en vivo.",
+        "Fuente de verdad para módulos Wara (Opciones, Unidades, Mantenimiento): cómo usar la app, paso a paso preventivo/correctivo, troubleshooting si no pudo cargar, o la palabra suelta «Mantenimiento». Sin acciones en vivo. Con mantenimiento operativo deshabilitado por WhatsApp, SIEMPRE usá esta tool para cualquier tema de mantenimiento — NUNCA inventes programar/registrar por chat ni pidas unidad para agendar.",
       parameters: { type: "object", properties: {} },
     },
   },
 ];
+
+const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
+  type: "function",
+  function: {
+    name: "mantenimiento_operativo",
+    description:
+      "Programar o registrar mantenimiento preventivo/correctivo operativo por WhatsApp (no guía informativa). Solo si la gestión operativa por WhatsApp está habilitada.",
+    parameters: { type: "object", properties: {} },
+  },
+};
+
+/** Tools expuestas al LLM según política de mantenimiento operativo. */
+export function buildAtilioAgentTools(
+  operativeEnabled: boolean = MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
+): OpenAiToolDef[] {
+  if (operativeEnabled) {
+    const tools = [...BASE_AGENT_TOOLS];
+    const derivarIdx = tools.findIndex((t) => t.function.name === "derivar_asesor_ticket");
+    tools.splice(Math.max(derivarIdx, 0), 0, MANTENIMIENTO_OPERATIVO_TOOL);
+    return tools;
+  }
+  return BASE_AGENT_TOOLS;
+}
+
+/** @deprecated Preferí buildAtilioAgentTools() — lista estática con política vigente al import. */
+export const ATILIO_AGENT_TOOLS = buildAtilioAgentTools();
+
+/** Si el operativo WA está off, cualquier intento de esa tool se resuelve como guía. */
+export function resolveAgentToolName(
+  toolName: AgentToolName,
+  operativeEnabled: boolean = MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
+): AgentToolName {
+  if (!operativeEnabled && toolName === "mantenimiento_operativo") {
+    return "guia_informativa";
+  }
+  return toolName;
+}
 
 async function invokeExecutorInternal(
   executor: TurnExecutorId,
@@ -140,7 +178,8 @@ export async function executeAtilioAgentTool(params: {
   apiKey: string;
   threadText?: string;
 }): Promise<AgentToolResult> {
-  const executor = TOOL_TO_EXECUTOR[params.toolName];
+  const resolvedName = resolveAgentToolName(params.toolName);
+  const executor = TOOL_TO_EXECUTOR[resolvedName];
   const raw = await invokeExecutorInternal(
     executor,
     params.rawPhone,
@@ -155,7 +194,10 @@ export async function executeAtilioAgentTool(params: {
   const dialogueState = parseExecutorDialogueState(raw);
   let composedMessage: string | undefined;
 
-  if (confirmationRequired && backendMessage) {
+  // Guía informativa: la salida del backend es la fuente de verdad (no reescribir a prosa libre).
+  if (resolvedName === "guia_informativa" && backendMessage) {
+    composedMessage = backendMessage;
+  } else if (confirmationRequired && backendMessage) {
     composedMessage = backendMessage;
   } else if (agentComposeRequested(raw) && dialogueState) {
     composedMessage = await composeAgentReplyFromDialogueState({
