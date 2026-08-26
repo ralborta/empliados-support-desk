@@ -1,6 +1,9 @@
 import {
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
+  looksLikeMaintenanceAppGuideRequest,
   looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceInfoRequest,
+  looksLikeMaintenanceStepByStepOnlyRequest,
   looksLikeOpcionesInfoRequest,
   looksLikeTicketCreationInfoQuestion,
   looksLikeTurnoOrAgendaQuestion,
@@ -38,7 +41,7 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     return "opciones";
   }
   if (looksLikeUnidadesInfoRequest(text)) return "unidades";
-  if (looksLikeMaintenanceInfoRequest(text) || looksLikeMaintenanceExplorationRequest(text)) {
+  if (looksLikeMaintenanceAppGuideRequest(text) || looksLikeMaintenanceExplorationRequest(text)) {
     return "mantenimiento";
   }
   return null;
@@ -197,7 +200,7 @@ function mantenimientoReply(rawText: string): string {
       "4. Definí periodicidad y responsables si el módulo lo permite.",
       "5. Hacé seguimiento del estado hasta el cierre.",
       "",
-      "Si preferís, yo puedo registrar un mantenimiento preventivo por WhatsApp: decime la patente.",
+      "Todo el agendamiento se hace desde la plataforma Wara (Utilidades → Mantenimiento).",
     ].join("\n");
   }
   if (/\b(correctiv|averia|falla)\b/.test(t)) {
@@ -216,9 +219,9 @@ function mantenimientoReply(rawText: string): string {
     "",
     "1. Preventivo: planes periódicos asociados a unidades.",
     "2. Correctivo: órdenes por falla o reparación puntual.",
-    "3. Desde WhatsApp puedo registrar o programar un mantenimiento si me pasás la patente.",
+    "3. El agendamiento se hace en la app Wara: Utilidades → Mantenimiento.",
     "",
-    "¿Querés el paso a paso de preventivo, correctivo, o preferís que lo registre yo?",
+    "¿Querés el paso a paso de preventivo o de correctivo?",
   ].join("\n");
 }
 
@@ -245,7 +248,7 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
   if (detected === "mantenimiento") {
     return [
       "Ya te pasé ese paso a paso de Mantenimiento. Contame si tu duda es sobre preventivo o correctivo,",
-      "o si preferís que lo registre yo por acá (pasame la patente).",
+      "o qué paso puntual no te quedó claro en la app.",
     ].join("\n");
   }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";

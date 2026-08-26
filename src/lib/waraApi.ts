@@ -535,6 +535,7 @@ export function looksLikeShortAffirmative(text: string | undefined | null): bool
 export function looksLikeOperationalIntent(text: string): boolean {
   const n = normCompanyToken(text);
   if (!n) return false;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(text)) return false;
   return /\b(quiero|necesito|programar|consultar|solicitar|pedir|ver|dame|decime|pasame|reporte|mantenimiento|certificado|patente|odometro|horometro|unidad|unidades|flota|ticket|reclamo|asesor|ubicacion|ignicion|voltaje|offline|falla|problema|ayuda|como hago|como puedo|estado de|ultimo reporte|sin reporte)\b/.test(
     n
   );
@@ -1106,7 +1107,10 @@ export function looksLikeMaintenanceExplorationRequest(raw: string | undefined |
   return infoCue.test(text);
 }
 
-export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = ""): boolean {
+/** Política producto (2026-08): mantenimiento operativo por WhatsApp deshabilitado; solo guía paso a paso en app. */
+export const MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED = false;
+
+export function looksLikeOperationalMaintenanceIntentCore(raw: string, threadText = ""): boolean {
   const text = normCompanyToken(raw);
   if (looksLikeMaintenanceExplorationRequest(raw)) return false;
   // "Mantenimiento 900133" / "Preventivo M900-112" — servicio + unidad sin verbo.
@@ -1130,6 +1134,51 @@ export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = 
     /\b(puedo|programar|registrar|agendar|generar|hacer|crear|abrir)\b/.test(text) &&
     /\b(vos|con vos|contigo|atilio|uno|una|lo|preventivo|correctivo|con tu ayuda)\b/.test(text)
   );
+}
+
+export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = ""): boolean {
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return false;
+  return looksLikeOperationalMaintenanceIntentCore(raw, threadText);
+}
+
+/** Cliente pide solo el procedimiento en la app; no registro por WhatsApp (bug prod 2026-08-25). */
+export function looksLikeMaintenanceStepByStepOnlyRequest(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text) return false;
+  const inMaintContext =
+    looksLikeMaintenanceGuideContextInThread(threadText) ||
+    /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text);
+  const wantsSteps =
+    /\b(paso a paso|procedimiento|como lo agendo|como lo programo|como se hace|como hago|como carg)\b/.test(
+      text,
+    );
+  const rejectsWhatsAppRegistration =
+    /\b(no deber[ií]as|no podes|no pod[eé]s|no quiero que|no registres|sin registrar|solo quiero|solamente quiero|unicamente quiero|nada mas quiero)\b/.test(
+      text,
+    ) || (/\b(solo|solamente|unicamente|nada mas)\b/.test(text) && wantsSteps);
+  if (wantsSteps && (rejectsWhatsAppRegistration || inMaintContext)) return true;
+  if (rejectsWhatsAppRegistration && /\b(registrar\w*|programar|agendar)\b/.test(text)) return true;
+  return false;
+}
+
+/** Guía informativa de mantenimiento (incluye política solo-app cuando el registro WA está off). */
+export function looksLikeMaintenanceAppGuideRequest(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
+  if (looksLikeMaintenanceInfoRequest(raw)) return true;
+  if (looksLikeMaintenanceExplorationRequest(raw)) return true;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(raw, threadText)) return true;
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
+    if (looksLikeMaintenanceCapabilityQuestion(raw, threadText)) return true;
+    if (looksLikeOperationalMaintenanceIntentCore(raw, threadText)) return true;
+    const text = normCompanyToken(raw ?? "").trim();
+    if (text === "mantenimiento") return true;
+  }
+  return false;
 }
 
 /**
@@ -1819,7 +1868,21 @@ export function looksLikeFlowControlCommand(text: string | undefined | null): bo
 export function looksLikeSoftFlowRestart(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "").replace(/[!?.¡¿]+$/g, "").trim();
   if (!norm) return false;
-  return /^(inicio|menu|volver)$/.test(norm);
+  if (/^(inicio|menu|volver)$/.test(norm)) return true;
+  // Volver al menú / arranque — no es búsqueda de unidad (bug prod 2026-08-25).
+  if (
+    /\b(volvamos|volver|volv[eé]|volvé|regres(?:ar|emos|a)|retorn(?:ar|emos|a))\b/.test(norm) &&
+    /\b(al\s+)?(inicio|menu|menú|principio|comienzo|arranque)\b/.test(norm)
+  ) {
+    return true;
+  }
+  if (
+    /\b(empecemos|empezar|arranquemos|arrancar|comencemos|comenzar)\b/.test(norm) &&
+    /\b(de nuevo|desde cero|otra vez)\b/.test(norm)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Saludo repetido en una conversación que ya venía en curso (no primer contacto). */

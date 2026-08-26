@@ -55,6 +55,9 @@ import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
+  looksLikeMaintenanceStepByStepOnlyRequest,
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
   looksLikeGreeting,
   looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGpsOrUnitStatusQuestion,
@@ -473,6 +476,8 @@ export function looksLikeChosePlateReply(rawText: string | undefined | null): bo
 export function looksLikeFleetUnitSearchInput(rawText: string, threadText = ""): boolean {
   const text = String(rawText ?? "").trim();
   if (!text) return false;
+  if (looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text)) return false;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(text, threadText)) return false;
   if (looksLikeFechaHoraLecturaMessage(text)) return false;
   // CONFIRMO / sí / dale nunca son búsqueda de unidad (bug 2026-08-07).
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
@@ -507,6 +512,7 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeSoftFlowRestart(text)) return false;
   // Nunca tratar "confirmar"/"confirmá" como patente (bug 2026-08-22 → mantenimiento).
   if (/^confirm[aá](r|cion)?[!?.]*$/i.test(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
@@ -533,6 +539,7 @@ export function isOdometerPlateSelectionMessage(rawText: string): boolean {
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeSoftFlowRestart(text)) return false;
   // "ODOMETRO" solo no es una unidad (bug 2026-08-07).
   if (looksLikeBareOdometerTopicMention(text) || looksLikeExplicitOdometerUpdateRequest(text)) {
     return false;
@@ -1154,6 +1161,8 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return null;
   // Bug 2026-08-07: "CERRAR TICKETS" se buscaba en flota en vez de cerrar el caso.
   if (looksLikeCustomerConversationCloseRequest(raw)) return null;
+  if (looksLikeSoftFlowRestart(raw)) return null;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(raw)) return null;
   // Bug 2026-08-20: "NO REPORTA ETAPAS DE LA VUELTA" → no buscar «VUELTA» en flota.
   if (looksLikeGpsFeatureIssueForAdvisor(raw)) return null;
   if (looksLikeBareOdometerTopicMention(raw) || looksLikeExplicitOdometerUpdateRequest(raw)) return null;

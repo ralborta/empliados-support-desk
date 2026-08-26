@@ -13,6 +13,7 @@ import {
 } from "@/lib/wara";
 import {
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
 } from "@/lib/waraApi";
@@ -62,6 +63,7 @@ export function looksLikeOdometerActionChoiceReply(text: string): boolean {
 export function shouldSupersedeOdometerActionChoice(text: string): boolean {
   if (looksLikeOdometerActionChoiceReply(text)) return false;
   if (looksLikeFlowControlCommand(text)) return true;
+  if (looksLikeSoftFlowRestart(text)) return true;
   if (looksLikeExplicitOtherTramiteIntent(text)) return true;
   if (looksLikeCertificateKeyword(text)) return true;
   if (looksLikeMaintenanceKeyword(text)) return true;

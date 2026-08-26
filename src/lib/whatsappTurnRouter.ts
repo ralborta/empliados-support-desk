@@ -2,6 +2,7 @@ import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConvers
 import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
 import { looksLikeOpenCaseStatusInquiry, looksLikeCaseResolutionEtaInquiry } from "@/lib/customerTicketInquiry";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
+import { isAffirmationForPendingWrite } from "@/lib/pendingWriteIntent";
 import { looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import {
   certificateFlowState,
@@ -37,11 +38,15 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
   looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
   looksLikeLiveUnitConsultIntent,
   looksLikeMaintenanceCapabilityQuestion,
+  looksLikeMaintenanceAppGuideRequest,
+  looksLikeMaintenanceStepByStepOnlyRequest,
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
   looksLikeOpenNewCaseRequest,
   looksLikeOutOfScopeSupportClaim,
   looksLikeSubstantiveCustomerMessage,
@@ -128,6 +133,7 @@ function looksLikeOdometerIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeMaintenanceOperational(text: string, threadText: string): boolean {
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return false;
   if (isMaintenanceFlowSuperseded(threadText, text)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(text)) return false;
   const incident = detectIncidentType(text);
@@ -233,7 +239,8 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "flow_control_block",
     reason: "Comando de flujo (reinicio/cancelar) se resuelve aparte, no es guía.",
-    decide: ({ text }) => (looksLikeFlowControlCommand(text) ? false : undefined),
+    decide: ({ text }) =>
+      looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text) ? false : undefined,
   },
   {
     id: "technical_support_block",
@@ -243,10 +250,13 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "pending_maintenance_plate_block",
     reason: "Selección de unidad tras pedido de patente de mantenimiento es operativo, no guía.",
-    decide: ({ text, threadText }) =>
-      hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)
-        ? false
-        : undefined,
+    decide: ({ text, threadText }) => {
+      if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
+        return undefined;
+      }
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return undefined;
+      return false;
+    },
   },
   {
     id: "unit_selection_in_maintenance_guide_block",
@@ -265,8 +275,11 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "maintenance_capability_question_block",
     reason: "Pregunta de capacidad (¿podés registrarlo vos?) es operativo, no guía.",
-    decide: ({ text, threadText }) =>
-      looksLikeMaintenanceCapabilityQuestion(text, threadText) ? false : undefined,
+    decide: ({ text, threadText }) => {
+      if (!looksLikeMaintenanceCapabilityQuestion(text, threadText)) return undefined;
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return true;
+      return false;
+    },
   },
   {
     id: "module_pick_allow",
@@ -281,7 +294,8 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "maintenance_info_allow",
     reason: "Pedido explícito de guía del módulo Mantenimiento.",
-    decide: ({ text }) => (looksLikeMaintenanceInfoRequest(text) ? true : undefined),
+    decide: ({ text, threadText }) =>
+      looksLikeMaintenanceAppGuideRequest(text, threadText) ? true : undefined,
   },
   {
     id: "unidades_info_allow",
@@ -307,7 +321,11 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
     decide: ({ text, threadText }) => {
       if (!looksLikeMaintenanceInfoGuideInThread(threadText)) return undefined;
       if (looksLikeMaintenanceOperational(text, threadText)) return undefined;
-      return !!detectInfoGuideKind(text) || looksLikeInfoGuideModulePick(text);
+      return (
+        !!detectInfoGuideKind(text) ||
+        looksLikeInfoGuideModulePick(text) ||
+        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText)
+      );
     },
   },
   {
@@ -316,7 +334,11 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
     decide: ({ text, threadText }) => {
       if (!looksLikeMaintenanceGuideContextInThread(threadText)) return undefined;
       if (looksLikeMaintenanceOperational(text, threadText)) return undefined;
-      return !!detectInfoGuideKind(text) || looksLikeInfoGuideModulePick(text);
+      return (
+        !!detectInfoGuideKind(text) ||
+        looksLikeInfoGuideModulePick(text) ||
+        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText)
+      );
     },
   },
   {
@@ -592,6 +614,7 @@ const TURN_RULES: TurnRule[] = [
       if (threadHasRecentLiveUnitConsultIntent(threadText) && looksLikeVehicleBrandOrUnitSearch(text)) {
         return "unidades";
       }
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return "info_guides";
       return "mantenimiento";
     },
   },
@@ -604,7 +627,14 @@ const TURN_RULES: TurnRule[] = [
     id: "pending_confirmation_resolver",
     reason: "Confirmaciones pendientes explícitas en el hilo — resolver único (cert > odo > maint).",
     decide: ({ text, threadText }) => {
-      if (looksLikeFlowControlCommand(text)) return null;
+      if (looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text)) return null;
+      if (
+        !MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED &&
+        hasPendingMantenimientoConfirmation(threadText) &&
+        isAffirmationForPendingWrite(text)
+      ) {
+        return "info_guides";
+      }
       return resolvePendingConfirmationExecutor(threadText, text) ?? null;
     },
   },
@@ -650,6 +680,9 @@ const TURN_RULES: TurnRule[] = [
       if (certificateFlowState(threadText) !== "none") return null;
       if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
         return null;
+      }
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
+        return resolveExecutorOverStaleMaintenancePlateSelection(text, threadText) ?? "info_guides";
       }
       return resolveExecutorOverStaleMaintenancePlateSelection(text, threadText) ?? "mantenimiento";
     },

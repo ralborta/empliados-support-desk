@@ -17,6 +17,7 @@ import {
   looksLikeCompanySelection,
   looksLikeChangeCompanyRequest,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
   looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeGpsPositionClarificationQuestion,
@@ -62,7 +63,9 @@ import {
   buildGpsClientSummary,
   isStructuredGpsWhatsAppSummary,
   buildGpsPositionClarificationAnalysis,
+  looksLikeGpsStatusContinuityReply,
   mapsLinkForUnit,
+  resolvePlateFromRecentGpsThread,
   threadHasRecentGpsContext,
 } from "@/lib/waraGpsSummary";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
@@ -1131,7 +1134,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (looksLikeFlowControlCommand(rawText.trim()) || looksLikeChangeCompanyRequest(rawText.trim())) {
+  if (
+    looksLikeFlowControlCommand(rawText.trim()) ||
+    looksLikeSoftFlowRestart(rawText.trim()) ||
+    looksLikeChangeCompanyRequest(rawText.trim())
+  ) {
     return NextResponse.json(
       {
         ok: true,
@@ -1315,6 +1322,9 @@ export async function POST(req: NextRequest) {
       ? null
       : extractLastPlateFromThreadCompat(scopedThreadEarly) ??
         detectPlate(scopedThreadEarly) ??
+        (looksLikeGpsStatusContinuityReply(rawText)
+          ? resolvePlateFromRecentGpsThread(scopedThreadEarly)
+          : null) ??
         contextUnitPlate ??
         null;
 
@@ -1331,7 +1341,9 @@ export async function POST(req: NextRequest) {
       looksLikeAnotherUnitRequest(rawText) ||
       mentionsMissingReportWithoutPlate(rawText) ||
       genericUnitConsultWithoutPlate ||
-      (looksLikeLiveUnitConsultIntent(rawText) && !looksLikeFleetUnitSearchInput(rawText)))
+      (looksLikeLiveUnitConsultIntent(rawText) &&
+        !looksLikeFleetUnitSearchInput(rawText) &&
+        !looksLikeGpsStatusContinuityReply(rawText)))
   ) {
     if (explicitRejection) {
       await guardedClearActiveUnit();

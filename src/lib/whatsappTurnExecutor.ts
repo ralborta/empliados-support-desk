@@ -71,6 +71,7 @@ import {
   threadHasRecentUnitCaseOpened,
   looksLikeColloquialGratitudeAck,
   looksLikeConversationAcknowledgement,
+  looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
 import {
   detectPendingConfirmKind,
@@ -225,7 +226,11 @@ import {
 import {
   composeAgentReplyFromDialogueState,
 } from "@/lib/atilioDialogueCompose";
-import { isPassthroughGpsWhatsAppMessage } from "@/lib/waraGpsSummary";
+import {
+  isPassthroughGpsWhatsAppMessage,
+  looksLikeGpsStatusContinuityReply,
+  resolvePlateFromRecentGpsThread,
+} from "@/lib/waraGpsSummary";
 import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 import type { PendingActionRecord } from "@/lib/pendingAction";
 
@@ -688,6 +693,24 @@ export async function runTurnExecutorPhase(params: {
     }
     const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
     return { message: reset.message, executor: "unidades", ok: true };
+  }
+
+  if (looksLikeSoftFlowRestart(selectionText)) {
+    await clearPendingAction(prisma, rawPhone);
+    await clearActiveUnit(prisma, rawPhone).catch(() => undefined);
+    const { buildAtilioStructuredGreeting } = await import("@/lib/waraWhatsAppFormat");
+    const { resolveCustomerByWaraPhone } = await import("@/lib/waraApi");
+    const peek = await resolveCustomerByWaraPhone(prisma, rawPhone);
+    const companyName = peek.customer?.companyName?.trim() || null;
+    return {
+      message: buildAtilioStructuredGreeting({
+        threadText: "",
+        companyName,
+        repeatGreeting: true,
+      }),
+      executor: "context",
+      ok: true,
+    };
   }
 
   const { resolveCustomerByWaraPhone } = await import("@/lib/waraApi");
@@ -1801,7 +1824,12 @@ export async function runTurnExecutorPhase(params: {
     sessionNotebook: sessionNotebookForNl,
     activeUnitPlate: activeUnitForNl?.plate,
   });
-  const hasPersistedContextUnit = !!persistedContextPlate;
+  const gpsContinuityReply = looksLikeGpsStatusContinuityReply(selectionText);
+  const threadGpsPlate = gpsContinuityReply
+    ? resolvePlateFromRecentGpsThread(threadCtx.classificationThread)
+    : null;
+  const effectiveContextPlate = persistedContextPlate ?? threadGpsPlate ?? null;
+  const hasPersistedContextUnit = !!effectiveContextPlate;
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
   );
@@ -1910,19 +1938,25 @@ export async function runTurnExecutorPhase(params: {
       aiUnitExtras = undefined;
     }
 
-    const reuseContextUnit = canReuseContextUnitForTurn({
-      utteranceAction: understanding?.action,
-      unitRefKind: understanding?.unitRef?.kind,
-      hasUsableUnitInMessage,
-      hasPersistedContextUnit,
-    });
+    const reuseContextUnit =
+      (gpsContinuityReply && !!threadGpsPlate) ||
+      canReuseContextUnitForTurn({
+        utteranceAction: understanding?.action,
+        unitRefKind: understanding?.unitRef?.kind,
+        hasUsableUnitInMessage,
+        hasPersistedContextUnit,
+      });
     // Solo inyectar contexto si no hay entidad de mensaje (incluye candidato sin match aún).
     if (reuseContextUnit && !aiUnitExtras?.plate && !aiUnitExtras?.unitSearchText) {
-      if (persistedContextPlate) {
+      const plateForExtras = effectiveContextPlate;
+      if (plateForExtras) {
         aiUnitExtras = {
           ...(aiUnitExtras ?? {}),
-          plate: persistedContextPlate.replace(/\s+/g, "").toUpperCase(),
-          ...(understanding?.action ? { utteranceAction: understanding.action } : {}),
+          plate: plateForExtras.replace(/\s+/g, "").toUpperCase(),
+          utteranceAction:
+            gpsContinuityReply || understanding?.action === "unit_status_read"
+              ? "unit_status_read"
+              : understanding?.action,
         };
       }
     }
@@ -2014,6 +2048,7 @@ export async function runTurnExecutorPhase(params: {
       !!hasPersistedContextUnit &&
       !looksLikeAnotherUnitConsultRequest(selectionText) &&
       (reuseContextUnit ||
+        gpsContinuityReply ||
         threadAwaitingUnitProblem ||
         looksLikeUnitConsultFollowUp(selectionText) ||
         looksLikeUnitReportingStatusCue(selectionText) ||
@@ -2049,7 +2084,7 @@ export async function runTurnExecutorPhase(params: {
         );
       } else {
         console.info(
-          `[utteranceUnderstanding] contexto-unidad-persistido phone=${rawPhone.slice(0, 4)}… plate=${persistedContextPlate}`,
+          `[utteranceUnderstanding] contexto-unidad-persistido phone=${rawPhone.slice(0, 4)}… plate=${effectiveContextPlate}`,
         );
       }
 

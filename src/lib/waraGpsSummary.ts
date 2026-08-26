@@ -3,7 +3,11 @@ import {
   formatCustomerOdooCaseRefForWhatsApp,
 } from "@/lib/customerOdooCaseRef";
 import type { WaraUnidadEstado } from "@/lib/waraApi";
-import { formatPlateWithSpaces, normalizePlate } from "@/lib/wara";
+import { formatPlateWithSpaces, normalizePlate, extractLastPlateFromThread } from "@/lib/wara";
+import {
+  looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
+} from "@/lib/waraApi";
 import {
   assessUnitReporting,
   buildGpsFacts,
@@ -11,9 +15,8 @@ import {
   ignitionLabel,
   type GpsAssessment,
 } from "@/lib/waraGpsAssessment";
-import { withMediaUrlMarker } from "@/lib/mediaUrlMarker";
 
-/** Asset estático en /public/gps (servido por wara.nivel41.com). */
+/** Assets legacy en /public/gps — ya no se envían por WhatsApp (2026-08). */
 export const GPS_ALERT_MISSING_REPORT_ASSET_PATH = "/gps/alert-falta-reporte.jpg";
 export const GPS_ALERT_IGNITION_FAILURE_ASSET_PATH = "/gps/alert-falla-ignicion.jpg";
 
@@ -112,9 +115,41 @@ export function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
 }
 
 function mapsLine(unit: WaraUnidadEstado): string {
+  const lat = coerceGpsCoordinate(unit.ultima_posicion?.lat);
+  const lon = coerceGpsCoordinate(unit.ultima_posicion?.lon);
   const url = mapsLinkForUnit(unit);
-  // WhatsApp no renderiza markdown `[texto](url)`; URL en texto plano en su línea.
-  return url ? `🗺️ Ver ubicación:\n${url}` : "🗺️ Sin coordenadas de última posición en WARA.";
+  if (lat == null || lon == null) {
+    return "🗺️ Sin coordenadas de última posición en WARA.";
+  }
+  const coords = `${lat}, ${lon}`;
+  return url ? `📍 Coordenadas: ${coords}\n🗺️ Mapa: ${url}` : `📍 Coordenadas: ${coords}`;
+}
+
+function buildGpsAlertHeadline(input: GpsSummaryInput): string | null {
+  const { assessment, action, odooRef } = input;
+  let label: string | null = null;
+  if (assessment.status === "missing_report") label = "FALTA DE REPORTE";
+  else if (assessment.status === "ignition_failure") label = "DATO DE IGNICIÓN INCOMPLETO";
+  else return null;
+
+  if (action === "ticket" && odooRef) {
+    const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
+    return `⚠️ ${label} — Caso *${display}*`;
+  }
+  if (action === "ticket") {
+    return `⚠️ ${label} — Caso en revisión`;
+  }
+  return `⚠️ ${label}`;
+}
+
+function buildTicketAdvisorNote(input: GpsSummaryInput): string {
+  if (input.action !== "ticket" || !input.ticketIssueDetail) return "";
+  if (!input.odooRef) {
+    return "Generé un caso para que Atención al cliente lo revise (todavía no tengo el número para pasarte).";
+  }
+  return input.ticketReused
+    ? "Seguimiento en el caso que ya tenías abierto. Un asesor de Atención al cliente lo sigue revisando."
+    : "Un asesor de Atención al cliente lo va a revisar.";
 }
 
 function gpsClosingQuestion(): string {
@@ -128,8 +163,40 @@ export function threadHasRecentGpsContext(threadText: string): boolean {
   return (
     /funcionamiento normal|unidad detenida|falta de reporte|p[eé]rdida de se[nñ]al|falla de ignici[oó]n/i.test(
       tail,
-    ) && /posici[oó]n:|ultimo reporte:/i.test(tail)
+    ) &&
+    (/posici[oó]n:|ultimo reporte:|último reporte:/i.test(tail) ||
+      /📍\s*coordenadas:/i.test(tail))
   );
+}
+
+/**
+ * Respuesta afirmativa al cierre GPS «¿Seguimos con el estado de la unidad o cambiamos de tema?»
+ * Bug prod 2026-08-25: con activeUnit vencida (>45 min) pedía patente de nuevo.
+ */
+export function looksLikeGpsStatusContinuityReply(text: string | undefined | null): boolean {
+  const t = (text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!t || t.length > 220) return false;
+  if (looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text)) return false;
+  if (/\bcambiamos de tema\b/.test(t) && !/\b(seguimos|continuamos|sigamos)\b/.test(t)) {
+    return false;
+  }
+  if (
+    /\b(seguimos|continuamos|sigamos|dale\s+seguimos|bueno\s+seguimos)\b/.test(t) &&
+    /\b(estado|unidad|gps|reporte|misma|mismo|esa|esta)\b/.test(t)
+  ) {
+    return true;
+  }
+  return /\b(seguimos|continuamos)\s+con\s+(el\s+)?(estado|la\s+unidad)\b/.test(t);
+}
+
+/** Patente de la unidad del último resumen GPS en el hilo (sin depender de activeUnit en DB). */
+export function resolvePlateFromRecentGpsThread(threadText: string): string | null {
+  if (!threadHasRecentGpsContext(threadText)) return null;
+  return extractLastPlateFromThread(threadText);
 }
 
 export function buildGpsPositionClarificationAnalysis(
@@ -203,11 +270,11 @@ function positionLine(assessment: GpsAssessment): string {
 export function buildStructuredGpsBody(
   unit: WaraUnidadEstado,
   assessment: GpsAssessment,
-  options?: { compactForBanner?: boolean },
+  options?: { omitStatusHeadline?: boolean },
 ): string {
-  const compact = options?.compactForBanner === true;
+  const omitHeadline = options?.omitStatusHeadline === true;
   const label = formatGpsUnitLabel(unit);
-  const unitLine = compact ? null : `🚗 Unidad: *${label}*`;
+  const unitLine = `🚗 Unidad: *${label}*`;
   const map = mapsLine(unit);
   const withUnit = (lines: Array<string | null>) => lines.filter(Boolean).join("\n");
 
@@ -237,7 +304,7 @@ export function buildStructuredGpsBody(
 
   if (assessment.status === "missing_report") {
     return withUnit([
-      compact ? null : "⚠️ *Falta de reporte*",
+      omitHeadline ? null : "⚠️ *Falta de reporte*",
       unitLine,
       ignitionLine(unit),
       reportLine(assessment),
@@ -249,7 +316,7 @@ export function buildStructuredGpsBody(
 
   if (assessment.status === "ignition_failure") {
     return withUnit([
-      compact ? null : "ℹ️ *Dato de ignición incompleto*",
+      omitHeadline ? null : "ℹ️ *Dato de ignición incompleto*",
       unitLine,
       reportLine(assessment),
       positionLine(assessment),
@@ -269,41 +336,21 @@ export function buildStructuredGpsBody(
   ]);
 }
 
-function buildTicketFooter(input: GpsSummaryInput): string {
-  const { odooRef, ticketRef, ticketReused, ticketIssueDetail } = input;
-  if (!ticketIssueDetail) return "";
-
-  if (odooRef) {
-    const display = formatCustomerOdooCaseRefForWhatsApp(odooRef);
-    return ticketReused
-      ? `Generé el seguimiento en el caso *${display}* que ya tenías abierto. Un asesor de Atención al cliente lo sigue revisando.`
-      : `Generé el caso *${display}* en Atención al cliente por ${ticketIssueDetail}. Un asesor lo va a revisar.`;
-  }
-
-  if (ticketRef) {
-    return ticketReused
-      ? "Ya tenías un caso abierto para esta unidad; registré la consulta ahí. Un asesor de Atención al cliente lo sigue revisando."
-      : "Generé un caso para que Atención al cliente lo revise (todavía no tengo el número para pasarte).";
-  }
-
-  return "";
-}
-
 function buildTemplateSummary(input: GpsSummaryInput): string {
   const label = formatGpsUnitLabel(input.unit);
   const plateIntro = formatGpsPlateIntro(input.unit);
   const intro = `El estado GPS de la unidad ${plateIntro} es el siguiente:`;
-  const hasBanner = gpsStatusHasBanner(input.assessment.status);
-  const header = hasBanner
-    ? `🚗 Unidad: *${label}*`
-    : ["📍 *Estado GPS*", `🚗 Unidad: *${label}*`].join("\n");
+  const alertHeadline = buildGpsAlertHeadline(input);
+  const header = ["📍 *Estado GPS*", `🚗 Unidad: *${label}*`].join("\n");
   const body = buildStructuredGpsBody(input.unit, input.assessment, {
-    compactForBanner: hasBanner,
+    omitStatusHeadline: alertHeadline != null,
   });
-  const parts = [intro, "", header, "", body];
+  const parts = [intro];
+  if (alertHeadline) parts.push("", alertHeadline);
+  parts.push("", header, "", body);
 
-  const ticketFooter = input.action === "ticket" ? buildTicketFooter(input) : "";
-  if (ticketFooter) parts.push("", ticketFooter);
+  const ticketNote = input.action === "ticket" ? buildTicketAdvisorNote(input) : "";
+  if (ticketNote) parts.push("", ticketNote);
 
   parts.push("", gpsClosingQuestion());
 
@@ -331,21 +378,17 @@ export function isPassthroughGpsWhatsAppMessage(text: string | undefined | null)
   return isStructuredGpsWhatsAppSummary(text) || isGpsPositionClarificationSummary(text);
 }
 
-/** Imagen de encabezado WhatsApp — solo falta de reporte o falla ignición; nunca otra. */
+/** @deprecated Ya no se adjunta banner por WhatsApp (2026-08). Siempre undefined. */
 export function resolveGpsHeaderMediaUrl(
   _unit: WaraUnidadEstado,
-  status: GpsAssessment["status"],
+  _status: GpsAssessment["status"],
 ): string | undefined {
-  if (!isGpsBannerStatus(status)) return undefined;
-  return waraPublicAssetUrl(GPS_BANNER_MEDIA_BY_STATUS[status]);
+  return undefined;
 }
 
 export async function buildGpsClientSummary(input: GpsSummaryInput): Promise<string> {
   const template = buildTemplateSummary(input);
-  const finalize = (text: string) =>
-    ensureOdooCaseRefInClientMessage(text, input.odooRef, { reused: input.ticketReused });
-  const text = finalize(template);
-  return withMediaUrlMarker(text, resolveGpsHeaderMediaUrl(input.unit, input.assessment.status));
+  return ensureOdooCaseRefInClientMessage(template, input.odooRef, { reused: input.ticketReused });
 }
 
 export { buildTemplateSummary, buildGpsFacts, ignitionLabel, formatMinutesAgo, assessUnitReporting };

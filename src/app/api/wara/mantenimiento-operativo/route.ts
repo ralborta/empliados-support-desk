@@ -37,12 +37,15 @@ import {
 } from "@/lib/conversationNotebook";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
 import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
+import { buildInfoGuideReply } from "@/lib/infoGuideReplies";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceCapabilityQuestion,
   looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeMaintenanceInfoRequest,
+  looksLikeMaintenanceAppGuideRequest,
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
   looksLikePlatformInfoGuideInThread,
@@ -439,8 +442,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const rawInboundEarly = parsed.data.rawText?.trim() ?? "";
+  const threadEarly = await recentThreadText(rawPhone);
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
+    const message = buildInfoGuideReply(
+      rawInboundEarly || "mantenimiento",
+      "mantenimiento",
+    );
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "maintenance_app_guide_only",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message,
+        informational: true,
+        informational_s: "true",
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
-  const rawInbound = parsed.data.rawText?.trim() ?? "";
+  const rawInbound = rawInboundEarly;
   const threadText = await recentThreadText(rawPhone);
   const lastInbound = await recentLastInboundTextForPhone(rawPhone);
   const dbPendingMaint = await getPendingAction(prisma, rawPhone);

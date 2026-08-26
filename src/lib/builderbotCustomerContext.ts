@@ -27,6 +27,7 @@ import {
   looksLikeBareAtilioMention,
   looksLikeConversationClosing,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
   looksLikeExplicitCapabilityMenuRequest,
   looksLikeGreeting,
@@ -777,7 +778,7 @@ export async function customerRegisteredContextResponse(
         });
       }
     }
-  } else if (looksLikeGreeting(selectionText)) {
+  } else if (looksLikeGreeting(selectionText) || looksLikeSoftFlowRestart(selectionText)) {
     const threadForGreeting = scopedThreadText || fullThreadText;
     const pendingActionRecord = await getPendingAction(prisma, trimmed);
     if (
@@ -786,7 +787,9 @@ export async function customerRegisteredContextResponse(
       nextFlow = "ignore";
       responseMessage = "";
     } else {
-    const inconclusive = threadHasInconclusiveTramite(threadForGreeting, pendingActionRecord);
+    const forceRestart = looksLikeSoftFlowRestart(selectionText);
+    const inconclusive =
+      forceRestart || threadHasInconclusiveTramite(threadForGreeting, pendingActionRecord);
     // Saludo = arrancar de cero aunque haya trámite inconcluso (bug prod 2026-08-17).
     if (inconclusive) {
       await clearPendingAction(prisma, trimmed);

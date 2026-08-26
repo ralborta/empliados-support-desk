@@ -32,6 +32,11 @@ assert.equal(looksLikeFlowControlCommand("reiniciar"), true);
 assert.equal(looksLikeFlowControlCommand("cancelar"), false, "cancelar → IA, no hard reset");
 assert.equal(looksLikeFlowControlCommand("inicio"), false);
 assert.equal(looksLikeSoftFlowRestart("inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("Volvamos al inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("volver al inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("Te pedí volver al inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("volvamos al menu"), true);
+assert.equal(looksLikeSoftFlowRestart("Indícame el reporte de la nissan"), false);
 
 assert.equal(looksLikeThanksOnlyAcknowledgement("gracias"), true);
 assert.equal(looksLikeThanksOnlyAcknowledgement("ok"), false);

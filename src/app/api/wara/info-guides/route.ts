@@ -12,6 +12,7 @@ import { buildGroundedInfoGuideReply, detectInfoGuideKind } from "@/lib/infoGuid
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
   looksLikeInfoGuideModulePick,
   looksLikeTechnicalSupportRequest,
   threadHasGenericPlatformMenuOffer,
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const rawText = (parsed.data.rawText ?? parsed.data.body ?? "").trim();
 
-  if (looksLikeFlowControlCommand(rawText)) {
+  if (looksLikeFlowControlCommand(rawText) || looksLikeSoftFlowRestart(rawText)) {
     return NextResponse.json(
       {
         ok: true,
