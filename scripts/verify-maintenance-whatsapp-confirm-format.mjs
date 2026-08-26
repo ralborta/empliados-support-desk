@@ -36,8 +36,8 @@ assert.equal(
 );
 assert.equal(
   classifyTurnExecutor("Confirmo", pendingThread),
-  "mantenimiento",
-  "Confirmo enruta a mantenimiento",
+  "info_guides",
+  "Confirmo legacy de mantenimiento → guía app (operativo WA off)",
 );
 
 const afterConfirmLoop = [

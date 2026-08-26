@@ -105,13 +105,13 @@
     "label": "patente tras pedido mantenimiento",
     "text": "AD427MC",
     "threadTextPreview": "Para registrar el mantenimiento necesito la patente de la un",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "prefijo tras pedido mantenimiento",
     "text": "AD",
     "threadTextPreview": "Para registrar el mantenimiento necesito la patente de la un",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "marca tras pedido mantenimiento + consulta viva reciente",
@@ -171,7 +171,7 @@
     "label": "confirmo pendiente mantenimiento",
     "text": "Confirmo",
     "threadTextPreview": "Voy a registrar:\nPatente: AD427MC\nTipo: Correctivo\nPrioridad",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "confirmo pendiente certificado",
@@ -189,7 +189,7 @@
     "label": "dale pendiente mantenimiento",
     "text": "dale",
     "threadTextPreview": "Voy a registrar:\nPatente: AD427MC\nTipo: Correctivo\nPrioridad",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "gracias tras derivacion",
@@ -237,25 +237,25 @@
     "label": "mantenimiento operativo directo (palabra completa)",
     "text": "Quiero programar un mantenimiento correctivo para AD427MC",
     "threadTextPreview": "",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "mantenimiento operativo directo (solo correctivo, sin palabra completa)",
     "text": "Quiero programar un correctivo para AD427MC",
     "threadTextPreview": "",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "mantenimiento operativo directo (solo preventivo, sin palabra completa)",
     "text": "Necesito agendar un preventivo para AD427MC",
     "threadTextPreview": "",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "mantenimiento capability question",
     "text": "¿Atilio puede registrar el mantenimiento por WhatsApp?",
     "threadTextPreview": "El mantenimiento preventivo se programa cada 10.000km o 6 me",
-    "executor": "mantenimiento"
+    "executor": "info_guides"
   },
   {
     "label": "derivacion administrativa",
