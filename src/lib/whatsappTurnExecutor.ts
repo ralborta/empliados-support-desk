@@ -71,10 +71,9 @@ import {
   threadHasRecentUnitCaseOpened,
   looksLikeColloquialGratitudeAck,
   looksLikeConversationAcknowledgement,
-  looksLikeMetaConversationalReply,
   looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
-import { buildMetaConversationalContinuityReply } from "@/lib/idleConversationFollowup";
+import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
 import {
   detectPendingConfirmKind,
   looksLikePendingConfirmPushback,
@@ -1173,8 +1172,13 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  // Meta-conversacional (presencia, demora, «sigo acá»): no es patente ni trámite.
-  if (looksLikeMetaConversationalReply(selectionText)) {
+  // Meta-conversacional / pushback idle (acotado al último cierre automático).
+  const metaTurn = resolveIdleFollowupMetaTurn({
+    selectionText,
+    threadText: thread,
+    pendingAction,
+  });
+  if (metaTurn) {
     if (pendingKind) {
       return {
         message: `Dale, seguimos. ${buildPendingConfirmStillWaitingReminder(pendingKind)}`,
@@ -1196,7 +1200,7 @@ export async function runTurnExecutorPhase(params: {
       };
     }
     return {
-      message: buildMetaConversationalContinuityReply(thread),
+      message: metaTurn.message,
       executor: "info_guides",
       ok: true,
     };

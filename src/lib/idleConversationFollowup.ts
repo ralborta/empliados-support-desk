@@ -13,14 +13,12 @@ import { clearPendingAction } from "@/lib/pendingAction";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { reactivateAtilioAfterTicketClosed } from "@/lib/atilioBotPause";
 
-export const IDLE_NUDGE_KIND = "idle_nudge";
-export const IDLE_CLOSE_KIND = "idle_close";
-
-export const IDLE_NUDGE_MESSAGE =
-  "¿Seguís ahí? Si todavía necesitás ayuda, respondeme cuando puedas y seguimos con tu consulta.";
-
-export const IDLE_CLOSE_MESSAGE =
-  "Como no tuve respuesta, cierro esta consulta por ahora. Cuando quieras, escribime de nuevo y te ayudo.";
+import {
+  IDLE_CLOSE_KIND,
+  IDLE_CLOSE_MESSAGE,
+  IDLE_NUDGE_KIND,
+  IDLE_NUDGE_MESSAGE,
+} from "@/lib/idleFollowupMeta";
 
 const DEFAULT_NUDGE_MS = 15 * 60 * 1000;
 const DEFAULT_CLOSE_MS = 30 * 60 * 1000;
@@ -378,26 +376,16 @@ export async function runIdleConversationFollowupCycle(params?: {
   return result;
 }
 
-/** Último mensaje del bot en el hilo fue el nudge de inactividad (~15 min). */
-export function threadHasRecentIdleNudge(threadText: string): boolean {
-  const tail = threadText
-    .slice(-2000)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const needle = IDLE_NUDGE_MESSAGE.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .slice(0, 40);
-  return tail.includes(needle);
-}
-
-export function buildMetaConversationalContinuityReply(threadText: string): string {
-  if (threadHasRecentIdleNudge(threadText)) {
-    return (
-      "Perfecto, seguimos. Contame qué necesitás: GPS/reporte, odómetro, certificado, " +
-      "mantenimiento u otra consulta."
-    );
-  }
-  return "Dale, seguimos. ¿En qué te ayudo?";
-}
+export {
+  IDLE_NUDGE_KIND,
+  IDLE_CLOSE_KIND,
+  IDLE_NUDGE_MESSAGE,
+  IDLE_CLOSE_MESSAGE,
+  buildMetaConversationalContinuityReply,
+  buildIdleFollowupPushbackReply,
+  shouldHandleIdleFollowupPushback,
+  looksLikeIdleFollowupPushbackCandidate,
+  threadLastBotOutboundWasIdleClose,
+  threadLastBotOutboundWasIdleNudge,
+  resolveIdleFollowupMetaTurn,
+} from "@/lib/idleFollowupMeta";

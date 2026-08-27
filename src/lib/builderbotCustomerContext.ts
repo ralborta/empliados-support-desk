@@ -26,7 +26,6 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeBareAtilioMention,
   looksLikeConversationClosing,
-  looksLikeMetaConversationalReply,
   looksLikeFlowControlCommand,
   looksLikeSoftFlowRestart,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
@@ -65,7 +64,7 @@ import {
   looksLikeOpenCaseStatusInquiry,
   persistCustomerBotReply,
 } from "@/lib/customerTicketInquiry";
-import { buildMetaConversationalContinuityReply } from "@/lib/idleConversationFollowup";
+import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
   let t = String(s ?? "");
@@ -592,6 +591,14 @@ export async function customerRegisteredContextResponse(
   const threadOperationalHint = hasKnownPlate
     ? `Patente/matrícula ya mencionada en este hilo: ${lastKnownPlateFormatted}. No la vuelvas a pedir salvo corrección explícita del cliente.`
     : "";
+  const idleMetaTurn = selectionText?.trim()
+    ? resolveIdleFollowupMetaTurn({
+        selectionText,
+        threadText: scopedThreadText || fullThreadText,
+        customerFirstName: customer?.name?.trim().split(/\s+/)[0],
+        pendingAction: (await getPendingAction(prisma, trimmed)) ?? undefined,
+      })
+    : null;
 
   let responseMessage = selectionMessage;
   const threadForMaintIntent = scopedThreadText || fullThreadText;
@@ -901,16 +908,16 @@ export async function customerRegisteredContextResponse(
         ? `De nada, ${firstName}. ¿Necesitás algo más?`
         : "De nada. ¿En qué más te ayudo?";
     }
-  } else if (selectionText && looksLikeMetaConversationalReply(selectionText)) {
+  } else if (idleMetaTurn) {
     nextFlow = "reply";
     if (!responseMessage) {
-      responseMessage = buildMetaConversationalContinuityReply(
-        scopedThreadText || fullThreadText,
-      );
+      responseMessage = idleMetaTurn.message;
     }
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
-      stage: "meta_conversational_continuity",
+      stage: idleMetaTurn.idlePushback
+        ? "idle_followup_pushback"
+        : "meta_conversational_continuity",
     });
   } else if (companyPickedThisTurn) {
     nextFlow = "reply";
