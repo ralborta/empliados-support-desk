@@ -768,6 +768,48 @@ export function looksLikeConversationClosing(text: string | undefined | null): b
   );
 }
 
+function normMetaConversationalText(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Presencia, demora o continuidad social — no patente ni trámite.
+ * Bug real 2026-08-26: «Sigo acá» tras nudge idle se buscaba en la flota.
+ */
+export function looksLikeMetaConversationalReply(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 120) return false;
+  if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
+
+  const t = normMetaConversationalText(raw);
+  if (!t) return false;
+  if (/\b(con|en|para)\s+(el|la)?\s*(wara|cacique|empresa)\b/.test(t)) return false;
+
+  const presence =
+    /^(sigo|estoy|aca|aqui|presente|volvi|volvio|si sigo|aun sigo|todavia sigo)[\s!.,]*$/.test(t) ||
+    /\b(sigo|estoy)\s+(aca|aqui|en linea|todavia|aun)\b/.test(t) ||
+    /\b(aca|aqui)\s+(estoy|sigo|ando|volvi)\b/.test(t) ||
+    /\b(todavia|aun)\s+(aca|aqui|sigo|estoy)\b/.test(t) ||
+    /\bya\s+(estoy|volvi|aca|aqui)\b/.test(t) ||
+    /^presente[\s!.,]*$/.test(t);
+
+  const delayOrReturn =
+    /\b(perdon|disculpa|disculpame)\s+(la\s+)?(demora|tardo|tarde)\b/.test(t) ||
+    /\b(un\s+momento|dame\s+un\s+(momento|minuto|segundo)|ahi\s+voy|esperame|aguardame)\b/.test(t) ||
+    /\brecien\s+(vi|leo|llego|entro)\b/.test(t);
+
+  const shortContinuity =
+    /^(dale|bueno|ok|si|sip)?\s*(seguimos|sigamos|continuamos|continuemos)[\s!.,]*$/.test(t);
+
+  return presence || delayOrReturn || shortContinuity;
+}
+
 /**
  * El bot ofreció seguir ayudando ("¿Necesitás algo más?" / "¿En qué más te ayudo?").
  * Un "No" suelto después de eso es cierre, no rechazo de patente ni cancelación de CONFIRMO.
@@ -1730,6 +1772,7 @@ export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | nu
   const text = (raw ?? "").trim();
   if (text.length < 4) return false;
   if (looksLikeConversationAcknowledgement(text)) return false;
+  if (looksLikeMetaConversationalReply(text)) return false;
   const norm = normCompanyToken(text);
   if (
     /^(ok|si|no|gracias|muchas gracias|listo|dale|bueno|perfecto|genial|entendido|de acuerdo|confirmo)$/.test(

@@ -377,3 +377,27 @@ export async function runIdleConversationFollowupCycle(params?: {
 
   return result;
 }
+
+/** Último mensaje del bot en el hilo fue el nudge de inactividad (~15 min). */
+export function threadHasRecentIdleNudge(threadText: string): boolean {
+  const tail = threadText
+    .slice(-2000)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const needle = IDLE_NUDGE_MESSAGE.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .slice(0, 40);
+  return tail.includes(needle);
+}
+
+export function buildMetaConversationalContinuityReply(threadText: string): string {
+  if (threadHasRecentIdleNudge(threadText)) {
+    return (
+      "Perfecto, seguimos. Contame qué necesitás: GPS/reporte, odómetro, certificado, " +
+      "mantenimiento u otra consulta."
+    );
+  }
+  return "Dale, seguimos. ¿En qué te ayudo?";
+}

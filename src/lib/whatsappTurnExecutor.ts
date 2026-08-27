@@ -71,8 +71,10 @@ import {
   threadHasRecentUnitCaseOpened,
   looksLikeColloquialGratitudeAck,
   looksLikeConversationAcknowledgement,
+  looksLikeMetaConversationalReply,
   looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
+import { buildMetaConversationalContinuityReply } from "@/lib/idleConversationFollowup";
 import {
   detectPendingConfirmKind,
   looksLikePendingConfirmPushback,
@@ -1166,6 +1168,35 @@ export async function runTurnExecutorPhase(params: {
   ) {
     return {
       message: "De nada. ¿En qué más te ayudo?",
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  // Meta-conversacional (presencia, demora, «sigo acá»): no es patente ni trámite.
+  if (looksLikeMetaConversationalReply(selectionText)) {
+    if (pendingKind) {
+      return {
+        message: `Dale, seguimos. ${buildPendingConfirmStillWaitingReminder(pendingKind)}`,
+        executor:
+          pendingKind === "odometro"
+            ? "odometro"
+            : pendingKind === "certificados"
+              ? "certificados"
+              : "mantenimiento",
+        ok: true,
+      };
+    }
+    if (threadHasInconclusiveTramite(thread, pendingAction)) {
+      const executor = resolveExecutorForInconclusiveTramite(thread, pendingAction);
+      return {
+        message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),
+        executor,
+        ok: true,
+      };
+    }
+    return {
+      message: buildMetaConversationalContinuityReply(thread),
       executor: "info_guides",
       ok: true,
     };

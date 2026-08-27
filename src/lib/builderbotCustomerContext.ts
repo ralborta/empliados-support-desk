@@ -26,6 +26,7 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeBareAtilioMention,
   looksLikeConversationClosing,
+  looksLikeMetaConversationalReply,
   looksLikeFlowControlCommand,
   looksLikeSoftFlowRestart,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
@@ -64,6 +65,7 @@ import {
   looksLikeOpenCaseStatusInquiry,
   persistCustomerBotReply,
 } from "@/lib/customerTicketInquiry";
+import { buildMetaConversationalContinuityReply } from "@/lib/idleConversationFollowup";
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
   let t = String(s ?? "");
@@ -899,6 +901,17 @@ export async function customerRegisteredContextResponse(
         ? `De nada, ${firstName}. ¿Necesitás algo más?`
         : "De nada. ¿En qué más te ayudo?";
     }
+  } else if (selectionText && looksLikeMetaConversationalReply(selectionText)) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      responseMessage = buildMetaConversationalContinuityReply(
+        scopedThreadText || fullThreadText,
+      );
+    }
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "meta_conversational_continuity",
+    });
   } else if (companyPickedThisTurn) {
     nextFlow = "reply";
     if (!responseMessage) {
