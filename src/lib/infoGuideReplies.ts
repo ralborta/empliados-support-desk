@@ -9,6 +9,7 @@ import {
   looksLikeTurnoOrAgendaQuestion,
   looksLikeUnidadesInfoRequest,
   buildTicketCreationInfoReply,
+  parseInfoGuideModulePick,
 } from "@/lib/waraApi";
 import { looksLikeOdometerInfoRequest } from "@/lib/wara";
 import { answerFromKnowledgeBase } from "@/lib/knowledgeBaseAI";
@@ -37,6 +38,8 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   ) {
     return "mantenimiento";
   }
+  const modulePick = parseInfoGuideModulePick(text);
+  if (modulePick) return modulePick;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeTurnoOrAgendaQuestion(text)) {
     return "opciones";
   }

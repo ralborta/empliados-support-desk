@@ -133,6 +133,14 @@ describe("regresión post-guía mantenimiento: tema nuevo no fuerza guía", () =
 });
 
 describe("guía autoservicio (fuente de verdad)", () => {
+  it("GESTIONAR MANTENIMIENTO (botón menú) → KB mantenimiento, no unidades", () => {
+    assert.equal(detectInfoGuideKind("GESTIONAR MANTENIMIENTO"), "mantenimiento");
+    assert.equal(looksLikeMaintenanceAppGuideRequest("GESTIONAR MANTENIMIENTO"), true);
+    const msg = buildInfoGuideReply("GESTIONAR MANTENIMIENTO", "mantenimiento");
+    assert.match(msg, /Utilidades → Mantenimiento|Así se agenda/i);
+    assert.doesNotMatch(msg, /Contame con más detalle qué necesitás/i);
+  });
+
   it("Mantenimiento → intro app, sin pedir unidad ni programar por WA", () => {
     const msg = buildInfoGuideReply("Mantenimiento", "mantenimiento");
     assert.match(msg, /Utilidades → Mantenimiento|Así se agenda/i);

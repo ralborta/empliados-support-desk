@@ -536,6 +536,8 @@ export function looksLikeOperationalIntent(text: string): boolean {
   const n = normCompanyToken(text);
   if (!n) return false;
   if (looksLikeMaintenanceStepByStepOnlyRequest(text)) return false;
+  // Botones de menú ("GESTIONAR MANTENIMIENTO") → guía/KB, no consulta operativa.
+  if (parseInfoGuideModulePick(text)) return false;
   return /\b(quiero|necesito|programar|consultar|solicitar|pedir|ver|dame|decime|pasame|reporte|mantenimiento|certificado|patente|odometro|horometro|unidad|unidades|flota|ticket|reclamo|asesor|ubicacion|ignicion|voltaje|offline|falla|problema|ayuda|como hago|como puedo|estado de|ultimo reporte|sin reporte)\b/.test(
     n
   );
@@ -1211,6 +1213,7 @@ export function looksLikeMaintenanceAppGuideRequest(
   raw: string | undefined | null,
   threadText = "",
 ): boolean {
+  if (parseInfoGuideModulePick(raw) === "mantenimiento") return true;
   if (looksLikeMaintenanceInfoRequest(raw)) return true;
   if (looksLikeMaintenanceExplorationRequest(raw)) return true;
   if (looksLikeMaintenanceStepByStepOnlyRequest(raw, threadText)) return true;
@@ -1942,16 +1945,36 @@ export function looksLikeRepeatGreetingInSession(
   );
 }
 
-/** Cliente elige módulo del menú genérico (Opciones / Unidades / Mantenimiento). */
-export function looksLikeInfoGuideModulePick(text: string | undefined | null): boolean {
-  const n = normCompanyToken(text ?? "")
+export type InfoGuideModulePick = "opciones" | "unidades" | "mantenimiento";
+
+function normalizeInfoGuideModulePickText(text: string | undefined | null): string {
+  return normCompanyToken(text ?? "")
     .replace(/^(ok|dale|si|sip|bueno|perfecto|listo)\s+/, "")
     .trim();
-  if (!n) return false;
-  return (
-    /^(opciones|unidades|mantenimiento)$/.test(n) ||
-    /^modulo (de )?(opciones|unidades|mantenimiento)$/.test(n)
+}
+
+/**
+ * Elección explícita de módulo Wara desde menú o botón WhatsApp
+ * (ej. "Mantenimiento", "GESTIONAR MANTENIMIENTO", "CONSULTAR OPCIONES").
+ */
+export function parseInfoGuideModulePick(
+  text: string | undefined | null,
+): InfoGuideModulePick | null {
+  const n = normalizeInfoGuideModulePickText(text);
+  if (!n) return null;
+  if (/^(opciones|unidades|mantenimiento)$/.test(n)) return n as InfoGuideModulePick;
+  const modulo = n.match(/^modulo (de )?(opciones|unidades|mantenimiento)$/);
+  if (modulo?.[2]) return modulo[2] as InfoGuideModulePick;
+  const menu = n.match(
+    /^(gestionar|consultar|ver|info|informacion|guia|ayuda)\s+(de\s+)?(opciones|unidades|mantenimiento)$/,
   );
+  if (menu?.[3]) return menu[3] as InfoGuideModulePick;
+  return null;
+}
+
+/** Cliente elige módulo del menú genérico (Opciones / Unidades / Mantenimiento). */
+export function looksLikeInfoGuideModulePick(text: string | undefined | null): boolean {
+  return parseInfoGuideModulePick(text) !== null;
 }
 
 /** Pide soporte / atención humana (no guía de módulos). */
