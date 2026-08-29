@@ -80,6 +80,7 @@ import {
   threadHasRecentFleetUnitSearchRequest,
 } from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import { looksLikeIdleNudgeAffirmation } from "@/lib/idleFollowupMeta";
 import type { PendingActionRecord } from "@/lib/pendingAction";
 import {
   hasPendingOdometerActionChoice,
@@ -699,6 +700,12 @@ const TURN_RULES: TurnRule[] = [
       const incident = detectIncidentType(text);
       return incident === "ADMIN_DERIVATION" || incident === "ACCESS_PLATFORM" ? "odoo_ticket" : null;
     },
+  },
+  {
+    id: "idle_nudge_affirmation",
+    reason: "Si/dale tras nudge idle — continuidad social, no replay GPS ni unidad activa.",
+    decide: ({ text, threadText }) =>
+      looksLikeIdleNudgeAffirmation(text, threadText) ? "info_guides" : null,
   },
   {
     id: "loose_plate_or_operational_fallback",

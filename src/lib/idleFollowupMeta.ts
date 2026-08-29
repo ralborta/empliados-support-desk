@@ -177,6 +177,28 @@ function formatContinuityStep(
 const IDLE_PUSHBACK_APOLOGY =
   "Tenés razón en reclamarlo. Ese cierre fue automático por inactividad y pudo quedar fuera de contexto. Perdón la confusión.";
 
+/** "Si"/"dale" tras nudge idle = sigo acá, no CONFIRMO ni replay de GPS/unidad activa. */
+export function looksLikeIdleNudgeAffirmation(
+  text: string | undefined | null,
+  threadText: string,
+): boolean {
+  if (!threadLastBotOutboundWasIdleNudge(threadText)) return false;
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 48) return false;
+  if (hasOperationalPayload(raw)) return false;
+  const t = normIdleText(raw);
+  return /^(si|sip|sii|dale|ok|okey|okay|bueno|perfecto|listo|aca estoy|aqui estoy|presente|seguimos|sigamos)[\s!.,]*$/.test(
+    t,
+  );
+}
+
+export function buildIdleNudgeAffirmationReply(opts?: {
+  customerFirstName?: string | null;
+}): string {
+  const prefix = formatIdleMetaCustomerPrefix(opts?.customerFirstName);
+  return `${prefix}Perfecto, seguimos. ¿En qué te puedo ayudar?`;
+}
+
 export function buildIdleFollowupPushbackReply(params: {
   threadText: string;
   customerFirstName?: string | null;
@@ -233,6 +255,14 @@ export function resolveIdleFollowupMetaTurn(params: {
         customerFirstName,
         pendingAction,
       }),
+    };
+  }
+
+  if (looksLikeIdleNudgeAffirmation(selectionText, threadText)) {
+    return {
+      intercept: true,
+      idlePushback: false,
+      message: buildIdleNudgeAffirmationReply({ customerFirstName }),
     };
   }
 

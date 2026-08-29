@@ -12,8 +12,10 @@ import {
   IDLE_CLOSE_MESSAGE,
   IDLE_NUDGE_MESSAGE,
   buildIdleFollowupPushbackReply,
+  buildIdleNudgeAffirmationReply,
   buildMetaConversationalContinuityReply,
   looksLikeIdleFollowupPushbackCandidate,
+  looksLikeIdleNudgeAffirmation,
   resolveIdleFollowupMetaTurn,
   shouldHandleIdleFollowupPushback,
   threadLastBotOutboundWasIdleClose,
@@ -103,6 +105,19 @@ describe("shouldHandleIdleFollowupPushback", () => {
       resolveIdleFollowupMetaTurn({ selectionText: "Sigo acá", threadText: thread }),
     );
     assert.equal(threadLastBotOutboundWasIdleNudge(thread), true);
+  });
+
+  it("«Si» tras nudge idle → pregunta en qué ayudar, no replay GPS", () => {
+    const thread = [
+      "Atilio: El estado GPS de la unidad NKL 952 es el siguiente...",
+      `Atilio: ${IDLE_NUDGE_MESSAGE}`,
+    ].join("\n");
+    assert.equal(looksLikeIdleNudgeAffirmation("Si", thread), true);
+    const turn = resolveIdleFollowupMetaTurn({ selectionText: "Si", threadText: thread });
+    assert.ok(turn);
+    assert.equal(turn?.idlePushback, false);
+    assert.match(turn!.message, /¿En qué te puedo ayudar/i);
+    assert.doesNotMatch(turn!.message, /NKL 952|Estado GPS/i);
   });
 });
 

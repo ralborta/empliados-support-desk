@@ -847,6 +847,17 @@ export async function customerRegisteredContextResponse(
         : formatSoftClose("bye");
     }
     }
+  } else if (idleMetaTurn) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      responseMessage = idleMetaTurn.message;
+    }
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: idleMetaTurn.idlePushback
+        ? "idle_followup_pushback"
+        : "meta_conversational_continuity",
+    });
   } else if (
     selectionText &&
     looksLikePendingTramiteAffirmation(selectionText) &&
@@ -908,17 +919,6 @@ export async function customerRegisteredContextResponse(
         ? `De nada, ${firstName}. ¿Necesitás algo más?`
         : "De nada. ¿En qué más te ayudo?";
     }
-  } else if (idleMetaTurn) {
-    nextFlow = "reply";
-    if (!responseMessage) {
-      responseMessage = idleMetaTurn.message;
-    }
-    await persistCustomerBotReply(trimmed, responseMessage, {
-      source: "builderbot_context",
-      stage: idleMetaTurn.idlePushback
-        ? "idle_followup_pushback"
-        : "meta_conversational_continuity",
-    });
   } else if (companyPickedThisTurn) {
     nextFlow = "reply";
     if (!responseMessage) {
