@@ -19,9 +19,9 @@ export const REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY =
 
 /** Fuera de alcance Atilio → transferir por panel Wara (sin Odoo). */
 const OUT_OF_SCOPE_HANDOFF_VARIANTS = [
-  "No puedo ayudarte con ese tema, pero te transfiero de inmediato con un operador para que te ayude.",
-  "Eso queda fuera de lo que puedo resolver yo. Te derivo ahora mismo con un operador para que te atiendan por este medio.",
-  "Con ese tema no te puedo ayudar desde acá. Te paso de inmediato con un operador para que te den una mano.",
+  "Yo no te puedo ayudar con eso, pero te paso con un asistente que va a tomar tu caso para resolverlo.",
+  "Eso no lo puedo resolver yo. Te derivo con un asistente para que tome tu consulta y te ayude.",
+  "Con ese tema no te puedo ayudar desde acá. Te paso con un asistente que se va a ocupar de tu caso.",
 ];
 
 function hashSeed(seed: string): number {

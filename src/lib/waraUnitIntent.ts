@@ -66,6 +66,7 @@ import {
   looksLikeMetaConversationalReply,
   looksLikeConversationalUnitConcern,
   looksLikeOdometerConfirmationRejection,
+  looksLikeOutOfScopeSupportClaim,
   looksLikePatenteUnknownReply,
   looksLikePlateCorrectionRequest,
   looksLikeSubstantiveCustomerMessage,
@@ -479,6 +480,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string, threadText = ""):
   const text = String(rawText ?? "").trim();
   if (!text) return false;
   if (looksLikeMetaConversationalReply(text)) return false;
+  if (looksLikeOutOfScopeSupportClaim(text)) return false;
   if (looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text)) return false;
   if (looksLikeMaintenanceStepByStepOnlyRequest(text, threadText)) return false;
   if (looksLikeFechaHoraLecturaMessage(text)) return false;
@@ -1159,6 +1161,7 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   const raw = String(rawText ?? "").trim();
   if (!raw || raw.length > 80) return null;
   if (looksLikeMetaConversationalReply(raw)) return null;
+  if (looksLikeOutOfScopeSupportClaim(raw)) return null;
   // Bug real, producción 2026-08-07: "CONFIRMO" (pedido explícito del bot) matcheaba
   // como nombre propio de unidad → "No encontré ninguna unidad que coincida con «CONFIRMO»"
   // en vez de registrar el odómetro pendiente.

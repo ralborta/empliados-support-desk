@@ -200,6 +200,16 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
   if (!t) return false;
+  // Bug real 2026-08-29: "NO LE FUNCIONA LA PANTALLA…" matcheaba \bno…\bla\b
+  // y se buscaba «PANTALLA» en flota en vez de derivar a asesor.
+  if (
+    /\b(pantalla|tactil|touch|display|teclado|botonera|hardware|garantia)\b/.test(t) &&
+    /\b(no\s+(le\s+|me\s+|les\s+)?(funciona|anda)|falla|fallando|rota|roto|mal|problema|averia|reclam\w*)\b/.test(
+      t,
+    )
+  ) {
+    return false;
+  }
   if (
     /\b(cambiar|corregir|rectificar|modificar|actualizar)\b.*\b(matr[i]?cula|patente)\b/.test(t)
   ) {
@@ -2009,8 +2019,9 @@ export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null)
     /\b(pantalla|tactil|touch\s*screen|display|teclado|botonera|cargador|fuente|cable|antena|modem|router|tablet|impresora|hardware|garantia)\b/.test(
       n,
     );
+  // Incluye "no le/me funciona", "no anda" (bug 2026-08-29: "NO LE FUNCIONA LA PANTALLA…").
   const brokenOrClaim =
-    /\b(reclamar|reclamo|reclam\w*|falla|fallando|mal|rota|roto|romper|no funciona|funcion\w*\s+mal|problema|averia|danad\w*|defectuos\w*|garantia|quiet\w*|clavad\w*|congelad\w*|tildad\w*|trabad\w*)\b/.test(
+    /\b(reclamar|reclamo|reclam\w*|falla|fallando|mal|rota|roto|romper|no\s+(le\s+|me\s+|les\s+)?(funciona|anda)|funcion\w*\s+mal|anda\s+mal|problema|averia|danad\w*|defectuos\w*|garantia|quiet\w*|clavad\w*|congelad\w*|tildad\w*|trabad\w*)\b/.test(
       n,
     );
   const platformContext =

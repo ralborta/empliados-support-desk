@@ -3130,7 +3130,9 @@ export function detectIncidentType(text: string): WaraIncidentType {
   // Hardware / reclamo fuera de telemetría (pantalla táctil, etc.) → soporte humano.
   if (
     /\b(pantalla|t[aá]ctil|touch|display|teclado|hardware|garant[ií]a)\b/.test(lower) &&
-    /\b(reclam\w*|falla|mal|rota|roto|no funciona|problema|aver[ií]a|defectu)\b/.test(lower)
+    /\b(reclam\w*|falla|mal|rota|roto|no\s+(le\s+|me\s+|les\s+)?(funciona|anda)|problema|aver[ií]a|defectu)\b/.test(
+      lower,
+    )
   ) {
     return "GENERAL_TECH";
   }

@@ -29,8 +29,9 @@ assert.equal(
 );
 
 const reply = pickOutOfScopeHandoffReply("5492612732306");
-assert.match(reply, /no puedo ayudarte|fuera de lo que puedo|no te puedo ayudar/i);
-assert.match(reply, /operador|transfiero|derivo|paso/i);
-assert.doesNotMatch(reply, /odoo|#\d{4,}/i);
+assert.match(reply, /no (te )?puedo ayudar|no lo puedo resolver|fuera de lo que puedo/i);
+assert.match(reply, /asistente|operador|transfiero|derivo|paso/i);
+assert.match(reply, /caso|consulta|resolver|ayud/i);
+assert.doesNotMatch(reply, /odoo|#\d{4,}|unidad no encontrada|coincida con/i);
 
 console.log("OK verify-out-of-scope-platform-handoff");

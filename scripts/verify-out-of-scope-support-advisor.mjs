@@ -30,6 +30,23 @@ assert.equal(
   "auto-asignar asesor",
 );
 
+const pantallaNoLeFunciona = "NO LE FUNCIONA LA PANTALLA A ESA UNIDAD";
+assert.equal(
+  looksLikeOutOfScopeSupportClaim(pantallaNoLeFunciona),
+  true,
+  "out of scope: no le funciona la pantalla",
+);
+assert.equal(
+  classifyTurnExecutor(pantallaNoLeFunciona, ""),
+  "odoo_ticket",
+  "no le funciona pantalla → odoo_ticket (no unidades)",
+);
+assert.equal(
+  detectIncidentType(pantallaNoLeFunciona),
+  "GENERAL_TECH",
+  "incidente GENERAL_TECH",
+);
+
 assert.equal(
   classifyTurnExecutor("la pantalla del gps anda mal el tactil", ""),
   "odoo_ticket",
