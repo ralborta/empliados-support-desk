@@ -140,7 +140,7 @@ export function formatGreeting(input: {
   companyListBlock?: string | null;
 }): string {
   const intro = !input.introduced
-    ? "👋 *Hola, soy Atilio*\nAsistente virtual de WARA."
+    ? "👋 *Hola, soy Kira*\nAsistente virtual de WARA."
     : "👋 *Hola*";
 
   if (input.companyListBlock) {

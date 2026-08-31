@@ -90,7 +90,7 @@ describe("formatHumanizedGreeting", () => {
       pendingSummary: null,
       localNow: atHour(9),
     });
-    assert.match(msg, /^Buenos días, Walter\. Soy Atilio/);
+    assert.match(msg, /^Buenos días, Walter\. Soy Kira/);
     assert.match(msg, /¿En qué te ayudo\?$/);
     assert.doesNotMatch(msg, /•|Odómetro|elegí la empresa/);
     const audit = auditHumanizedGreeting({
@@ -101,7 +101,7 @@ describe("formatHumanizedGreeting", () => {
     assert.equal(audit.ok, true, audit.reasons.join(","));
   });
 
-  it("contacto posterior breve (sin Soy Atilio)", () => {
+  it("contacto posterior breve (sin Soy Kira)", () => {
     const msg = formatHumanizedGreeting({
       customerName: "Walter",
       introducedAtilio: true,
@@ -109,7 +109,7 @@ describe("formatHumanizedGreeting", () => {
       localNow: atHour(15),
     });
     assert.equal(msg, "Buenas tardes, Walter. ¿En qué te ayudo?");
-    assert.doesNotMatch(msg, /Soy Atilio/);
+    assert.doesNotMatch(msg, /Soy Kira/);
     const audit = auditHumanizedGreeting({
       message: msg,
       introducedBefore: true,
@@ -127,7 +127,7 @@ describe("formatHumanizedGreeting", () => {
     });
     assert.equal(
       msg,
-      "Buenas noches. Soy Atilio, el asistente virtual de WARA. ¿En qué te ayudo?",
+      "Buenas noches. Soy Kira, el asistente virtual de WARA. ¿En qué te ayudo?",
     );
     assert.equal(sanitizeGreetingName(null), null);
     assert.equal(sanitizeGreetingName("  "), null);
@@ -183,7 +183,7 @@ describe("maybeApplyHumanizedGreeting", () => {
       localNow: atHour(9),
     });
     assert.notEqual(out, draft);
-    assert.match(out, /Buenos días, Walter\. Soy Atilio/);
+    assert.match(out, /Buenos días, Walter\. Soy Kira/);
     assert.equal(state.conversationMetadata.introducedAtilio, true);
   });
 

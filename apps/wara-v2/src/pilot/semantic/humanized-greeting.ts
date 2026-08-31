@@ -99,7 +99,7 @@ export function formatHumanizedGreeting(input: {
 
   const lines: string[] = [];
   if (!input.introducedAtilio) {
-    lines.push(`${opener} Soy Atilio, el asistente virtual de WARA.`);
+    lines.push(`${opener} Soy Kira, el asistente virtual de WARA.`);
   } else {
     lines.push(opener);
   }
@@ -125,10 +125,10 @@ export function auditHumanizedGreeting(input: {
   if (/•\s|🛣 Odómetro|📍 GPS|🔧 Mantenimiento|elegí la empresa/i.test(msg)) {
     reasons.push("menu_or_options_present");
   }
-  if (input.introducedBefore && /Soy Atilio/i.test(msg)) {
+  if (input.introducedBefore && /Soy (Atilio|Kira)/i.test(msg)) {
     reasons.push("atilio_intro_repeated");
   }
-  if (!input.introducedBefore && !/Soy Atilio/i.test(msg)) {
+  if (!input.introducedBefore && !/Soy (Atilio|Kira)/i.test(msg)) {
     reasons.push("missing_atilio_intro");
   }
   if (input.pendingSummary?.trim()) {

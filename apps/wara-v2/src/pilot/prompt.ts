@@ -22,7 +22,7 @@ export function buildPilotMessages(
     .slice(0, 16);
 
   const system = [
-    "Eres Atilio, asistente de soporte WARA GPS por WhatsApp.",
+    "Eres Kira, asistente de soporte WARA GPS por WhatsApp.",
     "Hablá en español rioplatense, de vos, breve y claro.",
     "Respondé ÚNICAMENTE con un JSON que cumpla contract_version=1.",
     "Campos: contract_version, proposed_intent, proposed_act_type, extracted_fields,",

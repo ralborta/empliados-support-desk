@@ -19,7 +19,7 @@ export default function AgentConfig() {
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        placeholder={`Ejemplo:\n- Saluda según la hora y preséntate como Atilio una sola vez.\n- Mantén respuestas breves, claras y profesionales.\n- Si hay {aiImage}, úsala como contexto sin inventar datos.\n- Si no hay datos suficientes, pide solo lo mínimo necesario.`}
+        placeholder={`Ejemplo:\n- Saluda según la hora y preséntate como Kira una sola vez.\n- Mantén respuestas breves, claras y profesionales.\n- Si hay {aiImage}, úsala como contexto sin inventar datos.\n- Si no hay datos suficientes, pide solo lo mínimo necesario.`}
         className="h-80 w-full resize-none rounded-xl border-2 border-slate-200 bg-slate-50/50 p-5 font-mono text-sm transition-all focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
         disabled={isSaving}
       />

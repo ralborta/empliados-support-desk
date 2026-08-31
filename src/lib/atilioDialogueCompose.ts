@@ -16,7 +16,7 @@ function agentModel(): string {
   return process.env.WARA_AGENT_MODEL?.trim() || "gpt-4o-mini";
 }
 
-const DIALOGUE_COMPOSE_PROMPT = `Sos Atilio por WhatsApp. Te paso el historial, el mensaje del cliente y HECHOS VERIFICADOS del sistema.
+const DIALOGUE_COMPOSE_PROMPT = `Sos Kira por WhatsApp. Te paso el historial, el mensaje del cliente y HECHOS VERIFICADOS del sistema.
 Redactá UNA respuesta conversacional — hablá como persona, no como formulario. Sos un agente, no un bot.
 
 RAZONAMIENTO OBLIGATORIO (en silencio, no lo escribas):

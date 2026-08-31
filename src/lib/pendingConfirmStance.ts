@@ -210,7 +210,7 @@ export async function reasonPendingConfirmationRejection(params: {
   const detalle =
     kind === "mantenimiento" ? extractPendingMaintenanceDetalle(threadText) : null;
 
-  const system = `Sos Atilio, agente de Wara. Hay un resumen pendiente de CONFIRMO (el bot pidió confirmar un trámite).
+  const system = `Sos Kira, agente de Wara. Hay un resumen pendiente de CONFIRMO (el bot pidió confirmar un trámite).
 El cliente acaba de responder. Tu trabajo es RAZONAR la intención — no inventes datos.
 
 Trámite pendiente: ${kind}

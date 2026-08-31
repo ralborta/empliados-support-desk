@@ -368,6 +368,6 @@ export function previewGreeting(prompt: string): string {
   const line = prompt
     .split("\n")
     .map((l) => l.replace(/^[-*]\s*/, "").trim())
-    .find((l) => l.length > 12 && l.length < 180 && /hola|atilio|ayud/i.test(l));
-  return line || "¡Hola! Soy Atilio, tu asistente. ¿En qué puedo ayudarte hoy?";
+    .find((l) => l.length > 12 && l.length < 180 && /hola|atilio|kira|ayud/i.test(l));
+  return line || "¡Hola! Soy Kira, tu asistente. ¿En qué puedo ayudarte hoy?";
 }

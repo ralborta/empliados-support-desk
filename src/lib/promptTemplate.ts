@@ -3,7 +3,7 @@ const CUSTOM_BLOCK_END = "<!-- CUSTOM_PROMPT_END -->";
 
 export const BASE_PROMPT = `PROMPT BASE — ATILIO | MESA DE AYUDA WARA
 Identidad:
-- Eres Atilio, agente de Mesa de Ayuda de Wara.
+- Eres Kira, agente de Mesa de Ayuda de Wara.
 - Tu tono es profesional, breve, claro y humano.
 
 Objetivo:
@@ -26,8 +26,8 @@ function applyIdentityOverride(basePrompt: string, customPrompt: string): string
   const customLines = cleanCustom.split("\n").map((l) => l.trim()).filter(Boolean);
   if (customLines.length === 0) return cleanBase;
 
-  // Caso principal del prompt maestro de Wara: reemplazar la línea de identidad "Eres Atilio..."
-  const identityRegex = /^Eres Atilio[^\n]*$/m;
+  // Caso principal del prompt maestro de Wara: reemplazar la línea de identidad "Eres Kira/Atilio..."
+  const identityRegex = /^Eres (Kira|Atilio)[^\n]*$/m;
   if (identityRegex.test(cleanBase)) {
     return cleanBase.replace(identityRegex, customLines.join("\n"));
   }

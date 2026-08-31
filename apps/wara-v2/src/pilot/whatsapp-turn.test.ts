@@ -118,7 +118,7 @@ describe("piloto WhatsApp V2", () => {
       env: env(),
       decide: async () => ({
         schemaVersion: 2,
-        interpretationSummary: "Hola, soy Atilio. ¿En qué te ayudo?",
+        interpretationSummary: "Hola, soy Kira. ¿En qué te ayudo?",
         proposedGoal: "clarify",
         acts: [],
       }),

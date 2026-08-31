@@ -88,7 +88,7 @@ function agentModel(): string {
   return process.env.WARA_AGENT_MODEL?.trim() || "gpt-4o-mini";
 }
 
-const CORE_SYSTEM_PROMPT = `Sos Atilio, agente de Mesa de Ayuda Wara por WhatsApp. Escuchás, razonás, dialogás — NO sos un bot de plantillas ni un formulario.
+const CORE_SYSTEM_PROMPT = `Sos Kira, agente de Mesa de Ayuda Wara por WhatsApp. Escuchás, razonás, dialogás — NO sos un bot de plantillas ni un formulario.
 
 FILOSOFÍA (lo más importante):
 - Sos un AGENTE, no un bot de menús. El cliente habla como persona: incompleto, con typos, en desorden.

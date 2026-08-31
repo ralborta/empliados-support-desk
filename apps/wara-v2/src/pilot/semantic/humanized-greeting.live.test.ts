@@ -160,7 +160,7 @@ describe("LIVE socialAct + humanized greeting", { skip: !LIVE }, () => {
     const r = await turn("Hola Atilio", "sa-hola-atilio", envOn());
     assert.equal(r.kind, "reply");
     assert.match(r.message, /Buenos días|Buenas tardes|Buenas noches/);
-    assert.doesNotMatch(r.message, /Soy Atilio/i);
+    assert.doesNotMatch(r.message, /Soy Kira/i);
     console.info(JSON.stringify({ case: "Hola Atilio", reply: r.message }));
   });
 
@@ -170,7 +170,7 @@ describe("LIVE socialAct + humanized greeting", { skip: !LIVE }, () => {
     const r = await turn("Gracias", "sa-gracias", envOn());
     assert.equal(r.kind, "reply");
     assert.doesNotMatch(r.message, /Buenos días|Buenas tardes|Buenas noches/);
-    assert.doesNotMatch(r.message, /Soy Atilio/i);
+    assert.doesNotMatch(r.message, /Soy Kira/i);
     assert.deepEqual(snapshotState()?.pendingConfirmation, before?.pendingConfirmation);
     console.info(JSON.stringify({ case: "Gracias", reply: r.message }));
   });
@@ -180,7 +180,7 @@ describe("LIVE socialAct + humanized greeting", { skip: !LIVE }, () => {
     const r = await turn("Gracias genio", "sa-gracias-genio", envOn());
     assert.equal(r.kind, "reply");
     assert.doesNotMatch(r.message, /Buenos días|Buenas tardes|Buenas noches/);
-    assert.doesNotMatch(r.message, /Soy Atilio/i);
+    assert.doesNotMatch(r.message, /Soy Kira/i);
     console.info(JSON.stringify({ case: "Gracias genio", reply: r.message }));
   });
 
@@ -189,7 +189,7 @@ describe("LIVE socialAct + humanized greeting", { skip: !LIVE }, () => {
     const r = await turn("Chau", "sa-chau", envOn());
     assert.equal(r.kind, "reply");
     assert.doesNotMatch(r.message, /Buenos días|Buenas tardes|Buenas noches/);
-    assert.doesNotMatch(r.message, /Soy Atilio/i);
+    assert.doesNotMatch(r.message, /Soy Kira/i);
     console.info(JSON.stringify({ case: "Chau", reply: r.message }));
   });
 

@@ -127,9 +127,10 @@ export function formatFleetUnitLabel(plate: string, unitName?: string | null): s
 export function threadIntroducedAtilio(threadText: string): boolean {
   const tail = threadText.slice(-4000).toLowerCase();
   return (
-    /hola,\s*soy atilio/.test(tail) ||
+    /hola,\s*soy (atilio|kira)/.test(tail) ||
     /asistente virtual de wara/.test(tail) ||
-    /soy atilio de la mesa de ayuda/.test(tail)
+    /soy (atilio|kira) de la mesa de ayuda/.test(tail) ||
+    /soy kira/.test(tail)
   );
 }
 
@@ -337,7 +338,7 @@ export function formatGreeting(input: {
   companyListBlock?: string | null;
 }): string {
   const intro = !input.introduced
-    ? "👋 *Hola, soy Atilio*\nAsistente virtual de WARA."
+    ? "👋 *Hola, soy Kira*\nAsistente virtual de WARA."
     : "👋 *Hola*";
 
   if (input.companyListBlock) {
@@ -423,10 +424,10 @@ export function buildAtilioStructuredGreeting(input: {
   pendingAction?: PendingActionRecord | null;
   /** @deprecated No suprime la presentación; usar omitIntroduction. */
   repeatGreeting?: boolean;
-  /** Solo menciones bare "Atilio": saludo corto sin re-presentarse. */
+  /** Solo menciones bare del nombre del bot: saludo corto sin re-presentarse. */
   omitIntroduction?: boolean;
 }): string {
-  // Saludados estructurados V1 siempre lideran con "soy Atilio", salvo omit explícito.
+  // Saludados estructurados V1 siempre lideran con "soy Kira", salvo omit explícito.
   // Antes, repeatGreeting (casi siempre true por ticket abierto) forzaba "👋 Hola" sin presentación.
   const introduced = input.omitIntroduction === true;
   return formatGreeting({

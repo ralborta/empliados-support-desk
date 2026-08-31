@@ -1186,7 +1186,7 @@ export function looksLikeOperationalMaintenanceIntentCore(raw: string, threadTex
   if (!looksLikeMaintenanceGuideContextInThread(threadText)) return false;
   return (
     /\b(puedo|programar|registrar|agendar|generar|hacer|crear|abrir)\b/.test(text) &&
-    /\b(vos|con vos|contigo|atilio|uno|una|lo|preventivo|correctivo|con tu ayuda)\b/.test(text)
+    /\b(vos|con vos|contigo|atilio|kira|uno|una|lo|preventivo|correctivo|con tu ayuda)\b/.test(text)
   );
 }
 
@@ -1251,7 +1251,7 @@ export function looksLikeMaintenanceCapabilityQuestion(
   const threadHasMaintGuide = looksLikeMaintenanceGuideContextInThread(threadText);
   const maintInText = /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan|uno|una)\b/.test(text);
   const asksBotVsSelf =
-    (/\b(vos|tu|atilio|bot|aca|whatsapp|por aca|con vos|contigo)\b/.test(text) &&
+    (/\b(vos|tu|atilio|kira|bot|aca|whatsapp|por aca|con vos|contigo)\b/.test(text) &&
       /\b(podes|pod[eé]s|generar|registrar|programar|abrir|crear|hacer|agendar|haces|hac[eé]s)\b/.test(
         text,
       )) ||
@@ -1260,7 +1260,7 @@ export function looksLikeMaintenanceCapabilityQuestion(
     ) ||
     (/\bpuedo\b/.test(text) &&
       /\b(programar|registrar|agendar|hacer|crear|generar)\b/.test(text) &&
-      (/\b(vos|con vos|contigo|atilio)\b/.test(text) || threadHasMaintGuide));
+      (/\b(vos|con vos|contigo|atilio|kira)\b/.test(text) || threadHasMaintGuide));
 
   if (!asksBotVsSelf) return false;
   return maintInText || threadHasMaintGuide;
@@ -1949,7 +1949,7 @@ export function looksLikeRepeatGreetingInSession(
   if (!looksLikeGreeting(selectionText) || !threadText.trim()) return false;
   const tail = threadText.slice(-3500).toLowerCase();
   return (
-    /atilio|mesa de ayuda wara|seguimos|en qu[eé] te puedo|en qu[eé] te ayudo|consulta o servicio|voy a registrar|ten[eé]s \d+ unidades|listo,\s*registr|patente:|asistente virtual de wara/.test(
+    /atilio|kira|mesa de ayuda wara|seguimos|en qu[eé] te puedo|en qu[eé] te ayudo|consulta o servicio|voy a registrar|ten[eé]s \d+ unidades|listo,\s*registr|patente:|asistente virtual de wara/.test(
       tail,
     )
   );
@@ -2279,7 +2279,7 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
   }
 
   return (
-    /\b(vos|tu|atilio|bot|chatbot)\b/.test(norm) ||
+    /\b(vos|tu|atilio|kira|bot|chatbot)\b/.test(norm) ||
     // Raíz "ayud" + cualquier forma de "poder" (incluye plural/condicional: "pueden
     // ayudarme", "podrían ayudar"), no solo 2da persona singular.
     /\b(no\s+me\s+)?(podes|pod[eé]s|puede|pueden|podr[ií]an|podr[ií]as)\s+ayud\w*\b/.test(norm)
@@ -2405,22 +2405,17 @@ export function looksLikeThanksOnlyAcknowledgement(text: string | undefined | nu
 }
 
 /**
- * Solo el nombre del bot como llamado de atención — "Atilio", "hola atilio", "Atilio?",
- * "atilio estás ahí" — sin pregunta de capacidades ni tema concreto. Distinto de
- * looksLikeExplicitCapabilityQuestion a propósito: bug real, producción 2026-07-28 (3ra
- * vuelta): el cliente ya había recibido el mensaje completo de capacidades y, al volver a
- * escribir solo "Atilio", el bot repetía TEXTUALMENTE el mismo párrafo largo en vez de
- * saludar corto y preguntar en qué ayudar — así que esta mención "pelada" del nombre
- * amerita una respuesta breve, no la lista completa de capacidades de nuevo.
+ * Solo el nombre del bot como llamado de atención — "Kira", "hola kira", "Atilio?"
+ * (nombre viejo aún reconocido), sin pregunta de capacidades ni tema concreto.
  */
 export function looksLikeBareAtilioMention(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "")
     .replace(/[^a-z0-9\s]/g, "")
     .trim();
   if (!norm || norm.length > 40) return false;
-  if (!/\batilio\b/.test(norm)) return false;
+  if (!/\b(atilio|kira)\b/.test(norm)) return false;
   if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
-  return /^(hola\s+)?atilio(\s+(estas|esta)\s*(ahi)?)?$/.test(norm);
+  return /^(hola\s+)?(atilio|kira)(\s+(estas|esta)\s*(ahi)?)?$/.test(norm);
 }
 
 /**

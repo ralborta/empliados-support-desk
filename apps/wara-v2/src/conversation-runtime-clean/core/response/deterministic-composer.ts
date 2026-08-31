@@ -5,7 +5,7 @@ export class DeterministicComposer implements Composer {
   async compose(input: ComposerInput): Promise<string> {
     if (input.responsePlan.facts.some((fact) => !fact.verified)) throw new Error("UNVERIFIED_FACT");
     const lines: string[] = [];
-    if (input.responsePlan.purpose === "greet") lines.push(input.customerName ? `Hola ${input.customerName}. Soy Atilio.` : "Hola. Soy Atilio.");
+    if (input.responsePlan.purpose === "greet") lines.push(input.customerName ? `Hola ${input.customerName}. Soy Kira.` : "Hola. Soy Kira.");
     for (const fact of input.responsePlan.facts) lines.push(fact.text);
     if (input.responsePlan.pendingTaskReminder) lines.push(input.responsePlan.pendingTaskReminder);
     if (input.responsePlan.nextQuestion) lines.push(input.responsePlan.nextQuestion);

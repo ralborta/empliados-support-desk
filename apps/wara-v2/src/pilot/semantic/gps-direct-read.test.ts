@@ -247,7 +247,7 @@ describe("GPS lectura directa + saludo + anti-genérico", () => {
     seedActive();
     const msg = msgOf(await turn("hola"));
     assert.match(msg, /Hola/i);
-    assert.doesNotMatch(msg, /soy Atilio/i);
+    assert.doesNotMatch(msg, /soy Kira/i);
   });
 
   it("trámite pendiente → hola → saludo + resumen", async () => {

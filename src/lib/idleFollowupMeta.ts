@@ -108,8 +108,8 @@ export function threadLastBotOutboundLine(threadText: string): string | null {
     const line = lines[i]?.trim() ?? "";
     if (!line) continue;
     if (/^Cliente:/i.test(line)) continue;
-    if (/^(Atilio|BOT|Bot):/i.test(line)) {
-      return line.replace(/^(Atilio|BOT|Bot):\s*/i, "").trim();
+    if (/^(Atilio|Kira|BOT|Bot):/i.test(line)) {
+      return line.replace(/^(Atilio|Kira|BOT|Bot):\s*/i, "").trim();
     }
   }
   return null;
@@ -144,8 +144,8 @@ export function threadTextBeforeIdleOutbound(threadText: string): string {
   let cutAt = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]?.trim() ?? "";
-    if (!/^(Atilio|BOT|Bot):/i.test(line)) continue;
-    const content = normIdleText(line.replace(/^(Atilio|BOT|Bot):\s*/i, ""));
+    if (!/^(Atilio|Kira|BOT|Bot):/i.test(line)) continue;
+    const content = normIdleText(line.replace(/^(Atilio|Kira|BOT|Bot):\s*/i, ""));
     if (content.includes(IDLE_CLOSE_NEEDLE) || content.includes(IDLE_NUDGE_NEEDLE)) {
       cutAt = i;
       break;

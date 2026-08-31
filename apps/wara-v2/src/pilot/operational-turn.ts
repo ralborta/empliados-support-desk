@@ -435,7 +435,7 @@ function buildFirstContactPresentation(state: PilotConversationState): string {
   state.conversationMetadata.introducedAtilio = true;
   const menu = buildCompanyMenuMessage(state.contacts);
   return (
-    `Hola, soy Atilio, el asistente virtual de WARA. Puedo ayudarte con tus unidades, reportes y gestiones.\n\n` +
+    `Hola, soy Kira, el asistente virtual de WARA. Puedo ayudarte con tus unidades, reportes y gestiones.\n\n` +
     menu
   );
 }
@@ -468,14 +468,14 @@ function buildGreetingReply(
       return {
         handler: "greet",
         message:
-          `Hola, soy Atilio, el asistente virtual de WARA.\n\n` +
+          `Hola, soy Kira, el asistente virtual de WARA.\n\n` +
           `Teníamos pendiente ${pending}. ¿Querés continuar o necesitás otra cosa?`,
       };
     }
     return {
       handler: "greet",
       message:
-        `Hola, soy Atilio, el asistente virtual de WARA. Puedo ayudarte con tus unidades, reportes y gestiones. ¿En qué te ayudo?`,
+        `Hola, soy Kira, el asistente virtual de WARA. Puedo ayudarte con tus unidades, reportes y gestiones. ¿En qué te ayudo?`,
     };
   }
   state.conversationMetadata.greetedAt = now;
