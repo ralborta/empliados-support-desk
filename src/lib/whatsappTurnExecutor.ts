@@ -719,16 +719,16 @@ export async function runTurnExecutorPhase(params: {
     const {
       ensureUnregisteredPhoneAdvisorHandoff,
       UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
-      UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
     } = await import("@/lib/unregisteredPhoneHandoff");
     const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, rawPhone, {
       messageText: selectionText || undefined,
       source: "turn_executor",
     });
+    if (!handoff.shouldNotifyCustomer) {
+      return { message: "", executor: "odoo_ticket", ok: true };
+    }
     return {
-      message: handoff.shouldNotifyCustomer
-        ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
-        : UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+      message: UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
       executor: "odoo_ticket",
       ok: true,
     };

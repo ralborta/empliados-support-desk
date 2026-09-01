@@ -32,9 +32,12 @@ assert.equal(typeof ensureUnregisteredPhoneAdvisorHandoff, "function");
 assert.ok(/deriv[eé]/i.test(REGISTERED_ADVISOR_HANDOFF_REPLY));
 assert.ok(/asesor/i.test(REGISTERED_ADVISOR_HANDOFF_REPLY));
 assert.ok(/asesor/i.test(REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY));
-assert.ok(/encontramos.*registrado/i.test(UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY));
-assert.ok(/asesor/i.test(UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY));
-assert.ok(/asesor/i.test(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY));
+assert.equal(
+  UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+  "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.",
+);
+assert.ok(/agente|asesor/i.test(UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY));
+assert.equal(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY, "");
 assert.equal(UNREGISTERED_PHONE_TICKET_TITLE, "Número no registrado en Wara");
 
 for (const msg of [

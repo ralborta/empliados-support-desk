@@ -12,23 +12,25 @@ import { resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 /** Asunto visible en el panel para números que Wara no reconoce. */
 export const UNREGISTERED_PHONE_TICKET_TITLE = "Número no registrado en Wara";
 
-/** Primer aviso al cliente cuando el número no está en Wara. */
+/**
+ * Única respuesta al cliente cuando el número no está en Wara.
+ * Bug real 2026-08-31: otros textos (“Ya tenemos tu consulta…”) confundían y spameaban.
+ */
 export const UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY =
-  "No encontramos este número registrado en Wara. Derivamos tu consulta a un asesor de Atención al Cliente; te van a escribir por este medio a la brevedad.";
+  "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.";
 
 /**
- * Si el cliente escribe de nuevo tras la derivación: calma, sin repetir el aviso largo
- * ni pausar Atilio (Atilio sigue respondiendo este mensaje).
+ * Tras la primera derivación no se reenvía texto al cliente (el asesor toma el hilo).
+ * Se mantiene el export por callers que aún lo referencian; vacío = no spamear.
  */
-export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY =
-  "Ya tenemos tu consulta: un asesor de Atención al Cliente de WARA te va a atender lo antes posible por este medio. Gracias por tu paciencia.";
+export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY = "";
 
 export type UnregisteredPhoneHandoffResult = {
   customer: Customer;
   ticket: Ticket;
   /** Se creó el ticket en este llamado (primera derivación). */
   isNewTicket: boolean;
-  /** Primera vez: mensaje BBC de “no registrado / te derivamos”. Después: mensaje de calma. */
+  /** Primera vez: avisar al cliente. Después: false → no reenviar texto. */
   shouldNotifyCustomer: boolean;
 };
 
@@ -158,7 +160,8 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     console.error("[unregisteredHandoff] autoAssign:", e);
   }
 
-  // Regla: número no registrado NO pausa Atilio — debe poder mandar el aviso de calma.
+  // Número no registrado: Atilio/Kira sigue activo solo para silenciar reenvíos;
+  // el aviso al cliente es una sola vez (shouldNotifyCustomer).
   await reactivateAtilioForCustomer(
     customer.id,
     prisma,
