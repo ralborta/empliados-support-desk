@@ -747,7 +747,9 @@ export function looksLikeConversationAcknowledgement(text: string | undefined | 
   if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
   const t = normCompanyToken(raw);
   if (looksLikeGratitudeAckToken(t)) return true;
-  return /^(ok|listo|perfecto|genial|joya|barbaro|obvio|claro|exacto|buenisimo|buenisima|dale gracias|tks|ty|thx|thanks)[\s!.,¡¿]*$/.test(
+  // Bug real 2026-09-01: tras certificado emitido, "Bien!" no era ack → reabría
+  // CONFIRMO de otra unidad. Afirmación corta sin pregunta/consulta = cierre social.
+  return /^(ok|listo|perfecto|genial|joya|barbaro|obvio|claro|exacto|buenisimo|buenisima|bien|bueno|excelente|fenomenal|copado|piola|dale gracias|tks|ty|thx|thanks|(muy|todo|re|ta)\s+bien|esta\s+bien)[\s!.,¡¿]*$/.test(
     t,
   );
 }

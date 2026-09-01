@@ -41,6 +41,27 @@ assert.equal(looksLikeConversationAcknowledgement("joya"), true);
 assert.equal(looksLikeConversationAcknowledgement("claro"), true);
 assert.equal(looksLikeConversationAcknowledgement("exacto"), true);
 assert.equal(looksLikeConversationAcknowledgement("obvio"), true);
+assert.equal(looksLikeConversationAcknowledgement("Bien!"), true, "Bien! post-trámite = ack");
+assert.equal(looksLikeConversationAcknowledgement("bien"), true);
+assert.equal(looksLikeConversationAcknowledgement("muy bien"), true);
+assert.equal(looksLikeConversationAcknowledgement("Bueno"), true);
+assert.equal(
+  looksLikeConversationAcknowledgement("me generas un certificado?"),
+  false,
+  "pregunta no es ack",
+);
+
+// Post-éxito: "Bien!" no debe reabrir CONFIRMO (bug 2026-09-01 AH 881 WS → AI 154 GB).
+assert.equal(
+  resolvePendingConfirmationExecutor(threadAfterCert, "Bien!"),
+  null,
+  "Bien! no reconfirma certificado ya emitido",
+);
+assert.equal(
+  (await import("../src/lib/wara.ts")).looksLikeBriefConfirmation("Bien!"),
+  false,
+  "Bien! no es CONFIRMO operativo (no romper pending)",
+);
 assert.equal(
   (await import("../src/lib/wara.ts")).looksLikeCertificateKeyword(
     "me generas un certificado porfa?",
