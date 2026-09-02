@@ -660,7 +660,7 @@ export async function customerRegisteredContextResponse(
       // Fallback seguro: mismo texto canónico (import puede fallar arriba).
       nextFlow = "reply";
       responseMessage =
-        "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe mando también la guía para cargar un número nuevo en la plataforma.";
+        "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe envío también la guía para cargar un número nuevo en la plataforma.";
     }
   } else if (
     selectionText &&

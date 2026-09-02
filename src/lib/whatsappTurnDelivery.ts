@@ -90,8 +90,54 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
     };
 
     if (gpsMediaViaApi) {
+      const isPdf = /\.pdf(\?|$)/i.test(mediaUrl);
+      const mediaCaption = isPdf ? "📄 Guía Wara" : "📍";
+
+      // PDF guía: texto primero y PDF después, ambos por API (orden fijo).
+      // GPS/mapa: media primero por API; el texto lo manda BBC (comportamiento histórico).
+      if (isPdf) {
+        let textSent = false;
+        let mediaSent = false;
+        try {
+          await deps.sendWhatsAppMessage({ number: rawPhone, message });
+          textSent = true;
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          console.error("[whatsappTurn] Envío texto (PDF guide) falló:", detail);
+        }
+        try {
+          await deps.sendWhatsAppMessage({
+            number: rawPhone,
+            message: mediaCaption,
+            mediaUrl,
+          });
+          mediaSent = true;
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          console.error("[whatsappTurn] Envío PDF falló:", detail);
+        }
+        await persistCustomerBotReply(rawPhone, message, {
+          ...persistMeta,
+          waDelivery: "pdf_text_then_media_api",
+          waTextSent_s: textSent ? "true" : "false",
+          waMediaSent_s: mediaSent ? "true" : "false",
+        }).catch(() => undefined);
+        return {
+          ...payload,
+          message: "",
+          summaryText: String(payload.summaryText ?? message),
+          deliveredMessage: message,
+          deliveredMessage_s: message,
+          // Ya enviamos el texto por API: BBC no debe reenviarlo (evita PDF→texto).
+          skipResponse_s: "true",
+          waSent_s: textSent || mediaSent ? "true" : "false",
+          waDelivery: "pdf_text_then_media_api",
+          waDelivery_s: "pdf_text_then_media_api",
+          ...(mediaUrl ? { mediaUrl: "", mediaUrl_s: "" } : {}),
+        };
+      }
+
       let mediaSent = false;
-      const mediaCaption = /\.pdf(\?|$)/i.test(mediaUrl) ? "📄 Guía Wara" : "📍";
       try {
         await deps.sendWhatsAppMessage({ number: rawPhone, message: mediaCaption, mediaUrl });
         mediaSent = true;

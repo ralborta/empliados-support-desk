@@ -41,11 +41,22 @@ assert.match(
   /gu[ií]a.*cargar un n[uú]mero nuevo/i,
   "menciona la guía PDF",
 );
+assert.match(
+  UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+  /Te env[ií]o también/i,
+  "copy: Te envío (no 'Te mando')",
+);
+assert.doesNotMatch(
+  UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+  /Te mando/i,
+  "no usar 'Te mando'",
+);
 
 const waiting = buildUnregisteredPhoneWaitingAdvisorReply("0209266");
 assert.match(waiting, /no está registrado/i, "recontacto: no registrado");
 assert.match(waiting, /0209266/, "recontacto: código de ticket");
 assert.match(waiting, /gu[ií]a/i, "recontacto: menciona guía");
+assert.match(waiting, /Te env[ií]o la gu[ií]a/i, "recontacto: Te envío");
 assert.match(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY, /no está registrado/i);
 assert.doesNotMatch(
   UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,

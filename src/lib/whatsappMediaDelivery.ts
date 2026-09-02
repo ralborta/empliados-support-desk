@@ -4,9 +4,14 @@ import {
   type WhatsAppApiSendResult,
 } from "@/lib/builderbotSendResult";
 
+function isPdfMediaUrl(mediaUrl: string): boolean {
+  return /\.pdf(\?|$)/i.test(mediaUrl);
+}
+
 /**
- * WhatsApp: primero la imagen (tarjeta/mapa), después el texto con detalle.
- * BuilderBot acepta mediaUrl + content; con caption largo la imagen pierde protagonismo.
+ * WhatsApp con media opcional.
+ * - Imagen/mapa GPS: primero media (tarjeta), después texto (detalle).
+ * - PDF (guía): primero texto explicativo, después el documento.
  */
 export async function sendWhatsAppTextWithOptionalMedia(params: {
   number: string;
@@ -17,7 +22,30 @@ export async function sendWhatsAppTextWithOptionalMedia(params: {
   const mediaUrl = params.mediaUrl?.trim();
 
   if (mediaUrl) {
-    const mediaCaption = /\.pdf(\?|$)/i.test(mediaUrl) ? "📄 Guía Wara" : "📍";
+    const mediaCaption = isPdfMediaUrl(mediaUrl) ? "📄 Guía Wara" : "📍";
+    const textFirst = isPdfMediaUrl(mediaUrl);
+
+    if (textFirst && message) {
+      const textRes = await sendWhatsAppMessage({ number: params.number, message });
+      if ((textRes as { skippedDuplicate?: boolean })?.skippedDuplicate) {
+        return { skippedDuplicate: true };
+      }
+      const textId = extractBuilderBotOutboundMessageId(textRes);
+      const mediaRes = await sendWhatsAppMessage({
+        number: params.number,
+        message: mediaCaption,
+        mediaUrl,
+      });
+      if ((mediaRes as { skippedDuplicate?: boolean })?.skippedDuplicate) {
+        return { skippedDuplicate: true, providerMessageId: textId };
+      }
+      const mediaId = extractBuilderBotOutboundMessageId(mediaRes);
+      return {
+        providerMessageId: mediaId ?? textId,
+        rawResponse: mediaRes,
+      };
+    }
+
     const mediaRes = await sendWhatsAppMessage({
       number: params.number,
       message: mediaCaption,

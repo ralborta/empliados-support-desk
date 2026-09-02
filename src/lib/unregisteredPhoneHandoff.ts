@@ -21,7 +21,7 @@ export const UNREGISTERED_PHONE_GUIDE_PDF_PATH = "/guides/como-cargo-mi-numero-e
  * Incluye aviso de guía PDF (adjunto vía mediaUrl).
  */
 export const UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY =
-  "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe mando también la guía para cargar un número nuevo en la plataforma.";
+  "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe envío también la guía para cargar un número nuevo en la plataforma.";
 
 /**
  * Si vuelve a escribir (ej. meses después): SIEMPRE se contesta.
@@ -32,13 +32,13 @@ export function buildUnregisteredPhoneWaitingAdvisorReply(ticketCode: string): s
   const code = String(ticketCode ?? "").trim() || "pendiente";
   return (
     `Tu número no está registrado en Wara. Ya tenemos tu consulta abierta (ticket ${code}); un agente te va a atender.\n\n` +
-    `Te mando la guía para cargar un número nuevo en la plataforma.`
+    `Te envío la guía para cargar un número nuevo en la plataforma.`
   );
 }
 
 /** @deprecated Usar buildUnregisteredPhoneWaitingAdvisorReply(ticketCode). */
 export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY =
-  "Tu número no está registrado en Wara. Ya tenemos tu consulta abierta; un agente te va a atender.\n\nTe mando la guía para cargar un número nuevo en la plataforma.";
+  "Tu número no está registrado en Wara. Ya tenemos tu consulta abierta; un agente te va a atender.\n\nTe envío la guía para cargar un número nuevo en la plataforma.";
 
 function waraPublicAssetUrl(relativePath: string): string {
   const override = process.env.WARA_UNREGISTERED_GUIDE_PDF_URL?.trim();
