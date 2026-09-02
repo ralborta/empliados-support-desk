@@ -631,6 +631,7 @@ export async function customerRegisteredContextResponse(
     try {
       const {
         ensureUnregisteredPhoneAdvisorHandoff,
+        buildUnregisteredPhoneFirstHandoffMessage,
         UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
       } = await import("@/lib/unregisteredPhoneHandoff");
       const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, trimmed, {
@@ -640,8 +641,8 @@ export async function customerRegisteredContextResponse(
       });
       if (handoff.shouldNotifyCustomer) {
         nextFlow = "reply";
-        responseMessage = UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY;
-        await persistCustomerBotReply(trimmed, responseMessage, {
+        responseMessage = buildUnregisteredPhoneFirstHandoffMessage();
+        await persistCustomerBotReply(trimmed, UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY, {
           source: "builderbot_context",
           stage: "unregistered_first_handoff",
         });
@@ -655,7 +656,7 @@ export async function customerRegisteredContextResponse(
       // Fallback seguro: mismo texto canónico (import puede fallar arriba).
       nextFlow = "reply";
       responseMessage =
-        "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.";
+        "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe mando también la guía para cargar un número nuevo en la plataforma.";
     }
   } else if (
     selectionText &&

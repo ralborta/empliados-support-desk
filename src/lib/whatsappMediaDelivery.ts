@@ -17,9 +17,10 @@ export async function sendWhatsAppTextWithOptionalMedia(params: {
   const mediaUrl = params.mediaUrl?.trim();
 
   if (mediaUrl) {
+    const mediaCaption = /\.pdf(\?|$)/i.test(mediaUrl) ? "📄 Guía Wara" : "📍";
     const mediaRes = await sendWhatsAppMessage({
       number: params.number,
-      message: "📍",
+      message: mediaCaption,
       mediaUrl,
     });
     if ((mediaRes as { skippedDuplicate?: boolean })?.skippedDuplicate) {

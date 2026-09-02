@@ -1,6 +1,7 @@
 import type { Customer, PrismaClient, Ticket } from "@prisma/client";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
+import { withMediaUrlMarker } from "@/lib/mediaUrlMarker";
 import {
   findOpenConversationTicket,
   mergeDuplicateOpenTicketsForCustomer,
@@ -12,18 +13,47 @@ import { resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 /** Asunto visible en el panel para números que Wara no reconoce. */
 export const UNREGISTERED_PHONE_TICKET_TITLE = "Número no registrado en Wara";
 
+/** Asset estático en /public/guides — URL pública para mediaUrl de BuilderBot. */
+export const UNREGISTERED_PHONE_GUIDE_PDF_PATH = "/guides/como-cargo-mi-numero-en-wara.pdf";
+
 /**
  * Única respuesta al cliente cuando el número no está en Wara.
- * Bug real 2026-08-31: otros textos (“Ya tenemos tu consulta…”) confundían y spameaban.
+ * Incluye aviso de guía PDF (adjunto vía mediaUrl).
  */
 export const UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY =
-  "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.";
+  "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe mando también la guía para cargar un número nuevo en la plataforma.";
 
 /**
  * Tras la primera derivación no se reenvía texto al cliente (el asesor toma el hilo).
  * Se mantiene el export por callers que aún lo referencian; vacío = no spamear.
  */
 export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY = "";
+
+function waraPublicAssetUrl(relativePath: string): string {
+  const override = process.env.WARA_UNREGISTERED_GUIDE_PDF_URL?.trim();
+  if (override && /^https?:\/\//i.test(override)) return override;
+  const base =
+    process.env.WARA_PUBLIC_BASE_URL?.trim() ||
+    process.env.WARA_TURN_BASE_URL?.trim() ||
+    (process.env.VERCEL_URL?.trim()
+      ? `https://${process.env.VERCEL_URL.trim()}`
+      : "https://wara.nivel41.com");
+  const path = relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+/** URL pública del PDF (override opcional: WARA_UNREGISTERED_GUIDE_PDF_URL). */
+export function unregisteredPhoneGuidePdfUrl(): string {
+  return waraPublicAssetUrl(UNREGISTERED_PHONE_GUIDE_PDF_PATH);
+}
+
+/** Texto + marcador mediaUrl para que /turn envíe el PDF por BuilderBot. */
+export function buildUnregisteredPhoneFirstHandoffMessage(): string {
+  return withMediaUrlMarker(
+    UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+    unregisteredPhoneGuidePdfUrl(),
+  );
+}
 
 export type UnregisteredPhoneHandoffResult = {
   customer: Customer;

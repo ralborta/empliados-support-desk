@@ -91,12 +91,13 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
 
     if (gpsMediaViaApi) {
       let mediaSent = false;
+      const mediaCaption = /\.pdf(\?|$)/i.test(mediaUrl) ? "📄 Guía Wara" : "📍";
       try {
-        await deps.sendWhatsAppMessage({ number: rawPhone, message: "📍", mediaUrl });
+        await deps.sendWhatsAppMessage({ number: rawPhone, message: mediaCaption, mediaUrl });
         mediaSent = true;
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        console.error("[whatsappTurn] Envío imagen GPS falló:", detail);
+        console.error("[whatsappTurn] Envío media falló:", detail);
       }
       const bbcSends = bbcShouldSendExecutorMessage();
       await persistCustomerBotReply(rawPhone, message, {
