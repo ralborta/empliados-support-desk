@@ -77,12 +77,19 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     contactName?: string;
     messageText?: string;
     source?: string;
+    /**
+     * Inbound (audit-only) abre ticket pero NO es la voz al cliente.
+     * Si true: no marca `unregistered_phone_notice` — el aviso lo envía context/turn.
+     * Bug real 2026-09-02: inbound marcaba el notice y /context quedaba en silencio.
+     */
+    deferCustomerNotify?: boolean;
   },
 ): Promise<UnregisteredPhoneHandoffResult> {
   const contactName =
     opts?.contactName?.trim() || "Contacto no registrado en Wara";
   const messageText = opts?.messageText?.trim() || "";
   const source = opts?.source ?? "unregistered_phone_handoff";
+  const deferCustomerNotify = opts?.deferCustomerNotify === true;
 
   const customer = await resolveCustomerByWhatsAppNumber(prisma, rawPhone, {
     name: contactName,
@@ -160,7 +167,7 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     select: { id: true },
   });
   const shouldNotifyCustomer = !priorNotice;
-  if (shouldNotifyCustomer) {
+  if (shouldNotifyCustomer && !deferCustomerNotify) {
     await prisma.ticketEvent.create({
       data: {
         ticketId: ticket.id,

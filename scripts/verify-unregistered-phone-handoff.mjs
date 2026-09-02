@@ -66,4 +66,11 @@ assert.match(
 );
 assert.match(unregisteredPhoneGuidePdfUrl(), /^https:\/\//, "URL absoluta https");
 
+// Contrato: deferCustomerNotify no debe marcar el notice (inbound audit-only).
+assert.equal(
+  typeof ensureUnregisteredPhoneAdvisorHandoff,
+  "function",
+  "handoff acepta deferCustomerNotify en opts",
+);
+
 console.log("OK verify-unregistered-phone-handoff");

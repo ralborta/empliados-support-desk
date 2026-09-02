@@ -339,10 +339,12 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, customerPhoneRaw, {
         contactName,
         source: "whatsapp_inbound",
+        // Audit-only: no consumir el aviso acá — lo envía context/turn (voz al cliente).
+        deferCustomerNotify: true,
       });
       customer = handoff.customer;
       console.log(
-        `[WhatsApp] Número no validado por Wara (${customerPhone}) → ticket ${handoff.ticket.code} (asesor)`,
+        `[WhatsApp] Número no validado por Wara (${customerPhone}) → ticket ${handoff.ticket.code} (asesor)${handoff.shouldNotifyCustomer ? " — aviso pendiente de context/turn" : ""}`,
       );
     } catch (e) {
       console.error("[WhatsApp] Falló handoff número no registrado:", e);
