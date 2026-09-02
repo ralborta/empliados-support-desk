@@ -1,7 +1,10 @@
 import type { Customer, PrismaClient } from "@prisma/client";
 import { formatGreeting, formatCompanySelected } from "@/lib/waraWhatsAppFormat";
 import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
-import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
+import {
+  looksLikeResolvableUnitReferenceInMessage,
+  shouldRouteGpsConsultToUnidades,
+} from "@/lib/gpsConsultRouting";
 import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
@@ -2007,6 +2010,46 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
 }
 
 /**
+ * Reclamo de flota completa / masivo (sin unidad concreta).
+ * Bug real 2026-09-02: "Ninguna anda" / "están todas quietas" / "Ninguna reporta"
+ * caía a unidades y pedía patente en loop — debe ir a asesor (odoo_ticket).
+ *
+ * No robar GPS de UNA unidad: "la AD356UQ no reporta", "la nissan no reporta".
+ */
+export function looksLikeFleetWideOutageClaim(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 220) return false;
+  if (looksLikeResolvableUnitReferenceInMessage(raw)) return false;
+  if (detectLoosePlate(raw)) return false;
+
+  const n = normCompanyToken(raw);
+  if (/\b(odometro|horometro|kilometraje|\bkm\b|certificado|cobertura|mantenimiento|preventiv\w*|correctiv\w*)\b/.test(n)) {
+    return false;
+  }
+
+  const fleetQuantifier =
+    /\bningun[ao](\s+unidad(?:es)?)?\b/.test(n) ||
+    /\b(tod[ao]s|tods)(\s+(las?\s+)?unidades?)?\b/.test(n) ||
+    /\btoda\s+la\s+flota\b/.test(n) ||
+    /\btodas\s+las\s+unidades\b/.test(n) ||
+    /\bvarias\s+unidades\b/.test(n) ||
+    /\bla\s+flota\s+(entera|completa|toda)\b/.test(n) ||
+    (/\blas\s+unidades\b/.test(n) && /\b(tod[ao]s|tods|quiet\w*|clavad\w*|congelad\w*)\b/.test(n));
+
+  if (!fleetQuantifier) return false;
+
+  // Con "ninguna/ninguno" la negación ya va en el cuantificador ("ninguna reporta").
+  const outageSymptom =
+    /\b(quiet\w*|clavad\w*|congelad\w*|tildad\w*|trabad\w*|parad\w*|offline|sin\s+reporte|sin\s+se[nñ]al)\b/.test(
+      n,
+    ) ||
+    /\b(no\s+)?(reportan?|andan?|funcionan?|marchan?)\b/.test(n) ||
+    /\bno\s+(hay|tiene|tienen)\s+(reporte|senal|señal|gps)\b/.test(n);
+
+  return outageSymptom;
+}
+
+/**
  * Soporte fuera del alcance operativo de Atilio (GPS, odómetro, certificado, flota,
  * mantenimiento programable, guías de app). Ej.: pantalla táctil, hardware físico, factura.
  * Debe derivar a operador por panel Wara — no preguntar patente ni # de ticket previo.
@@ -2016,6 +2059,9 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
 export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
   if (!n || n.length > 280) return false;
+
+  // 0) Falla masiva de flota (sin patente) → asesor; no pedir unidad.
+  if (looksLikeFleetWideOutageClaim(text)) return true;
 
   const hardwareOrPhysical =
     /\b(pantalla|tactil|touch\s*screen|display|teclado|botonera|cargador|fuente|cable|antena|modem|router|tablet|impresora|hardware|garantia)\b/.test(

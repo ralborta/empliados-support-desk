@@ -65,11 +65,57 @@ assert.equal(
   "auto-asignar asesor por falla general web",
 );
 
+// Bug real 2026-09-02: flota completa quieta/sin reporte → asesor (no pedir patente).
+for (const fleetWide of [
+  "Ninguna anda",
+  "Estan tods quietas",
+  "Estan todas quietas",
+  "Ninguna reporta",
+  "Esta todas quietas",
+  "todas las unidades sin reporte",
+]) {
+  assert.equal(
+    looksLikeOutOfScopeSupportClaim(fleetWide),
+    true,
+    `out of scope flota: ${fleetWide}`,
+  );
+  assert.equal(
+    classifyTurnExecutor(fleetWide, ""),
+    "odoo_ticket",
+    `router flota → odoo_ticket: ${fleetWide}`,
+  );
+  assert.equal(
+    shouldAutoAssignInboundMessage(detectIncidentType(fleetWide), fleetWide),
+    true,
+    `auto-asignar flota: ${fleetWide}`,
+  );
+}
+
+// Con hilo que ya pedía patente, igual derivar (anti-loop).
+assert.equal(
+  classifyTurnExecutor(
+    "Ninguna reporta",
+    "Cliente: ninguna anda\nAtilio: ¿Cuál es la patente de la unidad?\nAtilio: ¿Me podés dar la patente de alguna unidad?",
+  ),
+  "odoo_ticket",
+  "anti-loop: flota masiva gana sobre pedido de patente",
+);
+
 // Sigue en alcance Atilio (no robar GPS / odómetro).
 assert.equal(
   looksLikeOutOfScopeSupportClaim("la unidad AD356UQ no reporta"),
   false,
   "GPS no es out-of-scope",
+);
+assert.equal(
+  classifyTurnExecutor("la unidad AD356UQ no reporta", ""),
+  "unidades",
+  "GPS con patente → unidades",
+);
+assert.equal(
+  looksLikeOutOfScopeSupportClaim("la nissan no reporta"),
+  false,
+  "GPS de una marca no es flota masiva",
 );
 assert.equal(
   looksLikeOutOfScopeSupportClaim("necesito corregir el odometro"),

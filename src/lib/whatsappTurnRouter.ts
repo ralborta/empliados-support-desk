@@ -39,6 +39,7 @@ import {
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
   looksLikeSoftFlowRestart,
+  looksLikeFleetWideOutageClaim,
   looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
@@ -380,6 +381,12 @@ type TurnRule = {
 };
 
 const TURN_RULES: TurnRule[] = [
+  {
+    id: "fleet_wide_outage_advisor",
+    reason:
+      "Falla masiva de flota sin unidad concreta → asesor (no pedir patente ni listado).",
+    decide: ({ text }) => (looksLikeFleetWideOutageClaim(text) ? "odoo_ticket" : null),
+  },
   {
     id: "unit_list_request",
     reason: "Pedido explícito de listado de unidades.",
@@ -743,6 +750,7 @@ const TURN_RULES: TurnRule[] = [
 
 /** Reglas que NUNCA delega la IA (confirmaciones, Odoo, GPS en vivo, cert awaiting unit). */
 export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
+  "fleet_wide_outage_advisor",
   "unit_list_request",
   "conversation_close_request",
   "open_case_status_inquiry",

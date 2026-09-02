@@ -93,6 +93,7 @@ const PUSH_SUITES = [
   "verify-unregistered-phone-handoff.mjs",
   "verify-mesa-entrada-advisor.mjs",
   "verify-out-of-scope-support-advisor.mjs",
+  "verify-fleet-outage-ops-alert.mjs",
   "verify-outbound-dedup.mjs",
   "verify-company-continuation-mention.mjs",
   "verify-utterance-understanding.mjs",

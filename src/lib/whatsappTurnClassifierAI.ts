@@ -23,6 +23,7 @@ import {
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeTechnicalSupportRequest,
   looksLikeOperationalMaintenanceIntent,
+  looksLikeFleetWideOutageClaim,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
 } from "@/lib/waraApi";
@@ -89,7 +90,9 @@ Ejecutores (elegí UNO):
 
 • odoo_ticket — Asesor humano, reclamo, ticket, soporte técnico, cerrar caso/conversación,
   consultar caso abierto, FALLA de odómetro (no marca bien, desfase) — NO registro de km,
-  incidentes de acceso/admin, detalle post-derivación a asesor.
+  incidentes de acceso/admin, detalle post-derivación a asesor,
+  falla MASIVA de flota sin unidad concreta ("ninguna anda", "están todas quietas",
+  "ninguna reporta") — NO pedir patente.
 
 Reglas críticas:
 - Leé historial + mensaje_nuevo: la intención puede estar en el hilo (horómetro pendiente + prefijo).
@@ -172,6 +175,14 @@ export async function resolveTurnExecutor(
   }
 
   const text = selectionText.trim();
+  // Falla masiva de flota: antes que forzar telemetría/unidades (anti pedir patente).
+  if (looksLikeFleetWideOutageClaim(text)) {
+    return {
+      executor: "odoo_ticket",
+      source: "safety_guard",
+      ruleId: "fleet_wide_outage_advisor",
+    };
+  }
   // GPS read tipado: nunca etiquetar certificado por historial stale sin pending DB.
   if (
     (looksLikeGpsOrUnitStatusQuestion(text) ||

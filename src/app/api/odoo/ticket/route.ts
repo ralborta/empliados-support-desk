@@ -20,6 +20,7 @@ import {
   looksLikeHumanAdvisorRequest,
   looksLikeOpenNewCaseRequest,
   looksLikeOutOfScopeSupportClaim,
+  looksLikeFleetWideOutageClaim,
   looksLikeTechnicalSupportRequest,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
@@ -53,7 +54,21 @@ import {
   REGISTERED_ADVISOR_HANDOFF_REPLY,
   REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY,
 } from "@/lib/advisorHandoff";
+import { maybeNotifyFleetOutageOpsAlert } from "@/lib/fleetOutageOpsAlert";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
+
+function fireFleetOutageOpsAlertBestEffort(params: {
+  ticketId: string;
+  customerPhone: string;
+  customerName?: string;
+  companyName?: string;
+  ticketCode?: string;
+  messageText: string;
+}): void {
+  void maybeNotifyFleetOutageOpsAlert(prisma, params).catch((e) =>
+    console.error("[odoo/ticket] fleetOutageOpsAlert:", e),
+  );
+}
 
 /**
  * Crea un ticket de reclamo/escalamiento en Odoo Helpdesk (equipo "Atención al cliente").
@@ -522,6 +537,7 @@ export async function POST(req: NextRequest) {
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
   const advisorRequest = looksLikeHumanAdvisorRequest(data.rawText);
   const outOfScopeSupport = looksLikeOutOfScopeSupportClaim(data.rawText);
+  const fleetWideOutage = looksLikeFleetWideOutageClaim(data.rawText);
   const technicalSupport = looksLikeTechnicalSupportRequest(data.rawText);
   const openNewCase = looksLikeOpenNewCaseRequest(data.rawText);
   const gpsFeatureIssue = looksLikeGpsFeatureIssueForAdvisor(data.rawText);
@@ -563,21 +579,33 @@ export async function POST(req: NextRequest) {
         ref: existingAdvisorRef,
         plate: plate || undefined,
       });
-      if (localCustomer && gpsFeatureIssue) {
+      if (localCustomer && (gpsFeatureIssue || fleetWideOutage)) {
         const openTicket = await prisma.ticket.findFirst({
           where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
           orderBy: { lastMessageAt: "desc" },
         });
         if (openTicket) {
-          await prisma.ticketMessage.create({
-            data: {
+          if (gpsFeatureIssue) {
+            await prisma.ticketMessage.create({
+              data: {
+                ticketId: openTicket.id,
+                direction: "INBOUND",
+                from: "CUSTOMER",
+                text: rawText,
+                rawPayload: { source: "advisor_case_supplement", odooRef: existingAdvisorRef },
+              },
+            });
+          }
+          if (fleetWideOutage) {
+            fireFleetOutageOpsAlertBestEffort({
               ticketId: openTicket.id,
-              direction: "INBOUND",
-              from: "CUSTOMER",
-              text: rawText,
-              rawPayload: { source: "advisor_case_supplement", odooRef: existingAdvisorRef },
-            },
-          });
+              customerPhone: rawPhone,
+              customerName: customerName || undefined,
+              companyName: companyName || undefined,
+              ticketCode: openTicket.code,
+              messageText: rawText,
+            });
+          }
         }
       }
       return NextResponse.json({
@@ -597,14 +625,18 @@ export async function POST(req: NextRequest) {
         source: openNewCase ? "odoo_ticket_new_case" : "odoo_ticket",
         title: openNewCase
           ? "Cliente solicitó abrir un nuevo caso"
-          : advisorRequest
+          : fleetWideOutage
+            ? "Falla masiva de flota"
+            : advisorRequest
             ? "Cliente solicita asesor humano"
             : gpsFeatureIssue
               ? rawText.slice(0, 120).trim() || "GPS: etapas / recorrido"
               : rawText.slice(0, 120).trim() || "Reclamo / soporte",
         // Fuera de alcance: solo mesa Wara; pausar bot para el operador.
         pauseBot: outOfScopeSupport,
-        aiSummary: outOfScopeSupport
+        aiSummary: fleetWideOutage
+          ? "Falla masiva de flota — derivación a operador + alerta ops WA."
+          : outOfScopeSupport
           ? "Fuera de alcance Atilio — derivación a operador (panel Wara, sin Odoo)."
           : undefined,
       });
@@ -620,6 +652,16 @@ export async function POST(req: NextRequest) {
           stage: "out_of_scope_platform_only",
           ticketCode: advisorHandoffLocal.ticket.code,
         });
+        if (fleetWideOutage) {
+          fireFleetOutageOpsAlertBestEffort({
+            ticketId: advisorHandoffLocal.ticket.id,
+            customerPhone: rawPhone,
+            customerName: customerName || undefined,
+            companyName: companyName || undefined,
+            ticketCode: advisorHandoffLocal.ticket.code,
+            messageText: rawText,
+          });
+        }
         return NextResponse.json({
           ok: true,
           ok_s: "true",
