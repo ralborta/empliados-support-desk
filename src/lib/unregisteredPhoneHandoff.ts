@@ -17,17 +17,28 @@ export const UNREGISTERED_PHONE_TICKET_TITLE = "Número no registrado en Wara";
 export const UNREGISTERED_PHONE_GUIDE_PDF_PATH = "/guides/como-cargo-mi-numero-en-wara.pdf";
 
 /**
- * Única respuesta al cliente cuando el número no está en Wara.
+ * Primera respuesta cuando el número no está en Wara.
  * Incluye aviso de guía PDF (adjunto vía mediaUrl).
  */
 export const UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY =
   "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe mando también la guía para cargar un número nuevo en la plataforma.";
 
 /**
- * Tras la primera derivación no se reenvía texto al cliente (el asesor toma el hilo).
- * Se mantiene el export por callers que aún lo referencian; vacío = no spamear.
+ * Si vuelve a escribir (ej. meses después): SIEMPRE se contesta.
+ * Confirma que el ticket ya existe, que no está registrado, y reenvía el PDF.
+ * Nunca silencio (bug real 2026-09-02: Alborta 10-may → “Holaa” sin respuesta).
  */
-export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY = "";
+export function buildUnregisteredPhoneWaitingAdvisorReply(ticketCode: string): string {
+  const code = String(ticketCode ?? "").trim() || "pendiente";
+  return (
+    `Tu número no está registrado en Wara. Ya tenemos tu consulta abierta (ticket ${code}); un agente te va a atender.\n\n` +
+    `Te mando la guía para cargar un número nuevo en la plataforma.`
+  );
+}
+
+/** @deprecated Usar buildUnregisteredPhoneWaitingAdvisorReply(ticketCode). */
+export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY =
+  "Tu número no está registrado en Wara. Ya tenemos tu consulta abierta; un agente te va a atender.\n\nTe mando la guía para cargar un número nuevo en la plataforma.";
 
 function waraPublicAssetUrl(relativePath: string): string {
   const override = process.env.WARA_UNREGISTERED_GUIDE_PDF_URL?.trim();
@@ -55,12 +66,29 @@ export function buildUnregisteredPhoneFirstHandoffMessage(): string {
   );
 }
 
+/** Recontacto: ticket ya abierto + no registrado + PDF. */
+export function buildUnregisteredPhoneWaitingHandoffMessage(ticketCode: string): string {
+  return withMediaUrlMarker(
+    buildUnregisteredPhoneWaitingAdvisorReply(ticketCode),
+    unregisteredPhoneGuidePdfUrl(),
+  );
+}
+
+/** Respuesta al cliente (primera o recontacto) + PDF. Nunca vacío. */
+export function buildUnregisteredPhoneCustomerReply(opts: {
+  isFirstNotify: boolean;
+  ticketCode: string;
+}): string {
+  if (opts.isFirstNotify) return buildUnregisteredPhoneFirstHandoffMessage();
+  return buildUnregisteredPhoneWaitingHandoffMessage(opts.ticketCode);
+}
+
 export type UnregisteredPhoneHandoffResult = {
   customer: Customer;
   ticket: Ticket;
   /** Se creó el ticket en este llamado (primera derivación). */
   isNewTicket: boolean;
-  /** Primera vez: avisar al cliente. Después: false → no reenviar texto. */
+  /** Primera vez: copy de derivación. Después: copy de ticket ya abierto (siempre se contesta). */
   shouldNotifyCustomer: boolean;
 };
 
@@ -197,8 +225,7 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     console.error("[unregisteredHandoff] autoAssign:", e);
   }
 
-  // Número no registrado: Atilio/Kira sigue activo solo para silenciar reenvíos;
-  // el aviso al cliente es una sola vez (shouldNotifyCustomer).
+  // Número no registrado: Kira sigue activo para poder recontestar (ticket + PDF).
   await reactivateAtilioForCustomer(
     customer.id,
     prisma,

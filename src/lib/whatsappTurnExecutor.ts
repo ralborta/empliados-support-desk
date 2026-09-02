@@ -718,17 +718,17 @@ export async function runTurnExecutorPhase(params: {
   if (!waraResolution.registered && !waraResolution.testBlocked) {
     const {
       ensureUnregisteredPhoneAdvisorHandoff,
-      buildUnregisteredPhoneFirstHandoffMessage,
+      buildUnregisteredPhoneCustomerReply,
     } = await import("@/lib/unregisteredPhoneHandoff");
     const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, rawPhone, {
       messageText: selectionText || undefined,
       source: "turn_executor",
     });
-    if (!handoff.shouldNotifyCustomer) {
-      return { message: "", executor: "odoo_ticket", ok: true };
-    }
     return {
-      message: buildUnregisteredPhoneFirstHandoffMessage(),
+      message: buildUnregisteredPhoneCustomerReply({
+        isFirstNotify: handoff.shouldNotifyCustomer,
+        ticketCode: handoff.ticket.code,
+      }),
       executor: "odoo_ticket",
       ok: true,
     };

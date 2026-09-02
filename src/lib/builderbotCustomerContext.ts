@@ -631,26 +631,30 @@ export async function customerRegisteredContextResponse(
     try {
       const {
         ensureUnregisteredPhoneAdvisorHandoff,
-        buildUnregisteredPhoneFirstHandoffMessage,
+        buildUnregisteredPhoneCustomerReply,
         UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+        buildUnregisteredPhoneWaitingAdvisorReply,
       } = await import("@/lib/unregisteredPhoneHandoff");
       const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, trimmed, {
         contactName: customer?.name ?? undefined,
         messageText: selectionText || undefined,
         source: "builderbot_context",
       });
-      if (handoff.shouldNotifyCustomer) {
-        nextFlow = "reply";
-        responseMessage = buildUnregisteredPhoneFirstHandoffMessage();
-        await persistCustomerBotReply(trimmed, UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY, {
-          source: "builderbot_context",
-          stage: "unregistered_first_handoff",
-        });
-      } else {
-        // Ya derivado: no reenviar mensaje (solo el aviso de pantalla una vez).
-        nextFlow = "ignore";
-        responseMessage = "";
-      }
+      // Siempre contestar: 1ª vez derivación; recontacto = ticket ya abierto + PDF.
+      nextFlow = "reply";
+      responseMessage = buildUnregisteredPhoneCustomerReply({
+        isFirstNotify: handoff.shouldNotifyCustomer,
+        ticketCode: handoff.ticket.code,
+      });
+      const persistText = handoff.shouldNotifyCustomer
+        ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
+        : buildUnregisteredPhoneWaitingAdvisorReply(handoff.ticket.code);
+      await persistCustomerBotReply(trimmed, persistText, {
+        source: "builderbot_context",
+        stage: handoff.shouldNotifyCustomer
+          ? "unregistered_first_handoff"
+          : "unregistered_waiting_handoff",
+      });
     } catch (e) {
       console.error("[builderbotCustomerContext] unregistered handoff:", e);
       // Fallback seguro: mismo texto canónico (import puede fallar arriba).

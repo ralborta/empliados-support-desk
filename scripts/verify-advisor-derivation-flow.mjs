@@ -39,7 +39,12 @@ assert.ok(
 );
 assert.ok(/gu[ií]a.*cargar un n[uú]mero nuevo/i.test(UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY));
 assert.ok(/agente|asesor/i.test(UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY));
-assert.equal(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY, "");
+assert.match(
+  UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+  /no está registrado/i,
+  "recontacto: siempre contesta (no silencio)",
+);
+assert.match(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY, /gu[ií]a/i);
 assert.equal(UNREGISTERED_PHONE_TICKET_TITLE, "Número no registrado en Wara");
 
 for (const msg of [
