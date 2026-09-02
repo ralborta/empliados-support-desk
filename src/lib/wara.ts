@@ -2574,7 +2574,7 @@ export function isMaintenanceFlowSuperseded(
   const current = normThreadText(String(currentText ?? "").trim());
   if (current) {
     if (
-      /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|que tal)$/.test(
+      /^(hola|buenas|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches)|hey|que tal)$/.test(
         current.replace(/\s+/g, " "),
       )
     ) {

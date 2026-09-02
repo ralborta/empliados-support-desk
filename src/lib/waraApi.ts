@@ -566,8 +566,8 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
   if (looksLikeOperationalIntent(t)) return false;
   const norm = normCompanyToken(t);
   if (
-    /^(inicio|volver|hola|buenas|menu|ayuda|si|no|confirmo|gracias|buenos dias|buenas tardes|buenas noches)$/.test(
-      norm
+    /^(inicio|volver|hola|buenas|menu|ayuda|si|no|confirmo|gracias|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches))$/.test(
+      norm,
     )
   ) {
     return false;
@@ -1906,11 +1906,13 @@ export function shouldSkipStrayMaintenanceRequest(
 
 export function looksLikeGreeting(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "")
-    .replace(/[!?.¡¿]+$/g, "")
+    .replace(/[,!?.¡¿]+$/g, "")
     .trim();
   if (!norm) return true;
-  return /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|que tal|menu|inicio)$/.test(
-    norm
+  // Bug real 2026-09-02: "Buen dia" (singular, sin tilde) NO matcheaba "buenos dias"
+  // → el router lo mandaba a búsqueda de unidad ("Unidad no encontrada «Buen dia»").
+  return /^(hola|buenas|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches)|hey|que tal|menu|inicio)(\s+(atilio|kira))?$/.test(
+    norm,
   );
 }
 

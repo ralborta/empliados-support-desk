@@ -55,6 +55,10 @@ console.log("— Cuerpo vacío (bug BBC) no debe repetir saludo operativo —");
 assert(looksLikeGreeting(""), "documenta: texto vacío = saludo (por eso hay que tratarlo aparte)");
 assert(looksLikeGreeting("Buenas tardes?"), "saludo con interrogación");
 assert(looksLikeGreeting("Hola!"), "saludo con exclamación");
+assert(looksLikeGreeting("Buen dia"), "bug 2026-09-02: Buen dia (singular) es saludo");
+assert(looksLikeGreeting("Buen día"), "Buen día con tilde es saludo");
+assert(looksLikeGreeting("buen dia!!"), "Buen dia con exclamación");
+assert(looksLikeGreeting("Buenos dias"), "Buenos dias plural");
 assert(!looksLikeGreeting("Buenas tardes, quiero el certificado"), "saludo + trámite no es solo saludo");
 
 console.log("— saludo no reabre horómetro pendiente —");
