@@ -93,7 +93,7 @@ const BASE_AGENT_TOOLS: OpenAiToolDef[] = [
     function: {
       name: "guia_informativa",
       description:
-        "Fuente de verdad para módulos Wara (Opciones, Unidades, Mantenimiento): cómo usar la app. Con «Mantenimiento» o cómo agendar, la tool ya trae el procedimiento completo — devolvilo tal cual, sin preguntar preventivo/correctivo ni configurar. Troubleshooting si no pudo cargar. Sin acciones en vivo. Con mantenimiento operativo deshabilitado, SIEMPRE esta tool — NUNCA inventes programar por chat ni pidas unidad para agendar.",
+        "Fuente de verdad para módulos Wara (Opciones, Unidades, Mantenimiento, Transporte Público / de pasajeros): cómo usar la app, conceptos y errores de pantalla. Con «Mantenimiento» o cómo agendar, la tool ya trae el procedimiento completo — devolvilo tal cual, sin preguntar preventivo/correctivo ni configurar. Con transporte de pasajeros / hoja de turno / servicios / paradas, SIEMPRE esta tool — NUNCA inventes que no hay info. Troubleshooting si no pudo cargar. Sin acciones en vivo. Con mantenimiento operativo deshabilitado, SIEMPRE esta tool — NUNCA inventes programar por chat ni pidas unidad para agendar.",
       parameters: { type: "object", properties: {} },
     },
   },

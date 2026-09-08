@@ -1971,7 +1971,7 @@ export function looksLikeRepeatGreetingInSession(
   );
 }
 
-export type InfoGuideModulePick = "opciones" | "unidades" | "mantenimiento";
+export type InfoGuideModulePick = "opciones" | "unidades" | "mantenimiento" | "transporte_publico";
 
 function normalizeInfoGuideModulePickText(text: string | undefined | null): string {
   return normCompanyToken(text ?? "")
@@ -1989,12 +1989,26 @@ export function parseInfoGuideModulePick(
   const n = normalizeInfoGuideModulePickText(text);
   if (!n) return null;
   if (/^(opciones|unidades|mantenimiento)$/.test(n)) return n as InfoGuideModulePick;
+  if (
+    /^(transporte( de pasajeros)?|transporte publico|modulo( de)? transporte( de pasajeros| publico)?)$/.test(
+      n,
+    )
+  ) {
+    return "transporte_publico";
+  }
   const modulo = n.match(/^modulo (de )?(opciones|unidades|mantenimiento)$/);
   if (modulo?.[2]) return modulo[2] as InfoGuideModulePick;
   const menu = n.match(
     /^(gestionar|consultar|ver|info|informacion|guia|ayuda)\s+(de\s+)?(opciones|unidades|mantenimiento)$/,
   );
   if (menu?.[3]) return menu[3] as InfoGuideModulePick;
+  if (
+    /^(gestionar|consultar|ver|info|informacion|guia|ayuda)\s+(de\s+)?transporte( de pasajeros| publico)?$/.test(
+      n,
+    )
+  ) {
+    return "transporte_publico";
+  }
   return null;
 }
 
@@ -2512,6 +2526,7 @@ export function buildAtilioHelpCapabilitiesReply(
     "• 📍 Estados GPS y reportes de unidades",
     "• 📋 Certificados de cobertura",
     "• 🔧 Agenda de mantenimientos",
+    "• 🚌 Transporte de pasajeros",
     "• 📱 Soporte sobre el uso de la app Wara",
     "",
     "Contame qué necesitás y lo vemos.",

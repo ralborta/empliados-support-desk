@@ -326,7 +326,7 @@ export function buildBriefServiceScopeConsultationReply(): string {
   return [
     "Sí, podés consultarme por acá.",
     "",
-    "Atiendo *GPS/reporte*, *odómetro/horómetro*, *certificados*, *mantenimiento* y *guías de Wara*.",
+    "Atiendo *GPS/reporte*, *odómetro/horómetro*, *certificados*, *mantenimiento*, *transporte de pasajeros* y *guías de Wara*.",
     "¿Sobre cuál?",
   ].join("\n");
 }
@@ -364,6 +364,7 @@ export function formatGreeting(input: {
     "• 📋 Certificado",
     "• 📍 GPS / reporte",
     "• 🔧 Mantenimiento",
+    "• 🚌 Transporte de pasajeros",
   );
   return body.join("\n");
 }
@@ -412,6 +413,7 @@ export function formatContinueConsult(input: {
     "• 📋 Certificado",
     "• 📍 GPS / reporte",
     "• 🔧 Mantenimiento",
+    "• 🚌 Transporte de pasajeros",
     "• 👨‍💼 Hablar con un asesor",
   );
   return lines.join("\n");

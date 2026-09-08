@@ -56,6 +56,7 @@ describe("waraWhatsAppFormat", () => {
     assert.match(msg, /Seguimos con \*El Cacique S\.A\.\*/);
     assert.match(msg, /Tenemos pendiente un odómetro/);
     assert.match(msg, /• 🛣 Odómetro/);
+    assert.match(msg, /• 🚌 Transporte de pasajeros/);
   });
 
   it("saludo con hilo previo igual presenta Soy Kira (no forma corta)", () => {

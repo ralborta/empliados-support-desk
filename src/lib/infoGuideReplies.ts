@@ -43,6 +43,17 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   ) {
     return "mantenimiento";
   }
+  if (
+    pick === "transporte" ||
+    pick === "transporte publico" ||
+    pick === "transporte de pasajeros" ||
+    pick === "modulo transporte" ||
+    pick === "modulo de transporte" ||
+    pick === "modulo de transporte publico" ||
+    pick === "modulo de transporte de pasajeros"
+  ) {
+    return "transporte_publico";
+  }
   const modulePick = parseInfoGuideModulePick(text);
   if (modulePick) return modulePick;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeTurnoOrAgendaQuestion(text)) {
@@ -51,6 +62,15 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   if (looksLikeUnidadesInfoRequest(text)) return "unidades";
   if (looksLikeMaintenanceAppGuideRequest(text) || looksLikeMaintenanceExplorationRequest(text)) {
     return "mantenimiento";
+  }
+  // Fallback léxico claro (si el intérprete LLM no corre o falla): no inventar "sin info".
+  const n = pick;
+  if (
+    /\btransporte\s+(public|de\s+pasajer)/.test(n) ||
+    /\b(hoja(s)?\s+de\s+turno|excepciones?\s+de\s+transporte)\b/.test(n) ||
+    (/\bmodulo\b/.test(n) && /\btransporte\b/.test(n))
+  ) {
+    return "transporte_publico";
   }
   return null;
 }
