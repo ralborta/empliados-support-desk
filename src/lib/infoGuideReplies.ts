@@ -13,8 +13,13 @@ import {
 } from "@/lib/waraApi";
 import { looksLikeOdometerInfoRequest } from "@/lib/wara";
 import { answerFromKnowledgeBase } from "@/lib/knowledgeBaseAI";
+import type { InfoGuideNeed, PlatformKnowledgeInterpret } from "@/lib/infoGuideInterpretAI";
+import {
+  buildPlatformGuideClarifyOrLimitMessage,
+  interpretPlatformKnowledgeTurn,
+} from "@/lib/infoGuideInterpretAI";
 
-export type InfoGuideKind = "opciones" | "unidades" | "mantenimiento";
+export type InfoGuideKind = "opciones" | "unidades" | "mantenimiento" | "transporte_publico";
 
 export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   const text = rawText.trim();
@@ -281,6 +286,12 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué paso puntual no te quedó claro (unidad, frecuencia, guardar, o atajos desde Unidades).",
     ].join("\n");
   }
+  if (detected === "transporte_publico") {
+    return [
+      "Ya te pasé esa parte de Transporte Público.",
+      "Decime qué punto puntual necesitás: concepto, un paso del procedimiento, o el error que ves en pantalla.",
+    ].join("\n");
+  }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
 }
 
@@ -304,10 +315,14 @@ export function buildInfoGuideReply(
   } else if (detected === "opciones") message = opcionesReply(rawText);
   else if (detected === "unidades") message = unidadesReply(rawText);
   else if (detected === "mantenimiento") message = mantenimientoReply(rawText);
-  else if (looksLikeMaintenanceLoadTrouble(rawText)) message = mantenimientoTroubleshootingReply();
+  else if (detected === "transporte_publico")
+    message = [
+      "Puedo ayudarte con Transporte Público: conceptos, servicios/POI, paradas, turnos, hojas de turno, excepciones, monitoreo o errores frecuentes.",
+      "Decime qué necesitás en una frase (sin asumir causas).",
+    ].join("\n");
   else
     message = [
-      "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
+      "Puedo guiarte sobre los módulos Opciones, Unidades, Mantenimiento o Transporte Público de Wara.",
       "Decime cuál te interesa o qué querés configurar.",
     ].join("\n");
 
@@ -343,11 +358,52 @@ export async function buildGroundedInfoGuideReply(
   kind?: InfoGuideKind | null,
   lastBotMessage?: string | null,
   threadText?: string,
+  interpret?: PlatformKnowledgeInterpret | null,
 ): Promise<string> {
-  const detected = kind ?? detectInfoGuideKind(rawText);
+  let detected = kind ?? detectInfoGuideKind(rawText);
+  let articleIds = interpret?.articleIds ?? [];
+  let need: InfoGuideNeed | null = interpret?.need ?? null;
+  let activeInterpret = interpret ?? null;
 
-  if (detected === "opciones" || detected === "unidades" || detected === "mantenimiento") {
-    const grounded = await answerFromKnowledgeBase(detected, rawText, threadText);
+  // Si no vino interpret del turn, interpretá acá (primera consulta / follow-up).
+  if (!activeInterpret) {
+    activeInterpret = await interpretPlatformKnowledgeTurn({
+      selectionText: rawText,
+      threadText,
+    });
+    if (activeInterpret?.guideKind) {
+      detected = activeInterpret.guideKind;
+      articleIds = activeInterpret.articleIds;
+      need = activeInterpret.need;
+    }
+  }
+
+  if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
+    return activeInterpret.clarifyQuestion;
+  }
+  if (
+    activeInterpret?.executionRequest &&
+    (detected === "transporte_publico" || activeInterpret.guideKind === "transporte_publico")
+  ) {
+    detected = "transporte_publico";
+    const execLimit = await answerFromKnowledgeBase("transporte_publico", rawText, threadText, {
+      articleIds: articleIds.length ? articleIds : ["tp-ejecucion-no-disponible"],
+      need: "execute",
+    });
+    if (execLimit) return execLimit;
+    return buildPlatformGuideClarifyOrLimitMessage(activeInterpret);
+  }
+
+  if (
+    detected === "opciones" ||
+    detected === "unidades" ||
+    detected === "mantenimiento" ||
+    detected === "transporte_publico"
+  ) {
+    const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
+      articleIds: detected === "transporte_publico" ? articleIds : undefined,
+      need,
+    });
     if (
       grounded &&
       !(detected === "mantenimiento" && looksLikeWeakMaintenanceGuideAnswer(grounded))
@@ -357,7 +413,42 @@ export async function buildGroundedInfoGuideReply(
       }
       return grounded;
     }
+    if (detected === "transporte_publico" && !grounded) {
+      return buildPlatformGuideClarifyOrLimitMessage(activeInterpret);
+    }
   }
 
   return buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
+}
+
+/** Resultado expuesto para evidencia / persistencia. */
+export async function buildGroundedInfoGuideReplyWithMeta(
+  rawText: string,
+  kind?: InfoGuideKind | null,
+  lastBotMessage?: string | null,
+  threadText?: string,
+  interpret?: PlatformKnowledgeInterpret | null,
+): Promise<{
+  message: string;
+  guideKind: InfoGuideKind | null;
+  interpret: PlatformKnowledgeInterpret | null;
+}> {
+  const active =
+    interpret ??
+    (await interpretPlatformKnowledgeTurn({
+      selectionText: rawText,
+      threadText,
+    }));
+  const guideKind =
+    (kind as InfoGuideKind | null | undefined) ??
+    active?.guideKind ??
+    detectInfoGuideKind(rawText);
+  const message = await buildGroundedInfoGuideReply(
+    rawText,
+    guideKind,
+    lastBotMessage,
+    threadText,
+    active,
+  );
+  return { message, guideKind, interpret: active };
 }

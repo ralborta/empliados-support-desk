@@ -1837,6 +1837,15 @@ export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null):
 export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
   const text = normCompanyToken(raw);
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)) return false;
+  // No confundir planilla de Transporte Público (hoja de turno / turnos de línea) con Agenda/Turnos de Opciones.
+  if (
+    /\bhoja(s)?\s+de\s+turno/.test(text) ||
+    /\btransporte\s+public/.test(text) ||
+    /\bexcepciones?\s+de\s+transporte\b/.test(text) ||
+    /\b(poi|paradas?|traza|kmz|regularidad)\b/.test(text)
+  ) {
+    return false;
+  }
   return /\b(turno|turnos|agenda)\b/.test(text);
 }
 

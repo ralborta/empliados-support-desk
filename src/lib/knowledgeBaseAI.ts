@@ -2,15 +2,21 @@ import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE, MANTENIMIENTO_KNOWLEDGE_BASE } from "@/lib/knowledgeBase";
 import { getBotPromptModule } from "@/lib/botPromptStore";
+import { buildTransporteKnowledgeContext } from "@/lib/transportePublicoKnowledge";
+import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
 // compacto de unidades), así que le damos algo más de margen que el timeout default
 // para no caer al fallback estático por una demora de red normal.
 const KNOWLEDGE_BASE_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 3_000;
 
-export type KnowledgeGuideKind = "opciones" | "unidades" | "mantenimiento";
+export type KnowledgeGuideKind =
+  | "opciones"
+  | "unidades"
+  | "mantenimiento"
+  | "transporte_publico";
 
-const KNOWLEDGE_BY_KIND: Record<KnowledgeGuideKind, string> = {
+const KNOWLEDGE_BY_KIND: Record<Exclude<KnowledgeGuideKind, "transporte_publico">, string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
   unidades: UNIDADES_KNOWLEDGE_BASE,
   mantenimiento: MANTENIMIENTO_KNOWLEDGE_BASE,
@@ -22,10 +28,11 @@ const KNOWLEDGE_BY_KIND: Record<KnowledgeGuideKind, string> = {
 // asistente ChatPDF de BuilderBot que quedó inutilizable al borrarse los flows (ver
 // docs/bbc-flows-eliminados-2026-07-22.md). Se reutilizan acá como prompt real: así lo
 // que se edite en ese panel vuelve a tener efecto en la respuesta real del bot.
-const PROMPT_MODULE_KEY_BY_KIND: Record<KnowledgeGuideKind, string> = {
+const PROMPT_MODULE_KEY_BY_KIND: Partial<Record<KnowledgeGuideKind, string>> = {
   opciones: "opciones_info",
   unidades: "unidades_info",
   mantenimiento: "mantenimiento_info",
+  // transporte_publico: sin módulo de panel aún → FALLBACK + reglas de transporte.
 };
 
 const FALLBACK_INSTRUCTIONS = `Sos Kira, el asistente de soporte de Wara por WhatsApp. Respondé la pregunta del
@@ -50,14 +57,40 @@ REGLAS DURAS para Mantenimiento (prioridad absoluta sobre cualquier instrucción
 - No lideres con consumo/rendimiento teórico salvo que lo pregunten.
 - No inventes pasos fuera del manual.`.trim();
 
+const TRANSPORTE_HARD_CONSTRAINTS = `
+REGLAS DURAS Transporte Público:
+- Usá SOLO los artículos provistos. No inventes pantallas, botones ni causas cerradas.
+- Forma según need: definition=breve; procedure=pasos pertinentes (no un manual entero);
+  troubleshoot=comprobaciones como hipótesis; ambiguous=una pregunta; execute=explicá límite de canal.
+- No presentes status future como disponible. Si status needs_validation, sé cauteloso.
+- No profundices en login, permisos de perfil, backoffice inicial ni roles del ente; solo el límite
+  indispensable y derivación.
+- Continuá el hilo («eso», feriado, ya lo hice) sin repetir pasos ya dados.
+- No pedís patente para una guía general de plataforma.
+- Nunca digas que creaste/guardaste algo en la cuenta.`.trim();
+
+function needStyleHint(need?: InfoGuideNeed | null): string {
+  if (!need) return "";
+  const map: Record<InfoGuideNeed, string> = {
+    definition: "Forma: definición breve (sin lista larga de pasos).",
+    procedure: "Forma: solo los pasos pertinentes a lo preguntado.",
+    troubleshoot: "Forma: comprobaciones concretas; distinguí hipótesis de hechos.",
+    execute: "Forma: reconocé el pedido de ejecución y el límite del canal; ofrecé guía o asesor.",
+    ambiguous: "Forma: una sola pregunta puntual para precisar.",
+  };
+  return map[need];
+}
+
 async function resolveInstructions(kind: KnowledgeGuideKind): Promise<string> {
   try {
     const moduleKey = PROMPT_MODULE_KEY_BY_KIND[kind];
-    const module = await getBotPromptModule(moduleKey);
-    const content = module?.content?.trim();
-    // Placeholder sin editar (buildModulePlaceholder) no aporta nada específico del
-    // módulo — mejor usar el fallback genérico que un texto vacío de instrucciones.
-    if (content && content.length > 200) return content;
+    if (moduleKey) {
+      const module = await getBotPromptModule(moduleKey);
+      const content = module?.content?.trim();
+      // Placeholder sin editar (buildModulePlaceholder) no aporta nada específico del
+      // módulo — mejor usar el fallback genérico que un texto vacío de instrucciones.
+      if (content && content.length > 200) return content;
+    }
   } catch {
     // Sigue con el fallback genérico (DB caída, módulo no sembrado, etc).
   }
@@ -77,17 +110,33 @@ export async function answerFromKnowledgeBase(
   kind: KnowledgeGuideKind,
   question: string,
   threadText?: string,
+  opts?: {
+    articleIds?: string[];
+    need?: InfoGuideNeed | null;
+  },
 ): Promise<string | null> {
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
-  const knowledge = KNOWLEDGE_BY_KIND[kind];
-  if (!knowledge || !question.trim()) return null;
+  if (!question.trim()) return null;
+
+  const knowledge =
+    kind === "transporte_publico"
+      ? buildTransporteKnowledgeContext(opts?.articleIds ?? [])
+      : KNOWLEDGE_BY_KIND[kind];
+  if (!knowledge?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const instructions = await resolveInstructions(kind);
 
-  const hardConstraints = kind === "mantenimiento" ? `\n\n${MANTENIMIENTO_HARD_CONSTRAINTS}` : "";
+  const hardConstraints =
+    kind === "mantenimiento"
+      ? `\n\n${MANTENIMIENTO_HARD_CONSTRAINTS}`
+      : kind === "transporte_publico"
+        ? `\n\n${TRANSPORTE_HARD_CONSTRAINTS}`
+        : "";
+  const needHint = needStyleHint(opts?.need);
 
   const system = `${instructions}${hardConstraints}
+${needHint ? `\n${needHint}` : ""}
 
 BASE DE CONOCIMIENTO (manual real de Wara, módulo ${kind}) — usá EXCLUSIVAMENTE esto para el contenido, nunca inventes algo que no esté acá:
 """
@@ -99,6 +148,8 @@ Formato de salida: texto plano de WhatsApp (sin markdown pesado, sin asteriscos 
   const user = JSON.stringify({
     pregunta: question,
     historial_reciente: (threadText ?? "").slice(-1500),
+    need: opts?.need ?? null,
+    articleIds: opts?.articleIds ?? null,
   });
 
   try {

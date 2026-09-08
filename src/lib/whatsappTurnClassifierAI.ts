@@ -32,6 +32,7 @@ import {
   looksLikeHorometerOnlyIntent,
 } from "@/lib/wara";
 import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
+import { isPlatformKbLlmInterpretEnabled } from "@/lib/infoGuideInterpretAI";
 
 const TURN_AI_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_CONFIDENCE = 0.78;
@@ -70,8 +71,10 @@ Ejecutores (elegí UNO):
 • info_guides — Preguntas INFORMATIVAS sobre CÓMO usar la plataforma Wara (manual/guía):
   módulo Opciones (agenda, contactos, perfiles, permisos, notificaciones, alertas),
   módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos verde/azul/rojo, crear grupo),
-  módulo Mantenimiento INFORMATIVO (qué es preventivo/correctivo, cómo funciona el módulo).
-  NO es info_guides si piden ejecutar/registrar/programar un trámite real.
+  módulo Mantenimiento INFORMATIVO (qué es preventivo/correctivo, cómo funciona el módulo),
+  módulo Transporte Público (hoja de turno, turnos, servicios/líneas, POI/etapas de recorrido,
+  paradas, traza KMZ, excepciones de feriado, monitoreo de viajes / colores de línea).
+  NO es info_guides si piden ejecutar/registrar/programar un trámite real ni consulta GPS live.
 
 • unidades — Consulta EN VIVO contra API Wara: listado de flota, cuántas unidades,
   GPS, ignición, voltaje, último reporte, si reporta/no reporta, offline, ubicación,
@@ -226,6 +229,27 @@ export async function resolveTurnExecutor(
       source: "safety_guard",
       ruleId: "explicit_odometer_horometer_start",
     };
+  }
+
+  // Guías de plataforma (incl. Transporte Público): interpretación LLM, no keywords.
+  if (isPlatformKbLlmInterpretEnabled()) {
+    const {
+      interpretPlatformKnowledgeTurn,
+      shouldRouteInterpretToInfoGuides,
+    } = await import("@/lib/infoGuideInterpretAI");
+    const kbInterpret = await interpretPlatformKnowledgeTurn({
+      selectionText,
+      threadText,
+      pendingActionType: pendingAction?.type ?? null,
+    });
+    if (shouldRouteInterpretToInfoGuides(kbInterpret)) {
+      return {
+        executor: "info_guides",
+        source: "ai",
+        aiConfidence: kbInterpret?.confidence,
+        ruleId: "platform_kb_llm_interpret",
+      };
+    }
   }
 
   if (isTurnAiClassifyEnabled()) {

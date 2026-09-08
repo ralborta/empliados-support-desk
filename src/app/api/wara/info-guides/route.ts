@@ -8,7 +8,8 @@ import {
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
-import { buildGroundedInfoGuideReply, detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import { buildGroundedInfoGuideReplyWithMeta, detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import type { PlatformKnowledgeInterpret } from "@/lib/infoGuideInterpretAI";
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
   looksLikeFlowControlCommand,
@@ -25,7 +26,13 @@ const bodySchema = z
     from: z.string().min(8).optional(),
     rawText: z.string().optional(),
     body: z.string().optional(),
-    guide: z.enum(["opciones", "unidades", "mantenimiento"]).optional(),
+    guide: z.enum(["opciones", "unidades", "mantenimiento", "transporte_publico"]).optional(),
+    articleIds: z.array(z.string()).optional(),
+    need: z
+      .enum(["definition", "procedure", "troubleshoot", "execute", "ambiguous"])
+      .optional(),
+    executionRequest: z.boolean().optional(),
+    clarifyQuestion: z.string().optional(),
     api_key: z.string().optional(),
     apiKey: z.string().optional(),
   })
@@ -149,12 +156,36 @@ export async function POST(req: NextRequest) {
     lastBotMessage(rawPhone),
     recentThreadTextForPhone(rawPhone),
   ]);
-  const message = await buildGroundedInfoGuideReply(rawText, kind ?? undefined, previousMessage, threadText);
+
+  const seededInterpret: PlatformKnowledgeInterpret | null =
+    parsed.data.guide || parsed.data.need || parsed.data.articleIds?.length
+      ? {
+          route: "info_guides",
+          guideKind: (parsed.data.guide as PlatformKnowledgeInterpret["guideKind"]) ?? null,
+          need: (parsed.data.need as PlatformKnowledgeInterpret["need"]) ?? "procedure",
+          articleIds: parsed.data.articleIds ?? [],
+          clarifyQuestion: parsed.data.clarifyQuestion?.trim() || null,
+          executionRequest: parsed.data.executionRequest === true,
+          confidence: 1,
+          reason: "seeded_from_turn",
+        }
+      : null;
+
+  const { message, guideKind, interpret } = await buildGroundedInfoGuideReplyWithMeta(
+    rawText,
+    kind ?? undefined,
+    previousMessage,
+    threadText,
+    seededInterpret,
+  );
 
   await appendOutboundBotMessage(rawPhone, message, {
     source: "wara_info_guides",
-    guideKind: kind ?? "general",
+    guideKind: guideKind ?? kind ?? "general",
     rawText,
+    interpretNeed: interpret?.need ?? null,
+    interpretArticles: interpret?.articleIds ?? [],
+    interpretReason: interpret?.reason ?? null,
   });
 
   return NextResponse.json(
@@ -162,7 +193,9 @@ export async function POST(req: NextRequest) {
       ok: true,
       ok_s: "true",
       message,
-      guideKind: kind ?? "",
+      guideKind: guideKind ?? kind ?? "",
+      interpretNeed: interpret?.need ?? "",
+      interpretArticles: interpret?.articleIds ?? [],
       informational: true,
       informational_s: "true",
       flowComplete_s: "true",

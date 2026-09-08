@@ -219,7 +219,7 @@ import {
   classifyOperationPrecedence,
   buildIncompatibleWriteForkReply,
 } from "@/lib/operationModuleAdapters";
-import { isExplicitUnitStatusQuery } from "@/lib/tramiteMeterPrecedence";
+import { isExplicitUnitStatusQuery, isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import {
   agentComposeRequested,
   parseExecutorDialogueState,
@@ -275,6 +275,11 @@ function executorBody(
     unitSearchText?: string;
     ephemeralOverlayRead?: boolean;
     utteranceAction?: string;
+    guide?: string;
+    articleIds?: string[];
+    need?: string;
+    executionRequest?: boolean;
+    clarifyQuestion?: string;
   },
 ): JsonRecord {
   return {
@@ -287,6 +292,11 @@ function executorBody(
     ...(extras?.unitSearchText ? { unitSearchText: extras.unitSearchText } : {}),
     ...(extras?.ephemeralOverlayRead ? { ephemeralOverlayRead: true } : {}),
     ...(extras?.utteranceAction ? { utteranceAction: extras.utteranceAction } : {}),
+    ...(extras?.guide ? { guide: extras.guide } : {}),
+    ...(extras?.articleIds?.length ? { articleIds: extras.articleIds } : {}),
+    ...(extras?.need ? { need: extras.need } : {}),
+    ...(extras?.executionRequest != null ? { executionRequest: extras.executionRequest } : {}),
+    ...(extras?.clarifyQuestion ? { clarifyQuestion: extras.clarifyQuestion } : {}),
   };
 }
 
@@ -301,6 +311,11 @@ async function invokeExecutor(
     unitSearchText?: string;
     ephemeralOverlayRead?: boolean;
     utteranceAction?: string;
+    guide?: string;
+    articleIds?: string[];
+    need?: string;
+    executionRequest?: boolean;
+    clarifyQuestion?: string;
   },
 ): Promise<JsonRecord> {
   const handler = EXECUTOR_HANDLERS[executor];
@@ -1487,6 +1502,48 @@ export async function runTurnExecutorPhase(params: {
         executor: typedLateralKind === "gps_unit_status" ? "unidades" : "info_guides",
         ok: lateralOk,
       };
+    }
+  }
+
+  // Pregunta informativa de plataforma durante trámite: overlay LLM (no confirma ni cancela).
+  if (
+    hasPendingWrite &&
+    tramiteAllowsTypedLateralOverlay(thread, pendingAction) &&
+    !typedLateralKind &&
+    !isOperationalMeterCollectionMessage(selectionText, thread)
+  ) {
+    const { interpretPlatformKnowledgeTurn, shouldRouteInterpretToInfoGuides } = await import(
+      "@/lib/infoGuideInterpretAI"
+    );
+    const kbInterpret = await interpretPlatformKnowledgeTurn({
+      selectionText,
+      threadText: thread,
+      pendingActionType: pendingAction?.type ?? null,
+    });
+    if (
+      kbInterpret &&
+      shouldRouteInterpretToInfoGuides(kbInterpret) &&
+      kbInterpret.need !== "execute" &&
+      !isOperationalMeterCollectionMessage(selectionText, thread)
+    ) {
+      const interference = decidePendingWriteInterference({
+        hasPendingWrite,
+        incomingActionRisk: "read",
+        incomingMatchesExpectedField: false,
+      });
+      if (interference === "overlay_read_keep_pending" || interference === "normal_route") {
+        const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
+          guide: kbInterpret.guideKind ?? undefined,
+          articleIds: kbInterpret.articleIds,
+          need: kbInterpret.need,
+          executionRequest: kbInterpret.executionRequest,
+          clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
+        });
+        const msg = messageFromPayload(execResult);
+        if (msg) {
+          return { message: msg, executor: "info_guides", ok: true };
+        }
+      }
     }
   }
 
