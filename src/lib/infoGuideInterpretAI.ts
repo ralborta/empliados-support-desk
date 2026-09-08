@@ -65,7 +65,8 @@ Devolvé SOLO JSON válido:
 }
 
 route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (Opciones, Unidades, Mantenimiento informativo, Transporte Público).
-route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado a emitir, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa.
+route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa.
+NUNCA route=info_guides para "necesito un certificado", "certificado de cobertura", "mandame el certificado".
 
 need:
 - definition: qué es X

@@ -231,7 +231,8 @@ export async function resolveTurnExecutor(
     };
   }
 
-  // Guías de plataforma (incl. Transporte Público): interpretación LLM, no keywords.
+  // Transporte Público: las reglas lo mandan a "unidades" por defecto.
+  // El intérprete KB solo puede robar ese default — NUNCA certificados/odómetro/asesor.
   if (isPlatformKbLlmInterpretEnabled()) {
     const {
       interpretPlatformKnowledgeTurn,
@@ -242,13 +243,19 @@ export async function resolveTurnExecutor(
       threadText,
       pendingActionType: pendingAction?.type ?? null,
     });
-    if (shouldRouteInterpretToInfoGuides(kbInterpret)) {
-      return {
-        executor: "info_guides",
-        source: "ai",
-        aiConfidence: kbInterpret?.confidence,
-        ruleId: "platform_kb_llm_interpret",
-      };
+    if (
+      shouldRouteInterpretToInfoGuides(kbInterpret) &&
+      kbInterpret?.guideKind === "transporte_publico"
+    ) {
+      const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
+      if (rulesExecutor === "unidades" || rulesExecutor === "info_guides") {
+        return {
+          executor: "info_guides",
+          source: "ai",
+          aiConfidence: kbInterpret?.confidence,
+          ruleId: "platform_kb_llm_interpret",
+        };
+      }
     }
   }
 

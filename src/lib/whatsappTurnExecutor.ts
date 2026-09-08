@@ -2573,26 +2573,36 @@ export async function runTurnExecutorPhase(params: {
   // KB de plataforma (incl. Transporte Público): ANTES del agente.
   // Con WARA_AGENT_MODE el LLM improvisaba "no tengo info" sin llamar guia_informativa
   // (bug prod 2026-09-08: "módulo de transporte de pasajeros").
+  // No pisar trámites operativos que las reglas ya resolvieron (cert/odo/asesor).
   if (!isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread)) {
     const { interpretPlatformKnowledgeTurn, shouldRouteInterpretToInfoGuides } = await import(
       "@/lib/infoGuideInterpretAI"
     );
+    const { classifyTurnExecutor } = await import("@/lib/whatsappTurnRouter");
     const kbInterpret = await interpretPlatformKnowledgeTurn({
       selectionText,
       threadText: threadCtx.classificationThread,
       pendingActionType: pendingAction?.type ?? null,
     });
     if (kbInterpret && shouldRouteInterpretToInfoGuides(kbInterpret)) {
-      const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
-        guide: kbInterpret.guideKind ?? undefined,
-        articleIds: kbInterpret.articleIds,
-        need: kbInterpret.need,
-        executionRequest: kbInterpret.executionRequest,
-        clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
-      });
-      const msg = messageFromPayload(execResult);
-      if (msg) {
-        return { message: msg, executor: "info_guides", ok: true };
+      const rulesExecutor = classifyTurnExecutor(
+        selectionText,
+        threadCtx.classificationThread,
+        pendingAction,
+      );
+      const hardOps = new Set(["certificados", "odometro", "odoo_ticket"]);
+      if (!hardOps.has(rulesExecutor)) {
+        const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
+          guide: kbInterpret.guideKind ?? undefined,
+          articleIds: kbInterpret.articleIds,
+          need: kbInterpret.need,
+          executionRequest: kbInterpret.executionRequest,
+          clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
+        });
+        const msg = messageFromPayload(execResult);
+        if (msg) {
+          return { message: msg, executor: "info_guides", ok: true };
+        }
       }
     }
   }
