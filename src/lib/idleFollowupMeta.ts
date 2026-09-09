@@ -42,20 +42,120 @@ function hasOperationalPayload(raw: string): boolean {
   return looksLikeOperationalIntent(raw);
 }
 
+/** Menú de capacidades del saludo (lista Odómetro/Certificado/GPS/…) — no es tema activo. */
+function looksLikeCapabilityMenuSnippet(text: string): boolean {
+  const t = normIdleText(text);
+  if (!t) return false;
+  if (/\ben que te ayudo\b/.test(t) || /\ben que te puedo ayudar\b/.test(t)) return true;
+  const bullets = [
+    /\bcertificad/,
+    /\b(odometro|horometro)/,
+    /\b(gps|reporte)\b/,
+    /\bmantenim/,
+    /\btransporte\s+de\s+pasajer/,
+  ].filter((re) => re.test(t)).length;
+  return bullets >= 3;
+}
+
+/** Últimos mensajes del bot previos al idle, excluyendo menús de capacidades. */
+function recentBotContentBeforeIdle(threadText: string): string {
+  const pre = threadTextBeforeIdleOutbound(threadText);
+  const lines = pre.split("\n");
+  const botChunks: string[] = [];
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim() ?? "";
+    if (!/^(Atilio|Kira|BOT|Bot):/i.test(line)) continue;
+    const content = line.replace(/^(Atilio|Kira|BOT|Bot):\s*/i, "").trim();
+    if (!content) continue;
+    if (looksLikeCapabilityMenuSnippet(content)) continue;
+    const norm = normIdleText(content);
+    if (norm.includes(IDLE_CLOSE_NEEDLE) || norm.includes(IDLE_NUDGE_NEEDLE)) continue;
+    botChunks.push(content);
+    if (botChunks.join("\n").length > 900 || botChunks.length >= 4) break;
+  }
+  return botChunks.reverse().join("\n");
+}
+
+function looksLikeDeepenGuideCue(raw: string | undefined | null): boolean {
+  const t = normIdleText(String(raw ?? ""));
+  if (!t || t.length > 160) return false;
+  return (
+    /\b(contame|cuentame|decime|explica(me)?|amplia(me)?|profundiza)\s+(mas|m[aá]s|un poco)?\b/.test(
+      t,
+    ) ||
+    /\b(mas|m[aá]s)\s+(info|informacion|detalle|detalles)\b/.test(t) ||
+    /\bque\s+mas\b/.test(t)
+  );
+}
+
+/**
+ * Tema activo real para retomar tras idle.
+ * NUNCA usar el menú de saludo (ahí aparece «Certificado» y ensucia el hint).
+ */
 function inferIdleTopicHint(threadText: string): string | null {
-  const pre = normIdleText(threadTextBeforeIdleOutbound(threadText));
-  if (/\bcertificad\w*\b/.test(pre)) {
+  const recent = normIdleText(recentBotContentBeforeIdle(threadText));
+  if (!recent) return null;
+
+  // Guías informativas (prioridad: lo último que el bot explicó).
+  if (
+    /\btransporte\s+de\s+pasajer/.test(recent) ||
+    /\bhoja(s)?\s+de\s+turno\b/.test(recent) ||
+    (/\b(servicio|paradas?|turnos?|poi|gtfs|recorrido)\b/.test(recent) &&
+      /\b(transporte|pasajer|linea|l[ií]nea)\b/.test(recent))
+  ) {
+    return "Seguimos con Transporte de pasajeros. Decime qué punto querés: conceptos, hoja de turno, paradas, servicios o el error que ves.";
+  }
+  if (/\bhojas?\s+de\s+ruta\b/.test(recent) || /utilidades\s*[→>\-]\s*hojas de ruta/.test(recent)) {
+    return "Seguimos con Hojas de ruta. Decime qué punto querés: alta, predefinidas, puntos, calendario o cargas/descargas.";
+  }
+  if (
+    /\bcisternas?\b/.test(recent) ||
+    (/\btanque\b/.test(recent) && /\b(deposito|dep[oó]sito|base)\b/.test(recent))
+  ) {
+    return "Seguimos con Cisternas. Decime si necesitás alta, carga, medición o informes.";
+  }
+  if (
+    /\b(tickets?\s+de\s+combustible|panel(es)?\s*[→>]?\s*combustible|validaci[oó]n de cargas)\b/.test(
+      recent,
+    )
+  ) {
+    return "Seguimos con Combustible. Decime si es tickets, validación, panel o informes.";
+  }
+  if (
+    /\bmantenim\w*\b/.test(recent) &&
+    /\b(utilidades|plan|preventiv|correctiv|tarea|paso a paso|como\s+(cargar|agendar|programar))\b/.test(
+      recent,
+    )
+  ) {
+    return "Seguimos con la guía de Mantenimiento. Decime qué punto querés profundizar.";
+  }
+
+  // Trámites: solo si el bot pidió dato / está en flujo (no por palabra suelta del menú).
+  if (
+    /\bcertificad\w*\b/.test(recent) &&
+    /\b(patente|unidad|cobertura|pasame|necesito|emit|constancia)\b/.test(recent)
+  ) {
     return "Seguimos con el certificado. Pasame la patente o unidad.";
   }
-  if (/\b(odometro|horometro|kilometr\w*|horas?\s+de\s+lectura)\b/.test(pre)) {
+  if (
+    /\b(odometro|horometro)\b/.test(recent) &&
+    /\b(patente|unidad|kilometr|hora|pasame|necesito|lectura|fecha)\b/.test(recent)
+  ) {
     return "Seguimos con el odómetro/horómetro. Decime la unidad o el dato que faltaba.";
   }
-  if (/\bmantenim\w*\b/.test(pre)) {
+  if (
+    /\bmantenim\w*\b/.test(recent) &&
+    /\b(patente|unidad|preventiv|correctiv|pasame|necesito)\b/.test(recent)
+  ) {
     return "Seguimos con el mantenimiento. Decime la patente y si es preventivo o correctivo.";
   }
-  if (/\b(gps|reporte|ubicacion|posicion|flota|unidad)\b/.test(pre)) {
+  if (
+    /\b(gps|reporte|ubicacion|posicion)\b/.test(recent) &&
+    /\b(patente|unidad|estado|pasame|necesito|flota)\b/.test(recent)
+  ) {
     return "Seguimos con la consulta de unidad/GPS. Contame la patente o qué necesitás revisar.";
   }
+
   return null;
 }
 
@@ -158,6 +258,7 @@ export function threadTextBeforeIdleOutbound(threadText: string): string {
 function formatContinuityStep(
   threadText: string,
   pendingAction?: PendingActionRecord | null,
+  selectionText?: string | null,
 ): string {
   const preIdle = threadTextBeforeIdleOutbound(threadText);
   const resume = buildInconclusiveTramiteResumePrompt(
@@ -168,8 +269,15 @@ function formatContinuityStep(
     .replace(/^¿Seguimos\?\s*/i, "")
     .replace(/^¿Seguimos con/i, "Seguimos con")
     .replace(/^¿Seguimos/i, "Seguimos");
+
+  // Sin trámite activo: retomar guía/tema real del hilo (nunca el menú de saludo).
   if (/Seguimos con lo que estábamos haciendo/.test(normalized)) {
-    return inferIdleTopicHint(threadText) ?? normalized;
+    const topic = inferIdleTopicHint(threadText);
+    if (topic) return topic;
+    if (looksLikeDeepenGuideCue(selectionText)) {
+      return "Contame qué punto querés que profundice de lo que estábamos viendo.";
+    }
+    return "¿En qué seguimos? Contame qué necesitás.";
   }
   return normalized;
 }
@@ -211,10 +319,18 @@ export function buildIdleFollowupPushbackReply(params: {
 
 export function buildMetaConversationalContinuityReply(
   threadText: string,
-  opts?: { customerFirstName?: string | null; pendingAction?: PendingActionRecord | null },
+  opts?: {
+    customerFirstName?: string | null;
+    pendingAction?: PendingActionRecord | null;
+    selectionText?: string | null;
+  },
 ): string {
   const prefix = formatIdleMetaCustomerPrefix(opts?.customerFirstName);
-  const step = formatContinuityStep(threadText, opts?.pendingAction);
+  const step = formatContinuityStep(
+    threadText,
+    opts?.pendingAction,
+    opts?.selectionText,
+  );
 
   if (threadLastBotOutboundWasIdleClose(threadText)) {
     return `${prefix}${step}`;
@@ -222,7 +338,7 @@ export function buildMetaConversationalContinuityReply(
   if (threadLastBotOutboundWasIdleNudge(threadText)) {
     return `${prefix}${/^Seguimos/i.test(step) ? `Perfecto, ${step}` : `Perfecto, seguimos. ${step}`}`;
   }
-  if (step && !/^Seguimos con lo que/.test(step)) {
+  if (step && !/^Seguimos con lo que/.test(step) && !/^¿En qué seguimos/i.test(step)) {
     return `${prefix}${/^Seguimos/i.test(step) ? `Dale, ${step}` : `Dale, seguimos. ${step}`}`;
   }
   return `${prefix}Dale, seguimos. ¿En qué te ayudo?`;
@@ -273,6 +389,7 @@ export function resolveIdleFollowupMetaTurn(params: {
       message: buildMetaConversationalContinuityReply(threadText, {
         customerFirstName,
         pendingAction,
+        selectionText,
       }),
     };
   }

@@ -195,7 +195,9 @@ describe("resolveIdleFollowupMetaTurn (integración)", () => {
     });
     assert.ok(turn);
     assert.equal(turn?.idlePushback, false);
-    assert.match(turn!.message, /Perfecto, Seguimos/i);
+    assert.match(turn!.message, /Perfecto, seguimos/i);
+    // Menú genérico no debe inventar trámite.
+    assert.doesNotMatch(turn!.message, /Pasame la patente/i);
   });
 
   it("texto normal sin idle → null (router/agente)", () => {
@@ -207,6 +209,31 @@ describe("resolveIdleFollowupMetaTurn (integración)", () => {
       null,
     );
   });
+
+  it("bug Emii: menú+TP+nudge+«cuéntame más» NO salta a certificado", () => {
+    const thread = [
+      "Atilio: ¿En qué te ayudo?",
+      "Atilio: • Odómetro / horómetro",
+      "Atilio: • Certificado",
+      "Atilio: • GPS / reporte",
+      "Atilio: • Mantenimiento",
+      "Atilio: • Transporte de pasajeros",
+      "Cliente: Transporte de pasajeros",
+      "Atilio: El servicio de Transporte de pasajeros te permite gestionar rutas, horarios y el cumplimiento del servicio en tiempo real. Se apoya en tres pilares: el servicio, el turno y la hoja de turno.",
+      `Atilio: ${IDLE_NUDGE_MESSAGE}`,
+    ].join("\n");
+    const turn = resolveIdleFollowupMetaTurn({
+      selectionText: "Sigo acá, cuéntame mas",
+      threadText: thread,
+      customerFirstName: "Emii",
+    });
+    assert.ok(turn);
+    assert.equal(turn?.idlePushback, false);
+    assert.match(turn!.message, /Emii,/);
+    assert.match(turn!.message, /Transporte de pasajeros/i);
+    assert.doesNotMatch(turn!.message, /certificado/i);
+    assert.doesNotMatch(turn!.message, /Pasame la patente/i);
+  });
 });
 
 describe("buildMetaConversationalContinuityReply", () => {
@@ -217,5 +244,17 @@ describe("buildMetaConversationalContinuityReply", () => {
     ].join("\n");
     const reply = buildMetaConversationalContinuityReply(thread);
     assert.match(reply, /certificado/i);
+  });
+
+  it("menú de capacidades solo → pregunta en qué seguir, no certificado", () => {
+    const thread = [
+      "Atilio: ¿En qué te ayudo?\n• Odómetro / horómetro\n• Certificado\n• GPS / reporte\n• Mantenimiento\n• Transporte de pasajeros",
+      `Atilio: ${IDLE_NUDGE_MESSAGE}`,
+    ].join("\n");
+    const reply = buildMetaConversationalContinuityReply(thread, {
+      selectionText: "Sigo acá",
+    });
+    assert.doesNotMatch(reply, /certificado/i);
+    assert.match(reply, /En qué seguimos|En qué te ayudo|qué necesitás/i);
   });
 });
