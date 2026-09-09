@@ -94,7 +94,6 @@ const PUSH_SUITES = [
   "verify-transporte-publico-kb.mjs",
   "verify-cisternas-kb.mjs",
   "verify-combustible-kb.mjs",
-  "verify-hojas-ruta-kb.mjs",
   "verify-mantenimiento-kb.mjs",
   "verify-hojas-ruta-kb.mjs",
   "verify-mesa-entrada-advisor.mjs",
