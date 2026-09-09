@@ -27,7 +27,15 @@ const bodySchema = z
     rawText: z.string().optional(),
     body: z.string().optional(),
     guide: z
-      .enum(["opciones", "unidades", "mantenimiento", "transporte_publico", "cisternas", "combustible"])
+      .enum([
+        "opciones",
+        "unidades",
+        "mantenimiento",
+        "transporte_publico",
+        "cisternas",
+        "combustible",
+        "hojas_de_ruta",
+      ])
       .optional(),
     articleIds: z.array(z.string()).optional(),
     need: z
@@ -155,12 +163,16 @@ export async function POST(req: NextRequest) {
 
   const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
   const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
+  const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
   const requestedGuide = parsed.data.guide;
   const cisternasGuideIgnored =
     requestedGuide === "cisternas" && !isCisternasKbEnabled();
   const combustibleGuideIgnored =
     requestedGuide === "combustible" && !isCombustibleKbEnabled();
-  const optInGuideIgnored = cisternasGuideIgnored || combustibleGuideIgnored;
+  const hojasRutaGuideIgnored =
+    requestedGuide === "hojas_de_ruta" && !isHojasRutaKbEnabled();
+  const optInGuideIgnored =
+    cisternasGuideIgnored || combustibleGuideIgnored || hojasRutaGuideIgnored;
   const guide = optInGuideIgnored ? undefined : requestedGuide;
   const kind = guide ?? detectInfoGuideKind(rawText);
   const [previousMessage, threadText] = await Promise.all([
@@ -173,7 +185,9 @@ export async function POST(req: NextRequest) {
     ? "cisternas_flag_off_ignored_guide"
     : combustibleGuideIgnored
       ? "combustible_flag_off_ignored_guide"
-      : null;
+      : hojasRutaGuideIgnored
+        ? "hojas_ruta_flag_off_ignored_guide"
+        : null;
   const seededInterpret: PlatformKnowledgeInterpret | null =
     guide ||
     parsed.data.need ||
@@ -214,7 +228,9 @@ export async function POST(req: NextRequest) {
       ? "cisternas_flag_off"
       : combustibleGuideIgnored && !grounded.fallback
         ? "combustible_flag_off"
-        : grounded.fallback;
+        : hojasRutaGuideIgnored && !grounded.fallback
+          ? "hojas_ruta_flag_off"
+          : grounded.fallback;
 
   const { logPlatformKbTurn } = await import("@/lib/infoGuideInterpretAI");
   logPlatformKbTurn({

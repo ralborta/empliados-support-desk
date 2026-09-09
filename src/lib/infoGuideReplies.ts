@@ -21,6 +21,7 @@ import {
 } from "@/lib/infoGuideInterpretAI";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
+import { isHojasRutaKbEnabled } from "@/lib/hojasRutaKnowledge";
 
 export type InfoGuideKind =
   | "opciones"
@@ -28,7 +29,8 @@ export type InfoGuideKind =
   | "mantenimiento"
   | "transporte_publico"
   | "cisternas"
-  | "combustible";
+  | "combustible"
+  | "hojas_de_ruta";
 
 export type InfoGuideFallback =
   | null
@@ -37,7 +39,8 @@ export type InfoGuideFallback =
   | "static_kind"
   | "repeat"
   | "cisternas_flag_off"
-  | "combustible_flag_off";
+  | "combustible_flag_off"
+  | "hojas_ruta_flag_off";
 
 function sanitizeOptInGuideKind(
   kind: InfoGuideKind | null | undefined,
@@ -45,6 +48,7 @@ function sanitizeOptInGuideKind(
   if (!kind) return null;
   if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
   if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
+  if (kind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) return null;
   return kind;
 }
 
@@ -99,6 +103,16 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
       pick === "modulo de combustible")
   ) {
     return "combustible";
+  }
+  if (
+    isHojasRutaKbEnabled() &&
+    (pick === "hojas de ruta" ||
+      pick === "hoja de ruta" ||
+      pick === "modulo hojas de ruta" ||
+      pick === "modulo de hojas de ruta" ||
+      pick === "modulo hoja de ruta")
+  ) {
+    return "hojas_de_ruta";
   }
   const modulePick = parseInfoGuideModulePick(text);
   if (modulePick) return modulePick;
@@ -382,6 +396,12 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué punto puntual necesitás: tickets, validación, panel, informes o permisos.",
     ].join("\n");
   }
+  if (detected === "hojas_de_ruta") {
+    return [
+      "Ya te pasé esa parte de Hojas de ruta.",
+      "Decime qué punto puntual: alta, predefinida, puntos, calendario, cargas/descargas o un error de pantalla.",
+    ].join("\n");
+  }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
 }
 
@@ -394,6 +414,7 @@ export function buildInfoGuideReply(
   let detected = kind ?? detectInfoGuideKind(rawText);
   if (detected === "cisternas" && !isCisternasKbEnabled()) detected = null;
   if (detected === "combustible" && !isCombustibleKbEnabled()) detected = null;
+  if (detected === "hojas_de_ruta" && !isHojasRutaKbEnabled()) detected = null;
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
   else if (looksLikeOdometerInfoRequest(rawText)) message = buildOdometerInfoExplanation(rawText);
@@ -423,6 +444,12 @@ export function buildInfoGuideReply(
       "Te puedo orientar con el módulo Combustible: tickets, pegado masivo, validación de cargas, panel, informes o permisos.",
       "Decime en una frase qué necesitás y te detallo ese punto.",
       "No confundas Combustible (unidad/tickets) con Cisternas (tanque de depósito).",
+    ].join("\n");
+  else if (detected === "hojas_de_ruta")
+    message = [
+      "Te puedo orientar con Hojas de ruta: listado, alta, predefinidas, puntos/traza, calendario o cargas/descargas de viaje.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "No confundas hoja de ruta con hoja de turno (Transporte de Pasajeros).",
     ].join("\n");
   else
     message = [
@@ -519,6 +546,17 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     articleIds = [];
     fallback = "combustible_flag_off";
   }
+  if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "hojas_ruta_flag_off",
+    };
+    articleIds = [];
+    fallback = "hojas_ruta_flag_off";
+  }
 
   if (!activeInterpret) {
     activeInterpret = await interpretPlatformKnowledgeTurn({
@@ -546,6 +584,16 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       reason: "combustible_flag_off",
     };
     fallback = "combustible_flag_off";
+  }
+  if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: "hojas_ruta_flag_off",
+    };
+    fallback = "hojas_ruta_flag_off";
   }
 
   if (!detected) {
@@ -577,6 +625,15 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       fallback: "combustible_flag_off",
     };
   }
+  if (kind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
+    return {
+      message,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: "hojas_ruta_flag_off",
+    };
+  }
 
   if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
     return {
@@ -595,6 +652,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       activeInterpret.guideKind === "cisternas" ||
       detected === "combustible" ||
       activeInterpret.guideKind === "combustible" ||
+      detected === "hojas_de_ruta" ||
+      activeInterpret.guideKind === "hojas_de_ruta" ||
       detected === "mantenimiento" ||
       activeInterpret.guideKind === "mantenimiento")
   ) {
@@ -658,6 +717,36 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: "clarify_or_limit",
       };
     }
+    if (detected === "hojas_de_ruta" || activeInterpret.guideKind === "hojas_de_ruta") {
+      if (!isHojasRutaKbEnabled()) {
+        return {
+          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
+          guideKind: null,
+          interpret: activeInterpret,
+          fallback: "hojas_ruta_flag_off",
+        };
+      }
+      detected = "hojas_de_ruta";
+      const execIds = articleIds.length ? articleIds : ["hr-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("hojas_de_ruta", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "hojas_de_ruta",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "hojas_de_ruta",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     if (detected === "mantenimiento" || activeInterpret.guideKind === "mantenimiento") {
       detected = "mantenimiento";
       const execIds = articleIds.length ? articleIds : ["mt-ejecucion-no-disponible"];
@@ -707,13 +796,15 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     detected === "mantenimiento" ||
     detected === "transporte_publico" ||
     (detected === "cisternas" && isCisternasKbEnabled()) ||
-    (detected === "combustible" && isCombustibleKbEnabled())
+    (detected === "combustible" && isCombustibleKbEnabled()) ||
+    (detected === "hojas_de_ruta" && isHojasRutaKbEnabled())
   ) {
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
       articleIds:
         detected === "transporte_publico" ||
         detected === "cisternas" ||
         detected === "combustible" ||
+        detected === "hojas_de_ruta" ||
         detected === "mantenimiento"
           ? articleIds
           : undefined,
@@ -742,6 +833,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       (detected === "transporte_publico" ||
         detected === "cisternas" ||
         detected === "combustible" ||
+        detected === "hojas_de_ruta" ||
         detected === "mantenimiento") &&
       !grounded
     ) {

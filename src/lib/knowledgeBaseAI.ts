@@ -5,6 +5,7 @@ import { getBotPromptModule } from "@/lib/botPromptStore";
 import { buildTransporteKnowledgeContext } from "@/lib/transportePublicoKnowledge";
 import { buildCisternasKnowledgeContext } from "@/lib/cisternasKnowledge";
 import { buildCombustibleKnowledgeContext } from "@/lib/combustibleKnowledge";
+import { buildHojasRutaKnowledgeContext } from "@/lib/hojasRutaKnowledge";
 import { buildMantenimientoKnowledgeContext } from "@/lib/mantenimientoKnowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
@@ -19,7 +20,8 @@ export type KnowledgeGuideKind =
   | "mantenimiento"
   | "transporte_publico"
   | "cisternas"
-  | "combustible";
+  | "combustible"
+  | "hojas_de_ruta";
 
 const KNOWLEDGE_BY_KIND: Record<"opciones" | "unidades", string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
@@ -95,6 +97,16 @@ REGLAS DURAS Combustible:
 - Nunca digas que cargaste tickets ni generaste informes en la cuenta.
 - Continuá el hilo sin repetir todo el manual.`.trim();
 
+const HOJAS_RUTA_HARD_CONSTRAINTS = `
+REGLAS DURAS Hojas de ruta:
+- Usá SOLO los artículos hr-* provistos. No inventes pantallas, botones ni significados no confirmados.
+- Hojas de ruta = Utilidades → Hojas de ruta (listado, predefinidas, calendario, cargas/descargas de VIAJE, puntos/traza). NO es “hoja de turno” (Transporte Público / pasajeros).
+- Gestión de cargas/descargas de viaje ≠ tickets Combustible de unidad ≠ Cisternas (depósito) ≠ Remitos/Stock.
+- Respetá restrictions (§10): AE INICIO/FIN, Actualizar números, descarga remota, etc. — si preguntan eso, decí que el manual no lo confirma; NUNCA inventes.
+- Forma según need; execute = límite de canal (hr-ejecucion-no-disponible).
+- Nunca digas que creaste/pegaste/enviaste planificación en la cuenta.
+- Continuá el hilo sin repetir todo el manual.`.trim();
+
 function needStyleHint(need?: InfoGuideNeed | null): string {
   if (!need) return "";
   const map: Record<InfoGuideNeed, string> = {
@@ -151,6 +163,10 @@ export async function answerFromKnowledgeBase(
     const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
     if (!isCombustibleKbEnabled()) return null;
   }
+  if (kind === "hojas_de_ruta") {
+    const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
+    if (!isHojasRutaKbEnabled()) return null;
+  }
 
   const knowledge =
     kind === "transporte_publico"
@@ -159,9 +175,11 @@ export async function answerFromKnowledgeBase(
         ? buildCisternasKnowledgeContext(opts?.articleIds ?? [])
         : kind === "combustible"
           ? buildCombustibleKnowledgeContext(opts?.articleIds ?? [])
-          : kind === "mantenimiento"
-            ? buildMantenimientoKnowledgeContext(opts?.articleIds ?? [])
-            : KNOWLEDGE_BY_KIND[kind];
+          : kind === "hojas_de_ruta"
+            ? buildHojasRutaKnowledgeContext(opts?.articleIds ?? [])
+            : kind === "mantenimiento"
+              ? buildMantenimientoKnowledgeContext(opts?.articleIds ?? [])
+              : KNOWLEDGE_BY_KIND[kind];
   if (!knowledge?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -176,7 +194,9 @@ export async function answerFromKnowledgeBase(
           ? `\n\n${CISTERNAS_HARD_CONSTRAINTS}`
           : kind === "combustible"
             ? `\n\n${COMBUSTIBLE_HARD_CONSTRAINTS}`
-            : "";
+            : kind === "hojas_de_ruta"
+              ? `\n\n${HOJAS_RUTA_HARD_CONSTRAINTS}`
+              : "";
   const needHint = needStyleHint(opts?.need);
 
   const system = `${instructions}${hardConstraints}

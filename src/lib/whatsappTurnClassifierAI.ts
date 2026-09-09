@@ -240,6 +240,7 @@ export async function resolveTurnExecutor(
     } = await import("@/lib/infoGuideInterpretAI");
     const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
     const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
+    const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
     const kbInterpret = await interpretPlatformKnowledgeTurn({
       selectionText,
       threadText,
@@ -248,9 +249,10 @@ export async function resolveTurnExecutor(
     const isTp = kbInterpret?.guideKind === "transporte_publico";
     const isCs = kbInterpret?.guideKind === "cisternas" && isCisternasKbEnabled();
     const isCb = kbInterpret?.guideKind === "combustible" && isCombustibleKbEnabled();
+    const isHr = kbInterpret?.guideKind === "hojas_de_ruta" && isHojasRutaKbEnabled();
     const isMt = kbInterpret?.guideKind === "mantenimiento";
     // Mantenimiento también: las reglas default a "unidades" en follow-ups / jerga sin keyword.
-    if (shouldRouteInterpretToInfoGuides(kbInterpret) && (isTp || isCs || isCb || isMt)) {
+    if (shouldRouteInterpretToInfoGuides(kbInterpret) && (isTp || isCs || isCb || isHr || isMt)) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
       if (rulesExecutor === "unidades" || rulesExecutor === "info_guides" || rulesExecutor === "mantenimiento") {
         return {

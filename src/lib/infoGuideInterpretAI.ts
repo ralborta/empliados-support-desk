@@ -5,6 +5,7 @@
  *
  * Cisternas: solo si WARA_CISTERNAS_KB_ENABLED=true.
  * Combustible: solo si WARA_COMBUSTIBLE_KB_ENABLED=true.
+ * Hojas de ruta: solo si WARA_HOJAS_RUTA_KB_ENABLED=true.
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -17,6 +18,10 @@ import {
   isCombustibleKbEnabled,
   listCombustibleArticleCatalog,
 } from "@/lib/combustibleKnowledge";
+import {
+  isHojasRutaKbEnabled,
+  listHojasRutaArticleCatalog,
+} from "@/lib/hojasRutaKnowledge";
 import { listMantenimientoArticleCatalog } from "@/lib/mantenimientoKnowledge";
 import {
   looksLikeMaintenanceDomainTermQuestion,
@@ -39,7 +44,8 @@ export type PlatformGuideKind =
   | "mantenimiento"
   | "transporte_publico"
   | "cisternas"
-  | "combustible";
+  | "combustible"
+  | "hojas_de_ruta";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -61,8 +67,9 @@ function cacheKey(
   threadText: string,
   cisternasOn: boolean,
   combustibleOn: boolean,
+  hojasRutaOn: boolean,
 ): string {
-  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}::${selectionText.trim()}::${threadText.slice(-400)}`;
+  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}::${selectionText.trim()}::${threadText.slice(-400)}`;
 }
 
 export function isPlatformKbLlmInterpretEnabled(): boolean {
@@ -78,6 +85,7 @@ function allowedGuideKinds(): readonly string[] {
   const kinds: string[] = [...GUIDE_KINDS_BASE];
   if (isCisternasKbEnabled()) kinds.push("cisternas");
   if (isCombustibleKbEnabled()) kinds.push("combustible");
+  if (isHojasRutaKbEnabled()) kinds.push("hojas_de_ruta");
   return kinds;
 }
 
@@ -86,13 +94,15 @@ function isArticleBackedGuide(kind: PlatformGuideKind | null): boolean {
     kind === "transporte_publico" ||
     kind === "cisternas" ||
     kind === "combustible" ||
-    kind === "mantenimiento"
+    kind === "mantenimiento" ||
+    kind === "hojas_de_ruta"
   );
 }
 
 function buildSystemPrompt(): string {
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
+  const hojasRutaOn = isHojasRutaKbEnabled();
   const kindParts = [
     '"opciones"',
     '"unidades"',
@@ -101,6 +111,7 @@ function buildSystemPrompt(): string {
   ];
   if (cisternasOn) kindParts.push('"cisternas"');
   if (combustibleOn) kindParts.push('"combustible"');
+  if (hojasRutaOn) kindParts.push('"hojas_de_ruta"');
   kindParts.push("null");
   const kindEnum = kindParts.join(" | ");
 
@@ -111,6 +122,7 @@ function buildSystemPrompt(): string {
     "Transporte Público",
     cisternasOn ? "Cisternas" : null,
     combustibleOn ? "Combustible" : null,
+    hojasRutaOn ? "Hojas de ruta" : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -138,6 +150,23 @@ executionRequest en combustible: articleIds puede incluir "cb-ejecucion-no-dispo
 `
     : `
 NO uses guideKind "combustible" (módulo no habilitado en este entorno). Si el cliente habla de tickets/panel/informes de combustible de unidad, route=continue_normal salvo que encaje en otra guía habilitada.
+`;
+
+  const hojasRutaBlock = hojasRutaOn
+    ? `
+guideKind hojas_de_ruta: Utilidades→Hojas de ruta (listado, alta, predefinidas, editor calendario, gestión de cargas/descargas de VIAJE, puntos/traza, pegado masivo).
+FRONTERAS SEMÁNTICAS (mirá consulta + historial; NO te bases solo en una palabra):
+- “hoja de ruta” / predefinida / editor calendario / cargas y descargas de viaje → hojas_de_ruta.
+- “hoja de turno” / pasajeros / paradas / GTFS / servicios de línea → transporte_publico (NO hojas_de_ruta).
+- Ticket de combustible de una UNIDAD / validar cargas de tickets → combustible (si habilitado). “Tipo=Combustible” o “Carga de combustible” como atributo de un PUNTO de la hoja → sigue siendo hojas_de_ruta.
+- Carga o medición de tanque de DEPÓSITO → cisternas (si habilitado).
+- “Necesito registrar una carga” / “una carga” SIN contexto claro → need=ambiguous + clarifyQuestion preguntando si es: mercadería en hoja de ruta, ticket de combustible de unidad, o carga a cisterna. NO asumas.
+Continuá el hilo de hojas de ruta (“¿y después dónde la veo?”) → hojas_de_ruta.
+articleIds: solo catálogo_hojas_ruta (prefijo hr-, 0–3). executionRequest: puede incluir "hr-ejecucion-no-disponible".
+Pendientes (AE INICIO/FIN, Actualizar números, etc.): NO inventes; usá artículos con restrictions.
+`
+    : `
+NO uses guideKind "hojas_de_ruta" (módulo no habilitado en este entorno). Si el cliente habla de hojas de ruta / predefinidas / editor calendario de rutas, route=continue_normal salvo que encaje en otra guía habilitada (p. ej. hoja de turno → transporte_publico).
 `;
 
   return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
@@ -176,7 +205,7 @@ executionRequest en mantenimiento: articleIds puede incluir "mt-ejecucion-no-dis
 Continuá el hilo de mantenimiento: “¿y después dónde la sigo?”, preguntas de OT/estados/paneles tras una guía de mantenimiento → guideKind=mantenimiento (no unidades).
 NO confundir "etapas" de transporte con consulta GPS de una unidad.
 NO confundir pedido de ejecución con capacidad real: executionRequest=true; articleIds puede incluir "tp-ejecucion-no-disponible".
-${cisternasBlock}${combustibleBlock}
+${cisternasBlock}${combustibleBlock}${hojasRutaBlock}
 articleIds transporte: solo IDs del catálogo_transporte (0–3). Vacío si guideKind no es transporte_publico.
 Nunca inventes IDs. Si status needs_validation, podés usarlo con cautela; no uses artículos future.
 Respetá restrictions de cada artículo: no afirmes lo no confirmado.
@@ -241,6 +270,18 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
           reason: "combustible_flag_off",
         };
       }
+      if (guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+        return {
+          route: "continue_normal",
+          guideKind: null,
+          need,
+          articleIds: [],
+          clarifyQuestion: null,
+          executionRequest: false,
+          confidence: Number(parsed.confidence) || 0,
+          reason: "hojas_ruta_flag_off",
+        };
+      }
       return null;
     }
     const confidence = Number(parsed.confidence);
@@ -252,13 +293,18 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     const tpIds = new Set(listTransporteArticleCatalog().map((a) => a.id));
     const csIds = new Set(listCisternasArticleCatalog().map((a) => a.id));
     const cbIds = new Set(listCombustibleArticleCatalog().map((a) => a.id));
+    const hrIds = new Set(listHojasRutaArticleCatalog().map((a) => a.id));
     const mtIds = new Set(listMantenimientoArticleCatalog().map((a) => a.id));
     const tpArticles = articleIds.filter((id) => tpIds.has(id));
     const csArticles = articleIds.filter((id) => csIds.has(id));
     const cbArticles = articleIds.filter((id) => cbIds.has(id));
+    const hrArticles = articleIds.filter((id) => hrIds.has(id));
     const mtArticles = articleIds.filter((id) => mtIds.has(id));
 
-    if (guideKind === "combustible" && isCombustibleKbEnabled() && cbArticles.length) {
+    if (guideKind === "hojas_de_ruta" && isHojasRutaKbEnabled() && hrArticles.length) {
+      articleIds = hrArticles;
+      route = promoteArticleGuide(need, route);
+    } else if (guideKind === "combustible" && isCombustibleKbEnabled() && cbArticles.length) {
       articleIds = cbArticles;
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "cisternas" && isCisternasKbEnabled() && csArticles.length) {
@@ -269,6 +315,10 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "transporte_publico" && tpArticles.length) {
       articleIds = tpArticles;
+      route = promoteArticleGuide(need, route);
+    } else if (hrArticles.length && isHojasRutaKbEnabled()) {
+      articleIds = hrArticles;
+      guideKind = "hojas_de_ruta";
       route = promoteArticleGuide(need, route);
     } else if (cbArticles.length && isCombustibleKbEnabled()) {
       articleIds = cbArticles;
@@ -399,7 +449,8 @@ export async function interpretPlatformKnowledgeTurn(opts: {
 
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
-  const key = cacheKey(text, opts.threadText ?? "", cisternasOn, combustibleOn);
+  const hojasRutaOn = isHojasRutaKbEnabled();
+  const key = cacheKey(text, opts.threadText ?? "", cisternasOn, combustibleOn, hojasRutaOn);
   const cached = interpretCache.get(key);
   if (cached && cached.value && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
     return correctMaintenanceMisroute(cached.value, text, opts.threadText ?? "");
@@ -408,6 +459,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const catalogTp = listTransporteArticleCatalog();
   const catalogCs = listCisternasArticleCatalog();
   const catalogCb = listCombustibleArticleCatalog();
+  const catalogHr = listHojasRutaArticleCatalog();
   const catalogMt = listMantenimientoArticleCatalog();
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const userPayload: Record<string, unknown> = {
@@ -422,6 +474,9 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   }
   if (combustibleOn) {
     userPayload.catalogo_combustible = catalogCb;
+  }
+  if (hojasRutaOn) {
+    userPayload.catalogo_hojas_ruta = catalogHr;
   }
 
   try {
@@ -480,6 +535,7 @@ export function shouldRouteInterpretToInfoGuides(
   if (!interpret) return false;
   if (interpret.guideKind === "cisternas" && !isCisternasKbEnabled()) return false;
   if (interpret.guideKind === "combustible" && !isCombustibleKbEnabled()) return false;
+  if (interpret.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) return false;
   if (interpret.need === "ambiguous" && interpret.clarifyQuestion) {
     return interpret.confidence >= 0.55;
   }
@@ -513,6 +569,13 @@ export function buildPlatformGuideClarifyOrLimitMessage(
       return [
         "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
         "Por este chat no puedo crear planes, asignar tareas ni abrir órdenes de trabajo en tu cuenta.",
+        "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
+      ].join("\n");
+    }
+    if (interpret.guideKind === "hojas_de_ruta") {
+      return [
+        "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
+        "Por este chat no puedo crear hojas de ruta, pegar masivo ni enviar planificación en tu cuenta.",
         "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
       ].join("\n");
     }

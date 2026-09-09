@@ -163,6 +163,11 @@ export function agentCorePromptMentionsCombustible(): boolean {
   return /\bm[oó]dulo\s+(de\s+)?combustible\b/i.test(CORE_SYSTEM_PROMPT);
 }
 
+/** Solo tests: el prompt base no debe anunciar Hojas de ruta (va por appendix si flag on). */
+export function agentCorePromptMentionsHojasRuta(): boolean {
+  return /\bhojas?\s+de\s+ruta\b/i.test(CORE_SYSTEM_PROMPT);
+}
+
 const BUSINESS_MODULE_KEYS = [
   "odometer",
   "consulta",
@@ -532,6 +537,15 @@ export async function runAtilioAgentTurn(
 === MÓDULO COMBUSTIBLE (habilitado) ===
 - Preguntas sobre tickets de combustible, validación de cargas, panel de combustible o informes de combustible de unidad → SIEMPRE guia_informativa.
 - NO confundas con Cisternas (tanque de depósito) ni con odómetro.
+- No inventes pantallas ni digas que no hay info sin llamar la tool.`;
+      }
+      const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
+      if (isHojasRutaKbEnabled()) {
+        systemPrompt += `
+
+=== MÓDULO HOJAS DE RUTA (habilitado) ===
+- Preguntas sobre hojas de ruta, predefinidas, editor calendario, puntos/traza o cargas/descargas de viaje → SIEMPRE guia_informativa.
+- NO confundas con hoja de turno (Transporte Público), tickets de Combustible ni Cisternas.
 - No inventes pantallas ni digas que no hay info sin llamar la tool.`;
       }
     } catch {
