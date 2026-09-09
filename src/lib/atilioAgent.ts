@@ -158,6 +158,11 @@ export function agentCorePromptMentionsCisternas(): boolean {
   return /\bcisternas\b/i.test(CORE_SYSTEM_PROMPT);
 }
 
+/** Solo tests: el prompt base no debe anunciar el módulo Combustible (va por appendix). */
+export function agentCorePromptMentionsCombustible(): boolean {
+  return /\bm[oó]dulo\s+(de\s+)?combustible\b/i.test(CORE_SYSTEM_PROMPT);
+}
+
 const BUSINESS_MODULE_KEYS = [
   "odometer",
   "consulta",
@@ -510,7 +515,7 @@ export async function runAtilioAgentTurn(
     let systemPrompt = businessKnowledge
       ? `${CORE_SYSTEM_PROMPT}\n\n=== CONOCIMIENTO DEL NEGOCIO (Wara) ===\n${businessKnowledge}`
       : CORE_SYSTEM_PROMPT;
-    // Cisternas solo en el prompt del agente si el flag está on (no-op del flag).
+    // Cisternas / Combustible solo en el prompt del agente si el flag está on.
     try {
       const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
       if (isCisternasKbEnabled()) {
@@ -518,6 +523,15 @@ export async function runAtilioAgentTurn(
 
 === MÓDULO CISTERNAS (habilitado) ===
 - Preguntas sobre cisternas / tanques de depósito / carga o medición de cisternas → SIEMPRE guia_informativa.
+- No inventes pantallas ni digas que no hay info sin llamar la tool.`;
+      }
+      const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
+      if (isCombustibleKbEnabled()) {
+        systemPrompt += `
+
+=== MÓDULO COMBUSTIBLE (habilitado) ===
+- Preguntas sobre tickets de combustible, validación de cargas, panel de combustible o informes de combustible de unidad → SIEMPRE guia_informativa.
+- NO confundas con Cisternas (tanque de depósito) ni con odómetro.
 - No inventes pantallas ni digas que no hay info sin llamar la tool.`;
       }
     } catch {

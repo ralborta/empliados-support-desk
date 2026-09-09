@@ -16,6 +16,7 @@ import {
 import { composeAgentReplyFromDialogueState } from "@/lib/atilioDialogueCompose";
 import { MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED } from "@/lib/waraApi";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
+import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 
 const EXECUTOR_HANDLERS: Record<TurnExecutorId, (req: NextRequest) => Promise<Response>> = {
   unidades: unidadesPost,
@@ -103,6 +104,9 @@ const BASE_AGENT_TOOLS: OpenAiToolDef[] = [
 const GUIA_CISTERNAS_SUFFIX =
   " Con cisternas (tanques de combustible de depósito/base) habilitadas en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni registres cargas/mediciones por chat.";
 
+const GUIA_COMBUSTIBLE_SUFFIX =
+  " Con combustible (tickets/validación/panel/informes de unidad) habilitado en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni cargues tickets por chat. No confundas con Cisternas.";
+
 const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   type: "function",
   function: {
@@ -113,18 +117,23 @@ const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   },
 };
 
-/** Tools expuestas al LLM según política de mantenimiento operativo (+ Cisternas si flag). */
+/** Tools expuestas al LLM según política de mantenimiento operativo (+ KBs opt-in). */
 export function buildAtilioAgentTools(
   operativeEnabled: boolean = MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
 ): OpenAiToolDef[] {
   const cisternasOn = isCisternasKbEnabled();
+  const combustibleOn = isCombustibleKbEnabled();
   const base: OpenAiToolDef[] = BASE_AGENT_TOOLS.map((t) => {
-    if (t.function.name !== "guia_informativa" || !cisternasOn) return t;
+    if (t.function.name !== "guia_informativa") return t;
+    let description = t.function.description;
+    if (cisternasOn) description += GUIA_CISTERNAS_SUFFIX;
+    if (combustibleOn) description += GUIA_COMBUSTIBLE_SUFFIX;
+    if (description === t.function.description) return t;
     return {
       ...t,
       function: {
         ...t.function,
-        description: `${t.function.description}${GUIA_CISTERNAS_SUFFIX}`,
+        description,
       },
     };
   });

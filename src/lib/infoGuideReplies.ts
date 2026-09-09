@@ -19,13 +19,15 @@ import {
   interpretPlatformKnowledgeTurn,
 } from "@/lib/infoGuideInterpretAI";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
+import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 
 export type InfoGuideKind =
   | "opciones"
   | "unidades"
   | "mantenimiento"
   | "transporte_publico"
-  | "cisternas";
+  | "cisternas"
+  | "combustible";
 
 export type InfoGuideFallback =
   | null
@@ -33,13 +35,15 @@ export type InfoGuideFallback =
   | "clarify_or_limit"
   | "static_kind"
   | "repeat"
-  | "cisternas_flag_off";
+  | "cisternas_flag_off"
+  | "combustible_flag_off";
 
-function sanitizeCisternasKind(
+function sanitizeOptInGuideKind(
   kind: InfoGuideKind | null | undefined,
 ): InfoGuideKind | null {
   if (!kind) return null;
   if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
+  if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
   return kind;
 }
 
@@ -76,7 +80,7 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   ) {
     return "transporte_publico";
   }
-  // Cisternas: solo con flag on — elección explícita de módulo (sin keywords de negocio).
+  // Cisternas / Combustible: solo con flag on — elección explícita de módulo.
   if (
     isCisternasKbEnabled() &&
     (pick === "cisternas" ||
@@ -86,6 +90,14 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
       pick === "modulo cisterna")
   ) {
     return "cisternas";
+  }
+  if (
+    isCombustibleKbEnabled() &&
+    (pick === "combustible" ||
+      pick === "modulo combustible" ||
+      pick === "modulo de combustible")
+  ) {
+    return "combustible";
   }
   const modulePick = parseInfoGuideModulePick(text);
   if (modulePick) return modulePick;
@@ -351,6 +363,12 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué punto puntual necesitás: alta, carga, medición, informes o tickets de combustible.",
     ].join("\n");
   }
+  if (detected === "combustible") {
+    return [
+      "Ya te pasé esa parte de Combustible.",
+      "Decime qué punto puntual necesitás: tickets, validación, panel, informes o permisos.",
+    ].join("\n");
+  }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
 }
 
@@ -362,6 +380,7 @@ export function buildInfoGuideReply(
 ): string {
   let detected = kind ?? detectInfoGuideKind(rawText);
   if (detected === "cisternas" && !isCisternasKbEnabled()) detected = null;
+  if (detected === "combustible" && !isCombustibleKbEnabled()) detected = null;
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
   else if (looksLikeOdometerInfoRequest(rawText)) message = buildOdometerInfoExplanation(rawText);
@@ -385,6 +404,12 @@ export function buildInfoGuideReply(
       "Te puedo orientar con el módulo Cisternas: qué es, alta, carga, medición, informes o tickets de combustible.",
       "Decime en una frase qué necesitás y te detallo ese punto.",
       "Si preguntás por editar/eliminar o columnas exactas de un informe, el manual aún no lo confirma con datos reales.",
+    ].join("\n");
+  else if (detected === "combustible")
+    message = [
+      "Te puedo orientar con el módulo Combustible: tickets, pegado masivo, validación de cargas, panel, informes o permisos.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "No confundas Combustible (unidad/tickets) con Cisternas (tanque de depósito).",
     ].join("\n");
   else
     message = [
@@ -450,7 +475,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   fallback: InfoGuideFallback;
 }> {
   let activeInterpret = interpret ?? null;
-  let detected = sanitizeCisternasKind(kind ?? null);
+  let detected = sanitizeOptInGuideKind(kind ?? null);
   let articleIds = activeInterpret?.articleIds ?? [];
   let need: InfoGuideNeed | null = activeInterpret?.need ?? null;
   let fallback: InfoGuideFallback = null;
@@ -465,6 +490,17 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
     articleIds = [];
     fallback = "cisternas_flag_off";
+  }
+  if (activeInterpret?.guideKind === "combustible" && !isCombustibleKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "combustible_flag_off",
+    };
+    articleIds = [];
+    fallback = "combustible_flag_off";
   }
 
   if (!activeInterpret) {
@@ -484,13 +520,23 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
     fallback = "cisternas_flag_off";
   }
+  if (activeInterpret?.guideKind === "combustible" && !isCombustibleKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: "combustible_flag_off",
+    };
+    fallback = "combustible_flag_off";
+  }
 
   if (!detected) {
-    detected = sanitizeCisternasKind(
+    detected = sanitizeOptInGuideKind(
       activeInterpret?.guideKind ?? detectInfoGuideKind(rawText),
     );
   }
-  if (activeInterpret?.guideKind && sanitizeCisternasKind(activeInterpret.guideKind)) {
+  if (activeInterpret?.guideKind && sanitizeOptInGuideKind(activeInterpret.guideKind)) {
     articleIds = activeInterpret.articleIds;
     need = activeInterpret.need;
     if (!kind) detected = activeInterpret.guideKind;
@@ -505,11 +551,20 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       fallback: "cisternas_flag_off",
     };
   }
+  if (kind === "combustible" && !isCombustibleKbEnabled()) {
+    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
+    return {
+      message,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: "combustible_flag_off",
+    };
+  }
 
   if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
     return {
       message: activeInterpret.clarifyQuestion,
-      guideKind: sanitizeCisternasKind(detected ?? activeInterpret.guideKind),
+      guideKind: sanitizeOptInGuideKind(detected ?? activeInterpret.guideKind),
       interpret: activeInterpret,
       fallback: "clarify_question",
     };
@@ -520,7 +575,9 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     (detected === "transporte_publico" ||
       activeInterpret.guideKind === "transporte_publico" ||
       detected === "cisternas" ||
-      activeInterpret.guideKind === "cisternas")
+      activeInterpret.guideKind === "cisternas" ||
+      detected === "combustible" ||
+      activeInterpret.guideKind === "combustible")
   ) {
     if (detected === "cisternas" || activeInterpret.guideKind === "cisternas") {
       if (!isCisternasKbEnabled()) {
@@ -552,6 +609,36 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: "clarify_or_limit",
       };
     }
+    if (detected === "combustible" || activeInterpret.guideKind === "combustible") {
+      if (!isCombustibleKbEnabled()) {
+        return {
+          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
+          guideKind: null,
+          interpret: activeInterpret,
+          fallback: "combustible_flag_off",
+        };
+      }
+      detected = "combustible";
+      const execIds = articleIds.length ? articleIds : ["cb-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("combustible", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "combustible",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "combustible",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     detected = "transporte_publico";
     const execLimit = await answerFromKnowledgeBase("transporte_publico", rawText, threadText, {
       articleIds: articleIds.length ? articleIds : ["tp-ejecucion-no-disponible"],
@@ -578,11 +665,16 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     detected === "unidades" ||
     detected === "mantenimiento" ||
     detected === "transporte_publico" ||
-    (detected === "cisternas" && isCisternasKbEnabled())
+    (detected === "cisternas" && isCisternasKbEnabled()) ||
+    (detected === "combustible" && isCombustibleKbEnabled())
   ) {
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
       articleIds:
-        detected === "transporte_publico" || detected === "cisternas" ? articleIds : undefined,
+        detected === "transporte_publico" ||
+        detected === "cisternas" ||
+        detected === "combustible"
+          ? articleIds
+          : undefined,
       need,
     });
     if (
@@ -604,7 +696,12 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: null,
       };
     }
-    if ((detected === "transporte_publico" || detected === "cisternas") && !grounded) {
+    if (
+      (detected === "transporte_publico" ||
+        detected === "cisternas" ||
+        detected === "combustible") &&
+      !grounded
+    ) {
       if (activeInterpret && (activeInterpret.articleIds.length > 0 || activeInterpret.need)) {
         return {
           message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
@@ -620,7 +717,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   const message = buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
   return {
     message,
-    guideKind: sanitizeCisternasKind(detected),
+    guideKind: sanitizeOptInGuideKind(detected),
     interpret: activeInterpret,
     fallback: fallback ?? (detected ? "static_kind" : null),
   };

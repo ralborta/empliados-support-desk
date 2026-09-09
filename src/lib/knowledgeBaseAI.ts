@@ -4,6 +4,7 @@ import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE, MANTENIMIENTO_KNOWLED
 import { getBotPromptModule } from "@/lib/botPromptStore";
 import { buildTransporteKnowledgeContext } from "@/lib/transportePublicoKnowledge";
 import { buildCisternasKnowledgeContext } from "@/lib/cisternasKnowledge";
+import { buildCombustibleKnowledgeContext } from "@/lib/combustibleKnowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -16,10 +17,11 @@ export type KnowledgeGuideKind =
   | "unidades"
   | "mantenimiento"
   | "transporte_publico"
-  | "cisternas";
+  | "cisternas"
+  | "combustible";
 
 const KNOWLEDGE_BY_KIND: Record<
-  Exclude<KnowledgeGuideKind, "transporte_publico" | "cisternas">,
+  Exclude<KnowledgeGuideKind, "transporte_publico" | "cisternas" | "combustible">,
   string
 > = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
@@ -37,7 +39,7 @@ const PROMPT_MODULE_KEY_BY_KIND: Partial<Record<KnowledgeGuideKind, string>> = {
   opciones: "opciones_info",
   unidades: "unidades_info",
   mantenimiento: "mantenimiento_info",
-  // transporte_publico / cisternas: sin módulo de panel → FALLBACK + reglas del kind.
+  // transporte_publico / cisternas / combustible: sin módulo de panel → FALLBACK + reglas del kind.
 };
 
 const FALLBACK_INSTRUCTIONS = `Sos Kira, el asistente de soporte de Wara por WhatsApp. Respondé la pregunta del
@@ -83,6 +85,15 @@ REGLAS DURAS Cisternas:
 - Respetá restrictions (needs_validation): si preguntan eso, decí que el manual no lo confirma.
 - Forma según need; execute=límite de canal. Nunca digas que creaste/guardaste en la cuenta.
 - Continuá el hilo (carga vs medición, “eso”, litros) sin repetir todo el manual.`.trim();
+
+const COMBUSTIBLE_HARD_CONSTRAINTS = `
+REGLAS DURAS Combustible:
+- Usá SOLO los artículos provistos. No inventes pantallas, columnas ni estados no confirmados.
+- Combustible = tickets / validación / panel / informes de UNIDAD. NO es módulo Cisternas (depósito).
+- No afirmes grilla de validación, etiqueta de agua detectada, % del panel ni columnas de sensor si hay restriction/pendiente.
+- Respetá restrictions (§13 del relevamiento). Forma según need; execute=límite de canal.
+- Nunca digas que cargaste tickets ni generaste informes en la cuenta.
+- Continuá el hilo sin repetir todo el manual.`.trim();
 
 function needStyleHint(need?: InfoGuideNeed | null): string {
   if (!need) return "";
@@ -136,13 +147,19 @@ export async function answerFromKnowledgeBase(
     const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
     if (!isCisternasKbEnabled()) return null;
   }
+  if (kind === "combustible") {
+    const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
+    if (!isCombustibleKbEnabled()) return null;
+  }
 
   const knowledge =
     kind === "transporte_publico"
       ? buildTransporteKnowledgeContext(opts?.articleIds ?? [])
       : kind === "cisternas"
         ? buildCisternasKnowledgeContext(opts?.articleIds ?? [])
-        : KNOWLEDGE_BY_KIND[kind];
+        : kind === "combustible"
+          ? buildCombustibleKnowledgeContext(opts?.articleIds ?? [])
+          : KNOWLEDGE_BY_KIND[kind];
   if (!knowledge?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -155,7 +172,9 @@ export async function answerFromKnowledgeBase(
         ? `\n\n${TRANSPORTE_HARD_CONSTRAINTS}`
         : kind === "cisternas"
           ? `\n\n${CISTERNAS_HARD_CONSTRAINTS}`
-          : "";
+          : kind === "combustible"
+            ? `\n\n${COMBUSTIBLE_HARD_CONSTRAINTS}`
+            : "";
   const needHint = needStyleHint(opts?.need);
 
   const system = `${instructions}${hardConstraints}

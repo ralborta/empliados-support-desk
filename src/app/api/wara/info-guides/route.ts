@@ -26,7 +26,9 @@ const bodySchema = z
     from: z.string().min(8).optional(),
     rawText: z.string().optional(),
     body: z.string().optional(),
-    guide: z.enum(["opciones", "unidades", "mantenimiento", "transporte_publico", "cisternas"]).optional(),
+    guide: z
+      .enum(["opciones", "unidades", "mantenimiento", "transporte_publico", "cisternas", "combustible"])
+      .optional(),
     articleIds: z.array(z.string()).optional(),
     need: z
       .enum(["definition", "procedure", "troubleshoot", "execute", "ambiguous"])
@@ -152,23 +154,31 @@ export async function POST(req: NextRequest) {
   }
 
   const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
+  const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
   const requestedGuide = parsed.data.guide;
   const cisternasGuideIgnored =
     requestedGuide === "cisternas" && !isCisternasKbEnabled();
-  const guide = cisternasGuideIgnored ? undefined : requestedGuide;
+  const combustibleGuideIgnored =
+    requestedGuide === "combustible" && !isCombustibleKbEnabled();
+  const optInGuideIgnored = cisternasGuideIgnored || combustibleGuideIgnored;
+  const guide = optInGuideIgnored ? undefined : requestedGuide;
   const kind = guide ?? detectInfoGuideKind(rawText);
   const [previousMessage, threadText] = await Promise.all([
     lastBotMessage(rawPhone),
     recentThreadTextForPhone(rawPhone),
   ]);
 
-  // Si solo venía guide=cisternas y el flag está off, igual sembramos interpret
-  // para no perder el diagnóstico (fallback/reason) en el log único.
+  // Si venía guide opt-in con flag off, sembramos interpret para no perder diagnóstico.
+  const ignoredReason = cisternasGuideIgnored
+    ? "cisternas_flag_off_ignored_guide"
+    : combustibleGuideIgnored
+      ? "combustible_flag_off_ignored_guide"
+      : null;
   const seededInterpret: PlatformKnowledgeInterpret | null =
     guide ||
     parsed.data.need ||
     parsed.data.articleIds?.length ||
-    cisternasGuideIgnored
+    optInGuideIgnored
       ? {
           route: "info_guides",
           guideKind: (guide as PlatformKnowledgeInterpret["guideKind"]) ?? null,
@@ -177,9 +187,7 @@ export async function POST(req: NextRequest) {
           clarifyQuestion: parsed.data.clarifyQuestion?.trim() || null,
           executionRequest: parsed.data.executionRequest === true,
           confidence: 1,
-          reason: cisternasGuideIgnored
-            ? "cisternas_flag_off_ignored_guide"
-            : "seeded_from_turn",
+          reason: ignoredReason ?? "seeded_from_turn",
         }
       : null;
 
@@ -196,16 +204,17 @@ export async function POST(req: NextRequest) {
     ? {
         ...grounded.interpret,
         reason:
-          cisternasGuideIgnored && !grounded.interpret.reason
-            ? "cisternas_flag_off_ignored_guide"
+          optInGuideIgnored && !grounded.interpret.reason
+            ? ignoredReason!
             : grounded.interpret.reason,
       }
     : grounded.interpret;
-  // Marca de diagnóstico: el route ya sanitizó guide antes del generador.
   const fallback =
     cisternasGuideIgnored && !grounded.fallback
       ? "cisternas_flag_off"
-      : grounded.fallback;
+      : combustibleGuideIgnored && !grounded.fallback
+        ? "combustible_flag_off"
+        : grounded.fallback;
 
   const { logPlatformKbTurn } = await import("@/lib/infoGuideInterpretAI");
   logPlatformKbTurn({
@@ -215,7 +224,7 @@ export async function POST(req: NextRequest) {
     need: interpret?.need ?? null,
     articleIds: interpret?.articleIds ?? [],
     confidence: interpret?.confidence ?? null,
-    reason: interpret?.reason ?? (cisternasGuideIgnored ? "cisternas_flag_off_ignored_guide" : null),
+    reason: interpret?.reason ?? ignoredReason,
     fallback,
     source: "wara_info_guides_route",
   });

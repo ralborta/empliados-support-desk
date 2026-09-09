@@ -11,6 +11,7 @@
 | Path productivo | Mismo: `info_guides` → interpret LLM → grounded → fallback. Nuevo kind `cisternas`. |
 | Proxy V2 | `WARA_CONVERSATION_RUNTIME_NEXT_PROXY=false` → no tocar `apps/wara-v2`. |
 | Saludo / menú | **No** se agrega Cisternas al menú en esta etapa. |
+| Frontera vs Combustible | Tickets/panel/informes de **unidad** → kind `combustible` (flag propio). Cisternas = depósito/base. |
 
 ## Flags (protección de regresión)
 

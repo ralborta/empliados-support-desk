@@ -2574,7 +2574,7 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // KB de plataforma (TP / Cisternas si flag): ANTES del agente.
+  // KB de plataforma (TP / Cisternas / Combustible si flag): ANTES del agente.
   // Con WARA_AGENT_MODE el LLM improvisaba "no tengo info" sin llamar guia_informativa
   // (bug prod 2026-09-08: "módulo de transporte de pasajeros").
   // No pisar trámites operativos que las reglas ya resolvieron (cert/odo/asesor).
