@@ -234,6 +234,46 @@ describe("resolveIdleFollowupMetaTurn (integración)", () => {
     assert.doesNotMatch(turn!.message, /certificado/i);
     assert.doesNotMatch(turn!.message, /Pasame la patente/i);
   });
+
+  it("pendingAction residual certificado + TP reciente → pregunta fork, no retoma cert", () => {
+    const thread = [
+      "Atilio: ¿En qué te ayudo?\n• Certificado\n• Transporte de pasajeros",
+      "Cliente: Transporte de pasajeros",
+      "Atilio: El servicio de Transporte de pasajeros te permite gestionar rutas, horarios y la hoja de turno.",
+      `Atilio: ${IDLE_NUDGE_MESSAGE}`,
+    ].join("\n");
+    const pending = {
+      type: "certificados" as const,
+      payload: { stage: "awaiting_unit" },
+      createdAt: new Date().toISOString(),
+    };
+    const turn = resolveIdleFollowupMetaTurn({
+      selectionText: "Sigo acá, cuéntame mas",
+      threadText: thread,
+      customerFirstName: "Emii",
+      pendingAction: pending,
+    });
+    assert.ok(turn);
+    assert.equal(turn!.preferGuideOverPending, true);
+    assert.match(turn!.message, /Transporte de pasajeros/i);
+    assert.match(turn!.message, /certificado pendiente/i);
+    assert.doesNotMatch(turn!.message, /Pasame la patente/i);
+
+    // Metadato estructurado también gana aunque el hilo sea ambiguo.
+    const withMeta = resolveIdleFollowupMetaTurn({
+      selectionText: "Sigo acá",
+      threadText: [
+        "Atilio: ¿En qué te ayudo?\n• Certificado\n• GPS",
+        `Atilio: ${IDLE_NUDGE_MESSAGE}`,
+      ].join("\n"),
+      pendingAction: pending,
+      lastGuideKind: "transporte_publico",
+    });
+    assert.ok(withMeta);
+    assert.equal(withMeta!.preferGuideOverPending, true);
+    assert.match(withMeta!.message, /Transporte de pasajeros/i);
+    assert.match(withMeta!.message, /certificado pendiente/i);
+  });
 });
 
 describe("buildMetaConversationalContinuityReply", () => {

@@ -74,6 +74,7 @@ import {
   looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
 import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
+import { getLastInfoGuideContext, setLastInfoGuideContext, isLastInfoGuideKind } from "@/lib/lastInfoGuideContext";
 import {
   detectPendingConfirmKind,
   looksLikePendingConfirmPushback,
@@ -329,7 +330,14 @@ async function invokeExecutor(
     body: JSON.stringify(executorBody(rawPhone, body, extras)),
   });
   const res = await handler(req);
-  return (await res.json().catch(() => ({}))) as JsonRecord;
+  const data = (await res.json().catch(() => ({}))) as JsonRecord;
+  if (executor === "info_guides") {
+    const kindRaw = data.guideKind ?? data.guide ?? extras?.guide;
+    if (isLastInfoGuideKind(kindRaw)) {
+      void setLastInfoGuideContext(prisma, rawPhone, kindRaw);
+    }
+  }
+  return data;
 }
 
 /**
@@ -1189,13 +1197,16 @@ export async function runTurnExecutorPhase(params: {
   }
 
   // Meta-conversacional / pushback idle (acotado al último cierre automático).
+  const lastGuideCtx = await getLastInfoGuideContext(prisma, rawPhone).catch(() => null);
   const metaTurn = resolveIdleFollowupMetaTurn({
     selectionText,
     threadText: thread,
     pendingAction,
+    lastGuideKind: lastGuideCtx?.kind ?? null,
   });
   if (metaTurn) {
-    if (pendingKind) {
+    // CONFIRMO pendiente explícito en hilo: sí retomar confirmación.
+    if (pendingKind && !metaTurn.preferGuideOverPending) {
       return {
         message: `Dale, seguimos. ${buildPendingConfirmStillWaitingReminder(pendingKind)}`,
         executor:
@@ -1207,7 +1218,11 @@ export async function runTurnExecutorPhase(params: {
         ok: true,
       };
     }
-    if (threadHasInconclusiveTramite(thread, pendingAction)) {
+    // Pending residual vs guía reciente: no pisar con resume de certificado/odo.
+    if (
+      threadHasInconclusiveTramite(thread, pendingAction) &&
+      !metaTurn.preferGuideOverPending
+    ) {
       const executor = resolveExecutorForInconclusiveTramite(thread, pendingAction);
       return {
         message: buildInconclusiveTramiteResumePrompt(thread, pendingAction),

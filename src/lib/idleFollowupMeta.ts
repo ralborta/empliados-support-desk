@@ -11,6 +11,8 @@ export const IDLE_CLOSE_MESSAGE =
   "Como no tuve respuesta, cierro esta consulta por ahora. Cuando quieras, escribime de nuevo y te ayudo.";
 
 import type { PendingActionRecord } from "@/lib/pendingAction";
+import type { LastInfoGuideKind } from "@/lib/lastInfoGuideContext";
+import { isLastInfoGuideKind } from "@/lib/lastInfoGuideContext";
 import {
   looksLikeMetaConversationalReply,
   looksLikeOperationalIntent,
@@ -88,38 +90,40 @@ function looksLikeDeepenGuideCue(raw: string | undefined | null): boolean {
   );
 }
 
-/**
- * Tema activo real para retomar tras idle.
- * NUNCA usar el menú de saludo (ahí aparece «Certificado» y ensucia el hint).
- */
-function inferIdleTopicHint(threadText: string): string | null {
+/** Tema de guía / trámite inferido del hilo (fallback si no hay metadato estructurado). */
+export type IdleTopicKind =
+  | LastInfoGuideKind
+  | "certificados"
+  | "odometro"
+  | "gps_unidad";
+
+function inferIdleTopicKindFromThread(threadText: string): IdleTopicKind | null {
   const recent = normIdleText(recentBotContentBeforeIdle(threadText));
   if (!recent) return null;
 
-  // Guías informativas (prioridad: lo último que el bot explicó).
   if (
     /\btransporte\s+de\s+pasajer/.test(recent) ||
     /\bhoja(s)?\s+de\s+turno\b/.test(recent) ||
     (/\b(servicio|paradas?|turnos?|poi|gtfs|recorrido)\b/.test(recent) &&
       /\b(transporte|pasajer|linea|l[ií]nea)\b/.test(recent))
   ) {
-    return "Seguimos con Transporte de pasajeros. Decime qué punto querés: conceptos, hoja de turno, paradas, servicios o el error que ves.";
+    return "transporte_publico";
   }
   if (/\bhojas?\s+de\s+ruta\b/.test(recent) || /utilidades\s*[→>\-]\s*hojas de ruta/.test(recent)) {
-    return "Seguimos con Hojas de ruta. Decime qué punto querés: alta, predefinidas, puntos, calendario o cargas/descargas.";
+    return "hojas_de_ruta";
   }
   if (
     /\bcisternas?\b/.test(recent) ||
     (/\btanque\b/.test(recent) && /\b(deposito|dep[oó]sito|base)\b/.test(recent))
   ) {
-    return "Seguimos con Cisternas. Decime si necesitás alta, carga, medición o informes.";
+    return "cisternas";
   }
   if (
     /\b(tickets?\s+de\s+combustible|panel(es)?\s*[→>]?\s*combustible|validaci[oó]n de cargas)\b/.test(
       recent,
     )
   ) {
-    return "Seguimos con Combustible. Decime si es tickets, validación, panel o informes.";
+    return "combustible";
   }
   if (
     /\bmantenim\w*\b/.test(recent) &&
@@ -127,36 +131,133 @@ function inferIdleTopicHint(threadText: string): string | null {
       recent,
     )
   ) {
-    return "Seguimos con la guía de Mantenimiento. Decime qué punto querés profundizar.";
+    return "mantenimiento";
   }
 
-  // Trámites: solo si el bot pidió dato / está en flujo (no por palabra suelta del menú).
   if (
     /\bcertificad\w*\b/.test(recent) &&
     /\b(patente|unidad|cobertura|pasame|necesito|emit|constancia)\b/.test(recent)
   ) {
-    return "Seguimos con el certificado. Pasame la patente o unidad.";
+    return "certificados";
   }
   if (
     /\b(odometro|horometro)\b/.test(recent) &&
     /\b(patente|unidad|kilometr|hora|pasame|necesito|lectura|fecha)\b/.test(recent)
   ) {
-    return "Seguimos con el odómetro/horómetro. Decime la unidad o el dato que faltaba.";
+    return "odometro";
   }
   if (
     /\bmantenim\w*\b/.test(recent) &&
     /\b(patente|unidad|preventiv|correctiv|pasame|necesito)\b/.test(recent)
   ) {
-    return "Seguimos con el mantenimiento. Decime la patente y si es preventivo o correctivo.";
+    return "mantenimiento";
   }
   if (
     /\b(gps|reporte|ubicacion|posicion)\b/.test(recent) &&
     /\b(patente|unidad|estado|pasame|necesito|flota)\b/.test(recent)
   ) {
-    return "Seguimos con la consulta de unidad/GPS. Contame la patente o qué necesitás revisar.";
+    return "gps_unidad";
   }
 
   return null;
+}
+
+/** Resuelve tema: metadato estructurado gana sobre inferencia del hilo. */
+export function resolveIdleTopicKind(
+  threadText: string,
+  lastGuideKind?: LastInfoGuideKind | null,
+): IdleTopicKind | null {
+  if (lastGuideKind && isLastInfoGuideKind(lastGuideKind)) return lastGuideKind;
+  return inferIdleTopicKindFromThread(threadText);
+}
+
+function idleTopicLabel(kind: IdleTopicKind): string {
+  switch (kind) {
+    case "transporte_publico":
+      return "Transporte de pasajeros";
+    case "hojas_de_ruta":
+      return "Hojas de ruta";
+    case "cisternas":
+      return "Cisternas";
+    case "combustible":
+      return "Combustible";
+    case "mantenimiento":
+      return "Mantenimiento";
+    case "opciones":
+      return "Opciones";
+    case "unidades":
+      return "Unidades";
+    case "certificados":
+      return "el certificado";
+    case "odometro":
+      return "el odómetro/horómetro";
+    case "gps_unidad":
+      return "la consulta de unidad/GPS";
+    default:
+      return "lo que estábamos viendo";
+  }
+}
+
+function idleTopicHint(kind: IdleTopicKind): string {
+  switch (kind) {
+    case "transporte_publico":
+      return "Seguimos con Transporte de pasajeros. Decime qué punto querés: conceptos, hoja de turno, paradas, servicios o el error que ves.";
+    case "hojas_de_ruta":
+      return "Seguimos con Hojas de ruta. Decime qué punto querés: alta, predefinidas, puntos, calendario o cargas/descargas.";
+    case "cisternas":
+      return "Seguimos con Cisternas. Decime si necesitás alta, carga, medición o informes.";
+    case "combustible":
+      return "Seguimos con Combustible. Decime si es tickets, validación, panel o informes.";
+    case "mantenimiento":
+      return "Seguimos con la guía de Mantenimiento. Decime qué punto querés profundizar.";
+    case "opciones":
+      return "Seguimos con Opciones. Decime qué querés configurar.";
+    case "unidades":
+      return "Seguimos con Unidades. Decime qué necesitás revisar.";
+    case "certificados":
+      return "Seguimos con el certificado. Pasame la patente o unidad.";
+    case "odometro":
+      return "Seguimos con el odómetro/horómetro. Decime la unidad o el dato que faltaba.";
+    case "gps_unidad":
+      return "Seguimos con la consulta de unidad/GPS. Contame la patente o qué necesitás revisar.";
+    default:
+      return "¿En qué seguimos? Contame qué necesitás.";
+  }
+}
+
+function pendingTramiteLabel(pending?: PendingActionRecord | null): string | null {
+  if (!pending?.type) return null;
+  if (pending.type === "certificados") return "certificado";
+  if (pending.type === "odometro") return "odómetro/horómetro";
+  if (pending.type === "mantenimiento") return "mantenimiento";
+  return null;
+}
+
+/** Guía informativa reciente vs trámite write pendiente residual. */
+export function idleGuideConflictsWithPending(
+  topic: IdleTopicKind | null,
+  pending?: PendingActionRecord | null,
+): boolean {
+  if (!topic || !pending?.type) return false;
+  // Trámites write: si el tema reciente es guía/consulta distinta, no retomar pending en silencio.
+  if (topic === "certificados" && pending.type === "certificados") return false;
+  if (topic === "odometro" && pending.type === "odometro") return false;
+  if (topic === "mantenimiento" && pending.type === "mantenimiento") return false;
+  const guideLike =
+    topic === "transporte_publico" ||
+    topic === "hojas_de_ruta" ||
+    topic === "cisternas" ||
+    topic === "combustible" ||
+    topic === "opciones" ||
+    topic === "unidades" ||
+    topic === "gps_unidad" ||
+    topic === "mantenimiento";
+  return guideLike;
+}
+
+function buildIdleForkAsk(topic: IdleTopicKind, pendingLabel: string): string {
+  const guide = idleTopicLabel(topic);
+  return `¿Seguimos con ${guide} o querés retomar el ${pendingLabel} pendiente?`;
 }
 
 export function formatIdleMetaCustomerPrefix(firstName?: string | null): string {
@@ -259,27 +360,65 @@ function formatContinuityStep(
   threadText: string,
   pendingAction?: PendingActionRecord | null,
   selectionText?: string | null,
+  lastGuideKind?: LastInfoGuideKind | null,
 ): string {
   const preIdle = threadTextBeforeIdleOutbound(threadText);
-  const resume = buildInconclusiveTramiteResumePrompt(
-    preIdle.trim() ? preIdle : threadText,
-    pendingAction,
+  const scoped = preIdle.trim() ? preIdle : threadText;
+  const topic = resolveIdleTopicKind(threadText, lastGuideKind);
+  const pendingLabel = pendingTramiteLabel(pendingAction);
+
+  const threadOnlyResume = buildInconclusiveTramiteResumePrompt(scoped, null);
+  const threadHasNativeTramite = !/Seguimos con lo que estábamos haciendo/.test(
+    threadOnlyResume,
   );
+
+  // Guía reciente + pending residual en DB → preguntar (no retomar certificado en silencio).
+  if (
+    topic &&
+    pendingLabel &&
+    idleGuideConflictsWithPending(topic, pendingAction) &&
+    !threadHasNativeTramite
+  ) {
+    return buildIdleForkAsk(topic, pendingLabel);
+  }
+
+  // Guía reciente sin trámite nativo en el hilo → retomar guía.
+  if (topic && !threadHasNativeTramite && !pendingLabel) {
+    return idleTopicHint(topic);
+  }
+
+  const resume = buildInconclusiveTramiteResumePrompt(scoped, pendingAction);
   const normalized = resume
     .replace(/^¿Seguimos\?\s*/i, "")
     .replace(/^¿Seguimos con/i, "Seguimos con")
     .replace(/^¿Seguimos/i, "Seguimos");
 
-  // Sin trámite activo: retomar guía/tema real del hilo (nunca el menú de saludo).
   if (/Seguimos con lo que estábamos haciendo/.test(normalized)) {
-    const topic = inferIdleTopicHint(threadText);
-    if (topic) return topic;
+    if (topic) return idleTopicHint(topic);
     if (looksLikeDeepenGuideCue(selectionText)) {
       return "Contame qué punto querés que profundice de lo que estábamos viendo.";
     }
     return "¿En qué seguimos? Contame qué necesitás.";
   }
   return normalized;
+}
+
+/** True cuando el executor NO debe pisar el mensaje meta con resume de pending. */
+export function idleMetaShouldPreferGuideOverPending(
+  threadText: string,
+  pendingAction?: PendingActionRecord | null,
+  lastGuideKind?: LastInfoGuideKind | null,
+): boolean {
+  const topic = resolveIdleTopicKind(threadText, lastGuideKind);
+  if (!topic || !pendingTramiteLabel(pendingAction)) return false;
+  if (!idleGuideConflictsWithPending(topic, pendingAction)) return false;
+  const scoped = threadTextBeforeIdleOutbound(threadText);
+  const threadOnly = buildInconclusiveTramiteResumePrompt(
+    scoped.trim() ? scoped : threadText,
+    null,
+  );
+  const threadHasNativeTramite = !/Seguimos con lo que estábamos haciendo/.test(threadOnly);
+  return !threadHasNativeTramite;
 }
 
 const IDLE_PUSHBACK_APOLOGY =
@@ -311,9 +450,15 @@ export function buildIdleFollowupPushbackReply(params: {
   threadText: string;
   customerFirstName?: string | null;
   pendingAction?: PendingActionRecord | null;
+  lastGuideKind?: LastInfoGuideKind | null;
 }): string {
   const prefix = formatIdleMetaCustomerPrefix(params.customerFirstName);
-  const step = formatContinuityStep(params.threadText, params.pendingAction);
+  const step = formatContinuityStep(
+    params.threadText,
+    params.pendingAction,
+    null,
+    params.lastGuideKind,
+  );
   return `${prefix}${IDLE_PUSHBACK_APOLOGY} ${step}`;
 }
 
@@ -323,6 +468,7 @@ export function buildMetaConversationalContinuityReply(
     customerFirstName?: string | null;
     pendingAction?: PendingActionRecord | null;
     selectionText?: string | null;
+    lastGuideKind?: LastInfoGuideKind | null;
   },
 ): string {
   const prefix = formatIdleMetaCustomerPrefix(opts?.customerFirstName);
@@ -330,15 +476,24 @@ export function buildMetaConversationalContinuityReply(
     threadText,
     opts?.pendingAction,
     opts?.selectionText,
+    opts?.lastGuideKind,
   );
 
   if (threadLastBotOutboundWasIdleClose(threadText)) {
     return `${prefix}${step}`;
   }
+  // Pregunta de fork guía vs pending: no anteponer "Perfecto, seguimos".
+  if (/^¿Seguimos con/i.test(step)) {
+    return `${prefix}${step}`;
+  }
   if (threadLastBotOutboundWasIdleNudge(threadText)) {
     return `${prefix}${/^Seguimos/i.test(step) ? `Perfecto, ${step}` : `Perfecto, seguimos. ${step}`}`;
   }
-  if (step && !/^Seguimos con lo que/.test(step) && !/^¿En qué seguimos/i.test(step)) {
+  if (
+    step &&
+    !/^Seguimos con lo que/.test(step) &&
+    !/^¿En qué seguimos/i.test(step)
+  ) {
     return `${prefix}${/^Seguimos/i.test(step) ? `Dale, ${step}` : `Dale, seguimos. ${step}`}`;
   }
   return `${prefix}Dale, seguimos. ¿En qué te ayudo?`;
@@ -348,6 +503,8 @@ export type IdleFollowupMetaTurnResult = {
   intercept: true;
   idlePushback: boolean;
   message: string;
+  /** Si true, el caller no debe reemplazar el mensaje por resume de pendingAction. */
+  preferGuideOverPending: boolean;
 };
 
 /**
@@ -359,25 +516,49 @@ export function resolveIdleFollowupMetaTurn(params: {
   threadText: string;
   customerFirstName?: string | null;
   pendingAction?: PendingActionRecord | null;
+  lastGuideKind?: LastInfoGuideKind | null;
 }): IdleFollowupMetaTurnResult | null {
-  const { selectionText, threadText, customerFirstName, pendingAction } = params;
+  const { selectionText, threadText, customerFirstName, pendingAction, lastGuideKind } =
+    params;
+
+  const preferGuideOverPending = idleMetaShouldPreferGuideOverPending(
+    threadText,
+    pendingAction,
+    lastGuideKind,
+  );
 
   if (shouldHandleIdleFollowupPushback(selectionText, threadText)) {
     return {
       intercept: true,
       idlePushback: true,
+      preferGuideOverPending,
       message: buildIdleFollowupPushbackReply({
         threadText,
         customerFirstName,
         pendingAction,
+        lastGuideKind,
       }),
     };
   }
 
   if (looksLikeIdleNudgeAffirmation(selectionText, threadText)) {
+    if (preferGuideOverPending) {
+      return {
+        intercept: true,
+        idlePushback: false,
+        preferGuideOverPending,
+        message: buildMetaConversationalContinuityReply(threadText, {
+          customerFirstName,
+          pendingAction,
+          selectionText,
+          lastGuideKind,
+        }),
+      };
+    }
     return {
       intercept: true,
       idlePushback: false,
+      preferGuideOverPending,
       message: buildIdleNudgeAffirmationReply({ customerFirstName }),
     };
   }
@@ -386,10 +567,12 @@ export function resolveIdleFollowupMetaTurn(params: {
     return {
       intercept: true,
       idlePushback: false,
+      preferGuideOverPending,
       message: buildMetaConversationalContinuityReply(threadText, {
         customerFirstName,
         pendingAction,
         selectionText,
+        lastGuideKind,
       }),
     };
   }
