@@ -1229,9 +1229,11 @@ export function looksLikeMaintenanceAppGuideRequest(
   threadText = "",
 ): boolean {
   if (parseInfoGuideModulePick(raw) === "mantenimiento") return true;
+  if (looksLikeMaintenanceDomainTermQuestion(raw)) return true;
   if (looksLikeMaintenanceInfoRequest(raw)) return true;
   if (looksLikeMaintenanceExplorationRequest(raw)) return true;
   if (looksLikeMaintenanceStepByStepOnlyRequest(raw, threadText)) return true;
+  if (looksLikeMaintenanceGuideFollowupQuestion(raw, threadText)) return true;
   if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
     if (looksLikeMaintenanceCapabilityQuestion(raw, threadText)) return true;
     if (looksLikeOperationalMaintenanceIntentCore(raw ?? "", threadText)) return true;
@@ -1817,10 +1819,66 @@ export function buildUnexpectedTurnFallbackMessage(raw: string | undefined | nul
   );
 }
 
+/** Términos / preguntas del dominio Mantenimiento sin decir “mantenimiento”. */
+export function looksLikeMaintenanceDomainTermQuestion(raw: string | undefined | null): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text || text.length > 240) return false;
+  // Checkbox del plan preventivo (§11.5) — no es glosario de Transporte Público.
+  if (/contar a partir de la realizaci[oó]n/.test(text)) return true;
+  if (
+    /a partir de la realizaci[oó]n/.test(text) &&
+    /\b(contar|significa|que es|qué es|quiere decir|para que|para qué)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (/\bconfirmar (la )?realizaci[oó]n\b/.test(text)) return true;
+  if (/\badministrar (la )?tarea\b/.test(text)) return true;
+  if (/\bpr[oó]ximo vencimiento\b/.test(text)) return true;
+  if (
+    /\b(orden(es)? de trabajo|\bot\b|una orden|la orden)\b/.test(text) &&
+    /\b(iniciad|finaliz|estado|pase|pasar|pendiente|acci[oó]n)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (/\btoma y deje\b/.test(text)) return true;
+  if (/\bplan (de )?mantenimiento\b/.test(text) && /\b(asign|unidad|tarea|como|cómo)\b/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+/** Continuación conversacional dentro de una guía de mantenimiento ya abierta. */
+export function looksLikeMaintenanceGuideFollowupQuestion(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
+  if (!looksLikeMaintenanceGuideContextInThread(threadText)) return false;
+  const text = normCompanyToken(raw ?? "");
+  if (!text || text.length > 220) return false;
+  if (looksLikeOperationalMaintenanceIntent(raw ?? "", threadText)) return false;
+  if (looksLikeGpsOrUnitStatusQuestion(raw)) return false;
+  // Patente / interno suelto: no es follow-up de guía.
+  if (/^[a-z]{0,3}\d{2,6}[a-z]{0,3}$/i.test(text.replace(/\s+/g, "")) && text.length <= 12) {
+    return false;
+  }
+  if (looksLikeMaintenanceDomainTermQuestion(raw)) return true;
+  if (looksLikeMaintenanceInfoRequest(raw)) return true;
+  if (/\?/.test(String(raw ?? "")) && text.length < 180) return true;
+  if (
+    /^(y |despues|después|entonces|ok |dale |ahora |tambien|también|y despues|y después)/.test(text)
+  ) {
+    return true;
+  }
+  if (/\b(donde|dónde|como|cómo|que|qué|cual|cuál|cuando|cuándo)\b/.test(text)) return true;
+  if (/\b(panel(es)?|tarea|ot\b|orden|seguimiento|siga|sigo|despu[eé]s)\b/.test(text)) return true;
+  return false;
+}
+
 /** Guía informativa del módulo Mantenimiento (cómo usar/configurar), no trámite operativo. */
 export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null): boolean {
   const text = normCompanyToken(raw ?? "");
   if (!text) return false;
+  if (looksLikeMaintenanceDomainTermQuestion(raw)) return true;
   if (looksLikeMaintenanceExplorationRequest(raw)) return true;
   if (looksLikeOperationalMaintenanceIntent(String(raw ?? ""))) return false;
   if (looksLikeTurnoOrAgendaQuestion(String(raw ?? ""))) return false;
@@ -1829,7 +1887,7 @@ export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null):
   const maintenanceDomain =
     /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
   const howToCue =
-    /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona|saber|conocer|informacion|como se|cómo se|como hago|cómo hago)\b/;
+    /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona|saber|conocer|informacion|como se|cómo se|como hago|cómo hago|significa|que es|qué es)\b/;
   return maintenanceDomain.test(text) && howToCue.test(text);
 }
 
@@ -1853,10 +1911,16 @@ export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
 export function looksLikeMaintenanceInfoGuideInThread(threadText: string): boolean {
   const tail = threadText.slice(-3500).toLowerCase();
   return (
-    /modulo de mantenimiento/.test(tail) &&
-    (/orientacion de uso|como guia general|tarea preventiva|tarea correctiva|paso a paso/.test(tail) ||
-      /queres que te explique/.test(tail) ||
-      /no genero un ticket por esta consulta/.test(tail))
+    (/modulo de mantenimiento/.test(tail) &&
+      (/orientacion de uso|como guia general|tarea preventiva|tarea correctiva|paso a paso/.test(
+        tail,
+      ) ||
+        /queres que te explique/.test(tail) ||
+        /no genero un ticket por esta consulta/.test(tail))) ||
+    (/mantenimiento/.test(tail) &&
+      /utilidades\s*[→\-]\s*mantenimiento|paneles\s*[→\-]|mis atajos\s*[→\-]?\s*tareas|as[ií] est[aá] armado mantenimiento/.test(
+        tail,
+      ))
   );
 }
 
@@ -1868,10 +1932,11 @@ export function looksLikeMaintenanceGuideContextInThread(threadText: string): bo
   return (
     /mantenimiento preventivo/.test(tail) ||
     (/mantenimiento/.test(tail) &&
-      /utilidades|plan de mantenimiento|tarea correctiva|tarea preventiva|ingresa al sistema wara|ingresar al sistema/.test(
+      /utilidades|plan de mantenimiento|tarea correctiva|tarea preventiva|ingresa al sistema wara|ingresar al sistema|mis atajos|paneles|ordenes de trabajo|órdenes de trabajo|toma y deje/.test(
         tail,
       )) ||
-    (/queres que te explique/.test(tail) && /mantenimiento|preventiv\w*|correctiv\w*|tarea/.test(tail))
+    (/queres que te explique/.test(tail) && /mantenimiento|preventiv\w*|correctiv\w*|tarea/.test(tail)) ||
+    /para asignar (un )?plan/.test(tail)
   );
 }
 

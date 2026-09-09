@@ -18,6 +18,10 @@ import {
   listCombustibleArticleCatalog,
 } from "@/lib/combustibleKnowledge";
 import { listMantenimientoArticleCatalog } from "@/lib/mantenimientoKnowledge";
+import {
+  looksLikeMaintenanceDomainTermQuestion,
+  looksLikeMaintenanceGuideFollowupQuestion,
+} from "@/lib/waraApi";
 
 const INTERPRET_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_ROUTE_CONFIDENCE = 0.72;
@@ -163,10 +167,13 @@ need:
 guideKind transporte_publico: hoja de turno, turnos de línea, servicios/recorridos de pasajeros, POI/etapas de recorrido, paradas, traza KMZ, excepciones de transporte, regularidad, colores del panel de viajes.
 Si guideKind es opciones|unidades: articleIds DEBE ser [].
 guideKind mantenimiento: planes preventivos/correctivos (catálogo Utilidades), asignar plan desde Unidades→TAREAS, Paneles→Tareas/Órdenes de trabajo/Toma y deje, informes de mantenimiento. Utilidades = SOLO configuración; la operación NO es solo Utilidades.
+Términos de Mantenimiento (NO son Transporte Público): “contar a partir de la realización”, “confirmar la realización”, “próximo vencimiento”, “administrar tarea”, “orden de trabajo” (OT), “toma y deje”, estados iniciada/finalizada de OT.
+Si preguntan qué significa “contar a partir de la realización” → guideKind=mantenimiento, articleIds=["mt-contar-realizacion"] (pendiente de validación: NO inventes definición).
 NO confundir pedido de “programame/creame el mantenimiento de la patente X” (execute) con guía de cómo hacerlo en la app.
 NO confundir con odómetro/horómetro a registrar por WhatsApp.
 articleIds de mantenimiento: solo IDs del catálogo_mantenimiento (prefijo mt-, 0–3). Vacío si guideKind no es mantenimiento.
 executionRequest en mantenimiento: articleIds puede incluir "mt-ejecucion-no-disponible".
+Continuá el hilo de mantenimiento: “¿y después dónde la sigo?”, preguntas de OT/estados/paneles tras una guía de mantenimiento → guideKind=mantenimiento (no unidades).
 NO confundir "etapas" de transporte con consulta GPS de una unidad.
 NO confundir pedido de ejecución con capacidad real: executionRequest=true; articleIds puede incluir "tp-ejecucion-no-disponible".
 ${cisternasBlock}${combustibleBlock}
@@ -318,6 +325,69 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
   }
 }
 
+function correctMaintenanceMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+  threadText: string,
+): PlatformKnowledgeInterpret {
+  const domainTerm = looksLikeMaintenanceDomainTermQuestion(selectionText);
+  const followup = looksLikeMaintenanceGuideFollowupQuestion(selectionText, threadText);
+  if (!domainTerm && !followup) return interpret;
+
+  const t = selectionText.toLowerCase();
+  const wantsContar =
+    /contar a partir de la realizaci[oó]n|a partir de la realizaci[oó]n/.test(t);
+  const wantsOtEstado = /\b(orden|ot\b|finaliz|iniciad)\b/.test(t) && !wantsContar;
+  const wantsFollowPanel = /\b(panel|siga|sigo|despu[eé]s|seguimiento|d[oó]nde)\b/.test(t);
+
+  const mtIds = new Set(listMantenimientoArticleCatalog().map((a) => a.id));
+  let articleIds = interpret.articleIds.filter((id) => mtIds.has(id));
+
+  const alreadyOk =
+    interpret.guideKind === "mantenimiento" &&
+    interpret.route === "info_guides" &&
+    articleIds.length > 0 &&
+    ((wantsContar && articleIds.includes("mt-contar-realizacion")) ||
+      (wantsOtEstado &&
+        articleIds.some((id) => id === "mt-orden-trabajo" || id === "mt-flujo-preventivo")) ||
+      (wantsFollowPanel &&
+        articleIds.some((id) => id === "mt-panel-tareas" || id === "mt-asignar-plan-unidad")) ||
+      (!wantsContar && !wantsOtEstado && !wantsFollowPanel));
+  if (alreadyOk) return interpret;
+
+  if (wantsContar) {
+    articleIds = ["mt-contar-realizacion"];
+  } else if (wantsOtEstado) {
+    articleIds = ["mt-orden-trabajo", "mt-flujo-preventivo"];
+  } else if (wantsFollowPanel) {
+    articleIds = ["mt-panel-tareas", "mt-asignar-plan-unidad"];
+  } else if (!articleIds.length) {
+    articleIds = domainTerm
+      ? ["mt-plan-preventivo", "mt-contar-realizacion"]
+      : ["mt-concepto-y-mapa", "mt-panel-tareas"];
+  }
+
+  const need =
+    /significa|qu[eé] es|quiere decir|qu[eé] acci[oó]n/.test(t)
+      ? ("definition" as const)
+      : interpret.need === "ambiguous"
+        ? ("procedure" as const)
+        : interpret.need;
+
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "mantenimiento",
+    need,
+    articleIds,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|mt_domain_guard`
+      : "mt_domain_guard",
+  };
+}
+
 export async function interpretPlatformKnowledgeTurn(opts: {
   selectionText: string;
   threadText?: string;
@@ -332,7 +402,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const key = cacheKey(text, opts.threadText ?? "", cisternasOn, combustibleOn);
   const cached = interpretCache.get(key);
   if (cached && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
-    return cached.value;
+    return correctMaintenanceMisroute(cached.value, text, opts.threadText ?? "");
   }
 
   const catalogTp = listTransporteArticleCatalog();
@@ -373,10 +443,33 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       INTERPRET_TIMEOUT_MS,
     );
     const content = response?.choices?.[0]?.message?.content?.trim();
-    const parsed = content ? parseInterpret(content) : null;
-    if (parsed) interpretCache.set(key, { at: Date.now(), value: parsed });
+    let parsed = content ? parseInterpret(content) : null;
+    if (parsed) {
+      parsed = correctMaintenanceMisroute(parsed, text, opts.threadText ?? "");
+      interpretCache.set(key, { at: Date.now(), value: parsed });
+    }
     return parsed;
   } catch {
+    // Sin OpenAI: aún así no mandar jerga de mantenimiento a TP/unidades.
+    if (
+      looksLikeMaintenanceDomainTermQuestion(text) ||
+      looksLikeMaintenanceGuideFollowupQuestion(text, opts.threadText ?? "")
+    ) {
+      return correctMaintenanceMisroute(
+        {
+          route: "info_guides",
+          guideKind: "mantenimiento",
+          need: "definition",
+          articleIds: ["mt-contar-realizacion"],
+          clarifyQuestion: null,
+          executionRequest: false,
+          confidence: 0.92,
+          reason: "mt_domain_guard_offline",
+        },
+        text,
+        opts.threadText ?? "",
+      );
+    }
     return null;
   }
 }

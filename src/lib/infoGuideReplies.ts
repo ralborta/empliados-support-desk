@@ -1,5 +1,6 @@
 import {
   looksLikeMaintenanceAppGuideRequest,
+  looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceGuideContextInThread,
   looksLikeMaintenanceInfoRequest,
@@ -105,7 +106,11 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     return "opciones";
   }
   if (looksLikeUnidadesInfoRequest(text)) return "unidades";
-  if (looksLikeMaintenanceAppGuideRequest(text) || looksLikeMaintenanceExplorationRequest(text)) {
+  if (
+    looksLikeMaintenanceAppGuideRequest(text) ||
+    looksLikeMaintenanceExplorationRequest(text) ||
+    looksLikeMaintenanceDomainTermQuestion(text)
+  ) {
     return "mantenimiento";
   }
   // Fallback léxico claro (si el intérprete LLM no corre o falla): no inventar "sin info".

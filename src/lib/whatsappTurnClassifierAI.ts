@@ -248,9 +248,11 @@ export async function resolveTurnExecutor(
     const isTp = kbInterpret?.guideKind === "transporte_publico";
     const isCs = kbInterpret?.guideKind === "cisternas" && isCisternasKbEnabled();
     const isCb = kbInterpret?.guideKind === "combustible" && isCombustibleKbEnabled();
-    if (shouldRouteInterpretToInfoGuides(kbInterpret) && (isTp || isCs || isCb)) {
+    const isMt = kbInterpret?.guideKind === "mantenimiento";
+    // Mantenimiento también: las reglas default a "unidades" en follow-ups / jerga sin keyword.
+    if (shouldRouteInterpretToInfoGuides(kbInterpret) && (isTp || isCs || isCb || isMt)) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
-      if (rulesExecutor === "unidades" || rulesExecutor === "info_guides") {
+      if (rulesExecutor === "unidades" || rulesExecutor === "info_guides" || rulesExecutor === "mantenimiento") {
         return {
           executor: "info_guides",
           source: "ai",

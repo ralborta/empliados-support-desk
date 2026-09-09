@@ -52,6 +52,7 @@ import {
   looksLikeOutOfScopeSupportClaim,
   looksLikeSubstantiveCustomerMessage,
   looksLikeMaintenanceGuideContextInThread,
+  looksLikeMaintenanceGuideFollowupQuestion,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeMaintenanceInfoRequest,
   looksLikeNonOdometerOperationalIntent,
@@ -319,27 +320,29 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "maintenance_info_guide_in_thread_allow",
     reason:
-      "Venimos de una guía informativa de mantenimiento y el mensaje no es operativo: seguir en guía solo si es explícito o elige módulo.",
+      "Venimos de una guía informativa de mantenimiento y el mensaje no es operativo: seguir en guía (incluye follow-ups).",
     decide: ({ text, threadText }) => {
       if (!looksLikeMaintenanceInfoGuideInThread(threadText)) return undefined;
       if (looksLikeMaintenanceOperational(text, threadText)) return undefined;
       return (
         !!detectInfoGuideKind(text) ||
         looksLikeInfoGuideModulePick(text) ||
-        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText)
+        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText) ||
+        looksLikeMaintenanceGuideFollowupQuestion(text, threadText)
       );
     },
   },
   {
     id: "maintenance_guide_context_in_thread_allow",
-    reason: "Contexto general de guía de mantenimiento en el hilo, mensaje no operativo.",
+    reason: "Contexto general de guía de mantenimiento en el hilo, mensaje no operativo (incluye follow-ups).",
     decide: ({ text, threadText }) => {
       if (!looksLikeMaintenanceGuideContextInThread(threadText)) return undefined;
       if (looksLikeMaintenanceOperational(text, threadText)) return undefined;
       return (
         !!detectInfoGuideKind(text) ||
         looksLikeInfoGuideModulePick(text) ||
-        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText)
+        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText) ||
+        looksLikeMaintenanceGuideFollowupQuestion(text, threadText)
       );
     },
   },

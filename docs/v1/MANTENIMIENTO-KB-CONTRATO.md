@@ -50,7 +50,14 @@
 8. Validaciones  
 9. Límite de canal (`mt-ejecucion-no-disponible`)
 
-Pendientes §11 del relevamiento → `restrictions` (no afirmar).
+Pendientes §11 del relevamiento → `restrictions` (no afirmar). Incluye semántica de “Contar a partir de la realización” (`mt-contar-realizacion`) y avance OT→FINALIZADA.
+
+## Hotfix interpretación / continuidad (post-deploy)
+
+- Jerga sin keyword “mantenimiento” (p. ej. “contar a partir de la realización”) → `mantenimiento`, no TP.
+- Follow-ups con hilo de guía MT (“¿y después dónde la sigo?”) → `info_guides`, no `unidades`.
+- `resolveTurnExecutor` también promueve `guideKind=mantenimiento` sobre default `unidades`.
+- Live ampliado: ambigüedad + continuidad + honestidad de pendientes.
 
 ## Observabilidad
 
@@ -58,8 +65,8 @@ Cada respuesta KB: `executor`, `guideKind`, `need`, `articleIds`, `confidence`/`
 
 ## Validación
 
-- Offline: `scripts/verify-mantenimiento-kb.mjs` (corpus + fallbacks + regresión odo/cert/TP).  
-- Live parcial: `scripts/live-mantenimiento-kb.mjs` (interpret + resolve).
+- Offline: `scripts/verify-mantenimiento-kb.mjs` (corpus + jerga/continuidad + regresión odo/cert/TP).  
+- Live parcial: `scripts/live-mantenimiento-kb.mjs` (incluye realización + follow-ups).
 
 ## Fuente
 

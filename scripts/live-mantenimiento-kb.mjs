@@ -2,6 +2,7 @@
 /**
  * LIVE PARCIAL — Mantenimiento KB (helpers + resolveTurnExecutor).
  *
+ * Incluye ambigüedad (“realización”) y continuidad conversacional.
  * NO ejecuta runTurnExecutorPhase / WhatsApp real.
  *
  * Uso:
@@ -41,6 +42,35 @@ const cases = [
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "mantenimiento",
+  },
+  {
+    id: "realizacion-term",
+    text: "¿Qué significa contar a partir de la realización?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "mantenimiento",
+    expectArticlesInclude: "mt-contar-realizacion",
+    expectReplyNotTp: true,
+    expectPendingHonesty: true,
+  },
+  {
+    id: "followup-donde-sigo",
+    text: "¿Y después dónde la sigo?",
+    thread:
+      "Cliente: ¿Cómo asigno un plan de mantenimiento a una unidad?\n" +
+      "Atilio: Para asignar un plan: Unidades → MIS ATAJOS → TAREAS. Elegí el plan y guardá.",
+    expectResolve: "info_guides",
+    expectGuide: "mantenimiento",
+  },
+  {
+    id: "ot-estado-followup",
+    text: "¿Qué acción hace que una orden pase de iniciada a finalizada?",
+    thread:
+      "Cliente: mantenimiento\nAtilio: Así está armado Mantenimiento en Wara:\n" +
+      "Configuración: Utilidades → Mantenimiento.\nOperación: Paneles → Órdenes de trabajo.",
+    expectResolve: "info_guides",
+    expectGuide: "mantenimiento",
+    expectPendingHonesty: true,
   },
   {
     id: "execute-mt",
@@ -93,7 +123,7 @@ for (const c of cases) {
     );
     guideKind = meta.guideKind;
     used = meta.interpret;
-    replyPreview = String(meta.message).slice(0, 220);
+    replyPreview = String(meta.message).slice(0, 280);
   }
 
   const row = {
@@ -113,6 +143,21 @@ for (const c of cases) {
     if (c.expectGuide) {
       assert.equal(guideKind, c.expectGuide, `${c.id} guideKind`);
     }
+    if (c.expectArticlesInclude) {
+      assert.ok(
+        (used?.articleIds ?? []).includes(c.expectArticlesInclude),
+        `${c.id} article ${c.expectArticlesInclude}`,
+      );
+    }
+    if (c.expectReplyNotTp) {
+      assert.doesNotMatch(replyPreview, /transporte p[uú]blico|hoja de turno|servicio de pasajer/i);
+    }
+    if (c.expectPendingHonesty) {
+      assert.match(
+        replyPreview,
+        /pendiente|no (est[aá]|puedo|tenemos) (confirm|valid)|no confirm|sin validar|manual no|no afirm|no (puedo|podemos) afirmar|a[uú]n no|no se menciona|no (hay|queda) (confirm|valid)|correspondencia|§11/i,
+      );
+    }
     if (c.expectExecute) {
       assert.equal(used?.executionRequest, true, `${c.id} executionRequest`);
       assert.match(replyPreview, /no (puedo|tengo)|por este chat|asesor|paso a paso/i);
@@ -120,7 +165,7 @@ for (const c of cases) {
     if (c.expectGuide === "mantenimiento" && !c.expectExecute) {
       assert.ok(
         (used?.articleIds ?? []).some((id) => String(id).startsWith("mt-")) ||
-          /Utilidades|Paneles|Unidades|TAREAS|mantenimiento/i.test(replyPreview),
+          /Utilidades|Paneles|Unidades|TAREAS|mantenimiento|realizaci[oó]n|orden/i.test(replyPreview),
         `${c.id} mt content`,
       );
     }

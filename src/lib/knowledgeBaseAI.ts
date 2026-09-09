@@ -60,7 +60,9 @@ REGLAS DURAS para Mantenimiento (prioridad absoluta):
 - Solo especializá preventivo/correctivo/toma-deje/OT si el cliente lo pidió o los articleIds lo indican.
 - No confundas con odómetro/horómetro. No digas que creaste/programaste algo en la cuenta.
 - Forma según need; execute = límite de canal (mt-ejecucion-no-disponible).
-- Respetá restrictions (pendientes §11): no afirmes lo no confirmado.`.trim();
+- Respetá restrictions (pendientes §11): no afirmes lo no confirmado.
+- “Contar a partir de la realización”: solo decí que el campo existe y que el significado exacto no está validado; NUNCA inventes definición.
+- No afirmes que confirmar realización cierra la tarea, recalcula el próximo vencimiento ni que la OT queda FINALIZADA si hay restriction pendiente.`.trim();
 
 const TRANSPORTE_HARD_CONSTRAINTS = `
 REGLAS DURAS Transporte Público:
