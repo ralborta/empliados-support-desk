@@ -401,7 +401,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const combustibleOn = isCombustibleKbEnabled();
   const key = cacheKey(text, opts.threadText ?? "", cisternasOn, combustibleOn);
   const cached = interpretCache.get(key);
-  if (cached && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
+  if (cached && cached.value && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
     return correctMaintenanceMisroute(cached.value, text, opts.threadText ?? "");
   }
 
