@@ -270,14 +270,15 @@ function looksLikeMaintenanceLoadTrouble(rawText: string): boolean {
 
 function mantenimientoTroubleshootingReply(): string {
   return [
-    "Si no pudiste cargar el mantenimiento en Wara, probá esto:",
+    "Si no pudiste avanzar con Mantenimiento en Wara, revisá esto:",
     "",
-    "1. Entrá de nuevo a Utilidades → Mantenimiento.",
-    "2. Confirmá que elegiste la empresa y la unidad correctas.",
-    "3. Revisá que todos los campos obligatorios estén completos antes de guardar.",
-    "4. Si sigue fallando, anotá el mensaje de error exacto o una captura y pedí ayuda a tu administrador Wara.",
+    "1. Separá configuración de operación: Utilidades → Mantenimiento es solo catálogos (planes / correctivo / toma y deje).",
+    "2. Para asignar un plan a una unidad: Unidades → (unidad) → MIS ATAJOS → TAREAS.",
+    "3. Para ver/confirmar tareas u OT: Paneles → Tareas de mantenimiento u Órdenes de trabajo.",
+    "4. Completá campos obligatorios y, si el sistema pide odómetro/horómetro, actualizalo antes (otro trámite).",
+    "5. Si sigue fallando, anotá el mensaje de error o una captura y pedí ayuda a tu administrador Wara.",
     "",
-    "Por este chat no registro ni abro ticket automático solo por el mantenimiento: primero te ayudo a resolverlo en la app.",
+    "Por este chat no registro ni abro ticket automático solo por preguntar: primero te ayudo a resolverlo en la app.",
   ].join("\n");
 }
 
@@ -286,42 +287,49 @@ function mantenimientoReply(rawText: string): string {
   if (looksLikeMaintenanceLoadTrouble(rawText)) {
     return mantenimientoTroubleshootingReply();
   }
-  if (/\b(preventiv\w*|plan)\b/.test(t)) {
+  if (/\b(preventiv\w*|plan)\b/.test(t) && !/\bcorrectiv/.test(t)) {
     return [
-      "Para agendar un plan o tarea preventiva en Wara:",
+      "Plan preventivo en Wara (configuración + asignación):",
       "",
-      "1. Entrá a Utilidades → Mantenimiento.",
-      "2. Creá o seleccioná un plan preventivo.",
-      "3. Asociá las unidades que correspondan.",
-      "4. Definí periodicidad (fecha, km u horas, según el módulo).",
-      "5. Guardá y verificá que el plan quede activo.",
+      "1. Catálogo: Utilidades → Mantenimiento → Plan de mantenimiento (crear plan y tareas con un solo criterio: km, horas o fecha).",
+      "2. Asignar a la unidad: Unidades → (unidad) → MIS ATAJOS → TAREAS → elegir plan o tarea.",
+      "3. Seguimiento: Paneles → Tareas de mantenimiento (estados, confirmar, administrar).",
+      "",
+      "Utilidades no es donde se opera el día a día: ahí solo se arman los catálogos.",
     ].join("\n");
   }
-  if (/\b(correctiv\w*|averia|falla|orden de trabajo)\b/.test(t)) {
+  if (/\b(correctiv\w*|averia|falla|orden(?:es)? de trabajo)\b/.test(t)) {
     return [
-      "Para agendar una tarea o orden correctiva en Wara:",
+      "Correctivo / orden de trabajo en Wara:",
       "",
-      "1. Entrá a Utilidades → Mantenimiento (o desde la ficha de la unidad).",
-      "2. Creá una tarea u orden correctiva.",
-      "3. Seleccioná la unidad afectada.",
-      "4. Describí la falla o el trabajo a realizar.",
-      "5. Guardá y hacé seguimiento hasta el cierre.",
+      "1. Catálogo (opcional): Utilidades → Mantenimiento → Plan correctivo (planes y tareas correctivas).",
+      "2. Operación: Paneles → Tareas de mantenimiento o Paneles → Órdenes de trabajo (alta, edición, seguimiento).",
+      "3. Desde una novedad de inspección: Paneles → Toma y deje → solucionar o convertir a tarea correctiva.",
       "",
-      "También: Unidades → chevron de la unidad → MIS ATAJOS → Tareas correctivas / Agregar orden de trabajo.",
+      "No confundas con odómetro/horómetro (otro trámite).",
     ].join("\n");
   }
-  // «Mantenimiento» / cómo agendo: explicar el cómo, no un menú vacío.
+  if (/\b(toma\s*y\s*deje|inspecci[oó]n)\b/.test(t)) {
+    return [
+      "Toma y deje en Wara:",
+      "",
+      "1. Conceptos (catálogo): Utilidades → Mantenimiento → Conceptos toma y deje.",
+      "2. Operación: Paneles → Toma y deje (novedades; solucionar o convertir a correctivo).",
+    ].join("\n");
+  }
+  // «Mantenimiento» genérico: mapa real, no menú ni “todo en Utilidades”.
   return [
-    "Así se agenda un mantenimiento en Wara:",
+    "Así está armado Mantenimiento en Wara:",
     "",
-    "1. Entrá a Utilidades → Mantenimiento.",
-    "2. Elegí plan/tarea preventiva o tarea/orden correctiva.",
-    "3. Seleccioná la unidad (o unidades).",
-    "4. Completá descripción y, si aplica, frecuencia (fecha, km u horas).",
-    "5. Guardá y seguí el estado desde el mismo módulo.",
+    "Configuración (catálogos): Utilidades → Mantenimiento → Plan de mantenimiento / Plan correctivo / Conceptos toma y deje.",
+    "Operación diaria:",
+    "1. Asignar plan/tarea a una unidad: Unidades → (unidad) → MIS ATAJOS → TAREAS.",
+    "2. Gestionar tareas y OT: Paneles → Tareas de mantenimiento / Órdenes de trabajo.",
+    "3. Inspecciones: Paneles → Toma y deje.",
+    "4. Seguimiento: Informes → Mantenimiento y depósito.",
     "",
     "Preventivo = plan programado. Correctivo = falla o reparación puntual.",
-    "Desde una unidad: Unidades → chevron → MIS ATAJOS → Tareas correctivas / Orden de trabajo.",
+    "Por este chat te explico el uso; no programo mantenimientos en tu cuenta.",
   ].join("\n");
 }
 
@@ -347,8 +355,8 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
   }
   if (detected === "mantenimiento") {
     return [
-      "Ya te pasé el paso a paso para agendar en Utilidades → Mantenimiento.",
-      "Decime qué paso puntual no te quedó claro (unidad, frecuencia, guardar, o atajos desde Unidades).",
+      "Ya te pasé el mapa de Mantenimiento (catálogos en Utilidades vs operación en Unidades/Paneles).",
+      "Decime qué punto puntual: asignar plan, panel de tareas, OT, toma y deje, o un error de pantalla.",
     ].join("\n");
   }
   if (detected === "transporte_publico") {
@@ -434,7 +442,11 @@ function looksLikeWeakMaintenanceGuideAnswer(text: string): boolean {
   const t = text.trim();
   if (!t) return true;
   const hasNumberedSteps = /\n\s*1[\).\]]/.test(`\n${t}`) || /^\s*1[\).\]]/.test(t);
-  const hasAppPath = /Utilidades\s*[→\-]\s*Mantenimiento/i.test(t);
+  const hasAppPath =
+    /Utilidades\s*[→\-]\s*Mantenimiento/i.test(t) ||
+    /Paneles\s*[→\-]\s*(Tareas|[ÓO]rdenes|Toma)/i.test(t) ||
+    /MIS\s+ATAJOS\s*[→\-]\s*TAREAS/i.test(t) ||
+    /Unidades\s*[→\-].{0,40}TAREAS/i.test(t);
   if (hasNumberedSteps || hasAppPath) return false;
   return (
     /preventivo o (de )?correctivo/i.test(t) ||
@@ -577,7 +589,9 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       detected === "cisternas" ||
       activeInterpret.guideKind === "cisternas" ||
       detected === "combustible" ||
-      activeInterpret.guideKind === "combustible")
+      activeInterpret.guideKind === "combustible" ||
+      detected === "mantenimiento" ||
+      activeInterpret.guideKind === "mantenimiento")
   ) {
     if (detected === "cisternas" || activeInterpret.guideKind === "cisternas") {
       if (!isCisternasKbEnabled()) {
@@ -639,6 +653,28 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: "clarify_or_limit",
       };
     }
+    if (detected === "mantenimiento" || activeInterpret.guideKind === "mantenimiento") {
+      detected = "mantenimiento";
+      const execIds = articleIds.length ? articleIds : ["mt-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("mantenimiento", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit && !looksLikeWeakMaintenanceGuideAnswer(execLimit)) {
+        return {
+          message: execLimit,
+          guideKind: "mantenimiento",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "mantenimiento",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     detected = "transporte_publico";
     const execLimit = await answerFromKnowledgeBase("transporte_publico", rawText, threadText, {
       articleIds: articleIds.length ? articleIds : ["tp-ejecucion-no-disponible"],
@@ -672,7 +708,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       articleIds:
         detected === "transporte_publico" ||
         detected === "cisternas" ||
-        detected === "combustible"
+        detected === "combustible" ||
+        detected === "mantenimiento"
           ? articleIds
           : undefined,
       need,
@@ -699,7 +736,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     if (
       (detected === "transporte_publico" ||
         detected === "cisternas" ||
-        detected === "combustible") &&
+        detected === "combustible" ||
+        detected === "mantenimiento") &&
       !grounded
     ) {
       if (activeInterpret && (activeInterpret.articleIds.length > 0 || activeInterpret.need)) {

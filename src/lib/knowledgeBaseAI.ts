@@ -1,10 +1,11 @@
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
-import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE, MANTENIMIENTO_KNOWLEDGE_BASE } from "@/lib/knowledgeBase";
+import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE } from "@/lib/knowledgeBase";
 import { getBotPromptModule } from "@/lib/botPromptStore";
 import { buildTransporteKnowledgeContext } from "@/lib/transportePublicoKnowledge";
 import { buildCisternasKnowledgeContext } from "@/lib/cisternasKnowledge";
 import { buildCombustibleKnowledgeContext } from "@/lib/combustibleKnowledge";
+import { buildMantenimientoKnowledgeContext } from "@/lib/mantenimientoKnowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -20,13 +21,9 @@ export type KnowledgeGuideKind =
   | "cisternas"
   | "combustible";
 
-const KNOWLEDGE_BY_KIND: Record<
-  Exclude<KnowledgeGuideKind, "transporte_publico" | "cisternas" | "combustible">,
-  string
-> = {
+const KNOWLEDGE_BY_KIND: Record<"opciones" | "unidades", string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
   unidades: UNIDADES_KNOWLEDGE_BASE,
-  mantenimiento: MANTENIMIENTO_KNOWLEDGE_BASE,
 };
 
 // Clave del módulo en el panel "Configuración → Prompts por trámite" (tabla
@@ -38,7 +35,8 @@ const KNOWLEDGE_BY_KIND: Record<
 const PROMPT_MODULE_KEY_BY_KIND: Partial<Record<KnowledgeGuideKind, string>> = {
   opciones: "opciones_info",
   unidades: "unidades_info",
-  mantenimiento: "mantenimiento_info",
+  // mantenimiento: NO usar panel como fuente de hechos (blob viejo / menús).
+  // El corpus mt-* + MANTENIMIENTO_HARD_CONSTRAINTS es la fuente de verdad.
   // transporte_publico / cisternas / combustible: sin módulo de panel → FALLBACK + reglas del kind.
 };
 
@@ -54,15 +52,15 @@ pasos, botones, nombres de pantallas ni funcionalidades que no estén en el manu
 
 /** Prioridad sobre cualquier prompt del panel: evita menús que pierden el hilo. */
 const MANTENIMIENTO_HARD_CONSTRAINTS = `
-REGLAS DURAS para Mantenimiento (prioridad absoluta sobre cualquier instrucción anterior):
-- Si la pregunta es genérica («Mantenimiento», «cómo agendo», «cómo se usa el módulo», «quiero agendar») →
-  entregá YA la sección «CÓMO AGENDAR UN MANTENIMIENTO» completa (pasos 1–5 numerados) y una línea
-  aclarando preventivo vs correctivo. El mensaje debe ser el procedimiento, no una pregunta.
-- NUNCA preguntes primero «¿preventivo o correctivo?», «¿querés configurar?», «¿qué querés hacer?»
-  ni ofrezcas menús. Eso pierde el hilo: el cliente ya pidió mantenimiento.
-- Solo especializá en PLAN PREVENTIVA o TAREA CORRECTIVA si el cliente lo pidió explícitamente.
-- No lideres con consumo/rendimiento teórico salvo que lo pregunten.
-- No inventes pasos fuera del manual.`.trim();
+REGLAS DURAS para Mantenimiento (prioridad absoluta):
+- Usá SOLO los artículos mt-* provistos. No inventes pantallas ni botones.
+- Utilidades → Mantenimiento = SOLO catálogos (planes, correctivo, conceptos toma/deje). La operación diaria es Unidades (asignar) + Paneles (Tareas / OT / Toma y deje) + Informes.
+- Si la pregunta es genérica («Mantenimiento», «cómo se usa», «cómo agendo») → entregá el mapa configuración vs operación + el flujo preventivo básico (no un menú).
+- NUNCA preguntes primero «¿preventivo o correctivo?», «¿querés configurar?» ni ofrezcas menús vacíos.
+- Solo especializá preventivo/correctivo/toma-deje/OT si el cliente lo pidió o los articleIds lo indican.
+- No confundas con odómetro/horómetro. No digas que creaste/programaste algo en la cuenta.
+- Forma según need; execute = límite de canal (mt-ejecucion-no-disponible).
+- Respetá restrictions (pendientes §11): no afirmes lo no confirmado.`.trim();
 
 const TRANSPORTE_HARD_CONSTRAINTS = `
 REGLAS DURAS Transporte Público:
@@ -159,7 +157,9 @@ export async function answerFromKnowledgeBase(
         ? buildCisternasKnowledgeContext(opts?.articleIds ?? [])
         : kind === "combustible"
           ? buildCombustibleKnowledgeContext(opts?.articleIds ?? [])
-          : KNOWLEDGE_BY_KIND[kind];
+          : kind === "mantenimiento"
+            ? buildMantenimientoKnowledgeContext(opts?.articleIds ?? [])
+            : KNOWLEDGE_BY_KIND[kind];
   if (!knowledge?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });

@@ -17,6 +17,7 @@ import {
   isCombustibleKbEnabled,
   listCombustibleArticleCatalog,
 } from "@/lib/combustibleKnowledge";
+import { listMantenimientoArticleCatalog } from "@/lib/mantenimientoKnowledge";
 
 const INTERPRET_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_ROUTE_CONFIDENCE = 0.72;
@@ -77,7 +78,12 @@ function allowedGuideKinds(): readonly string[] {
 }
 
 function isArticleBackedGuide(kind: PlatformGuideKind | null): boolean {
-  return kind === "transporte_publico" || kind === "cisternas" || kind === "combustible";
+  return (
+    kind === "transporte_publico" ||
+    kind === "cisternas" ||
+    kind === "combustible" ||
+    kind === "mantenimiento"
+  );
 }
 
 function buildSystemPrompt(): string {
@@ -155,7 +161,12 @@ need:
 - ambiguous: ayuda vaga sin foco — una sola clarifyQuestion breve
 
 guideKind transporte_publico: hoja de turno, turnos de línea, servicios/recorridos de pasajeros, POI/etapas de recorrido, paradas, traza KMZ, excepciones de transporte, regularidad, colores del panel de viajes.
-Si guideKind es opciones|unidades|mantenimiento: articleIds DEBE ser [].
+Si guideKind es opciones|unidades: articleIds DEBE ser [].
+guideKind mantenimiento: planes preventivos/correctivos (catálogo Utilidades), asignar plan desde Unidades→TAREAS, Paneles→Tareas/Órdenes de trabajo/Toma y deje, informes de mantenimiento. Utilidades = SOLO configuración; la operación NO es solo Utilidades.
+NO confundir pedido de “programame/creame el mantenimiento de la patente X” (execute) con guía de cómo hacerlo en la app.
+NO confundir con odómetro/horómetro a registrar por WhatsApp.
+articleIds de mantenimiento: solo IDs del catálogo_mantenimiento (prefijo mt-, 0–3). Vacío si guideKind no es mantenimiento.
+executionRequest en mantenimiento: articleIds puede incluir "mt-ejecucion-no-disponible".
 NO confundir "etapas" de transporte con consulta GPS de una unidad.
 NO confundir pedido de ejecución con capacidad real: executionRequest=true; articleIds puede incluir "tp-ejecucion-no-disponible".
 ${cisternasBlock}${combustibleBlock}
@@ -234,15 +245,20 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     const tpIds = new Set(listTransporteArticleCatalog().map((a) => a.id));
     const csIds = new Set(listCisternasArticleCatalog().map((a) => a.id));
     const cbIds = new Set(listCombustibleArticleCatalog().map((a) => a.id));
+    const mtIds = new Set(listMantenimientoArticleCatalog().map((a) => a.id));
     const tpArticles = articleIds.filter((id) => tpIds.has(id));
     const csArticles = articleIds.filter((id) => csIds.has(id));
     const cbArticles = articleIds.filter((id) => cbIds.has(id));
+    const mtArticles = articleIds.filter((id) => mtIds.has(id));
 
     if (guideKind === "combustible" && isCombustibleKbEnabled() && cbArticles.length) {
       articleIds = cbArticles;
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "cisternas" && isCisternasKbEnabled() && csArticles.length) {
       articleIds = csArticles;
+      route = promoteArticleGuide(need, route);
+    } else if (guideKind === "mantenimiento" && mtArticles.length) {
+      articleIds = mtArticles;
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "transporte_publico" && tpArticles.length) {
       articleIds = tpArticles;
@@ -254,6 +270,10 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     } else if (csArticles.length && isCisternasKbEnabled()) {
       articleIds = csArticles;
       guideKind = "cisternas";
+      route = promoteArticleGuide(need, route);
+    } else if (mtArticles.length) {
+      articleIds = mtArticles;
+      guideKind = "mantenimiento";
       route = promoteArticleGuide(need, route);
     } else if (tpArticles.length) {
       articleIds = tpArticles;
@@ -318,12 +338,14 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const catalogTp = listTransporteArticleCatalog();
   const catalogCs = listCisternasArticleCatalog();
   const catalogCb = listCombustibleArticleCatalog();
+  const catalogMt = listMantenimientoArticleCatalog();
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const userPayload: Record<string, unknown> = {
     mensaje_nuevo: text,
     historial_reciente: (opts.threadText ?? "").slice(-2500),
     pending_action_type: opts.pendingActionType ?? null,
     catalogo_transporte: catalogTp,
+    catalogo_mantenimiento: catalogMt,
   };
   if (cisternasOn) {
     userPayload.catalogo_cisternas = catalogCs;
@@ -391,6 +413,13 @@ export function buildPlatformGuideClarifyOrLimitMessage(
       return [
         "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
         "Por este chat no puedo cargar tickets, validar cargas ni generar informes de combustible en tu cuenta.",
+        "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
+      ].join("\n");
+    }
+    if (interpret.guideKind === "mantenimiento") {
+      return [
+        "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
+        "Por este chat no puedo crear planes, asignar tareas ni abrir órdenes de trabajo en tu cuenta.",
         "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
       ].join("\n");
     }
