@@ -26,7 +26,7 @@ const bodySchema = z
     from: z.string().min(8).optional(),
     rawText: z.string().optional(),
     body: z.string().optional(),
-    guide: z.enum(["opciones", "unidades", "mantenimiento", "transporte_publico"]).optional(),
+    guide: z.enum(["opciones", "unidades", "mantenimiento", "transporte_publico", "cisternas"]).optional(),
     articleIds: z.array(z.string()).optional(),
     need: z
       .enum(["definition", "procedure", "troubleshoot", "execute", "ambiguous"])
@@ -151,33 +151,74 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const kind = parsed.data.guide ?? detectInfoGuideKind(rawText);
+  const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
+  const requestedGuide = parsed.data.guide;
+  const cisternasGuideIgnored =
+    requestedGuide === "cisternas" && !isCisternasKbEnabled();
+  const guide = cisternasGuideIgnored ? undefined : requestedGuide;
+  const kind = guide ?? detectInfoGuideKind(rawText);
   const [previousMessage, threadText] = await Promise.all([
     lastBotMessage(rawPhone),
     recentThreadTextForPhone(rawPhone),
   ]);
 
+  // Si solo venía guide=cisternas y el flag está off, igual sembramos interpret
+  // para no perder el diagnóstico (fallback/reason) en el log único.
   const seededInterpret: PlatformKnowledgeInterpret | null =
-    parsed.data.guide || parsed.data.need || parsed.data.articleIds?.length
+    guide ||
+    parsed.data.need ||
+    parsed.data.articleIds?.length ||
+    cisternasGuideIgnored
       ? {
           route: "info_guides",
-          guideKind: (parsed.data.guide as PlatformKnowledgeInterpret["guideKind"]) ?? null,
+          guideKind: (guide as PlatformKnowledgeInterpret["guideKind"]) ?? null,
           need: (parsed.data.need as PlatformKnowledgeInterpret["need"]) ?? "procedure",
           articleIds: parsed.data.articleIds ?? [],
           clarifyQuestion: parsed.data.clarifyQuestion?.trim() || null,
           executionRequest: parsed.data.executionRequest === true,
           confidence: 1,
-          reason: "seeded_from_turn",
+          reason: cisternasGuideIgnored
+            ? "cisternas_flag_off_ignored_guide"
+            : "seeded_from_turn",
         }
       : null;
 
-  const { message, guideKind, interpret } = await buildGroundedInfoGuideReplyWithMeta(
+  const grounded = await buildGroundedInfoGuideReplyWithMeta(
     rawText,
     kind ?? undefined,
     previousMessage,
     threadText,
     seededInterpret,
   );
+  const message = grounded.message;
+  const guideKind = grounded.guideKind;
+  const interpret = grounded.interpret
+    ? {
+        ...grounded.interpret,
+        reason:
+          cisternasGuideIgnored && !grounded.interpret.reason
+            ? "cisternas_flag_off_ignored_guide"
+            : grounded.interpret.reason,
+      }
+    : grounded.interpret;
+  // Marca de diagnóstico: el route ya sanitizó guide antes del generador.
+  const fallback =
+    cisternasGuideIgnored && !grounded.fallback
+      ? "cisternas_flag_off"
+      : grounded.fallback;
+
+  const { logPlatformKbTurn } = await import("@/lib/infoGuideInterpretAI");
+  logPlatformKbTurn({
+    phone: rawPhone,
+    executor: "info_guides",
+    guideKind: guideKind ?? kind ?? null,
+    need: interpret?.need ?? null,
+    articleIds: interpret?.articleIds ?? [],
+    confidence: interpret?.confidence ?? null,
+    reason: interpret?.reason ?? (cisternasGuideIgnored ? "cisternas_flag_off_ignored_guide" : null),
+    fallback,
+    source: "wara_info_guides_route",
+  });
 
   await appendOutboundBotMessage(rawPhone, message, {
     source: "wara_info_guides",
@@ -186,6 +227,8 @@ export async function POST(req: NextRequest) {
     interpretNeed: interpret?.need ?? null,
     interpretArticles: interpret?.articleIds ?? [],
     interpretReason: interpret?.reason ?? null,
+    interpretConfidence: interpret?.confidence ?? null,
+    kbFallback: fallback,
   });
 
   return NextResponse.json(
@@ -196,6 +239,9 @@ export async function POST(req: NextRequest) {
       guideKind: guideKind ?? kind ?? "",
       interpretNeed: interpret?.need ?? "",
       interpretArticles: interpret?.articleIds ?? [],
+      interpretConfidence: interpret?.confidence ?? null,
+      interpretReason: interpret?.reason ?? "",
+      kbFallback: fallback ?? "",
       informational: true,
       informational_s: "true",
       flowComplete_s: "true",

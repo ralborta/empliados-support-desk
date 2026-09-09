@@ -146,6 +146,11 @@ CONSULTAS (alcance y brevedad):
 - Consulta informativa DENTRO del alcance → respondé breve, directo al punto. NO manual largo salvo que pidan paso a paso.
 - Consulta FUERA del alcance (factura, hardware, garantía, temas no Wara) → derivar_asesor_ticket en una línea. NO inventes ni te extiendas.`;
 
+/** Solo tests: el prompt base no debe mencionar Cisternas (va por appendix si flag on). */
+export function agentCorePromptMentionsCisternas(): boolean {
+  return /\bcisternas\b/i.test(CORE_SYSTEM_PROMPT);
+}
+
 const BUSINESS_MODULE_KEYS = [
   "odometer",
   "consulta",
@@ -482,9 +487,22 @@ export async function runAtilioAgentTurn(
 
   try {
     const businessKnowledge = await loadBusinessKnowledgeAppendix();
-    const systemPrompt = businessKnowledge
+    let systemPrompt = businessKnowledge
       ? `${CORE_SYSTEM_PROMPT}\n\n=== CONOCIMIENTO DEL NEGOCIO (Wara) ===\n${businessKnowledge}`
       : CORE_SYSTEM_PROMPT;
+    // Cisternas solo en el prompt del agente si el flag está on (no-op del flag).
+    try {
+      const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
+      if (isCisternasKbEnabled()) {
+        systemPrompt += `
+
+=== MÓDULO CISTERNAS (habilitado) ===
+- Preguntas sobre cisternas / tanques de depósito / carga o medición de cisternas → SIEMPRE guia_informativa.
+- No inventes pantallas ni digas que no hay info sin llamar la tool.`;
+      }
+    } catch {
+      /* ignore */
+    }
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },

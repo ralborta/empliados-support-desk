@@ -1,11 +1,17 @@
 /**
  * Interpretación semántica de consultas a guías de plataforma (LLM).
- * Sin keywords/regex por tema (hoja de turno, colectivo, etc.): el modelo decide
- * need + guideKind + artículos. Las guardas de seguridad del turn siguen afuera.
+ * Sin keywords/regex por tema de negocio: el modelo decide need + guideKind + artículos.
+ * Las guardas de seguridad del turn siguen afuera.
+ *
+ * Cisternas: solo si WARA_CISTERNAS_KB_ENABLED=true (además del flag de interpret).
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { listTransporteArticleCatalog } from "@/lib/transportePublicoKnowledge";
+import {
+  isCisternasKbEnabled,
+  listCisternasArticleCatalog,
+} from "@/lib/cisternasKnowledge";
 
 const INTERPRET_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_ROUTE_CONFIDENCE = 0.72;
@@ -21,7 +27,8 @@ export type PlatformGuideKind =
   | "opciones"
   | "unidades"
   | "mantenimiento"
-  | "transporte_publico";
+  | "transporte_publico"
+  | "cisternas";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -38,24 +45,51 @@ type CacheEntry = { at: number; value: PlatformKnowledgeInterpret | null };
 const interpretCache = new Map<string, CacheEntry>();
 const INTERPRET_CACHE_TTL_MS = 20_000;
 
-function cacheKey(selectionText: string, threadText: string): string {
-  return `${selectionText.trim()}::${threadText.slice(-400)}`;
+function cacheKey(selectionText: string, threadText: string, cisternasOn: boolean): string {
+  return `${cisternasOn ? "cs1" : "cs0"}::${selectionText.trim()}::${threadText.slice(-400)}`;
 }
 
 export function isPlatformKbLlmInterpretEnabled(): boolean {
   if (!process.env.OPENAI_API_KEY?.trim()) return false;
   const raw = process.env.WARA_PLATFORM_KB_LLM_INTERPRET?.trim().toLowerCase();
-  // Opt-in explícito: por defecto OFF para no alterar el routing V1 que ya funciona
-  // (odómetro/GPS/certificados/guías existentes). Activar en canary con =true.
   if (raw === "true" || raw === "1" || raw === "yes") return true;
   return false;
 }
 
-const SYSTEM_PROMPT = `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
+const GUIDE_KINDS_BASE = ["opciones", "unidades", "mantenimiento", "transporte_publico"] as const;
+
+function allowedGuideKinds(): readonly string[] {
+  return isCisternasKbEnabled()
+    ? [...GUIDE_KINDS_BASE, "cisternas"]
+    : GUIDE_KINDS_BASE;
+}
+
+function buildSystemPrompt(): string {
+  const cisternasOn = isCisternasKbEnabled();
+  const kindEnum = cisternasOn
+    ? '"opciones" | "unidades" | "mantenimiento" | "transporte_publico" | "cisternas" | null'
+    : '"opciones" | "unidades" | "mantenimiento" | "transporte_publico" | null';
+  const modules = cisternasOn
+    ? "Opciones, Unidades, Mantenimiento informativo, Transporte Público, Cisternas"
+    : "Opciones, Unidades, Mantenimiento informativo, Transporte Público";
+
+  const cisternasBlock = cisternasOn
+    ? `
+guideKind cisternas: tanques de combustible de depósito/base (módulo Cisternas): alta/listado, carga (reabastecimiento en litros), medición (nivel/stock), diferencia carga vs medición, informes Cisterna combustible / consumo promedio, asociación con tickets de combustible.
+NO confundir cisterna (tanque de depósito) con el tanque de combustible de una unidad/vehículo ni con odómetro/horómetro.
+NO confundir “litros en la cisterna” con km de odómetro.
+articleIds de cisternas: solo IDs del catálogo_cisternas (prefijo cs-, 0–3). Vacío si guideKind no es cisternas.
+executionRequest en cisternas: articleIds puede incluir "cs-ejecucion-no-disponible".
+`
+    : `
+NO uses guideKind "cisternas" (módulo no habilitado en este entorno). Si el cliente habla de cisternas/tanques de depósito, route=continue_normal salvo que encaje en otra guía habilitada.
+`;
+
+  return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
 Devolvé SOLO JSON válido:
 {
   "route": "info_guides" | "continue_normal",
-  "guideKind": "opciones" | "unidades" | "mantenimiento" | "transporte_publico" | null,
+  "guideKind": ${kindEnum},
   "need": "definition" | "procedure" | "troubleshoot" | "execute" | "ambiguous",
   "articleIds": string[],
   "clarifyQuestion": string | null,
@@ -64,8 +98,8 @@ Devolvé SOLO JSON válido:
   "reason": "breve"
 }
 
-route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (Opciones, Unidades, Mantenimiento informativo, Transporte Público).
-route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa.
+route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (${modules}).
+route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo Cisternas.
 NUNCA route=info_guides para "necesito un certificado", "certificado de cobertura", "mandame el certificado".
 
 need:
@@ -73,18 +107,20 @@ need:
 - procedure: cómo hago X (pasos)
 - troubleshoot: no puedo / error / no aparece (hipótesis, no diagnóstico cerrado)
 - execute: pedí que LO HAGAS vos (crear/guardar/operar) — executionRequest=true
-- ambiguous: "ayuda con transporte" u equivalente sin foco — una sola clarifyQuestion breve
+- ambiguous: ayuda vaga sin foco — una sola clarifyQuestion breve
 
 guideKind transporte_publico: hoja de turno, turnos de línea, servicios/recorridos de pasajeros, POI/etapas de recorrido, paradas, traza KMZ, excepciones de transporte, regularidad, colores del panel de viajes.
 Si guideKind es opciones|unidades|mantenimiento: articleIds DEBE ser [].
 NO confundir "etapas" de transporte con consulta GPS de una unidad.
 NO confundir pedido de ejecución con capacidad real: executionRequest=true; articleIds puede incluir "tp-ejecucion-no-disponible".
-
-articleIds: solo IDs del catálogo de transporte (0–3). Vacío si guideKind no es transporte_publico.
+${cisternasBlock}
+articleIds transporte: solo IDs del catálogo_transporte (0–3). Vacío si guideKind no es transporte_publico.
 Nunca inventes IDs. Si status needs_validation, podés usarlo con cautela; no uses artículos future.
+Respetá restrictions de cada artículo: no afirmes lo no confirmado.
 
-Para consultas ambiguas de transporte usá confidence >= 0.75 y una clarifyQuestion concreta.
-Alcance: no profundizar en login, permisos de perfil, backoffice inicial ni roles del ente regulador; si solo eso falta, clarify o sugerí soporte.`;
+Para consultas ambiguas usá confidence >= 0.75 y una clarifyQuestion concreta.
+Alcance: no profundizar en login, permisos de perfil ni backoffice inicial; si solo eso falta, clarify o sugerí soporte.`;
+}
 
 function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
   try {
@@ -100,10 +136,20 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
       guideRaw === null || guideRaw === undefined || guideRaw === ""
         ? null
         : (String(guideRaw).trim() as PlatformGuideKind);
-    if (
-      guideKind &&
-      !["opciones", "unidades", "mantenimiento", "transporte_publico"].includes(guideKind)
-    ) {
+    const allowed = allowedGuideKinds();
+    if (guideKind && !allowed.includes(guideKind)) {
+      if (guideKind === "cisternas" && !isCisternasKbEnabled()) {
+        return {
+          route: "continue_normal",
+          guideKind: null,
+          need,
+          articleIds: [],
+          clarifyQuestion: null,
+          executionRequest: false,
+          confidence: Number(parsed.confidence) || 0,
+          reason: "cisternas_flag_off",
+        };
+      }
       return null;
     }
     const confidence = Number(parsed.confidence);
@@ -111,10 +157,25 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     let articleIds = Array.isArray(parsed.articleIds)
       ? parsed.articleIds.map((id) => String(id).trim()).filter(Boolean).slice(0, 3)
       : [];
-    const catalogIds = new Set(listTransporteArticleCatalog().map((a) => a.id));
-    // Sanitizar: IDs de transporte fuerzan kind transporte (evita “mantenimiento” + tp-error-*).
-    const tpArticles = articleIds.filter((id) => catalogIds.has(id));
-    if (tpArticles.length) {
+
+    const tpIds = new Set(listTransporteArticleCatalog().map((a) => a.id));
+    const csIds = new Set(listCisternasArticleCatalog().map((a) => a.id));
+    const tpArticles = articleIds.filter((id) => tpIds.has(id));
+    const csArticles = articleIds.filter((id) => csIds.has(id));
+
+    if (csArticles.length && isCisternasKbEnabled()) {
+      articleIds = csArticles;
+      guideKind = "cisternas";
+      if (
+        need === "definition" ||
+        need === "procedure" ||
+        need === "troubleshoot" ||
+        need === "execute" ||
+        need === "ambiguous"
+      ) {
+        route = "info_guides";
+      }
+    } else if (tpArticles.length) {
       articleIds = tpArticles;
       guideKind = "transporte_publico";
       if (
@@ -124,20 +185,24 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
         need === "execute" ||
         need === "ambiguous"
       ) {
-        route = "info_guides" as const;
+        route = "info_guides";
       }
-    } else if (guideKind !== "transporte_publico") {
+    } else if (guideKind !== "transporte_publico" && guideKind !== "cisternas") {
       articleIds = [];
     }
-    if (guideKind === "transporte_publico" && parsed.executionRequest === true) {
-      route = "info_guides" as const;
+
+    if (
+      (guideKind === "transporte_publico" || guideKind === "cisternas") &&
+      parsed.executionRequest === true
+    ) {
+      route = "info_guides";
     }
     if (
-      guideKind === "transporte_publico" &&
+      (guideKind === "transporte_publico" || guideKind === "cisternas") &&
       need === "ambiguous" &&
       parsed.clarifyQuestion
     ) {
-      route = "info_guides" as const;
+      route = "info_guides";
     }
     const clarify =
       parsed.clarifyQuestion == null || parsed.clarifyQuestion === ""
@@ -146,10 +211,13 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     if (
       need === "ambiguous" &&
       clarify &&
-      (!guideKind || guideKind === "transporte_publico")
+      (!guideKind || guideKind === "transporte_publico" || guideKind === "cisternas")
     ) {
-      route = "info_guides" as const;
-      guideKind = guideKind ?? "transporte_publico";
+      route = "info_guides";
+      if (!guideKind) {
+        // Preferí no forzar transporte; sin kind claro dejamos null y el caller aclara.
+        guideKind = null;
+      }
     }
     return {
       route: route as PlatformKnowledgeInterpret["route"],
@@ -175,20 +243,25 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const text = opts.selectionText.trim();
   if (!text) return null;
 
-  const key = cacheKey(text, opts.threadText ?? "");
+  const cisternasOn = isCisternasKbEnabled();
+  const key = cacheKey(text, opts.threadText ?? "", cisternasOn);
   const cached = interpretCache.get(key);
   if (cached && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
     return cached.value;
   }
 
-  const catalog = listTransporteArticleCatalog();
+  const catalogTp = listTransporteArticleCatalog();
+  const catalogCs = listCisternasArticleCatalog();
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const user = JSON.stringify({
+  const userPayload: Record<string, unknown> = {
     mensaje_nuevo: text,
     historial_reciente: (opts.threadText ?? "").slice(-2500),
     pending_action_type: opts.pendingActionType ?? null,
-    catalogo_transporte: catalog,
-  });
+    catalogo_transporte: catalogTp,
+  };
+  if (cisternasOn) {
+    userPayload.catalogo_cisternas = catalogCs;
+  }
 
   try {
     const response = await withOpenAiTimeout(
@@ -197,8 +270,8 @@ export async function interpretPlatformKnowledgeTurn(opts: {
           {
             model: "gpt-4o-mini",
             messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: user },
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(userPayload) },
             ],
             temperature: 0.1,
             max_tokens: 320,
@@ -210,7 +283,6 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     );
     const content = response?.choices?.[0]?.message?.content?.trim();
     const parsed = content ? parseInterpret(content) : null;
-    // Solo cachear éxitos: un null por timeout no debe “envenenar” el mismo turno.
     if (parsed) interpretCache.set(key, { at: Date.now(), value: parsed });
     return parsed;
   } catch {
@@ -222,7 +294,7 @@ export function shouldRouteInterpretToInfoGuides(
   interpret: PlatformKnowledgeInterpret | null,
 ): boolean {
   if (!interpret) return false;
-  // Aclaración breve: hay que entrar a info_guides para entregarla (no caer a unidades).
+  if (interpret.guideKind === "cisternas" && !isCisternasKbEnabled()) return false;
   if (interpret.need === "ambiguous" && interpret.clarifyQuestion) {
     return interpret.confidence >= 0.55;
   }
@@ -238,6 +310,13 @@ export function buildPlatformGuideClarifyOrLimitMessage(
     return interpret.clarifyQuestion;
   }
   if (interpret?.executionRequest) {
+    if (interpret.guideKind === "cisternas") {
+      return [
+        "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
+        "Por este chat no puedo crear cisternas ni registrar cargas o mediciones en tu cuenta.",
+        "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
+      ].join("\n");
+    }
     return [
       "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
       "Por este chat no puedo crear ni guardar hojas de turno, servicios ni excepciones en tu cuenta.",
@@ -248,4 +327,35 @@ export function buildPlatformGuideClarifyOrLimitMessage(
     "No pude consultar bien la guía ahora.",
     "Decime en una frase qué necesitás (concepto, pasos o el error que ves) y lo reintento; si preferís, pedí un asesor.",
   ].join(" ");
+}
+
+/** Log estructurado para depurar routing KB (sin PII de cuerpo largo). */
+export function logPlatformKbTurn(meta: {
+  phone?: string;
+  executor?: string;
+  guideKind?: string | null;
+  need?: string | null;
+  articleIds?: string[];
+  confidence?: number | null;
+  reason?: string | null;
+  fallback?: string | null;
+  source?: string;
+}): void {
+  const phone = meta.phone?.trim();
+  const masked =
+    phone && phone.length >= 4 ? `${phone.slice(0, 4)}…` : phone ? "****" : undefined;
+  console.log(
+    "[platformKb]",
+    JSON.stringify({
+      source: meta.source ?? "info_guides",
+      executor: meta.executor ?? "info_guides",
+      guideKind: meta.guideKind ?? null,
+      need: meta.need ?? null,
+      articleIds: meta.articleIds ?? [],
+      confidence: meta.confidence ?? null,
+      reason: meta.reason ?? null,
+      fallback: meta.fallback ?? null,
+      phone: masked,
+    }),
+  );
 }

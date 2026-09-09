@@ -15,6 +15,7 @@ import {
 } from "@/lib/executorDialogueState";
 import { composeAgentReplyFromDialogueState } from "@/lib/atilioDialogueCompose";
 import { MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED } from "@/lib/waraApi";
+import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 
 const EXECUTOR_HANDLERS: Record<TurnExecutorId, (req: NextRequest) => Promise<Response>> = {
   unidades: unidadesPost,
@@ -99,6 +100,9 @@ const BASE_AGENT_TOOLS: OpenAiToolDef[] = [
   },
 ];
 
+const GUIA_CISTERNAS_SUFFIX =
+  " Con cisternas (tanques de combustible de depósito/base) habilitadas en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni registres cargas/mediciones por chat.";
+
 const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   type: "function",
   function: {
@@ -109,17 +113,29 @@ const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   },
 };
 
-/** Tools expuestas al LLM según política de mantenimiento operativo. */
+/** Tools expuestas al LLM según política de mantenimiento operativo (+ Cisternas si flag). */
 export function buildAtilioAgentTools(
   operativeEnabled: boolean = MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
 ): OpenAiToolDef[] {
+  const cisternasOn = isCisternasKbEnabled();
+  const base: OpenAiToolDef[] = BASE_AGENT_TOOLS.map((t) => {
+    if (t.function.name !== "guia_informativa" || !cisternasOn) return t;
+    return {
+      ...t,
+      function: {
+        ...t.function,
+        description: `${t.function.description}${GUIA_CISTERNAS_SUFFIX}`,
+      },
+    };
+  });
+
   if (operativeEnabled) {
-    const tools = [...BASE_AGENT_TOOLS];
+    const tools = [...base];
     const derivarIdx = tools.findIndex((t) => t.function.name === "derivar_asesor_ticket");
     tools.splice(Math.max(derivarIdx, 0), 0, MANTENIMIENTO_OPERATIVO_TOOL);
     return tools;
   }
-  return BASE_AGENT_TOOLS;
+  return base;
 }
 
 /** @deprecated Preferí buildAtilioAgentTools() — lista estática con política vigente al import. */

@@ -92,6 +92,7 @@ const PUSH_SUITES = [
   "verify-test-whitelist-open.mjs",
   "verify-unregistered-phone-handoff.mjs",
   "verify-transporte-publico-kb.mjs",
+  "verify-cisternas-kb.mjs",
   "verify-mesa-entrada-advisor.mjs",
   "verify-out-of-scope-support-advisor.mjs",
   "verify-fleet-outage-ops-alert.mjs",

@@ -2570,14 +2570,15 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // KB de plataforma (incl. Transporte Público): ANTES del agente.
+  // KB de plataforma (TP / Cisternas si flag): ANTES del agente.
   // Con WARA_AGENT_MODE el LLM improvisaba "no tengo info" sin llamar guia_informativa
   // (bug prod 2026-09-08: "módulo de transporte de pasajeros").
   // No pisar trámites operativos que las reglas ya resolvieron (cert/odo/asesor).
   if (!isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread)) {
-    const { interpretPlatformKnowledgeTurn, shouldRouteInterpretToInfoGuides } = await import(
-      "@/lib/infoGuideInterpretAI"
-    );
+    const {
+      interpretPlatformKnowledgeTurn,
+      shouldRouteInterpretToInfoGuides,
+    } = await import("@/lib/infoGuideInterpretAI");
     const { classifyTurnExecutor } = await import("@/lib/whatsappTurnRouter");
     const kbInterpret = await interpretPlatformKnowledgeTurn({
       selectionText,
@@ -2601,6 +2602,7 @@ export async function runTurnExecutorPhase(params: {
         });
         const msg = messageFromPayload(execResult);
         if (msg) {
+          // Log único lo emite /api/wara/info-guides con fallback real.
           return { message: msg, executor: "info_guides", ok: true };
         }
       }

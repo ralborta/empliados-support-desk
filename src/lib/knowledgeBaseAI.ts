@@ -3,6 +3,7 @@ import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeou
 import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE, MANTENIMIENTO_KNOWLEDGE_BASE } from "@/lib/knowledgeBase";
 import { getBotPromptModule } from "@/lib/botPromptStore";
 import { buildTransporteKnowledgeContext } from "@/lib/transportePublicoKnowledge";
+import { buildCisternasKnowledgeContext } from "@/lib/cisternasKnowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -14,9 +15,13 @@ export type KnowledgeGuideKind =
   | "opciones"
   | "unidades"
   | "mantenimiento"
-  | "transporte_publico";
+  | "transporte_publico"
+  | "cisternas";
 
-const KNOWLEDGE_BY_KIND: Record<Exclude<KnowledgeGuideKind, "transporte_publico">, string> = {
+const KNOWLEDGE_BY_KIND: Record<
+  Exclude<KnowledgeGuideKind, "transporte_publico" | "cisternas">,
+  string
+> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
   unidades: UNIDADES_KNOWLEDGE_BASE,
   mantenimiento: MANTENIMIENTO_KNOWLEDGE_BASE,
@@ -32,7 +37,7 @@ const PROMPT_MODULE_KEY_BY_KIND: Partial<Record<KnowledgeGuideKind, string>> = {
   opciones: "opciones_info",
   unidades: "unidades_info",
   mantenimiento: "mantenimiento_info",
-  // transporte_publico: sin módulo de panel aún → FALLBACK + reglas de transporte.
+  // transporte_publico / cisternas: sin módulo de panel → FALLBACK + reglas del kind.
 };
 
 const FALLBACK_INSTRUCTIONS = `Sos Kira, el asistente de soporte de Wara por WhatsApp. Respondé la pregunta del
@@ -63,11 +68,21 @@ REGLAS DURAS Transporte Público:
 - Forma según need: definition=breve; procedure=pasos pertinentes (no un manual entero);
   troubleshoot=comprobaciones como hipótesis; ambiguous=una pregunta; execute=explicá límite de canal.
 - No presentes status future como disponible. Si status needs_validation, sé cauteloso.
+- Respetá restrictions del artículo: no afirmes lo no confirmado.
 - No profundices en login, permisos de perfil, backoffice inicial ni roles del ente; solo el límite
   indispensable y derivación.
 - Continuá el hilo («eso», feriado, ya lo hice) sin repetir pasos ya dados.
 - No pedís patente para una guía general de plataforma.
 - Nunca digas que creaste/guardaste algo en la cuenta.`.trim();
+
+const CISTERNAS_HARD_CONSTRAINTS = `
+REGLAS DURAS Cisternas:
+- Usá SOLO los artículos provistos. No inventes pantallas, columnas de informes ni validaciones no confirmadas.
+- Cisterna = tanque de depósito/base. NO es el tanque de una unidad ni odómetro/horómetro.
+- No afirmes edición/eliminación de cisternas, multi-selección en carga, ni columnas exactas de informes.
+- Respetá restrictions (needs_validation): si preguntan eso, decí que el manual no lo confirma.
+- Forma según need; execute=límite de canal. Nunca digas que creaste/guardaste en la cuenta.
+- Continuá el hilo (carga vs medición, “eso”, litros) sin repetir todo el manual.`.trim();
 
 function needStyleHint(need?: InfoGuideNeed | null): string {
   if (!need) return "";
@@ -117,11 +132,17 @@ export async function answerFromKnowledgeBase(
 ): Promise<string | null> {
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
   if (!question.trim()) return null;
+  if (kind === "cisternas") {
+    const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
+    if (!isCisternasKbEnabled()) return null;
+  }
 
   const knowledge =
     kind === "transporte_publico"
       ? buildTransporteKnowledgeContext(opts?.articleIds ?? [])
-      : KNOWLEDGE_BY_KIND[kind];
+      : kind === "cisternas"
+        ? buildCisternasKnowledgeContext(opts?.articleIds ?? [])
+        : KNOWLEDGE_BY_KIND[kind];
   if (!knowledge?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -132,7 +153,9 @@ export async function answerFromKnowledgeBase(
       ? `\n\n${MANTENIMIENTO_HARD_CONSTRAINTS}`
       : kind === "transporte_publico"
         ? `\n\n${TRANSPORTE_HARD_CONSTRAINTS}`
-        : "";
+        : kind === "cisternas"
+          ? `\n\n${CISTERNAS_HARD_CONSTRAINTS}`
+          : "";
   const needHint = needStyleHint(opts?.need);
 
   const system = `${instructions}${hardConstraints}

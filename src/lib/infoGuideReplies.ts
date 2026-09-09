@@ -18,8 +18,30 @@ import {
   buildPlatformGuideClarifyOrLimitMessage,
   interpretPlatformKnowledgeTurn,
 } from "@/lib/infoGuideInterpretAI";
+import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 
-export type InfoGuideKind = "opciones" | "unidades" | "mantenimiento" | "transporte_publico";
+export type InfoGuideKind =
+  | "opciones"
+  | "unidades"
+  | "mantenimiento"
+  | "transporte_publico"
+  | "cisternas";
+
+export type InfoGuideFallback =
+  | null
+  | "clarify_question"
+  | "clarify_or_limit"
+  | "static_kind"
+  | "repeat"
+  | "cisternas_flag_off";
+
+function sanitizeCisternasKind(
+  kind: InfoGuideKind | null | undefined,
+): InfoGuideKind | null {
+  if (!kind) return null;
+  if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
+  return kind;
+}
 
 export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   const text = rawText.trim();
@@ -53,6 +75,17 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     pick === "modulo de transporte de pasajeros"
   ) {
     return "transporte_publico";
+  }
+  // Cisternas: solo con flag on — elección explícita de módulo (sin keywords de negocio).
+  if (
+    isCisternasKbEnabled() &&
+    (pick === "cisternas" ||
+      pick === "cisterna" ||
+      pick === "modulo cisternas" ||
+      pick === "modulo de cisternas" ||
+      pick === "modulo cisterna")
+  ) {
+    return "cisternas";
   }
   const modulePick = parseInfoGuideModulePick(text);
   if (modulePick) return modulePick;
@@ -312,6 +345,12 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué punto puntual necesitás: concepto, un paso del procedimiento, o el error que ves en pantalla.",
     ].join("\n");
   }
+  if (detected === "cisternas") {
+    return [
+      "Ya te pasé esa parte de Cisternas.",
+      "Decime qué punto puntual necesitás: alta, carga, medición, informes o tickets de combustible.",
+    ].join("\n");
+  }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
 }
 
@@ -321,7 +360,8 @@ export function buildInfoGuideReply(
   lastBotMessage?: string | null,
   threadText?: string | null,
 ): string {
-  const detected = kind ?? detectInfoGuideKind(rawText);
+  let detected = kind ?? detectInfoGuideKind(rawText);
+  if (detected === "cisternas" && !isCisternasKbEnabled()) detected = null;
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
   else if (looksLikeOdometerInfoRequest(rawText)) message = buildOdometerInfoExplanation(rawText);
@@ -339,6 +379,12 @@ export function buildInfoGuideReply(
     message = [
       "Puedo ayudarte con Transporte Público: conceptos, servicios/POI, paradas, turnos, hojas de turno, excepciones, monitoreo o errores frecuentes.",
       "Decime qué necesitás en una frase (sin asumir causas).",
+    ].join("\n");
+  else if (detected === "cisternas")
+    message = [
+      "Te puedo orientar con el módulo Cisternas: qué es, alta, carga, medición, informes o tickets de combustible.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "Si preguntás por editar/eliminar o columnas exactas de un informe, el manual aún no lo confirma con datos reales.",
     ].join("\n");
   else
     message = [
@@ -380,68 +426,17 @@ export async function buildGroundedInfoGuideReply(
   threadText?: string,
   interpret?: PlatformKnowledgeInterpret | null,
 ): Promise<string> {
-  let detected = kind ?? detectInfoGuideKind(rawText);
-  let articleIds = interpret?.articleIds ?? [];
-  let need: InfoGuideNeed | null = interpret?.need ?? null;
-  let activeInterpret = interpret ?? null;
-
-  // Si no vino interpret del turn, interpretá acá (primera consulta / follow-up).
-  if (!activeInterpret) {
-    activeInterpret = await interpretPlatformKnowledgeTurn({
-      selectionText: rawText,
-      threadText,
-    });
-    if (activeInterpret?.guideKind) {
-      detected = activeInterpret.guideKind;
-      articleIds = activeInterpret.articleIds;
-      need = activeInterpret.need;
-    }
-  }
-
-  if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
-    return activeInterpret.clarifyQuestion;
-  }
-  if (
-    activeInterpret?.executionRequest &&
-    (detected === "transporte_publico" || activeInterpret.guideKind === "transporte_publico")
-  ) {
-    detected = "transporte_publico";
-    const execLimit = await answerFromKnowledgeBase("transporte_publico", rawText, threadText, {
-      articleIds: articleIds.length ? articleIds : ["tp-ejecucion-no-disponible"],
-      need: "execute",
-    });
-    if (execLimit) return execLimit;
-    return buildPlatformGuideClarifyOrLimitMessage(activeInterpret);
-  }
-
-  if (
-    detected === "opciones" ||
-    detected === "unidades" ||
-    detected === "mantenimiento" ||
-    detected === "transporte_publico"
-  ) {
-    const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
-      articleIds: detected === "transporte_publico" ? articleIds : undefined,
-      need,
-    });
-    if (
-      grounded &&
-      !(detected === "mantenimiento" && looksLikeWeakMaintenanceGuideAnswer(grounded))
-    ) {
-      if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
-        return buildRepeatFallback(detected);
-      }
-      return grounded;
-    }
-    if (detected === "transporte_publico" && !grounded) {
-      return buildPlatformGuideClarifyOrLimitMessage(activeInterpret);
-    }
-  }
-
-  return buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
+  const { message } = await buildGroundedInfoGuideReplyWithMeta(
+    rawText,
+    kind,
+    lastBotMessage,
+    threadText,
+    interpret,
+  );
+  return message;
 }
 
-/** Resultado expuesto para evidencia / persistencia. */
+/** Resultado expuesto para evidencia / persistencia / log único. */
 export async function buildGroundedInfoGuideReplyWithMeta(
   rawText: string,
   kind?: InfoGuideKind | null,
@@ -452,23 +447,181 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   message: string;
   guideKind: InfoGuideKind | null;
   interpret: PlatformKnowledgeInterpret | null;
+  fallback: InfoGuideFallback;
 }> {
-  const active =
-    interpret ??
-    (await interpretPlatformKnowledgeTurn({
+  let activeInterpret = interpret ?? null;
+  let detected = sanitizeCisternasKind(kind ?? null);
+  let articleIds = activeInterpret?.articleIds ?? [];
+  let need: InfoGuideNeed | null = activeInterpret?.need ?? null;
+  let fallback: InfoGuideFallback = null;
+
+  if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "cisternas_flag_off",
+    };
+    articleIds = [];
+    fallback = "cisternas_flag_off";
+  }
+
+  if (!activeInterpret) {
+    activeInterpret = await interpretPlatformKnowledgeTurn({
       selectionText: rawText,
       threadText,
-    }));
-  const guideKind =
-    (kind as InfoGuideKind | null | undefined) ??
-    active?.guideKind ??
-    detectInfoGuideKind(rawText);
-  const message = await buildGroundedInfoGuideReply(
-    rawText,
-    guideKind,
-    lastBotMessage,
-    threadText,
-    active,
-  );
-  return { message, guideKind, interpret: active };
+    });
+  }
+
+  if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: "cisternas_flag_off",
+    };
+    fallback = "cisternas_flag_off";
+  }
+
+  if (!detected) {
+    detected = sanitizeCisternasKind(
+      activeInterpret?.guideKind ?? detectInfoGuideKind(rawText),
+    );
+  }
+  if (activeInterpret?.guideKind && sanitizeCisternasKind(activeInterpret.guideKind)) {
+    articleIds = activeInterpret.articleIds;
+    need = activeInterpret.need;
+    if (!kind) detected = activeInterpret.guideKind;
+  }
+
+  if (kind === "cisternas" && !isCisternasKbEnabled()) {
+    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
+    return {
+      message,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: "cisternas_flag_off",
+    };
+  }
+
+  if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
+    return {
+      message: activeInterpret.clarifyQuestion,
+      guideKind: sanitizeCisternasKind(detected ?? activeInterpret.guideKind),
+      interpret: activeInterpret,
+      fallback: "clarify_question",
+    };
+  }
+
+  if (
+    activeInterpret?.executionRequest &&
+    (detected === "transporte_publico" ||
+      activeInterpret.guideKind === "transporte_publico" ||
+      detected === "cisternas" ||
+      activeInterpret.guideKind === "cisternas")
+  ) {
+    if (detected === "cisternas" || activeInterpret.guideKind === "cisternas") {
+      if (!isCisternasKbEnabled()) {
+        return {
+          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
+          guideKind: null,
+          interpret: activeInterpret,
+          fallback: "cisternas_flag_off",
+        };
+      }
+      detected = "cisternas";
+      const execIds = articleIds.length ? articleIds : ["cs-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("cisternas", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "cisternas",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "cisternas",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    detected = "transporte_publico";
+    const execLimit = await answerFromKnowledgeBase("transporte_publico", rawText, threadText, {
+      articleIds: articleIds.length ? articleIds : ["tp-ejecucion-no-disponible"],
+      need: "execute",
+    });
+    if (execLimit) {
+      return {
+        message: execLimit,
+        guideKind: "transporte_publico",
+        interpret: activeInterpret,
+        fallback: null,
+      };
+    }
+    return {
+      message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+      guideKind: "transporte_publico",
+      interpret: activeInterpret,
+      fallback: "clarify_or_limit",
+    };
+  }
+
+  if (
+    detected === "opciones" ||
+    detected === "unidades" ||
+    detected === "mantenimiento" ||
+    detected === "transporte_publico" ||
+    (detected === "cisternas" && isCisternasKbEnabled())
+  ) {
+    const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
+      articleIds:
+        detected === "transporte_publico" || detected === "cisternas" ? articleIds : undefined,
+      need,
+    });
+    if (
+      grounded &&
+      !(detected === "mantenimiento" && looksLikeWeakMaintenanceGuideAnswer(grounded))
+    ) {
+      if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
+        return {
+          message: buildRepeatFallback(detected),
+          guideKind: detected,
+          interpret: activeInterpret,
+          fallback: "repeat",
+        };
+      }
+      return {
+        message: grounded,
+        guideKind: detected,
+        interpret: activeInterpret,
+        fallback: null,
+      };
+    }
+    if ((detected === "transporte_publico" || detected === "cisternas") && !grounded) {
+      if (activeInterpret && (activeInterpret.articleIds.length > 0 || activeInterpret.need)) {
+        return {
+          message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+          guideKind: detected,
+          interpret: activeInterpret,
+          fallback: "clarify_or_limit",
+        };
+      }
+      fallback = "static_kind";
+    }
+  }
+
+  const message = buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
+  return {
+    message,
+    guideKind: sanitizeCisternasKind(detected),
+    interpret: activeInterpret,
+    fallback: fallback ?? (detected ? "static_kind" : null),
+  };
 }

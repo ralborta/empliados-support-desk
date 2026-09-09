@@ -231,22 +231,22 @@ export async function resolveTurnExecutor(
     };
   }
 
-  // Transporte Público: las reglas lo mandan a "unidades" por defecto.
+  // Transporte Público / Cisternas: las reglas lo mandan a "unidades" por defecto.
   // El intérprete KB solo puede robar ese default — NUNCA certificados/odómetro/asesor.
   if (isPlatformKbLlmInterpretEnabled()) {
     const {
       interpretPlatformKnowledgeTurn,
       shouldRouteInterpretToInfoGuides,
     } = await import("@/lib/infoGuideInterpretAI");
+    const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
     const kbInterpret = await interpretPlatformKnowledgeTurn({
       selectionText,
       threadText,
       pendingActionType: pendingAction?.type ?? null,
     });
-    if (
-      shouldRouteInterpretToInfoGuides(kbInterpret) &&
-      kbInterpret?.guideKind === "transporte_publico"
-    ) {
+    const isTp = kbInterpret?.guideKind === "transporte_publico";
+    const isCs = kbInterpret?.guideKind === "cisternas" && isCisternasKbEnabled();
+    if (shouldRouteInterpretToInfoGuides(kbInterpret) && (isTp || isCs)) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
       if (rulesExecutor === "unidades" || rulesExecutor === "info_guides") {
         return {
