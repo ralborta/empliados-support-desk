@@ -40,8 +40,14 @@ import {
   threadHasActiveOdometerFlow,
   threadOdometerRegistrationCompleted,
   looksLikeAnotherUnitConsultRequest,
+  hasPendingUnitConsultPlateRequest,
 } from "@/lib/wara";
-import { shouldRouteTurnToOdometerExecutor, shouldRouteTurnToFleetListExecutor, shouldRouteTurnToUnidadesExecutor } from "@/lib/waraUnitIntent";
+import {
+  shouldRouteTurnToOdometerExecutor,
+  shouldRouteTurnToFleetListExecutor,
+  shouldRouteTurnToUnidadesExecutor,
+  isOdometerPlateSelectionMessage,
+} from "@/lib/waraUnitIntent";
 import { looksLikePossibleFleetListRequest } from "@/lib/fleetListIntentAI";
 
 /** Pregunta operativa de captura (patente/valor/fecha/CONFIRMO) sin tool = invariante rota. */
@@ -107,7 +113,8 @@ AMBIGÜEDAD (razonar, no formulario):
 - Marca, prefijo o patente incompleta ("la Nissan", "empieza con AG", "OST") → SIEMPRE consultar_unidades: el backend busca similares en la flota y lista opciones. NUNCA pidas "patente completa" sin haber buscado antes.
 - Cuidado: "NRO", "N°", "número 12" NO son prefijo de patente — son número administrativo (caso/interno). Si el mensaje es ambiguo entre matrícula y número, PREGUNTÁ ("¿A qué te referís: una patente o un número de caso/interno?") — NUNCA inventes ni busques flota a ciegas.
 - Si no estás seguro de qué pidió el cliente → una sola pregunta aclaratoria en natural. Mejor preguntar que equivocarse.
-- Plantilla de cambio de odómetro (Interno M300-xxx, Km actual, Fecha/Hora, "mando interno con km desfasados") → registrar_odometro_horometro SIEMPRE — NO derivar_asesor_ticket ni bloquear por caso abierto previo.
+- Plantilla COMPLETA de cambio de odómetro (Interno + Km actual + Fecha/Hora, o "mando interno con km desfasados") → registrar_odometro_horometro SIEMPRE — NO derivar_asesor_ticket ni bloquear por caso abierto previo.
+- CUIDADO: un código solo tipo "300-111" / "M300-111" / "Es la 300-111" NO es pedido de odómetro. Si el hilo preguntó por GPS/reporte/sin reporte o "Decime la patente exacta", usá consultar_unidades. NUNCA arranques odómetro solo porque el interno parece M300-xxx.
 
 EN CADA TURNO:
 1. Leé el mensaje actual: ¿qué necesita el cliente en concreto (explícito o implícito)?
@@ -437,9 +444,19 @@ export async function runAtilioAgentTurn(
     threadText,
   });
   const requireMeterRegistration = shouldRequireMeterRegistrationTool(input.selectionText);
+  // Tras "Decime la patente exacta" por GPS/sin reporte, forzar flota — no odómetro.
+  const requireUnitConsult =
+    !requireMeterRegistration &&
+    hasPendingUnitConsultPlateRequest(threadText) &&
+    (isOdometerPlateSelectionMessage(input.selectionText) ||
+      shouldRouteTurnToUnidadesExecutor({
+        selectionText: input.selectionText,
+        threadText,
+      }));
   const requireTool =
     requireMaintenanceGuide ||
     requireMeterRegistration ||
+    requireUnitConsult ||
     shouldRequireToolCall({
       session,
       threadText,
@@ -465,6 +482,9 @@ export async function runAtilioAgentTurn(
       : "",
     requireMeterRegistration
       ? "requiere_registrar_odometro_horometro: true — NO preguntes patente/valor/fecha sin esa tool (persiste el estado)"
+      : "",
+    requireUnitConsult
+      ? "requiere_consultar_unidades: true — el hilo pide aclarar unidad para GPS/reporte; NO uses registrar_odometro_horometro"
       : "",
     "",
     "=== HISTORIAL RECIENTE (más abajo = más reciente) ===",
@@ -520,9 +540,11 @@ export async function runAtilioAgentTurn(
               ? { type: "function", function: { name: "guia_informativa" } }
               : round === 0 && requireMeterRegistration
                 ? { type: "function", function: { name: "registrar_odometro_horometro" } }
-                : round === 0 && requireTool
-                  ? "required"
-                  : "auto",
+                : round === 0 && requireUnitConsult
+                  ? { type: "function", function: { name: "consultar_unidades" } }
+                  : round === 0 && requireTool
+                    ? "required"
+                    : "auto",
           temperature: 0.55,
         },
         { signal: controller.signal },
@@ -548,6 +570,26 @@ export async function runAtilioAgentTurn(
             apiKey: input.apiKey,
             threadText,
           });
+        }
+        if (requireUnitConsult) {
+          const forced = await executeAtilioAgentTool({
+            toolName: "consultar_unidades",
+            rawPhone: input.rawPhone,
+            customerMessage: input.selectionText,
+            apiKey: input.apiKey,
+            threadText,
+          });
+          const text = String(
+            forced.composed_message ?? forced.backend_message ?? "",
+          ).trim();
+          if (text) {
+            return {
+              message: text,
+              executor: forced.executor,
+              ok: forced.ok,
+              usedAgent: true,
+            };
+          }
         }
         const text = choice.content?.trim();
         if (!text) return null;
@@ -599,6 +641,26 @@ export async function runAtilioAgentTurn(
             apiKey: input.apiKey,
             threadText,
           });
+        }
+        if (requireUnitConsult && toolName === "registrar_odometro_horometro") {
+          const forced = await executeAtilioAgentTool({
+            toolName: "consultar_unidades",
+            rawPhone: input.rawPhone,
+            customerMessage: input.selectionText,
+            apiKey: input.apiKey,
+            threadText,
+          });
+          const text = String(
+            forced.composed_message ?? forced.backend_message ?? "",
+          ).trim();
+          if (text) {
+            return {
+              message: text,
+              executor: forced.executor,
+              ok: forced.ok,
+              usedAgent: true,
+            };
+          }
         }
 
         const toolResult = await executeAtilioAgentTool({

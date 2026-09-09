@@ -100,6 +100,7 @@ import {
   detectLoosePlate,
   extractPlatePrefixFromMessage,
   hasPendingMaintenancePlateRequest,
+  hasPendingUnitConsultPlateRequest,
   isPlausibleVehiclePlate,
   normalizePlate,
   threadHasActiveOdometerFlow,
@@ -2504,14 +2505,17 @@ export async function runTurnExecutorPhase(params: {
 
   // Marca/prefijo/nombre/patente parcial → buscar en flota y listar similares (no pedir patente completa al agente).
   // Incluye unit_ref razonada por IA aunque el texto no matchee regex.
-  if (
-    !skipSchematicUnitRoute &&
-    (shouldRouteTurnToUnidadesExecutor({
+  // Bug prod 2026-09-09: si la IA marcaba !vehicle_unit, skipSchematicUnitRoute
+  // salteaba flota y el agente arrancaba odómetro ante "Es la 300-111" tras "sin reporte".
+  const forceUnidadesSchematic =
+    shouldRouteTurnToUnidadesExecutor({
       selectionText,
       threadText: threadCtx.classificationThread,
     }) ||
-      shouldForceUnidadesFromUnderstanding(lastUnderstanding))
-  ) {
+    shouldForceUnidadesFromUnderstanding(lastUnderstanding) ||
+    (hasPendingUnitConsultPlateRequest(threadCtx.classificationThread) &&
+      isOdometerPlateSelectionMessage(selectionText));
+  if ((!skipSchematicUnitRoute || forceUnidadesSchematic) && forceUnidadesSchematic) {
     const execResult = await invokeExecutor(
       "unidades",
       rawPhone,

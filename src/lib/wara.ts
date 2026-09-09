@@ -934,6 +934,9 @@ function odometerFlowPausedByLaterTramite(threadText: string): boolean {
     lower.lastIndexOf("matricula exacta"),
     lower.lastIndexOf("decime la matrícula exacta"),
     lower.lastIndexOf("decime la matricula exacta"),
+    lower.lastIndexOf("decime la patente exacta"),
+    lower.lastIndexOf("patente exacta"),
+    lower.lastIndexOf("decime la patente completa"),
   ].filter((i) => i >= 0);
   if (unitConsultMarkers.length && Math.max(...unitConsultMarkers) > markerIdx) return true;
   const afterTail = after.slice(80).toLowerCase();
@@ -2157,6 +2160,13 @@ export function lastUnitConsultPlateAskIndex(threadText: string): number {
     lower.lastIndexOf("entendido, no era esa"),
     lower.lastIndexOf("decime la matrícula exacta"),
     lower.lastIndexOf("decime la matricula exacta"),
+    // Bug prod 2026-09-09: el bot pide "Decime la patente exacta" (waraUnitIntent)
+    // pero solo se detectaba "matrícula exacta" → se perdía continuidad GPS y el
+    // agente asociaba M300-xxx con odómetro.
+    lower.lastIndexOf("decime la patente exacta"),
+    lower.lastIndexOf("patente exacta"),
+    lower.lastIndexOf("decime la patente completa"),
+    lower.lastIndexOf("patente completa"),
     lower.lastIndexOf("patente de la unidad que quer"),
     lower.lastIndexOf("patente de la unidad que quier"),
     lower.lastIndexOf("pasar la patente de la unidad"),
@@ -2245,10 +2255,11 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
   return (
     /para revisar el gps.*necesito la unidad/.test(tail) ||
     /(?:entendido, no era esa|cual es la otra unidad)/.test(tail) ||
-    /(?:cual es la matricula|decime la matricula|matricula exacta|indic\w*me la matricula|pas\w*me la patente|marca\/nombre \(ej\.)/.test(
+    /(?:cual es la matricula|decime la matricula|matricula exacta|patente exacta|indic\w*me la matricula|pas\w*me la patente|marca\/nombre \(ej\.)/.test(
       tail,
     ) ||
     /(?:indic\w*|decime|pas\w*me|pasar|necesito que me).{0,40}patente/.test(tail) ||
+    /decime la patente completa/.test(tail) ||
     /(?:ultima)\s+posicion/.test(tail) ||
     /patente de la unidad que quer/.test(tail) ||
     /otra unidad sin reporte/.test(tail) ||
