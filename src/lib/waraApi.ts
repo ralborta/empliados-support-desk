@@ -1857,6 +1857,14 @@ export function looksLikeMaintenanceGuideFollowupQuestion(
   if (!text || text.length > 220) return false;
   if (looksLikeOperationalMaintenanceIntent(raw ?? "", threadText)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(raw)) return false;
+  // Acks cortos (“ok gracias”, “dale”, “listo”) no son follow-up de guía.
+  if (
+    /^(ok|dale|gracias|listo|perfecto|buen[oa]s?|si|sí|sip)\b/.test(text) &&
+    !/[?]/.test(String(raw ?? "")) &&
+    text.length < 40
+  ) {
+    return false;
+  }
   // Patente / interno suelto: no es follow-up de guía.
   if (/^[a-z]{0,3}\d{2,6}[a-z]{0,3}$/i.test(text.replace(/\s+/g, "")) && text.length <= 12) {
     return false;
@@ -1865,7 +1873,7 @@ export function looksLikeMaintenanceGuideFollowupQuestion(
   if (looksLikeMaintenanceInfoRequest(raw)) return true;
   if (/\?/.test(String(raw ?? "")) && text.length < 180) return true;
   if (
-    /^(y |despues|después|entonces|ok |dale |ahora |tambien|también|y despues|y después)/.test(text)
+    /^(y |despues|después|entonces|ahora |tambien|también|y despues|y después)/.test(text)
   ) {
     return true;
   }
