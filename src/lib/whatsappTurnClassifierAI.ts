@@ -251,8 +251,14 @@ export async function resolveTurnExecutor(
     const isCb = kbInterpret?.guideKind === "combustible" && isCombustibleKbEnabled();
     const isHr = kbInterpret?.guideKind === "hojas_de_ruta" && isHojasRutaKbEnabled();
     const isMt = kbInterpret?.guideKind === "mantenimiento";
+    const isAmbiguousClarify =
+      kbInterpret?.need === "ambiguous" && Boolean(kbInterpret.clarifyQuestion);
     // Mantenimiento también: las reglas default a "unidades" en follow-ups / jerga sin keyword.
-    if (shouldRouteInterpretToInfoGuides(kbInterpret) && (isTp || isCs || isCb || isHr || isMt)) {
+    // Ambiguous con clarify (p. ej. “una carga” sin módulo) también debe ir a info_guides.
+    if (
+      shouldRouteInterpretToInfoGuides(kbInterpret) &&
+      (isTp || isCs || isCb || isHr || isMt || isAmbiguousClarify)
+    ) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
       if (rulesExecutor === "unidades" || rulesExecutor === "info_guides" || rulesExecutor === "mantenimiento") {
         return {

@@ -1,6 +1,6 @@
 # Contrato — KB Hojas de ruta (Atilio / V1 activo)
 
-**Estado:** implementación con flag **apagado** por defecto. Sin activar en prod hasta evidencia live del recorrido (canary → smoke turno real).
+**Estado:** implementación con flag **apagado** por defecto. Live parcial corregido (autoridad semántica consulta+historial+catálogo). Sin activar en prod hasta canary → smoke turno real.
 
 ## Coherencia con TP / Cisternas / Combustible / Mantenimiento
 

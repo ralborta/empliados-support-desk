@@ -9,20 +9,30 @@
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
-import { listTransporteArticleCatalog } from "@/lib/transportePublicoKnowledge";
 import {
+  CISTERNAS_ARTICLES,
   isCisternasKbEnabled,
   listCisternasArticleCatalog,
 } from "@/lib/cisternasKnowledge";
 import {
+  COMBUSTIBLE_ARTICLES,
   isCombustibleKbEnabled,
   listCombustibleArticleCatalog,
 } from "@/lib/combustibleKnowledge";
 import {
+  HOJAS_RUTA_ARTICLES,
   isHojasRutaKbEnabled,
   listHojasRutaArticleCatalog,
+  looksLikeHojasRutaGuideFollowupQuestion,
 } from "@/lib/hojasRutaKnowledge";
-import { listMantenimientoArticleCatalog } from "@/lib/mantenimientoKnowledge";
+import {
+  MANTENIMIENTO_ARTICLES,
+  listMantenimientoArticleCatalog,
+} from "@/lib/mantenimientoKnowledge";
+import {
+  TRANSPORTE_PUBLICO_ARTICLES,
+  listTransporteArticleCatalog,
+} from "@/lib/transportePublicoKnowledge";
 import {
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
@@ -155,13 +165,15 @@ NO uses guideKind "combustible" (módulo no habilitado en este entorno). Si el c
   const hojasRutaBlock = hojasRutaOn
     ? `
 guideKind hojas_de_ruta: Utilidades→Hojas de ruta (listado, alta, predefinidas, editor calendario, gestión de cargas/descargas de VIAJE, puntos/traza, pegado masivo).
-FRONTERAS SEMÁNTICAS (mirá consulta + historial; NO te bases solo en una palabra):
-- “hoja de ruta” / predefinida / editor calendario / cargas y descargas de viaje → hojas_de_ruta.
-- “hoja de turno” / pasajeros / paradas / GTFS / servicios de línea → transporte_publico (NO hojas_de_ruta).
+FRONTERAS SEMÁNTICAS (consulta completa + historial; la autoridad es el sentido del pedido, no una sola palabra suelta):
+- “Hoja de X” es excluyente: X=ruta → hojas_de_ruta; X=turno → transporte_publico. NUNCA intercambies esos módulos.
+- Predefinida / editor calendario / cargas y descargas de viaje / puntos/traza de hoja de ruta → hojas_de_ruta.
+- Pasajeros / paradas / GTFS / servicios de línea / hoja de turno → transporte_publico (NO hojas_de_ruta).
 - Ticket de combustible de una UNIDAD / validar cargas de tickets → combustible (si habilitado). “Tipo=Combustible” o “Carga de combustible” como atributo de un PUNTO de la hoja → sigue siendo hojas_de_ruta.
 - Carga o medición de tanque de DEPÓSITO → cisternas (si habilitado).
 - “Necesito registrar una carga” / “una carga” SIN contexto claro → need=ambiguous + clarifyQuestion preguntando si es: mercadería en hoja de ruta, ticket de combustible de unidad, o carga a cisterna. NO asumas.
-Continuá el hilo de hojas de ruta (“¿y después dónde la veo?”) → hojas_de_ruta.
+- Columnas/etiquetas de la grilla Gestión de carga/descarga (p. ej. AE INICIO, AE FIN, HOJA DE RUTA PREDEFINIDA, PRODUCTO de viaje) → hojas_de_ruta + articleIds con hr-cargas-descargas (respetá restrictions; no inventes significados pendientes). NUNCA mantenimiento.
+CONTINUIDAD: si el historial ya habla de Hojas de ruta / Utilidades→Hojas de ruta y el mensaje nuevo es seguimiento (dónde la veo, y después, cómo sigo) → guideKind=hojas_de_ruta (NO unidades, NO mantenimiento).
 articleIds: solo catálogo_hojas_ruta (prefijo hr-, 0–3). executionRequest: puede incluir "hr-ejecucion-no-disponible".
 Pendientes (AE INICIO/FIN, Actualizar números, etc.): NO inventes; usá artículos con restrictions.
 `
@@ -194,6 +206,7 @@ need:
 - ambiguous: ayuda vaga sin foco — una sola clarifyQuestion breve
 
 guideKind transporte_publico: hoja de turno, turnos de línea, servicios/recorridos de pasajeros, POI/etapas de recorrido, paradas, traza KMZ, excepciones de transporte, regularidad, colores del panel de viajes.
+“Hoja de turno” NUNCA es hojas_de_ruta (aunque diga “hoja” o “crear”).
 Si guideKind es opciones|unidades: articleIds DEBE ser [].
 guideKind mantenimiento: planes preventivos/correctivos (catálogo Utilidades), asignar plan desde Unidades→TAREAS, Paneles→Tareas/Órdenes de trabajo/Toma y deje, informes de mantenimiento. Utilidades = SOLO configuración; la operación NO es solo Utilidades.
 Términos de Mantenimiento (NO son Transporte Público): “contar a partir de la realización”, “confirmar la realización”, “próximo vencimiento”, “administrar tarea”, “orden de trabajo” (OT), “toma y deje”, estados iniciada/finalizada de OT.
@@ -438,6 +451,336 @@ function correctMaintenanceMisroute(
   };
 }
 
+type CatalogLabelHit = {
+  kind: PlatformGuideKind;
+  articleId: string;
+  label: string;
+};
+
+function extractCatalogLabels(
+  kind: PlatformGuideKind,
+  articles: Array<{ id: string; title: string; body: string; restrictions?: string[] }>,
+): CatalogLabelHit[] {
+  const hits: CatalogLabelHit[] = [];
+  for (const a of articles) {
+    if (a.id.endsWith("-ejecucion-no-disponible")) continue;
+    const hay = [a.title, a.body, ...(a.restrictions ?? [])].join("\n");
+    const re = /\b([A-ZÁÉÍÓÚÑ]{2,}(?:\s+[A-ZÁÉÍÓÚÑ0-9./-]{2,})+)\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(hay))) {
+      const label = m[1].replace(/\s+/g, " ").trim();
+      if (label.length < 5) continue;
+      if (/^(UTILIDADES|PANELES|INFORMES|SISTEMA)$/i.test(label)) continue;
+      hits.push({ kind, articleId: a.id, label });
+    }
+  }
+  return hits;
+}
+
+function allCatalogLabels(): CatalogLabelHit[] {
+  const out: CatalogLabelHit[] = [];
+  out.push(...extractCatalogLabels("transporte_publico", TRANSPORTE_PUBLICO_ARTICLES));
+  out.push(...extractCatalogLabels("mantenimiento", MANTENIMIENTO_ARTICLES));
+  if (isHojasRutaKbEnabled()) {
+    out.push(...extractCatalogLabels("hojas_de_ruta", HOJAS_RUTA_ARTICLES));
+  }
+  if (isCombustibleKbEnabled()) {
+    out.push(...extractCatalogLabels("combustible", COMBUSTIBLE_ARTICLES));
+  }
+  if (isCisternasKbEnabled()) {
+    out.push(...extractCatalogLabels("cisternas", CISTERNAS_ARTICLES));
+  }
+  return out;
+}
+
+/**
+ * Pregunta por una etiqueta/columna que aparece en un único artículo del corpus →
+ * ancla guideKind + articleId (autoridad del catálogo).
+ */
+function correctCatalogLabelMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+): PlatformKnowledgeInterpret {
+  const norm = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!norm || norm.length > 240) return interpret;
+  if (!/\b(significa|que es|quiere decir|para que|para que sirve|columna|campo)\b/.test(norm)) {
+    return interpret;
+  }
+
+  const labels = allCatalogLabels();
+  let best: CatalogLabelHit | null = null;
+  let bestLen = 0;
+  let tie = false;
+  for (const hit of labels) {
+    const needle = hit.label
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    if (needle.length < 5) continue;
+    if (!norm.includes(needle)) continue;
+    if (needle.length > bestLen) {
+      best = hit;
+      bestLen = needle.length;
+      tie = false;
+    } else if (needle.length === bestLen && best && hit.articleId !== best.articleId) {
+      tie = true;
+    }
+  }
+  if (!best || tie || bestLen < 5) return interpret;
+  if (
+    interpret.guideKind === best.kind &&
+    interpret.articleIds[0] === best.articleId &&
+    interpret.route === "info_guides"
+  ) {
+    return interpret;
+  }
+
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: best.kind,
+    need: "definition",
+    articleIds: [best.articleId],
+    clarifyQuestion: null,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.92),
+    reason: interpret.reason
+      ? `${interpret.reason}|catalog_label_guard`
+      : "catalog_label_guard",
+  };
+}
+
+/** Estructura “hoja(s) de <sustantivo>”: el sustantivo define el módulo. */
+function correctHojaDeNounMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+): PlatformKnowledgeInterpret {
+  const m = /\bhojas?\s+de\s+([a-záéíóúñ]+)/i.exec(selectionText);
+  if (!m) return interpret;
+  const noun = m[1]
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+
+  if (/^turno/.test(noun)) {
+    if (interpret.guideKind === "transporte_publico" && interpret.route === "info_guides") {
+      const tpIds = new Set(listTransporteArticleCatalog().map((a) => a.id));
+      const ids = interpret.articleIds.filter((id) => tpIds.has(id));
+      if (ids.length) return interpret;
+      return {
+        ...interpret,
+        articleIds: ["tp-hoja-turno-crear"],
+        need: interpret.need === "execute" ? "execute" : "procedure",
+        reason: interpret.reason
+          ? `${interpret.reason}|hoja_de_noun_guard`
+          : "hoja_de_noun_guard",
+      };
+    }
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: "transporte_publico",
+      need: interpret.need === "execute" ? "execute" : "procedure",
+      articleIds: ["tp-hoja-turno-crear"],
+      clarifyQuestion: null,
+      executionRequest: interpret.need === "execute",
+      confidence: Math.max(interpret.confidence, 0.93),
+      reason: interpret.reason
+        ? `${interpret.reason}|hoja_de_noun_guard`
+        : "hoja_de_noun_guard",
+    };
+  }
+
+  if (/^ruta/.test(noun) && isHojasRutaKbEnabled()) {
+    if (interpret.guideKind === "hojas_de_ruta" && interpret.route === "info_guides") {
+      return interpret;
+    }
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: "hojas_de_ruta",
+      need: interpret.need === "execute" ? "execute" : "procedure",
+      articleIds:
+        interpret.need === "execute"
+          ? ["hr-ejecucion-no-disponible"]
+          : ["hr-alta-asignacion", "hr-concepto-mapa"],
+      clarifyQuestion: null,
+      executionRequest: interpret.need === "execute",
+      confidence: Math.max(interpret.confidence, 0.93),
+      reason: interpret.reason
+        ? `${interpret.reason}|hoja_de_noun_guard`
+        : "hoja_de_noun_guard",
+    };
+  }
+
+  return interpret;
+}
+
+function correctHojasRutaContinuityMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+  threadText: string,
+): PlatformKnowledgeInterpret {
+  if (!isHojasRutaKbEnabled()) return interpret;
+  if (!looksLikeHojasRutaGuideFollowupQuestion(selectionText, threadText)) return interpret;
+  if (
+    interpret.guideKind === "hojas_de_ruta" &&
+    interpret.route === "info_guides" &&
+    interpret.articleIds.some((id) => id.startsWith("hr-"))
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "hojas_de_ruta",
+    need: interpret.need === "ambiguous" ? "procedure" : interpret.need,
+    articleIds: ["hr-listado-filtros", "hr-alta-asignacion"],
+    clarifyQuestion: null,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|hr_continuity_guard`
+      : "hr_continuity_guard",
+  };
+}
+
+/**
+ * Pedido en imperativo de canal (“creame/haceme/generame…”) sobre un módulo de guía →
+ * executionRequest (límite de canal), sin anclar frases de test.
+ */
+function correctGuideExecuteImperativeMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+): PlatformKnowledgeInterpret {
+  const t = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+  const isImperative =
+    /\b(creame|haceme|generame|armame|pegame)\b/.test(t) ||
+    /\b(crea|hace|genera|arma|pega|envia)me\b/.test(t) ||
+    /\bme\s+(creas?|haces?|generas?|armas?)\b/.test(t);
+  if (!isImperative) return interpret;
+
+  const kind = interpret.guideKind;
+  if (
+    kind !== "hojas_de_ruta" &&
+    kind !== "transporte_publico" &&
+    kind !== "combustible" &&
+    kind !== "cisternas" &&
+    kind !== "mantenimiento"
+  ) {
+    return interpret;
+  }
+  if (interpret.executionRequest && interpret.need === "execute") return interpret;
+  const execId =
+    kind === "hojas_de_ruta"
+      ? "hr-ejecucion-no-disponible"
+      : kind === "combustible"
+        ? "cb-ejecucion-no-disponible"
+        : kind === "cisternas"
+          ? "cs-ejecucion-no-disponible"
+          : kind === "mantenimiento"
+            ? "mt-ejecucion-no-disponible"
+            : "tp-ejecucion-no-disponible";
+  return {
+    ...interpret,
+    route: "info_guides",
+    need: "execute",
+    executionRequest: true,
+    articleIds: interpret.articleIds.includes(execId)
+      ? interpret.articleIds
+      : [execId, ...interpret.articleIds.filter((id) => id !== execId)].slice(0, 3),
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|execute_imperative_guard`
+      : "execute_imperative_guard",
+  };
+}
+
+/**
+ * “Una carga” / registrar carga sin módulo en consulta ni historial → ambiguous + clarify.
+ */
+function correctAmbiguousCargaMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+  threadText: string,
+): PlatformKnowledgeInterpret {
+  if (!isHojasRutaKbEnabled() && !isCombustibleKbEnabled() && !isCisternasKbEnabled()) {
+    return interpret;
+  }
+  const t = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!/\bcarga/.test(t)) return interpret;
+  if (
+    /\b(ticket|cisterna|combustible|odometro|horometro|patente|gps|hoja(s)? de ruta|hoja(s)? de turno|viaje|predefinida)\b/.test(
+      t,
+    )
+  ) {
+    return interpret;
+  }
+  const thread = (threadText ?? "").toLowerCase();
+  if (
+    /hojas? de ruta|combustible|cisterna|ticket de combustible|gestion de carga/.test(thread)
+  ) {
+    return interpret;
+  }
+  if (
+    !/\b(registrar|cargar|anotar|necesito|quiero|tengo que|hay que).{0,48}\bcarga/.test(t) &&
+    !/\buna carga\b/.test(t)
+  ) {
+    return interpret;
+  }
+  if (
+    interpret.need === "ambiguous" &&
+    interpret.clarifyQuestion &&
+    interpret.route === "info_guides"
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: null,
+    need: "ambiguous",
+    articleIds: [],
+    clarifyQuestion:
+      "¿La carga es mercadería en una hoja de ruta, un ticket de combustible de una unidad, o carga a una cisterna?",
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.88),
+    reason: interpret.reason
+      ? `${interpret.reason}|ambiguous_carga_guard`
+      : "ambiguous_carga_guard",
+  };
+}
+
+/** Guardas post-LLM: consulta + historial + catálogo (sin anclar frases de test). */
+export function applyPlatformGuideInterpretGuards(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+  threadText: string,
+): PlatformKnowledgeInterpret {
+  let next = interpret;
+  next = correctMaintenanceMisroute(next, selectionText, threadText);
+  next = correctHojaDeNounMisroute(next, selectionText);
+  next = correctCatalogLabelMisroute(next, selectionText);
+  next = correctHojasRutaContinuityMisroute(next, selectionText, threadText);
+  next = correctGuideExecuteImperativeMisroute(next, selectionText);
+  next = correctAmbiguousCargaMisroute(next, selectionText, threadText);
+  return next;
+}
+
 export async function interpretPlatformKnowledgeTurn(opts: {
   selectionText: string;
   threadText?: string;
@@ -453,7 +796,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const key = cacheKey(text, opts.threadText ?? "", cisternasOn, combustibleOn, hojasRutaOn);
   const cached = interpretCache.get(key);
   if (cached && cached.value && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
-    return correctMaintenanceMisroute(cached.value, text, opts.threadText ?? "");
+    return applyPlatformGuideInterpretGuards(cached.value, text, opts.threadText ?? "");
   }
 
   const catalogTp = listTransporteArticleCatalog();
@@ -500,17 +843,36 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     const content = response?.choices?.[0]?.message?.content?.trim();
     let parsed = content ? parseInterpret(content) : null;
     if (parsed) {
-      parsed = correctMaintenanceMisroute(parsed, text, opts.threadText ?? "");
+      parsed = applyPlatformGuideInterpretGuards(parsed, text, opts.threadText ?? "");
       interpretCache.set(key, { at: Date.now(), value: parsed });
+      return parsed;
     }
-    return parsed;
+    // LLM vacío/JSON inválido: igual aplicar autoridad consulta+historial+catálogo.
+    const parseMiss = applyPlatformGuideInterpretGuards(
+      {
+        route: "continue_normal",
+        guideKind: null,
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion: null,
+        executionRequest: false,
+        confidence: 0.4,
+        reason: "interpret_parse_miss",
+      },
+      text,
+      opts.threadText ?? "",
+    );
+    if (parseMiss.route === "info_guides" && parseMiss.guideKind) {
+      interpretCache.set(key, { at: Date.now(), value: parseMiss });
+      return parseMiss;
+    }
+    return null;
   } catch {
-    // Sin OpenAI: aún así no mandar jerga de mantenimiento a TP/unidades.
     if (
       looksLikeMaintenanceDomainTermQuestion(text) ||
       looksLikeMaintenanceGuideFollowupQuestion(text, opts.threadText ?? "")
     ) {
-      return correctMaintenanceMisroute(
+      return applyPlatformGuideInterpretGuards(
         {
           route: "info_guides",
           guideKind: "mantenimiento",
@@ -525,6 +887,22 @@ export async function interpretPlatformKnowledgeTurn(opts: {
         opts.threadText ?? "",
       );
     }
+    const offlineBase: PlatformKnowledgeInterpret = {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.5,
+      reason: "interpret_offline",
+    };
+    const guarded = applyPlatformGuideInterpretGuards(
+      offlineBase,
+      text,
+      opts.threadText ?? "",
+    );
+    if (guarded.route === "info_guides" && guarded.guideKind) return guarded;
     return null;
   }
 }

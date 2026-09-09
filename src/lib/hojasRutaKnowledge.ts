@@ -139,7 +139,7 @@ export const HOJAS_RUTA_ARTICLES: HojasRutaKnowledgeArticle[] = [
       "• Solicitar carga de ticket (casilla; habilitada/deshabilitada según contexto — ver restrictions).",
       "• Horario de ingreso habilitado; Tiempo desde punto anterior; Notas.",
       "IMPORTANTE: Tipo = Combustible o “Carga de combustible” en acciones NO significa el módulo Combustible (tickets de unidad). Es configuración del punto del viaje.",
-      "Bloque de carga (Tipo de carga + Cantidad + Agregar carga): en la PREDEFINIDA solo aparece si Tipo = Carga o Descarga. En la hoja real el relevamiento lo describe en el flujo de puntos con la misma lógica condicional.",
+      "Bloque de carga (Tipo de carga + Cantidad + Agregar carga): en la PREDEFINIDA solo aparece si Tipo = Carga o Descarga.",
       "Reordenar puntos: casillas fijar primer punto como salida / último como llegada + botón Reordenar.",
     ].join("\n"),
     source: { ...HOJAS_RUTA_SOURCE, pages: "2–4" },
@@ -147,6 +147,7 @@ export const HOJAS_RUTA_ARTICLES: HojasRutaKnowledgeArticle[] = [
       "Efecto de “descarga remota”: pendiente §10.2.",
       "De qué depende “Solicitar carga de ticket” habilitada: pendiente §10.3.",
       "Dónde se dan de alta los “tipos de carga”: pendiente §10.4.",
+      "Si el bloque Tipo de carga + Cantidad aparece con la misma lógica condicional en la hoja real (no solo predefinida): pendiente de confirmación en relevamiento — no afirmar.",
     ],
     relatedIds: ["hr-recorrido-traza", "hr-cargas-descargas", "hr-fronteras"],
     status: "available",
@@ -361,3 +362,59 @@ export function buildHojasRutaKnowledgeContext(articleIds: string[]): string {
     )
     .join("\n\n---\n\n");
 }
+
+/** Contexto de guía Hojas de ruta ya abierta en el hilo (continuidad, no keyword de frase puntual). */
+export function looksLikeHojasRutaGuideContextInThread(threadText: string): boolean {
+  if (!isHojasRutaKbEnabled()) return false;
+  const tail = (threadText ?? "").slice(-4000).toLowerCase();
+  if (!tail.trim()) return false;
+  // Si el hilo habla de hoja de turno / pasajeros, no es continuidad HR.
+  if (
+    /\bhoja(s)?\s+de\s+turno\b/.test(tail) ||
+    /\btransporte\s+(p[uú]blico|de\s+pasajer)/.test(tail)
+  ) {
+    if (!/\bhojas?\s+de\s+ruta\b/.test(tail) && !/utilidades\s*[→>]\s*hojas de ruta/.test(tail)) {
+      return false;
+    }
+  }
+  return (
+    /utilidades\s*[→>\-]\s*hojas de ruta/.test(tail) ||
+    /\bhojas?\s+de\s+ruta\b/.test(tail) ||
+    /\bhoja de ruta predefinida\b/.test(tail) ||
+    /gesti[oó]n de carga\/?descarga/.test(tail) ||
+    /editor calendario/.test(tail)
+  );
+}
+
+/**
+ * Continuación corta dentro de una guía HR ya abierta (misma idea que mantenimiento).
+ * No ancla frases de test: cualquier follow-up breve con hilo HR.
+ */
+export function looksLikeHojasRutaGuideFollowupQuestion(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
+  if (!looksLikeHojasRutaGuideContextInThread(threadText)) return false;
+  const text = String(raw ?? "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || text.length > 220) return false;
+  if (
+    /^(ok|dale|gracias|listo|perfecto|buen[oa]s?|si|sip)\b/.test(text) &&
+    !/[?]/.test(String(raw ?? "")) &&
+    text.length < 40
+  ) {
+    return false;
+  }
+  if (/^[a-z]{0,3}\d{2,6}[a-z]{0,3}$/i.test(text.replace(/\s+/g, "")) && text.length <= 12) {
+    return false;
+  }
+  if (/\?/.test(String(raw ?? "")) && text.length < 180) return true;
+  if (/^(y |despues|entonces|ahora |tambien|y despues)/.test(text)) return true;
+  if (/\b(donde|como|que|cual|cuando)\b/.test(text)) return true;
+  return false;
+}
+

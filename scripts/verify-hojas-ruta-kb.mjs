@@ -122,6 +122,67 @@ try {
   assert.match(cargas.body, /AE INICIO/);
   assert.ok(cargas.restrictions?.some((r) => /AE INICIO|§10/.test(r)));
 
+  const puntos = getHojasRutaArticlesByIds(["hr-puntos-detalle"])[0];
+  assert.ok(
+    puntos.restrictions?.some((r) => /hoja real|pendiente/i.test(r)),
+    "carga condicional en hoja real = pendiente",
+  );
+  assert.doesNotMatch(
+    puntos.body,
+    /En la hoja real el relevamiento lo describe en el flujo de puntos con la misma lógica condicional/,
+  );
+
+  const { applyPlatformGuideInterpretGuards } = await import(
+    "../src/lib/infoGuideInterpretAI.ts"
+  );
+  const baseWrong = {
+    route: "info_guides",
+    guideKind: "hojas_de_ruta",
+    need: "procedure",
+    articleIds: ["hr-alta-asignacion"],
+    clarifyQuestion: null,
+    executionRequest: false,
+    confidence: 0.8,
+    reason: "test",
+  };
+  const turnoFixed = applyPlatformGuideInterpretGuards(
+    baseWrong,
+    "cómo creo una hoja de turno",
+    "",
+  );
+  assert.equal(turnoFixed.guideKind, "transporte_publico");
+  assert.ok(turnoFixed.articleIds.includes("tp-hoja-turno-crear"));
+
+  const aeFixed = applyPlatformGuideInterpretGuards(
+    {
+      ...baseWrong,
+      guideKind: "mantenimiento",
+      articleIds: ["mt-contar-realizacion"],
+      need: "definition",
+    },
+    "¿Qué significa AE INICIO?",
+    "",
+  );
+  assert.equal(aeFixed.guideKind, "hojas_de_ruta");
+  assert.ok(aeFixed.articleIds.includes("hr-cargas-descargas"));
+
+  const followFixed = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.4,
+      reason: "test",
+    },
+    "¿Y después dónde la veo?",
+    "Cliente: ¿Cómo creo una hoja de ruta?\nAtilio: En Utilidades → Hojas de ruta podés dar de alta una hoja.",
+  );
+  assert.equal(followFixed.guideKind, "hojas_de_ruta");
+  assert.equal(followFixed.route, "info_guides");
+
   const toolsOn = buildAtilioAgentTools(false);
   const guiaOn = toolsOn.find((t) => t.function.name === "guia_informativa");
   assert.match(guiaOn.function.description, /hojas de ruta/i);

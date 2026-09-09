@@ -135,9 +135,13 @@ for (const c of cases) {
       );
     }
     if (c.expectPendingHonesty) {
+      assert.ok(
+        used?.articleIds?.includes("hr-cargas-descargas"),
+        `${c.id} article hr-cargas-descargas`,
+      );
       assert.match(
         replyPreview,
-        /pendiente|no (est[aá]|puedo|tenemos) (confirm|valid)|no confirm|sin validar|manual no|no afirm|no (puedo|podemos) afirmar|a[uú]n no|no se menciona|§10/i,
+        /pendiente|no (est[aá]|puedo|tenemos) (confirm|valid)|no confirm|sin validar|manual no|no (tiene|hay) (un )?significado|no (est[aá]|queda) definid|no figura|no afirm|no (puedo|podemos) afirmar|a[uú]n no|no se menciona|§10|consult(a|e|á).*admin/i,
       );
     }
   } catch (e) {

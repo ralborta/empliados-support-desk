@@ -102,7 +102,7 @@ REGLAS DURAS Hojas de ruta:
 - Usá SOLO los artículos hr-* provistos. No inventes pantallas, botones ni significados no confirmados.
 - Hojas de ruta = Utilidades → Hojas de ruta (listado, predefinidas, calendario, cargas/descargas de VIAJE, puntos/traza). NO es “hoja de turno” (Transporte Público / pasajeros).
 - Gestión de cargas/descargas de viaje ≠ tickets Combustible de unidad ≠ Cisternas (depósito) ≠ Remitos/Stock.
-- Respetá restrictions (§10): AE INICIO/FIN, Actualizar números, descarga remota, etc. — si preguntan eso, decí que el manual no lo confirma; NUNCA inventes.
+- Respetá restrictions (§10): AE INICIO/FIN, Actualizar números, descarga remota, etc. Si preguntan el significado de una etiqueta pendiente, decí explícitamente que el manual/relevamiento NO lo confirma (pendiente de validación) — NUNCA inventes una definición.
 - Forma según need; execute = límite de canal (hr-ejecucion-no-disponible).
 - Nunca digas que creaste/pegaste/enviaste planificación en la cuenta.
 - Continuá el hilo sin repetir todo el manual.`.trim();
