@@ -17,7 +17,6 @@ import { composeAgentReplyFromDialogueState } from "@/lib/atilioDialogueCompose"
 import { MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED } from "@/lib/waraApi";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
-import { isHojasRutaKbEnabled } from "@/lib/hojasRutaKnowledge";
 
 const EXECUTOR_HANDLERS: Record<TurnExecutorId, (req: NextRequest) => Promise<Response>> = {
   unidades: unidadesPost,
@@ -109,7 +108,7 @@ const GUIA_COMBUSTIBLE_SUFFIX =
   " Con combustible (tickets/validación/panel/informes de unidad) habilitado en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni cargues tickets por chat. No confundas con Cisternas.";
 
 const GUIA_HOJAS_RUTA_SUFFIX =
-  " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje) habilitadas en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni crees hojas por chat. No confundas con hoja de turno ni Combustible/Cisternas.";
+  " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje): SIEMPRE esta tool — NUNCA inventes Mantenimiento/Unidades ni digas que no hay info. Si el corpus está deshabilitado, la tool devolverá el límite de canal honesto. No confundas con hoja de turno ni Combustible/Cisternas.";
 
 const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   type: "function",
@@ -127,13 +126,13 @@ export function buildAtilioAgentTools(
 ): OpenAiToolDef[] {
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
-  const hojasRutaOn = isHojasRutaKbEnabled();
   const base: OpenAiToolDef[] = BASE_AGENT_TOOLS.map((t) => {
     if (t.function.name !== "guia_informativa") return t;
     let description = t.function.description;
     if (cisternasOn) description += GUIA_CISTERNAS_SUFFIX;
     if (combustibleOn) description += GUIA_COMBUSTIBLE_SUFFIX;
-    if (hojasRutaOn) description += GUIA_HOJAS_RUTA_SUFFIX;
+    // HR: reconocimiento siempre (corpus gated en la tool/grounded).
+    description += GUIA_HOJAS_RUTA_SUFFIX;
     if (description === t.function.description) return t;
     return {
       ...t,

@@ -23,7 +23,6 @@ import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 import {
   isHojasRutaKbEnabled,
-  looksLikeHojasRutaQueryWhenDisabled,
   buildHojasRutaDisabledChannelReply,
 } from "@/lib/hojasRutaKnowledge";
 
@@ -52,7 +51,7 @@ function sanitizeOptInGuideKind(
   if (!kind) return null;
   if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
   if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
-  if (kind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) return null;
+  // hojas_de_ruta: reconocer aunque corpus off (respuesta disabled estructurada).
   return kind;
 }
 
@@ -109,12 +108,11 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     return "combustible";
   }
   if (
-    isHojasRutaKbEnabled() &&
-    (pick === "hojas de ruta" ||
-      pick === "hoja de ruta" ||
-      pick === "modulo hojas de ruta" ||
-      pick === "modulo de hojas de ruta" ||
-      pick === "modulo hoja de ruta")
+    pick === "hojas de ruta" ||
+    pick === "hoja de ruta" ||
+    pick === "modulo hojas de ruta" ||
+    pick === "modulo de hojas de ruta" ||
+    pick === "modulo hoja de ruta"
   ) {
     return "hojas_de_ruta";
   }
@@ -418,7 +416,9 @@ export function buildInfoGuideReply(
   let detected = kind ?? detectInfoGuideKind(rawText);
   if (detected === "cisternas" && !isCisternasKbEnabled()) detected = null;
   if (detected === "combustible" && !isCombustibleKbEnabled()) detected = null;
-  if (detected === "hojas_de_ruta" && !isHojasRutaKbEnabled()) detected = null;
+  if (detected === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    return buildHojasRutaDisabledChannelReply();
+  }
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
   else if (looksLikeOdometerInfoRequest(rawText)) message = buildOdometerInfoExplanation(rawText);
@@ -528,25 +528,34 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   let need: InfoGuideNeed | null = activeInterpret?.need ?? null;
   let fallback: InfoGuideFallback = null;
 
-  // Flag off + consulta HR: límite de canal honesto (nunca KB de mantenimiento/unidades).
-  if (looksLikeHojasRutaQueryWhenDisabled(rawText)) {
+  const disabledHrReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
     const message = buildHojasRutaDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "hojas_de_ruta",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("hojas_ruta_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|hojas_ruta_module_disabled`
+          : "hojas_ruta_module_disabled",
+    };
     return {
       message,
-      guideKind: null,
-      interpret: {
-        route: "info_guides",
-        guideKind: null,
-        need: "ambiguous",
-        articleIds: [],
-        clarifyQuestion: message,
-        executionRequest: false,
-        confidence: 0.95,
-        reason: "hojas_ruta_flag_off_guard",
-      },
+      guideKind: "hojas_de_ruta",
+      interpret: disabledInterpret,
       fallback: "hojas_ruta_flag_off",
     };
-  }
+  };
 
   if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
     activeInterpret = {
@@ -571,15 +580,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     fallback = "combustible_flag_off";
   }
   if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
-    activeInterpret = {
-      ...activeInterpret,
-      guideKind: null,
-      articleIds: [],
-      route: "continue_normal",
-      reason: activeInterpret.reason || "hojas_ruta_flag_off",
-    };
-    articleIds = [];
-    fallback = "hojas_ruta_flag_off";
+    return disabledHrReply();
   }
 
   if (!activeInterpret) {
@@ -587,6 +588,38 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       selectionText: rawText,
       threadText,
     });
+  }
+  if (activeInterpret) {
+    const { applyPlatformGuideInterpretGuards } = await import(
+      "@/lib/infoGuideInterpretAI"
+    );
+    // Reaplicar: p. ej. kind/seed contaminado por MT + consulta HR.
+    activeInterpret = applyPlatformGuideInterpretGuards(
+      activeInterpret,
+      rawText,
+      threadText ?? "",
+    );
+  } else {
+    const { applyPlatformGuideInterpretGuards } = await import(
+      "@/lib/infoGuideInterpretAI"
+    );
+    const offlineGuarded = applyPlatformGuideInterpretGuards(
+      {
+        route: "continue_normal",
+        guideKind: detected ?? null,
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion: null,
+        executionRequest: false,
+        confidence: 0.5,
+        reason: "grounded_offline_seed",
+      },
+      rawText,
+      threadText ?? "",
+    );
+    if (offlineGuarded.route === "info_guides" && offlineGuarded.guideKind) {
+      activeInterpret = offlineGuarded;
+    }
   }
 
   if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
@@ -610,14 +643,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     fallback = "combustible_flag_off";
   }
   if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
-    activeInterpret = {
-      ...activeInterpret,
-      guideKind: null,
-      articleIds: [],
-      route: "continue_normal",
-      reason: "hojas_ruta_flag_off",
-    };
-    fallback = "hojas_ruta_flag_off";
+    return disabledHrReply();
   }
 
   if (!detected) {
@@ -650,13 +676,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
   }
   if (kind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
-    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
-    return {
-      message,
-      guideKind: null,
-      interpret: activeInterpret,
-      fallback: "hojas_ruta_flag_off",
-    };
+    return disabledHrReply();
   }
 
   if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
@@ -743,12 +763,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     }
     if (detected === "hojas_de_ruta" || activeInterpret.guideKind === "hojas_de_ruta") {
       if (!isHojasRutaKbEnabled()) {
-        return {
-          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
-          guideKind: null,
-          interpret: activeInterpret,
-          fallback: "hojas_ruta_flag_off",
-        };
+        return disabledHrReply();
       }
       detected = "hojas_de_ruta";
       const execIds = articleIds.length ? articleIds : ["hr-ejecucion-no-disponible"];

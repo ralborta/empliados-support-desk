@@ -27,10 +27,6 @@ import {
   looksLikeUnitConsultFollowUp,
   threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
-import {
-  looksLikeHojasRutaQueryWhenDisabled,
-  buildHojasRutaDisabledChannelReply,
-} from "@/lib/hojasRutaKnowledge";
 import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 import { buildInfoGuideReply } from "@/lib/infoGuideReplies";
 import {
@@ -450,16 +446,8 @@ export async function runAtilioAgentTurn(
   if (!isAtilioAgentEnabled()) return null;
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
 
-  // Flag off: no improvisar otro módulo (p. ej. Mantenimiento) ante “hoja de ruta”.
-  if (looksLikeHojasRutaQueryWhenDisabled(input.selectionText)) {
-    return {
-      message: buildHojasRutaDisabledChannelReply(),
-      executor: "info_guides",
-      ok: true,
-      usedAgent: true,
-    };
-  }
-
+  // Flag off: no improvisar otro módulo; el intérprete/tool deben reconocer HR.
+  // La tool guia_informativa ya entrega límite estructurado si guideKind=hojas_de_ruta.
   const session = await loadAgentSessionContext(input.rawPhone);
   const threadText =
     input.threadCtx.scopedThread.trim() || input.threadCtx.classificationThread.trim() || "";
@@ -554,14 +542,16 @@ export async function runAtilioAgentTurn(
 - No inventes pantallas ni digas que no hay info sin llamar la tool.`;
       }
       const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
-      if (isHojasRutaKbEnabled()) {
-        systemPrompt += `
+      systemPrompt += `
 
-=== MÓDULO HOJAS DE RUTA (habilitado) ===
+=== MÓDULO HOJAS DE RUTA ===
 - Preguntas sobre hojas de ruta, predefinidas, editor calendario, puntos/traza o cargas/descargas de viaje → SIEMPRE guia_informativa.
-- NO confundas con hoja de turno (Transporte Público), tickets de Combustible ni Cisternas.
-- No inventes pantallas ni digas que no hay info sin llamar la tool.`;
-      }
+- NO confundas con hoja de turno (Transporte Público), tickets de Combustible, Cisternas ni Mantenimiento.
+- ${
+        isHojasRutaKbEnabled()
+          ? "Corpus habilitado: no inventes pantallas; usá la tool."
+          : "Corpus aún deshabilitado: la tool devolverá el límite de canal honesto; NO improvises otro módulo."
+      }`;
     } catch {
       /* ignore */
     }

@@ -4,9 +4,11 @@
  *
  * NO ejecuta runTurnExecutorPhase / WhatsApp real.
  *
- * Uso:
- *   WARA_HOJAS_RUTA_KB_ENABLED=true WARA_PLATFORM_KB_LLM_INTERPRET=true \
+ * Uso (flag HR off — contrato safe-off previo a activación):
+ *   WARA_HOJAS_RUTA_KB_ENABLED=false WARA_PLATFORM_KB_LLM_INTERPRET=true \
  *   npx tsx scripts/live-hojas-ruta-kb.mjs
+ *
+ * Corpus on (opcional): WARA_HOJAS_RUTA_KB_ENABLED=true …
  */
 import assert from "node:assert/strict";
 import { interpretPlatformKnowledgeTurn } from "../src/lib/infoGuideInterpretAI.ts";
@@ -18,16 +20,50 @@ if (!process.env.OPENAI_API_KEY?.trim()) {
   process.exit(1);
 }
 process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "true";
-process.env.WARA_HOJAS_RUTA_KB_ENABLED = "true";
 process.env.WARA_TURN_AI_CLASSIFY = "false";
+const hrCorpusOn = ["true", "1", "yes"].includes(
+  String(process.env.WARA_HOJAS_RUTA_KB_ENABLED ?? "")
+    .trim()
+    .toLowerCase(),
+);
+process.env.WARA_HOJAS_RUTA_KB_ENABLED = hrCorpusOn ? "true" : "false";
+
+const HR_THREAD =
+  "Cliente: ¿Cómo creo una hoja de ruta?\n" +
+  "Atilio: En Utilidades → Hojas de ruta podés dar de alta una hoja con fechas, unidad y chofer.";
 
 const cases = [
   {
-    id: "def-hr",
-    text: "¿Qué es una hoja de ruta?",
+    id: "create-hr",
+    text: "¿Cómo creo una hoja de ruta?",
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "hojas_de_ruta",
+    expectDisabled: !hrCorpusOn,
+  },
+  {
+    id: "follow-hr",
+    text: "¿Y después dónde la veo?",
+    thread: HR_THREAD,
+    expectResolve: "info_guides",
+    expectGuide: "hojas_de_ruta",
+    expectDisabled: !hrCorpusOn,
+  },
+  {
+    id: "help-hr",
+    text: "Necesito ayuda con las hojas de ruta",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "hojas_de_ruta",
+    expectDisabled: !hrCorpusOn,
+  },
+  {
+    id: "editor-hr",
+    text: "Editor calendario de rutas",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "hojas_de_ruta",
+    expectDisabled: !hrCorpusOn,
   },
   {
     id: "hoja-turno-tp",
@@ -37,6 +73,22 @@ const cases = [
     expectGuide: "transporte_publico",
   },
   {
+    id: "mt-preventivo",
+    text: "¿Cómo creo un mantenimiento preventivo?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "mantenimiento",
+  },
+  {
+    id: "mt-contam-hr",
+    text: "¿Cómo creo una hoja de ruta?",
+    thread:
+      "Cliente: mantenimiento preventivo\nAtilio: En Utilidades → Mantenimiento podés ver planes.",
+    expectResolve: "info_guides",
+    expectGuide: "hojas_de_ruta",
+    expectDisabled: !hrCorpusOn,
+  },
+  {
     id: "ambiguous-carga",
     text: "Quiero registrar una carga",
     thread: "",
@@ -44,29 +96,20 @@ const cases = [
     expectAmbiguousOrClarify: true,
   },
   {
-    id: "followup",
-    text: "¿Y después dónde la veo?",
-    thread:
-      "Cliente: ¿Cómo creo una hoja de ruta?\n" +
-      "Atilio: En Utilidades → Hojas de ruta podés dar de alta una hoja con fechas, unidad y chofer.",
-    expectResolve: "info_guides",
-    expectGuide: "hojas_de_ruta",
-  },
-  {
     id: "execute-hr",
     text: "Creame una hoja de ruta en mi cuenta",
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "hojas_de_ruta",
-    expectExecute: true,
+    expectExecuteOrDisabled: true,
   },
   {
-    id: "ae-inicio-pending",
+    id: "ae-inicio",
     text: "¿Qué significa AE INICIO?",
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "hojas_de_ruta",
-    expectPendingHonesty: true,
+    expectPendingOrDisabled: true,
   },
   {
     id: "odo",
@@ -84,11 +127,19 @@ const cases = [
 
 let failed = 0;
 
+console.log(
+  JSON.stringify({
+    mode: hrCorpusOn ? "corpus_on" : "flag_off_safe",
+    interpret: true,
+  }),
+);
+
 for (const c of cases) {
   await new Promise((r) => setTimeout(r, 700));
   const resolved = await resolveTurnExecutor(c.text, c.thread || c.text);
   let guideKind = null;
   let used = null;
+  let fallback = null;
   let replyPreview = "";
   if (resolved.executor === "info_guides") {
     const interpret = await interpretPlatformKnowledgeTurn({
@@ -104,6 +155,7 @@ for (const c of cases) {
     );
     guideKind = meta.guideKind;
     used = meta.interpret;
+    fallback = meta.fallback;
     replyPreview = String(meta.message).slice(0, 280);
   }
 
@@ -113,6 +165,7 @@ for (const c of cases) {
     guideKind,
     need: used?.need ?? null,
     articleIds: used?.articleIds ?? [],
+    fallback,
     confidence: used?.confidence ?? null,
     executionRequest: used?.executionRequest ?? null,
     replyPreview,
@@ -122,45 +175,48 @@ for (const c of cases) {
   try {
     if (c.expectResolve) assert.equal(resolved.executor, c.expectResolve, `${c.id} resolve`);
     if (c.expectGuide) assert.equal(guideKind, c.expectGuide, `${c.id} guide`);
-    if (c.expectExecute) {
-      assert.equal(used?.executionRequest, true, `${c.id} execute`);
-      assert.match(replyPreview, /no (puedo|tengo)|por este chat|asesor|paso a paso/i);
+    if (c.expectDisabled) {
+      assert.equal(fallback, "hojas_ruta_flag_off", `${c.id} disabled fallback`);
+      assert.equal(used?.articleIds?.length ?? 0, 0, `${c.id} no hr bodies`);
+      assert.match(replyPreview, /no tengo habilitada|aún no|todavía no/i);
+      assert.doesNotMatch(replyPreview, /órdenes de trabajo|planes preventivos/i);
+    }
+    if (c.expectExecuteOrDisabled) {
+      if (hrCorpusOn) {
+        assert.equal(used?.executionRequest, true, `${c.id} execute`);
+        assert.match(replyPreview, /no (puedo|tengo)|por este chat|asesor|paso a paso/i);
+      } else {
+        assert.equal(fallback, "hojas_ruta_flag_off", `${c.id} execute→disabled`);
+      }
     }
     if (c.expectAmbiguousOrClarify) {
+      assert.equal(guideKind, null, `${c.id} guideKind null`);
       assert.ok(
         used?.need === "ambiguous" ||
           Boolean(used?.clarifyQuestion) ||
-          /\?|viaje|ticket|cisterna|combustible/i.test(replyPreview),
+          /\?|viaje|ticket|cisterna|combustible|mercader/i.test(replyPreview),
         `${c.id} ambiguous/clarify`,
       );
+      assert.doesNotMatch(replyPreview, /no tengo habilitada la guía/i);
     }
-    if (c.expectPendingHonesty) {
-      assert.ok(
-        used?.articleIds?.includes("hr-cargas-descargas"),
-        `${c.id} article hr-cargas-descargas`,
-      );
-      assert.match(
-        replyPreview,
-        /pendiente|no (est[aá]|puedo|tenemos) (confirm|valid)|no confirm|sin validar|manual no|no (tiene|hay) (un )?significado|no (est[aá]|queda) definid|no figura|no afirm|no (puedo|podemos) afirmar|a[uú]n no|no se menciona|§10|consult(a|e|á).*admin/i,
-      );
+    if (c.expectPendingOrDisabled) {
+      if (hrCorpusOn) {
+        assert.ok(
+          used?.articleIds?.includes("hr-cargas-descargas"),
+          `${c.id} article hr-cargas-descargas`,
+        );
+        assert.match(
+          replyPreview,
+          /pendiente|no (est[aá]|puedo|tenemos) (confirm|valid)|no confirm|sin validar|manual no|no (tiene|hay) (un )?significado|no (est[aá]|queda) definid|no figura|no afirm|no (puedo|podemos) afirmar|a[uú]n no|no se menciona|§10|consult(a|e|á).*admin/i,
+        );
+      } else {
+        assert.equal(fallback, "hojas_ruta_flag_off", `${c.id} ae→disabled`);
+      }
     }
   } catch (e) {
     failed++;
     console.error(`FAIL ${c.id}:`, e.message);
   }
-}
-
-// Flag off: interpret no debe devolver hojas_de_ruta
-process.env.WARA_HOJAS_RUTA_KB_ENABLED = "false";
-const off = await interpretPlatformKnowledgeTurn({
-  selectionText: "módulo de hojas de ruta predefinidas",
-  threadText: "",
-});
-if (off?.guideKind === "hojas_de_ruta") {
-  failed++;
-  console.error("FAIL flag-off: guideKind hojas_de_ruta");
-} else {
-  console.log(JSON.stringify({ id: "flag-off", guideKind: off?.guideKind ?? null, ok: true }));
 }
 
 if (failed > 0) {

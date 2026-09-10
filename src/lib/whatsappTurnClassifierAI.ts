@@ -32,7 +32,6 @@ import {
   looksLikeHorometerOnlyIntent,
 } from "@/lib/wara";
 import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
-import { isPlatformKbLlmInterpretEnabled } from "@/lib/infoGuideInterpretAI";
 
 const TURN_AI_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_CONFIDENCE = 0.78;
@@ -231,16 +230,15 @@ export async function resolveTurnExecutor(
     };
   }
 
-  // Transporte Público / Cisternas / Combustible: las reglas lo mandan a "unidades" por defecto.
-  // El intérprete KB solo puede robar ese default — NUNCA certificados/odómetro/asesor.
-  if (isPlatformKbLlmInterpretEnabled()) {
+  // Guías de plataforma: LLM si está on; si no / falla API → guardas offline V1.
+  // El contrato HR safe-off (nunca Unidades/MT) no depende solo del LLM.
+  {
     const {
       interpretPlatformKnowledgeTurn,
       shouldRouteInterpretToInfoGuides,
     } = await import("@/lib/infoGuideInterpretAI");
     const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
     const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
-    const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
     const kbInterpret = await interpretPlatformKnowledgeTurn({
       selectionText,
       threadText,
@@ -249,12 +247,10 @@ export async function resolveTurnExecutor(
     const isTp = kbInterpret?.guideKind === "transporte_publico";
     const isCs = kbInterpret?.guideKind === "cisternas" && isCisternasKbEnabled();
     const isCb = kbInterpret?.guideKind === "combustible" && isCombustibleKbEnabled();
-    const isHr = kbInterpret?.guideKind === "hojas_de_ruta" && isHojasRutaKbEnabled();
+    const isHr = kbInterpret?.guideKind === "hojas_de_ruta";
     const isMt = kbInterpret?.guideKind === "mantenimiento";
     const isAmbiguousClarify =
       kbInterpret?.need === "ambiguous" && Boolean(kbInterpret.clarifyQuestion);
-    // Mantenimiento también: las reglas default a "unidades" en follow-ups / jerga sin keyword.
-    // Ambiguous con clarify (p. ej. “una carga” sin módulo) también debe ir a info_guides.
     if (
       shouldRouteInterpretToInfoGuides(kbInterpret) &&
       (isTp || isCs || isCb || isHr || isMt || isAmbiguousClarify)

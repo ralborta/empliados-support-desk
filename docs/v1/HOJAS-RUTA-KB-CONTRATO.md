@@ -18,11 +18,16 @@
 | Flag | Default | Rol |
 |------|---------|-----|
 | `WARA_PLATFORM_KB_LLM_INTERPRET` | opt-in (ya true en prod) | Intérprete de guías. |
-| `WARA_HOJAS_RUTA_KB_ENABLED` | **false** | Habilita kind, catálogo y ruteo. Apagado = comportamiento idéntico al actual. |
+| `WARA_HOJAS_RUTA_KB_ENABLED` | **false** | Habilita *entrega* del corpus `hr-*`. |
 
-Con flag off: intérprete **no** ofrece catálogo ni `guideKind=hojas_de_ruta`; endpoint **ignora** `guide=hojas_de_ruta`; grounded con kind forzado o consulta “hoja de ruta” → límite de canal honesto (`fallback=hojas_ruta_flag_off`, sin caer en Mantenimiento/unidades); tool/agente **no** anuncian el corpus.
+**Contrato del flag (importante):**
 
-## Fronteras (semánticas — instrucciones LLM, no regex)
+- `false` → se **reconoce** `guideKind=hojas_de_ruta` (intérprete LLM o guardas offline V1 + catálogo de reconocimiento + continuidad), pero **no** se entregan cuerpos `hr-*`. Salida estructurada `hojas_ruta_module_disabled` / `fallback=hojas_ruta_flag_off`.
+- `true` → reconocimiento + grounded con artículos `hr-*`.
+- **Nunca Unidades/Mantenimiento ante consulta HR:** el clasificador productivo (`resolveTurnExecutor`) aplica ruteo de plataforma KB siempre (con o sin `WARA_PLATFORM_KB_LLM_INTERPRET`, y si falta `OPENAI_API_KEY`). Las guardas offline V1 cubren el hueco.
+- No hay canary por cliente en el servicio único de EasyPanel: `true` = activación global.
+
+## Fronteras (autoridad semántica LLM + excepciones textuales V1)
 
 | Kind | Significa | No es |
 |------|-----------|--------|
@@ -32,6 +37,20 @@ Con flag off: intérprete **no** ofrece catálogo ni `guideKind=hojas_de_ruta`; 
 | `cisternas` | Tanque de **depósito** | Carga de mercadería en viaje |
 
 “Necesito registrar una carga” **sin contexto** → `need=ambiguous` + clarify (¿viaje / ticket unidad / cisterna?).
+
+### Excepciones textuales legacy V1 (no afirmar “sin regex”)
+
+Post-LLM / offline, el path V1 **sí** usa matching textual acotado. Son deuda explícita; en arquitectura V2 semántica serían bloqueo:
+
+| Guarda | Rol |
+|--------|-----|
+| `correctHojaDeNounMisroute` | `hoja(s) de <sustantivo>` → ruta vs turno |
+| `correctHojasRutaContinuityMisroute` + `looksLikeHojasRutaGuideFollowupQuestion` | continuidad en hilo HR |
+| `correctHojasRutaCatalogTopicMisroute` | título/tema de catálogo HR (p. ej. editor calendario) |
+| `correctCatalogLabelMisroute` | etiquetas de grilla (AE INICIO, …) |
+| `detectInfoGuideKind` (picks enumerados) | elección explícita de módulo |
+
+No anclar frases de test ad-hoc fuera de estas guardas.
 
 ## Artículos `hr-*`
 
@@ -66,9 +85,10 @@ Pendientes §10 → `restrictions` (AE INICIO/FIN, Actualizar números, etc.: no
 - Ambiguo: “Quiero registrar una carga.”  
 - Seguimiento: “¿Y después dónde la veo?”  
 - Cambio de tema TP ↔ Hojas de ruta.  
-- Flag off: ninguna mención en prompt, tool, endpoint, menú ni clasificador.  
+- Flag off: reconoce `hojas_de_ruta`, responde límite estructurado, **no** entrega `hr-*`, **no** Unidades/MT (incl. historial contaminado por MT).  
 - Pendiente: “¿Qué significa AE INICIO?” → no confirmado.  
-- Execute: “Creame una hoja de ruta” → límite de canal.
+- Execute: “Creame una hoja de ruta” → límite de canal.  
+- Smoke WA (antes de `true`): crear HR → continuidad → hoja de turno → preventivo → idle “Sigo acá…” retoma HR.
 
 ## Observabilidad
 

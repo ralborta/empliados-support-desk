@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Offline: catálogo Hojas de ruta + flag off = no-op + regresión TP/odo/cert.
+ * Offline: contrato flag HR (reconocer ≠ entregar) + fronteras TP/MT + continuidad.
  * Uso: npx tsx scripts/verify-hojas-ruta-kb.mjs
  */
 import assert from "node:assert/strict";
@@ -10,21 +10,21 @@ import {
   listHojasRutaArticleCatalog,
   buildHojasRutaKnowledgeContext,
   getHojasRutaArticlesByIds,
+  buildHojasRutaDisabledChannelReply,
 } from "../src/lib/hojasRutaKnowledge.ts";
 import {
   detectInfoGuideKind,
-  buildGroundedInfoGuideReply,
   buildGroundedInfoGuideReplyWithMeta,
   buildInfoGuideReply,
 } from "../src/lib/infoGuideReplies.ts";
-import { shouldRouteInterpretToInfoGuides } from "../src/lib/infoGuideInterpretAI.ts";
+import {
+  applyPlatformGuideInterpretGuards,
+  shouldRouteInterpretToInfoGuides,
+} from "../src/lib/infoGuideInterpretAI.ts";
 import { resolveTurnExecutor } from "../src/lib/whatsappTurnClassifierAI.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import { buildAtilioAgentTools } from "../src/lib/atilioAgentTools.ts";
-import {
-  agentCorePromptMentionsCombustible,
-  agentCorePromptMentionsHojasRuta,
-} from "../src/lib/atilioAgent.ts";
+import { agentCorePromptMentionsHojasRuta } from "../src/lib/atilioAgent.ts";
 
 const prevHr = process.env.WARA_HOJAS_RUTA_KB_ENABLED;
 const prevCb = process.env.WARA_COMBUSTIBLE_KB_ENABLED;
@@ -42,38 +42,74 @@ function restoreEnv() {
   else process.env.OPENAI_API_KEY = prevKey;
 }
 
+const HR_THREAD =
+  "Cliente: ¿Cómo creo una hoja de ruta?\nAtilio: En Utilidades → Hojas de ruta podés dar de alta una hoja.";
+
 try {
-  // --- Flag OFF: no corpus HR, pero respuesta coherente (no Mantenimiento/unidades) ---
+  // --- Flag OFF: reconocer hojas_de_ruta, no entregar hr-*, no caer a MT/Unidades ---
   delete process.env.WARA_HOJAS_RUTA_KB_ENABLED;
   assert.equal(isHojasRutaKbEnabled(), false);
-  assert.equal(listHojasRutaArticleCatalog().length, 0);
-  assert.equal(detectInfoGuideKind("hojas de ruta"), null);
-  assert.notEqual(detectInfoGuideKind("modulo de hojas de ruta"), "hojas_de_ruta");
+  assert.ok(listHojasRutaArticleCatalog().length >= 10, "catálogo reconocimiento siempre");
+  assert.equal(getHojasRutaArticlesByIds(["hr-concepto-mapa"]).length, 0);
+  assert.match(buildHojasRutaKnowledgeContext(["hr-concepto-mapa"]), /deshabilitada/i);
+  assert.equal(detectInfoGuideKind("hojas de ruta"), "hojas_de_ruta");
+  assert.equal(detectInfoGuideKind("modulo de hojas de ruta"), "hojas_de_ruta");
 
   delete process.env.OPENAI_API_KEY;
   process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "false";
+
   const forcedOff = await buildGroundedInfoGuideReplyWithMeta(
     "como creo una hoja de ruta?",
     "hojas_de_ruta",
   );
-  assert.notEqual(forcedOff.guideKind, "hojas_de_ruta");
+  assert.equal(forcedOff.guideKind, "hojas_de_ruta");
   assert.equal(forcedOff.fallback, "hojas_ruta_flag_off");
   assert.match(forcedOff.message, /no tengo habilitada la guía de \*Hojas de ruta\*/i);
   assert.match(forcedOff.message, /hoja de turno/i);
   assert.doesNotMatch(forcedOff.message, /Mantenimiento se enfoca|órdenes de trabajo|planes preventivos/i);
   assert.doesNotMatch(forcedOff.message, /Agregar hoja de ruta|predefinidas — plantillas/i);
+  assert.match(forcedOff.interpret?.reason ?? "", /hojas_ruta_module_disabled/);
+
+  // Historial contaminado por Mantenimiento + consulta HR → disabled HR, no MT.
+  const mtContaminated = await buildGroundedInfoGuideReplyWithMeta(
+    "¿Cómo creo una hoja de ruta?",
+    "mantenimiento",
+    null,
+    "Cliente: mantenimiento preventivo\nAtilio: En Utilidades → Mantenimiento…",
+  );
+  assert.equal(mtContaminated.guideKind, "hojas_de_ruta");
+  assert.equal(mtContaminated.fallback, "hojas_ruta_flag_off");
+  assert.doesNotMatch(mtContaminated.message, /órdenes de trabajo|planes preventivos/i);
 
   const knowledgeAsk = await buildGroundedInfoGuideReplyWithMeta(
     "y sobre hoja de ruta tenes conocimientos?",
     "mantenimiento",
   );
+  assert.equal(knowledgeAsk.guideKind, "hojas_de_ruta");
   assert.equal(knowledgeAsk.fallback, "hojas_ruta_flag_off");
-  assert.match(knowledgeAsk.message, /no tengo habilitada/i);
   assert.doesNotMatch(knowledgeAsk.message, /módulo de Mantenimiento|órdenes de trabajo/i);
 
-  const { applyPlatformGuideInterpretGuards } = await import(
-    "../src/lib/infoGuideInterpretAI.ts"
+  // Continuidad con flag off: sigue siendo HR (disabled), no Unidades.
+  const followOff = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.4,
+      reason: "test",
+    },
+    "¿Y después dónde la veo?",
+    HR_THREAD,
   );
+  assert.equal(followOff.guideKind, "hojas_de_ruta");
+  assert.equal(followOff.route, "info_guides");
+  assert.equal(followOff.articleIds.length, 0);
+  assert.match(followOff.reason ?? "", /hojas_ruta_module_disabled/);
+  assert.ok(shouldRouteInterpretToInfoGuides(followOff));
+
   const mtSteal = applyPlatformGuideInterpretGuards(
     {
       route: "info_guides",
@@ -88,38 +124,114 @@ try {
     "¿Cómo creo una hoja de ruta?",
     "",
   );
-  assert.equal(mtSteal.guideKind, null);
-  assert.match(mtSteal.reason ?? "", /hojas_ruta_flag_off_guard/);
+  assert.equal(mtSteal.guideKind, "hojas_de_ruta");
+  assert.match(mtSteal.reason ?? "", /hojas_ruta_module_disabled/);
+  assert.equal(mtSteal.articleIds.length, 0);
   assert.ok(mtSteal.clarifyQuestion);
 
-  const staticOff = buildInfoGuideReply("x", "hojas_de_ruta");
-  assert.doesNotMatch(staticOff, /módulo Hojas de ruta|Te puedo orientar con el módulo Hojas de ruta/i);
-
-  const ignoredGuideMeta = await buildGroundedInfoGuideReplyWithMeta(
-    "ayuda con algo",
-    null,
-    null,
-    "",
+  // Frontera TP con flag off: hoja de turno ≠ HR disabled.
+  const turnoOff = applyPlatformGuideInterpretGuards(
     {
       route: "info_guides",
+      guideKind: "hojas_de_ruta",
+      need: "procedure",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.8,
+      reason: "test",
+    },
+    "cómo creo una hoja de turno",
+    "",
+  );
+  assert.equal(turnoOff.guideKind, "transporte_publico");
+  assert.ok(turnoOff.articleIds.includes("tp-hoja-turno-crear"));
+
+  const preventivoOff = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
       guideKind: null,
       need: "procedure",
       articleIds: [],
       clarifyQuestion: null,
       executionRequest: false,
-      confidence: 1,
-      reason: "hojas_ruta_flag_off_ignored_guide",
+      confidence: 0.5,
+      reason: "test",
     },
+    "¿Cómo creo un mantenimiento preventivo?",
+    "",
   );
-  const routeFallback = !ignoredGuideMeta.fallback
-    ? "hojas_ruta_flag_off"
-    : ignoredGuideMeta.fallback;
-  assert.equal(routeFallback, "hojas_ruta_flag_off");
+  // Sin LLM, la guarda MT por dominio puede no disparar; al menos no debe ser HR disabled.
+  assert.notEqual(preventivoOff.guideKind, "hojas_de_ruta");
+
+  const staticOff = buildInfoGuideReply("x", "hojas_de_ruta");
+  assert.equal(staticOff, buildHojasRutaDisabledChannelReply());
 
   const toolsOff = buildAtilioAgentTools(false);
   const guiaOff = toolsOff.find((t) => t.function.name === "guia_informativa");
   assert.ok(guiaOff);
-  assert.doesNotMatch(guiaOff.function.description, /hojas de ruta \(listado/i);
+  assert.match(guiaOff.function.description, /hojas de ruta/i);
+
+  // --- E2E resolveTurnExecutor (clasificador productivo) con flag HR off ---
+  process.env.WARA_TURN_AI_CLASSIFY = "false";
+  const mtThread =
+    "Cliente: mantenimiento preventivo\nAtilio: En Utilidades → Mantenimiento podés ver planes.";
+
+  async function assertResolve(label, text, thread, expectExecutor) {
+    const r = await resolveTurnExecutor(text, thread);
+    assert.equal(r.executor, expectExecutor, `${label}: got ${r.executor}`);
+  }
+
+  // A) Intérprete LLM off + sin API key → guardas offline; nunca Unidades/MT ante HR.
+  delete process.env.OPENAI_API_KEY;
+  process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "false";
+  await assertResolve("off/create", "¿Cómo creo una hoja de ruta?", "", "info_guides");
+  await assertResolve("off/follow", "¿Y después dónde la veo?", HR_THREAD, "info_guides");
+  await assertResolve(
+    "off/help",
+    "Necesito ayuda con las hojas de ruta",
+    "",
+    "info_guides",
+  );
+  await assertResolve(
+    "off/editor",
+    "Editor calendario de rutas",
+    "",
+    "info_guides",
+  );
+  await assertResolve(
+    "off/mt-contam",
+    "¿Cómo creo una hoja de ruta?",
+    mtThread,
+    "info_guides",
+  );
+  await assertResolve(
+    "off/turno",
+    "¿Cómo creo una hoja de turno?",
+    "",
+    "info_guides",
+  );
+  await assertResolve(
+    "off/preventivo",
+    "¿Cómo creo un mantenimiento preventivo?",
+    "",
+    "info_guides",
+  );
+  // Trámites duros intactos
+  await assertResolve("off/odo", "Quiero corregir el odómetro", "", "odometro");
+  await assertResolve("off/cert", "Necesito un certificado de cobertura", "", "certificados");
+
+  // B) Intérprete “on” pero sin API key (= fallo de proveedor / config) → mismo contrato.
+  process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "true";
+  delete process.env.OPENAI_API_KEY;
+  await assertResolve("nokey/create", "¿Cómo creo una hoja de ruta?", "", "info_guides");
+  await assertResolve("nokey/follow", "¿Y después dónde la veo?", HR_THREAD, "info_guides");
+  await assertResolve(
+    "nokey/editor",
+    "Editor calendario de rutas",
+    "",
+    "info_guides",
+  );
 
   // --- Corpus (flag on) ---
   process.env.WARA_HOJAS_RUTA_KB_ENABLED = "true";
@@ -207,10 +319,50 @@ try {
       reason: "test",
     },
     "¿Y después dónde la veo?",
-    "Cliente: ¿Cómo creo una hoja de ruta?\nAtilio: En Utilidades → Hojas de ruta podés dar de alta una hoja.",
+    HR_THREAD,
   );
   assert.equal(followFixed.guideKind, "hojas_de_ruta");
   assert.equal(followFixed.route, "info_guides");
+  assert.ok(followFixed.articleIds.some((id) => id.startsWith("hr-")));
+
+  const createOn = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "procedure",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.5,
+      reason: "test",
+    },
+    "¿Cómo creo una hoja de ruta?",
+    "",
+  );
+  assert.equal(createOn.guideKind, "hojas_de_ruta");
+  assert.ok(createOn.articleIds.includes("hr-alta-asignacion"));
+
+  const cargaAmb = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "hojas_de_ruta",
+      need: "procedure",
+      articleIds: ["hr-cargas-descargas"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "test_carga_misroute",
+    },
+    "Quiero registrar una carga",
+    "",
+  );
+  assert.equal(cargaAmb.guideKind, null);
+  assert.equal(cargaAmb.need, "ambiguous");
+  assert.match(cargaAmb.clarifyQuestion ?? "", /mercader|ticket|cisterna/i);
+  assert.ok(shouldRouteInterpretToInfoGuides(cargaAmb));
+  process.env.WARA_TURN_AI_CLASSIFY = "false";
+  const cargaResolve = await resolveTurnExecutor("Quiero registrar una carga", "");
+  assert.equal(cargaResolve.executor, "info_guides");
 
   const toolsOn = buildAtilioAgentTools(false);
   const guiaOn = toolsOn.find((t) => t.function.name === "guia_informativa");
@@ -218,62 +370,25 @@ try {
 
   delete process.env.OPENAI_API_KEY;
   process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "false";
-  const hr = await buildGroundedInfoGuideReply("como creo una hoja de ruta?", "hojas_de_ruta");
-  assert.ok(hr.length > 20, "fallback hojas de ruta");
-  assert.match(hr, /Hojas de ruta|predefinida|Utilidades/i);
-
-  const tp = await buildGroundedInfoGuideReply("como creo una hoja de turno?", "transporte_publico");
-  assert.ok(tp.length > 20);
-
-  // Flag on: detector picks hojas_de_ruta
-  assert.equal(detectInfoGuideKind("hojas de ruta"), "hojas_de_ruta");
-
-  // Regresión trámites duros
-  delete process.env.WARA_HOJAS_RUTA_KB_ENABLED;
-  process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "false";
-  assert.equal(
-    classifyTurnExecutor("Quiero corregir el odómetro", "Quiero corregir el odómetro"),
-    "odometro",
+  const onMeta = await buildGroundedInfoGuideReplyWithMeta(
+    "como creo una hoja de ruta?",
+    "hojas_de_ruta",
   );
+  assert.equal(onMeta.guideKind, "hojas_de_ruta");
+  assert.notEqual(onMeta.fallback, "hojas_ruta_flag_off");
+  assert.doesNotMatch(onMeta.message, /no tengo habilitada la guía/i);
+
+  // Regresión reglas: odo/cert no se roban (sin LLM).
   assert.equal(
-    classifyTurnExecutor(
-      "Necesito un certificado de cobertura",
-      "Necesito un certificado de cobertura",
-    ),
+    classifyTurnExecutor("necesito el certificado de cobertura", ""),
     "certificados",
   );
   assert.equal(
-    (await resolveTurnExecutor("Quiero corregir el odómetro", "Quiero corregir el odómetro"))
-      .executor,
+    classifyTurnExecutor("quiero cambiar el odómetro de la AB123CD", ""),
     "odometro",
-  );
-  assert.equal(
-    (
-      await resolveTurnExecutor(
-        "Necesito un certificado de cobertura",
-        "Necesito un certificado de cobertura",
-      )
-    ).executor,
-    "certificados",
-  );
-
-  process.env.WARA_HOJAS_RUTA_KB_ENABLED = "true";
-  assert.equal(
-    shouldRouteInterpretToInfoGuides({
-      route: "info_guides",
-      guideKind: "hojas_de_ruta",
-      need: "definition",
-      articleIds: ["hr-concepto-mapa"],
-      clarifyQuestion: null,
-      executionRequest: false,
-      confidence: 0.99,
-      reason: "test",
-    }),
-    true,
   );
 
   assert.equal(agentCorePromptMentionsHojasRuta(), false);
-  assert.equal(agentCorePromptMentionsCombustible(), false);
 
   console.log("OK verify-hojas-ruta-kb");
 } finally {

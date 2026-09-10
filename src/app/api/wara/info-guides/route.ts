@@ -169,10 +169,10 @@ export async function POST(req: NextRequest) {
     requestedGuide === "cisternas" && !isCisternasKbEnabled();
   const combustibleGuideIgnored =
     requestedGuide === "combustible" && !isCombustibleKbEnabled();
-  const hojasRutaGuideIgnored =
+  const hojasRutaCorpusOff =
     requestedGuide === "hojas_de_ruta" && !isHojasRutaKbEnabled();
-  const optInGuideIgnored =
-    cisternasGuideIgnored || combustibleGuideIgnored || hojasRutaGuideIgnored;
+  // Cisternas/Combustible: flag off = ignorar kind. HR: reconocer kind aunque corpus off.
+  const optInGuideIgnored = cisternasGuideIgnored || combustibleGuideIgnored;
   const guide = optInGuideIgnored ? undefined : requestedGuide;
   const kind = guide ?? detectInfoGuideKind(rawText);
   const [previousMessage, threadText] = await Promise.all([
@@ -185,21 +185,26 @@ export async function POST(req: NextRequest) {
     ? "cisternas_flag_off_ignored_guide"
     : combustibleGuideIgnored
       ? "combustible_flag_off_ignored_guide"
-      : hojasRutaGuideIgnored
-        ? "hojas_ruta_flag_off_ignored_guide"
+      : hojasRutaCorpusOff
+        ? "hojas_ruta_module_disabled"
         : null;
   const seededInterpret: PlatformKnowledgeInterpret | null =
     guide ||
     parsed.data.need ||
     parsed.data.articleIds?.length ||
-    optInGuideIgnored
+    optInGuideIgnored ||
+    hojasRutaCorpusOff
       ? {
           route: "info_guides",
-          guideKind: (guide as PlatformKnowledgeInterpret["guideKind"]) ?? null,
+          guideKind: (hojasRutaCorpusOff
+            ? "hojas_de_ruta"
+            : ((guide as PlatformKnowledgeInterpret["guideKind"]) ?? null)),
           need: (parsed.data.need as PlatformKnowledgeInterpret["need"]) ?? "procedure",
-          articleIds: parsed.data.articleIds ?? [],
+          articleIds: hojasRutaCorpusOff ? [] : (parsed.data.articleIds ?? []),
           clarifyQuestion: parsed.data.clarifyQuestion?.trim() || null,
-          executionRequest: parsed.data.executionRequest === true,
+          executionRequest: hojasRutaCorpusOff
+            ? false
+            : parsed.data.executionRequest === true,
           confidence: 1,
           reason: ignoredReason ?? "seeded_from_turn",
         }
@@ -228,7 +233,7 @@ export async function POST(req: NextRequest) {
       ? "cisternas_flag_off"
       : combustibleGuideIgnored && !grounded.fallback
         ? "combustible_flag_off"
-        : hojasRutaGuideIgnored && !grounded.fallback
+        : hojasRutaCorpusOff && !grounded.fallback
           ? "hojas_ruta_flag_off"
           : grounded.fallback;
 

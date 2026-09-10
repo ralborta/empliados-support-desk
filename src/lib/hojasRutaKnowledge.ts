@@ -4,10 +4,11 @@
  * Activación: WARA_HOJAS_RUTA_KB_ENABLED=true (default off).
  * Pendientes §10 → restrictions (no inventar).
  *
- * Fronteras (semánticas, no regex):
+ * Fronteras (LLM + guardas textuales legacy V1 documentadas en HOJAS-RUTA-KB-CONTRATO):
  * - hojas_de_ruta ≠ hoja de turno (Transporte Público)
  * - Gestión cargas/descargas de viaje ≠ tickets Combustible ≠ Cisternas (depósito)
  * - ≠ Remitos / Stock de Artículos
+ * Flag: entrega de cuerpos hr-* opt-in; reconocimiento activo con false.
  */
 
 export type HojasRutaArticleStatus = "available" | "needs_validation" | "future";
@@ -42,36 +43,14 @@ export const HOJAS_RUTA_SOURCE = {
   version: "08/09/2026",
 } as const;
 
-/** Opt-in: con false el path productivo no ofrece ni rutea Hojas de ruta. */
+/**
+ * Opt-in de *entrega* del corpus hr-*.
+ * El reconocimiento semántico de guideKind=hojas_de_ruta sigue activo con false;
+ * solo se bloquea grounded/contexto de artículos.
+ */
 export function isHojasRutaKbEnabled(): boolean {
   const raw = process.env.WARA_HOJAS_RUTA_KB_ENABLED?.trim().toLowerCase();
   return raw === "true" || raw === "1" || raw === "yes";
-}
-
-/**
- * Consulta de Hojas de ruta (viaje/flota) con el módulo aún deshabilitado.
- * Excluye hoja de turno (TP). Usado para no caer en unidades/mantenimiento.
- */
-export function looksLikeHojasRutaQueryWhenDisabled(
-  raw: string | undefined | null,
-): boolean {
-  if (isHojasRutaKbEnabled()) return false;
-  const t = String(raw ?? "")
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!t || t.length > 280) return false;
-  if (/\bhojas?\s+de\s+turno\b/.test(t)) return false;
-  if (/\btransporte\s+(public|de\s+pasajer)/.test(t) && !/\bhojas?\s+de\s+ruta\b/.test(t)) {
-    return false;
-  }
-  if (/\bhojas?\s+de\s+ruta\b/.test(t)) return true;
-  if (/\bpredefinida(s)?\b/.test(t) && /\bruta\b/.test(t)) return true;
-  if (/\beditor\s+calendario\b/.test(t) && /\bruta\b/.test(t)) return true;
-  if (/\butilidades\b/.test(t) && /\bhojas?\s+de\s+ruta\b/.test(t)) return true;
-  return false;
 }
 
 /** Respuesta de canal cuando HR está apagado: honesta, sin inventar otro módulo. */
@@ -335,6 +314,10 @@ export const HOJAS_RUTA_ARTICLES: HojasRutaKnowledgeArticle[] = [
   },
 ];
 
+/**
+ * Catálogo para reconocimiento/ruteo (siempre disponible).
+ * La entrega de cuerpos sigue gated por isHojasRutaKbEnabled().
+ */
 export function listHojasRutaArticleCatalog(): Array<{
   id: string;
   category: HojasRutaArticleCategory;
@@ -342,7 +325,6 @@ export function listHojasRutaArticleCatalog(): Array<{
   summary: string;
   status: HojasRutaArticleStatus;
 }> {
-  if (!isHojasRutaKbEnabled()) return [];
   return HOJAS_RUTA_ARTICLES.filter((a) => a.status !== "future").map((a) => ({
     id: a.id,
     category: a.category,
@@ -400,7 +382,6 @@ export function buildHojasRutaKnowledgeContext(articleIds: string[]): string {
 
 /** Contexto de guía Hojas de ruta ya abierta en el hilo (continuidad, no keyword de frase puntual). */
 export function looksLikeHojasRutaGuideContextInThread(threadText: string): boolean {
-  if (!isHojasRutaKbEnabled()) return false;
   const tail = (threadText ?? "").slice(-4000).toLowerCase();
   if (!tail.trim()) return false;
   // Si el hilo habla de hoja de turno / pasajeros, no es continuidad HR.

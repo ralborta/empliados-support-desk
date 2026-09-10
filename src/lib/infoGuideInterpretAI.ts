@@ -24,7 +24,6 @@ import {
   isHojasRutaKbEnabled,
   listHojasRutaArticleCatalog,
   looksLikeHojasRutaGuideFollowupQuestion,
-  looksLikeHojasRutaQueryWhenDisabled,
   buildHojasRutaDisabledChannelReply,
 } from "@/lib/hojasRutaKnowledge";
 import {
@@ -97,7 +96,8 @@ function allowedGuideKinds(): readonly string[] {
   const kinds: string[] = [...GUIDE_KINDS_BASE];
   if (isCisternasKbEnabled()) kinds.push("cisternas");
   if (isCombustibleKbEnabled()) kinds.push("combustible");
-  if (isHojasRutaKbEnabled()) kinds.push("hojas_de_ruta");
+  // Reconocimiento siempre; la entrega de hr-* se gatea aparte.
+  kinds.push("hojas_de_ruta");
   return kinds;
 }
 
@@ -114,7 +114,7 @@ function isArticleBackedGuide(kind: PlatformGuideKind | null): boolean {
 function buildSystemPrompt(): string {
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
-  const hojasRutaOn = isHojasRutaKbEnabled();
+  const hojasRutaCorpusOn = isHojasRutaKbEnabled();
   const kindParts = [
     '"opciones"',
     '"unidades"',
@@ -123,7 +123,7 @@ function buildSystemPrompt(): string {
   ];
   if (cisternasOn) kindParts.push('"cisternas"');
   if (combustibleOn) kindParts.push('"combustible"');
-  if (hojasRutaOn) kindParts.push('"hojas_de_ruta"');
+  kindParts.push('"hojas_de_ruta"');
   kindParts.push("null");
   const kindEnum = kindParts.join(" | ");
 
@@ -134,7 +134,7 @@ function buildSystemPrompt(): string {
     "Transporte Público",
     cisternasOn ? "Cisternas" : null,
     combustibleOn ? "Combustible" : null,
-    hojasRutaOn ? "Hojas de ruta" : null,
+    "Hojas de ruta",
   ]
     .filter(Boolean)
     .join(", ");
@@ -164,8 +164,21 @@ executionRequest en combustible: articleIds puede incluir "cb-ejecucion-no-dispo
 NO uses guideKind "combustible" (módulo no habilitado en este entorno). Si el cliente habla de tickets/panel/informes de combustible de unidad, route=continue_normal salvo que encaje en otra guía habilitada.
 `;
 
-  const hojasRutaBlock = hojasRutaOn
+  const hojasRutaDeliveryBlock = hojasRutaCorpusOn
     ? `
+articleIds: solo catálogo_hojas_ruta (prefijo hr-, 0–3). executionRequest: puede incluir "hr-ejecucion-no-disponible".
+Pendientes (AE INICIO/FIN, Actualizar números, etc.): NO inventes; usá artículos con restrictions.
+`
+    : `
+ENTREGA DE CORPUS DESHABILITADA (flag off):
+- AUN ASÍ usá guideKind=hojas_de_ruta cuando el pedido sea de ese módulo (reconocimiento semántico obligatorio).
+- articleIds: [] (no cites cuerpos hr-*).
+- need=ambiguous + clarifyQuestion: la guía de Hojas de ruta aún no está habilitada por este chat; ofrecé hoja de turno (TP) si aplica o asesor.
+- NUNCA guideKind mantenimiento, unidades, combustible ni cisternas para esa consulta.
+- NUNCA inventes el manual de otro módulo.
+`;
+
+  const hojasRutaBlock = `
 guideKind hojas_de_ruta: Utilidades→Hojas de ruta (listado, alta, predefinidas, editor calendario, gestión de cargas/descargas de VIAJE, puntos/traza, pegado masivo).
 FRONTERAS SEMÁNTICAS (consulta completa + historial; la autoridad es el sentido del pedido, no una sola palabra suelta):
 - “Hoja de X” es excluyente: X=ruta → hojas_de_ruta; X=turno → transporte_publico. NUNCA intercambies esos módulos.
@@ -174,19 +187,9 @@ FRONTERAS SEMÁNTICAS (consulta completa + historial; la autoridad es el sentido
 - Ticket de combustible de una UNIDAD / validar cargas de tickets → combustible (si habilitado). “Tipo=Combustible” o “Carga de combustible” como atributo de un PUNTO de la hoja → sigue siendo hojas_de_ruta.
 - Carga o medición de tanque de DEPÓSITO → cisternas (si habilitado).
 - “Necesito registrar una carga” / “una carga” SIN contexto claro → need=ambiguous + clarifyQuestion preguntando si es: mercadería en hoja de ruta, ticket de combustible de unidad, o carga a cisterna. NO asumas.
-- Columnas/etiquetas de la grilla Gestión de carga/descarga (p. ej. AE INICIO, AE FIN, HOJA DE RUTA PREDEFINIDA, PRODUCTO de viaje) → hojas_de_ruta + articleIds con hr-cargas-descargas (respetá restrictions; no inventes significados pendientes). NUNCA mantenimiento.
+- Columnas/etiquetas de la grilla Gestión de carga/descarga (p. ej. AE INICIO, AE FIN, HOJA DE RUTA PREDEFINIDA, PRODUCTO de viaje) → hojas_de_ruta${hojasRutaCorpusOn ? " + articleIds con hr-cargas-descargas (respetá restrictions; no inventes significados pendientes)" : ""}. NUNCA mantenimiento.
 CONTINUIDAD: si el historial ya habla de Hojas de ruta / Utilidades→Hojas de ruta y el mensaje nuevo es seguimiento (dónde la veo, y después, cómo sigo) → guideKind=hojas_de_ruta (NO unidades, NO mantenimiento).
-articleIds: solo catálogo_hojas_ruta (prefijo hr-, 0–3). executionRequest: puede incluir "hr-ejecucion-no-disponible".
-Pendientes (AE INICIO/FIN, Actualizar números, etc.): NO inventes; usá artículos con restrictions.
-`
-    : `
-Si el cliente habla de hoja(s) de ruta / predefinidas / editor calendario de rutas (NO “hoja de turno”):
-- route=info_guides, need=ambiguous, guideKind=null,
-- clarifyQuestion: explicá que la guía de Hojas de ruta aún no está habilitada por este chat; ofrecé hoja de turno (TP) o asesor.
-- NUNCA guideKind mantenimiento, unidades, combustible ni cisternas para esa consulta.
-- NUNCA inventes el manual de otro módulo.
-Si es claramente “hoja de turno” / pasajeros → transporte_publico.
-NO uses guideKind "hojas_de_ruta" (módulo no habilitado en este entorno).
+${hojasRutaDeliveryBlock}
 `;
 
   return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
@@ -291,18 +294,6 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
           reason: "combustible_flag_off",
         };
       }
-      if (guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
-        return {
-          route: "continue_normal",
-          guideKind: null,
-          need,
-          articleIds: [],
-          clarifyQuestion: null,
-          executionRequest: false,
-          confidence: Number(parsed.confidence) || 0,
-          reason: "hojas_ruta_flag_off",
-        };
-      }
       return null;
     }
     const confidence = Number(parsed.confidence);
@@ -321,9 +312,11 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     const cbArticles = articleIds.filter((id) => cbIds.has(id));
     const hrArticles = articleIds.filter((id) => hrIds.has(id));
     const mtArticles = articleIds.filter((id) => mtIds.has(id));
+    const hojasCorpusOn = isHojasRutaKbEnabled();
 
-    if (guideKind === "hojas_de_ruta" && isHojasRutaKbEnabled() && hrArticles.length) {
-      articleIds = hrArticles;
+    if (guideKind === "hojas_de_ruta") {
+      // Reconocimiento siempre; cuerpos solo si corpus on.
+      articleIds = hojasCorpusOn ? hrArticles : [];
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "combustible" && isCombustibleKbEnabled() && cbArticles.length) {
       articleIds = cbArticles;
@@ -337,8 +330,8 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     } else if (guideKind === "transporte_publico" && tpArticles.length) {
       articleIds = tpArticles;
       route = promoteArticleGuide(need, route);
-    } else if (hrArticles.length && isHojasRutaKbEnabled()) {
-      articleIds = hrArticles;
+    } else if (hrArticles.length) {
+      articleIds = hojasCorpusOn ? hrArticles : [];
       guideKind = "hojas_de_ruta";
       route = promoteArticleGuide(need, route);
     } else if (cbArticles.length && isCombustibleKbEnabled()) {
@@ -489,9 +482,8 @@ function allCatalogLabels(): CatalogLabelHit[] {
   const out: CatalogLabelHit[] = [];
   out.push(...extractCatalogLabels("transporte_publico", TRANSPORTE_PUBLICO_ARTICLES));
   out.push(...extractCatalogLabels("mantenimiento", MANTENIMIENTO_ARTICLES));
-  if (isHojasRutaKbEnabled()) {
-    out.push(...extractCatalogLabels("hojas_de_ruta", HOJAS_RUTA_ARTICLES));
-  }
+  // Labels HR siempre: ayudan al reconocimiento; la entrega de cuerpos sigue gated.
+  out.push(...extractCatalogLabels("hojas_de_ruta", HOJAS_RUTA_ARTICLES));
   if (isCombustibleKbEnabled()) {
     out.push(...extractCatalogLabels("combustible", COMBUSTIBLE_ARTICLES));
   }
@@ -605,8 +597,12 @@ function correctHojaDeNounMisroute(
     };
   }
 
-  if (/^ruta/.test(noun) && isHojasRutaKbEnabled()) {
-    if (interpret.guideKind === "hojas_de_ruta" && interpret.route === "info_guides") {
+  if (/^ruta/.test(noun)) {
+    if (
+      interpret.guideKind === "hojas_de_ruta" &&
+      interpret.route === "info_guides" &&
+      (isHojasRutaKbEnabled() || interpret.articleIds.length === 0)
+    ) {
       return interpret;
     }
     return {
@@ -614,10 +610,11 @@ function correctHojaDeNounMisroute(
       route: "info_guides",
       guideKind: "hojas_de_ruta",
       need: interpret.need === "execute" ? "execute" : "procedure",
-      articleIds:
-        interpret.need === "execute"
+      articleIds: isHojasRutaKbEnabled()
+        ? interpret.need === "execute"
           ? ["hr-ejecucion-no-disponible"]
-          : ["hr-alta-asignacion", "hr-concepto-mapa"],
+          : ["hr-alta-asignacion", "hr-concepto-mapa"]
+        : [],
       clarifyQuestion: null,
       executionRequest: interpret.need === "execute",
       confidence: Math.max(interpret.confidence, 0.93),
@@ -635,12 +632,13 @@ function correctHojasRutaContinuityMisroute(
   selectionText: string,
   threadText: string,
 ): PlatformKnowledgeInterpret {
-  if (!isHojasRutaKbEnabled()) return interpret;
   if (!looksLikeHojasRutaGuideFollowupQuestion(selectionText, threadText)) return interpret;
   if (
     interpret.guideKind === "hojas_de_ruta" &&
     interpret.route === "info_guides" &&
-    interpret.articleIds.some((id) => id.startsWith("hr-"))
+    (isHojasRutaKbEnabled()
+      ? interpret.articleIds.some((id) => id.startsWith("hr-"))
+      : true)
   ) {
     return interpret;
   }
@@ -649,7 +647,9 @@ function correctHojasRutaContinuityMisroute(
     route: "info_guides",
     guideKind: "hojas_de_ruta",
     need: interpret.need === "ambiguous" ? "procedure" : interpret.need,
-    articleIds: ["hr-listado-filtros", "hr-alta-asignacion"],
+    articleIds: isHojasRutaKbEnabled()
+      ? ["hr-listado-filtros", "hr-alta-asignacion"]
+      : [],
     clarifyQuestion: null,
     executionRequest: false,
     confidence: Math.max(interpret.confidence, 0.9),
@@ -715,6 +715,7 @@ function correctGuideExecuteImperativeMisroute(
 
 /**
  * “Una carga” / registrar carga sin módulo en consulta ni historial → ambiguous + clarify.
+ * Debe ganar sobre un misroute a hojas_de_ruta/combustible/cisternas (y sobre disabled HR).
  */
 function correctAmbiguousCargaMisroute(
   interpret: PlatformKnowledgeInterpret,
@@ -750,10 +751,15 @@ function correctAmbiguousCargaMisroute(
   ) {
     return interpret;
   }
+
+  const clarify =
+    "¿La carga es mercadería en una hoja de ruta, un ticket de combustible de una unidad, o carga a una cisterna?";
   if (
     interpret.need === "ambiguous" &&
+    interpret.guideKind === null &&
+    interpret.route === "info_guides" &&
     interpret.clarifyQuestion &&
-    interpret.route === "info_guides"
+    /mercader[ií]a|ticket|cisterna/i.test(interpret.clarifyQuestion)
   ) {
     return interpret;
   }
@@ -763,8 +769,7 @@ function correctAmbiguousCargaMisroute(
     guideKind: null,
     need: "ambiguous",
     articleIds: [],
-    clarifyQuestion:
-      "¿La carga es mercadería en una hoja de ruta, un ticket de combustible de una unidad, o carga a una cisterna?",
+    clarifyQuestion: clarify,
     executionRequest: false,
     confidence: Math.max(interpret.confidence, 0.88),
     reason: interpret.reason
@@ -774,41 +779,113 @@ function correctAmbiguousCargaMisroute(
 }
 
 /**
- * Flag off + consulta de hoja de ruta: no continue_normal → unidades/mantenimiento.
- * Deja clarify de canal; el grounded responde el límite honesto.
+ * Pedido que nombra un tema del catálogo HR (título) sin pasar por LLM.
+ * Deuda legacy V1: matching textual sobre catálogo, no frases de test sueltas.
  */
-function correctHojasRutaDisabledMisroute(
+function correctHojasRutaCatalogTopicMisroute(
   interpret: PlatformKnowledgeInterpret,
   selectionText: string,
 ): PlatformKnowledgeInterpret {
-  if (!looksLikeHojasRutaQueryWhenDisabled(selectionText)) return interpret;
-  // hoja_de_noun ya pudo fijar TP para “hoja de turno”; no pisar.
   if (interpret.guideKind === "transporte_publico" && interpret.route === "info_guides") {
     return interpret;
   }
+  const norm = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!norm || norm.length > 240) return interpret;
+  if (/\bhojas?\s+de\s+turno\b/.test(norm)) return interpret;
+  if (/\btransporte\s+(public|de\s+pasajer)/.test(norm) && !/\bhojas?\s+de\s+ruta\b/.test(norm)) {
+    return interpret;
+  }
+
+  let bestId: string | null = null;
+  let bestLen = 0;
+  for (const a of HOJAS_RUTA_ARTICLES) {
+    if (a.status === "future" || a.id.endsWith("-ejecucion-no-disponible")) continue;
+    const titleKey = a.title
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .split(/[—–\-|(]/)[0]
+      .replace(/\s+/g, " ")
+      .trim();
+    if (titleKey.length < 10) continue;
+    if (!norm.includes(titleKey)) continue;
+    if (titleKey.length > bestLen) {
+      bestId = a.id;
+      bestLen = titleKey.length;
+    }
+  }
+  // Cobertura de temas cortos del relevamiento (mismo espíritu catálogo).
+  if (!bestId) {
+    if (/\beditor\s+calendario\b/.test(norm) && /\brutas?\b/.test(norm)) {
+      bestId = "hr-editor-calendario";
+    } else if (/\bpredefinida(s)?\b/.test(norm) && /\brutas?\b/.test(norm)) {
+      bestId = "hr-predefinidas";
+    } else if (/\bhojas?\s+de\s+ruta\b/.test(norm)) {
+      bestId = "hr-concepto-mapa";
+    }
+  }
+  if (!bestId) return interpret;
   if (
-    interpret.reason?.includes("hojas_ruta_flag_off_guard") &&
-    interpret.need === "ambiguous" &&
-    interpret.clarifyQuestion
+    interpret.guideKind === "hojas_de_ruta" &&
+    interpret.route === "info_guides" &&
+    (isHojasRutaKbEnabled() ? interpret.articleIds.includes(bestId) : true)
   ) {
     return interpret;
   }
   return {
     ...interpret,
     route: "info_guides",
-    guideKind: null,
-    need: "ambiguous",
-    articleIds: [],
-    clarifyQuestion: buildHojasRutaDisabledChannelReply(),
-    executionRequest: false,
-    confidence: Math.max(interpret.confidence, 0.95),
+    guideKind: "hojas_de_ruta",
+    need: interpret.need === "execute" ? "execute" : "procedure",
+    articleIds: isHojasRutaKbEnabled() ? [bestId] : [],
+    clarifyQuestion: null,
+    executionRequest: interpret.need === "execute",
+    confidence: Math.max(interpret.confidence, 0.9),
     reason: interpret.reason
-      ? `${interpret.reason}|hojas_ruta_flag_off_guard`
-      : "hojas_ruta_flag_off_guard",
+      ? `${interpret.reason}|hr_catalog_topic_guard`
+      : "hr_catalog_topic_guard",
   };
 }
 
-/** Guardas post-LLM: consulta + historial + catálogo (sin anclar frases de test). */
+/**
+ * Flag off: reconoce guideKind=hojas_de_ruta pero no entrega corpus hr-*.
+ * Salida estructurada de módulo deshabilitado (sin caer a Unidades/MT).
+ */
+function normalizeHojasRutaDisabledDelivery(
+  interpret: PlatformKnowledgeInterpret,
+): PlatformKnowledgeInterpret {
+  if (interpret.guideKind !== "hojas_de_ruta") return interpret;
+  if (isHojasRutaKbEnabled()) return interpret;
+  const disabledReply = buildHojasRutaDisabledChannelReply();
+  if (
+    interpret.reason?.includes("hojas_ruta_module_disabled") &&
+    interpret.route === "info_guides" &&
+    interpret.articleIds.length === 0 &&
+    interpret.clarifyQuestion === disabledReply
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "hojas_de_ruta",
+    need: "ambiguous",
+    articleIds: [],
+    clarifyQuestion: disabledReply,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.95),
+    reason: interpret.reason
+      ? `${interpret.reason}|hojas_ruta_module_disabled`
+      : "hojas_ruta_module_disabled",
+  };
+}
+
+/** Guardas post-LLM / offline V1: consulta + historial + catálogo. */
 export function applyPlatformGuideInterpretGuards(
   interpret: PlatformKnowledgeInterpret,
   selectionText: string,
@@ -817,14 +894,41 @@ export function applyPlatformGuideInterpretGuards(
   let next = interpret;
   next = correctMaintenanceMisroute(next, selectionText, threadText);
   next = correctHojaDeNounMisroute(next, selectionText);
-  next = correctHojasRutaDisabledMisroute(next, selectionText);
+  next = correctHojasRutaCatalogTopicMisroute(next, selectionText);
   next = correctCatalogLabelMisroute(next, selectionText);
   next = correctHojasRutaContinuityMisroute(next, selectionText, threadText);
   next = correctGuideExecuteImperativeMisroute(next, selectionText);
+  next = normalizeHojasRutaDisabledDelivery(next);
+  // Último: carga ambigua gana sobre HR/combustible/cisternas (y sobre disabled HR).
   next = correctAmbiguousCargaMisroute(next, selectionText, threadText);
-  // Flag-off HR al final otra vez: MT/cargas no deben reescribir el límite de canal.
-  next = correctHojasRutaDisabledMisroute(next, selectionText);
   return next;
+}
+
+/** Offline / sin API: autoridad textual V1 + catálogo (nunca Improvisar Unidades/MT ante HR). */
+export function applyOfflinePlatformKnowledgeGuards(
+  selectionText: string,
+  threadText: string = "",
+): PlatformKnowledgeInterpret | null {
+  const text = selectionText.trim();
+  if (!text) return null;
+  const guarded = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.5,
+      reason: "interpret_offline_guards",
+    },
+    text,
+    threadText,
+  );
+  if (guarded.route === "info_guides" && (guarded.guideKind || guarded.clarifyQuestion)) {
+    return guarded;
+  }
+  return null;
 }
 
 export async function interpretPlatformKnowledgeTurn(opts: {
@@ -832,17 +936,22 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   threadText?: string;
   pendingActionType?: string | null;
 }): Promise<PlatformKnowledgeInterpret | null> {
-  if (!isPlatformKbLlmInterpretEnabled()) return null;
   const text = opts.selectionText.trim();
   if (!text) return null;
+  const threadText = opts.threadText ?? "";
+
+  // Sin intérprete LLM / sin API key: guardas offline V1 (contrato HR safe-off).
+  if (!isPlatformKbLlmInterpretEnabled()) {
+    return applyOfflinePlatformKnowledgeGuards(text, threadText);
+  }
 
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
-  const hojasRutaOn = isHojasRutaKbEnabled();
-  const key = cacheKey(text, opts.threadText ?? "", cisternasOn, combustibleOn, hojasRutaOn);
+  const hojasRutaCorpusOn = isHojasRutaKbEnabled();
+  const key = cacheKey(text, threadText, cisternasOn, combustibleOn, hojasRutaCorpusOn);
   const cached = interpretCache.get(key);
   if (cached && cached.value && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
-    return applyPlatformGuideInterpretGuards(cached.value, text, opts.threadText ?? "");
+    return applyPlatformGuideInterpretGuards(cached.value, text, threadText);
   }
 
   const catalogTp = listTransporteArticleCatalog();
@@ -853,19 +962,19 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const userPayload: Record<string, unknown> = {
     mensaje_nuevo: text,
-    historial_reciente: (opts.threadText ?? "").slice(-2500),
+    historial_reciente: threadText.slice(-2500),
     pending_action_type: opts.pendingActionType ?? null,
     catalogo_transporte: catalogTp,
     catalogo_mantenimiento: catalogMt,
+    // Catálogo HR siempre (reconocimiento); cuerpos gated en grounded.
+    catalogo_hojas_ruta: catalogHr,
+    hojas_ruta_corpus_enabled: hojasRutaCorpusOn,
   };
   if (cisternasOn) {
     userPayload.catalogo_cisternas = catalogCs;
   }
   if (combustibleOn) {
     userPayload.catalogo_combustible = catalogCb;
-  }
-  if (hojasRutaOn) {
-    userPayload.catalogo_hojas_ruta = catalogHr;
   }
 
   try {
@@ -889,7 +998,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     const content = response?.choices?.[0]?.message?.content?.trim();
     let parsed = content ? parseInterpret(content) : null;
     if (parsed) {
-      parsed = applyPlatformGuideInterpretGuards(parsed, text, opts.threadText ?? "");
+      parsed = applyPlatformGuideInterpretGuards(parsed, text, threadText);
       interpretCache.set(key, { at: Date.now(), value: parsed });
       return parsed;
     }
@@ -906,17 +1015,17 @@ export async function interpretPlatformKnowledgeTurn(opts: {
         reason: "interpret_parse_miss",
       },
       text,
-      opts.threadText ?? "",
+      threadText,
     );
     if (parseMiss.route === "info_guides" && parseMiss.guideKind) {
       interpretCache.set(key, { at: Date.now(), value: parseMiss });
       return parseMiss;
     }
-    return null;
+    return applyOfflinePlatformKnowledgeGuards(text, threadText);
   } catch {
     if (
       looksLikeMaintenanceDomainTermQuestion(text) ||
-      looksLikeMaintenanceGuideFollowupQuestion(text, opts.threadText ?? "")
+      looksLikeMaintenanceGuideFollowupQuestion(text, threadText)
     ) {
       return applyPlatformGuideInterpretGuards(
         {
@@ -930,26 +1039,10 @@ export async function interpretPlatformKnowledgeTurn(opts: {
           reason: "mt_domain_guard_offline",
         },
         text,
-        opts.threadText ?? "",
+        threadText,
       );
     }
-    const offlineBase: PlatformKnowledgeInterpret = {
-      route: "continue_normal",
-      guideKind: null,
-      need: "ambiguous",
-      articleIds: [],
-      clarifyQuestion: null,
-      executionRequest: false,
-      confidence: 0.5,
-      reason: "interpret_offline",
-    };
-    const guarded = applyPlatformGuideInterpretGuards(
-      offlineBase,
-      text,
-      opts.threadText ?? "",
-    );
-    if (guarded.route === "info_guides" && guarded.guideKind) return guarded;
-    return null;
+    return applyOfflinePlatformKnowledgeGuards(text, threadText);
   }
 }
 
@@ -959,7 +1052,7 @@ export function shouldRouteInterpretToInfoGuides(
   if (!interpret) return false;
   if (interpret.guideKind === "cisternas" && !isCisternasKbEnabled()) return false;
   if (interpret.guideKind === "combustible" && !isCombustibleKbEnabled()) return false;
-  if (interpret.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) return false;
+  // HR: reconocer aunque corpus off → info_guides (respuesta disabled estructurada).
   if (interpret.need === "ambiguous" && interpret.clarifyQuestion) {
     return interpret.confidence >= 0.55;
   }
