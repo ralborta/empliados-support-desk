@@ -380,14 +380,32 @@ export function buildHojasRutaKnowledgeContext(articleIds: string[]): string {
     .join("\n\n---\n\n");
 }
 
+/**
+ * Aclaraciones del bot que nombran “hoja de ruta” como una opción entre varias
+ * (p. ej. ambigüedad de “carga”) no son guía HR activa.
+ */
+function scrubFalseHojasRutaMentionsFromThread(threadText: string): string {
+  return String(threadText ?? "")
+    .replace(
+      /[¿?]?\s*(la\s+)?carga es mercader[ií]a[^\n?]{0,160}cisterna[^\n?]*[?]*/gi,
+      " ",
+    )
+    .replace(
+      /si necesit[aá]s ayuda con las hojas de ruta[^\n]*/gi,
+      " ",
+    );
+}
+
 /** Contexto de guía Hojas de ruta ya abierta en el hilo (continuidad, no keyword de frase puntual). */
 export function looksLikeHojasRutaGuideContextInThread(threadText: string): boolean {
-  const tail = (threadText ?? "").slice(-4000).toLowerCase();
+  const scrubbed = scrubFalseHojasRutaMentionsFromThread(threadText);
+  const tail = scrubbed.slice(-4000).toLowerCase();
   if (!tail.trim()) return false;
   // Si el hilo habla de hoja de turno / pasajeros, no es continuidad HR.
   if (
     /\bhoja(s)?\s+de\s+turno\b/.test(tail) ||
-    /\btransporte\s+(p[uú]blico|de\s+pasajer)/.test(tail)
+    /\btransporte\s+(p[uú]blico|de\s+pasajer)/.test(tail) ||
+    /\bservicio[s]?\s+(de\s+)?(transporte|pasajer)/.test(tail)
   ) {
     if (!/\bhojas?\s+de\s+ruta\b/.test(tail) && !/utilidades\s*[→>]\s*hojas de ruta/.test(tail)) {
       return false;

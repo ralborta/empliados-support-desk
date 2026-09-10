@@ -364,6 +364,85 @@ try {
   const cargaResolve = await resolveTurnExecutor("Quiero registrar una carga", "");
   assert.equal(cargaResolve.executor, "info_guides");
 
+  // “Cargar servicios de transporte” ≠ ambigüedad de “una carga”: preservar TP.
+  const cargaTpServicio = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "transporte_publico",
+      need: "procedure",
+      articleIds: ["tp-servicio-crear"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.92,
+      reason: "test_tp_servicio",
+    },
+    "Quiero cargar unos servicios a transporte público pero no entiendo cómo hacerlo",
+    "",
+  );
+  assert.equal(cargaTpServicio.guideKind, "transporte_publico");
+  assert.ok(cargaTpServicio.articleIds.includes("tp-servicio-crear"));
+  assert.doesNotMatch(cargaTpServicio.reason ?? "", /ambiguous_carga_guard/);
+  assert.equal(cargaTpServicio.need, "procedure");
+
+  const cargaServicioPasajeros = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "transporte_publico",
+      need: "procedure",
+      articleIds: ["tp-servicio-crear"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "test_tp_pasajeros",
+    },
+    "Cómo cargo un servicio a transporte de pasajeros?",
+    "",
+  );
+  assert.equal(cargaServicioPasajeros.guideKind, "transporte_publico");
+  assert.ok(cargaServicioPasajeros.articleIds.includes("tp-servicio-crear"));
+  assert.doesNotMatch(cargaServicioPasajeros.reason ?? "", /ambiguous_carga_guard|hr_continuity_guard/);
+
+  // Aclaración del bot (opciones de carga) no contamina continuidad HR.
+  const CARGA_CLARIFY_THREAD = [
+    "Cliente: Quiero cargar unos servicios a transporte público",
+    "Atilio: ¿La carga es mercadería en una hoja de ruta, un ticket de combustible de una unidad, o carga a una cisterna?",
+  ].join("\n");
+  const afterCargaClarify = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "transporte_publico",
+      need: "procedure",
+      articleIds: ["tp-servicio-crear"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.93,
+      reason: "test_after_clarify",
+    },
+    "Ninguna de esas 3. Es un servicio de transporte público. Cómo lo cargo?",
+    CARGA_CLARIFY_THREAD,
+  );
+  assert.equal(afterCargaClarify.guideKind, "transporte_publico");
+  assert.ok(afterCargaClarify.articleIds.includes("tp-servicio-crear"));
+  assert.doesNotMatch(afterCargaClarify.reason ?? "", /hr_continuity_guard|ambiguous_carga_guard/);
+
+  // Sin decisión TP previa: el hilo de clarify tampoco debe forzar HR.
+  const afterClarifyNoSeed = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.4,
+      reason: "test",
+    },
+    "Ninguna de esas 3. Es un servicio de transporte público. Cómo lo cargo?",
+    CARGA_CLARIFY_THREAD,
+  );
+  assert.notEqual(afterClarifyNoSeed.guideKind, "hojas_de_ruta");
+  assert.doesNotMatch(afterClarifyNoSeed.reason ?? "", /hr_continuity_guard/);
+
   const toolsOn = buildAtilioAgentTools(false);
   const guiaOn = toolsOn.find((t) => t.function.name === "guia_informativa");
   assert.match(guiaOn.function.description, /hojas de ruta/i);

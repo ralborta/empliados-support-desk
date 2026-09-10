@@ -694,6 +694,14 @@ function correctHojasRutaContinuityMisroute(
   selectionText: string,
   threadText: string,
 ): PlatformKnowledgeInterpret {
+  // Decisión explícita de otro módulo en este turno gana sobre continuidad histórica.
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "hojas_de_ruta"
+  ) {
+    return interpret;
+  }
   if (!looksLikeHojasRutaGuideFollowupQuestion(selectionText, threadText)) return interpret;
   if (
     interpret.guideKind === "hojas_de_ruta" &&
@@ -780,7 +788,8 @@ function correctGuideExecuteImperativeMisroute(
 
 /**
  * “Una carga” / registrar carga sin módulo en consulta ni historial → ambiguous + clarify.
- * Debe ganar sobre un misroute a hojas_de_ruta/combustible/cisternas (y sobre disabled HR).
+ * Puede corregir un misroute a hojas_de_ruta/combustible/cisternas cuando la consulta
+ * es realmente ambigua. Nunca pisa un dominio estructurado ajeno (p. ej. transporte_publico).
  */
 function correctAmbiguousCargaMisroute(
   interpret: PlatformKnowledgeInterpret,
@@ -790,13 +799,24 @@ function correctAmbiguousCargaMisroute(
   if (!isHojasRutaKbEnabled() && !isCombustibleKbEnabled() && !isCisternasKbEnabled()) {
     return interpret;
   }
+  // Dominio explícito del turno (LLM u otra guarda): no degradar a clarify de “carga”.
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "hojas_de_ruta" &&
+    interpret.guideKind !== "combustible" &&
+    interpret.guideKind !== "cisternas"
+  ) {
+    return interpret;
+  }
   const t = selectionText
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
-  if (!/\bcarga/.test(t)) return interpret;
+  // Sustantivo “carga/cargas” — no el prefijo de “cargar/cargo”.
+  if (!/\bcargas?\b/.test(t)) return interpret;
   if (
     /\b(ticket|cisterna|combustible|odometro|horometro|patente|gps|hoja(s)? de ruta|hoja(s)? de turno|viaje|predefinida)\b/.test(
       t,
@@ -804,14 +824,36 @@ function correctAmbiguousCargaMisroute(
   ) {
     return interpret;
   }
+  // Dominio TP / servicio de pasajeros explícito en el texto → no ambiguous de carga.
+  if (
+    /\btransporte\s+(publico|de\s+pasajer)/.test(t) ||
+    /\bpasajeros?\b/.test(t) ||
+    (/\bservicios?\b/.test(t) &&
+      /\b(transporte|pasajer|linea|l[ií]nea|recorrido)\b/.test(t))
+  ) {
+    return interpret;
+  }
   const thread = (threadText ?? "").toLowerCase();
   if (
     /hojas? de ruta|combustible|cisterna|ticket de combustible|gestion de carga/.test(thread)
   ) {
-    return interpret;
+    // Historial de clarify multi-opción no cuenta como módulo HR activo.
+    const scrubbedThread = thread
+      .replace(
+        /[¿?]?\s*(la\s+)?carga es mercader[ií]a[^\n?]{0,160}cisterna[^\n?]*[?]*/gi,
+        " ",
+      )
+      .replace(/si necesit[aá]s ayuda con las hojas de ruta[^\n]*/gi, " ");
+    if (
+      /hojas? de ruta|combustible|cisterna|ticket de combustible|gestion de carga/.test(
+        scrubbedThread,
+      )
+    ) {
+      return interpret;
+    }
   }
   if (
-    !/\b(registrar|cargar|anotar|necesito|quiero|tengo que|hay que).{0,48}\bcarga/.test(t) &&
+    !/\b(registrar|cargar|anotar|necesito|quiero|tengo que|hay que).{0,48}\bcargas?\b/.test(t) &&
     !/\buna carga\b/.test(t)
   ) {
     return interpret;
