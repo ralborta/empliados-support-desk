@@ -24,6 +24,8 @@ import {
   isHojasRutaKbEnabled,
   listHojasRutaArticleCatalog,
   looksLikeHojasRutaGuideFollowupQuestion,
+  looksLikeHojasRutaQueryWhenDisabled,
+  buildHojasRutaDisabledChannelReply,
 } from "@/lib/hojasRutaKnowledge";
 import {
   MANTENIMIENTO_ARTICLES,
@@ -178,7 +180,13 @@ articleIds: solo catálogo_hojas_ruta (prefijo hr-, 0–3). executionRequest: pu
 Pendientes (AE INICIO/FIN, Actualizar números, etc.): NO inventes; usá artículos con restrictions.
 `
     : `
-NO uses guideKind "hojas_de_ruta" (módulo no habilitado en este entorno). Si el cliente habla de hojas de ruta / predefinidas / editor calendario de rutas, route=continue_normal salvo que encaje en otra guía habilitada (p. ej. hoja de turno → transporte_publico).
+Si el cliente habla de hoja(s) de ruta / predefinidas / editor calendario de rutas (NO “hoja de turno”):
+- route=info_guides, need=ambiguous, guideKind=null,
+- clarifyQuestion: explicá que la guía de Hojas de ruta aún no está habilitada por este chat; ofrecé hoja de turno (TP) o asesor.
+- NUNCA guideKind mantenimiento, unidades, combustible ni cisternas para esa consulta.
+- NUNCA inventes el manual de otro módulo.
+Si es claramente “hoja de turno” / pasajeros → transporte_publico.
+NO uses guideKind "hojas_de_ruta" (módulo no habilitado en este entorno).
 `;
 
   return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
@@ -765,6 +773,41 @@ function correctAmbiguousCargaMisroute(
   };
 }
 
+/**
+ * Flag off + consulta de hoja de ruta: no continue_normal → unidades/mantenimiento.
+ * Deja clarify de canal; el grounded responde el límite honesto.
+ */
+function correctHojasRutaDisabledMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+): PlatformKnowledgeInterpret {
+  if (!looksLikeHojasRutaQueryWhenDisabled(selectionText)) return interpret;
+  // hoja_de_noun ya pudo fijar TP para “hoja de turno”; no pisar.
+  if (interpret.guideKind === "transporte_publico" && interpret.route === "info_guides") {
+    return interpret;
+  }
+  if (
+    interpret.reason?.includes("hojas_ruta_flag_off_guard") &&
+    interpret.need === "ambiguous" &&
+    interpret.clarifyQuestion
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: null,
+    need: "ambiguous",
+    articleIds: [],
+    clarifyQuestion: buildHojasRutaDisabledChannelReply(),
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.95),
+    reason: interpret.reason
+      ? `${interpret.reason}|hojas_ruta_flag_off_guard`
+      : "hojas_ruta_flag_off_guard",
+  };
+}
+
 /** Guardas post-LLM: consulta + historial + catálogo (sin anclar frases de test). */
 export function applyPlatformGuideInterpretGuards(
   interpret: PlatformKnowledgeInterpret,
@@ -774,10 +817,13 @@ export function applyPlatformGuideInterpretGuards(
   let next = interpret;
   next = correctMaintenanceMisroute(next, selectionText, threadText);
   next = correctHojaDeNounMisroute(next, selectionText);
+  next = correctHojasRutaDisabledMisroute(next, selectionText);
   next = correctCatalogLabelMisroute(next, selectionText);
   next = correctHojasRutaContinuityMisroute(next, selectionText, threadText);
   next = correctGuideExecuteImperativeMisroute(next, selectionText);
   next = correctAmbiguousCargaMisroute(next, selectionText, threadText);
+  // Flag-off HR al final otra vez: MT/cargas no deben reescribir el límite de canal.
+  next = correctHojasRutaDisabledMisroute(next, selectionText);
   return next;
 }
 

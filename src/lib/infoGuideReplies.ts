@@ -21,7 +21,11 @@ import {
 } from "@/lib/infoGuideInterpretAI";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
-import { isHojasRutaKbEnabled } from "@/lib/hojasRutaKnowledge";
+import {
+  isHojasRutaKbEnabled,
+  looksLikeHojasRutaQueryWhenDisabled,
+  buildHojasRutaDisabledChannelReply,
+} from "@/lib/hojasRutaKnowledge";
 
 export type InfoGuideKind =
   | "opciones"
@@ -523,6 +527,26 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   let articleIds = activeInterpret?.articleIds ?? [];
   let need: InfoGuideNeed | null = activeInterpret?.need ?? null;
   let fallback: InfoGuideFallback = null;
+
+  // Flag off + consulta HR: límite de canal honesto (nunca KB de mantenimiento/unidades).
+  if (looksLikeHojasRutaQueryWhenDisabled(rawText)) {
+    const message = buildHojasRutaDisabledChannelReply();
+    return {
+      message,
+      guideKind: null,
+      interpret: {
+        route: "info_guides",
+        guideKind: null,
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion: message,
+        executionRequest: false,
+        confidence: 0.95,
+        reason: "hojas_ruta_flag_off_guard",
+      },
+      fallback: "hojas_ruta_flag_off",
+    };
+  }
 
   if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
     activeInterpret = {

@@ -48,6 +48,41 @@ export function isHojasRutaKbEnabled(): boolean {
   return raw === "true" || raw === "1" || raw === "yes";
 }
 
+/**
+ * Consulta de Hojas de ruta (viaje/flota) con el módulo aún deshabilitado.
+ * Excluye hoja de turno (TP). Usado para no caer en unidades/mantenimiento.
+ */
+export function looksLikeHojasRutaQueryWhenDisabled(
+  raw: string | undefined | null,
+): boolean {
+  if (isHojasRutaKbEnabled()) return false;
+  const t = String(raw ?? "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t || t.length > 280) return false;
+  if (/\bhojas?\s+de\s+turno\b/.test(t)) return false;
+  if (/\btransporte\s+(public|de\s+pasajer)/.test(t) && !/\bhojas?\s+de\s+ruta\b/.test(t)) {
+    return false;
+  }
+  if (/\bhojas?\s+de\s+ruta\b/.test(t)) return true;
+  if (/\bpredefinida(s)?\b/.test(t) && /\bruta\b/.test(t)) return true;
+  if (/\beditor\s+calendario\b/.test(t) && /\bruta\b/.test(t)) return true;
+  if (/\butilidades\b/.test(t) && /\bhojas?\s+de\s+ruta\b/.test(t)) return true;
+  return false;
+}
+
+/** Respuesta de canal cuando HR está apagado: honesta, sin inventar otro módulo. */
+export function buildHojasRutaDisabledChannelReply(): string {
+  return [
+    "Por este chat todavía no tengo habilitada la guía de *Hojas de ruta* (Utilidades → planificación de viaje).",
+    "Si te referías a *hoja de turno* de Transporte de pasajeros, decime y te oriento con eso.",
+    "Si necesitás Hojas de ruta ya, pedí un asesor y te derivo.",
+  ].join("\n");
+}
+
 export const HOJAS_RUTA_ARTICLES: HojasRutaKnowledgeArticle[] = [
   {
     id: "hr-concepto-mapa",

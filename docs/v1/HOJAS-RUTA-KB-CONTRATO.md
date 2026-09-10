@@ -20,7 +20,7 @@
 | `WARA_PLATFORM_KB_LLM_INTERPRET` | opt-in (ya true en prod) | Intérprete de guías. |
 | `WARA_HOJAS_RUTA_KB_ENABLED` | **false** | Habilita kind, catálogo y ruteo. Apagado = comportamiento idéntico al actual. |
 
-Con flag off: intérprete **no** ofrece catálogo ni `guideKind=hojas_de_ruta`; endpoint **ignora** `guide=hojas_de_ruta`; grounded con kind forzado → menú genérico (`fallback=hojas_ruta_flag_off`); tool/agente **no** mencionan Hojas de ruta.
+Con flag off: intérprete **no** ofrece catálogo ni `guideKind=hojas_de_ruta`; endpoint **ignora** `guide=hojas_de_ruta`; grounded con kind forzado o consulta “hoja de ruta” → límite de canal honesto (`fallback=hojas_ruta_flag_off`, sin caer en Mantenimiento/unidades); tool/agente **no** anuncian el corpus.
 
 ## Fronteras (semánticas — instrucciones LLM, no regex)
 

@@ -43,7 +43,7 @@ function restoreEnv() {
 }
 
 try {
-  // --- Flag OFF: no-op ---
+  // --- Flag OFF: no corpus HR, pero respuesta coherente (no Mantenimiento/unidades) ---
   delete process.env.WARA_HOJAS_RUTA_KB_ENABLED;
   assert.equal(isHojasRutaKbEnabled(), false);
   assert.equal(listHojasRutaArticleCatalog().length, 0);
@@ -58,7 +58,39 @@ try {
   );
   assert.notEqual(forcedOff.guideKind, "hojas_de_ruta");
   assert.equal(forcedOff.fallback, "hojas_ruta_flag_off");
-  assert.doesNotMatch(forcedOff.message, /Utilidades → Hojas de ruta|predefinidas/i);
+  assert.match(forcedOff.message, /no tengo habilitada la guía de \*Hojas de ruta\*/i);
+  assert.match(forcedOff.message, /hoja de turno/i);
+  assert.doesNotMatch(forcedOff.message, /Mantenimiento se enfoca|órdenes de trabajo|planes preventivos/i);
+  assert.doesNotMatch(forcedOff.message, /Agregar hoja de ruta|predefinidas — plantillas/i);
+
+  const knowledgeAsk = await buildGroundedInfoGuideReplyWithMeta(
+    "y sobre hoja de ruta tenes conocimientos?",
+    "mantenimiento",
+  );
+  assert.equal(knowledgeAsk.fallback, "hojas_ruta_flag_off");
+  assert.match(knowledgeAsk.message, /no tengo habilitada/i);
+  assert.doesNotMatch(knowledgeAsk.message, /módulo de Mantenimiento|órdenes de trabajo/i);
+
+  const { applyPlatformGuideInterpretGuards } = await import(
+    "../src/lib/infoGuideInterpretAI.ts"
+  );
+  const mtSteal = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "mantenimiento",
+      need: "definition",
+      articleIds: ["mt-concepto-y-mapa"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "test_mt_steal",
+    },
+    "¿Cómo creo una hoja de ruta?",
+    "",
+  );
+  assert.equal(mtSteal.guideKind, null);
+  assert.match(mtSteal.reason ?? "", /hojas_ruta_flag_off_guard/);
+  assert.ok(mtSteal.clarifyQuestion);
 
   const staticOff = buildInfoGuideReply("x", "hojas_de_ruta");
   assert.doesNotMatch(staticOff, /módulo Hojas de ruta|Te puedo orientar con el módulo Hojas de ruta/i);
@@ -132,9 +164,6 @@ try {
     /En la hoja real el relevamiento lo describe en el flujo de puntos con la misma lógica condicional/,
   );
 
-  const { applyPlatformGuideInterpretGuards } = await import(
-    "../src/lib/infoGuideInterpretAI.ts"
-  );
   const baseWrong = {
     route: "info_guides",
     guideKind: "hojas_de_ruta",

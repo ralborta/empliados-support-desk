@@ -27,6 +27,10 @@ import {
   looksLikeUnitConsultFollowUp,
   threadHasRecentUnitCaseOpened,
 } from "@/lib/waraApi";
+import {
+  looksLikeHojasRutaQueryWhenDisabled,
+  buildHojasRutaDisabledChannelReply,
+} from "@/lib/hojasRutaKnowledge";
 import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 import { buildInfoGuideReply } from "@/lib/infoGuideReplies";
 import {
@@ -445,6 +449,16 @@ export async function runAtilioAgentTurn(
 ): Promise<AtilioAgentTurnResult | null> {
   if (!isAtilioAgentEnabled()) return null;
   if (!process.env.OPENAI_API_KEY?.trim()) return null;
+
+  // Flag off: no improvisar otro módulo (p. ej. Mantenimiento) ante “hoja de ruta”.
+  if (looksLikeHojasRutaQueryWhenDisabled(input.selectionText)) {
+    return {
+      message: buildHojasRutaDisabledChannelReply(),
+      executor: "info_guides",
+      ok: true,
+      usedAgent: true,
+    };
+  }
 
   const session = await loadAgentSessionContext(input.rawPhone);
   const threadText =
