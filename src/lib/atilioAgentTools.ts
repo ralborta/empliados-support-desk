@@ -114,7 +114,7 @@ const GUIA_PUNTOS_INTERES_SUFFIX =
   " Con Puntos de interés (Utilidades→POI/geocercas, grupos, eventos, Depósito): SIEMPRE esta tool — si el corpus está off, límite honesto. Paradas TP son independientes; etapas de servicio usan POI previos (no inventes que etapas ≠ PI).";
 
 const GUIA_ARTICULOS_UNSUPPORTED_SUFFIX =
-  " Con módulo Artículos (stock/remitos/inventario): SIEMPRE esta tool — devolverá límite honesto. NUNCA improvises Mantenimiento/Combustible/Cisternas ni digas pasos inventados.";
+  " Con módulo Artículos (stock/remitos/inventario): SIEMPRE esta tool — devolverá límite honesto. NUNCA improvises otro módulo ni digas pasos inventados.";
 
 const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   type: "function",
