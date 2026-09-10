@@ -29,6 +29,10 @@ import {
   buildArticulosModuleUnsupportedReply,
   looksLikeArticulosModuleUnsupportedQuery,
 } from "@/lib/articulosModuleUnsupported";
+import {
+  isPuntosInteresKbEnabled,
+  buildPuntosInteresDisabledChannelReply,
+} from "@/lib/puntosInteresKnowledge";
 
 export type InfoGuideKind =
   | "opciones"
@@ -37,7 +41,8 @@ export type InfoGuideKind =
   | "transporte_publico"
   | "cisternas"
   | "combustible"
-  | "hojas_de_ruta";
+  | "hojas_de_ruta"
+  | "puntos_de_interes";
 
 export type InfoGuideFallback =
   | null
@@ -48,6 +53,7 @@ export type InfoGuideFallback =
   | "cisternas_flag_off"
   | "combustible_flag_off"
   | "hojas_ruta_flag_off"
+  | "puntos_interes_flag_off"
   | "articulos_module_unsupported";
 
 function sanitizeOptInGuideKind(
@@ -56,7 +62,7 @@ function sanitizeOptInGuideKind(
   if (!kind) return null;
   if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
   if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
-  // hojas_de_ruta: reconocer aunque corpus off (respuesta disabled estructurada).
+  // hojas_de_ruta / puntos_de_interes: reconocer aunque corpus off.
   return kind;
 }
 
@@ -120,6 +126,15 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     pick === "modulo hoja de ruta"
   ) {
     return "hojas_de_ruta";
+  }
+  if (
+    pick === "puntos de interes" ||
+    pick === "punto de interes" ||
+    pick === "modulo puntos de interes" ||
+    pick === "modulo de puntos de interes" ||
+    pick === "modulo punto de interes"
+  ) {
+    return "puntos_de_interes";
   }
   const modulePick = parseInfoGuideModulePick(text);
   if (modulePick) return modulePick;
@@ -409,6 +424,12 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué punto puntual: alta, predefinida, puntos, calendario, cargas/descargas o un error de pantalla.",
     ].join("\n");
   }
+  if (detected === "puntos_de_interes") {
+    return [
+      "Ya te pasé esa parte de Puntos de interés.",
+      "Decime qué punto puntual: alta, grupos, forma, eventos, import/export o el depósito.",
+    ].join("\n");
+  }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
 }
 
@@ -423,6 +444,9 @@ export function buildInfoGuideReply(
   if (detected === "combustible" && !isCombustibleKbEnabled()) detected = null;
   if (detected === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
     return buildHojasRutaDisabledChannelReply();
+  }
+  if (detected === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return buildPuntosInteresDisabledChannelReply();
   }
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
@@ -459,6 +483,12 @@ export function buildInfoGuideReply(
       "Te puedo orientar con Hojas de ruta: listado, alta, predefinidas, puntos/traza, calendario o cargas/descargas de viaje.",
       "Decime en una frase qué necesitás y te detallo ese punto.",
       "No confundas hoja de ruta con hoja de turno (Transporte de Pasajeros).",
+    ].join("\n");
+  else if (detected === "puntos_de_interes")
+    message = [
+      "Te puedo orientar con Puntos de interés: grupos, alta/edición de geocercas/POI, eventos, import/export o el vínculo Depósito↔Artículos.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "Si es una etapa dentro de un servicio de Transporte, o una parada de pasajeros, decime y te oriento con eso.",
     ].join("\n");
   else
     message = [
@@ -562,6 +592,64 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
   };
 
+  const disabledPiReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message = buildPuntosInteresDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "puntos_de_interes",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("puntos_interes_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|puntos_interes_module_disabled`
+          : "puntos_interes_module_disabled",
+    };
+    return {
+      message,
+      guideKind: "puntos_de_interes",
+      interpret: disabledInterpret,
+      fallback: "puntos_interes_flag_off",
+    };
+  };
+
+  if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "cisternas_flag_off",
+    };
+    articleIds = [];
+    fallback = "cisternas_flag_off";
+  }
+  if (activeInterpret?.guideKind === "combustible" && !isCombustibleKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "combustible_flag_off",
+    };
+    articleIds = [];
+    fallback = "combustible_flag_off";
+  }
+  if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    return disabledHrReply();
+  }
+  if (activeInterpret?.guideKind === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return disabledPiReply();
+  }
+
   const articulosUnsupportedReply = (): {
     message: string;
     guideKind: null;
@@ -595,32 +683,6 @@ export async function buildGroundedInfoGuideReplyWithMeta(
 
   if (looksLikeArticulosModuleUnsupportedQuery(rawText)) {
     return articulosUnsupportedReply();
-  }
-
-  if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
-    activeInterpret = {
-      ...activeInterpret,
-      guideKind: null,
-      articleIds: [],
-      route: "continue_normal",
-      reason: activeInterpret.reason || "cisternas_flag_off",
-    };
-    articleIds = [];
-    fallback = "cisternas_flag_off";
-  }
-  if (activeInterpret?.guideKind === "combustible" && !isCombustibleKbEnabled()) {
-    activeInterpret = {
-      ...activeInterpret,
-      guideKind: null,
-      articleIds: [],
-      route: "continue_normal",
-      reason: activeInterpret.reason || "combustible_flag_off",
-    };
-    articleIds = [];
-    fallback = "combustible_flag_off";
-  }
-  if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
-    return disabledHrReply();
   }
 
   if (!activeInterpret) {
@@ -694,6 +756,9 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
     return disabledHrReply();
   }
+  if (activeInterpret?.guideKind === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return disabledPiReply();
+  }
 
   if (!detected) {
     detected = sanitizeOptInGuideKind(
@@ -727,6 +792,9 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   if (kind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
     return disabledHrReply();
   }
+  if (kind === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return disabledPiReply();
+  }
 
   if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
     return {
@@ -747,6 +815,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       activeInterpret.guideKind === "combustible" ||
       detected === "hojas_de_ruta" ||
       activeInterpret.guideKind === "hojas_de_ruta" ||
+      detected === "puntos_de_interes" ||
+      activeInterpret.guideKind === "puntos_de_interes" ||
       detected === "mantenimiento" ||
       activeInterpret.guideKind === "mantenimiento")
   ) {
@@ -835,6 +905,31 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: "clarify_or_limit",
       };
     }
+    if (detected === "puntos_de_interes" || activeInterpret.guideKind === "puntos_de_interes") {
+      if (!isPuntosInteresKbEnabled()) {
+        return disabledPiReply();
+      }
+      detected = "puntos_de_interes";
+      const execIds = articleIds.length ? articleIds : ["pi-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("puntos_de_interes", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "puntos_de_interes",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "puntos_de_interes",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     if (detected === "mantenimiento" || activeInterpret.guideKind === "mantenimiento") {
       detected = "mantenimiento";
       const execIds = articleIds.length ? articleIds : ["mt-ejecucion-no-disponible"];
@@ -885,7 +980,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     detected === "transporte_publico" ||
     (detected === "cisternas" && isCisternasKbEnabled()) ||
     (detected === "combustible" && isCombustibleKbEnabled()) ||
-    (detected === "hojas_de_ruta" && isHojasRutaKbEnabled())
+    (detected === "hojas_de_ruta" && isHojasRutaKbEnabled()) ||
+    (detected === "puntos_de_interes" && isPuntosInteresKbEnabled())
   ) {
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
       articleIds:
@@ -893,6 +989,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "cisternas" ||
         detected === "combustible" ||
         detected === "hojas_de_ruta" ||
+        detected === "puntos_de_interes" ||
         detected === "mantenimiento"
           ? articleIds
           : undefined,
@@ -922,6 +1019,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "cisternas" ||
         detected === "combustible" ||
         detected === "hojas_de_ruta" ||
+        detected === "puntos_de_interes" ||
         detected === "mantenimiento") &&
       !grounded
     ) {

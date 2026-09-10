@@ -113,6 +113,12 @@ function inferIdleTopicKindFromThread(threadText: string): IdleTopicKind | null 
     return "hojas_de_ruta";
   }
   if (
+    /\bpuntos?\s+de\s+interes\b/.test(recent) ||
+    /utilidades\s*[→>\-]\s*puntos de interes/.test(recent)
+  ) {
+    return "puntos_de_interes";
+  }
+  if (
     /\bcisternas?\b/.test(recent) ||
     (/\btanque\b/.test(recent) && /\b(deposito|dep[oó]sito|base)\b/.test(recent))
   ) {
@@ -177,6 +183,8 @@ function idleTopicLabel(kind: IdleTopicKind): string {
       return "Transporte de pasajeros";
     case "hojas_de_ruta":
       return "Hojas de ruta";
+    case "puntos_de_interes":
+      return "Puntos de interés";
     case "cisternas":
       return "Cisternas";
     case "combustible":
@@ -204,6 +212,8 @@ function idleTopicHint(kind: IdleTopicKind): string {
       return "Seguimos con Transporte de pasajeros. Decime qué punto querés: conceptos, hoja de turno, paradas, servicios o el error que ves.";
     case "hojas_de_ruta":
       return "Seguimos con Hojas de ruta. Decime qué punto querés: alta, predefinidas, puntos, calendario o cargas/descargas.";
+    case "puntos_de_interes":
+      return "Seguimos con Puntos de interés. Decime si necesitás alta, grupos, eventos, forma o import/export.";
     case "cisternas":
       return "Seguimos con Cisternas. Decime si necesitás alta, carga, medición o informes.";
     case "combustible":
@@ -246,6 +256,7 @@ export function idleGuideConflictsWithPending(
   const guideLike =
     topic === "transporte_publico" ||
     topic === "hojas_de_ruta" ||
+    topic === "puntos_de_interes" ||
     topic === "cisternas" ||
     topic === "combustible" ||
     topic === "opciones" ||

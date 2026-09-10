@@ -6,6 +6,7 @@ import { buildTransporteKnowledgeContext } from "@/lib/transportePublicoKnowledg
 import { buildCisternasKnowledgeContext } from "@/lib/cisternasKnowledge";
 import { buildCombustibleKnowledgeContext } from "@/lib/combustibleKnowledge";
 import { buildHojasRutaKnowledgeContext } from "@/lib/hojasRutaKnowledge";
+import { buildPuntosInteresKnowledgeContext } from "@/lib/puntosInteresKnowledge";
 import { buildMantenimientoKnowledgeContext } from "@/lib/mantenimientoKnowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
@@ -21,7 +22,8 @@ export type KnowledgeGuideKind =
   | "transporte_publico"
   | "cisternas"
   | "combustible"
-  | "hojas_de_ruta";
+  | "hojas_de_ruta"
+  | "puntos_de_interes";
 
 const KNOWLEDGE_BY_KIND: Record<"opciones" | "unidades", string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
@@ -107,6 +109,17 @@ REGLAS DURAS Hojas de ruta:
 - Nunca digas que creaste/pegaste/enviaste planificación en la cuenta.
 - Continuá el hilo sin repetir todo el manual.`.trim();
 
+const PUNTOS_INTERES_HARD_CONSTRAINTS = `
+REGLAS DURAS Puntos de interés:
+- Usá SOLO los artículos pi-* provistos. No inventes pantallas ni botones.
+- Utilidades → Puntos de interés = geocercas/POI. El manual de TP usa esos POI como etapas/checkpoints de servicios; Paradas de pasajeros son entidad independiente.
+- No afirmes “etapas ≠ Puntos de interés” como módulos distintos.
+- Tipo Depósito ↔ origen de stock en Artículos: vínculo confirmado; NO afirmes causalidad de activación automática (restriction pendiente).
+- Respetá restrictions (§11): parseo KMZ, columnas Excel, botón Depósito, etc.
+- Forma según need; execute = límite de canal (pi-ejecucion-no-disponible).
+- Nunca digas que creaste/editaste/importaste puntos en la cuenta.
+- Continuá el hilo sin repetir todo el manual.`.trim();
+
 function needStyleHint(need?: InfoGuideNeed | null): string {
   if (!need) return "";
   const map: Record<InfoGuideNeed, string> = {
@@ -167,6 +180,10 @@ export async function answerFromKnowledgeBase(
     const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
     if (!isHojasRutaKbEnabled()) return null;
   }
+  if (kind === "puntos_de_interes") {
+    const { isPuntosInteresKbEnabled } = await import("@/lib/puntosInteresKnowledge");
+    if (!isPuntosInteresKbEnabled()) return null;
+  }
 
   const knowledge =
     kind === "transporte_publico"
@@ -177,9 +194,11 @@ export async function answerFromKnowledgeBase(
           ? buildCombustibleKnowledgeContext(opts?.articleIds ?? [])
           : kind === "hojas_de_ruta"
             ? buildHojasRutaKnowledgeContext(opts?.articleIds ?? [])
-            : kind === "mantenimiento"
-              ? buildMantenimientoKnowledgeContext(opts?.articleIds ?? [])
-              : KNOWLEDGE_BY_KIND[kind];
+            : kind === "puntos_de_interes"
+              ? buildPuntosInteresKnowledgeContext(opts?.articleIds ?? [])
+              : kind === "mantenimiento"
+                ? buildMantenimientoKnowledgeContext(opts?.articleIds ?? [])
+                : KNOWLEDGE_BY_KIND[kind];
   if (!knowledge?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -196,7 +215,9 @@ export async function answerFromKnowledgeBase(
             ? `\n\n${COMBUSTIBLE_HARD_CONSTRAINTS}`
             : kind === "hojas_de_ruta"
               ? `\n\n${HOJAS_RUTA_HARD_CONSTRAINTS}`
-              : "";
+              : kind === "puntos_de_interes"
+                ? `\n\n${PUNTOS_INTERES_HARD_CONSTRAINTS}`
+                : "";
   const needHint = needStyleHint(opts?.need);
 
   const system = `${instructions}${hardConstraints}

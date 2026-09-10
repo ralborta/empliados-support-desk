@@ -5,7 +5,8 @@
  *
  * Cisternas: solo si WARA_CISTERNAS_KB_ENABLED=true.
  * Combustible: solo si WARA_COMBUSTIBLE_KB_ENABLED=true.
- * Hojas de ruta: solo si WARA_HOJAS_RUTA_KB_ENABLED=true.
+ * Hojas de ruta: reconocimiento siempre; entrega si WARA_HOJAS_RUTA_KB_ENABLED=true.
+ * Puntos de interés: reconocimiento siempre; entrega si WARA_PUNTOS_INTERES_KB_ENABLED=true.
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -30,6 +31,13 @@ import {
   buildArticulosModuleUnsupportedReply,
   looksLikeArticulosModuleUnsupportedQuery,
 } from "@/lib/articulosModuleUnsupported";
+import {
+  PUNTOS_INTERES_ARTICLES,
+  isPuntosInteresKbEnabled,
+  listPuntosInteresArticleCatalog,
+  buildPuntosInteresDisabledChannelReply,
+  looksLikePuntosInteresGuideFollowupQuestion,
+} from "@/lib/puntosInteresKnowledge";
 import {
   MANTENIMIENTO_ARTICLES,
   listMantenimientoArticleCatalog,
@@ -60,7 +68,8 @@ export type PlatformGuideKind =
   | "transporte_publico"
   | "cisternas"
   | "combustible"
-  | "hojas_de_ruta";
+  | "hojas_de_ruta"
+  | "puntos_de_interes";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -83,8 +92,9 @@ function cacheKey(
   cisternasOn: boolean,
   combustibleOn: boolean,
   hojasRutaOn: boolean,
+  puntosInteresOn: boolean,
 ): string {
-  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}::${selectionText.trim()}::${threadText.slice(-400)}`;
+  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}::${selectionText.trim()}::${threadText.slice(-400)}`;
 }
 
 export function isPlatformKbLlmInterpretEnabled(): boolean {
@@ -100,8 +110,9 @@ function allowedGuideKinds(): readonly string[] {
   const kinds: string[] = [...GUIDE_KINDS_BASE];
   if (isCisternasKbEnabled()) kinds.push("cisternas");
   if (isCombustibleKbEnabled()) kinds.push("combustible");
-  // Reconocimiento siempre; la entrega de hr-* se gatea aparte.
+  // Reconocimiento siempre; la entrega de hr-*/pi-* se gatea aparte.
   kinds.push("hojas_de_ruta");
+  kinds.push("puntos_de_interes");
   return kinds;
 }
 
@@ -111,7 +122,8 @@ function isArticleBackedGuide(kind: PlatformGuideKind | null): boolean {
     kind === "cisternas" ||
     kind === "combustible" ||
     kind === "mantenimiento" ||
-    kind === "hojas_de_ruta"
+    kind === "hojas_de_ruta" ||
+    kind === "puntos_de_interes"
   );
 }
 
@@ -119,6 +131,7 @@ function buildSystemPrompt(): string {
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
   const hojasRutaCorpusOn = isHojasRutaKbEnabled();
+  const puntosInteresCorpusOn = isPuntosInteresKbEnabled();
   const kindParts = [
     '"opciones"',
     '"unidades"',
@@ -128,6 +141,7 @@ function buildSystemPrompt(): string {
   if (cisternasOn) kindParts.push('"cisternas"');
   if (combustibleOn) kindParts.push('"combustible"');
   kindParts.push('"hojas_de_ruta"');
+  kindParts.push('"puntos_de_interes"');
   kindParts.push("null");
   const kindEnum = kindParts.join(" | ");
 
@@ -139,6 +153,7 @@ function buildSystemPrompt(): string {
     cisternasOn ? "Cisternas" : null,
     combustibleOn ? "Combustible" : null,
     "Hojas de ruta",
+    "Puntos de interés",
   ]
     .filter(Boolean)
     .join(", ");
@@ -196,6 +211,32 @@ CONTINUIDAD: si el historial ya habla de Hojas de ruta / Utilidades→Hojas de r
 ${hojasRutaDeliveryBlock}
 `;
 
+  const puntosInteresDeliveryBlock = puntosInteresCorpusOn
+    ? `
+articleIds: solo catálogo_puntos_interes (prefijo pi-, 0–3). executionRequest: puede incluir "pi-ejecucion-no-disponible".
+Pendientes §11 (parseo KMZ, columnas Excel, AE INICIO vs PI, activación botón Depósito, etc.): NO inventes; usá artículos con restrictions.
+`
+    : `
+ENTREGA DE CORPUS DESHABILITADA (flag off):
+- AUN ASÍ usá guideKind=puntos_de_interes cuando el pedido sea de gestión del módulo Utilidades→Puntos de interés (reconocimiento semántico obligatorio).
+- articleIds: [] (no cites cuerpos pi-*).
+- need=ambiguous + clarifyQuestion: la guía de Puntos de interés aún no está habilitada; si aplica, ofrecé paradas TP, etapas de un servicio (TP) o punto de hoja de ruta, o asesor.
+- NUNCA guideKind mantenimiento / unidades para “módulo de puntos de interés”.
+`;
+
+  const puntosInteresBlock = `
+guideKind puntos_de_interes: Utilidades→Puntos de interés (grupos, alta/edición de geocercas/POI, círculo/polígono, eventos, tipos Depósito/Empresa/Planta, import/export, visibilidad mapa).
+FRONTERAS POR INTENCIÓN (no inventes “etapas ≠ PI”):
+- Paradas de pasajeros → transporte_publico (entidad independiente; relevamiento PI §9.4).
+- Etapas/checkpoints DENTRO de un servicio / tiempos acumulativos / armar recorrido → transporte_publico. El manual TP dice que esos checkpoints son POI creados en Utilidades→Puntos de interés y se reutilizan en servicios.
+- Asignar/agregar/cargar un POI / punto de interés / checkpoint a una línea, servicio o recorrido → transporte_publico (misma frontera).
+- Gestión del módulo PI (grupos, formas, eventos, depósito, import/export, “módulo de puntos de interés”, “agregar punto al grupo…”) → puntos_de_interes.
+- Puntos/traza de una hoja de ruta de viaje → hojas_de_ruta (NO puntos_de_interes).
+- Tipo Depósito ↔ origen de stock en Artículos: vínculo confirmado; NO afirmes que elegir el tipo habilita solo el botón (pendiente).
+CONTINUIDAD: historial de Puntos de interés + seguimiento de ese módulo → guideKind=puntos_de_interes.
+${puntosInteresDeliveryBlock}
+`;
+
   return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
 Devolvé SOLO JSON válido:
 {
@@ -220,8 +261,9 @@ need:
 - execute: pedí que LO HAGAS vos (crear/guardar/operar) — executionRequest=true
 - ambiguous: ayuda vaga sin foco — una sola clarifyQuestion breve
 
-guideKind transporte_publico: hoja de turno, turnos de línea, servicios/recorridos de pasajeros, POI/etapas de recorrido, paradas, traza KMZ, excepciones de transporte, regularidad, colores del panel de viajes.
+guideKind transporte_publico: hoja de turno, turnos de línea, servicios/recorridos de pasajeros, etapas/checkpoints de un servicio (POI previos de Utilidades→Puntos de interés), paradas, traza KMZ, excepciones de transporte, regularidad, colores del panel de viajes.
 “Hoja de turno” NUNCA es hojas_de_ruta (aunque diga “hoja” o “crear”).
+Gestión del módulo Utilidades→Puntos de interés (grupos, eventos, formas, depósito, import/export) → guideKind=puntos_de_interes; no lo trates solo como “transporte”.
 Si guideKind es opciones|unidades: articleIds DEBE ser [].
 guideKind mantenimiento: planes preventivos/correctivos (catálogo Utilidades), asignar plan desde Unidades→TAREAS, Paneles→Tareas/Órdenes de trabajo/Toma y deje, informes de mantenimiento. Utilidades = SOLO configuración; la operación NO es solo Utilidades.
 Términos de Mantenimiento (NO son Transporte Público): “contar a partir de la realización”, “confirmar la realización”, “próximo vencimiento”, “administrar tarea”, “orden de trabajo” (OT), “toma y deje”, estados iniciada/finalizada de OT.
@@ -233,7 +275,7 @@ executionRequest en mantenimiento: articleIds puede incluir "mt-ejecucion-no-dis
 Continuá el hilo de mantenimiento: “¿y después dónde la sigo?”, preguntas de OT/estados/paneles tras una guía de mantenimiento → guideKind=mantenimiento (no unidades).
 NO confundir "etapas" de transporte con consulta GPS de una unidad.
 NO confundir pedido de ejecución con capacidad real: executionRequest=true; articleIds puede incluir "tp-ejecucion-no-disponible".
-${cisternasBlock}${combustibleBlock}${hojasRutaBlock}
+${cisternasBlock}${combustibleBlock}${hojasRutaBlock}${puntosInteresBlock}
 articleIds transporte: solo IDs del catálogo_transporte (0–3). Vacío si guideKind no es transporte_publico.
 Nunca inventes IDs. Si status needs_validation, podés usarlo con cautela; no uses artículos future.
 Respetá restrictions de cada artículo: no afirmes lo no confirmado.
@@ -315,17 +357,23 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     const csIds = new Set(listCisternasArticleCatalog().map((a) => a.id));
     const cbIds = new Set(listCombustibleArticleCatalog().map((a) => a.id));
     const hrIds = new Set(listHojasRutaArticleCatalog().map((a) => a.id));
+    const piIds = new Set(listPuntosInteresArticleCatalog().map((a) => a.id));
     const mtIds = new Set(listMantenimientoArticleCatalog().map((a) => a.id));
     const tpArticles = articleIds.filter((id) => tpIds.has(id));
     const csArticles = articleIds.filter((id) => csIds.has(id));
     const cbArticles = articleIds.filter((id) => cbIds.has(id));
     const hrArticles = articleIds.filter((id) => hrIds.has(id));
+    const piArticles = articleIds.filter((id) => piIds.has(id));
     const mtArticles = articleIds.filter((id) => mtIds.has(id));
     const hojasCorpusOn = isHojasRutaKbEnabled();
+    const puntosCorpusOn = isPuntosInteresKbEnabled();
 
     if (guideKind === "hojas_de_ruta") {
       // Reconocimiento siempre; cuerpos solo si corpus on.
       articleIds = hojasCorpusOn ? hrArticles : [];
+      route = promoteArticleGuide(need, route);
+    } else if (guideKind === "puntos_de_interes") {
+      articleIds = puntosCorpusOn ? piArticles : [];
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "combustible" && isCombustibleKbEnabled() && cbArticles.length) {
       articleIds = cbArticles;
@@ -342,6 +390,10 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     } else if (hrArticles.length) {
       articleIds = hojasCorpusOn ? hrArticles : [];
       guideKind = "hojas_de_ruta";
+      route = promoteArticleGuide(need, route);
+    } else if (piArticles.length) {
+      articleIds = puntosCorpusOn ? piArticles : [];
+      guideKind = "puntos_de_interes";
       route = promoteArticleGuide(need, route);
     } else if (cbArticles.length && isCombustibleKbEnabled()) {
       articleIds = cbArticles;
@@ -491,8 +543,9 @@ function allCatalogLabels(): CatalogLabelHit[] {
   const out: CatalogLabelHit[] = [];
   out.push(...extractCatalogLabels("transporte_publico", TRANSPORTE_PUBLICO_ARTICLES));
   out.push(...extractCatalogLabels("mantenimiento", MANTENIMIENTO_ARTICLES));
-  // Labels HR siempre: ayudan al reconocimiento; la entrega de cuerpos sigue gated.
+  // Labels HR/PI siempre: ayudan al reconocimiento; la entrega de cuerpos sigue gated.
   out.push(...extractCatalogLabels("hojas_de_ruta", HOJAS_RUTA_ARTICLES));
+  out.push(...extractCatalogLabels("puntos_de_interes", PUNTOS_INTERES_ARTICLES));
   if (isCombustibleKbEnabled()) {
     out.push(...extractCatalogLabels("combustible", COMBUSTIBLE_ARTICLES));
   }
@@ -689,6 +742,7 @@ function correctGuideExecuteImperativeMisroute(
   const kind = interpret.guideKind;
   if (
     kind !== "hojas_de_ruta" &&
+    kind !== "puntos_de_interes" &&
     kind !== "transporte_publico" &&
     kind !== "combustible" &&
     kind !== "cisternas" &&
@@ -700,13 +754,15 @@ function correctGuideExecuteImperativeMisroute(
   const execId =
     kind === "hojas_de_ruta"
       ? "hr-ejecucion-no-disponible"
-      : kind === "combustible"
-        ? "cb-ejecucion-no-disponible"
-        : kind === "cisternas"
-          ? "cs-ejecucion-no-disponible"
-          : kind === "mantenimiento"
-            ? "mt-ejecucion-no-disponible"
-            : "tp-ejecucion-no-disponible";
+      : kind === "puntos_de_interes"
+        ? "pi-ejecucion-no-disponible"
+        : kind === "combustible"
+          ? "cb-ejecucion-no-disponible"
+          : kind === "cisternas"
+            ? "cs-ejecucion-no-disponible"
+            : kind === "mantenimiento"
+              ? "mt-ejecucion-no-disponible"
+              : "tp-ejecucion-no-disponible";
   return {
     ...interpret,
     route: "info_guides",
@@ -895,6 +951,228 @@ function normalizeHojasRutaDisabledDelivery(
 }
 
 /**
+ * Pedido que nombra el módulo / tema del catálogo PI sin pasar por LLM.
+ * Conserva TP cuando la intención es asignar/usar POI en línea/servicio/recorrido.
+ */
+function looksLikeTpServicePoiIntent(norm: string): boolean {
+  const hasService =
+    /\b(servicios?|recorridos?|lineas?|l[ií]neas?)\b/.test(norm);
+  if (!hasService) return false;
+  // Gestión pura del módulo PI (grupos/eventos) no es TP aunque diga “punto”.
+  if (/\bgrupo\b/.test(norm) && !/\b(servicio|recorrido|linea|l[ií]nea)\b/.test(norm)) {
+    return false;
+  }
+  const hasPoiSyn =
+    /\bpuntos?\s+de\s+interes\b/.test(norm) ||
+    /\bpois?\b/.test(norm) ||
+    /\bcheckpoints?\b/.test(norm) ||
+    /\betapas?\b/.test(norm) ||
+    (/\bpuntos?\b/.test(norm) &&
+      /\b(asign|agreg|añad|anad|carg|vincul|uso|usar|utiliz)\w*/.test(norm));
+  if (!hasPoiSyn) return false;
+  if (/\b(asign|agreg|añad|anad|carg|pon|sum|vincul|uso|usar|utiliz)\w*/.test(norm)) {
+    return true;
+  }
+  // “checkpoints del recorrido” / “punto en el servicio”
+  if (
+    /\b(del|de la|en (el|la|un|una)|al|a (el|la|un|una)|para (el|la|un|una))\s+(servicio|recorrido|linea|l[ií]nea)/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
+  return /\b(checkpoints?|etapas?)\b/.test(norm);
+}
+
+function looksLikePiModuleManagementCue(norm: string): boolean {
+  if (/\bmodulo\s+(de\s+)?puntos?\s+de\s+interes\b/.test(norm)) return true;
+  if (/\bgrupo\b/.test(norm) && /\b(punto|poi|interes)\b/.test(norm)) return true;
+  if (
+    /\b(geocerca|depositos?|import|export|ver lista|ver tabla|editar grupos)\b/.test(norm) &&
+    !/\b(servicio|recorrido|linea|l[ií]nea)\b/.test(norm)
+  ) {
+    return true;
+  }
+  // “agregar punto” sin contexto de servicio/línea → alta en módulo PI
+  if (
+    /\bagregar\s+punto\b/.test(norm) &&
+    !/\b(servicio|recorrido|linea|l[ií]nea)\b/.test(norm)
+  ) {
+    return true;
+  }
+  if (
+    /\bpuntos?\s+de\s+interes\b/.test(norm) &&
+    !looksLikeTpServicePoiIntent(norm)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function correctPuntosInteresCatalogTopicMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+): PlatformKnowledgeInterpret {
+  const norm = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!norm || norm.length > 240) return interpret;
+  if (/\bhojas?\s+de\s+turno\b/.test(norm)) return interpret;
+  if (/\bparadas?\b/.test(norm) && /\b(transporte|pasajer|linea|l[ií]nea)\b/.test(norm)) {
+    return interpret;
+  }
+  if (/\bhojas?\s+de\s+ruta\b/.test(norm) && !/\bpuntos?\s+de\s+interes\b/.test(norm)) {
+    return interpret;
+  }
+
+  // Intención TP: asignar/agregar POI/punto/checkpoint a línea/servicio/recorrido.
+  if (looksLikeTpServicePoiIntent(norm)) {
+    if (
+      interpret.guideKind === "transporte_publico" &&
+      interpret.route === "info_guides" &&
+      interpret.articleIds.some((id) => id.startsWith("tp-"))
+    ) {
+      return interpret;
+    }
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: "transporte_publico",
+      need: interpret.need === "execute" ? "execute" : "procedure",
+      articleIds: ["tp-poi-crear", "tp-servicio-etapas-tiempos"].slice(0, 3),
+      clarifyQuestion: null,
+      executionRequest: interpret.need === "execute",
+      confidence: Math.max(interpret.confidence, 0.9),
+      reason: interpret.reason
+        ? `${interpret.reason}|tp_service_poi_intent_guard`
+        : "tp_service_poi_intent_guard",
+    };
+  }
+
+  // Ya TP sin intención de módulo PI → no pisar.
+  if (interpret.guideKind === "transporte_publico" && interpret.route === "info_guides") {
+    if (!looksLikePiModuleManagementCue(norm)) return interpret;
+  }
+
+  let bestId: string | null = null;
+  let bestLen = 0;
+  for (const a of PUNTOS_INTERES_ARTICLES) {
+    if (a.id.endsWith("-ejecucion-no-disponible")) continue;
+    const title = a.title
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    if (title.length < 8) continue;
+    if (norm.includes(title) && title.length > bestLen) {
+      bestId = a.id;
+      bestLen = title.length;
+    }
+  }
+  if (!looksLikePiModuleManagementCue(norm) && !bestId) return interpret;
+  const pickId = bestId ?? "pi-concepto-mapa";
+  if (
+    interpret.guideKind === "puntos_de_interes" &&
+    interpret.route === "info_guides" &&
+    (isPuntosInteresKbEnabled() ? interpret.articleIds.includes(pickId) : true)
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "puntos_de_interes",
+    need: interpret.need === "execute" ? "execute" : "procedure",
+    articleIds: isPuntosInteresKbEnabled() ? [pickId] : [],
+    clarifyQuestion: null,
+    executionRequest: interpret.need === "execute",
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|pi_catalog_topic_guard`
+      : "pi_catalog_topic_guard",
+  };
+}
+
+/**
+ * Flag off: reconoce guideKind=puntos_de_interes pero no entrega corpus pi-*.
+ */
+function normalizePuntosInteresDisabledDelivery(
+  interpret: PlatformKnowledgeInterpret,
+): PlatformKnowledgeInterpret {
+  if (interpret.guideKind !== "puntos_de_interes") return interpret;
+  if (isPuntosInteresKbEnabled()) return interpret;
+  const disabledReply = buildPuntosInteresDisabledChannelReply();
+  if (
+    interpret.reason?.includes("puntos_interes_module_disabled") &&
+    interpret.route === "info_guides" &&
+    interpret.articleIds.length === 0 &&
+    interpret.clarifyQuestion === disabledReply
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "puntos_de_interes",
+    need: "ambiguous",
+    articleIds: [],
+    clarifyQuestion: disabledReply,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.95),
+    reason: interpret.reason
+      ? `${interpret.reason}|puntos_interes_module_disabled`
+      : "puntos_interes_module_disabled",
+  };
+}
+
+function correctPuntosInteresContinuityMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+  threadText: string,
+): PlatformKnowledgeInterpret {
+  if (!looksLikePuntosInteresGuideFollowupQuestion(selectionText, threadText)) {
+    return interpret;
+  }
+  if (looksLikeTpServicePoiIntent(
+    selectionText
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim(),
+  )) {
+    return interpret;
+  }
+  if (
+    interpret.guideKind === "puntos_de_interes" &&
+    interpret.route === "info_guides" &&
+    (isPuntosInteresKbEnabled()
+      ? interpret.articleIds.some((id) => id.startsWith("pi-"))
+      : true)
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "puntos_de_interes",
+    need: interpret.need === "ambiguous" ? "procedure" : interpret.need,
+    articleIds: isPuntosInteresKbEnabled()
+      ? ["pi-flujos-crud", "pi-alta-edicion-campos"]
+      : [],
+    clarifyQuestion: null,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|pi_continuity_guard`
+      : "pi_continuity_guard",
+  };
+}
+
+/**
  * Módulo Artículos sin KB: límite honesto; no caer a MT/combustible/cisternas.
  */
 function normalizeArticulosModuleUnsupported(
@@ -937,10 +1215,13 @@ export function applyPlatformGuideInterpretGuards(
   next = correctMaintenanceMisroute(next, selectionText, threadText);
   next = correctHojaDeNounMisroute(next, selectionText);
   next = correctHojasRutaCatalogTopicMisroute(next, selectionText);
+  next = correctPuntosInteresCatalogTopicMisroute(next, selectionText);
   next = correctCatalogLabelMisroute(next, selectionText);
   next = correctHojasRutaContinuityMisroute(next, selectionText, threadText);
+  next = correctPuntosInteresContinuityMisroute(next, selectionText, threadText);
   next = correctGuideExecuteImperativeMisroute(next, selectionText);
   next = normalizeHojasRutaDisabledDelivery(next);
+  next = normalizePuntosInteresDisabledDelivery(next);
   // Carga ambigua gana sobre HR/combustible/cisternas (y sobre disabled HR).
   next = correctAmbiguousCargaMisroute(next, selectionText, threadText);
   // Artículos sin KB: después de misroutes, para no ser pisado por MT.
@@ -992,7 +1273,15 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
   const hojasRutaCorpusOn = isHojasRutaKbEnabled();
-  const key = cacheKey(text, threadText, cisternasOn, combustibleOn, hojasRutaCorpusOn);
+  const puntosInteresCorpusOn = isPuntosInteresKbEnabled();
+  const key = cacheKey(
+    text,
+    threadText,
+    cisternasOn,
+    combustibleOn,
+    hojasRutaCorpusOn,
+    puntosInteresCorpusOn,
+  );
   const cached = interpretCache.get(key);
   if (cached && cached.value && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
     return applyPlatformGuideInterpretGuards(cached.value, text, threadText);
@@ -1002,6 +1291,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const catalogCs = listCisternasArticleCatalog();
   const catalogCb = listCombustibleArticleCatalog();
   const catalogHr = listHojasRutaArticleCatalog();
+  const catalogPi = listPuntosInteresArticleCatalog();
   const catalogMt = listMantenimientoArticleCatalog();
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const userPayload: Record<string, unknown> = {
@@ -1010,9 +1300,11 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     pending_action_type: opts.pendingActionType ?? null,
     catalogo_transporte: catalogTp,
     catalogo_mantenimiento: catalogMt,
-    // Catálogo HR siempre (reconocimiento); cuerpos gated en grounded.
+    // Catálogo HR/PI siempre (reconocimiento); cuerpos gated en grounded.
     catalogo_hojas_ruta: catalogHr,
     hojas_ruta_corpus_enabled: hojasRutaCorpusOn,
+    catalogo_puntos_interes: catalogPi,
+    puntos_interes_corpus_enabled: puntosInteresCorpusOn,
   };
   if (cisternasOn) {
     userPayload.catalogo_cisternas = catalogCs;
@@ -1137,6 +1429,13 @@ export function buildPlatformGuideClarifyOrLimitMessage(
       return [
         "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
         "Por este chat no puedo crear hojas de ruta, pegar masivo ni enviar planificación en tu cuenta.",
+        "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
+      ].join("\n");
+    }
+    if (interpret.guideKind === "puntos_de_interes") {
+      return [
+        "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
+        "Por este chat no puedo crear, editar ni importar puntos de interés en tu cuenta.",
         "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
       ].join("\n");
     }

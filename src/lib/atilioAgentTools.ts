@@ -110,6 +110,9 @@ const GUIA_COMBUSTIBLE_SUFFIX =
 const GUIA_HOJAS_RUTA_SUFFIX =
   " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje): SIEMPRE esta tool — NUNCA inventes Mantenimiento/Unidades ni digas que no hay info. Si el corpus está deshabilitado, la tool devolverá el límite de canal honesto. No confundas con hoja de turno, tickets de combustible de unidad ni tanques de depósito.";
 
+const GUIA_PUNTOS_INTERES_SUFFIX =
+  " Con Puntos de interés (Utilidades→POI/geocercas, grupos, eventos, Depósito): SIEMPRE esta tool — si el corpus está off, límite honesto. Paradas TP son independientes; etapas de servicio usan POI previos (no inventes que etapas ≠ PI).";
+
 const GUIA_ARTICULOS_UNSUPPORTED_SUFFIX =
   " Con módulo Artículos (stock/remitos/inventario): SIEMPRE esta tool — devolverá límite honesto. NUNCA improvises Mantenimiento/Combustible/Cisternas ni digas pasos inventados.";
 
@@ -136,6 +139,7 @@ export function buildAtilioAgentTools(
     if (combustibleOn) description += GUIA_COMBUSTIBLE_SUFFIX;
     // HR: reconocimiento siempre (corpus gated en la tool/grounded).
     description += GUIA_HOJAS_RUTA_SUFFIX;
+    description += GUIA_PUNTOS_INTERES_SUFFIX;
     description += GUIA_ARTICULOS_UNSUPPORTED_SUFFIX;
     if (description === t.function.description) return t;
     return {

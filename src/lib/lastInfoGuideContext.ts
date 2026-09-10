@@ -14,7 +14,8 @@ export type LastInfoGuideKind =
   | "unidades"
   | "cisternas"
   | "combustible"
-  | "hojas_de_ruta";
+  | "hojas_de_ruta"
+  | "puntos_de_interes";
 
 export type LastInfoGuideContext = {
   kind: LastInfoGuideKind;
@@ -32,6 +33,7 @@ const ALLOWED = new Set<string>([
   "cisternas",
   "combustible",
   "hojas_de_ruta",
+  "puntos_de_interes",
 ]);
 
 export function isLastInfoGuideKind(value: unknown): value is LastInfoGuideKind {

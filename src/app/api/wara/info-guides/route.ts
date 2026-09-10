@@ -35,6 +35,7 @@ const bodySchema = z
         "cisternas",
         "combustible",
         "hojas_de_ruta",
+        "puntos_de_interes",
       ])
       .optional(),
     articleIds: z.array(z.string()).optional(),
@@ -164,6 +165,7 @@ export async function POST(req: NextRequest) {
   const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
   const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
   const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
+  const { isPuntosInteresKbEnabled } = await import("@/lib/puntosInteresKnowledge");
   const requestedGuide = parsed.data.guide;
   const cisternasGuideIgnored =
     requestedGuide === "cisternas" && !isCisternasKbEnabled();
@@ -171,7 +173,9 @@ export async function POST(req: NextRequest) {
     requestedGuide === "combustible" && !isCombustibleKbEnabled();
   const hojasRutaCorpusOff =
     requestedGuide === "hojas_de_ruta" && !isHojasRutaKbEnabled();
-  // Cisternas/Combustible: flag off = ignorar kind. HR: reconocer kind aunque corpus off.
+  const puntosInteresCorpusOff =
+    requestedGuide === "puntos_de_interes" && !isPuntosInteresKbEnabled();
+  // Cisternas/Combustible: flag off = ignorar kind. HR/PI: reconocer kind aunque corpus off.
   const optInGuideIgnored = cisternasGuideIgnored || combustibleGuideIgnored;
   const guide = optInGuideIgnored ? undefined : requestedGuide;
   const kind = guide ?? detectInfoGuideKind(rawText);
@@ -187,24 +191,31 @@ export async function POST(req: NextRequest) {
       ? "combustible_flag_off_ignored_guide"
       : hojasRutaCorpusOff
         ? "hojas_ruta_module_disabled"
-        : null;
+        : puntosInteresCorpusOff
+          ? "puntos_interes_module_disabled"
+          : null;
   const seededInterpret: PlatformKnowledgeInterpret | null =
     guide ||
     parsed.data.need ||
     parsed.data.articleIds?.length ||
     optInGuideIgnored ||
-    hojasRutaCorpusOff
+    hojasRutaCorpusOff ||
+    puntosInteresCorpusOff
       ? {
           route: "info_guides",
           guideKind: (hojasRutaCorpusOff
             ? "hojas_de_ruta"
-            : ((guide as PlatformKnowledgeInterpret["guideKind"]) ?? null)),
+            : puntosInteresCorpusOff
+              ? "puntos_de_interes"
+              : ((guide as PlatformKnowledgeInterpret["guideKind"]) ?? null)),
           need: (parsed.data.need as PlatformKnowledgeInterpret["need"]) ?? "procedure",
-          articleIds: hojasRutaCorpusOff ? [] : (parsed.data.articleIds ?? []),
+          articleIds:
+            hojasRutaCorpusOff || puntosInteresCorpusOff ? [] : (parsed.data.articleIds ?? []),
           clarifyQuestion: parsed.data.clarifyQuestion?.trim() || null,
-          executionRequest: hojasRutaCorpusOff
-            ? false
-            : parsed.data.executionRequest === true,
+          executionRequest:
+            hojasRutaCorpusOff || puntosInteresCorpusOff
+              ? false
+              : parsed.data.executionRequest === true,
           confidence: 1,
           reason: ignoredReason ?? "seeded_from_turn",
         }

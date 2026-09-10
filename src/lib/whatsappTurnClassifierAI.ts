@@ -74,7 +74,9 @@ Ejecutores (elegí UNO):
   módulo Transporte Público (hoja de turno, turnos, servicios/líneas, POI/etapas de recorrido,
   paradas, traza KMZ, excepciones de feriado, monitoreo de viajes / colores de línea),
   módulo Artículos (stock/remitos/inventario) aunque aún no haya guía — info_guides igual
-  (el backend responde el límite de canal; NO mandes a mantenimiento/combustible).
+  (el backend responde el límite de canal; NO mandes a mantenimiento/combustible),
+  módulo Puntos de interés (Utilidades→POI/geocercas; Paradas TP independientes;
+  etapas de servicio usan POI previos).
   NO es info_guides si piden ejecutar/registrar/programar un trámite real ni consulta GPS live.
 
 • unidades — Consulta EN VIVO contra API Wara: listado de flota, cuántas unidades,
@@ -250,12 +252,13 @@ export async function resolveTurnExecutor(
     const isCs = kbInterpret?.guideKind === "cisternas" && isCisternasKbEnabled();
     const isCb = kbInterpret?.guideKind === "combustible" && isCombustibleKbEnabled();
     const isHr = kbInterpret?.guideKind === "hojas_de_ruta";
+    const isPi = kbInterpret?.guideKind === "puntos_de_interes";
     const isMt = kbInterpret?.guideKind === "mantenimiento";
     const isAmbiguousClarify =
       kbInterpret?.need === "ambiguous" && Boolean(kbInterpret.clarifyQuestion);
     if (
       shouldRouteInterpretToInfoGuides(kbInterpret) &&
-      (isTp || isCs || isCb || isHr || isMt || isAmbiguousClarify)
+      (isTp || isCs || isCb || isHr || isPi || isMt || isAmbiguousClarify)
     ) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
       if (rulesExecutor === "unidades" || rulesExecutor === "info_guides" || rulesExecutor === "mantenimiento") {
