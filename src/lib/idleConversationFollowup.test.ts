@@ -136,6 +136,47 @@ describe("decideIdleFollowup", () => {
     );
   });
 
+  it("none si el cliente ya respondió al nudge (no cerrar como sin respuesta)", () => {
+    assert.equal(
+      decideIdleFollowup({
+        now,
+        botPaused: false,
+        lastMessage: {
+          direction: "OUTBOUND",
+          from: "BOT",
+          createdAt: new Date(now.getTime() - 15 * 60 * 1000),
+          autoReplyKind: IDLE_NUDGE_KIND,
+        },
+        lastSubstantiveBotAt: new Date(now.getTime() - CLOSE_MS),
+        idleNudgeAlreadySent: true,
+        customerRepliedAfterNudge: true,
+        nudgeAfterMs: NUDGE_MS,
+        closeAfterMs: CLOSE_MS,
+      }),
+      "none",
+    );
+  });
+
+  it("close a los 30 min del resume sustantivo tras «sigo acá»", () => {
+    assert.equal(
+      decideIdleFollowup({
+        now,
+        botPaused: false,
+        lastMessage: {
+          direction: "OUTBOUND",
+          from: "BOT",
+          createdAt: new Date(now.getTime() - CLOSE_MS),
+        },
+        lastSubstantiveBotAt: new Date(now.getTime() - CLOSE_MS),
+        idleNudgeAlreadySent: true,
+        customerRepliedAfterNudge: true,
+        nudgeAfterMs: NUDGE_MS,
+        closeAfterMs: CLOSE_MS,
+      }),
+      "close",
+    );
+  });
+
   it("close a los 30 min sin nudge previo (catch-up)", () => {
     assert.equal(
       decideIdleFollowup({

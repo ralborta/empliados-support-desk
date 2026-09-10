@@ -395,6 +395,8 @@ function formatContinuityStep(
 
   if (/Seguimos con lo que estábamos haciendo/.test(normalized)) {
     if (topic) return idleTopicHint(topic);
+    const clarify = lastBotClarifyQuestionBeforeIdle(threadText);
+    if (clarify) return `Retomemos: ${clarify}`;
     if (looksLikeDeepenGuideCue(selectionText)) {
       return "Contame qué punto querés que profundice de lo que estábamos viendo.";
     }
@@ -424,19 +426,27 @@ export function idleMetaShouldPreferGuideOverPending(
 const IDLE_PUSHBACK_APOLOGY =
   "Tenés razón en reclamarlo. Ese cierre fue automático por inactividad y pudo quedar fuera de contexto. Perdón la confusión.";
 
-/** "Si"/"dale" tras nudge idle = sigo acá, no CONFIRMO ni replay de GPS/unidad activa. */
+/** "Si"/"dale"/"si, sigo aquí" tras nudge idle = sigo acá, no CONFIRMO ni replay de GPS/unidad activa. */
 export function looksLikeIdleNudgeAffirmation(
   text: string | undefined | null,
   threadText: string,
 ): boolean {
   if (!threadLastBotOutboundWasIdleNudge(threadText)) return false;
   const raw = String(text ?? "").trim();
-  if (!raw || raw.length > 48) return false;
+  if (!raw || raw.length > 64) return false;
   if (hasOperationalPayload(raw)) return false;
   const t = normIdleText(raw);
-  return /^(si|sip|sii|dale|ok|okey|okay|bueno|perfecto|listo|aca estoy|aqui estoy|presente|seguimos|sigamos)[\s!.,]*$/.test(
-    t,
-  );
+  if (
+    /^(si|sip|sii|dale|ok|okey|okay|bueno|perfecto|listo|aca estoy|aqui estoy|presente|seguimos|sigamos)[\s!.,]*$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  // «Si, sigo aquí» / «sí estoy acá» (bug real: no matcheaba y perdía el tema)
+  if (/^(si|sip|dale|ok|bueno)\s+(sigo|estoy)\s+(aca|aqui)\b/.test(t)) return true;
+  if (/^(sigo|estoy)\s+(aca|aqui)(\s+(todavia|aun))?[\s!.,]*$/.test(t)) return true;
+  return false;
 }
 
 export function buildIdleNudgeAffirmationReply(opts?: {
@@ -444,6 +454,22 @@ export function buildIdleNudgeAffirmationReply(opts?: {
 }): string {
   const prefix = formatIdleMetaCustomerPrefix(opts?.customerFirstName);
   return `${prefix}Perfecto, seguimos. ¿En qué te puedo ayudar?`;
+}
+
+/** Última pregunta/aclaración del bot antes del nudge (para retomar el hilo). */
+export function lastBotClarifyQuestionBeforeIdle(threadText: string): string | null {
+  const recent = recentBotContentBeforeIdle(threadText);
+  if (!recent.trim()) return null;
+  const chunks = recent
+    .split(/\n+/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const c = chunks[i]!;
+    if (c.length > 280) continue;
+    if (/\?\s*$/.test(c)) return c;
+  }
+  return null;
 }
 
 export function buildIdleFollowupPushbackReply(params: {
@@ -542,24 +568,17 @@ export function resolveIdleFollowupMetaTurn(params: {
   }
 
   if (looksLikeIdleNudgeAffirmation(selectionText, threadText)) {
-    if (preferGuideOverPending) {
-      return {
-        intercept: true,
-        idlePushback: false,
-        preferGuideOverPending,
-        message: buildMetaConversationalContinuityReply(threadText, {
-          customerFirstName,
-          pendingAction,
-          selectionText,
-          lastGuideKind,
-        }),
-      };
-    }
+    // Siempre retomar tema/pregunta previa; no tirar menú vacío «¿en qué te ayudo?».
     return {
       intercept: true,
       idlePushback: false,
       preferGuideOverPending,
-      message: buildIdleNudgeAffirmationReply({ customerFirstName }),
+      message: buildMetaConversationalContinuityReply(threadText, {
+        customerFirstName,
+        pendingAction,
+        selectionText,
+        lastGuideKind,
+      }),
     };
   }
 

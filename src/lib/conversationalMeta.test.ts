@@ -107,7 +107,7 @@ describe("shouldHandleIdleFollowupPushback", () => {
     assert.equal(threadLastBotOutboundWasIdleNudge(thread), true);
   });
 
-  it("«Si» tras nudge idle → pregunta en qué ayudar, no replay GPS", () => {
+  it("«Si» tras nudge idle → retoma tema previo, no replay GPS", () => {
     const thread = [
       "Atilio: El estado GPS de la unidad NKL 952 es el siguiente...",
       `Atilio: ${IDLE_NUDGE_MESSAGE}`,
@@ -116,8 +116,24 @@ describe("shouldHandleIdleFollowupPushback", () => {
     const turn = resolveIdleFollowupMetaTurn({ selectionText: "Si", threadText: thread });
     assert.ok(turn);
     assert.equal(turn?.idlePushback, false);
-    assert.match(turn!.message, /¿En qué te puedo ayudar/i);
+    assert.match(turn!.message, /Seguimos con la consulta de unidad\/GPS/i);
     assert.doesNotMatch(turn!.message, /NKL 952|Estado GPS/i);
+  });
+
+  it("«Si, sigo aqui» tras nudge idle → afirmación + continuidad", () => {
+    const thread = [
+      "Atilio: ¿Querés que te explique cómo crear una hoja de ruta?",
+      `Atilio: ${IDLE_NUDGE_MESSAGE}`,
+    ].join("\n");
+    assert.equal(looksLikeIdleNudgeAffirmation("Si, sigo aqui", thread), true);
+    const turn = resolveIdleFollowupMetaTurn({
+      selectionText: "Si, sigo aqui",
+      threadText: thread,
+    });
+    assert.ok(turn);
+    assert.equal(turn?.idlePushback, false);
+    assert.match(turn!.message, /Perfecto/i);
+    assert.match(turn!.message, /Hojas de ruta/i);
   });
 });
 

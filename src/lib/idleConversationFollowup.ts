@@ -62,6 +62,11 @@ export function isIdleSystemOutbound(kind: string | null | undefined): boolean {
 /**
  * Decide nudge/close/none a partir del último mensaje del hilo y del último BOT sustantivo.
  * Pure — testeable sin DB.
+ *
+ * Reloj:
+ * - Si el último es BOT sustantivo (p. ej. resume tras «sigo acá») → desde ese mensaje.
+ * - Si el último es el nudge idle → desde el último BOT sustantivo (cierre ~30m total).
+ * - Si el cliente respondió después del nudge, NUNCA cerrar mientras el último siga siendo el nudge.
  */
 export function decideIdleFollowup(params: {
   now: Date;
@@ -69,6 +74,8 @@ export function decideIdleFollowup(params: {
   lastMessage: IdleMessageSnapshot | null;
   lastSubstantiveBotAt: Date | null;
   idleNudgeAlreadySent: boolean;
+  /** Cliente escribió después del nudge (aunque el último del hilo aún sea el nudge por carrera). */
+  customerRepliedAfterNudge?: boolean;
   nudgeAfterMs?: number;
   closeAfterMs?: number;
 }): IdleFollowupAction {
@@ -81,7 +88,16 @@ export function decideIdleFollowup(params: {
 
   const nudgeMs = params.nudgeAfterMs ?? DEFAULT_NUDGE_MS;
   const closeMs = params.closeAfterMs ?? DEFAULT_CLOSE_MS;
-  const waited = params.now.getTime() - params.lastSubstantiveBotAt.getTime();
+  const lastIsNudge = last.autoReplyKind === IDLE_NUDGE_KIND;
+
+  // Respuesta al nudge ya llegó: no cerrar como «sin respuesta» mientras el último sea el nudge.
+  if (lastIsNudge && params.customerRepliedAfterNudge) return "none";
+
+  // Ancla: mensaje sustantivo actual, o el pre-nudge si todavía estamos colgados del nudge.
+  const anchorAt = lastIsNudge || last.autoReplyKind === IDLE_CLOSE_KIND
+    ? params.lastSubstantiveBotAt
+    : last.createdAt;
+  const waited = params.now.getTime() - anchorAt.getTime();
 
   if (waited >= closeMs) return "close";
   if (waited >= nudgeMs && !params.idleNudgeAlreadySent) return "nudge";
@@ -314,11 +330,21 @@ export async function runIdleConversationFollowupCycle(params?: {
           m.from === "BOT" &&
           !isIdleSystemOutbound(m.autoReplyKind),
       );
-      const idleNudgeAlreadySent = snaps.some(
+      const lastNudge = snaps.find(
         (m) =>
           m.direction === "OUTBOUND" &&
           m.from === "BOT" &&
           m.autoReplyKind === IDLE_NUDGE_KIND,
+      );
+      const idleNudgeAlreadySent = Boolean(lastNudge);
+      const customerRepliedAfterNudge = Boolean(
+        lastNudge &&
+          snaps.some(
+            (m) =>
+              m.direction === "INBOUND" &&
+              m.from === "CUSTOMER" &&
+              m.createdAt.getTime() > lastNudge.createdAt.getTime(),
+          ),
       );
 
       const action = decideIdleFollowup({
@@ -327,6 +353,7 @@ export async function runIdleConversationFollowupCycle(params?: {
         lastMessage,
         lastSubstantiveBotAt: lastSubstantive?.createdAt ?? null,
         idleNudgeAlreadySent,
+        customerRepliedAfterNudge,
         nudgeAfterMs: nudgeMs,
         closeAfterMs: closeMs,
       });
