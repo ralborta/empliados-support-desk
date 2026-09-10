@@ -27,6 +27,10 @@ import {
   buildHojasRutaDisabledChannelReply,
 } from "@/lib/hojasRutaKnowledge";
 import {
+  buildArticulosModuleUnsupportedReply,
+  looksLikeArticulosModuleUnsupportedQuery,
+} from "@/lib/articulosModuleUnsupported";
+import {
   MANTENIMIENTO_ARTICLES,
   listMantenimientoArticleCatalog,
 } from "@/lib/mantenimientoKnowledge";
@@ -233,6 +237,11 @@ ${cisternasBlock}${combustibleBlock}${hojasRutaBlock}
 articleIds transporte: solo IDs del catálogo_transporte (0–3). Vacío si guideKind no es transporte_publico.
 Nunca inventes IDs. Si status needs_validation, podés usarlo con cautela; no uses artículos future.
 Respetá restrictions de cada artículo: no afirmes lo no confirmado.
+
+Módulo Artículos (stock / remitos / inventario / “módulo de artículos”): NO hay guía en este canal.
+Si el cliente pide ese módulo → route=info_guides, guideKind=null, need=ambiguous, articleIds=[],
+clarifyQuestion debe decir con honestidad que no hay guía de Artículos y NO ofrecer Mantenimiento/Combustible/Cisternas.
+NO confundir con “artículos” de una tarea de Mantenimiento (repuestos en OT/plan).
 
 Para consultas ambiguas usá confidence >= 0.75 y una clarifyQuestion concreta.
 Alcance: no profundizar en login, permisos de perfil ni backoffice inicial; si solo eso falta, clarify o sugerí soporte.`;
@@ -885,6 +894,39 @@ function normalizeHojasRutaDisabledDelivery(
   };
 }
 
+/**
+ * Módulo Artículos sin KB: límite honesto; no caer a MT/combustible/cisternas.
+ */
+function normalizeArticulosModuleUnsupported(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+): PlatformKnowledgeInterpret {
+  if (!looksLikeArticulosModuleUnsupportedQuery(selectionText)) return interpret;
+  const reply = buildArticulosModuleUnsupportedReply();
+  if (
+    interpret.reason?.includes("articulos_module_unsupported") &&
+    interpret.route === "info_guides" &&
+    interpret.guideKind === null &&
+    interpret.articleIds.length === 0 &&
+    interpret.clarifyQuestion === reply
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: null,
+    need: "ambiguous",
+    articleIds: [],
+    clarifyQuestion: reply,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.95),
+    reason: interpret.reason
+      ? `${interpret.reason}|articulos_module_unsupported`
+      : "articulos_module_unsupported",
+  };
+}
+
 /** Guardas post-LLM / offline V1: consulta + historial + catálogo. */
 export function applyPlatformGuideInterpretGuards(
   interpret: PlatformKnowledgeInterpret,
@@ -899,8 +941,10 @@ export function applyPlatformGuideInterpretGuards(
   next = correctHojasRutaContinuityMisroute(next, selectionText, threadText);
   next = correctGuideExecuteImperativeMisroute(next, selectionText);
   next = normalizeHojasRutaDisabledDelivery(next);
-  // Último: carga ambigua gana sobre HR/combustible/cisternas (y sobre disabled HR).
+  // Carga ambigua gana sobre HR/combustible/cisternas (y sobre disabled HR).
   next = correctAmbiguousCargaMisroute(next, selectionText, threadText);
+  // Artículos sin KB: después de misroutes, para no ser pisado por MT.
+  next = normalizeArticulosModuleUnsupported(next, selectionText);
   return next;
 }
 

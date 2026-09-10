@@ -25,6 +25,10 @@ import {
   isHojasRutaKbEnabled,
   buildHojasRutaDisabledChannelReply,
 } from "@/lib/hojasRutaKnowledge";
+import {
+  buildArticulosModuleUnsupportedReply,
+  looksLikeArticulosModuleUnsupportedQuery,
+} from "@/lib/articulosModuleUnsupported";
 
 export type InfoGuideKind =
   | "opciones"
@@ -43,7 +47,8 @@ export type InfoGuideFallback =
   | "repeat"
   | "cisternas_flag_off"
   | "combustible_flag_off"
-  | "hojas_ruta_flag_off";
+  | "hojas_ruta_flag_off"
+  | "articulos_module_unsupported";
 
 function sanitizeOptInGuideKind(
   kind: InfoGuideKind | null | undefined,
@@ -557,6 +562,41 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
   };
 
+  const articulosUnsupportedReply = (): {
+    message: string;
+    guideKind: null;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message =
+      activeInterpret?.clarifyQuestion?.includes("Artículos")
+        ? activeInterpret.clarifyQuestion
+        : buildArticulosModuleUnsupportedReply();
+    return {
+      message,
+      guideKind: null,
+      interpret: {
+        route: "info_guides",
+        guideKind: null,
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion: message,
+        executionRequest: false,
+        confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+        reason: activeInterpret?.reason?.includes("articulos_module_unsupported")
+          ? activeInterpret.reason
+          : activeInterpret?.reason
+            ? `${activeInterpret.reason}|articulos_module_unsupported`
+            : "articulos_module_unsupported",
+      },
+      fallback: "articulos_module_unsupported",
+    };
+  };
+
+  if (looksLikeArticulosModuleUnsupportedQuery(rawText)) {
+    return articulosUnsupportedReply();
+  }
+
   if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
     activeInterpret = {
       ...activeInterpret,
@@ -617,9 +657,18 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       rawText,
       threadText ?? "",
     );
-    if (offlineGuarded.route === "info_guides" && offlineGuarded.guideKind) {
+    if (
+      offlineGuarded.route === "info_guides" &&
+      (offlineGuarded.guideKind ||
+        offlineGuarded.reason?.includes("articulos_module_unsupported") ||
+        offlineGuarded.reason?.includes("ambiguous_carga_guard"))
+    ) {
       activeInterpret = offlineGuarded;
     }
+  }
+
+  if (activeInterpret?.reason?.includes("articulos_module_unsupported")) {
+    return articulosUnsupportedReply();
   }
 
   if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {

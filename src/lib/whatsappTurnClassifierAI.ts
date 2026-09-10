@@ -72,7 +72,9 @@ Ejecutores (elegí UNO):
   módulo Unidades (grupos, ficha expandida, MIS ATAJOS, puntos verde/azul/rojo, crear grupo),
   módulo Mantenimiento INFORMATIVO (qué es preventivo/correctivo, cómo funciona el módulo),
   módulo Transporte Público (hoja de turno, turnos, servicios/líneas, POI/etapas de recorrido,
-  paradas, traza KMZ, excepciones de feriado, monitoreo de viajes / colores de línea).
+  paradas, traza KMZ, excepciones de feriado, monitoreo de viajes / colores de línea),
+  módulo Artículos (stock/remitos/inventario) aunque aún no haya guía — info_guides igual
+  (el backend responde el límite de canal; NO mandes a mantenimiento/combustible).
   NO es info_guides si piden ejecutar/registrar/programar un trámite real ni consulta GPS live.
 
 • unidades — Consulta EN VIVO contra API Wara: listado de flota, cuántas unidades,
