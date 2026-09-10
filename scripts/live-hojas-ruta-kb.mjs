@@ -45,6 +45,7 @@ const cases = [
     id: "follow-hr",
     text: "¿Y después dónde la veo?",
     thread: HR_THREAD,
+    lastGuideKind: "hojas_de_ruta",
     expectResolve: "info_guides",
     expectGuide: "hojas_de_ruta",
     expectDisabled: !hrCorpusOn,
@@ -136,7 +137,10 @@ console.log(
 
 for (const c of cases) {
   await new Promise((r) => setTimeout(r, 700));
-  const resolved = await resolveTurnExecutor(c.text, c.thread || c.text);
+  const lastGuideKind = c.lastGuideKind ?? null;
+  const resolved = await resolveTurnExecutor(c.text, c.thread || c.text, null, {
+    lastGuideKind,
+  });
   let guideKind = null;
   let used = null;
   let fallback = null;
@@ -145,6 +149,7 @@ for (const c of cases) {
     const interpret = await interpretPlatformKnowledgeTurn({
       selectionText: c.text,
       threadText: c.thread,
+      lastGuideKind,
     });
     const meta = await buildGroundedInfoGuideReplyWithMeta(
       c.text,

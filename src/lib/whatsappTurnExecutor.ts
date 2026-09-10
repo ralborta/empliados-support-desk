@@ -1535,6 +1535,7 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadText: thread,
       pendingActionType: pendingAction?.type ?? null,
+      lastGuideKind: lastGuideCtx?.kind ?? null,
     });
     if (
       kbInterpret &&
@@ -2603,6 +2604,7 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadText: threadCtx.classificationThread,
       pendingActionType: pendingAction?.type ?? null,
+      lastGuideKind: lastGuideCtx?.kind ?? null,
     });
     if (kbInterpret && shouldRouteInterpretToInfoGuides(kbInterpret)) {
       const rulesExecutor = classifyTurnExecutor(
@@ -2671,6 +2673,7 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadCtx.classificationThread,
       pendingAction,
+      { lastGuideKind: lastGuideCtx?.kind ?? null },
     );
     executor = pendingConfirm ?? pendingAction?.type ?? resolved.executor;
   } else {
@@ -2678,6 +2681,7 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadCtx.classificationThread,
       pendingAction,
+      { lastGuideKind: lastGuideCtx?.kind ?? null },
     );
     executor = resolved.executor;
   }

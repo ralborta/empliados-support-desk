@@ -27,6 +27,7 @@ import {
   looksLikeHojasRutaGuideFollowupQuestion,
   buildHojasRutaDisabledChannelReply,
 } from "@/lib/hojasRutaKnowledge";
+import type { LastInfoGuideKind } from "@/lib/lastInfoGuideContext";
 import {
   buildArticulosModuleUnsupportedReply,
   looksLikeArticulosModuleUnsupportedQuery,
@@ -86,6 +87,11 @@ type CacheEntry = { at: number; value: PlatformKnowledgeInterpret | null };
 const interpretCache = new Map<string, CacheEntry>();
 const INTERPRET_CACHE_TTL_MS = 20_000;
 
+export type PlatformGuideGuardOpts = {
+  /** Última guía realmente entregada (metadato estructurado; no prosa del hilo). */
+  lastGuideKind?: LastInfoGuideKind | null;
+};
+
 function cacheKey(
   selectionText: string,
   threadText: string,
@@ -93,8 +99,10 @@ function cacheKey(
   combustibleOn: boolean,
   hojasRutaOn: boolean,
   puntosInteresOn: boolean,
+  lastGuideKind?: string | null,
 ): string {
-  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}::${selectionText.trim()}::${threadText.slice(-400)}`;
+  const lg = lastGuideKind ?? "";
+  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}::lg=${lg}::${selectionText.trim()}::${threadText.slice(-400)}`;
 }
 
 export function isPlatformKbLlmInterpretEnabled(): boolean {
@@ -693,6 +701,7 @@ function correctHojasRutaContinuityMisroute(
   interpret: PlatformKnowledgeInterpret,
   selectionText: string,
   threadText: string,
+  lastGuideKind?: LastInfoGuideKind | null,
 ): PlatformKnowledgeInterpret {
   // Decisión explícita de otro módulo en este turno gana sobre continuidad histórica.
   if (
@@ -702,7 +711,11 @@ function correctHojasRutaContinuityMisroute(
   ) {
     return interpret;
   }
-  if (!looksLikeHojasRutaGuideFollowupQuestion(selectionText, threadText)) return interpret;
+  if (
+    !looksLikeHojasRutaGuideFollowupQuestion(selectionText, threadText, lastGuideKind)
+  ) {
+    return interpret;
+  }
   if (
     interpret.guideKind === "hojas_de_ruta" &&
     interpret.route === "info_guides" &&
@@ -787,14 +800,14 @@ function correctGuideExecuteImperativeMisroute(
 }
 
 /**
- * “Una carga” / registrar carga sin módulo en consulta ni historial → ambiguous + clarify.
+ * “Una carga” / registrar carga sin módulo en consulta → ambiguous + clarify.
  * Puede corregir un misroute a hojas_de_ruta/combustible/cisternas cuando la consulta
  * es realmente ambigua. Nunca pisa un dominio estructurado ajeno (p. ej. transporte_publico).
+ * No usa prosa del historial: una mención de “hoja de ruta” en una aclaración no cuenta.
  */
 function correctAmbiguousCargaMisroute(
   interpret: PlatformKnowledgeInterpret,
   selectionText: string,
-  threadText: string,
 ): PlatformKnowledgeInterpret {
   if (!isHojasRutaKbEnabled() && !isCombustibleKbEnabled() && !isCisternasKbEnabled()) {
     return interpret;
@@ -832,25 +845,6 @@ function correctAmbiguousCargaMisroute(
       /\b(transporte|pasajer|linea|l[ií]nea|recorrido)\b/.test(t))
   ) {
     return interpret;
-  }
-  const thread = (threadText ?? "").toLowerCase();
-  if (
-    /hojas? de ruta|combustible|cisterna|ticket de combustible|gestion de carga/.test(thread)
-  ) {
-    // Historial de clarify multi-opción no cuenta como módulo HR activo.
-    const scrubbedThread = thread
-      .replace(
-        /[¿?]?\s*(la\s+)?carga es mercader[ií]a[^\n?]{0,160}cisterna[^\n?]*[?]*/gi,
-        " ",
-      )
-      .replace(/si necesit[aá]s ayuda con las hojas de ruta[^\n]*/gi, " ");
-    if (
-      /hojas? de ruta|combustible|cisterna|ticket de combustible|gestion de carga/.test(
-        scrubbedThread,
-      )
-    ) {
-      return interpret;
-    }
   }
   if (
     !/\b(registrar|cargar|anotar|necesito|quiero|tengo que|hay que).{0,48}\bcargas?\b/.test(t) &&
@@ -1252,20 +1246,27 @@ export function applyPlatformGuideInterpretGuards(
   interpret: PlatformKnowledgeInterpret,
   selectionText: string,
   threadText: string,
+  opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret {
+  const lastGuideKind = opts?.lastGuideKind ?? null;
   let next = interpret;
   next = correctMaintenanceMisroute(next, selectionText, threadText);
   next = correctHojaDeNounMisroute(next, selectionText);
   next = correctHojasRutaCatalogTopicMisroute(next, selectionText);
   next = correctPuntosInteresCatalogTopicMisroute(next, selectionText);
   next = correctCatalogLabelMisroute(next, selectionText);
-  next = correctHojasRutaContinuityMisroute(next, selectionText, threadText);
+  next = correctHojasRutaContinuityMisroute(
+    next,
+    selectionText,
+    threadText,
+    lastGuideKind,
+  );
   next = correctPuntosInteresContinuityMisroute(next, selectionText, threadText);
   next = correctGuideExecuteImperativeMisroute(next, selectionText);
   next = normalizeHojasRutaDisabledDelivery(next);
   next = normalizePuntosInteresDisabledDelivery(next);
   // Carga ambigua gana sobre HR/combustible/cisternas (y sobre disabled HR).
-  next = correctAmbiguousCargaMisroute(next, selectionText, threadText);
+  next = correctAmbiguousCargaMisroute(next, selectionText);
   // Artículos sin KB: después de misroutes, para no ser pisado por MT.
   next = normalizeArticulosModuleUnsupported(next, selectionText);
   return next;
@@ -1275,6 +1276,7 @@ export function applyPlatformGuideInterpretGuards(
 export function applyOfflinePlatformKnowledgeGuards(
   selectionText: string,
   threadText: string = "",
+  opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret | null {
   const text = selectionText.trim();
   if (!text) return null;
@@ -1291,6 +1293,7 @@ export function applyOfflinePlatformKnowledgeGuards(
     },
     text,
     threadText,
+    opts,
   );
   if (guarded.route === "info_guides" && (guarded.guideKind || guarded.clarifyQuestion)) {
     return guarded;
@@ -1302,14 +1305,18 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   selectionText: string;
   threadText?: string;
   pendingActionType?: string | null;
+  lastGuideKind?: LastInfoGuideKind | null;
 }): Promise<PlatformKnowledgeInterpret | null> {
   const text = opts.selectionText.trim();
   if (!text) return null;
   const threadText = opts.threadText ?? "";
+  const guardOpts: PlatformGuideGuardOpts = {
+    lastGuideKind: opts.lastGuideKind ?? null,
+  };
 
   // Sin intérprete LLM / sin API key: guardas offline V1 (contrato HR safe-off).
   if (!isPlatformKbLlmInterpretEnabled()) {
-    return applyOfflinePlatformKnowledgeGuards(text, threadText);
+    return applyOfflinePlatformKnowledgeGuards(text, threadText, guardOpts);
   }
 
   const cisternasOn = isCisternasKbEnabled();
@@ -1323,10 +1330,11 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     combustibleOn,
     hojasRutaCorpusOn,
     puntosInteresCorpusOn,
+    opts.lastGuideKind,
   );
   const cached = interpretCache.get(key);
   if (cached && cached.value && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
-    return applyPlatformGuideInterpretGuards(cached.value, text, threadText);
+    return applyPlatformGuideInterpretGuards(cached.value, text, threadText, guardOpts);
   }
 
   const catalogTp = listTransporteArticleCatalog();
@@ -1376,7 +1384,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     const content = response?.choices?.[0]?.message?.content?.trim();
     let parsed = content ? parseInterpret(content) : null;
     if (parsed) {
-      parsed = applyPlatformGuideInterpretGuards(parsed, text, threadText);
+      parsed = applyPlatformGuideInterpretGuards(parsed, text, threadText, guardOpts);
       interpretCache.set(key, { at: Date.now(), value: parsed });
       return parsed;
     }
@@ -1394,12 +1402,13 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       },
       text,
       threadText,
+      guardOpts,
     );
     if (parseMiss.route === "info_guides" && parseMiss.guideKind) {
       interpretCache.set(key, { at: Date.now(), value: parseMiss });
       return parseMiss;
     }
-    return applyOfflinePlatformKnowledgeGuards(text, threadText);
+    return applyOfflinePlatformKnowledgeGuards(text, threadText, guardOpts);
   } catch {
     if (
       looksLikeMaintenanceDomainTermQuestion(text) ||
@@ -1418,9 +1427,10 @@ export async function interpretPlatformKnowledgeTurn(opts: {
         },
         text,
         threadText,
+        guardOpts,
       );
     }
-    return applyOfflinePlatformKnowledgeGuards(text, threadText);
+    return applyOfflinePlatformKnowledgeGuards(text, threadText, guardOpts);
   }
 }
 

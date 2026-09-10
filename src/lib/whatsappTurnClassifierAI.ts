@@ -174,6 +174,7 @@ export async function resolveTurnExecutor(
   selectionText: string,
   threadText: string,
   pendingAction?: import("@/lib/pendingAction").PendingActionRecord | null,
+  opts?: { lastGuideKind?: import("@/lib/lastInfoGuideContext").LastInfoGuideKind | null },
 ): Promise<TurnExecutorResolution> {
   const guard = classifyTurnExecutorSafetyGuards(selectionText, threadText, pendingAction);
   if (guard) {
@@ -247,6 +248,7 @@ export async function resolveTurnExecutor(
       selectionText,
       threadText,
       pendingActionType: pendingAction?.type ?? null,
+      lastGuideKind: opts?.lastGuideKind ?? null,
     });
     const isTp = kbInterpret?.guideKind === "transporte_publico";
     const isCs = kbInterpret?.guideKind === "cisternas" && isCisternasKbEnabled();

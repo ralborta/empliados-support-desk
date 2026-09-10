@@ -381,54 +381,27 @@ export function buildHojasRutaKnowledgeContext(articleIds: string[]): string {
 }
 
 /**
- * Aclaraciones del bot que nombran “hoja de ruta” como una opción entre varias
- * (p. ej. ambigüedad de “carga”) no son guía HR activa.
+ * Continuidad HR: solo con metadato estructurado de la última guía entregada.
+ * No inferir por prosa del historial (una aclaración del bot puede mencionar
+ * “hoja de ruta” sin haber entregado esa guía).
  */
-function scrubFalseHojasRutaMentionsFromThread(threadText: string): string {
-  return String(threadText ?? "")
-    .replace(
-      /[¿?]?\s*(la\s+)?carga es mercader[ií]a[^\n?]{0,160}cisterna[^\n?]*[?]*/gi,
-      " ",
-    )
-    .replace(
-      /si necesit[aá]s ayuda con las hojas de ruta[^\n]*/gi,
-      " ",
-    );
-}
-
-/** Contexto de guía Hojas de ruta ya abierta en el hilo (continuidad, no keyword de frase puntual). */
-export function looksLikeHojasRutaGuideContextInThread(threadText: string): boolean {
-  const scrubbed = scrubFalseHojasRutaMentionsFromThread(threadText);
-  const tail = scrubbed.slice(-4000).toLowerCase();
-  if (!tail.trim()) return false;
-  // Si el hilo habla de hoja de turno / pasajeros, no es continuidad HR.
-  if (
-    /\bhoja(s)?\s+de\s+turno\b/.test(tail) ||
-    /\btransporte\s+(p[uú]blico|de\s+pasajer)/.test(tail) ||
-    /\bservicio[s]?\s+(de\s+)?(transporte|pasajer)/.test(tail)
-  ) {
-    if (!/\bhojas?\s+de\s+ruta\b/.test(tail) && !/utilidades\s*[→>]\s*hojas de ruta/.test(tail)) {
-      return false;
-    }
-  }
-  return (
-    /utilidades\s*[→>\-]\s*hojas de ruta/.test(tail) ||
-    /\bhojas?\s+de\s+ruta\b/.test(tail) ||
-    /\bhoja de ruta predefinida\b/.test(tail) ||
-    /gesti[oó]n de carga\/?descarga/.test(tail) ||
-    /editor calendario/.test(tail)
-  );
+export function looksLikeHojasRutaGuideContextInThread(
+  _threadText: string,
+  lastGuideKind?: string | null,
+): boolean {
+  return lastGuideKind === "hojas_de_ruta";
 }
 
 /**
  * Continuación corta dentro de una guía HR ya abierta (misma idea que mantenimiento).
- * No ancla frases de test: cualquier follow-up breve con hilo HR.
+ * Requiere lastGuideKind=hojas_de_ruta; el threadText no decide el módulo.
  */
 export function looksLikeHojasRutaGuideFollowupQuestion(
   raw: string | undefined | null,
   threadText = "",
+  lastGuideKind?: string | null,
 ): boolean {
-  if (!looksLikeHojasRutaGuideContextInThread(threadText)) return false;
+  if (!looksLikeHojasRutaGuideContextInThread(threadText, lastGuideKind)) return false;
   const text = String(raw ?? "")
     .normalize("NFD")
     .replace(/\p{M}/gu, "")

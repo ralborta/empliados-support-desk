@@ -89,7 +89,7 @@ try {
   assert.equal(knowledgeAsk.fallback, "hojas_ruta_flag_off");
   assert.doesNotMatch(knowledgeAsk.message, /módulo de Mantenimiento|órdenes de trabajo/i);
 
-  // Continuidad con flag off: sigue siendo HR (disabled), no Unidades.
+  // Continuidad con flag off: requiere lastGuideKind estructurado (no prosa del hilo).
   const followOff = applyPlatformGuideInterpretGuards(
     {
       route: "continue_normal",
@@ -103,6 +103,7 @@ try {
     },
     "¿Y después dónde la veo?",
     HR_THREAD,
+    { lastGuideKind: "hojas_de_ruta" },
   );
   assert.equal(followOff.guideKind, "hojas_de_ruta");
   assert.equal(followOff.route, "info_guides");
@@ -177,8 +178,8 @@ try {
   const mtThread =
     "Cliente: mantenimiento preventivo\nAtilio: En Utilidades → Mantenimiento podés ver planes.";
 
-  async function assertResolve(label, text, thread, expectExecutor) {
-    const r = await resolveTurnExecutor(text, thread);
+  async function assertResolve(label, text, thread, expectExecutor, lastGuideKind = null) {
+    const r = await resolveTurnExecutor(text, thread, null, { lastGuideKind });
     assert.equal(r.executor, expectExecutor, `${label}: got ${r.executor}`);
   }
 
@@ -186,7 +187,13 @@ try {
   delete process.env.OPENAI_API_KEY;
   process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "false";
   await assertResolve("off/create", "¿Cómo creo una hoja de ruta?", "", "info_guides");
-  await assertResolve("off/follow", "¿Y después dónde la veo?", HR_THREAD, "info_guides");
+  await assertResolve(
+    "off/follow",
+    "¿Y después dónde la veo?",
+    HR_THREAD,
+    "info_guides",
+    "hojas_de_ruta",
+  );
   await assertResolve(
     "off/help",
     "Necesito ayuda con las hojas de ruta",
@@ -225,7 +232,13 @@ try {
   process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "true";
   delete process.env.OPENAI_API_KEY;
   await assertResolve("nokey/create", "¿Cómo creo una hoja de ruta?", "", "info_guides");
-  await assertResolve("nokey/follow", "¿Y después dónde la veo?", HR_THREAD, "info_guides");
+  await assertResolve(
+    "nokey/follow",
+    "¿Y después dónde la veo?",
+    HR_THREAD,
+    "info_guides",
+    "hojas_de_ruta",
+  );
   await assertResolve(
     "nokey/editor",
     "Editor calendario de rutas",
@@ -320,10 +333,29 @@ try {
     },
     "¿Y después dónde la veo?",
     HR_THREAD,
+    { lastGuideKind: "hojas_de_ruta" },
   );
   assert.equal(followFixed.guideKind, "hojas_de_ruta");
   assert.equal(followFixed.route, "info_guides");
   assert.ok(followFixed.articleIds.some((id) => id.startsWith("hr-")));
+
+  // Sin lastGuideKind: mención de “hoja de ruta” en el hilo NO fuerza continuidad.
+  const followNoStructured = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.4,
+      reason: "test",
+    },
+    "¿Y después dónde la veo?",
+    HR_THREAD,
+  );
+  assert.notEqual(followNoStructured.guideKind, "hojas_de_ruta");
+  assert.doesNotMatch(followNoStructured.reason ?? "", /hr_continuity_guard/);
 
   const createOn = applyPlatformGuideInterpretGuards(
     {
@@ -402,7 +434,7 @@ try {
   assert.ok(cargaServicioPasajeros.articleIds.includes("tp-servicio-crear"));
   assert.doesNotMatch(cargaServicioPasajeros.reason ?? "", /ambiguous_carga_guard|hr_continuity_guard/);
 
-  // Aclaración del bot (opciones de carga) no contamina continuidad HR.
+  // Aclaración del bot (cualquier redacción) no contamina: sin lastGuideKind=HR no hay continuidad.
   const CARGA_CLARIFY_THREAD = [
     "Cliente: Quiero cargar unos servicios a transporte público",
     "Atilio: ¿La carga es mercadería en una hoja de ruta, un ticket de combustible de una unidad, o carga a una cisterna?",
@@ -424,6 +456,46 @@ try {
   assert.equal(afterCargaClarify.guideKind, "transporte_publico");
   assert.ok(afterCargaClarify.articleIds.includes("tp-servicio-crear"));
   assert.doesNotMatch(afterCargaClarify.reason ?? "", /hr_continuity_guard|ambiguous_carga_guard/);
+
+  // Reformulación distinta del bot (no depende de scrub de frase fija).
+  const REFORMULATED_CLARIFY_THREAD = [
+    "Cliente: Quiero cargar unos servicios a transporte público",
+    "Atilio: ¿Hablás de una carga de mercadería en hoja de ruta, de combustible en la unidad, o de llenar una cisterna?",
+  ].join("\n");
+  const afterReformulated = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "transporte_publico",
+      need: "procedure",
+      articleIds: ["tp-servicio-crear"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.93,
+      reason: "test_reformulated_clarify",
+    },
+    "Ninguna. Es un servicio de transporte público. Cómo lo cargo?",
+    REFORMULATED_CLARIFY_THREAD,
+  );
+  assert.equal(afterReformulated.guideKind, "transporte_publico");
+  assert.ok(afterReformulated.articleIds.includes("tp-servicio-crear"));
+  assert.doesNotMatch(afterReformulated.reason ?? "", /hr_continuity_guard/);
+
+  const afterReformulatedNoSeed = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.4,
+      reason: "test",
+    },
+    "Ninguna. Es un servicio de transporte público. Cómo lo cargo?",
+    REFORMULATED_CLARIFY_THREAD,
+  );
+  assert.notEqual(afterReformulatedNoSeed.guideKind, "hojas_de_ruta");
+  assert.doesNotMatch(afterReformulatedNoSeed.reason ?? "", /hr_continuity_guard/);
 
   // Sin decisión TP previa: el hilo de clarify tampoco debe forzar HR.
   const afterClarifyNoSeed = applyPlatformGuideInterpretGuards(
