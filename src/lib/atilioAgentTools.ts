@@ -108,7 +108,7 @@ const GUIA_COMBUSTIBLE_SUFFIX =
   " Con combustible (tickets/validación/panel/informes de unidad) habilitado en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni cargues tickets por chat. No confundas con Cisternas.";
 
 const GUIA_HOJAS_RUTA_SUFFIX =
-  " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje): SIEMPRE esta tool — NUNCA inventes Mantenimiento/Unidades ni digas que no hay info. Si el corpus está deshabilitado, la tool devolverá el límite de canal honesto. No confundas con hoja de turno ni Combustible/Cisternas.";
+  " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje): SIEMPRE esta tool — NUNCA inventes Mantenimiento/Unidades ni digas que no hay info. Si el corpus está deshabilitado, la tool devolverá el límite de canal honesto. No confundas con hoja de turno, tickets de combustible de unidad ni tanques de depósito.";
 
 const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   type: "function",
