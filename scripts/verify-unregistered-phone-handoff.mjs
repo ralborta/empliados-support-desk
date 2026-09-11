@@ -54,14 +54,24 @@ assert.doesNotMatch(
 
 const waiting = buildUnregisteredPhoneWaitingAdvisorReply("0209266");
 assert.match(waiting, /no está registrado/i, "recontacto: no registrado");
-assert.match(waiting, /0209266/, "recontacto: código de ticket");
+assert.doesNotMatch(waiting, /0209266|ticket\s+\d+/i, "recontacto: NO entregar número de ticket");
 assert.match(waiting, /gu[ií]a/i, "recontacto: menciona guía");
 assert.match(waiting, /Te env[ií]o la gu[ií]a/i, "recontacto: Te envío");
 assert.match(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY, /no está registrado/i);
 assert.doesNotMatch(
+  UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+  /ticket\s+\d+/i,
+  "constante waiting: sin número de ticket",
+);
+assert.doesNotMatch(
   UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
   /Ya tenemos tu consulta|Gracias por tu paciencia/i,
   "no usar el aviso largo de calma",
+);
+assert.doesNotMatch(
+  UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+  /ticket\s+\d+/i,
+  "primera respuesta: sin número de ticket",
 );
 
 assert.equal(
@@ -94,6 +104,6 @@ const again = extractMediaUrlAndCleanText(
 );
 assert.ok(first.text.length > 0 && first.mediaUrl, "1ª vez no vacío + PDF");
 assert.ok(again.text.length > 0 && again.mediaUrl, "recontacto no vacío + PDF");
-assert.match(again.text, /0209266/);
+assert.doesNotMatch(again.text, /0209266|ticket\s+\d+/i, "recontacto reply sin ticket");
 
 console.log("OK verify-unregistered-phone-handoff");

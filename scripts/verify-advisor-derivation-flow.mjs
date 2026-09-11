@@ -45,6 +45,11 @@ assert.match(
   "recontacto: siempre contesta (no silencio)",
 );
 assert.match(UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY, /gu[ií]a/i);
+assert.doesNotMatch(
+  UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+  /ticket\s+\d+/i,
+  "recontacto: no entregar número de ticket al cliente",
+);
 assert.equal(UNREGISTERED_PHONE_TICKET_TITLE, "Número no registrado en Wara");
 
 for (const msg of [

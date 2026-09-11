@@ -25,18 +25,18 @@ export const UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY =
 
 /**
  * Si vuelve a escribir (ej. meses después): SIEMPRE se contesta.
- * Confirma que el ticket ya existe, que no está registrado, y reenvía el PDF.
+ * Confirma que no está registrado y reenvía el PDF.
+ * No menciona número de ticket al cliente (el ticket sigue existiendo en panel).
  * Nunca silencio (bug real 2026-09-02: Alborta 10-may → “Holaa” sin respuesta).
  */
-export function buildUnregisteredPhoneWaitingAdvisorReply(ticketCode: string): string {
-  const code = String(ticketCode ?? "").trim() || "pendiente";
+export function buildUnregisteredPhoneWaitingAdvisorReply(_ticketCode?: string): string {
   return (
-    `Tu número no está registrado en Wara. Ya tenemos tu consulta abierta (ticket ${code}); un agente te va a atender.\n\n` +
+    `Tu número no está registrado en Wara. Ya tenemos tu consulta abierta; un agente te va a atender.\n\n` +
     `Te envío la guía para cargar un número nuevo en la plataforma.`
   );
 }
 
-/** @deprecated Usar buildUnregisteredPhoneWaitingAdvisorReply(ticketCode). */
+/** @deprecated Usar buildUnregisteredPhoneWaitingAdvisorReply(). */
 export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY =
   "Tu número no está registrado en Wara. Ya tenemos tu consulta abierta; un agente te va a atender.\n\nTe envío la guía para cargar un número nuevo en la plataforma.";
 
