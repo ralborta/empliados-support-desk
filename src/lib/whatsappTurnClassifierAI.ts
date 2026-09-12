@@ -244,6 +244,9 @@ export async function resolveTurnExecutor(
     } = await import("@/lib/infoGuideInterpretAI");
     const { isCisternasKbEnabled } = await import("@/lib/cisternasKnowledge");
     const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
+    const { isUtilidadesBloque2KbEnabled } = await import(
+      "@/lib/utilidadesBloque2Knowledge"
+    );
     const kbInterpret = await interpretPlatformKnowledgeTurn({
       selectionText,
       threadText,
@@ -255,12 +258,15 @@ export async function resolveTurnExecutor(
     const isCb = kbInterpret?.guideKind === "combustible" && isCombustibleKbEnabled();
     const isHr = kbInterpret?.guideKind === "hojas_de_ruta";
     const isPi = kbInterpret?.guideKind === "puntos_de_interes";
+    const isU2 =
+      kbInterpret?.guideKind === "utilidades_bloque_2" &&
+      isUtilidadesBloque2KbEnabled();
     const isMt = kbInterpret?.guideKind === "mantenimiento";
     const isAmbiguousClarify =
       kbInterpret?.need === "ambiguous" && Boolean(kbInterpret.clarifyQuestion);
     if (
       shouldRouteInterpretToInfoGuides(kbInterpret) &&
-      (isTp || isCs || isCb || isHr || isPi || isMt || isAmbiguousClarify)
+      (isTp || isCs || isCb || isHr || isPi || isU2 || isMt || isAmbiguousClarify)
     ) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
       if (rulesExecutor === "unidades" || rulesExecutor === "info_guides" || rulesExecutor === "mantenimiento") {

@@ -115,6 +115,7 @@ const SUITES = [
   "verify-certificate-confirm-pivot.mjs",
   "verify-info-guide-replies.mjs",
   "verify-knowledge-base.mjs",
+  "verify-utilidades-bloque2-kb.mjs",
   "verify-certificate-prefix-clarification-continuity.mjs",
   "verify-conversation-notebook-maintenance.mjs",
   "verify-conversation-notebook-tramites.mjs",

@@ -185,6 +185,8 @@ function idleTopicLabel(kind: IdleTopicKind): string {
       return "Hojas de ruta";
     case "puntos_de_interes":
       return "Puntos de interés";
+    case "utilidades_bloque_2":
+      return "Utilidades";
     case "cisternas":
       return "Cisternas";
     case "combustible":
@@ -214,6 +216,8 @@ function idleTopicHint(kind: IdleTopicKind): string {
       return "Seguimos con Hojas de ruta. Decime qué punto querés: alta, predefinidas, puntos, calendario o cargas/descargas.";
     case "puntos_de_interes":
       return "Seguimos con Puntos de interés. Decime si necesitás alta, grupos, eventos, forma o import/export.";
+    case "utilidades_bloque_2":
+      return "Seguimos con Utilidades. Decime si es Acoplados, Auditoría, recorridos, Comunicador, links de posición, Cuestionarios, Novedades o Remitos.";
     case "cisternas":
       return "Seguimos con Cisternas. Decime si necesitás alta, carga, medición o informes.";
     case "combustible":
@@ -257,6 +261,7 @@ export function idleGuideConflictsWithPending(
     topic === "transporte_publico" ||
     topic === "hojas_de_ruta" ||
     topic === "puntos_de_interes" ||
+    topic === "utilidades_bloque_2" ||
     topic === "cisternas" ||
     topic === "combustible" ||
     topic === "opciones" ||

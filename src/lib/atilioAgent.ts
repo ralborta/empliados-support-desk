@@ -565,6 +565,17 @@ export async function runAtilioAgentTurn(
           ? "Corpus habilitado: no inventes pantallas; usá la tool."
           : "Corpus aún deshabilitado: la tool devolverá el límite de canal honesto; NO improvises otro módulo."
       }`;
+      const { isUtilidadesBloque2KbEnabled } = await import(
+        "@/lib/utilidadesBloque2Knowledge"
+      );
+      if (isUtilidadesBloque2KbEnabled()) {
+        systemPrompt += `
+
+=== UTILIDADES — BLOQUE 2 (habilitado) ===
+- Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades, Remitos y Remitos hormigonera → SIEMPRE guia_informativa.
+- “Compartir posición” acá administra links; una ubicación GPS actual usa consultar_unidades.
+- No ejecutes altas, envíos, eliminaciones ni descargas por chat. No inventes lo pendiente de validar.`;
+      }
     } catch {
       /* ignore */
     }

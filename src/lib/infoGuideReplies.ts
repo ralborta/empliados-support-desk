@@ -33,6 +33,7 @@ import {
   isPuntosInteresKbEnabled,
   buildPuntosInteresDisabledChannelReply,
 } from "@/lib/puntosInteresKnowledge";
+import { isUtilidadesBloque2KbEnabled } from "@/lib/utilidadesBloque2Knowledge";
 
 export type InfoGuideKind =
   | "opciones"
@@ -42,7 +43,8 @@ export type InfoGuideKind =
   | "cisternas"
   | "combustible"
   | "hojas_de_ruta"
-  | "puntos_de_interes";
+  | "puntos_de_interes"
+  | "utilidades_bloque_2";
 
 export type InfoGuideFallback =
   | null
@@ -54,6 +56,7 @@ export type InfoGuideFallback =
   | "combustible_flag_off"
   | "hojas_ruta_flag_off"
   | "puntos_interes_flag_off"
+  | "utilidades_bloque2_flag_off"
   | "articulos_module_unsupported";
 
 function sanitizeOptInGuideKind(
@@ -62,6 +65,7 @@ function sanitizeOptInGuideKind(
   if (!kind) return null;
   if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
   if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
+  if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) return null;
   // hojas_de_ruta / puntos_de_interes: reconocer aunque corpus off.
   return kind;
 }
@@ -135,6 +139,14 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     pick === "modulo punto de interes"
   ) {
     return "puntos_de_interes";
+  }
+  if (
+    isUtilidadesBloque2KbEnabled() &&
+    /^(?:modulo(?: de)? |utilidades )?(?:acoplados|auditoria|calculador de recorridos|comunicador|comunicados|compartir posicion|cuestionarios|novedades|remitos|remitos hormigonera)$/.test(
+      pick,
+    )
+  ) {
+    return "utilidades_bloque_2";
   }
   const modulePick = parseInfoGuideModulePick(text);
   if (modulePick) return modulePick;
@@ -430,6 +442,12 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué punto puntual: alta, grupos, forma, eventos, import/export o el depósito.",
     ].join("\n");
   }
+  if (detected === "utilidades_bloque_2") {
+    return [
+      "Ya te pasé esa parte de Utilidades.",
+      "Decime qué punto puntual: Acoplados, Auditoría, recorridos, Comunicador, links de posición, Cuestionarios, Novedades o Remitos.",
+    ].join("\n");
+  }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
 }
 
@@ -442,6 +460,7 @@ export function buildInfoGuideReply(
   let detected = kind ?? detectInfoGuideKind(rawText);
   if (detected === "cisternas" && !isCisternasKbEnabled()) detected = null;
   if (detected === "combustible" && !isCombustibleKbEnabled()) detected = null;
+  if (detected === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) detected = null;
   if (detected === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
     return buildHojasRutaDisabledChannelReply();
   }
@@ -489,6 +508,11 @@ export function buildInfoGuideReply(
       "Te puedo orientar con Puntos de interés: grupos, alta/edición de geocercas/POI, eventos, import/export o el vínculo Depósito↔Artículos.",
       "Decime en una frase qué necesitás y te detallo ese punto.",
       "Si es una etapa dentro de un servicio de Transporte, o una parada de pasajeros, decime y te oriento con eso.",
+    ].join("\n");
+  else if (detected === "utilidades_bloque_2")
+    message = [
+      "Te puedo orientar con Utilidades: Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades y Remitos.",
+      "Decime cuál de esas secciones necesitás y qué querés hacer.",
     ].join("\n");
   else
     message = [
@@ -643,6 +667,20 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     articleIds = [];
     fallback = "combustible_flag_off";
   }
+  if (
+    activeInterpret?.guideKind === "utilidades_bloque_2" &&
+    !isUtilidadesBloque2KbEnabled()
+  ) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "utilidades_bloque2_flag_off",
+    };
+    articleIds = [];
+    fallback = "utilidades_bloque2_flag_off";
+  }
   if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
     return disabledHrReply();
   }
@@ -753,6 +791,20 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
     fallback = "combustible_flag_off";
   }
+  if (
+    activeInterpret?.guideKind === "utilidades_bloque_2" &&
+    !isUtilidadesBloque2KbEnabled()
+  ) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: "utilidades_bloque2_flag_off",
+    };
+    articleIds = [];
+    fallback = "utilidades_bloque2_flag_off";
+  }
   if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
     return disabledHrReply();
   }
@@ -795,6 +847,15 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   if (kind === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
     return disabledPiReply();
   }
+  if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) {
+    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
+    return {
+      message,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: "utilidades_bloque2_flag_off",
+    };
+  }
 
   if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
     return {
@@ -817,6 +878,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       activeInterpret.guideKind === "hojas_de_ruta" ||
       detected === "puntos_de_interes" ||
       activeInterpret.guideKind === "puntos_de_interes" ||
+      detected === "utilidades_bloque_2" ||
+      activeInterpret.guideKind === "utilidades_bloque_2" ||
       detected === "mantenimiento" ||
       activeInterpret.guideKind === "mantenimiento")
   ) {
@@ -930,6 +993,44 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: "clarify_or_limit",
       };
     }
+    if (
+      detected === "utilidades_bloque_2" ||
+      activeInterpret.guideKind === "utilidades_bloque_2"
+    ) {
+      if (!isUtilidadesBloque2KbEnabled()) {
+        return {
+          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
+          guideKind: null,
+          interpret: activeInterpret,
+          fallback: "utilidades_bloque2_flag_off",
+        };
+      }
+      detected = "utilidades_bloque_2";
+      const execIds = articleIds.length ? articleIds : ["u2-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase(
+        "utilidades_bloque_2",
+        rawText,
+        threadText,
+        {
+          articleIds: execIds,
+          need: "execute",
+        },
+      );
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "utilidades_bloque_2",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "utilidades_bloque_2",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     if (detected === "mantenimiento" || activeInterpret.guideKind === "mantenimiento") {
       detected = "mantenimiento";
       const execIds = articleIds.length ? articleIds : ["mt-ejecucion-no-disponible"];
@@ -981,7 +1082,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     (detected === "cisternas" && isCisternasKbEnabled()) ||
     (detected === "combustible" && isCombustibleKbEnabled()) ||
     (detected === "hojas_de_ruta" && isHojasRutaKbEnabled()) ||
-    (detected === "puntos_de_interes" && isPuntosInteresKbEnabled())
+    (detected === "puntos_de_interes" && isPuntosInteresKbEnabled()) ||
+    (detected === "utilidades_bloque_2" && isUtilidadesBloque2KbEnabled())
   ) {
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
       articleIds:
@@ -990,6 +1092,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "combustible" ||
         detected === "hojas_de_ruta" ||
         detected === "puntos_de_interes" ||
+        detected === "utilidades_bloque_2" ||
         detected === "mantenimiento"
           ? articleIds
           : undefined,
@@ -1020,6 +1123,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "combustible" ||
         detected === "hojas_de_ruta" ||
         detected === "puntos_de_interes" ||
+        detected === "utilidades_bloque_2" ||
         detected === "mantenimiento") &&
       !grounded
     ) {

@@ -8,6 +8,7 @@ import { buildCombustibleKnowledgeContext } from "@/lib/combustibleKnowledge";
 import { buildHojasRutaKnowledgeContext } from "@/lib/hojasRutaKnowledge";
 import { buildPuntosInteresKnowledgeContext } from "@/lib/puntosInteresKnowledge";
 import { buildMantenimientoKnowledgeContext } from "@/lib/mantenimientoKnowledge";
+import { buildUtilidadesBloque2KnowledgeContext } from "@/lib/utilidadesBloque2Knowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -23,7 +24,8 @@ export type KnowledgeGuideKind =
   | "cisternas"
   | "combustible"
   | "hojas_de_ruta"
-  | "puntos_de_interes";
+  | "puntos_de_interes"
+  | "utilidades_bloque_2";
 
 const KNOWLEDGE_BY_KIND: Record<"opciones" | "unidades", string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
@@ -120,6 +122,18 @@ REGLAS DURAS Puntos de interés:
 - Nunca digas que creaste/editaste/importaste puntos en la cuenta.
 - Continuá el hilo sin repetir todo el manual.`.trim();
 
+const UTILIDADES_BLOQUE2_HARD_CONSTRAINTS = `
+REGLAS DURAS Utilidades — Bloque 2:
+- Usá SOLO los artículos u2-* provistos. No inventes pantallas, botones, campos, validaciones ni causas.
+- El corpus cubre Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades, Remitos y Remitos hormigonera.
+- Respetá restrictions: alta de Acoplados, funcionamiento de Novedades, tipos de Comunicador, histórico de Remitos y validaciones de Remitos hormigonera quedaron pendientes.
+- “Compartir posición” en este corpus = administrar links temporales; consultar la ubicación GPS actual de una unidad es otra capacidad.
+- Remitos/Remitos hormigonera ≠ cargas y descargas de Hojas de ruta.
+- No expongas datos, nombres, tokens, URLs ni incidencias de la cuenta usada para el relevamiento.
+- Forma según need; execute = límite de canal (u2-ejecucion-no-disponible).
+- Nunca digas que creaste, editaste, eliminaste, guardaste, enviaste, copiaste, exportaste o descargaste algo.
+- Continuá el hilo sin repetir todo el manual.`.trim();
+
 function needStyleHint(need?: InfoGuideNeed | null): string {
   if (!need) return "";
   const map: Record<InfoGuideNeed, string> = {
@@ -184,6 +198,12 @@ export async function answerFromKnowledgeBase(
     const { isPuntosInteresKbEnabled } = await import("@/lib/puntosInteresKnowledge");
     if (!isPuntosInteresKbEnabled()) return null;
   }
+  if (kind === "utilidades_bloque_2") {
+    const { isUtilidadesBloque2KbEnabled } = await import(
+      "@/lib/utilidadesBloque2Knowledge"
+    );
+    if (!isUtilidadesBloque2KbEnabled()) return null;
+  }
 
   const knowledge =
     kind === "transporte_publico"
@@ -196,6 +216,8 @@ export async function answerFromKnowledgeBase(
             ? buildHojasRutaKnowledgeContext(opts?.articleIds ?? [])
             : kind === "puntos_de_interes"
               ? buildPuntosInteresKnowledgeContext(opts?.articleIds ?? [])
+              : kind === "utilidades_bloque_2"
+                ? buildUtilidadesBloque2KnowledgeContext(opts?.articleIds ?? [])
               : kind === "mantenimiento"
                 ? buildMantenimientoKnowledgeContext(opts?.articleIds ?? [])
                 : KNOWLEDGE_BY_KIND[kind];
@@ -217,7 +239,9 @@ export async function answerFromKnowledgeBase(
               ? `\n\n${HOJAS_RUTA_HARD_CONSTRAINTS}`
               : kind === "puntos_de_interes"
                 ? `\n\n${PUNTOS_INTERES_HARD_CONSTRAINTS}`
-                : "";
+                : kind === "utilidades_bloque_2"
+                  ? `\n\n${UTILIDADES_BLOQUE2_HARD_CONSTRAINTS}`
+                  : "";
   const needHint = needStyleHint(opts?.need);
 
   const system = `${instructions}${hardConstraints}

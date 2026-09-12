@@ -17,6 +17,7 @@ import { composeAgentReplyFromDialogueState } from "@/lib/atilioDialogueCompose"
 import { MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED } from "@/lib/waraApi";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
+import { isUtilidadesBloque2KbEnabled } from "@/lib/utilidadesBloque2Knowledge";
 
 const EXECUTOR_HANDLERS: Record<TurnExecutorId, (req: NextRequest) => Promise<Response>> = {
   unidades: unidadesPost,
@@ -116,6 +117,9 @@ const GUIA_PUNTOS_INTERES_SUFFIX =
 const GUIA_ARTICULOS_UNSUPPORTED_SUFFIX =
   " Con módulo Artículos (stock/remitos/inventario): SIEMPRE esta tool — devolverá límite honesto. NUNCA improvises otro módulo ni digas pasos inventados.";
 
+const GUIA_UTILIDADES_BLOQUE2_SUFFIX =
+  " Con Utilidades — Bloque 2 (Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades, Remitos y Remitos hormigonera) habilitado: SIEMPRE esta tool para guías de esas pantallas. No ejecutes altas, envíos, eliminaciones ni descargas por chat.";
+
 const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
   type: "function",
   function: {
@@ -132,6 +136,7 @@ export function buildAtilioAgentTools(
 ): OpenAiToolDef[] {
   const cisternasOn = isCisternasKbEnabled();
   const combustibleOn = isCombustibleKbEnabled();
+  const utilidadesBloque2On = isUtilidadesBloque2KbEnabled();
   const base: OpenAiToolDef[] = BASE_AGENT_TOOLS.map((t) => {
     if (t.function.name !== "guia_informativa") return t;
     let description = t.function.description;
@@ -141,6 +146,7 @@ export function buildAtilioAgentTools(
     description += GUIA_HOJAS_RUTA_SUFFIX;
     description += GUIA_PUNTOS_INTERES_SUFFIX;
     description += GUIA_ARTICULOS_UNSUPPORTED_SUFFIX;
+    if (utilidadesBloque2On) description += GUIA_UTILIDADES_BLOQUE2_SUFFIX;
     if (description === t.function.description) return t;
     return {
       ...t,

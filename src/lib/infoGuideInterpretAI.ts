@@ -7,6 +7,7 @@
  * Combustible: solo si WARA_COMBUSTIBLE_KB_ENABLED=true.
  * Hojas de ruta: reconocimiento siempre; entrega si WARA_HOJAS_RUTA_KB_ENABLED=true.
  * Puntos de interés: reconocimiento siempre; entrega si WARA_PUNTOS_INTERES_KB_ENABLED=true.
+ * Utilidades — Bloque 2: clasificación y entrega solo si WARA_UTILIDADES_BLOQUE2_KB_ENABLED=true.
  */
 import OpenAI from "openai";
 import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -48,6 +49,11 @@ import {
   listTransporteArticleCatalog,
 } from "@/lib/transportePublicoKnowledge";
 import {
+  UTILIDADES_BLOQUE2_ARTICLES,
+  isUtilidadesBloque2KbEnabled,
+  listUtilidadesBloque2ArticleCatalog,
+} from "@/lib/utilidadesBloque2Knowledge";
+import {
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
 } from "@/lib/waraApi";
@@ -70,7 +76,8 @@ export type PlatformGuideKind =
   | "cisternas"
   | "combustible"
   | "hojas_de_ruta"
-  | "puntos_de_interes";
+  | "puntos_de_interes"
+  | "utilidades_bloque_2";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -99,10 +106,11 @@ function cacheKey(
   combustibleOn: boolean,
   hojasRutaOn: boolean,
   puntosInteresOn: boolean,
+  utilidadesBloque2On: boolean,
   lastGuideKind?: string | null,
 ): string {
   const lg = lastGuideKind ?? "";
-  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}::lg=${lg}::${selectionText.trim()}::${threadText.slice(-400)}`;
+  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}${utilidadesBloque2On ? "u21" : "u20"}::lg=${lg}::${selectionText.trim()}::${threadText.slice(-400)}`;
 }
 
 export function isPlatformKbLlmInterpretEnabled(): boolean {
@@ -118,6 +126,7 @@ function allowedGuideKinds(): readonly string[] {
   const kinds: string[] = [...GUIDE_KINDS_BASE];
   if (isCisternasKbEnabled()) kinds.push("cisternas");
   if (isCombustibleKbEnabled()) kinds.push("combustible");
+  if (isUtilidadesBloque2KbEnabled()) kinds.push("utilidades_bloque_2");
   // Reconocimiento siempre; la entrega de hr-*/pi-* se gatea aparte.
   kinds.push("hojas_de_ruta");
   kinds.push("puntos_de_interes");
@@ -131,7 +140,8 @@ function isArticleBackedGuide(kind: PlatformGuideKind | null): boolean {
     kind === "combustible" ||
     kind === "mantenimiento" ||
     kind === "hojas_de_ruta" ||
-    kind === "puntos_de_interes"
+    kind === "puntos_de_interes" ||
+    kind === "utilidades_bloque_2"
   );
 }
 
@@ -140,6 +150,7 @@ function buildSystemPrompt(): string {
   const combustibleOn = isCombustibleKbEnabled();
   const hojasRutaCorpusOn = isHojasRutaKbEnabled();
   const puntosInteresCorpusOn = isPuntosInteresKbEnabled();
+  const utilidadesBloque2On = isUtilidadesBloque2KbEnabled();
   const kindParts = [
     '"opciones"',
     '"unidades"',
@@ -148,6 +159,7 @@ function buildSystemPrompt(): string {
   ];
   if (cisternasOn) kindParts.push('"cisternas"');
   if (combustibleOn) kindParts.push('"combustible"');
+  if (utilidadesBloque2On) kindParts.push('"utilidades_bloque_2"');
   kindParts.push('"hojas_de_ruta"');
   kindParts.push('"puntos_de_interes"');
   kindParts.push("null");
@@ -162,6 +174,7 @@ function buildSystemPrompt(): string {
     combustibleOn ? "Combustible" : null,
     "Hojas de ruta",
     "Puntos de interés",
+    utilidadesBloque2On ? "Utilidades — Bloque 2" : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -245,6 +258,20 @@ CONTINUIDAD: historial de Puntos de interés + seguimiento de ese módulo → gu
 ${puntosInteresDeliveryBlock}
 `;
 
+  const utilidadesBloque2Block = utilidadesBloque2On
+    ? `
+guideKind utilidades_bloque_2: módulos Utilidades→Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades, Remitos y Remitos hormigonera.
+FRONTERAS:
+- “Compartir posición” como crear/copiar/editar links temporales → utilidades_bloque_2. Preguntar dónde está/última posición/estado GPS de una unidad → continue_normal, NO guía.
+- Remitos y Remitos hormigonera → utilidades_bloque_2. Cargas/descargas de viaje y puntos/traza → hojas_de_ruta.
+- “Auditoría” como pantalla/log de WARA → utilidades_bloque_2. Reclamo, incidente o pedido de asesor → continue_normal.
+- Pedir enviar comunicado, guardar/eliminar algo o generar un remito → need=execute, executionRequest=true; no implica capacidad real.
+- Novedades tiene funcionamiento pendiente: no inventar causa ni pasos.
+articleIds: solo catálogo_utilidades_bloque_2 (prefijo u2-, 0–3). executionRequest puede incluir "u2-ejecucion-no-disponible".
+CONTINUIDAD: historial explícito de uno de estos nueve módulos + seguimiento informativo → utilidades_bloque_2.
+`
+    : "";
+
   return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
 Devolvé SOLO JSON válido:
 {
@@ -283,7 +310,7 @@ executionRequest en mantenimiento: articleIds puede incluir "mt-ejecucion-no-dis
 Continuá el hilo de mantenimiento: “¿y después dónde la sigo?”, preguntas de OT/estados/paneles tras una guía de mantenimiento → guideKind=mantenimiento (no unidades).
 NO confundir "etapas" de transporte con consulta GPS de una unidad.
 NO confundir pedido de ejecución con capacidad real: executionRequest=true; articleIds puede incluir "tp-ejecucion-no-disponible".
-${cisternasBlock}${combustibleBlock}${hojasRutaBlock}${puntosInteresBlock}
+${cisternasBlock}${combustibleBlock}${hojasRutaBlock}${puntosInteresBlock}${utilidadesBloque2Block}
 articleIds transporte: solo IDs del catálogo_transporte (0–3). Vacío si guideKind no es transporte_publico.
 Nunca inventes IDs. Si status needs_validation, podés usarlo con cautela; no uses artículos future.
 Respetá restrictions de cada artículo: no afirmes lo no confirmado.
@@ -366,12 +393,14 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     const cbIds = new Set(listCombustibleArticleCatalog().map((a) => a.id));
     const hrIds = new Set(listHojasRutaArticleCatalog().map((a) => a.id));
     const piIds = new Set(listPuntosInteresArticleCatalog().map((a) => a.id));
+    const u2Ids = new Set(listUtilidadesBloque2ArticleCatalog().map((a) => a.id));
     const mtIds = new Set(listMantenimientoArticleCatalog().map((a) => a.id));
     const tpArticles = articleIds.filter((id) => tpIds.has(id));
     const csArticles = articleIds.filter((id) => csIds.has(id));
     const cbArticles = articleIds.filter((id) => cbIds.has(id));
     const hrArticles = articleIds.filter((id) => hrIds.has(id));
     const piArticles = articleIds.filter((id) => piIds.has(id));
+    const u2Articles = articleIds.filter((id) => u2Ids.has(id));
     const mtArticles = articleIds.filter((id) => mtIds.has(id));
     const hojasCorpusOn = isHojasRutaKbEnabled();
     const puntosCorpusOn = isPuntosInteresKbEnabled();
@@ -382,6 +411,13 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "puntos_de_interes") {
       articleIds = puntosCorpusOn ? piArticles : [];
+      route = promoteArticleGuide(need, route);
+    } else if (
+      guideKind === "utilidades_bloque_2" &&
+      isUtilidadesBloque2KbEnabled() &&
+      u2Articles.length
+    ) {
+      articleIds = u2Articles;
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "combustible" && isCombustibleKbEnabled() && cbArticles.length) {
       articleIds = cbArticles;
@@ -402,6 +438,10 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     } else if (piArticles.length) {
       articleIds = puntosCorpusOn ? piArticles : [];
       guideKind = "puntos_de_interes";
+      route = promoteArticleGuide(need, route);
+    } else if (u2Articles.length && isUtilidadesBloque2KbEnabled()) {
+      articleIds = u2Articles;
+      guideKind = "utilidades_bloque_2";
       route = promoteArticleGuide(need, route);
     } else if (cbArticles.length && isCombustibleKbEnabled()) {
       articleIds = cbArticles;
@@ -554,6 +594,11 @@ function allCatalogLabels(): CatalogLabelHit[] {
   // Labels HR/PI siempre: ayudan al reconocimiento; la entrega de cuerpos sigue gated.
   out.push(...extractCatalogLabels("hojas_de_ruta", HOJAS_RUTA_ARTICLES));
   out.push(...extractCatalogLabels("puntos_de_interes", PUNTOS_INTERES_ARTICLES));
+  if (isUtilidadesBloque2KbEnabled()) {
+    out.push(
+      ...extractCatalogLabels("utilidades_bloque_2", UTILIDADES_BLOQUE2_ARTICLES),
+    );
+  }
   if (isCombustibleKbEnabled()) {
     out.push(...extractCatalogLabels("combustible", COMBUSTIBLE_ARTICLES));
   }
@@ -1133,6 +1178,69 @@ function correctPuntosInteresCatalogTopicMisroute(
 }
 
 /**
+ * Fallback offline acotado a nombres explícitos de los nueve módulos.
+ * Solo existe con el flag encendido; apagado no modifica el routing vigente.
+ */
+function correctUtilidadesBloque2TopicMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+): PlatformKnowledgeInterpret {
+  if (!isUtilidadesBloque2KbEnabled()) return interpret;
+  const norm = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!norm || norm.length > 240) return interpret;
+
+  const exactModulePick = /^(?:modulo(?: de)? |utilidades )?(?:acoplados|auditoria|calculador de recorridos|comunicador|comunicados|compartir posicion|cuestionarios|novedades|remitos|remitos hormigonera)$/.test(
+    norm,
+  );
+  const moduleContext =
+    /\b(utilidades|modulo|pantalla|seccion|menu|wara|como|donde|crear|editar|eliminar|guardar|descargar|exportar|filtro|error|no abre|no aparece)\b/.test(
+      norm,
+    );
+  if (!exactModulePick && !moduleContext) return interpret;
+
+  let articleId: string | null = null;
+  if (/\bremitos?\s+hormigonera\b/.test(norm)) articleId = "u2-remitos-hormigonera";
+  else if (/\bremitos?\b/.test(norm)) articleId = "u2-remitos";
+  else if (/\bcalculador\s+de\s+recorridos\b/.test(norm))
+    articleId = "u2-calculador-recorridos";
+  else if (/\bcompartir\s+posicion\b/.test(norm)) articleId = "u2-compartir-posicion";
+  else if (/\bcuestionarios?\b/.test(norm)) articleId = "u2-cuestionarios";
+  else if (/\bcomunicador\b|\bcomunicados?\b/.test(norm)) articleId = "u2-comunicador";
+  else if (/\bacoplados?\b/.test(norm)) articleId = "u2-acoplados";
+  else if (/\bauditoria\b/.test(norm)) articleId = "u2-auditoria";
+  else if (/\bnovedades\b/.test(norm)) articleId = "u2-novedades";
+  if (!articleId) return interpret;
+
+  // La autoridad GPS conserva preguntas por posición actual de una unidad antes de esta capa.
+  if (
+    articleId === "u2-compartir-posicion" &&
+    /\b(donde esta|ubicacion actual|ultima posicion|estado gps|ver la unidad)\b/.test(norm) &&
+    !/\b(link|enlace|compartir)\b/.test(norm)
+  ) {
+    return interpret;
+  }
+
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "utilidades_bloque_2",
+    need: interpret.need === "execute" ? "execute" : "procedure",
+    articleIds: [articleId],
+    clarifyQuestion: null,
+    executionRequest: interpret.need === "execute",
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|u2_explicit_module_guard`
+      : "u2_explicit_module_guard",
+  };
+}
+
+/**
  * Flag off: reconoce guideKind=puntos_de_interes pero no entrega corpus pi-*.
  */
 function normalizePuntosInteresDisabledDelivery(
@@ -1254,6 +1362,7 @@ export function applyPlatformGuideInterpretGuards(
   next = correctHojaDeNounMisroute(next, selectionText);
   next = correctHojasRutaCatalogTopicMisroute(next, selectionText);
   next = correctPuntosInteresCatalogTopicMisroute(next, selectionText);
+  next = correctUtilidadesBloque2TopicMisroute(next, selectionText);
   next = correctCatalogLabelMisroute(next, selectionText);
   next = correctHojasRutaContinuityMisroute(
     next,
@@ -1323,6 +1432,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const combustibleOn = isCombustibleKbEnabled();
   const hojasRutaCorpusOn = isHojasRutaKbEnabled();
   const puntosInteresCorpusOn = isPuntosInteresKbEnabled();
+  const utilidadesBloque2On = isUtilidadesBloque2KbEnabled();
   const key = cacheKey(
     text,
     threadText,
@@ -1330,6 +1440,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     combustibleOn,
     hojasRutaCorpusOn,
     puntosInteresCorpusOn,
+    utilidadesBloque2On,
     opts.lastGuideKind,
   );
   const cached = interpretCache.get(key);
@@ -1342,6 +1453,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const catalogCb = listCombustibleArticleCatalog();
   const catalogHr = listHojasRutaArticleCatalog();
   const catalogPi = listPuntosInteresArticleCatalog();
+  const catalogU2 = listUtilidadesBloque2ArticleCatalog();
   const catalogMt = listMantenimientoArticleCatalog();
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const userPayload: Record<string, unknown> = {
@@ -1356,6 +1468,9 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     catalogo_puntos_interes: catalogPi,
     puntos_interes_corpus_enabled: puntosInteresCorpusOn,
   };
+  if (utilidadesBloque2On) {
+    userPayload.catalogo_utilidades_bloque_2 = catalogU2;
+  }
   if (cisternasOn) {
     userPayload.catalogo_cisternas = catalogCs;
   }
@@ -1488,6 +1603,13 @@ export function buildPlatformGuideClarifyOrLimitMessage(
       return [
         "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
         "Por este chat no puedo crear, editar ni importar puntos de interés en tu cuenta.",
+        "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
+      ].join("\n");
+    }
+    if (interpret.guideKind === "utilidades_bloque_2") {
+      return [
+        "Puedo explicarte cómo hacerlo en la plataforma o ayudarte a revisar qué puede estar fallando.",
+        "Por este chat no puedo crear, editar, eliminar, guardar, enviar ni descargar elementos de esos módulos.",
         "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
       ].join("\n");
     }

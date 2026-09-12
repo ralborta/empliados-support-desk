@@ -36,6 +36,7 @@ const bodySchema = z
         "combustible",
         "hojas_de_ruta",
         "puntos_de_interes",
+        "utilidades_bloque_2",
       ])
       .optional(),
     articleIds: z.array(z.string()).optional(),
@@ -166,6 +167,9 @@ export async function POST(req: NextRequest) {
   const { isCombustibleKbEnabled } = await import("@/lib/combustibleKnowledge");
   const { isHojasRutaKbEnabled } = await import("@/lib/hojasRutaKnowledge");
   const { isPuntosInteresKbEnabled } = await import("@/lib/puntosInteresKnowledge");
+  const { isUtilidadesBloque2KbEnabled } = await import(
+    "@/lib/utilidadesBloque2Knowledge"
+  );
   const requestedGuide = parsed.data.guide;
   const cisternasGuideIgnored =
     requestedGuide === "cisternas" && !isCisternasKbEnabled();
@@ -175,8 +179,11 @@ export async function POST(req: NextRequest) {
     requestedGuide === "hojas_de_ruta" && !isHojasRutaKbEnabled();
   const puntosInteresCorpusOff =
     requestedGuide === "puntos_de_interes" && !isPuntosInteresKbEnabled();
+  const utilidadesBloque2GuideIgnored =
+    requestedGuide === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled();
   // Cisternas/Combustible: flag off = ignorar kind. HR/PI: reconocer kind aunque corpus off.
-  const optInGuideIgnored = cisternasGuideIgnored || combustibleGuideIgnored;
+  const optInGuideIgnored =
+    cisternasGuideIgnored || combustibleGuideIgnored || utilidadesBloque2GuideIgnored;
   const guide = optInGuideIgnored ? undefined : requestedGuide;
   const kind = guide ?? detectInfoGuideKind(rawText);
   const [previousMessage, threadText] = await Promise.all([
@@ -189,6 +196,8 @@ export async function POST(req: NextRequest) {
     ? "cisternas_flag_off_ignored_guide"
     : combustibleGuideIgnored
       ? "combustible_flag_off_ignored_guide"
+      : utilidadesBloque2GuideIgnored
+        ? "utilidades_bloque2_flag_off_ignored_guide"
       : hojasRutaCorpusOff
         ? "hojas_ruta_module_disabled"
         : puntosInteresCorpusOff
