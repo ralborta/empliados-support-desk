@@ -1106,7 +1106,12 @@ export async function POST(req: NextRequest) {
     });
     await setPendingAction(prisma, rawPhone, "certificados", {
       summary: message,
-      payload: { plate, companyName: company },
+      payload: {
+        stage: "confirmation_required",
+        plate,
+        companyName: company,
+        turnLayer: { activeExpectation: "confirmo" },
+      },
     });
     if (isConversationNotebookEnabled()) {
       await patchSessionNotebook(

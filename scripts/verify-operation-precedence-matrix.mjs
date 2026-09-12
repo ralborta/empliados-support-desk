@@ -343,6 +343,14 @@ const mandatory = [
     match: true,
     risk: null,
   },
+  {
+    name: "8. Cert pendiente + mismo certificado → normal, no fork",
+    pending: pendingCert("confirmo"),
+    text: "necesito el certificado de la 300-111",
+    decision: "normal_route",
+    match: false,
+    risk: null,
+  },
 ];
 
 for (const c of mandatory) {

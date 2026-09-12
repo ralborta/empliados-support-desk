@@ -9,6 +9,7 @@
  * 5. Maint + unitRef ambiguo → aclaración executor mantenimiento
  * 6. Fallo persistir fork → sin menú falso; pending intacto
  * 7. “Seguir” → restaura expectativa exacta del módulo original
+ * 8. CONFIRMO legacy de certificado gana al overlay LLM
  *
  * Uso: npx tsx scripts/verify-operation-fork-multi-module-e2e.mjs
  */
@@ -362,6 +363,33 @@ console.log("=== 7. Seguir → restaura expectativa exacta del módulo original 
   assert.equal(readTurnLayer(pending)?.activeExpectation, "detail");
   assert.equal(readTurnLayer(pending)?.forkPending, false);
   assert.equal(pending?.payload?.patente, "AG228NZ");
+}
+
+console.log("=== 8. CONFIRMO certificado legacy → certificados antes que guías ===");
+{
+  seedMessages(
+    [
+      "📋 *Confirmar certificado*",
+      "🚗 Unidad: *NKL 952*",
+      "🏢 Empresa: *El Cacique S.A.*",
+      "¿Confirmás la solicitud a WARA?",
+      "➡️ Respondé *CONFIRMO* o *CANCELAR*.",
+    ].join("\n"),
+  );
+  customerData.pendingAction = {
+    type: "certificados",
+    createdAt: new Date().toISOString(),
+    summary: "Confirmar certificado NKL952",
+    // Forma histórica que infería erróneamente activeExpectation=unit.
+    payload: { plate: "NKL952", companyName: "El Cacique S.A." },
+  };
+  const res = await runTurnExecutorPhase({
+    rawPhone: PHONE,
+    selectionText: "Confirmo",
+    apiKey: API_KEY,
+  });
+  assert.equal(res.executor, "certificados");
+  assert.doesNotMatch(res.message, /cobertura, monitoreo o constancia/i);
 }
 
 globalThis.fetch = originalFetch;

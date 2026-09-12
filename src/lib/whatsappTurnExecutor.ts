@@ -1521,6 +1521,64 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // La confirmación operativa es una transición determinista: debe resolverse antes
+  // que cualquier overlay LLM de guías. De lo contrario, "Confirmo" puede ser
+  // reinterpretado como una consulta informativa ambigua y nunca llegar al backend.
+  if (
+    hasAnyPendingConfirmation(threadCtx.classificationThread) &&
+    classifyConfirmoPhrase(selectionText) === "clarify"
+  ) {
+    return {
+      message: buildConfirmoClarifyReply(),
+      executor:
+        pendingKind === "odometro"
+          ? "odometro"
+          : pendingKind === "certificados"
+            ? "certificados"
+            : pendingKind === "mantenimiento"
+              ? "mantenimiento"
+              : "info_guides",
+      ok: true,
+    };
+  }
+
+  const pendingConfirmExecutor = resolvePendingConfirmationExecutor(
+    threadCtx.classificationThread,
+    selectionText,
+  );
+  const pendingTramiteType =
+    pendingAction?.type === "odometro" ||
+    pendingAction?.type === "certificados" ||
+    pendingAction?.type === "mantenimiento"
+      ? pendingAction.type
+      : null;
+  if (
+    looksLikePendingTramiteAffirmation(selectionText) &&
+    (pendingConfirmExecutor || (pendingTramiteType && pendingAction?.payload))
+  ) {
+    // Thread CONFIRMO (cert/odo) manda sobre pendingAction stale de mantenimiento.
+    const executor =
+      pendingConfirmExecutor ??
+      (hasPendingCertificateConfirmation(threadCtx.classificationThread)
+        ? "certificados"
+        : hasPendingOdometerConfirmation(threadCtx.classificationThread)
+          ? "odometro"
+          : pendingTramiteType!);
+    const execResult = await invokeExecutor(executor, rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage) {
+      return { message: execMessage, executor, ok: execOk };
+    }
+    // Nunca silencio ante CONFIRMO: si el executor no devolvió texto, igual contestamos.
+    return {
+      message:
+        "Tengo el registro pendiente pero no pude cerrarlo ahora. Respondé CONFIRMO de nuevo o decime qué corregir.",
+      executor,
+      ok: false,
+    };
+  }
+
   // Pregunta informativa de plataforma durante trámite: overlay LLM (no confirma ni cancela).
   if (
     hasPendingWrite &&
@@ -1760,63 +1818,6 @@ export async function runTurnExecutorPhase(params: {
     if (execMessage || !executorSkippedSilently(execResult)) {
       return { message: execMessage, executor: "odometro", ok: execOk };
     }
-  }
-
-  // Confirmación de trámite: el backend registra con los datos guardados — no dejar que
-  // la IA reinterprete "Confirmo" / "esa está bien" (seguridad operativa).
-  if (
-    hasAnyPendingConfirmation(threadCtx.classificationThread) &&
-    classifyConfirmoPhrase(selectionText) === "clarify"
-  ) {
-    return {
-      message: buildConfirmoClarifyReply(),
-      executor:
-        pendingKind === "odometro"
-          ? "odometro"
-          : pendingKind === "certificados"
-            ? "certificados"
-            : pendingKind === "mantenimiento"
-              ? "mantenimiento"
-              : "info_guides",
-      ok: true,
-    };
-  }
-
-  const pendingConfirmExecutor = resolvePendingConfirmationExecutor(
-    threadCtx.classificationThread,
-    selectionText,
-  );
-  const pendingTramiteType =
-    pendingAction?.type === "odometro" ||
-    pendingAction?.type === "certificados" ||
-    pendingAction?.type === "mantenimiento"
-      ? pendingAction.type
-      : null;
-  if (
-    looksLikePendingTramiteAffirmation(selectionText) &&
-    (pendingConfirmExecutor || (pendingTramiteType && pendingAction?.payload))
-  ) {
-    // Thread CONFIRMO (cert/odo) manda sobre pendingAction stale de mantenimiento.
-    const executor =
-      pendingConfirmExecutor ??
-      (hasPendingCertificateConfirmation(threadCtx.classificationThread)
-        ? "certificados"
-        : hasPendingOdometerConfirmation(threadCtx.classificationThread)
-          ? "odometro"
-          : pendingTramiteType!);
-    const execResult = await invokeExecutor(executor, rawPhone, selectionText, apiKey);
-    const execMessage = messageFromPayload(execResult);
-    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (execMessage) {
-      return { message: execMessage, executor, ok: execOk };
-    }
-    // Nunca silencio ante CONFIRMO: si el executor no devolvió texto, igual contestamos.
-    return {
-      message:
-        "Tengo el registro pendiente pero no pude cerrarlo ahora. Respondé CONFIRMO de nuevo o decime qué corregir.",
-      executor,
-      ok: false,
-    };
   }
 
   // Confirmación en odómetro solo si hay resumen CONFIRMO / pending real (no "sí" genérico mid-flujo).

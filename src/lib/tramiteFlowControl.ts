@@ -163,6 +163,20 @@ export function buildInconclusiveTramiteResumePrompt(
   if (confirmKind) {
     return `¿Seguimos? ${buildPendingConfirmStillWaitingReminder(confirmKind)}`;
   }
+  if (pendingAction?.type === "certificados") {
+    const stage = String(pendingAction.payload?.stage ?? "").toLowerCase();
+    const layer = pendingAction.payload?.turnLayer;
+    const expectation =
+      layer && typeof layer === "object"
+        ? String((layer as { activeExpectation?: unknown }).activeExpectation ?? "")
+        : "";
+    const hasResolvedUnit =
+      typeof pendingAction.payload?.plate === "string" &&
+      pendingAction.payload.plate.trim().length > 0;
+    if (stage.includes("confirm") || expectation === "confirmo" || hasResolvedUnit) {
+      return `¿Seguimos? ${buildPendingConfirmStillWaitingReminder("certificados")}`;
+    }
+  }
   if (threadAwaitingHorometerKmValue(threadText)) {
     return "¿Seguimos con el cambio de horómetro? Pasame el valor en horas y la fecha/hora de la lectura.";
   }

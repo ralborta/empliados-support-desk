@@ -196,8 +196,10 @@ export function classifyIncomingActionRisk(
   const explicitMeter =
     looksLikeExplicitOdometerUpdateRequest(text) || looksLikeHorometerOnlyIntent(text);
 
-  if (explicitCert && pendingOperation !== "certificados") return "write";
-  if (explicitMaint && pendingOperation !== "mantenimiento") return "write";
+  // Repetir "necesito el certificado..." durante ese mismo trámite es continuidad,
+  // no un write incompatible. Mantenimiento conserva su semántica de nuevo pedido.
+  if (explicitCert) return pendingOperation === "certificados" ? null : "write";
+  if (explicitMaint) return "write";
   if (
     explicitMeter &&
     pendingOperation !== "meter_odometro" &&
@@ -209,7 +211,6 @@ export function classifyIncomingActionRisk(
   // Fork aquí secuestraba "Quiero cambiar el horómetro" con pending vivo → fork_choice
   // y nunca persistía unit/km (bug prod 2026-08-26 / E2E agent).
   if (explicitMeter) return null;
-  if (explicitCert || explicitMaint) return "write";
 
   return null;
 }
@@ -313,6 +314,15 @@ export function classifyOperationPrecedence(params: {
     params.selectionText,
     params.threadText ?? "",
   );
+  if (
+    pendingOperation === "certificados" &&
+    activeExpectation !== "unit" &&
+    looksLikeCertificateKeyword(params.selectionText)
+  ) {
+    // Repetición o reformulación del mismo certificado: dejarla seguir al executor
+    // dueño. Una unidad incluida acá no abre una aclaración lateral GPS/trámite.
+    structuredField = null;
+  }
   if (
     activeExpectation === "unit" &&
     structuredField === "meter_value" &&

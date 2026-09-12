@@ -64,6 +64,22 @@ check(
   "executor odometro",
   resolveExecutorForInconclusiveTramite(odoMidFlow, null) === "odometro",
 );
+const certPendingConfirm = {
+  type: "certificados",
+  createdAt: new Date().toISOString(),
+  summary: "Confirmar certificado NKL952",
+  payload: {
+    stage: "confirmation_required",
+    plate: "NKL952",
+    turnLayer: { activeExpectation: "confirmo" },
+  },
+};
+check(
+  "resume certificado confirmado no vuelve a pedir unidad",
+  /respondé CONFIRMO/i.test(
+    buildInconclusiveTramiteResumePrompt("hilo sin tarjeta reciente", certPendingConfirm),
+  ),
+);
 
 console.log("\n▶ Tras cancelar, dato nuevo sigue siendo trámite (no GPS)");
 const afterCancelThread = [
