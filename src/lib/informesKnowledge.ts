@@ -1583,6 +1583,247 @@ export const INFORMES_ARTICLES: InformesKnowledgeArticle[] = [
     needsValidation: ["Columnas con datos"],
     status: "needs_validation",
   }
+,
+  {
+    id: "inf-gn-acoplados",
+    category: "generales",
+    reportId: "inf-gn-acoplados",
+    title: "Acoplados",
+    summary: "Informe de asociación unidad–acoplado; consolidar por unidad o acoplado.",
+    body: [
+      "Ruta: Informes → Acoplados (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; selector de acoplado; Consolidar por unidad/acoplado; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Por nombre y por los campos de filtro disponibles (“Consolidar por: unidad/acoplado”), este",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "1" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; selector de acoplado; Consolidar por unidad/acoplado; rango de fechas (atajos/calendario) y horas; botón Consultar"
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-adas-dsm",
+    category: "generales",
+    reportId: "inf-gn-adas-dsm",
+    title: "ADAS / DSM",
+    summary: "Eventos ADAS/DSM de asistencia y monitoreo del conductor.",
+    body: [
+      "Ruta: Informes → ADAS / DSM (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Por el nombre, este informe relevaría los eventos de los sistemas ADAS (Advanced Driver",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "2" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar"
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-alarmas",
+    category: "generales",
+    reportId: "inf-gn-alarmas",
+    title: "Alarmas",
+    summary: "Informe de alarmas; filtros principalmente de fecha/hora.",
+    body: [
+      "Ruta: Informes → Alarmas (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Por su nombre, este informe lista las alarmas generadas por las unidades en el período",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "3" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar"
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-alertas-adas-dsm",
+    category: "generales",
+    reportId: "inf-gn-alertas-adas-dsm",
+    title: "Alertas ADAS/DSM",
+    summary: "Alertas específicas ADAS/DSM (distinto del listado ADAS/DSM).",
+    body: [
+      "Ruta: Informes → Alertas ADAS/DSM (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Sería el informe de detalle de alertas puntuales generadas por los sistemas ADAS/DSM ,",
+      "Distinto del informe ADAS / DSM (listado general de eventos vs alertas específicas).",
+      "Mensaje observado: “Ingrese desde qué fecha\ndesea realizar la consulta.”.",
+      "Mensaje observado: “Ingrese desde qué fecha desea realizar la consulta.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "4" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese desde qué fecha\ndesea realizar la consulta. | Ingrese desde qué fecha desea realizar la consulta."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-conducta-unidad",
+    category: "generales",
+    reportId: "inf-gn-conducta-unidad",
+    title: "Conducta por unidad",
+    summary: "Conducta/eventos de manejo por unidad.",
+    body: [
+      "Ruta: Informes → Conducta por unidad (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Por su nombre, este informe mediría el comportamiento/estilo de conducción por unidad — típicamente puntajes o conteos de eventos como aceleraciones bruscas, frenadas bruscas,",
+      "Mensaje observado: “Ingrese desde qué fecha desea\nrealizar la consulta.”.",
+      "Mensaje observado: “Ingrese desde qué fecha desea realizar la consulta.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "5" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese desde qué fecha desea\nrealizar la consulta. | Ingrese desde qué fecha desea realizar la consulta."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-cumplimiento-rondas",
+    category: "generales",
+    reportId: "inf-gn-cumplimiento-rondas",
+    title: "Cumplimiento de rondas",
+    summary: "Cumplimiento de rondas planificadas.",
+    body: [
+      "Ruta: Informes → Cumplimiento de rondas (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Este informe releva el cumplimiento de rondas de vigilancia/seguridad : registra si los",
+      "Mensaje observado: “Ingrese desde qué fecha desea\nrealizar la consulta.”.",
+      "Mensaje observado: “Ingrese desde qué fecha desea realizar la consulta.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "6" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese desde qué fecha desea\nrealizar la consulta. | Ingrese desde qué fecha desea realizar la consulta."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-detenciones",
+    category: "generales",
+    reportId: "inf-gn-detenciones",
+    title: "Detenciones",
+    summary: "Detenciones de unidades en un período.",
+    body: [
+      "Ruta: Informes → Detenciones (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Relevaría las detenciones (paradas) de las unidades durante el período: presumiblemente",
+      "Mensaje observado: “Ingrese desde qué fecha desea realizar\nla consulta.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "7" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese desde qué fecha desea realizar\nla consulta."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-detalle-cuestionario",
+    category: "generales",
+    reportId: "inf-gn-detalle-cuestionario",
+    title: "Detalle de cuestionario",
+    summary: "Detalle de respuestas de cuestionarios.",
+    body: [
+      "Ruta: Informes → Detalle de cuestionario (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Relevaría el detalle de las respuestas de un cuestionario/checklist completado (por ejem-",
+      "Mensaje observado: “Seleccione un filtro.”.",
+      "Mensaje observado: “Seleccione un filtro.”."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "8" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Seleccione un filtro. | Seleccione un filtro."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-disponibilidad-unidades",
+    category: "generales",
+    reportId: "inf-gn-disponibilidad-unidades",
+    title: "Disponibilidad de unidades",
+    summary: "Disponibilidad/estimación de unidades.",
+    body: [
+      "Ruta: Informes → Disponibilidad de unidades (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Este informe cruza unidades con puntos de interés (partida/llegada) : relevaría la disponi-",
+      "Mensaje observado: “Seleccione al menos\nuna unidad.”.",
+      "Mensaje observado: “Seleccione al menos una unidad.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "9" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Seleccione al menos\nuna unidad. | Seleccione al menos una unidad."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-graficas-can",
+    category: "generales",
+    reportId: "inf-gn-graficas-can",
+    title: "Gráficas CAN bus",
+    summary: "Gráficas de señales CAN bus de una unidad.",
+    body: [
+      "Ruta: Informes → Gráficas CAN bus (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Genera gráficas de las variables del bus CAN del vehículo (velocidad, revoluciones del",
+      "Mensaje observado: “Seleccione una unidad.”.",
+      "Mensaje observado: “Seleccione una unidad.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "10" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Seleccione una unidad. | Seleccione una unidad."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  }
 ];
 
 export function listInformesArticleCatalog(options?: {

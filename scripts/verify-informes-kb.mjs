@@ -397,6 +397,33 @@ try {
   process.env.WARA_INFORMES_KB_SECTIONS = "";
   assert.equal(getInformesArticlesByIds(["inf-tp-resumen-servicio"]).length, 0);
 
+  // Ciclo 6: generales (entrega parcial por lotes)
+  process.env.WARA_INFORMES_KB_SECTIONS = "generales";
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-gn-")).length >= 10);
+  assert.ok(getInformesArticlesByIds(["inf-gn-historial"]).some((a) => a.id === "inf-gn-historial") ||
+    getInformesArticlesByIds(["inf-gn-acoplados"]).some((a) => a.id === "inf-gn-acoplados"));
+  const gnGuard = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-idx-generales"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "generales",
+    },
+    "¿Cómo veo el informe de acoplados?",
+    "",
+  );
+  assert.ok(
+    gnGuard.articleIds.some((id) => id.startsWith("inf-gn-") || id === "inf-idx-generales"),
+    `expected inf-gn-* got ${JSON.stringify(gnGuard.articleIds)}`,
+  );
+  process.env.WARA_INFORMES_KB_SECTIONS = "";
+  assert.equal(getInformesArticlesByIds(["inf-gn-acoplados"]).length, 0);
+
   console.log("OK verify-informes-kb");
 } finally {
   restoreEnv();

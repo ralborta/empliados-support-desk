@@ -1432,6 +1432,14 @@ function inferInformesCategoryFromText(norm: string): string | null {
   if (/\bresumen(es)?\s+por\s+punto/.test(norm) || /\bentradas?\s+y\s+salidas\b/.test(norm)) {
     return "puntos";
   }
+  if (
+    /\b(acoplados|adas|dsm|alarmas|detenciones|historial|instantanea|instantánea|infracciones|ralenti|ralentí|remitos|liquidacion|liquidación|sensores?)\b/.test(
+      norm,
+    ) &&
+    /\binforme/.test(norm)
+  ) {
+    return "generales";
+  }
   if (/\bchofer/.test(norm)) return "choferes";
   if (
     /\bcargas?\s+de\s+combustible\b/.test(norm) ||

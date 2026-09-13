@@ -47,6 +47,7 @@ const hojasRutaInfOn = infCorpusOn && sections.has("hojas_ruta");
 const combustibleInfOn = infCorpusOn && sections.has("combustible");
 const mantInfOn = infCorpusOn && sections.has("mantenimiento_deposito");
 const tpInfOn = infCorpusOn && sections.has("transporte_pasajeros");
+const generalesOn = infCorpusOn && sections.has("generales");
 
 const cases = [
   {
@@ -97,6 +98,25 @@ const cases = [
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "transporte_publico",
+  },
+  {
+    id: "informe-acoplados",
+    text: "¿Cómo veo el informe de acoplados?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !generalesOn,
+    expectArticlePrefix: generalesOn ? "inf-gn-" : null,
+  },
+  {
+    id: "informe-historial-frontera-gps",
+    text: "¿Cómo abro el informe Historial del menú Informes?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !generalesOn,
+    // Puede ser inf-gn-historial o idx hasta completar el lote 6b.
+    expectArticlePrefix: generalesOn ? "inf-" : null,
   },
   {
     id: "cargar-combustible-operativo",
@@ -192,6 +212,7 @@ console.log(
     combustibleInfOn,
     mantInfOn,
     tpInfOn,
+    generalesOn,
     interpret: true,
   }),
 );
