@@ -23,6 +23,7 @@ import {
 import {
   applyPlatformGuideInterpretGuards,
   shouldRouteInterpretToInfoGuides,
+  selectInformesCatalogsForInterpret,
 } from "../src/lib/infoGuideInterpretAI.ts";
 import { resolveTurnExecutor } from "../src/lib/whatsappTurnClassifierAI.ts";
 import { parseLastInfoGuideContext } from "../src/lib/lastInfoGuideContext.ts";
@@ -78,6 +79,34 @@ try {
   assert.ok(INFORMES_ARTICLES.some((a) => a.id === "inf-mapa"));
   assert.ok(INFORMES_ARTICLES.some((a) => a.id === "inf-idx-combustible"));
   assert.equal(categoryFromInformesArticleId("inf-idx-choferes"), "choferes");
+
+  // Contrato 3 etapas: con todas las secciones on, el 1er payload NO lista las 89.
+  process.env.WARA_INFORMES_KB_ENABLED = "true";
+  process.env.WARA_INFORMES_KB_SECTIONS =
+    "generales,choferes,combustible,mantenimiento_deposito,transporte_pasajeros,hojas_ruta,puntos";
+  const catalogsAllOn = selectInformesCatalogsForInterpret({});
+  assert.ok(catalogsAllOn.structural.length >= 8);
+  assert.equal(catalogsAllOn.category, null);
+  assert.equal(catalogsAllOn.categoryCatalog, null);
+  assert.ok(
+    !catalogsAllOn.structural.some((a) => a.id.startsWith("inf-ch-") && a.id !== "inf-idx-choferes"),
+  );
+  const catalogsCont = selectInformesCatalogsForInterpret({
+    lastGuideCategory: "combustible",
+    lastGuideReportId: "inf-cb-cargas",
+  });
+  assert.equal(catalogsCont.category, "combustible");
+  assert.ok(catalogsCont.categoryCatalog?.some((a) => a.id === "inf-cb-cargas"));
+  assert.ok(
+    (catalogsCont.categoryCatalog ?? []).every(
+      (a) =>
+        a.category === "combustible" ||
+        a.category === "mapa" ||
+        a.category === "shared",
+    ),
+  );
+  delete process.env.WARA_INFORMES_KB_ENABLED;
+  delete process.env.WARA_INFORMES_KB_SECTIONS;
 
   const guideTool = buildAtilioAgentTools(false).find(
     (tool) => tool.function.name === "guia_informativa",
@@ -149,6 +178,32 @@ try {
   assert.equal(parsedLast?.reportId, null);
   assert.deepEqual(parsedLast?.articleIds, ["inf-idx-combustible"]);
 
+  // Continuidad por reportId: follow-up conserva el informe concreto.
+  const cont = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.4,
+      reason: "seed",
+    },
+    "¿qué filtros tiene?",
+    "Atilio: En Informes → Combustible → Cargas de combustible…",
+    {
+      lastGuideKind: "informes",
+      lastGuideCategory: "combustible",
+      lastGuideReportId: "inf-cb-cargas",
+      lastGuideArticleIds: ["inf-cb-cargas"],
+    },
+  );
+  assert.equal(cont.guideKind, "informes");
+  assert.equal(cont.category, "combustible");
+  // Con master off no entrega cuerpos, pero el reportId debe quedar para continuidad.
+  assert.equal(cont.reportId, "inf-cb-cargas");
+
   // Master on + sections vacío: reconoce pero no entrega detalle inf-ch-*
   process.env.WARA_INFORMES_KB_ENABLED = "true";
   process.env.WARA_INFORMES_KB_SECTIONS = "";
@@ -156,6 +211,32 @@ try {
   assert.equal(isInformesSectionEnabled("choferes"), false);
   assert.equal(getInformesArticlesByIds(["inf-ch-km"]).length, 0);
   assert.equal(getInformesArticlesByIds(["inf-idx-choferes"]).length, 0);
+
+  const contOn = applyPlatformGuideInterpretGuards(
+    {
+      route: "continue_normal",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.4,
+      reason: "seed",
+    },
+    "¿qué filtros tiene ese informe?",
+    "",
+    {
+      lastGuideKind: "informes",
+      lastGuideCategory: "choferes",
+      lastGuideReportId: "inf-ch-km",
+      lastGuideArticleIds: ["inf-ch-km"],
+    },
+  );
+  assert.equal(contOn.guideKind, "informes");
+  assert.equal(contOn.category, "choferes");
+  // Sección choferes no habilitada → no entrega, pero reportId de continuidad.
+  assert.equal(contOn.reportId, "inf-ch-km");
+  assert.equal(contOn.articleIds.length, 0);
 
   // Master on + section choferes: idx + detalle inf-ch-*; idx-combustible no; mapa/shared sí
   process.env.WARA_INFORMES_KB_SECTIONS = "choferes";

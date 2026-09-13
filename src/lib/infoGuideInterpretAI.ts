@@ -116,6 +116,10 @@ export type PlatformGuideGuardOpts = {
   lastGuideKind?: LastInfoGuideKind | null;
   /** Continuidad informes: categoría del lastInfoGuide. */
   lastGuideCategory?: string | null;
+  /** Continuidad informes: pantalla concreta (reportId). */
+  lastGuideReportId?: string | null;
+  /** Continuidad informes: artículos grounded previos. */
+  lastGuideArticleIds?: string[] | null;
 };
 
 function cacheKey(
@@ -130,10 +134,61 @@ function cacheKey(
   informesSectionsKey: string,
   lastGuideKind?: string | null,
   lastGuideCategory?: string | null,
+  lastGuideReportId?: string | null,
+  lastGuideArticleIds?: string[] | null,
 ): string {
   const lg = lastGuideKind ?? "";
   const lc = lastGuideCategory ?? "";
-  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}${utilidadesBloque2On ? "u21" : "u20"}${informesOn ? "inf1" : "inf0"}:${informesSectionsKey}::lg=${lg}::lc=${lc}::${selectionText.trim()}::${threadText.slice(-400)}`;
+  const lr = lastGuideReportId ?? "";
+  const la = (lastGuideArticleIds ?? []).join(",");
+  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}${utilidadesBloque2On ? "u21" : "u20"}${informesOn ? "inf1" : "inf0"}:${informesSectionsKey}::lg=${lg}::lc=${lc}::lr=${lr}::la=${la}::${selectionText.trim()}::${threadText.slice(-400)}`;
+}
+
+function isInformesDetailArticleId(id: string): boolean {
+  return (
+    id.startsWith("inf-") &&
+    id !== "inf-mapa" &&
+    id !== "inf-ejecucion-no-disponible" &&
+    !id.startsWith("inf-idx-") &&
+    !id.startsWith("inf-shared-")
+  );
+}
+
+function hasInformesDetailArticle(ids: string[]): boolean {
+  return ids.some((id) => isInformesDetailArticleId(id));
+}
+
+/**
+ * Catálogos Informes para el intérprete (contrato 3 etapas).
+ * Etapa 1: solo estructurales. Detalle de categoría: únicamente si ya hay category conocida
+ * (continuidad lastGuide*) — nunca dump de las 89 pantallas.
+ */
+export function selectInformesCatalogsForInterpret(opts: {
+  lastGuideCategory?: string | null;
+  lastGuideReportId?: string | null;
+}): {
+  structural: ReturnType<typeof listInformesArticleCatalog>;
+  category: string | null;
+  categoryCatalog: ReturnType<typeof listInformesArticleCatalog> | null;
+} {
+  const fromReport = opts.lastGuideReportId
+    ? categoryFromInformesArticleId(opts.lastGuideReportId)
+    : null;
+  const category =
+    (opts.lastGuideCategory &&
+    (INFORMES_CATEGORIES as readonly string[]).includes(opts.lastGuideCategory)
+      ? opts.lastGuideCategory
+      : null) ||
+    (fromReport && (INFORMES_CATEGORIES as readonly string[]).includes(fromReport)
+      ? fromReport
+      : null);
+  return {
+    structural: listInformesArticleCatalog({ structuralOnly: true }),
+    category,
+    categoryCatalog: category
+      ? listInformesArticleCatalog({ category })
+      : null,
+  };
 }
 
 export function isPlatformKbLlmInterpretEnabled(): boolean {
@@ -332,9 +387,10 @@ CONTINUIDAD: historial explícito de uno de estos nueve módulos + seguimiento i
 
   const informesDeliveryBlock = informesMasterOn
     ? `
-articleIds: solo catálogo_informes / catálogo_informes_categoria / catálogo_informes_detalle_habilitado (prefijo inf-*, 0–3). executionRequest: puede incluir "inf-ejecucion-no-disponible".
+articleIds: solo catálogo_informes (estructural) y, si viene, catálogo_informes_categoria de UNA categoría (prefijo inf-*, 0–3). executionRequest: puede incluir "inf-ejecucion-no-disponible".
+NUNCA asumas un catálogo de las 89 pantallas a la vez: primero category; el detalle de pantallas llega solo en catálogo_informes_categoria.
 Si la categoría pedida no está en secciones habilitadas: articleIds=[] + need=ambiguous + clarifyQuestion de sección deshabilitada.
-Si la sección está habilitada y el cliente nombra un informe concreto, preferí el artículo de detalle (p. ej. inf-ch-km) sobre solo el índice inf-idx-*.
+Si hay catálogo_informes_categoria y el cliente nombra un informe concreto, preferí el artículo de detalle (p. ej. inf-ch-km) sobre solo el índice inf-idx-*.
 NO inventes columnas, filtros ni pantallas pending; usá índices/shared y restrictions.
 `
     : `
@@ -348,7 +404,7 @@ ENTREGA DE CORPUS DESHABILITADA (master off o sin sección):
   const informesBlock = `
 guideKind informes: menú lateral Informes de WARA (riel derecho → Informes). Es INFORMACIÓN / consulta de reportes, NO crear ni cargar en módulos operativos.
 Elegí category entre: generales | choferes | combustible | mantenimiento_deposito | transporte_pasajeros | hojas_ruta | puntos.
-Opcional: reportId (id de pantalla inf-*) cuando el informe concreto esté claro.
+Opcional: reportId (id de pantalla inf-*) cuando el informe concreto esté claro (idealmente tras ver catálogo_informes_categoria).
 FRONTERAS (pedido operativo ≠ pedido informe):
 - Cargar/pegar tickets / validar cargas → combustible (si on). “¿Cómo veo el informe de cargas de combustible?” → informes + category combustible.
 - Crear/editar hoja de ruta → hojas_de_ruta. Informe hojas de ruta / planificación / viajes planificados → informes + category hojas_ruta.
@@ -356,7 +412,7 @@ FRONTERAS (pedido operativo ≠ pedido informe):
 - Crear mantenimiento/OT → mantenimiento. Resumen/control/tareas de mantenimiento (Informes) → informes + category mantenimiento_deposito.
 - Configurar TP/paradas/servicios → transporte_publico. Informes → Transporte de pasajeros → informes + category transporte_pasajeros.
 - Crear remito / Novedades utilidades → utilidades_bloque_2 (si on). Informe Remitos / Parte disciplinario ≠ certificado ni u2-novedades.
-CONTINUIDAD: si lastGuideKind=informes y hay category, seguí en informes con esa category (p. ej. “¿y cómo exporto?”) sin saltar a módulos operativos.
+CONTINUIDAD: si last_guide_kind=informes, conservá category y last_guide_report_id / last_guide_article_ids en follow-ups (“¿qué filtros tiene?”, “¿y cómo exporto?”) salvo que el mensaje nuevo nombre OTRO informe o categoría explícitamente.
 ${informesDeliveryBlock}
 `;
 
@@ -1648,6 +1704,8 @@ function correctInformesContinuityMisroute(
 ): PlatformKnowledgeInterpret {
   const lastKind = opts?.lastGuideKind ?? null;
   const lastCategory = opts?.lastGuideCategory ?? null;
+  const lastReportId = opts?.lastGuideReportId ?? null;
+  const lastArticleIds = opts?.lastGuideArticleIds ?? null;
   const norm = selectionText
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
@@ -1655,7 +1713,7 @@ function correctInformesContinuityMisroute(
     .replace(/\s+/g, " ")
     .trim();
   const followCue =
-    /\b(y despues|como exporto|y eso|ese informe|la misma pantalla|filtros|y como)\b/.test(
+    /\b(y despues|como exporto|y eso|ese informe|la misma pantalla|filtros|y como|que filtros|qué filtros)\b/.test(
       norm,
     );
   const follow =
@@ -1666,27 +1724,53 @@ function correctInformesContinuityMisroute(
   const category =
     interpret.category ||
     lastCategory ||
+    (lastReportId ? categoryFromInformesArticleId(lastReportId) : null) ||
     (interpret.articleIds[0] ? categoryFromInformesArticleId(interpret.articleIds[0]) : null);
+
+  const explicitNewDetail =
+    hasInformesDetailArticle(interpret.articleIds) ||
+    (interpret.reportId &&
+      isInformesDetailArticleId(interpret.reportId) &&
+      interpret.reportId !== lastReportId);
+
+  let seedIds = interpret.articleIds.length
+    ? interpret.articleIds
+    : category
+      ? [`inf-idx-${category}`, "inf-shared-export"]
+      : ["inf-mapa"];
+
+  // Follow-up sin informe nuevo explícito → conservar reportId/artículos previos.
+  if (!explicitNewDetail && lastReportId && isInformesDetailArticleId(lastReportId)) {
+    const preserved = [
+      lastReportId,
+      ...(lastArticleIds ?? []).filter((id) => id !== lastReportId),
+      "inf-shared-filtros",
+      "inf-shared-export",
+    ];
+    seedIds = preserved;
+  }
+
   const deliver =
     isInformesKbEnabled() && (!category || isInformesSectionEnabled(category))
-      ? filterDeliverableInformesArticleIds(
-          interpret.articleIds.length
-            ? interpret.articleIds
-            : category
-              ? [`inf-idx-${category}`, "inf-shared-export"]
-              : ["inf-mapa"],
-          category,
-        )
+      ? filterDeliverableInformesArticleIds(seedIds, category)
       : [];
 
-  if (
-    interpret.guideKind === "informes" &&
-    interpret.route === "info_guides"
-  ) {
+  const reportId =
+    deliver.find((id) => isInformesDetailArticleId(id)) ??
+    (explicitNewDetail ? interpret.reportId : null) ??
+    (deliver.length ? null : lastReportId) ??
+    interpret.reportId ??
+    null;
+
+  if (interpret.guideKind === "informes" && interpret.route === "info_guides") {
     return {
       ...interpret,
       category: category ?? interpret.category ?? null,
+      reportId: reportId ?? interpret.reportId ?? null,
       articleIds: deliver,
+      reason: interpret.reason
+        ? `${interpret.reason}|informes_continuity_guard`
+        : "informes_continuity_guard",
     };
   }
 
@@ -1695,6 +1779,7 @@ function correctInformesContinuityMisroute(
     route: "info_guides",
     guideKind: "informes",
     category: category ?? null,
+    reportId,
     need: interpret.need === "ambiguous" ? "procedure" : interpret.need,
     articleIds: deliver,
     clarifyQuestion: null,
@@ -1973,6 +2058,8 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   pendingActionType?: string | null;
   lastGuideKind?: LastInfoGuideKind | null;
   lastGuideCategory?: string | null;
+  lastGuideReportId?: string | null;
+  lastGuideArticleIds?: string[] | null;
 }): Promise<PlatformKnowledgeInterpret | null> {
   const text = opts.selectionText.trim();
   if (!text) return null;
@@ -1980,6 +2067,8 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const guardOpts: PlatformGuideGuardOpts = {
     lastGuideKind: opts.lastGuideKind ?? null,
     lastGuideCategory: opts.lastGuideCategory ?? null,
+    lastGuideReportId: opts.lastGuideReportId ?? null,
+    lastGuideArticleIds: opts.lastGuideArticleIds ?? null,
   };
 
   // Sin intérprete LLM / sin API key: guardas offline V1 (contrato HR safe-off).
@@ -2006,6 +2095,8 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     informesSectionsKey,
     opts.lastGuideKind,
     opts.lastGuideCategory,
+    opts.lastGuideReportId,
+    opts.lastGuideArticleIds,
   );
   const cached = interpretCache.get(key);
   if (cached && cached.value && Date.now() - cached.at < INTERPRET_CACHE_TTL_MS) {
@@ -2020,6 +2111,10 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const catalogU2 = listUtilidadesBloque2ArticleCatalog();
   const catalogMt = listMantenimientoArticleCatalog();
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const informesCatalogs = selectInformesCatalogsForInterpret({
+    lastGuideCategory: opts.lastGuideCategory,
+    lastGuideReportId: opts.lastGuideReportId,
+  });
   const userPayload: Record<string, unknown> = {
     mensaje_nuevo: text,
     historial_reciente: threadText.slice(-2500),
@@ -2031,32 +2126,18 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     hojas_ruta_corpus_enabled: hojasRutaCorpusOn,
     catalogo_puntos_interes: catalogPi,
     puntos_interes_corpus_enabled: puntosInteresCorpusOn,
-    catalogo_informes: listInformesArticleCatalog({ structuralOnly: true }),
+    // Etapa 1 Informes: solo estructurales (mapa + índices + shared). Nunca las 89.
+    catalogo_informes: informesCatalogs.structural,
     informes_corpus_enabled: informesOn,
     informes_sections: Array.from(parseInformesKbSections()),
     last_guide_kind: opts.lastGuideKind ?? null,
     last_guide_category: opts.lastGuideCategory ?? null,
+    last_guide_report_id: opts.lastGuideReportId ?? null,
+    last_guide_article_ids: opts.lastGuideArticleIds ?? [],
   };
-  const knownCategory =
-    (opts.lastGuideCategory &&
-    (INFORMES_CATEGORIES as readonly string[]).includes(opts.lastGuideCategory)
-      ? opts.lastGuideCategory
-      : null) ||
-    null;
-  if (knownCategory) {
-    userPayload.catalogo_informes_categoria = listInformesArticleCatalog({
-      category: knownCategory,
-    });
-  } else if (informesOn) {
-    // Ciclo parcial: exponer detalle solo de secciones habilitadas (no los 89).
-    const enabledDetail = Array.from(parseInformesKbSections()).flatMap((cat) =>
-      listInformesArticleCatalog({ category: cat }).filter(
-        (a) => a.category === cat && !a.id.startsWith("inf-idx-"),
-      ),
-    );
-    if (enabledDetail.length) {
-      userPayload.catalogo_informes_detalle_habilitado = enabledDetail;
-    }
+  // Continuidad: si ya hay categoría conocida, etapa 2 en el mismo llamado.
+  if (informesCatalogs.categoryCatalog) {
+    userPayload.catalogo_informes_categoria = informesCatalogs.categoryCatalog;
   }
   if (utilidadesBloque2On) {
     userPayload.catalogo_utilidades_bloque_2 = catalogU2;
@@ -2090,10 +2171,17 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     let parsed = content ? parseInterpret(content) : null;
     if (parsed) {
       parsed = applyPlatformGuideInterpretGuards(parsed, text, threadText, guardOpts);
+      parsed = await refineInformesWithCategoryCatalog({
+        openai,
+        basePayload: userPayload,
+        interpret: parsed,
+        text,
+        threadText,
+        guardOpts,
+      });
       interpretCache.set(key, { at: Date.now(), value: parsed });
       return parsed;
     }
-    // LLM vacío/JSON inválido: igual aplicar autoridad consulta+historial+catálogo.
     const parseMiss = applyPlatformGuideInterpretGuards(
       {
         route: "continue_normal",
@@ -2110,8 +2198,16 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       guardOpts,
     );
     if (parseMiss.route === "info_guides" && parseMiss.guideKind) {
-      interpretCache.set(key, { at: Date.now(), value: parseMiss });
-      return parseMiss;
+      const refined = await refineInformesWithCategoryCatalog({
+        openai,
+        basePayload: userPayload,
+        interpret: parseMiss,
+        text,
+        threadText,
+        guardOpts,
+      });
+      interpretCache.set(key, { at: Date.now(), value: refined });
+      return refined;
     }
     return applyOfflinePlatformKnowledgeGuards(text, threadText, guardOpts);
   } catch {
@@ -2136,6 +2232,85 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       );
     }
     return applyOfflinePlatformKnowledgeGuards(text, threadText, guardOpts);
+  }
+}
+
+/**
+ * Segundo paso del contrato Informes: con category ya fijada y sin pantallas de detalle,
+ * re-interpreta usando únicamente el catálogo de esa categoría (no las 89).
+ */
+async function refineInformesWithCategoryCatalog(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (interpret.guideKind !== "informes" || interpret.route !== "info_guides") {
+    return interpret;
+  }
+  const category = interpret.category?.trim() || null;
+  if (!category || !(INFORMES_CATEGORIES as readonly string[]).includes(category)) {
+    return interpret;
+  }
+  if (
+    hasInformesDetailArticle(interpret.articleIds) ||
+    (interpret.reportId && isInformesDetailArticleId(interpret.reportId))
+  ) {
+    return interpret;
+  }
+  if (basePayload.catalogo_informes_categoria) {
+    return interpret;
+  }
+
+  const categoryCatalog = listInformesArticleCatalog({ category });
+  if (!categoryCatalog.length) return interpret;
+
+  const refinePayload = {
+    ...basePayload,
+    catalogo_informes: listInformesArticleCatalog({ structuralOnly: true }),
+    catalogo_informes_categoria: categoryCatalog,
+    informes_refine_stage: "category_detail",
+    category_preseleccionada: category,
+    mensaje_nuevo: text,
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0.1,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const refined = content ? parseInterpret(content) : null;
+    if (!refined || refined.guideKind !== "informes") return interpret;
+    const merged: PlatformKnowledgeInterpret = {
+      ...interpret,
+      ...refined,
+      route: "info_guides",
+      guideKind: "informes",
+      category: refined.category || category,
+      reason: interpret.reason
+        ? `${interpret.reason}|informes_category_refine`
+        : "informes_category_refine",
+    };
+    return applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+  } catch {
+    return interpret;
   }
 }
 

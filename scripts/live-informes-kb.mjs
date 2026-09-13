@@ -198,6 +198,21 @@ const cases = [
     thread: "",
     expectResolve: "odometro",
   },
+  {
+    id: "continuidad-filtros-reportId",
+    text: "¿qué filtros tiene?",
+    thread:
+      "Cliente: ¿Cómo veo el informe de kilómetros recorridos por chofer?\nAtilio: En Informes → Choferes → Kilómetros recorridos por chofer…",
+    lastGuideKind: "informes",
+    lastGuideCategory: "choferes",
+    lastGuideReportId: "inf-ch-km",
+    lastGuideArticleIds: ["inf-ch-km"],
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectReportId: "inf-ch-km",
+    expectDisabled: !choferesOn,
+    expectArticlePrefix: choferesOn ? "inf-ch-" : null,
+  },
 ];
 
 let failed = 0;
@@ -219,7 +234,12 @@ console.log(
 
 for (const c of cases) {
   await new Promise((r) => setTimeout(r, 700));
-  const resolved = await resolveTurnExecutor(c.text, c.thread || c.text);
+  const resolved = await resolveTurnExecutor(c.text, c.thread || c.text, null, {
+    lastGuideKind: c.lastGuideKind ?? null,
+    lastGuideCategory: c.lastGuideCategory ?? null,
+    lastGuideReportId: c.lastGuideReportId ?? null,
+    lastGuideArticleIds: c.lastGuideArticleIds ?? null,
+  });
   let guideKind = null;
   let used = null;
   let fallback = null;
@@ -228,6 +248,10 @@ for (const c of cases) {
     const interpret = await interpretPlatformKnowledgeTurn({
       selectionText: c.text,
       threadText: c.thread,
+      lastGuideKind: c.lastGuideKind ?? null,
+      lastGuideCategory: c.lastGuideCategory ?? null,
+      lastGuideReportId: c.lastGuideReportId ?? null,
+      lastGuideArticleIds: c.lastGuideArticleIds ?? null,
     });
     const meta = await buildGroundedInfoGuideReplyWithMeta(
       c.text,
@@ -247,6 +271,7 @@ for (const c of cases) {
     resolvedExecutor: resolved.executor,
     guideKind,
     category: used?.category ?? null,
+    reportId: used?.reportId ?? null,
     need: used?.need ?? null,
     articleIds: used?.articleIds ?? [],
     fallback,
@@ -259,6 +284,9 @@ for (const c of cases) {
   try {
     if (c.expectResolve) assert.equal(resolved.executor, c.expectResolve, `${c.id} resolve`);
     if (c.expectGuide) assert.equal(guideKind, c.expectGuide, `${c.id} guide`);
+    if (c.expectReportId) {
+      assert.equal(used?.reportId, c.expectReportId, `${c.id} reportId`);
+    }
     if (c.expectNotGuide) {
       assert.notEqual(guideKind, c.expectNotGuide, `${c.id} not hijacked`);
     }

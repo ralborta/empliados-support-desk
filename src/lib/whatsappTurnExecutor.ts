@@ -283,6 +283,8 @@ function executorBody(
     need?: string;
     executionRequest?: boolean;
     clarifyQuestion?: string;
+    category?: string;
+    reportId?: string;
   },
 ): JsonRecord {
   return {
@@ -300,6 +302,8 @@ function executorBody(
     ...(extras?.need ? { need: extras.need } : {}),
     ...(extras?.executionRequest != null ? { executionRequest: extras.executionRequest } : {}),
     ...(extras?.clarifyQuestion ? { clarifyQuestion: extras.clarifyQuestion } : {}),
+    ...(extras?.category ? { category: extras.category } : {}),
+    ...(extras?.reportId ? { reportId: extras.reportId } : {}),
   };
 }
 
@@ -319,6 +323,8 @@ async function invokeExecutor(
     need?: string;
     executionRequest?: boolean;
     clarifyQuestion?: string;
+    category?: string;
+    reportId?: string;
   },
 ): Promise<JsonRecord> {
   const handler = EXECUTOR_HANDLERS[executor];
@@ -1617,6 +1623,8 @@ export async function runTurnExecutorPhase(params: {
       pendingActionType: pendingAction?.type ?? null,
       lastGuideKind: lastGuideCtx?.kind ?? null,
       lastGuideCategory: lastGuideCtx?.category ?? null,
+      lastGuideReportId: lastGuideCtx?.reportId ?? null,
+      lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
     });
     if (
       kbInterpret &&
@@ -1636,6 +1644,8 @@ export async function runTurnExecutorPhase(params: {
           need: kbInterpret.need,
           executionRequest: kbInterpret.executionRequest,
           clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
+          category: kbInterpret.category ?? undefined,
+          reportId: kbInterpret.reportId ?? undefined,
         });
         const msg = messageFromPayload(execResult);
         if (msg) {
@@ -2630,6 +2640,8 @@ export async function runTurnExecutorPhase(params: {
       pendingActionType: pendingAction?.type ?? null,
       lastGuideKind: lastGuideCtx?.kind ?? null,
       lastGuideCategory: lastGuideCtx?.category ?? null,
+      lastGuideReportId: lastGuideCtx?.reportId ?? null,
+      lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
     });
     if (kbInterpret && shouldRouteInterpretToInfoGuides(kbInterpret)) {
       const rulesExecutor = classifyTurnExecutor(
@@ -2645,6 +2657,8 @@ export async function runTurnExecutorPhase(params: {
           need: kbInterpret.need,
           executionRequest: kbInterpret.executionRequest,
           clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
+          category: kbInterpret.category ?? undefined,
+          reportId: kbInterpret.reportId ?? undefined,
         });
         const msg = messageFromPayload(execResult);
         if (msg) {
@@ -2701,6 +2715,8 @@ export async function runTurnExecutorPhase(params: {
       {
         lastGuideKind: lastGuideCtx?.kind ?? null,
         lastGuideCategory: lastGuideCtx?.category ?? null,
+        lastGuideReportId: lastGuideCtx?.reportId ?? null,
+        lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
       },
     );
     executor = pendingConfirm ?? pendingAction?.type ?? resolved.executor;
@@ -2712,6 +2728,8 @@ export async function runTurnExecutorPhase(params: {
       {
         lastGuideKind: lastGuideCtx?.kind ?? null,
         lastGuideCategory: lastGuideCtx?.category ?? null,
+        lastGuideReportId: lastGuideCtx?.reportId ?? null,
+        lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
       },
     );
     executor = resolved.executor;

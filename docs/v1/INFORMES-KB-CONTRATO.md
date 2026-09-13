@@ -37,40 +37,15 @@ Utilidades Bloque 2 (`u2-*`) **no** se reingresa: solo comparación de hechos si
 ## Modelo de interpretación (3 etapas)
 
 1. **Familia + categoría:** ¿pertenece a `informes`? ¿qué `category`?
-2. **Selector acotado:** solo el catálogo de esa categoría (índice + N artículos), no los 89.
+   - El primer payload del LLM solo incluye catálogo **estructural** (mapa + índices + shared).
+   - **Nunca** se envían las ~89 pantallas de detalle en el primer llamado.
+2. **Selector acotado:** con `category` ya elegida (o continuidad `lastGuideCategory` / `lastGuideReportId`),
+   segundo llamado o mismo payload de continuidad con **solo** `catalogo_informes_categoria`.
 3. **Grounded:** 1–3 `articleIds` de detalle (+ compartidos si aplica).
 
-Salida estructurada objetivo (mínimo):
-
-```json
-{
-  "route": "info_guides",
-  "guideKind": "informes",
-  "category": "combustible",
-  "reportId": "inf-cb-cargas-combustible",
-  "articleIds": ["inf-cb-cargas-combustible"],
-  "need": "procedure",
-  "executionRequest": false,
-  "confidence": 0.9,
-  "reason": "..."
-}
-```
-
-## Continuidad de sesión
-
-`lastGuideKind="informes"` **no alcanza**. Persistencia mínima:
-
-```ts
-lastInfoGuide: {
-  kind: "informes",
-  category: "combustible" | ...,
-  reportId?: string,
-  articleIds?: string[],
-  at: string
-}
-```
-
-Sin categoría/reportId, un follow-up (“¿y cómo exporto?”) no puede elegir entre 89 pantallas.
+Continuidad: `lastInfoGuide` persiste y **reinyecta** al intérprete `category`, `reportId` y `articleIds`
+(caché + payload `last_guide_*`). Un follow-up (“¿qué filtros tiene?”) conserva el informe;
+un mensaje que nombre otro informe/categoría lo reemplaza.
 
 ## Catálogo (granularidad)
 

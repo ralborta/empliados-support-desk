@@ -46,6 +46,8 @@ const bodySchema = z
       .optional(),
     executionRequest: z.boolean().optional(),
     clarifyQuestion: z.string().optional(),
+    category: z.string().optional(),
+    reportId: z.string().optional(),
     api_key: z.string().optional(),
     apiKey: z.string().optional(),
   })
@@ -238,6 +240,8 @@ export async function POST(req: NextRequest) {
               : parsed.data.executionRequest === true,
           confidence: 1,
           reason: ignoredReason ?? "seeded_from_turn",
+          category: parsed.data.category?.trim() || null,
+          reportId: parsed.data.reportId?.trim() || null,
         }
       : null;
 

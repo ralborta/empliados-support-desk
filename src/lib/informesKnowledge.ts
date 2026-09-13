@@ -2405,7 +2405,7 @@ export function looksLikeInformesGuideFollowupQuestion(
   if (!/\binformes?\b/.test(t) && !/informe\s+(de|del|sobre)/.test(t)) {
     if (!/informes\s*[→>]|menu\s+informes/.test(t)) return false;
   }
-  return /\b(y despues|como exporto|y eso|ese informe|la misma pantalla|filtros)\b/.test(
+  return /\b(y despues|como exporto|y eso|ese informe|la misma pantalla|filtros|que filtros|y como)\b/.test(
     raw
       .normalize("NFD")
       .replace(/\p{M}/gu, "")
