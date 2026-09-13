@@ -60,7 +60,27 @@ export function buildConfirmoClarifyReply(): string {
   );
 }
 
+/**
+ * Negación / veto semántico sobre una aparente afirmación coloquial.
+ * Cubre «Claro que no», «Obvio que no», «Sí, pero no lo confirmes», «Dale, pero no lo hagas».
+ */
+export function hasPendingWriteNegationCue(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw) return false;
+  const norm = normPhrase(raw);
+  if (!norm) return false;
+  if (/\b(claro|obvio|seguro|si|sip|dale|ok|okey)\s+que\s+no\b/.test(norm)) return true;
+  if (/\bno\s+lo\s+(confirm|hag|registr|hac)/.test(norm)) return true;
+  if (/\bno\s+(confirm|hag|registr)/.test(norm)) return true;
+  if (/\bpero\s+no\b/.test(norm) && /\b(confirm|hag|registr|hac)/.test(norm)) return true;
+  if (/\b(no\s+quiero|no\s+confirmes|cancelar|cancelalo|olvidalo|negativo)\b/.test(norm)) {
+    return true;
+  }
+  return false;
+}
+
 export function isConfirmoWriteBlocked(text: string | undefined | null): boolean {
+  if (hasPendingWriteNegationCue(text)) return true;
   const phrase = classifyConfirmoPhrase(text);
   return phrase === "reject" || phrase === "clarify";
 }

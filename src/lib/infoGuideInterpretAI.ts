@@ -1213,7 +1213,22 @@ function correctUtilidadesBloque2TopicMisroute(
   else if (/\bcomunicador\b|\bcomunicados?\b/.test(norm)) articleId = "u2-comunicador";
   else if (/\bacoplados?\b/.test(norm)) articleId = "u2-acoplados";
   else if (/\bauditoria\b/.test(norm)) articleId = "u2-auditoria";
-  else if (/\bnovedades\b/.test(norm)) articleId = "u2-novedades";
+  else if (/\bnovedades\b/.test(norm)) {
+    // “Novedades” es ambiguo: no secuestrar certificado/ticket/odómetro ni consultas genéricas.
+    if (
+      /\b(certificado|ticket|reclamo|asesor|odometro|horometro|mantenimiento|gps|unidad)\b/.test(
+        norm,
+      )
+    ) {
+      return interpret;
+    }
+    const unequivocalNovedades =
+      exactModulePick ||
+      /\b(utilidades|modulo|pantalla|seccion|menu|wara)\b/.test(norm) ||
+      /\b(no abre|no aparece|megafono)\b/.test(norm);
+    if (!unequivocalNovedades) return interpret;
+    articleId = "u2-novedades";
+  }
   if (!articleId) return interpret;
 
   // La autoridad GPS conserva preguntas por posición actual de una unidad antes de esta capa.

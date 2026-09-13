@@ -1,6 +1,6 @@
 import type { Customer, PrismaClient } from "@prisma/client";
 import { formatGreeting, formatCompanySelected } from "@/lib/waraWhatsAppFormat";
-import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
+import { hasPendingWriteNegationCue, looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
 import {
   looksLikeResolvableUnitReferenceInMessage,
   shouldRouteGpsConsultToUnidades,
@@ -283,6 +283,7 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
   if (looksLikeBriefConfirmation(raw)) return false;
   // Pausa para consulta lateral ≠ cancelar el registro.
   if (looksLikePendingConfirmDeferForOtherQuery(raw)) return false;
+  if (hasPendingWriteNegationCue(raw)) return true;
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -301,6 +302,8 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
 export function looksLikeMaintenanceConfirmationRejection(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  // «Claro que no» / «no lo confirmes» — veto antes de brief-confirmation (certificados).
+  if (hasPendingWriteNegationCue(raw)) return true;
   if (looksLikeBriefConfirmation(raw)) return false;
   const t = raw
     .normalize("NFD")

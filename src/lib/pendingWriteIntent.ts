@@ -16,6 +16,7 @@ export {
   classifyConfirmoPhrase,
   buildConfirmoClarifyReply,
   isConfirmoWriteBlocked,
+  hasPendingWriteNegationCue,
   looksLikeFuzzyConfirmoToken,
   CONFIRMO_TYPO_WHITELIST,
 } from "@/lib/confirmoTokens";

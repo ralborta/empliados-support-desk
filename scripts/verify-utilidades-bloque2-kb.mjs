@@ -147,6 +147,29 @@ try {
   );
   assert.notEqual(unrelatedNews.guideKind, "utilidades_bloque_2");
 
+  for (const text of [
+    "¿Cómo te paso novedades sobre el certificado?",
+    "¿Dónde veo las novedades de mi ticket?",
+    "novedades del odómetro",
+  ]) {
+    const guarded = applyPlatformGuideInterpretGuards(seed, text, "");
+    assert.notEqual(
+      guarded.guideKind,
+      "utilidades_bloque_2",
+      `frontera novedades no secuestra: ${text}`,
+    );
+  }
+
+  for (const [text, expectedArticle] of [
+    ["Novedades", "u2-novedades"],
+    ["Utilidades Novedades no abre", "u2-novedades"],
+    ["módulo de Novedades", "u2-novedades"],
+  ]) {
+    const guarded = applyPlatformGuideInterpretGuards(seed, text, "");
+    assert.equal(guarded.guideKind, "utilidades_bloque_2", text);
+    assert.deepEqual(guarded.articleIds, [expectedArticle], text);
+  }
+
   const pendingCertificate = {
     type: "certificados",
     createdAt: new Date().toISOString(),

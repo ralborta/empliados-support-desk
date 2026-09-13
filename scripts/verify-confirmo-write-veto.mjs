@@ -15,6 +15,11 @@ const { isConfirmedForPendingWrite, isAffirmationForPendingWrite } = await impor
 );
 
 const { resolvePendingConfirmationExecutor } = await import("../src/lib/pendingConfirmation.ts");
+const { looksLikePendingTramiteAffirmation } = await import("../src/lib/wara.ts");
+const {
+  looksLikeMaintenanceConfirmationRejection,
+  looksLikeOdometerConfirmationRejection,
+} = await import("../src/lib/waraApi.ts");
 
 const PENDING_THREAD =
   "Bot: Voy a registrar:\nPatente: AC 574 AA\nOdómetro: 97880 km\nRespondé CONFIRMO para registrar.";
@@ -44,7 +49,15 @@ for (const text of ["confirmo", "comnfirmo", "dale", "si"]) {
   );
 }
 
-for (const text of ["no confirmo", "confirmo que no", "no, confirmo"]) {
+for (const text of [
+  "no confirmo",
+  "confirmo que no",
+  "no, confirmo",
+  "Claro que no",
+  "Obvio que no",
+  "Sí, pero no lo confirmes",
+  "Dale, pero no lo hagas",
+]) {
   assert.equal(isConfirmoWriteBlocked(text), true, `bloqueado: ${text}`);
   assert.equal(isConfirmedForPendingWrite(text), false, `no escribe: ${text}`);
   assert.equal(
@@ -56,5 +69,25 @@ for (const text of ["no confirmo", "confirmo que no", "no, confirmo"]) {
 
 assert.equal(isAffirmationForPendingWrite("no confirmo"), false);
 assert.equal(isAffirmationForPendingWrite("no, confirmo"), false);
+assert.equal(isAffirmationForPendingWrite("Claro que no"), false);
+assert.equal(isAffirmationForPendingWrite("Dale, pero no lo hagas"), false);
+
+const CERT_THREAD =
+  "Bot: Voy a solicitar el certificado de cobertura de AG228NZ.\nRespondé CONFIRMO o CANCELAR.";
+for (const text of ["Claro que no", "Obvio que no", "Sí, pero no lo confirmes"]) {
+  assert.equal(
+    resolvePendingConfirmationExecutor(CERT_THREAD, text),
+    null,
+    `certificado no escribe: ${text}`,
+  );
+  assert.equal(isConfirmedForPendingWrite(text), false, `cert no escribe: ${text}`);
+  assert.equal(looksLikePendingTramiteAffirmation(text), false, `tramite no afirma: ${text}`);
+  assert.equal(
+    looksLikeMaintenanceConfirmationRejection(text),
+    true,
+    `cert pushback: ${text}`,
+  );
+  assert.equal(looksLikeOdometerConfirmationRejection(text), true, `odo reject: ${text}`);
+}
 
 console.log("OK verify-confirmo-write-veto");

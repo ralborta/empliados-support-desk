@@ -201,6 +201,7 @@ import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation } from "@/lib/pendingConfirmation";
 import { classifyConfirmoPhrase, buildConfirmoClarifyReply } from "@/lib/confirmoTokens";
+import { isAffirmationForPendingWrite } from "@/lib/pendingWriteIntent";
 import {
   classifyTypedLateralQuery,
   tramiteAllowsTypedLateralOverlay,
@@ -1553,7 +1554,7 @@ export async function runTurnExecutorPhase(params: {
       ? pendingAction.type
       : null;
   if (
-    looksLikePendingTramiteAffirmation(selectionText) &&
+    isAffirmationForPendingWrite(selectionText) &&
     (pendingConfirmExecutor || (pendingTramiteType && pendingAction?.payload))
   ) {
     // Thread CONFIRMO (cert/odo) manda sobre pendingAction stale de mantenimiento.

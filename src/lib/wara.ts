@@ -15,7 +15,7 @@ import {
   type FleetUnitRef,
   type NumericExpectedField,
 } from "@/lib/unitReferenceParser";
-import { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
+import { hasPendingWriteNegationCue, looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
 import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
 
 export { looksLikeNamedServiceWithUnitReference };
@@ -2941,9 +2941,11 @@ export function looksLikePendingConfirmComprehensionAck(text: string | undefined
 }
 
 export function looksLikePendingTramiteAffirmation(text: string | undefined | null): boolean {
-  if (looksLikeBriefConfirmation(text)) return true;
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 140) return false;
+  // Veto primero: «Claro que no» / «no lo confirmes» nunca son afirmación de escritura.
+  if (hasPendingWriteNegationCue(raw)) return false;
+  if (looksLikeBriefConfirmation(text)) return true;
   const norm = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
