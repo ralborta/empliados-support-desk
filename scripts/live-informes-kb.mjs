@@ -45,6 +45,7 @@ const choferesOn = infCorpusOn && sections.has("choferes");
 const puntosOn = infCorpusOn && sections.has("puntos");
 const hojasRutaInfOn = infCorpusOn && sections.has("hojas_ruta");
 const combustibleInfOn = infCorpusOn && sections.has("combustible");
+const mantInfOn = infCorpusOn && sections.has("mantenimiento_deposito");
 
 const cases = [
   {
@@ -64,6 +65,21 @@ const cases = [
     expectGuide: "informes",
     expectDisabled: !combustibleInfOn,
     expectArticlePrefix: combustibleInfOn ? "inf-cb-" : null,
+  },
+  {
+    id: "informe-ordenes-trabajo",
+    text: "¿Cómo veo el informe de órdenes de trabajo en Informes de mantenimiento?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !mantInfOn,
+    expectArticlePrefix: mantInfOn ? "inf-md-" : null,
+  },
+  {
+    id: "crear-mantenimiento-operativo",
+    text: "Cómo asigno un plan de mantenimiento a una unidad",
+    thread: "",
+    expectNotGuide: "informes",
   },
   {
     id: "cargar-combustible-operativo",
@@ -157,6 +173,7 @@ console.log(
     puntosOn,
     hojasRutaInfOn,
     combustibleInfOn,
+    mantInfOn,
     interpret: true,
   }),
 );

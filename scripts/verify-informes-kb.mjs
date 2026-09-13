@@ -343,6 +343,32 @@ try {
   process.env.WARA_INFORMES_KB_SECTIONS = "";
   assert.equal(getInformesArticlesByIds(["inf-cb-cargas"]).length, 0);
 
+  // Ciclo 4: mantenimiento_deposito
+  process.env.WARA_INFORMES_KB_SECTIONS = "mantenimiento_deposito";
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-md-")).length >= 14);
+  assert.ok(getInformesArticlesByIds(["inf-md-ordenes-trabajo"]).some((a) => a.id === "inf-md-ordenes-trabajo"));
+  const mdGuard = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-idx-mantenimiento_deposito"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "mantenimiento_deposito",
+    },
+    "¿Cómo veo el informe de órdenes de trabajo de mantenimiento?",
+    "",
+  );
+  assert.ok(
+    mdGuard.articleIds.some((id) => id.startsWith("inf-md-")),
+    `expected inf-md-* got ${JSON.stringify(mdGuard.articleIds)}`,
+  );
+  process.env.WARA_INFORMES_KB_SECTIONS = "";
+  assert.equal(getInformesArticlesByIds(["inf-md-tareas"]).length, 0);
+
   console.log("OK verify-informes-kb");
 } finally {
   restoreEnv();
