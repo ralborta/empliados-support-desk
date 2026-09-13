@@ -46,6 +46,7 @@ const puntosOn = infCorpusOn && sections.has("puntos");
 const hojasRutaInfOn = infCorpusOn && sections.has("hojas_ruta");
 const combustibleInfOn = infCorpusOn && sections.has("combustible");
 const mantInfOn = infCorpusOn && sections.has("mantenimiento_deposito");
+const tpInfOn = infCorpusOn && sections.has("transporte_pasajeros");
 
 const cases = [
   {
@@ -80,6 +81,22 @@ const cases = [
     text: "Cómo asigno un plan de mantenimiento a una unidad",
     thread: "",
     expectNotGuide: "informes",
+  },
+  {
+    id: "informe-planilla-horarios",
+    text: "¿Cómo veo el informe de planilla de horarios de transporte de pasajeros?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !tpInfOn,
+    expectArticlePrefix: tpInfOn ? "inf-tp-" : null,
+  },
+  {
+    id: "crear-hoja-turno-operativo",
+    text: "Cómo creo una hoja de turno de transporte público",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "transporte_publico",
   },
   {
     id: "cargar-combustible-operativo",
@@ -174,6 +191,7 @@ console.log(
     hojasRutaInfOn,
     combustibleInfOn,
     mantInfOn,
+    tpInfOn,
     interpret: true,
   }),
 );

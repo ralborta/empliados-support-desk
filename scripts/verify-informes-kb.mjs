@@ -369,6 +369,34 @@ try {
   process.env.WARA_INFORMES_KB_SECTIONS = "";
   assert.equal(getInformesArticlesByIds(["inf-md-tareas"]).length, 0);
 
+  // Ciclo 5: transporte_pasajeros
+  process.env.WARA_INFORMES_KB_SECTIONS = "transporte_pasajeros";
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-tp-")).length >= 20);
+  assert.ok(
+    getInformesArticlesByIds(["inf-tp-planilla-horarios"]).some((a) => a.id === "inf-tp-planilla-horarios"),
+  );
+  const tpGuard = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-idx-transporte_pasajeros"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "transporte_pasajeros",
+    },
+    "¿Cómo veo el informe de planilla de horarios de transporte de pasajeros?",
+    "",
+  );
+  assert.ok(
+    tpGuard.articleIds.some((id) => id.startsWith("inf-tp-")),
+    `expected inf-tp-* got ${JSON.stringify(tpGuard.articleIds)}`,
+  );
+  process.env.WARA_INFORMES_KB_SECTIONS = "";
+  assert.equal(getInformesArticlesByIds(["inf-tp-resumen-servicio"]).length, 0);
+
   console.log("OK verify-informes-kb");
 } finally {
   restoreEnv();

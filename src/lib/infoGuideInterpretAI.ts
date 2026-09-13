@@ -1429,6 +1429,9 @@ function looksLikeInformesGuideIntent(norm: string): boolean {
 }
 
 function inferInformesCategoryFromText(norm: string): string | null {
+  if (/\bresumen(es)?\s+por\s+punto/.test(norm) || /\bentradas?\s+y\s+salidas\b/.test(norm)) {
+    return "puntos";
+  }
   if (/\bchofer/.test(norm)) return "choferes";
   if (
     /\bcargas?\s+de\s+combustible\b/.test(norm) ||
@@ -1525,9 +1528,10 @@ function correctInformesCatalogTopicMisroute(
   }
 
   let category =
-    interpret.guideKind === "informes" && interpret.category
+    inferInformesCategoryFromText(norm) ||
+    (interpret.guideKind === "informes" && interpret.category
       ? interpret.category
-      : inferInformesCategoryFromText(norm);
+      : null);
   if (!category && interpret.articleIds.length) {
     for (const id of interpret.articleIds) {
       const cat = categoryFromInformesArticleId(id);
