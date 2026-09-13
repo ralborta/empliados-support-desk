@@ -174,7 +174,10 @@ export async function resolveTurnExecutor(
   selectionText: string,
   threadText: string,
   pendingAction?: import("@/lib/pendingAction").PendingActionRecord | null,
-  opts?: { lastGuideKind?: import("@/lib/lastInfoGuideContext").LastInfoGuideKind | null },
+  opts?: {
+    lastGuideKind?: import("@/lib/lastInfoGuideContext").LastInfoGuideKind | null;
+    lastGuideCategory?: string | null;
+  },
 ): Promise<TurnExecutorResolution> {
   const guard = classifyTurnExecutorSafetyGuards(selectionText, threadText, pendingAction);
   if (guard) {
@@ -252,12 +255,14 @@ export async function resolveTurnExecutor(
       threadText,
       pendingActionType: pendingAction?.type ?? null,
       lastGuideKind: opts?.lastGuideKind ?? null,
+      lastGuideCategory: opts?.lastGuideCategory ?? null,
     });
     const isTp = kbInterpret?.guideKind === "transporte_publico";
     const isCs = kbInterpret?.guideKind === "cisternas" && isCisternasKbEnabled();
     const isCb = kbInterpret?.guideKind === "combustible" && isCombustibleKbEnabled();
     const isHr = kbInterpret?.guideKind === "hojas_de_ruta";
     const isPi = kbInterpret?.guideKind === "puntos_de_interes";
+    const isInf = kbInterpret?.guideKind === "informes";
     const isU2 =
       kbInterpret?.guideKind === "utilidades_bloque_2" &&
       isUtilidadesBloque2KbEnabled();
@@ -266,7 +271,7 @@ export async function resolveTurnExecutor(
       kbInterpret?.need === "ambiguous" && Boolean(kbInterpret.clarifyQuestion);
     if (
       shouldRouteInterpretToInfoGuides(kbInterpret) &&
-      (isTp || isCs || isCb || isHr || isPi || isU2 || isMt || isAmbiguousClarify)
+      (isTp || isCs || isCb || isHr || isPi || isInf || isU2 || isMt || isAmbiguousClarify)
     ) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
       if (rulesExecutor === "unidades" || rulesExecutor === "info_guides" || rulesExecutor === "mantenimiento") {

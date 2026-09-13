@@ -119,6 +119,14 @@ function inferIdleTopicKindFromThread(threadText: string): IdleTopicKind | null 
     return "puntos_de_interes";
   }
   if (
+    /\bmenu\s+informes\b/.test(recent) ||
+    /informes\s*[→>]/.test(recent) ||
+    (/\binforme(s)?\b/.test(recent) &&
+      /\b(consultar|filtros|export|excel|pdf|riel)\b/.test(recent))
+  ) {
+    return "informes";
+  }
+  if (
     /\bcisternas?\b/.test(recent) ||
     (/\btanque\b/.test(recent) && /\b(deposito|dep[oó]sito|base)\b/.test(recent))
   ) {
@@ -185,6 +193,8 @@ function idleTopicLabel(kind: IdleTopicKind): string {
       return "Hojas de ruta";
     case "puntos_de_interes":
       return "Puntos de interés";
+    case "informes":
+      return "Informes";
     case "utilidades_bloque_2":
       return "Utilidades";
     case "cisternas":
@@ -216,6 +226,8 @@ function idleTopicHint(kind: IdleTopicKind): string {
       return "Seguimos con Hojas de ruta. Decime qué punto querés: alta, predefinidas, puntos, calendario o cargas/descargas.";
     case "puntos_de_interes":
       return "Seguimos con Puntos de interés. Decime si necesitás alta, grupos, eventos, forma o import/export.";
+    case "informes":
+      return "Seguimos con Informes. Decime qué categoría o informe querés ver (no es crear/cargar en otro módulo).";
     case "utilidades_bloque_2":
       return "Seguimos con Utilidades. Decime si es Acoplados, Auditoría, recorridos, Comunicador, links de posición, Cuestionarios, Novedades o Remitos.";
     case "cisternas":
@@ -261,6 +273,7 @@ export function idleGuideConflictsWithPending(
     topic === "transporte_publico" ||
     topic === "hojas_de_ruta" ||
     topic === "puntos_de_interes" ||
+    topic === "informes" ||
     topic === "utilidades_bloque_2" ||
     topic === "cisternas" ||
     topic === "combustible" ||

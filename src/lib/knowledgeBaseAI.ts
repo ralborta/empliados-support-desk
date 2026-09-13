@@ -9,6 +9,7 @@ import { buildHojasRutaKnowledgeContext } from "@/lib/hojasRutaKnowledge";
 import { buildPuntosInteresKnowledgeContext } from "@/lib/puntosInteresKnowledge";
 import { buildMantenimientoKnowledgeContext } from "@/lib/mantenimientoKnowledge";
 import { buildUtilidadesBloque2KnowledgeContext } from "@/lib/utilidadesBloque2Knowledge";
+import { buildInformesKnowledgeContext } from "@/lib/informesKnowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -25,7 +26,8 @@ export type KnowledgeGuideKind =
   | "combustible"
   | "hojas_de_ruta"
   | "puntos_de_interes"
-  | "utilidades_bloque_2";
+  | "utilidades_bloque_2"
+  | "informes";
 
 const KNOWLEDGE_BY_KIND: Record<"opciones" | "unidades", string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
@@ -122,6 +124,16 @@ REGLAS DURAS Puntos de interés:
 - Nunca digas que creaste/editaste/importaste puntos en la cuenta.
 - Continuá el hilo sin repetir todo el manual.`.trim();
 
+const INFORMES_HARD_CONSTRAINTS = `
+REGLAS DURAS Informes (menú lateral):
+- Usá SOLO los artículos inf-* provistos. No inventes pantallas, columnas, filtros ni botones pending.
+- guideKind informes = consultar/ver reportes del menú Informes. NO es crear/cargar/editar en combustible, hojas_de_ruta, puntos_de_interes, mantenimiento, transporte_publico ni utilidades_bloque_2.
+- Fronteras: informe de cargas ≠ cargar tickets; informe hojas de ruta ≠ crear hoja; informes puntos ≠ crear POI; OT/resumen mantenimiento ≠ programar mantenimiento.
+- Forma según need; execute = límite de canal (inf-ejecucion-no-disponible): no Consultar ni exportar por WhatsApp.
+- Respetá restrictions / needsValidation: no inventes columnas ni significados no confirmados.
+- Nunca digas que abriste el informe, corriste Consultar o descargaste Excel/PDF en la cuenta.
+- Continuá el hilo sin repetir todo el manual.`.trim();
+
 const UTILIDADES_BLOQUE2_HARD_CONSTRAINTS = `
 REGLAS DURAS Utilidades — Bloque 2:
 - Usá SOLO los artículos u2-* provistos. No inventes pantallas, botones, campos, validaciones ni causas.
@@ -198,6 +210,10 @@ export async function answerFromKnowledgeBase(
     const { isPuntosInteresKbEnabled } = await import("@/lib/puntosInteresKnowledge");
     if (!isPuntosInteresKbEnabled()) return null;
   }
+  if (kind === "informes") {
+    const { isInformesKbEnabled } = await import("@/lib/informesKnowledge");
+    if (!isInformesKbEnabled()) return null;
+  }
   if (kind === "utilidades_bloque_2") {
     const { isUtilidadesBloque2KbEnabled } = await import(
       "@/lib/utilidadesBloque2Knowledge"
@@ -216,6 +232,8 @@ export async function answerFromKnowledgeBase(
             ? buildHojasRutaKnowledgeContext(opts?.articleIds ?? [])
             : kind === "puntos_de_interes"
               ? buildPuntosInteresKnowledgeContext(opts?.articleIds ?? [])
+              : kind === "informes"
+                ? buildInformesKnowledgeContext(opts?.articleIds ?? [])
               : kind === "utilidades_bloque_2"
                 ? buildUtilidadesBloque2KnowledgeContext(opts?.articleIds ?? [])
               : kind === "mantenimiento"
@@ -239,6 +257,8 @@ export async function answerFromKnowledgeBase(
               ? `\n\n${HOJAS_RUTA_HARD_CONSTRAINTS}`
               : kind === "puntos_de_interes"
                 ? `\n\n${PUNTOS_INTERES_HARD_CONSTRAINTS}`
+                : kind === "informes"
+                  ? `\n\n${INFORMES_HARD_CONSTRAINTS}`
                 : kind === "utilidades_bloque_2"
                   ? `\n\n${UTILIDADES_BLOQUE2_HARD_CONSTRAINTS}`
                   : "";

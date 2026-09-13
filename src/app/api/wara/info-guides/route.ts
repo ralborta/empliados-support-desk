@@ -37,6 +37,7 @@ const bodySchema = z
         "hojas_de_ruta",
         "puntos_de_interes",
         "utilidades_bloque_2",
+        "informes",
       ])
       .optional(),
     articleIds: z.array(z.string()).optional(),
@@ -170,6 +171,7 @@ export async function POST(req: NextRequest) {
   const { isUtilidadesBloque2KbEnabled } = await import(
     "@/lib/utilidadesBloque2Knowledge"
   );
+  const { isInformesKbEnabled } = await import("@/lib/informesKnowledge");
   const requestedGuide = parsed.data.guide;
   const cisternasGuideIgnored =
     requestedGuide === "cisternas" && !isCisternasKbEnabled();
@@ -179,9 +181,11 @@ export async function POST(req: NextRequest) {
     requestedGuide === "hojas_de_ruta" && !isHojasRutaKbEnabled();
   const puntosInteresCorpusOff =
     requestedGuide === "puntos_de_interes" && !isPuntosInteresKbEnabled();
+  const informesCorpusOff =
+    requestedGuide === "informes" && !isInformesKbEnabled();
   const utilidadesBloque2GuideIgnored =
     requestedGuide === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled();
-  // Cisternas/Combustible: flag off = ignorar kind. HR/PI: reconocer kind aunque corpus off.
+  // Cisternas/Combustible/U2: flag off = ignorar kind. HR/PI/Informes: reconocer kind aunque corpus off.
   const optInGuideIgnored =
     cisternasGuideIgnored || combustibleGuideIgnored || utilidadesBloque2GuideIgnored;
   const guide = optInGuideIgnored ? undefined : requestedGuide;
@@ -202,6 +206,8 @@ export async function POST(req: NextRequest) {
         ? "hojas_ruta_module_disabled"
         : puntosInteresCorpusOff
           ? "puntos_interes_module_disabled"
+          : informesCorpusOff
+            ? "informes_module_disabled"
           : null;
   const seededInterpret: PlatformKnowledgeInterpret | null =
     guide ||
@@ -209,20 +215,25 @@ export async function POST(req: NextRequest) {
     parsed.data.articleIds?.length ||
     optInGuideIgnored ||
     hojasRutaCorpusOff ||
-    puntosInteresCorpusOff
+    puntosInteresCorpusOff ||
+    informesCorpusOff
       ? {
           route: "info_guides",
           guideKind: (hojasRutaCorpusOff
             ? "hojas_de_ruta"
             : puntosInteresCorpusOff
               ? "puntos_de_interes"
+              : informesCorpusOff
+                ? "informes"
               : ((guide as PlatformKnowledgeInterpret["guideKind"]) ?? null)),
           need: (parsed.data.need as PlatformKnowledgeInterpret["need"]) ?? "procedure",
           articleIds:
-            hojasRutaCorpusOff || puntosInteresCorpusOff ? [] : (parsed.data.articleIds ?? []),
+            hojasRutaCorpusOff || puntosInteresCorpusOff || informesCorpusOff
+              ? []
+              : (parsed.data.articleIds ?? []),
           clarifyQuestion: parsed.data.clarifyQuestion?.trim() || null,
           executionRequest:
-            hojasRutaCorpusOff || puntosInteresCorpusOff
+            hojasRutaCorpusOff || puntosInteresCorpusOff || informesCorpusOff
               ? false
               : parsed.data.executionRequest === true,
           confidence: 1,
@@ -255,6 +266,8 @@ export async function POST(req: NextRequest) {
         ? "combustible_flag_off"
         : hojasRutaCorpusOff && !grounded.fallback
           ? "hojas_ruta_flag_off"
+          : informesCorpusOff && !grounded.fallback
+            ? "informes_flag_off"
           : grounded.fallback;
 
   const { logPlatformKbTurn } = await import("@/lib/infoGuideInterpretAI");
@@ -287,6 +300,8 @@ export async function POST(req: NextRequest) {
       ok_s: "true",
       message,
       guideKind: guideKind ?? kind ?? "",
+      category: interpret?.category ?? "",
+      reportId: interpret?.reportId ?? "",
       interpretNeed: interpret?.need ?? "",
       interpretArticles: interpret?.articleIds ?? [],
       interpretConfidence: interpret?.confidence ?? null,

@@ -335,7 +335,28 @@ async function invokeExecutor(
   if (executor === "info_guides") {
     const kindRaw = data.guideKind ?? data.guide ?? extras?.guide;
     if (isLastInfoGuideKind(kindRaw)) {
-      void setLastInfoGuideContext(prisma, rawPhone, kindRaw);
+      if (kindRaw === "informes") {
+        const category =
+          typeof data.category === "string" && data.category.trim()
+            ? data.category.trim()
+            : null;
+        const reportId =
+          typeof data.reportId === "string" && data.reportId.trim()
+            ? data.reportId.trim()
+            : null;
+        const articleIds = Array.isArray(data.interpretArticles)
+          ? data.interpretArticles.map((id) => String(id)).filter(Boolean)
+          : Array.isArray(extras?.articleIds)
+            ? extras.articleIds
+            : [];
+        void setLastInfoGuideContext(prisma, rawPhone, kindRaw, {
+          category,
+          reportId,
+          articleIds,
+        });
+      } else {
+        void setLastInfoGuideContext(prisma, rawPhone, kindRaw);
+      }
     }
   }
   return data;
@@ -1595,6 +1616,7 @@ export async function runTurnExecutorPhase(params: {
       threadText: thread,
       pendingActionType: pendingAction?.type ?? null,
       lastGuideKind: lastGuideCtx?.kind ?? null,
+      lastGuideCategory: lastGuideCtx?.category ?? null,
     });
     if (
       kbInterpret &&
@@ -2607,6 +2629,7 @@ export async function runTurnExecutorPhase(params: {
       threadText: threadCtx.classificationThread,
       pendingActionType: pendingAction?.type ?? null,
       lastGuideKind: lastGuideCtx?.kind ?? null,
+      lastGuideCategory: lastGuideCtx?.category ?? null,
     });
     if (kbInterpret && shouldRouteInterpretToInfoGuides(kbInterpret)) {
       const rulesExecutor = classifyTurnExecutor(
@@ -2675,7 +2698,10 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadCtx.classificationThread,
       pendingAction,
-      { lastGuideKind: lastGuideCtx?.kind ?? null },
+      {
+        lastGuideKind: lastGuideCtx?.kind ?? null,
+        lastGuideCategory: lastGuideCtx?.category ?? null,
+      },
     );
     executor = pendingConfirm ?? pendingAction?.type ?? resolved.executor;
   } else {
@@ -2683,7 +2709,10 @@ export async function runTurnExecutorPhase(params: {
       selectionText,
       threadCtx.classificationThread,
       pendingAction,
-      { lastGuideKind: lastGuideCtx?.kind ?? null },
+      {
+        lastGuideKind: lastGuideCtx?.kind ?? null,
+        lastGuideCategory: lastGuideCtx?.category ?? null,
+      },
     );
     executor = resolved.executor;
   }

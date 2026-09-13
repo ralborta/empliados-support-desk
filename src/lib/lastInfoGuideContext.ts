@@ -16,11 +16,22 @@ export type LastInfoGuideKind =
   | "combustible"
   | "hojas_de_ruta"
   | "puntos_de_interes"
-  | "utilidades_bloque_2";
+  | "utilidades_bloque_2"
+  | "informes";
 
 export type LastInfoGuideContext = {
   kind: LastInfoGuideKind;
   at: string;
+  /** Solo familia informes: categoría activa para continuidad. */
+  category?: string | null;
+  reportId?: string | null;
+  articleIds?: string[];
+};
+
+export type LastInfoGuideMeta = {
+  category?: string | null;
+  reportId?: string | null;
+  articleIds?: string[];
 };
 
 /** Misma ventana que notebook idle — no retomar guía de hace días. */
@@ -36,6 +47,7 @@ const ALLOWED = new Set<string>([
   "hojas_de_ruta",
   "puntos_de_interes",
   "utilidades_bloque_2",
+  "informes",
 ]);
 
 export function isLastInfoGuideKind(value: unknown): value is LastInfoGuideKind {
@@ -57,7 +69,28 @@ export function parseLastInfoGuideContext(raw: unknown): LastInfoGuideContext | 
   const at = typeof src.at === "string" ? src.at : "";
   const t = Date.parse(at);
   if (!Number.isFinite(t) || Date.now() - t > LAST_INFO_GUIDE_TTL_MS) return null;
-  return { kind: src.kind, at };
+  const category =
+    typeof src.category === "string"
+      ? src.category
+      : src.category === null
+        ? null
+        : undefined;
+  const reportId =
+    typeof src.reportId === "string"
+      ? src.reportId
+      : src.reportId === null
+        ? null
+        : undefined;
+  const articleIds = Array.isArray(src.articleIds)
+    ? src.articleIds.map((id) => String(id).trim()).filter(Boolean).slice(0, 8)
+    : undefined;
+  return {
+    kind: src.kind,
+    at,
+    ...(category !== undefined ? { category } : {}),
+    ...(reportId !== undefined ? { reportId } : {}),
+    ...(articleIds !== undefined ? { articleIds } : {}),
+  };
 }
 
 export async function getLastInfoGuideContext(
@@ -76,6 +109,7 @@ export async function setLastInfoGuideContext(
   prisma: PrismaClient,
   phone: string,
   kind: LastInfoGuideKind,
+  meta?: LastInfoGuideMeta,
 ): Promise<boolean> {
   const normalized = normalizeWhatsAppPhone(phone);
   if (!normalized || !isLastInfoGuideKind(kind)) return false;
@@ -88,9 +122,23 @@ export async function setLastInfoGuideContext(
       customer?.sessionNotebook && typeof customer.sessionNotebook === "object"
         ? ({ ...(customer.sessionNotebook as Record<string, unknown>) } as Record<string, unknown>)
         : {};
+    const lastInfoGuide: LastInfoGuideContext = {
+      kind,
+      at: new Date().toISOString(),
+    };
+    if (meta) {
+      if (meta.category !== undefined) lastInfoGuide.category = meta.category;
+      if (meta.reportId !== undefined) lastInfoGuide.reportId = meta.reportId;
+      if (meta.articleIds !== undefined) {
+        lastInfoGuide.articleIds = meta.articleIds
+          .map((id) => String(id).trim())
+          .filter(Boolean)
+          .slice(0, 8);
+      }
+    }
     const next = {
       ...prev,
-      lastInfoGuide: { kind, at: new Date().toISOString() } satisfies LastInfoGuideContext,
+      lastInfoGuide,
     };
     await prisma.customer.update({
       where: { phone: normalized },

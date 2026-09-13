@@ -114,6 +114,9 @@ const GUIA_HOJAS_RUTA_SUFFIX =
 const GUIA_PUNTOS_INTERES_SUFFIX =
   " Con Puntos de interés (Utilidades→POI/geocercas, grupos, eventos, Depósito): SIEMPRE esta tool — si el corpus está off, límite honesto. Paradas TP son independientes; etapas de servicio usan POI previos (no inventes que etapas ≠ PI).";
 
+const GUIA_INFORMES_SUFFIX =
+  " Con menú Informes (riel derecho→Informes: categorías Combustible/Choferes/Hojas de ruta/Mantenimiento/Puntos/TP + generales): SIEMPRE esta tool — si el corpus está off, límite honesto. Informes ≠ crear/cargar en módulos operativos (combustible, hoja de ruta, POI, mantenimiento, remitos, etc.).";
+
 const GUIA_ARTICULOS_UNSUPPORTED_SUFFIX =
   " Con módulo Artículos (stock/remitos/inventario): SIEMPRE esta tool — devolverá límite honesto. NUNCA improvises otro módulo ni digas pasos inventados.";
 
@@ -145,6 +148,7 @@ export function buildAtilioAgentTools(
     // HR: reconocimiento siempre (corpus gated en la tool/grounded).
     description += GUIA_HOJAS_RUTA_SUFFIX;
     description += GUIA_PUNTOS_INTERES_SUFFIX;
+    description += GUIA_INFORMES_SUFFIX;
     description += GUIA_ARTICULOS_UNSUPPORTED_SUFFIX;
     if (utilidadesBloque2On) description += GUIA_UTILIDADES_BLOQUE2_SUFFIX;
     if (description === t.function.description) return t;

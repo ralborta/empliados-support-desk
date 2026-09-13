@@ -98,6 +98,7 @@ const PUSH_SUITES = [
   "verify-hojas-ruta-kb.mjs",
   "verify-puntos-interes-kb.mjs",
   "verify-utilidades-bloque2-kb.mjs",
+  "verify-informes-kb.mjs",
   "verify-articulos-module-unsupported.mjs",
   "verify-mesa-entrada-advisor.mjs",
   "verify-out-of-scope-support-advisor.mjs",
