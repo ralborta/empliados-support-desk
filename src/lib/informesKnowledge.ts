@@ -801,6 +801,222 @@ export const INFORMES_ARTICLES: InformesKnowledgeArticle[] = [
     ],
     status: "needs_validation",
   },
+
+  // --- Combustible Informes (detalle) ---
+  {
+    id: "inf-cb-agua",
+    category: "combustible",
+    reportId: "inf-cb-agua",
+    title: "Agua en combustible",
+    summary:
+      "Listado por unidad del estado de agua en combustible. ≠ cargar tickets operativos.",
+    body: [
+      "Ruta: Informes → Combustible → Agua en combustible.",
+      "Filtros: Todas las unidades (múltiple); fechas/horas estándar; Cancelar · Consultar.",
+      "Resultados: encabezado Unidad / Fecha desde / Fecha hasta. Una línea por unidad; sin detecciones: estado “SIN AGUA EN COMBUSTIBLE”. Sin botones de descarga.",
+      "Frontera: informe ≠ Utilidades → Combustible (cargar/pegar tickets).",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "2" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros unidades + fechas; estado SIN AGUA EN COMBUSTIBLE",
+      "Sin descarga Excel/PDF",
+    ],
+    needsValidation: [
+      "Columnas cuando hay detecciones de agua.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-cb-buscar-tickets",
+    category: "combustible",
+    reportId: "inf-cb-buscar-tickets",
+    title: "Buscar ticket de combustible (Buscar tickets de combustible)",
+    summary:
+      "Menú “Buscar ticket…”; pantalla “Buscar tickets…”. Filtros unidad/proveedor/cisterna.",
+    body: [
+      "Ruta: Informes → Combustible → Buscar ticket de combustible. Alias de pantalla: “Buscar tickets de combustible”.",
+      "Filtros: Cualquier unidad; Cualquier proveedor; Cualquier cisterna (puede no mostrarse si no hay cisternas); casilla Consultar odómetro; fechas/horas; Cancelar · Consultar.",
+      "Sin tickets en el período: se observó que Consultar no abre resultados ni muestra mensaje (comportamiento a tener en cuenta).",
+      "Frontera: buscar/ver tickets en informe ≠ cargar ticket en Utilidades → Combustible.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "3" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros", "inf-cb-resumen-tickets"],
+    confirmedFacts: [
+      "Alias menú→pantalla (ticket/tickets)",
+      "Filtros unidad, proveedor, cisterna, Consultar odómetro",
+    ],
+    needsValidation: [
+      "Columnas de la grilla con tickets reales.",
+      "Visibilidad del filtro cisterna con cisternas cargadas.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-cb-cargas",
+    category: "combustible",
+    reportId: "inf-cb-cargas",
+    title: "Cargas de combustible",
+    summary:
+      "Informe de cargas por unidad (sensor/listado). Homónimo de categoría de alertas — pantallas distintas.",
+    body: [
+      "Ruta: Informes → Combustible → Cargas de combustible.",
+      "Filtros: Todas las unidades; fechas/horas; Cancelar · Consultar.",
+      "Resultados: una línea por unidad; sin cargas: “SIN RESULTADOS”. Descargas: DESCARGAR EXCEL (.XLSX) y DESCARGAR GOOGLE EARTH (.KMZ).",
+      "Nota: existe también una categoría de alertas llamada “Cargas de combustible” — es otra pantalla.",
+      "Frontera: ver informe de cargas ≠ cargar/pegar tickets en el módulo operativo Combustible.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "4" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros", "inf-shared-export", "inf-cb-descargas"],
+    confirmedFacts: [
+      "Estado SIN RESULTADOS sin cargas",
+      "Export Excel + Google Earth KMZ",
+    ],
+    needsValidation: [
+      "Columnas con cargas reales y contenido de KMZ/Excel.",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-cb-cisterna",
+    category: "combustible",
+    reportId: "inf-cb-cisterna",
+    title: "Cisterna combustible",
+    summary:
+      "Una cisterna por consulta. Requiere cisternas dadas de alta; ≠ módulo operativo Cisternas para cargar.",
+    body: [
+      "Ruta: Informes → Combustible → Cisterna combustible.",
+      "Filtros: Seleccione una cisterna (simple); fechas/horas; Cancelar · Consultar.",
+      "Sin cisternas: el combo abre vacío; Consultar sin selección no muestra mensaje de validación.",
+      "Frontera: informe de cisterna ≠ operar carga/medición en Utilidades → Cisternas.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "5" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Selector de una sola cisterna",
+      "Sin cisternas no se puede ejecutar",
+    ],
+    needsValidation: [
+      "Columnas, totales y descargas de resultados.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-cb-descargas",
+    category: "combustible",
+    reportId: "inf-cb-descargas",
+    title: "Descarga de combustible (Descargas de combustible)",
+    summary:
+      "Menú “Descarga…”; pantalla “Descargas…”. Posibles sustracciones detectadas por sensor.",
+    body: [
+      "Ruta: Informes → Combustible → Descarga de combustible. Alias: pantalla “Descargas de combustible”.",
+      "Filtros: Todas las unidades; fechas/horas; Cancelar · Consultar.",
+      "Resultados: una línea por unidad; sin eventos: “SIN DESCARGAS”. Export: DESCARGAR EXCEL (.XLSX) y DESCARGAR GOOGLE EARTH (.KMZ).",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "6" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros", "inf-shared-export", "inf-cb-cargas"],
+    confirmedFacts: [
+      "Alias Descarga→Descargas",
+      "Estado SIN DESCARGAS; Excel + KMZ",
+    ],
+    needsValidation: [
+      "Columnas con descargas detectadas.",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-cb-nivel",
+    category: "combustible",
+    reportId: "inf-cb-nivel",
+    title: "Nivel de combustible",
+    summary:
+      "Gráfico de nivel (fracción de tanque) de una sola unidad; pantalla completa.",
+    body: [
+      "Ruta: Informes → Combustible → Nivel de combustible.",
+      "Filtros: Seleccione una unidad (obligatorio, una sola); fechas/horas; Cancelar · Consultar.",
+      "Resultados: gráfico a pantalla completa. Eje Y: nivel 0–1.05; eje X: línea de tiempo por hora; barra de desplazamiento horizontal. Sin botones de descarga. Se cierra haciendo clic fuera del gráfico.",
+      "Sin sensor: “La unidad seleccionada no cuenta con sensor de combustible”.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "7" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros", "inf-cb-rendimiento"],
+    confirmedFacts: [
+      "Una unidad; gráfico pantalla completa",
+      "Escala Y 0–1.05; cierre clic afuera",
+      "Requiere sensor de combustible",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-cb-rendimiento-tickets",
+    category: "combustible",
+    reportId: "inf-cb-rendimiento-tickets",
+    title: "Rendimiento (c/tickets)",
+    summary:
+      "Rendimiento calculado desde tickets. Distinto del gráfico “Rendimiento de combustible”.",
+    body: [
+      "Ruta: Informes → Combustible → Rendimiento (c/tickets).",
+      "Filtros: Todas las unidades; origen del ticket (Manual y Automático / Manual / Automático); Seleccione un origen (lista pendiente); casillas “Traer ticket anterior y posterior…” y “Traer tiempo en movimiento y tiempo en ralentí”; fechas/horas; Cancelar · Consultar.",
+      "Sin tickets: igual que Buscar tickets — no abre resultados ni mensaje.",
+      "Frontera: ≠ informe gráfico Rendimiento combustible; ≠ cargar tickets en Utilidades.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "8" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros", "inf-cb-rendimiento", "inf-cb-buscar-tickets"],
+    confirmedFacts: [
+      "Filtro origen Manual/Automático + casillas de enriquecimiento",
+      "Sin tickets no abre resultados",
+    ],
+    needsValidation: [
+      "Columnas de grilla; lista de “Seleccione un origen”; efecto exacto de las casillas.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-cb-rendimiento",
+    category: "combustible",
+    reportId: "inf-cb-rendimiento",
+    title: "Rendimiento combustible (Rendimiento de combustible)",
+    summary:
+      "Menú “Rendimiento combustible”; pantalla “Rendimiento de combustible”. Gráfico vs teórico.",
+    body: [
+      "Ruta: Informes → Combustible → Rendimiento combustible. Alias: “Rendimiento de combustible”.",
+      "Filtros: una sola unidad; fechas/horas; Cancelar · Consultar.",
+      "Sin sensor: “La unidad seleccionada no cuenta con sensor de combustible”.",
+      "Gráfico: eje X por día; eje Y en litros; línea roja de rendimiento teórico; línea azul de promedio del período. Cierre clic afuera; sin descarga. Distinto de “Rendimiento (c/tickets)”.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "9" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros", "inf-cb-nivel", "inf-cb-rendimiento-tickets"],
+    confirmedFacts: [
+      "Alias menú→pantalla",
+      "Gráfico teórico vs promedio; requiere sensor",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-cb-resumen-tickets",
+    category: "combustible",
+    reportId: "inf-cb-resumen-tickets",
+    title: "Resumen de tickets de combustible",
+    summary:
+      "Tabla de 19 columnas por unidad (consumo/cargas/rendimientos). Export Excel.",
+    body: [
+      "Ruta: Informes → Combustible → Resumen de tickets de combustible.",
+      "Filtros: Todas las unidades; casilla Traer tiempos y velocidades; fechas/horas; Cancelar · Consultar.",
+      "Columnas (19): GRUPO, UNIDAD, MATRÍCULA, PRIMER TICKET, ÚLTIMO TICKET, LITROS CONSUMIDOS, LITROS CARGADOS, COSTO TICKETS CONSUMIDOS, COSTO TICKETS CARGADOS, KILÓMETROS RECORRIDOS, KILÓMETROS CON TICKETS, RENDIMIENTO L/100 KM, RENDIMIENTO L/100 KM (%), TEÓRICO L/100 KM, DESVIACIÓN POR KM(%), RENDIMIENTO POR HORA, RENDIMIENTO POR HORA (%), TEÓRICO POR HORA, DESVIACIÓN POR HORA(%).",
+      "Sin datos de tickets: filas de unidad igual aparecen con --- en columnas de tickets. Export: DESCARGAR EXCEL (.XLSX).",
+      "Frontera: resumen de tickets (informe) ≠ cargar tickets en Utilidades → Combustible.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Combustible", pages: "10" },
+    relatedIds: ["inf-idx-combustible", "inf-shared-filtros", "inf-shared-export", "inf-cb-buscar-tickets"],
+    confirmedFacts: [
+      "19 columnas exactas",
+      "Filas con --- sin tickets; Excel",
+      "Casilla Traer tiempos y velocidades",
+    ],
+    needsValidation: [
+      "Si hay fila de totales; qué columnas suma la casilla de tiempos/velocidades.",
+    ],
+    status: "available",
+  },
 ];
 
 export function listInformesArticleCatalog(options?: {

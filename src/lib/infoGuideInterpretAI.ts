@@ -1463,6 +1463,26 @@ function inferInformesCategoryFromText(norm: string): string | null {
   return null;
 }
 
+function scoreInformesDetailArticle(
+  article: (typeof INFORMES_ARTICLES)[number],
+  norm: string,
+): number {
+  const titlePrimary = article.title.split("(")[0] ?? article.title;
+  const titleNorm = titlePrimary
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+  const normWords = new Set(norm.split(/\W+/).filter(Boolean));
+  let score = 0;
+  for (const w of titleNorm.split(/\W+/).filter((x) => x.length > 3)) {
+    if (normWords.has(w)) score += 2;
+  }
+  for (const part of article.id.replace(/^inf-[a-z]+-/, "").split("-")) {
+    if (part.length > 2 && normWords.has(part)) score += 1;
+  }
+  return score;
+}
+
 function pickInformesDetailArticleId(
   category: string,
   norm: string,
@@ -1475,25 +1495,7 @@ function pickInformesDetailArticleId(
   );
   let best: { id: string; score: number } | null = null;
   for (const a of details) {
-    const titleNorm = a.title
-      .normalize("NFD")
-      .replace(/\p{M}/gu, "")
-      .toLowerCase();
-    const haystack = `${titleNorm} ${a.summary}`
-      .normalize("NFD")
-      .replace(/\p{M}/gu, "")
-      .toLowerCase();
-    let score = 0;
-    for (const w of titleNorm.split(/\W+/).filter((x) => x.length > 3)) {
-      if (norm.includes(w)) score += 2;
-    }
-    for (const part of a.id.replace(/^inf-[a-z]+-/, "").split("-")) {
-      if (part.length > 2 && norm.includes(part)) score += 1;
-    }
-    if (haystack.includes("alias") || /\(/.test(a.title)) {
-      // bonus leve si el texto cita un alias de menú/pantalla
-      void 0;
-    }
+    const score = scoreInformesDetailArticle(a, norm);
     if (!best || score > best.score) best = { id: a.id, score };
   }
   return best && best.score >= 2 ? best.id : null;
@@ -1548,24 +1550,39 @@ function correctInformesCatalogTopicMisroute(
         )
       : [];
 
-  // Etapa 2→3: con sección on, preferir detalle si el texto nombra un informe concreto.
+  // Etapa 2→3: con sección on, preferir/mejorar detalle según el texto.
   if (
     category &&
     isInformesKbEnabled() &&
-    isInformesSectionEnabled(category) &&
-    deliver.every(
+    isInformesSectionEnabled(category)
+  ) {
+    const detail = pickInformesDetailArticleId(category, norm);
+    const onlyStructural = deliver.every(
       (id) =>
         id.startsWith("inf-idx-") ||
         id === "inf-mapa" ||
         id.startsWith("inf-shared-"),
-    )
-  ) {
-    const detail = pickInformesDetailArticleId(category, norm);
-    if (detail) {
-      deliver = filterDeliverableInformesArticleIds(
-        [detail, ...deliver.filter((id) => id !== detail)],
-        category,
-      );
+    );
+    const currentDetail = deliver.find(
+      (id) =>
+        id !== "inf-mapa" &&
+        !id.startsWith("inf-idx-") &&
+        !id.startsWith("inf-shared-") &&
+        id !== "inf-ejecucion-no-disponible",
+    );
+    if (detail && (onlyStructural || (currentDetail && currentDetail !== detail))) {
+      const detailArt = INFORMES_ARTICLES.find((a) => a.id === detail);
+      const currentArt = currentDetail
+        ? INFORMES_ARTICLES.find((a) => a.id === currentDetail)
+        : null;
+      const newScore = detailArt ? scoreInformesDetailArticle(detailArt, norm) : 0;
+      const oldScore = currentArt ? scoreInformesDetailArticle(currentArt, norm) : 0;
+      if (onlyStructural || newScore > oldScore) {
+        deliver = filterDeliverableInformesArticleIds(
+          [detail, ...deliver.filter((id) => id !== detail && id !== currentDetail)],
+          category,
+        );
+      }
     }
   }
 

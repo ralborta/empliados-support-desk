@@ -315,6 +315,34 @@ try {
   assert.equal(getInformesArticlesByIds(["inf-pt-resumenes"]).length, 0);
   assert.equal(getInformesArticlesByIds(["inf-hr-detalle"]).length, 0);
 
+  // Ciclo 3: combustible
+  process.env.WARA_INFORMES_KB_SECTIONS = "combustible";
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-cb-")).length >= 9);
+  assert.ok(getInformesArticlesByIds(["inf-cb-cargas"]).some((a) => a.id === "inf-cb-cargas"));
+  assert.equal(getInformesArticlesByIds(["inf-ch-km"]).length, 0);
+  const cbGuard = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-idx-combustible"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "combustible",
+    },
+    "¿Cómo veo el informe de cargas de combustible?",
+    "",
+  );
+  assert.ok(
+    cbGuard.articleIds.some((id) => id.startsWith("inf-cb-")),
+    `expected inf-cb-* got ${JSON.stringify(cbGuard.articleIds)}`,
+  );
+
+  process.env.WARA_INFORMES_KB_SECTIONS = "";
+  assert.equal(getInformesArticlesByIds(["inf-cb-cargas"]).length, 0);
+
   console.log("OK verify-informes-kb");
 } finally {
   restoreEnv();

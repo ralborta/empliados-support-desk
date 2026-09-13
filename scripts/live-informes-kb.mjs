@@ -44,6 +44,7 @@ const sections = new Set(
 const choferesOn = infCorpusOn && sections.has("choferes");
 const puntosOn = infCorpusOn && sections.has("puntos");
 const hojasRutaInfOn = infCorpusOn && sections.has("hojas_ruta");
+const combustibleInfOn = infCorpusOn && sections.has("combustible");
 
 const cases = [
   {
@@ -52,7 +53,17 @@ const cases = [
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "informes",
-    expectDisabled: !infCorpusOn || !sections.has("combustible"),
+    expectDisabled: !combustibleInfOn,
+    expectArticlePrefix: combustibleInfOn ? "inf-cb-" : null,
+  },
+  {
+    id: "informe-resumen-tickets",
+    text: "Necesito el informe de resumen de tickets de combustible",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !combustibleInfOn,
+    expectArticlePrefix: combustibleInfOn ? "inf-cb-" : null,
   },
   {
     id: "cargar-combustible-operativo",
@@ -145,6 +156,7 @@ console.log(
     choferesOn,
     puntosOn,
     hojasRutaInfOn,
+    combustibleInfOn,
     interpret: true,
   }),
 );
