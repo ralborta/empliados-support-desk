@@ -1824,6 +1824,252 @@ export const INFORMES_ARTICLES: InformesKnowledgeArticle[] = [
     ],
     status: "available",
   }
+,
+  {
+    id: "inf-gn-histogramas-can",
+    category: "generales",
+    reportId: "inf-gn-histogramas-can",
+    title: "Histogramas CAN bus",
+    summary: "Histogramas de señales CAN bus.",
+    body: [
+      "Ruta: Informes → Histogramas CAN bus (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Genera un histograma (distribución de frecuencias) de una variable del bus CAN para",
+      "Mensaje observado: “Debe seleccionar una\nunidad”.",
+      "Mensaje observado: “Debe seleccionar una unidad”."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "11" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Debe seleccionar una\nunidad | Debe seleccionar una unidad"
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-historial",
+    category: "generales",
+    reportId: "inf-gn-historial",
+    title: "Historial",
+    summary: "Historial de posiciones/recorrido (≠ GPS vivo).",
+    body: [
+      "Ruta: Informes → Historial (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "es esperable que muestre el histórico de posiciones/recorrido de la unidad seleccionada en el",
+      "Frontera: este informe ≠ consulta GPS en vivo (“dónde está la unidad ahora”).",
+      "Mensaje observado: “Seleccione una unidad”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "12" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Seleccione una unidad"
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-historial-precios",
+    category: "generales",
+    reportId: "inf-gn-historial-precios",
+    title: "Historial de precios",
+    summary: "Historial de precios (p. ej. combustible/artículos).",
+    body: [
+      "Ruta: Informes → Historial de precios (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "los elegidos a lo largo del rango de fechas (fecha, precio, posiblemente proveedor o variación) — a confirmar.",
+      "Mensaje observado: “Debes seleccionar\n\nal menos un artículo.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "13" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Debes seleccionar\n\nal menos un artículo."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-infracciones",
+    category: "generales",
+    reportId: "inf-gn-infracciones",
+    title: "Infracciones",
+    summary: "Infracciones de velocidad/normas por unidad.",
+    body: [
+      "Ruta: Informes → Infracciones (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Mensaje observado: “Ingrese desde qué fecha desea realizar la consulta.”.",
+      "Mensaje observado: “Ingrese desde qué fecha desea realizar la consulta.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "14" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese desde qué fecha desea realizar la consulta. | Ingrese desde qué fecha desea realizar la consulta."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-instantanea",
+    category: "generales",
+    reportId: "inf-gn-instantanea",
+    title: "Instantánea",
+    summary: "Instantánea de estado (≠ posición GPS en vivo).",
+    body: [
+      "Ruta: Informes → Instantánea (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "(fecha+hora puntual), es esperable una tabla o vista de mapa mostrando la posición/estado de",
+      "Frontera: este informe ≠ consulta GPS en vivo (“dónde está la unidad ahora”).",
+      "Mensaje observado: “Ingrese una fecha.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "15" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese una fecha."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-km-horario",
+    category: "generales",
+    reportId: "inf-gn-km-horario",
+    title: "Kilómetros por horario",
+    summary: "Kilómetros agrupados por franja horaria.",
+    body: [
+      "Ruta: Informes → Kilómetros por horario (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Mensaje observado: “Ingrese al menos 1 rango de horas.”.",
+      "Mensaje observado: “Ingrese al menos 1 rango de horas.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "16" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese al menos 1 rango de horas. | Ingrese al menos 1 rango de horas."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-liquidacion",
+    category: "generales",
+    reportId: "inf-gn-liquidacion",
+    title: "Liquidación",
+    summary: "Liquidación operativa/comercial según filtros de la pantalla.",
+    body: [
+      "Ruta: Informes → Liquidación (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Mensaje observado: “Selecciona una empresa.”.",
+      "Mensaje observado: “Selecciona\nuna empresa.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "17" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Selecciona una empresa. | Selecciona\nuna empresa."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-pase-zona",
+    category: "generales",
+    reportId: "inf-gn-pase-zona",
+    title: "Pase por zona",
+    summary: "Pases por zonas/geocercas.",
+    body: [
+      "Ruta: Informes → Pase por zona (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "una tabla con cada paso registrado (unidad, fecha/hora, tipo de paso — entrada/salida —) de",
+      "Mensaje observado: “Dibuje un polígono.”.",
+      "Mensaje observado: “Dibuje\nun polígono.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "18" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Dibuje un polígono. | Dibuje\nun polígono."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-ralenti",
+    category: "generales",
+    reportId: "inf-gn-ralenti",
+    title: "Ralentí",
+    summary: "Tiempos en ralentí por unidad.",
+    body: [
+      "Ruta: Informes → Ralentí (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Mensaje observado: “Ingrese\ndesde qué fecha desea realizar la consulta.”.",
+      "Mensaje observado: “Ingrese desde qué fecha\ndesea realizar la consulta.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "19" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese\ndesde qué fecha desea realizar la consulta. | Ingrese desde qué fecha\ndesea realizar la consulta."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-gn-remitos",
+    category: "generales",
+    reportId: "inf-gn-remitos",
+    title: "Remitos",
+    summary: "Informe de remitos (≠ crear remito en Utilidades).",
+    body: [
+      "Ruta: Informes → Remitos (acceso directo en el panel, no dentro de un submenú de categoría).",
+      "Filtros típicos: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar.",
+      "Frontera: informe de remitos ≠ crear remito en Utilidades (utilidades_bloque_2).",
+      "Mensaje observado: “Ingrese un número de remito”.",
+      "Mensaje observado: “Ingrese\ndesde qué fecha desea realizar la consulta.”.",
+      "Mensaje observado: “Ingrese desde qué fecha desea realizar la con-\nsulta.”.",
+      "Columnas/resultados detallados: pendientes de confirmar si no hubo datos en el relevamiento."
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "Informes wara submodulos", pages: "20" },
+    relatedIds: ["inf-idx-generales", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros relevados: selector de unidades; rango de fechas (atajos/calendario) y horas; botón Consultar",
+      "Mensajes: Ingrese un número de remito | Ingrese\ndesde qué fecha desea realizar la consulta. | Ingrese desde qué fecha desea realizar la con-\nsulta."
+    ],
+    needsValidation: [
+      "Columnas/pantalla de resultados con datos reales"
+    ],
+    status: "available",
+  }
 ];
 
 export function listInformesArticleCatalog(options?: {
