@@ -399,7 +399,11 @@ try {
 
   // Ciclo 6: generales (entrega parcial por lotes)
   process.env.WARA_INFORMES_KB_SECTIONS = "generales";
-  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-gn-")).length >= 20);
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-gn-")).length >= 30);
+  assert.equal(
+    INFORMES_ARTICLES.filter((a) => Boolean(a.reportId)).length,
+    89,
+  );
   assert.ok(getInformesArticlesByIds(["inf-gn-historial"]).some((a) => a.id === "inf-gn-historial") ||
     getInformesArticlesByIds(["inf-gn-acoplados"]).some((a) => a.id === "inf-gn-acoplados"));
   const gnGuard = applyPlatformGuideInterpretGuards(
