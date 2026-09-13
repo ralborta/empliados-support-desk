@@ -600,6 +600,207 @@ export const INFORMES_ARTICLES: InformesKnowledgeArticle[] = [
     ],
     status: "needs_validation",
   },
+
+  // --- Puntos (detalle) ---
+  {
+    id: "inf-pt-entradas-salidas",
+    category: "puntos",
+    reportId: "inf-pt-entradas-salidas",
+    title: "Entradas y salidas",
+    summary:
+      "Informes → Puntos → Entradas y salidas. Eventos de entrada/salida a POI; ≠ crear puntos en Utilidades.",
+    body: [
+      "Ruta: Informes → Puntos → Entradas y salidas. Frontera: esto es un INFORME; no es Utilidades → Puntos de interés (crear/editar geocercas).",
+      "Filtros: selector múltiple “Todas las unidades”; selector múltiple “Todos los puntos”; criterio (radios excluyentes) “Entradas y salidas” / “Solo entradas” / “Sólo salidas” (preseleccionado “Sólo salidas”; ortografía literal de pantalla); atajos Hoy/Ayer/Última semana/Último mes + calendario doble; Hora de inicio / Hora de finalización; Consultar.",
+      "Resultados: encabezado Fecha desde / Fecha hasta / Criterio. Listado por unidad (expandible) con eventos cronológicos (“Entrada, fecha, hora” / “Salida, fecha, hora” + nombre del punto). Detalle de evento: Chofer:, Fecha:, Hora:, Punto:, Lugar:. Clic en un evento reposiciona el mapa. Sin fila de totales.",
+      "Descargas: DESCARGAR EXCEL (.XLSX), DESCARGAR PDF (.PDF), DESCARGAR GOOGLE EARTH (.KMZ).",
+      "Sin coincidencias: mensajes según criterio (“No se registran entradas ni salidas…”, “…entradas…”, “…salidas…”).",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "wara_puntos_relevamiento", pages: "2.1" },
+    relatedIds: ["inf-idx-puntos", "inf-shared-filtros", "inf-shared-export"],
+    confirmedFacts: [
+      "Filtros unidades/puntos + criterio + fechas/horas",
+      "Detalle de evento con etiquetas Chofer/Fecha/Hora/Punto/Lugar",
+      "Tres formatos de descarga",
+      "Mensajes sin datos por criterio",
+    ],
+    needsValidation: [
+      "Texto exacto de Criterio con “Solo entradas”.",
+      "Contenido interno de Excel/PDF/KMZ (no se ejecutaron descargas).",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-pt-obligatorios",
+    category: "puntos",
+    reportId: "inf-pt-obligatorios",
+    title: "Puntos obligatorios",
+    summary:
+      "Requiere al menos un POI con “Zona obligatoria”; si no hay, no abre filtros ni resultados.",
+    body: [
+      "Ruta: Informes → Puntos → Puntos obligatorios.",
+      "Restricción: si no hay puntos configurados como zona obligatoria, al abrir el ítem el panel se cierra y aparece toast naranja: “No hay puntos configurados como zonas obligatorias”. No se muestran filtros ni resultados.",
+      "La casilla “Zona obligatoria” (y horarios de zona obligatoria) se configura en el alta/edición del punto de interés (Utilidades / mapa), fuera de este informe.",
+      "Frontera: consultar el informe ≠ crear o editar el punto de interés.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "wara_puntos_relevamiento", pages: "2.2" },
+    relatedIds: ["inf-idx-puntos", "inf-pt-prohibidos"],
+    confirmedFacts: [
+      "Sin zonas obligatorias configuradas el informe no abre",
+      "Mensaje exacto del sistema relevado",
+    ],
+    restrictions: [
+      "Depende de configuración “Zona obligatoria” en el módulo de puntos de interés.",
+    ],
+    needsValidation: [
+      "Filtros, columnas, totales y botones de descarga cuando sí hay zonas obligatorias.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-pt-prohibidos",
+    category: "puntos",
+    reportId: "inf-pt-prohibidos",
+    title: "Puntos prohibidos",
+    summary:
+      "Entradas a zonas prohibidas. El selector de puntos solo lista POI con “Zona prohibida”.",
+    body: [
+      "Ruta: Informes → Puntos → Puntos prohibidos.",
+      "Filtros: “Todas las unidades” (múltiple); “Todos los puntos” acotado a puntos con zona prohibida; atajos/calendario; horas; Consultar. No tiene selector de criterio (solo entradas a zonas prohibidas).",
+      "Sin coincidencias: “No se registran entradas a zonas prohibidas para la combinación de unidades y puntos ingresada.”",
+      "Frontera: informe de control ≠ alta de geocerca en Utilidades → Puntos de interés.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "wara_puntos_relevamiento", pages: "2.3" },
+    relatedIds: ["inf-idx-puntos", "inf-shared-filtros", "inf-pt-obligatorios"],
+    confirmedFacts: [
+      "Selector de puntos filtrado por zona prohibida",
+      "Sin criterio entradas/salidas (solo entradas prohibidas)",
+      "Mensaje sin coincidencias relevado",
+    ],
+    needsValidation: [
+      "Pantalla de resultados con datos (columnas, totales, descargas).",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-pt-resumenes",
+    category: "puntos",
+    reportId: "inf-pt-resumenes",
+    title: "Resúmenes por punto",
+    summary:
+      "Comparativa DENTRO/FUERA de puntos para una unidad obligatoria; Excel únicamente.",
+    body: [
+      "Ruta: Informes → Puntos → Resúmenes por punto.",
+      "Filtros: “Seleccione una unidad” (obligatorio; no “Todas las unidades”); “Todos los puntos” (múltiple); período + horas; Consultar. Sin unidad → “Seleccione una unidad”.",
+      "Resultados: tabla ACCIONES / DENTRO / FUERA con filas: Kilómetros recorridos; Máxima velocidad alcanzada; Tiempo en ralentí; Tiempo en movimiento; Velocidad promedio; Infracciones; Kilómetros en infracción. Contadores bordó Entrada y Salida. Sin actividad: tabla en ceros / “—” en velocidad promedio, sin toast de error.",
+      "Descarga: solo DESCARGAR EXCEL (.XLSX) (sin PDF ni KMZ en este informe).",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "wara_puntos_relevamiento", pages: "2.4" },
+    relatedIds: ["inf-idx-puntos", "inf-shared-filtros", "inf-shared-export"],
+    confirmedFacts: [
+      "Unidad obligatoria",
+      "Filas DENTRO/FUERA relevadas",
+      "Contadores Entrada/Salida",
+      "Solo Excel; sin datos → ceros sin toast",
+    ],
+    needsValidation: [
+      "Contenido del Excel exportado.",
+    ],
+    status: "available",
+  },
+
+  // --- Hojas de ruta Informes (detalle) ---
+  {
+    id: "inf-hr-detalle",
+    category: "hojas_ruta",
+    reportId: "inf-hr-detalle",
+    title: "Detalle de hojas de ruta",
+    summary:
+      "Menú “Detalle de hojas de ruta”; pantalla se titula “Hojas de ruta”. ≠ crear/editar en Utilidades.",
+    body: [
+      "Ruta: Informes → Hojas de ruta → Detalle de hojas de ruta. Alias: el encabezado del panel muestra “Hojas de ruta” (no “Detalle…”).",
+      "Frontera crítica: esto es INFORME de consulta; no es Utilidades → Hojas de ruta (crear/editar/gestionar cargas).",
+      "UI: buscador “Buscar…” sobre resultados; ícono de filtros abre panel avanzado con atajos Hoy/Ayer/Última semana/Último mes; calendario doble; Hora de inicio / Hora de finalización (0:00–23:59); “Cualquier chofer” y “Cualquier unidad” (selectores múltiples). No se identificó botón “Consultar” explícito (el listado parece reaccionar con los filtros).",
+      "Sin datos: texto “(sin resultados)” en cursiva (sin toast).",
+    ].join("\n"),
+    source: {
+      ...INFORMES_SOURCE,
+      document: "wara_hojas_de_ruta_relevamiento",
+      pages: "2.1",
+    },
+    relatedIds: ["inf-idx-hojas_ruta", "inf-shared-filtros", "inf-hr-planificacion", "inf-hr-viajes-planificados"],
+    confirmedFacts: [
+      "Alias menú→pantalla: Detalle… → título Hojas de ruta",
+      "Filtros chofer/unidad + fechas/horas + Buscar…",
+      "Vacío: (sin resultados) sin toast",
+    ],
+    restrictions: [
+      "No confundir con alta/edición de hojas en Utilidades.",
+    ],
+    needsValidation: [
+      "Columnas/tabla de resultados con datos.",
+      "Si hay ficha al clic, exportación o impresión.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-hr-planificacion",
+    category: "hojas_ruta",
+    reportId: "inf-hr-planificacion",
+    title: "Planificación de hojas de ruta",
+    summary:
+      "Consulta de planificación por tipo de carga y período; requiere Consultar.",
+    body: [
+      "Ruta: Informes → Hojas de ruta → Planificación de hojas de ruta.",
+      "Filtros: “Cualquier tipo de carga” (múltiple); atajos de fecha + calendario doble; botón Consultar (no filtra en vivo).",
+      "Sin datos: toast “No se encontraron resultados para su búsqueda”.",
+      "Frontera: informe de planificación ≠ crear/editar hoja en Utilidades → Hojas de ruta.",
+    ].join("\n"),
+    source: {
+      ...INFORMES_SOURCE,
+      document: "wara_hojas_de_ruta_relevamiento",
+      pages: "2.2",
+    },
+    relatedIds: ["inf-idx-hojas_ruta", "inf-shared-filtros", "inf-hr-detalle"],
+    confirmedFacts: [
+      "Filtro tipo de carga + fechas + Consultar",
+      "Mensaje sin resultados estándar",
+    ],
+    needsValidation: [
+      "Formato de resultados con datos (columnas, gráficos, export).",
+      "Origen del catálogo “tipo de carga”.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-hr-viajes-planificados",
+    category: "hojas_ruta",
+    reportId: "inf-hr-viajes-planificados",
+    title: "Viajes planificados por hojas de ruta",
+    summary:
+      "Buscar por unidad o por chofer; fechas/horas y Consultar. ≠ hoja de turno de TP.",
+    body: [
+      "Ruta: Informes → Hojas de ruta → Viajes planificados por hojas de ruta.",
+      "Filtros: radios “Buscar por unidad” (default) / “Buscar por chofer”; selector múltiple correspondiente (“Cualquier unidad” o “Cualquier chofer”); atajos/calendario; Hora de inicio / Hora de finalización (0:00–24:00); Consultar.",
+      "Sin datos: “No se encontraron resultados para su búsqueda”.",
+      "Fronteras: ≠ Utilidades → Hojas de ruta (operativo); ≠ “viajes planificados por hojas de turno” (Informes → Transporte de pasajeros).",
+    ].join("\n"),
+    source: {
+      ...INFORMES_SOURCE,
+      document: "wara_hojas_de_ruta_relevamiento",
+      pages: "2.3",
+    },
+    relatedIds: ["inf-idx-hojas_ruta", "inf-shared-filtros", "inf-hr-detalle"],
+    confirmedFacts: [
+      "Modo buscar por unidad o chofer",
+      "Horas hasta 24:00",
+      "Mensaje sin resultados",
+    ],
+    needsValidation: [
+      "Formato de resultados con datos y posible enlace a la hoja asociada.",
+    ],
+    status: "needs_validation",
+  },
 ];
 
 export function listInformesArticleCatalog(options?: {

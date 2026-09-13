@@ -260,6 +260,61 @@ try {
   assert.equal(kmOff.articleIds.length, 0);
   assert.match(kmOff.reason ?? "", /informes_section_disabled/);
 
+  // Ciclo 2: puntos + hojas_ruta
+  process.env.WARA_INFORMES_KB_SECTIONS = "puntos,hojas_ruta";
+  assert.equal(isInformesSectionEnabled("puntos"), true);
+  assert.equal(isInformesSectionEnabled("hojas_ruta"), true);
+  assert.equal(isInformesSectionEnabled("choferes"), false);
+  assert.ok(getInformesArticlesByIds(["inf-pt-entradas-salidas"]).some((a) => a.id === "inf-pt-entradas-salidas"));
+  assert.ok(getInformesArticlesByIds(["inf-hr-viajes-planificados"]).some((a) => a.id === "inf-hr-viajes-planificados"));
+  assert.equal(getInformesArticlesByIds(["inf-ch-km"]).length, 0);
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-pt-")).length >= 4);
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-hr-")).length >= 3);
+
+  const ptGuard = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-idx-puntos"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "puntos",
+    },
+    "¿Cómo veo el informe de entradas y salidas de puntos?",
+    "",
+  );
+  assert.ok(
+    ptGuard.articleIds.some((id) => id.startsWith("inf-pt-")),
+    `expected inf-pt-* got ${JSON.stringify(ptGuard.articleIds)}`,
+  );
+
+  const hrGuard = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-idx-hojas_ruta"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "hojas_ruta",
+    },
+    "Quiero el informe de viajes planificados por hojas de ruta",
+    "",
+  );
+  assert.ok(
+    hrGuard.articleIds.some((id) => id.startsWith("inf-hr-")),
+    `expected inf-hr-* got ${JSON.stringify(hrGuard.articleIds)}`,
+  );
+
+  process.env.WARA_INFORMES_KB_SECTIONS = "";
+  assert.equal(getInformesArticlesByIds(["inf-pt-resumenes"]).length, 0);
+  assert.equal(getInformesArticlesByIds(["inf-hr-detalle"]).length, 0);
+
   console.log("OK verify-informes-kb");
 } finally {
   restoreEnv();

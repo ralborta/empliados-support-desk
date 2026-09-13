@@ -42,6 +42,8 @@ const sections = new Set(
     : [],
 );
 const choferesOn = infCorpusOn && sections.has("choferes");
+const puntosOn = infCorpusOn && sections.has("puntos");
+const hojasRutaInfOn = infCorpusOn && sections.has("hojas_ruta");
 
 const cases = [
   {
@@ -56,7 +58,6 @@ const cases = [
     id: "cargar-combustible-operativo",
     text: "Quiero cargar combustible / pegar tickets de la unidad",
     thread: "",
-    // Preferible: combustible (si on) o continue_normal — no hijack a informes.
     expectNotGuide: "informes",
   },
   {
@@ -72,7 +73,33 @@ const cases = [
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "informes",
-    expectDisabled: !infCorpusOn || !sections.has("hojas_ruta"),
+    expectDisabled: !hojasRutaInfOn,
+    expectArticlePrefix: hojasRutaInfOn ? "inf-hr-" : null,
+  },
+  {
+    id: "crear-punto-interes",
+    text: "Cómo creo un punto de interés / geocerca",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "puntos_de_interes",
+  },
+  {
+    id: "informe-entradas-salidas",
+    text: "¿Cómo veo el informe de entradas y salidas de puntos?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !puntosOn,
+    expectArticlePrefix: puntosOn ? "inf-pt-" : null,
+  },
+  {
+    id: "informe-resumenes-punto",
+    text: "Necesito el informe de resúmenes por punto",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !puntosOn,
+    expectArticlePrefix: puntosOn ? "inf-pt-" : null,
   },
   {
     id: "informe-km-chofer",
@@ -116,6 +143,8 @@ console.log(
     mode: infCorpusOn ? "corpus_on" : "flag_off_safe",
     sections: process.env.WARA_INFORMES_KB_SECTIONS || "",
     choferesOn,
+    puntosOn,
+    hojasRutaInfOn,
     interpret: true,
   }),
 );
