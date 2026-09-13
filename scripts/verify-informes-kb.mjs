@@ -66,7 +66,9 @@ try {
   assert.equal(isInformesSectionEnabled("choferes"), false);
   assert.ok(listInformesArticleCatalog({ structuralOnly: true }).length >= 8);
   assert.equal(getInformesArticlesByIds(["inf-idx-choferes"]).length, 0);
+  assert.equal(getInformesArticlesByIds(["inf-ch-km"]).length, 0);
   assert.match(buildInformesKnowledgeContext(["inf-mapa"]), /deshabilitada/i);
+  assert.ok(INFORMES_ARTICLES.filter((a) => a.id.startsWith("inf-ch-")).length >= 9);
   assert.equal(detectInfoGuideKind("informes"), "informes");
   assert.equal(detectInfoGuideKind("menu informes"), "informes");
   assert.equal(
@@ -147,22 +149,35 @@ try {
   assert.equal(parsedLast?.reportId, null);
   assert.deepEqual(parsedLast?.articleIds, ["inf-idx-combustible"]);
 
-  // Master on + section choferes: idx-choferes ok; idx-combustible no; mapa/shared sí
+  // Master on + sections vacío: reconoce pero no entrega detalle inf-ch-*
   process.env.WARA_INFORMES_KB_ENABLED = "true";
-  process.env.WARA_INFORMES_KB_SECTIONS = "choferes";
+  process.env.WARA_INFORMES_KB_SECTIONS = "";
   assert.equal(isInformesKbEnabled(), true);
+  assert.equal(isInformesSectionEnabled("choferes"), false);
+  assert.equal(getInformesArticlesByIds(["inf-ch-km"]).length, 0);
+  assert.equal(getInformesArticlesByIds(["inf-idx-choferes"]).length, 0);
+
+  // Master on + section choferes: idx + detalle inf-ch-*; idx-combustible no; mapa/shared sí
+  process.env.WARA_INFORMES_KB_SECTIONS = "choferes";
   assert.equal(isInformesSectionEnabled("choferes"), true);
   assert.equal(isInformesSectionEnabled("combustible"), false);
   assert.equal(isInformesSectionEnabled("mapa"), true);
   assert.ok(getInformesArticlesByIds(["inf-idx-choferes"]).some((a) => a.id === "inf-idx-choferes"));
+  assert.ok(getInformesArticlesByIds(["inf-ch-km"]).some((a) => a.id === "inf-ch-km"));
+  assert.ok(getInformesArticlesByIds(["inf-ch-conducta"]).some((a) => a.id === "inf-ch-conducta"));
   assert.equal(getInformesArticlesByIds(["inf-idx-combustible"]).length, 0);
   assert.ok(getInformesArticlesByIds(["inf-mapa"]).some((a) => a.id === "inf-mapa"));
   assert.ok(
     getInformesArticlesByIds(["inf-shared-filtros"]).some((a) => a.id === "inf-shared-filtros"),
   );
+  assert.match(buildInformesKnowledgeContext(["inf-ch-km"]), /Kilómetros recorridos/i);
   assert.match(buildInformesKnowledgeContext(["inf-idx-choferes"]), /Choferes/i);
   assert.match(buildInformesSectionDisabledReply("combustible"), /Combustible/i);
   assert.match(buildInformesDisabledChannelReply(), /Informes/);
+
+  const chCatalog = listInformesArticleCatalog({ category: "choferes" });
+  assert.ok(chCatalog.some((a) => a.id === "inf-ch-perfil-manejo"));
+  assert.ok(chCatalog.every((a) => !a.id.startsWith("inf-cb-")));
 
   const sectionGuard = applyPlatformGuideInterpretGuards(
     {
@@ -201,6 +216,49 @@ try {
   assert.equal(choferesGuard.guideKind, "informes");
   assert.ok(choferesGuard.articleIds.includes("inf-idx-choferes"));
   assert.doesNotMatch(choferesGuard.reason ?? "", /informes_section_disabled/);
+
+  // Con SECTIONS=choferes, pedido concreto → detalle inf-ch-* (no solo índice)
+  const kmGuard = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-idx-choferes"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "choferes",
+    },
+    "¿Cómo veo el informe de kilómetros recorridos por chofer?",
+    "",
+  );
+  assert.equal(kmGuard.guideKind, "informes");
+  assert.equal(kmGuard.category, "choferes");
+  assert.ok(
+    kmGuard.articleIds.some((id) => id.startsWith("inf-ch-")),
+    `expected inf-ch-* got ${JSON.stringify(kmGuard.articleIds)}`,
+  );
+
+  // SECTIONS vacío: no entregar inf-ch-*
+  process.env.WARA_INFORMES_KB_SECTIONS = "";
+  const kmOff = applyPlatformGuideInterpretGuards(
+    {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "procedure",
+      articleIds: ["inf-ch-km"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: 0.9,
+      reason: "seed",
+      category: "choferes",
+    },
+    "¿Cómo veo el informe de kilómetros recorridos por chofer?",
+    "",
+  );
+  assert.equal(kmOff.articleIds.length, 0);
+  assert.match(kmOff.reason ?? "", /informes_section_disabled/);
 
   console.log("OK verify-informes-kb");
 } finally {

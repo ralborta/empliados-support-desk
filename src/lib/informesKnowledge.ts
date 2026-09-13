@@ -353,6 +353,253 @@ export const INFORMES_ARTICLES: InformesKnowledgeArticle[] = [
     source: { ...INFORMES_SOURCE },
     status: "available",
   },
+
+  // --- Choferes (detalle) ---
+  {
+    id: "inf-ch-conducta",
+    category: "choferes",
+    reportId: "inf-ch-conducta",
+    title: "Conducta por chofer",
+    summary:
+      "Informes → Choferes → Conducta por chofer. Exige RFID asignado; filtros de choferes y rango de fechas.",
+    body: [
+      "Ruta: Informes → Choferes → Conducta por chofer.",
+      "Filtros: combo múltiple de choferes (por defecto “Todos los choferes”); atajos Hoy / Ayer / Última semana / Último mes; rango de fechas + doble calendario (solo fechas pasadas); Hora de inicio / Hora de finalización (0:00 / 24:00); botón Consultar.",
+      "Restricción bloqueante: los choferes consultados deben tener RFID asignado. Si alguno no lo tiene, aparece aviso naranja “El/los siguiente/s chofer/es no tiene/n RFID asignado:” + lista y no ejecuta la consulta. Consultar sin tildar ningún chofer equivale a consultar todos (misma validación).",
+      "Sin datos en el período (con choferes que sí tienen RFID): “No se encontraron resultados para su búsqueda”.",
+      "Flujo de 2 pantallas (filtros → resultados). No hay botón Cancelar en este grupo.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.1" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros", "inf-ch-rfid"],
+    confirmedFacts: [
+      "Filtros: choferes múltiple + atajos/rango/horas + Consultar",
+      "Exige RFID asignado; sin RFID bloquea la consulta",
+      "Sin tildar choferes = consultar todos",
+      "Mensaje sin datos: No se encontraron resultados para su búsqueda",
+    ],
+    restrictions: [
+      "Asignación de RFID al chofer se hace fuera de Informes (ABM de choferes).",
+    ],
+    needsValidation: [
+      "Columnas y formato de la pantalla de resultados (no se abrió por falta de datos con RFID).",
+      "Formato de descarga si existiera en resultados.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-ch-disponibilidad",
+    category: "choferes",
+    reportId: "inf-ch-disponibilidad",
+    title: "Disponibilidad de choferes",
+    summary:
+      "Único informe prospectivo del grupo: estima ubicaciones futuras. Chofer obligatorio; fechas solo desde hoy.",
+    body: [
+      "Ruta: Informes → Choferes → Disponibilidad de choferes.",
+      "Es el único informe prospectivo del grupo Choferes: estima dónde va a estar cada chofer.",
+      "Filtros: combo múltiple de choferes (obligatorio; placeholder “Seleccione uno o más choferes”); combo “Cualquier punto de partida” (radio, selección única, con buscador); combo “Cualquier punto de llegada” (igual); rango de fechas + doble calendario (solo fechas de hoy en adelante; pasadas deshabilitadas); horas 0:00 / 24:00 (si desde es hoy, la hora de inicio toma la hora actual); Consultar. No hay atajos Hoy/Ayer/Última semana/Último mes.",
+      "Validaciones (orden): sin chofer → “Seleccione al menos un chofer”; con chofer pero sin fecha → “Ingrese desde qué fecha desea realizar la consulta.”",
+      "Resultados: barra de resumen (Desde / Hasta / Punto de partida / Punto de llegada). Tabla con una fila por chofer seleccionado (aparecen todos aunque no tengan datos). Columnas: CHOFER, ÚLTIMA UBICACIÓN ESTIMADA, FECHA, PRÓXIMA UBICACIÓN ESTIMADA, FECHA. Pie: DESCARGAR EXCEL (.XLSX).",
+      "En el encabezado de resultados se observó el ícono persona+engranaje (Colapsar/Expandir mapa).",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.2" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros", "inf-shared-export"],
+    confirmedFacts: [
+      "Prospectivo: solo fechas futuras / desde hoy",
+      "Chofer obligatorio; puntos de partida/llegada opcionales",
+      "Columnas de resultados relevadas",
+      "Export DESCARGAR EXCEL (.XLSX)",
+    ],
+    needsValidation: [
+      "Si la lista de puntos de partida/llegada proviene del módulo Punto de Interés o del padrón de clientes.",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-ch-encuestas",
+    category: "choferes",
+    reportId: "inf-ch-encuestas",
+    title: "Encuestas por chofer (Últimas encuestas por chofer)",
+    summary:
+      "Menú “Encuestas por chofer” abre “Últimas encuestas por chofer”. Sin filtros; solo Consultar.",
+    body: [
+      "Ruta: Informes → Choferes → Encuestas por chofer. Alias de pantalla: el panel se titula “Últimas encuestas por chofer”.",
+      "Filtros: no tiene. Solo el botón Consultar.",
+      "Resultados: tabla con columnas ordenables CHOFER, LEGAJO, FECHA. Lista todos los usuarios/choferes del sistema, incluidos dados de baja (sufijo “(baja)” en el nombre). Las filas no son clicables (no abren detalle de encuesta).",
+      "Pie: botón “Descargar como Microsoft Excel (.xlsx)” — único del grupo Choferes con ese rótulo (el resto usa “DESCARGAR EXCEL (.XLSX)” o “DESCARGAS”).",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.3" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-export"],
+    confirmedFacts: [
+      "Alias menú→pantalla: Encuestas por chofer → Últimas encuestas por chofer",
+      "Sin filtros previos; solo Consultar",
+      "Columnas CHOFER / LEGAJO / FECHA ordenables",
+      "Incluye choferes dados de baja con sufijo (baja)",
+      "Export: Descargar como Microsoft Excel (.xlsx)",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-ch-graficas-puntuacion",
+    category: "choferes",
+    reportId: "inf-ch-graficas-puntuacion",
+    title: "Gráficas de puntuación (Gráficas de puntuación de choferes)",
+    summary:
+      "Menú “Gráficas de puntuación”; filtros “Gráficas de puntuación de choferes”; resultados se titulan “Puntuación de choferes” (informe distinto al N.º 8).",
+    body: [
+      "Ruta: Informes → Choferes → Gráficas de puntuación. Alias: panel de filtros “Gráficas de puntuación de choferes”. La pantalla de resultados se titula “Puntuación de choferes” (mismo título que el informe Puntuación de choferes, pero es otro informe).",
+      "Filtros: atajos Hoy / Ayer / Última semana / Último mes; rango de fechas + doble calendario (solo pasadas); Consultar. No tiene selector de choferes ni horas de inicio/finalización.",
+      "Sin datos: abre resultados vacíos (sin gráfico, sin tabla, sin mensaje del sistema y sin botón de descarga observado).",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.4" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros", "inf-ch-puntuacion"],
+    confirmedFacts: [
+      "Alias menú→filtros→resultados (título resultados coincide con otro informe)",
+      "Solo atajos/rango de fechas; sin choferes ni horas",
+      "Sin datos: pantalla vacía sin mensaje",
+    ],
+    needsValidation: [
+      "Tipo de gráfico, series y leyenda cuando hay puntuaciones cargadas.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-ch-km",
+    category: "choferes",
+    reportId: "inf-ch-km",
+    title: "Kilómetros recorridos por chofer",
+    summary:
+      "Km por chofer en un período, agrupados por chofer con detalle por tramo/unidad.",
+    body: [
+      "Ruta: Informes → Choferes → Kilómetros recorridos por chofer.",
+      "Filtros: combo múltiple de choferes (por defecto “Cualquier chofer”); atajos Hoy / Ayer / Última semana / Último mes; rango + horas 0:00 / 24:00; Consultar.",
+      "Resultados: barra de resumen (Chofer / Fecha desde / Fecha hasta) + enlace DESCARGAS. Bloques agrupados por chofer (colapsables); aparecen todos los choferes consultados, incluso con 0 km. Cada bloque cierra con fila TOTAL de km del chofer.",
+      "Columnas por fila: DESDE, HASTA, UNIDAD, KMS. RECORRIDOS, IDENTIFICACIÓN, LUGAR.",
+      "IDENTIFICACIÓN indica el vínculo chofer–unidad; valor observado: “Asignado a unidad”.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.5" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros", "inf-shared-export"],
+    confirmedFacts: [
+      "Filtros choferes + fechas/horas",
+      "Agrupado por chofer con TOTAL; incluye choferes con 0 km",
+      "Columnas DESDE/HASTA/UNIDAD/KMS/IDENTIFICACIÓN/LUGAR",
+      "Enlace DESCARGAS en barra de resumen",
+    ],
+    needsValidation: [
+      "Formatos que entrega el enlace DESCARGAS.",
+      "Otros valores posibles de IDENTIFICACIÓN (p. ej. por RFID).",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-ch-parte-disciplinario",
+    category: "choferes",
+    reportId: "inf-ch-parte-disciplinario",
+    title: "Parte disciplinario",
+    summary:
+      "Filtra por unidad, chofer y novedad (10 opciones de adelanto/atraso). ≠ novedades de certificado ni Utilidades→Novedades.",
+    body: [
+      "Ruta: Informes → Choferes → Parte disciplinario.",
+      "Filtros: combo múltiple “Cualquier unidad” (árbol por grupos); combo múltiple “Cualquier chofer”; combo múltiple “Cualquier novedad” (lista plana de 10); atajos de fecha; rango + horas; Consultar.",
+      "Novedades exactas (rótulos de pantalla, sin tilde en “Salio”/“Llego”): Adelantado; Atrasado; Llego adelantado; Llego atrasado; Salio adelantado; Salio adelantado y llego adelantado; Salio adelantado y llego atrasado; Salio atrasado; Salio atrasado y llego adelantado; Salio atrasado y llego atrasado.",
+      "Sin datos en el período: “No se encontraron resultados para su búsqueda”.",
+      "Frontera: este informe de parte disciplinario / novedades de cumplimiento de horarios ≠ novedades de certificado ni Utilidades → Novedades.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.6" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros"],
+    confirmedFacts: [
+      "Filtros unidad + chofer + novedad (10 opciones) + fechas",
+      "Listado exacto de 10 novedades",
+      "Mensaje sin datos estándar",
+    ],
+    restrictions: [
+      "No confundir con novedades de certificado ni con Utilidades→Novedades.",
+    ],
+    needsValidation: [
+      "Columnas de la pantalla de resultados (sin datos en la cuenta relevada).",
+      "Formato de descarga si existiera.",
+    ],
+    status: "needs_validation",
+  },
+  {
+    id: "inf-ch-perfil-manejo",
+    category: "choferes",
+    reportId: "inf-ch-perfil-manejo",
+    title: "Perfil de manejo",
+    summary:
+      "Métricas de manejo por chofer/unidad: excesos, frenadas, tiempo, km y rendimientos de combustible.",
+    body: [
+      "Ruta: Informes → Choferes → Perfil de manejo.",
+      "Filtros: combo múltiple de choferes; atajos de fecha; rango + horas 0:00 / 24:00; Consultar.",
+      "Resultados: barra de resumen (Chofer / fechas) + DESCARGAR EXCEL (.XLSX). Agrupado por chofer; el título del bloque incluye el legajo entre paréntesis. A diferencia de Kilómetros recorridos, solo aparecen choferes con datos en el período.",
+      "Columnas (una fila por unidad manejada): UNIDAD, ACELERACIONES BRUSCAS, EXCESOS DE VELOCIDAD, FRENADAS BRUSCAS, TIEMPO DE MANEJO, TIEMPO EN RALENTÍ, KMS. RECORRIDOS, REND. COMB. TEÓRICO L/100 KM, REND. DE COMB. PROMEDIO L/100 KM.",
+      "No se observó fila de TOTAL en este informe.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.7" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros", "inf-shared-export"],
+    confirmedFacts: [
+      "Filtros choferes + fechas/horas",
+      "Solo choferes con datos; legajo en título del bloque",
+      "9 columnas de métricas relevadas",
+      "DESCARGAR EXCEL (.XLSX)",
+    ],
+    needsValidation: [
+      "Si existen filas de TOTAL/subtotales cuando hay varias unidades por chofer.",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-ch-puntuacion",
+    category: "choferes",
+    reportId: "inf-ch-puntuacion",
+    title: "Puntuación de choferes",
+    summary:
+      "Puntaje de conducta a una fecha (un solo día). Distinto del informe Gráficas de puntuación.",
+    body: [
+      "Ruta: Informes → Choferes → Puntuación de choferes. Distinto de “Gráficas de puntuación” (aunque esa pantalla de resultados reutiliza el mismo título).",
+      "Filtros (los más simples del grupo): un único campo de fecha + un solo calendario; Consultar. Sin atajos, sin horas, sin selector de choferes. Se permite cualquier día, incluidos futuros.",
+      "Validación: consultar sin fecha → aviso rojo literal “Error”.",
+      "Resultados: barra de resumen Fecha + enlace DESCARGAS. Columnas: LEGAJO, NOMBRE, PUNTUACIÓN, PUNTUACIÓN INICIAL, EXCESOS DE VELOCIDAD, ACELERACIONES BRUSCAS, FRENADAS BRUSCAS, ZONAS PROHIBIDAS, SALIDA DE ZONAS OBLIGATORIAS.",
+      "Sin datos: tabla con encabezados y cero filas, sin mensaje de “sin resultados”.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.8" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros", "inf-shared-export", "inf-ch-graficas-puntuacion"],
+    confirmedFacts: [
+      "Una sola fecha; sin choferes ni horas",
+      "Sin fecha → Error (rojo)",
+      "9 columnas de resultados relevadas",
+      "Sin datos: encabezados sin filas ni mensaje",
+    ],
+    needsValidation: [
+      "Formatos que entrega el enlace DESCARGAS.",
+    ],
+    status: "available",
+  },
+  {
+    id: "inf-ch-rfid",
+    category: "choferes",
+    reportId: "inf-ch-rfid",
+    title: "Identificaciones RFID",
+    summary:
+      "Consulta identificaciones RFID por unidad/chofer; consolidar por unidad o por chofer.",
+    body: [
+      "Ruta: Informes → Choferes → Identificaciones RFID.",
+      "Filtros: combo múltiple “Cualquier unidad”; combo múltiple “Cualquier chofer”; radio “Consolidar por:” unidad (marcado por defecto) / chofer; atajos de fecha; rango + horas; Consultar.",
+      "Sin datos: “No se encontraron identificaciones RFID para su búsqueda” (mismo mensaje consolidando por unidad o por chofer).",
+      "En el DOM de resultados se detectó enlace DESCARGAS, pero la vista no se abrió por falta de datos.",
+    ].join("\n"),
+    source: { ...INFORMES_SOURCE, document: "WARA Informes Choferes", pages: "2.9" },
+    relatedIds: ["inf-idx-choferes", "inf-shared-filtros", "inf-ch-conducta"],
+    confirmedFacts: [
+      "Filtros unidad + chofer + consolidar por unidad/chofer + fechas",
+      "Mensaje sin datos propio del informe",
+      "Existe enlace DESCARGAS en resultados (DOM)",
+    ],
+    needsValidation: [
+      "Columnas de la pantalla de resultados.",
+      "Formatos del enlace DESCARGAS.",
+    ],
+    status: "needs_validation",
+  },
 ];
 
 export function listInformesArticleCatalog(options?: {

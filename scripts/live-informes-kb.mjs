@@ -33,6 +33,16 @@ if (!process.env.WARA_INFORMES_KB_SECTIONS?.trim()) {
   process.env.WARA_INFORMES_KB_SECTIONS = "";
 }
 
+const sectionsRaw = String(process.env.WARA_INFORMES_KB_SECTIONS ?? "")
+  .trim()
+  .toLowerCase();
+const sections = new Set(
+  sectionsRaw
+    ? sectionsRaw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean)
+    : [],
+);
+const choferesOn = infCorpusOn && sections.has("choferes");
+
 const cases = [
   {
     id: "informe-cargas-combustible",
@@ -40,7 +50,7 @@ const cases = [
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "informes",
-    expectDisabled: !infCorpusOn,
+    expectDisabled: !infCorpusOn || !sections.has("combustible"),
   },
   {
     id: "cargar-combustible-operativo",
@@ -62,7 +72,34 @@ const cases = [
     thread: "",
     expectResolve: "info_guides",
     expectGuide: "informes",
-    expectDisabled: !infCorpusOn,
+    expectDisabled: !infCorpusOn || !sections.has("hojas_ruta"),
+  },
+  {
+    id: "informe-km-chofer",
+    text: "¿Cómo veo el informe de kilómetros recorridos por chofer?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !choferesOn,
+    expectArticlePrefix: choferesOn ? "inf-ch-" : null,
+  },
+  {
+    id: "informe-perfil-manejo",
+    text: "Necesito el informe de perfil de manejo de choferes",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !choferesOn,
+    expectArticlePrefix: choferesOn ? "inf-ch-" : null,
+  },
+  {
+    id: "parte-disciplinario-frontera",
+    text: "¿Dónde veo el parte disciplinario de choferes en Informes?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !choferesOn,
+    expectNotGuideKinds: ["utilidades_bloque_2", "certificados"],
   },
   {
     id: "odo",
@@ -78,6 +115,7 @@ console.log(
   JSON.stringify({
     mode: infCorpusOn ? "corpus_on" : "flag_off_safe",
     sections: process.env.WARA_INFORMES_KB_SECTIONS || "",
+    choferesOn,
     interpret: true,
   }),
 );
@@ -127,6 +165,11 @@ for (const c of cases) {
     if (c.expectNotGuide) {
       assert.notEqual(guideKind, c.expectNotGuide, `${c.id} not hijacked`);
     }
+    if (c.expectNotGuideKinds?.length) {
+      for (const bad of c.expectNotGuideKinds) {
+        assert.notEqual(guideKind, bad, `${c.id} not ${bad}`);
+      }
+    }
     if (c.expectDisabled) {
       assert.ok(
         fallback === "informes_flag_off" || fallback === "informes_section_off",
@@ -137,6 +180,12 @@ for (const c of cases) {
         replyPreview,
         /no tengo habilitada|todavía no está habilitada|Informes/i,
         `${c.id} disabled msg`,
+      );
+    } else if (c.expectArticlePrefix) {
+      const ids = used?.articleIds ?? [];
+      assert.ok(
+        ids.some((id) => String(id).startsWith(c.expectArticlePrefix)),
+        `${c.id} expect article ${c.expectArticlePrefix}* got ${JSON.stringify(ids)}`,
       );
     }
   } catch (e) {

@@ -332,8 +332,9 @@ CONTINUIDAD: historial explícito de uno de estos nueve módulos + seguimiento i
 
   const informesDeliveryBlock = informesMasterOn
     ? `
-articleIds: solo catálogo_informes / catálogo_informes_categoria (prefijo inf-*, 0–3). executionRequest: puede incluir "inf-ejecucion-no-disponible".
+articleIds: solo catálogo_informes / catálogo_informes_categoria / catálogo_informes_detalle_habilitado (prefijo inf-*, 0–3). executionRequest: puede incluir "inf-ejecucion-no-disponible".
 Si la categoría pedida no está en secciones habilitadas: articleIds=[] + need=ambiguous + clarifyQuestion de sección deshabilitada.
+Si la sección está habilitada y el cliente nombra un informe concreto, preferí el artículo de detalle (p. ej. inf-ch-km) sobre solo el índice inf-idx-*.
 NO inventes columnas, filtros ni pantallas pending; usá índices/shared y restrictions.
 `
     : `
@@ -1462,6 +1463,42 @@ function inferInformesCategoryFromText(norm: string): string | null {
   return null;
 }
 
+function pickInformesDetailArticleId(
+  category: string,
+  norm: string,
+): string | null {
+  const details = INFORMES_ARTICLES.filter(
+    (a) =>
+      a.category === category &&
+      Boolean(a.reportId) &&
+      a.status !== "future",
+  );
+  let best: { id: string; score: number } | null = null;
+  for (const a of details) {
+    const titleNorm = a.title
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase();
+    const haystack = `${titleNorm} ${a.summary}`
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase();
+    let score = 0;
+    for (const w of titleNorm.split(/\W+/).filter((x) => x.length > 3)) {
+      if (norm.includes(w)) score += 2;
+    }
+    for (const part of a.id.replace(/^inf-[a-z]+-/, "").split("-")) {
+      if (part.length > 2 && norm.includes(part)) score += 1;
+    }
+    if (haystack.includes("alias") || /\(/.test(a.title)) {
+      // bonus leve si el texto cita un alias de menú/pantalla
+      void 0;
+    }
+    if (!best || score > best.score) best = { id: a.id, score };
+  }
+  return best && best.score >= 2 ? best.id : null;
+}
+
 /**
  * Pedido explícito del menú Informes / “informe de …” (offline + post-LLM).
  */
@@ -1503,7 +1540,7 @@ function correctInformesCatalogTopicMisroute(
     category && (INFORMES_CATEGORIES as readonly string[]).includes(category)
       ? `inf-idx-${category}`
       : "inf-mapa";
-  const deliver =
+  let deliver =
     isInformesKbEnabled() && (!category || isInformesSectionEnabled(category))
       ? filterDeliverableInformesArticleIds(
           interpret.articleIds.length ? interpret.articleIds : [structuralPick],
@@ -1511,17 +1548,49 @@ function correctInformesCatalogTopicMisroute(
         )
       : [];
 
+  // Etapa 2→3: con sección on, preferir detalle si el texto nombra un informe concreto.
+  if (
+    category &&
+    isInformesKbEnabled() &&
+    isInformesSectionEnabled(category) &&
+    deliver.every(
+      (id) =>
+        id.startsWith("inf-idx-") ||
+        id === "inf-mapa" ||
+        id.startsWith("inf-shared-"),
+    )
+  ) {
+    const detail = pickInformesDetailArticleId(category, norm);
+    if (detail) {
+      deliver = filterDeliverableInformesArticleIds(
+        [detail, ...deliver.filter((id) => id !== detail)],
+        category,
+      );
+    }
+  }
+
+  const reportId =
+    deliver.find(
+      (id) =>
+        id !== "inf-mapa" &&
+        !id.startsWith("inf-idx-") &&
+        !id.startsWith("inf-shared-") &&
+        id !== "inf-ejecucion-no-disponible",
+    ) ?? interpret.reportId ?? null;
+
   if (
     interpret.guideKind === "informes" &&
     interpret.route === "info_guides" &&
     (category ? interpret.category === category : true) &&
     (deliver.length
-      ? deliver.every((id) => interpret.articleIds.includes(id))
+      ? deliver.every((id) => interpret.articleIds.includes(id)) &&
+        (!reportId || interpret.reportId === reportId)
       : interpret.articleIds.length === 0)
   ) {
     return {
       ...interpret,
       category: category ?? interpret.category ?? null,
+      reportId: reportId ?? interpret.reportId ?? null,
     };
   }
 
@@ -1530,7 +1599,7 @@ function correctInformesCatalogTopicMisroute(
     route: "info_guides",
     guideKind: "informes",
     category: category ?? null,
-    reportId: interpret.reportId ?? null,
+    reportId,
     need: interpret.need === "execute" ? "execute" : "procedure",
     articleIds: deliver,
     clarifyQuestion: null,
@@ -1949,6 +2018,16 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     userPayload.catalogo_informes_categoria = listInformesArticleCatalog({
       category: knownCategory,
     });
+  } else if (informesOn) {
+    // Ciclo parcial: exponer detalle solo de secciones habilitadas (no los 89).
+    const enabledDetail = Array.from(parseInformesKbSections()).flatMap((cat) =>
+      listInformesArticleCatalog({ category: cat }).filter(
+        (a) => a.category === cat && !a.id.startsWith("inf-idx-"),
+      ),
+    );
+    if (enabledDetail.length) {
+      userPayload.catalogo_informes_detalle_habilitado = enabledDetail;
+    }
   }
   if (utilidadesBloque2On) {
     userPayload.catalogo_utilidades_bloque_2 = catalogU2;
