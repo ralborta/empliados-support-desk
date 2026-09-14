@@ -3478,7 +3478,90 @@ function fillOpcionesDetailFromScopedCatalog(
   return interpret;
 }
 
-/** Cadena de refinamiento semántico (Informes → Alertas → Paneles → Opciones V2). */
+/**
+ * Segunda decisión semántica cuando el primer paso reconoce una consulta de plataforma
+ * pero deja guideKind ambiguo. No inspecciona texto con regex ni fuerza una familia:
+ * resuelve únicamente las fronteras de alarmas o conserva la ambigüedad original.
+ */
+async function refineAmbiguousGuideFrontierIfNeeded(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (
+    interpret.route !== "info_guides" ||
+    interpret.guideKind !== null ||
+    interpret.need !== "ambiguous" ||
+    basePayload.ambiguous_guide_frontier_refine === "done"
+  ) {
+    return interpret;
+  }
+
+  const refinePayload = {
+    ...basePayload,
+    ambiguous_guide_frontier_refine: "done",
+    mensaje_nuevo: text,
+    interpret_previo: {
+      route: interpret.route,
+      need: interpret.need,
+      clarifyQuestion: interpret.clarifyQuestion,
+      reason: interpret.reason,
+    },
+    instruccion_refine: [
+      "Reclasificá SOLO si el pedido permite distinguir semánticamente estas fronteras.",
+      "Gestionar, silenciar o resolver una alarma activa → guideKind=paneles, reportId=alarmas, articleIds=[\"pn-alarmas\"].",
+      "Una acción explícita de resolver/silenciar/gestionar ya es decisiva aunque el cliente no agregue la palabra 'activa'; no pidas aclaración contra consultar Alertas.",
+      "Consultar un tipo de evento del menú Alertas → guideKind=alertas.",
+      "Configurar protocolos, criticidad o motivos → guideKind=opciones, category=conducta_alarmas.",
+      "Pedir histórico o informe por período → guideKind=informes.",
+      "Si no pertenece claramente a estas fronteras, conservá guideKind=null y la aclaración previa.",
+    ].join(" "),
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              {
+                role: "system",
+                content:
+                  "Esta es una segunda pasada de desambiguación. Priorizá instruccion_refine y devolvé la familia decidida cuando el mensaje ya contiene una acción explícita.",
+              },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const parsed = content ? parseInterpret(content) : null;
+    if (!parsed) return interpret;
+    const refined = applyPlatformGuideInterpretGuards(parsed, text, threadText, guardOpts);
+    if (
+      refined.route === "info_guides" &&
+      ["paneles", "alertas", "opciones", "informes"].includes(refined.guideKind ?? "")
+    ) {
+      return refined;
+    }
+  } catch {
+    /* conserva la aclaración segura del primer paso */
+  }
+  return interpret;
+}
+
+/** Cadena de refinamiento semántico (fronteras → Informes → Alertas → Paneles → Opciones V2). */
 async function applySemanticDetailRefinements(params: {
   openai: OpenAI;
   basePayload: Record<string, unknown>;
@@ -3488,6 +3571,7 @@ async function applySemanticDetailRefinements(params: {
   guardOpts: PlatformGuideGuardOpts;
 }): Promise<PlatformKnowledgeInterpret> {
   let next = params.interpret;
+  next = await refineAmbiguousGuideFrontierIfNeeded({ ...params, interpret: next });
   next = await refineInformesWithCategoryCatalog({ ...params, interpret: next });
   next = await refineAlertasPickItemIfMissing({ ...params, interpret: next });
   next = await refineAlertasWithItemCatalog({ ...params, interpret: next });
