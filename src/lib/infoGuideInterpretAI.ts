@@ -2928,15 +2928,15 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       threadText,
       guardOpts,
     );
-    if (parseMiss.route === "info_guides" && parseMiss.guideKind) {
-      const refined = await applySemanticDetailRefinements({
-        openai,
-        basePayload: userPayload,
-        interpret: parseMiss,
-        text,
-        threadText,
-        guardOpts,
-      });
+    const refined = await applySemanticDetailRefinements({
+      openai,
+      basePayload: userPayload,
+      interpret: parseMiss,
+      text,
+      threadText,
+      guardOpts,
+    });
+    if (refined.route === "info_guides" && refined.guideKind) {
       cacheInterpretResult(key, refined);
       return refined;
     }
@@ -2978,6 +2978,27 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       }
     } catch {
       /* fall through */
+    }
+    const frontierFallback = await applySemanticDetailRefinements({
+      openai,
+      basePayload: userPayload,
+      interpret: {
+        route: "continue_normal",
+        guideKind: null,
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion: null,
+        executionRequest: false,
+        confidence: 0.4,
+        reason: "interpret_transport_fallback",
+      },
+      text,
+      threadText,
+      guardOpts,
+    });
+    if (frontierFallback.route === "info_guides" && frontierFallback.guideKind) {
+      cacheInterpretResult(key, frontierFallback);
+      return frontierFallback;
     }
     if (
       looksLikeMaintenanceDomainTermQuestion(text) ||
@@ -3530,11 +3551,10 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
 }): Promise<PlatformKnowledgeInterpret> {
   const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
   if (
-    interpret.route !== "info_guides" ||
     !(
       (interpret.guideKind === null && interpret.need === "ambiguous") ||
-      interpret.guideKind === "opciones" ||
-      interpret.guideKind === "alertas"
+      (interpret.route === "info_guides" &&
+        (interpret.guideKind === "opciones" || interpret.guideKind === "alertas"))
     ) ||
     basePayload.ambiguous_guide_frontier_refine === "done"
   ) {
@@ -3562,6 +3582,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Consultar un tipo de evento del menú Alertas → guideKind=alertas.",
       "Configurar protocolos, criticidad o motivos → guideKind=opciones, category=conducta_alarmas.",
       "Pedir histórico o informe por período → guideKind=informes.",
+      "Preguntar qué informes existen o listarlos → informes_catalogo. Preguntar cómo consultar un informe nombrado → informes_consulta. Ambos son guideKind=informes aunque el nombre incluya flota, unidades o GPS.",
       "Una pantalla nombrada como Utilidades → Novedades, Utilidades → Auditoría u otro módulo inequívoco del Bloque 2 → guideKind=utilidades_bloque_2, incluso si su corpus está apagado; articleIds=[] si está apagado.",
       "Novedades de un ticket, certificado, mantenimiento u otro trámite NO son la pantalla Utilidades → Novedades.",
       "Si no pertenece claramente a estas fronteras, conservá la familia y la interpretación previas.",
@@ -3585,6 +3606,9 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                     "Ver o consultar un tipo de evento, como pánico, es Alertas.",
                     "Configurar protocolos/criticidad/motivos es Opciones.",
                     "Histórico o período es Informes.",
+                    "informes_catalogo: listar informes o preguntar qué tipos de informes existen.",
+                    "informes_consulta: preguntar cómo abrir o consultar un informe nombrado.",
+                    "Ambos son Informes; nunca son listado ni consulta en vivo de unidades.",
                     "Una ruta explícita Utilidades→Novedades o Auditoría en Wara es utilidades_bloque_2.",
                     "Si la intención es clara: route=info_guides, need=procedure, clarifyQuestion=null.",
                     "Si no pertenece a estas fronteras, conservá interpret_previo.",
@@ -3609,6 +3633,9 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                         "alertas_evento",
                         "opciones_configuracion",
                         "informes_historico",
+                        "informes_catalogo",
+                        "informes_consulta",
+                        "informes_modulo",
                         "utilidades_modulo",
                         "sin_cambio",
                       ],
@@ -3659,6 +3686,24 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       informes_historico: {
         guideKind: "informes",
         category: null,
+        reportId: null,
+        articleIds: [],
+      },
+      informes_modulo: {
+        guideKind: "informes",
+        category: guardOpts.lastGuideCategory ?? null,
+        reportId: null,
+        articleIds: ["inf-mapa"],
+      },
+      informes_catalogo: {
+        guideKind: "informes",
+        category: null,
+        reportId: null,
+        articleIds: ["inf-mapa"],
+      },
+      informes_consulta: {
+        guideKind: "informes",
+        category: guardOpts.lastGuideCategory ?? null,
         reportId: null,
         articleIds: [],
       },

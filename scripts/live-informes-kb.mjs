@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { interpretPlatformKnowledgeTurn } from "../src/lib/infoGuideInterpretAI.ts";
 import { buildGroundedInfoGuideReplyWithMeta } from "../src/lib/infoGuideReplies.ts";
 import { resolveTurnExecutor } from "../src/lib/whatsappTurnClassifierAI.ts";
+import { shouldRouteTurnToFleetListExecutorHybrid } from "../src/lib/fleetListIntentAI.ts";
 
 if (!process.env.OPENAI_API_KEY?.trim()) {
   console.error("OPENAI_API_KEY requerida");
@@ -116,6 +117,39 @@ const cases = [
     expectGuide: "informes",
     expectDisabled: !generalesOn,
     // Puede ser inf-gn-historial o idx hasta completar el lote 6b.
+    expectArticlePrefix: generalesOn ? "inf-" : null,
+  },
+  {
+    id: "informe-resumen-flota-no-gps",
+    text: "Indicame como consultar por el informe de resumen de flota",
+    thread: "¿Para qué sirve el módulo de Informes?",
+    lastGuideKind: "informes",
+    lastGuideCategory: "generales",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !generalesOn,
+    expectArticleId: generalesOn ? "inf-gn-resumen-flota" : null,
+    expectFleetListRoute: false,
+  },
+  {
+    id: "listar-informes-no-unidades",
+    text: "Listame todos los informes disponibles de la plataforma Wara",
+    thread: "Estamos consultando el módulo Informes.",
+    lastGuideKind: "informes",
+    lastGuideCategory: "generales",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !generalesOn,
+    expectArticlePrefix: generalesOn ? "inf-" : null,
+    expectFleetListRoute: false,
+  },
+  {
+    id: "tipos-de-informes-no-menu-general",
+    text: "¿Qué tipo de informes puedo consultar en la plataforma Wara?",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !generalesOn,
     expectArticlePrefix: generalesOn ? "inf-" : null,
   },
   {
@@ -234,6 +268,13 @@ console.log(
 
 for (const c of cases) {
   await new Promise((r) => setTimeout(r, 700));
+  if (typeof c.expectFleetListRoute === "boolean") {
+    const fleetListRoute = await shouldRouteTurnToFleetListExecutorHybrid({
+      selectionText: c.text,
+      threadText: c.thread,
+    });
+    assert.equal(fleetListRoute, c.expectFleetListRoute, `${c.id} fleet-list route`);
+  }
   const resolved = await resolveTurnExecutor(c.text, c.thread || c.text, null, {
     lastGuideKind: c.lastGuideKind ?? null,
     lastGuideCategory: c.lastGuideCategory ?? null,
@@ -311,6 +352,12 @@ for (const c of cases) {
       assert.ok(
         ids.some((id) => String(id).startsWith(c.expectArticlePrefix)),
         `${c.id} expect article ${c.expectArticlePrefix}* got ${JSON.stringify(ids)}`,
+      );
+    }
+    if (c.expectArticleId) {
+      assert.ok(
+        (used?.articleIds ?? []).includes(c.expectArticleId),
+        `${c.id} expect article ${c.expectArticleId}`,
       );
     }
   } catch (e) {

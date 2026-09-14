@@ -395,11 +395,6 @@ const TURN_RULES: TurnRule[] = [
     decide: ({ text }) => (looksLikeFleetWideOutageClaim(text) ? "odoo_ticket" : null),
   },
   {
-    id: "unit_list_request",
-    reason: "Pedido explícito de listado de unidades.",
-    decide: ({ text }) => (looksLikeUnitListRequest(text) ? "unidades" : null),
-  },
-  {
     id: "conversation_close_request",
     reason: "Cliente pide cerrar la conversación/caso.",
     decide: ({ text }) => (looksLikeCustomerConversationCloseRequest(text) ? "odoo_ticket" : null),
@@ -781,10 +776,9 @@ const TURN_RULES: TurnRule[] = [
   },
 ];
 
-/** Reglas que NUNCA delega la IA (confirmaciones, Odoo, GPS en vivo, cert awaiting unit). */
+/** Reglas que NUNCA delega la IA (confirmaciones, Odoo, cert awaiting unit y escrituras). */
 export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "fleet_wide_outage_advisor",
-  "unit_list_request",
   "conversation_close_request",
   "open_case_status_inquiry",
   "open_new_case_request",
@@ -801,7 +795,6 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "structured_odometer_update",
   "post_advisor_case_supplement",
   "certificate_unit_change_during_confirm",
-  "gps_or_live_unit_consult",
   "certificate_unit_context_selection",
   "unit_consult_plate_selection",
   "pending_confirmation_resolver",

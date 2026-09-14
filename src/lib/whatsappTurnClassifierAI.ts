@@ -61,6 +61,70 @@ export function isTurnAiClassifyEnabled(): boolean {
   return false;
 }
 
+async function classifyGpsReadTargetWithAi(
+  text: string,
+  threadText: string,
+): Promise<"live_unit" | "platform_report" | "other"> {
+  if (!process.env.OPENAI_API_KEY?.trim()) return "live_unit";
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "Clasificá el objeto de esta consulta de lectura en WARA.",
+                  "El mensaje actual manda sobre el historial: una pregunta nueva reemplaza el tema anterior.",
+                  "live_unit: estado, GPS, posición, ignición o reporte actual de una unidad concreta. Si pregunta dónde está una unidad identificada, siempre es live_unit aunque antes hablara de Informes.",
+                  "platform_report: pregunta cómo consultar, ver o listar informes de la plataforma; incluye informes cuyos nombres contienen flota, unidades, GPS o reporte.",
+                  "other: no corresponde claramente a ninguno.",
+                  "El nombre o tema de un informe no lo convierte en una consulta operativa de unidad.",
+                  "Devolvé solo el JSON del schema.",
+                ].join(" "),
+              },
+              {
+                role: "user",
+                content: `Historial reciente:\n${threadText.slice(-1200)}\n\nMensaje actual:\n${text}`,
+              },
+            ],
+            temperature: 0,
+            max_tokens: 64,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "wara_gps_read_target",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    target: {
+                      type: "string",
+                      enum: ["live_unit", "platform_report", "other"],
+                    },
+                  },
+                  required: ["target"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          { signal },
+        ),
+      TURN_AI_TIMEOUT_MS,
+    );
+    const parsed = JSON.parse(response?.choices[0]?.message?.content ?? "{}") as {
+      target?: "live_unit" | "platform_report" | "other";
+    };
+    return parsed.target ?? "live_unit";
+  } catch {
+    return "live_unit";
+  }
+}
+
 const SYSTEM_PROMPT = `Sos el clasificador de intención de Atilio (Mesa de Ayuda Wara por WhatsApp).
 Devolvé SOLO JSON válido (sin markdown):
 {"executor":"unidades|odometro|certificados|mantenimiento|odoo_ticket|info_guides","confidence":0.0-1.0,"reason":"breve"}
@@ -195,18 +259,22 @@ export async function resolveTurnExecutor(
       ruleId: "fleet_wide_outage_advisor",
     };
   }
-  // GPS read tipado: nunca etiquetar certificado por historial stale sin pending DB.
-  if (
-    (looksLikeGpsOrUnitStatusQuestion(text) ||
-      looksLikeLiveUnitConsultIntent(text) ||
-      shouldRouteGpsConsultToUnidades(text)) &&
-    pendingAction?.type !== "certificados"
-  ) {
-    return {
-      executor: "unidades",
-      source: "safety_guard",
-      ruleId: "gps_status_read_authority",
-    };
+  const gpsReadCandidate =
+    looksLikeGpsOrUnitStatusQuestion(text) ||
+    looksLikeLiveUnitConsultIntent(text) ||
+    shouldRouteGpsConsultToUnidades(text);
+  if (gpsReadCandidate && pendingAction?.type !== "certificados") {
+    const readTarget = await classifyGpsReadTargetWithAi(text, threadText);
+    console.info(`[gpsReadTarget] target=${readTarget}`);
+    if (readTarget === "live_unit") {
+      return {
+        executor: "unidades",
+        source: "ai",
+        aiConfidence: 1,
+        ruleId: "gps_read_semantic_target",
+      };
+    }
+    // platform_report continúa al intérprete KB; other cae a la red de reglas.
   }
 
   const normalized = text

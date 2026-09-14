@@ -1895,11 +1895,29 @@ export async function runTurnExecutorPhase(params: {
     !pendingConfirmExecutor &&
     !pendingAction?.payload
   ) {
-    return {
-      message: buildBriefServiceScopeConsultationReply(),
-      executor: "unidades",
-      ok: true,
-    };
+    const { interpretPlatformKnowledgeTurn, shouldRouteInterpretToInfoGuides } = await import(
+      "@/lib/infoGuideInterpretAI"
+    );
+    const scopeKbInterpret = await interpretPlatformKnowledgeTurn({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+      lastGuideKind: lastGuideCtx?.kind ?? null,
+      lastGuideCategory: lastGuideCtx?.category ?? null,
+      lastGuideReportId: lastGuideCtx?.reportId ?? null,
+      lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
+    });
+    // El gate textual solo detecta que podría ser una pregunta meta. La IA decide
+    // si realmente es alcance general o una consulta concreta de una guía.
+    if (
+      !scopeKbInterpret?.guideKind ||
+      !shouldRouteInterpretToInfoGuides(scopeKbInterpret)
+    ) {
+      return {
+        message: buildBriefServiceScopeConsultationReply(),
+        executor: "info_guides",
+        ok: true,
+      };
+    }
   }
 
   // Trámite de certificado esperando unidad: antes que interpretación IA / GPS.
