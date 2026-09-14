@@ -85,6 +85,13 @@ export function looksLikeGpsPlatformUiSymptomOnly(text: string | undefined | nul
 function looksLikeGpsStatusConsultCue(text: string): boolean {
   const n = norm(text);
   if (!n) return false;
+  // "¿Dónde está la unidad AD427MC?" / "dónde está la patente" = consulta de ubicación viva.
+  if (
+    /\b(donde\s+esta|donde\s+se\s+encuentra)\b/.test(n) &&
+    (/\b(unidad|patente|interno|flota|movil)\b/.test(n) || looksLikeResolvableUnitReferenceInMessage(text))
+  ) {
+    return true;
+  }
   return (
     /\b(estado|reporte|gps|ignicion|posicion|ubicacion|ultimo reporte|como esta|como está)\b/.test(
       n,

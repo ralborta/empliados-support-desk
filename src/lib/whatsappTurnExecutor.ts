@@ -2381,9 +2381,15 @@ export async function runTurnExecutorPhase(params: {
 
   // Guías de plataforma (Agenda, Perfiles, Notificaciones, Unidades…) → manual PDF + IA.
   // No dejar que el agente general invente botones/pasos fuera de la base de conocimiento.
+  // No secuestrar consultas GPS/flota en vivo (patente + "dónde está") hacia la guía estática.
   if (
-    looksLikeOpcionesInfoRequest(selectionText) ||
-    looksLikeUnidadesInfoRequest(selectionText)
+    (looksLikeOpcionesInfoRequest(selectionText) ||
+      looksLikeUnidadesInfoRequest(selectionText)) &&
+    !shouldRouteTurnToUnidadesExecutor({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+    }) &&
+    !shouldRouteGpsConsultToUnidades(selectionText)
   ) {
     const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);

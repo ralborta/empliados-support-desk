@@ -1095,8 +1095,19 @@ export function looksLikeOpcionesGuideInThread(threadText: string): boolean {
 
 /** Guía informativa del módulo Unidades (panel de flota, MIS ATAJOS). */
 export function looksLikeUnidadesInfoRequest(text: string | undefined | null): boolean {
-  const t = normCompanyToken(text ?? "");
+  const raw = String(text ?? "");
+  const t = normCompanyToken(raw);
   if (!t) return false;
+  // Ubicación / estado en vivo de una unidad concreta ≠ guía UI del módulo Unidades.
+  // Bug: "¿Dónde está la unidad AD427MC?" caía a info_guides (pasos del panel) en vez de GPS.
+  if (
+    /\b(donde\s+esta|donde\s+se\s+encuentra|ubicacion\s+(de|del)|posicion\s+(de|del))\b/.test(t) &&
+    (/\b(unidad|patente|movil|interno|flota)\b/.test(t) || !!detectLoosePlate(raw))
+  ) {
+    return false;
+  }
+  // Cómo consultar un informe de plataforma ≠ guía del módulo Unidades.
+  if (/\binforme(s)?\b/.test(t)) return false;
   if (
     /\b(no reporta|no actualiza|offline|sin reporte|ultimo reporte|consultar|reporte en vivo|patente|certificado|odometro|horometro|mantenimiento)\b/.test(
       t
@@ -1298,9 +1309,17 @@ export function looksLikeUnitReportingStatusCue(text: string | undefined | null)
 /** Mensaje del cliente con contenido (no ack vacío) — evitar ignorar turnos útiles. */
 /** Consulta operativa sobre GPS, ignición, reporte o estado de unidad (no mantenimiento). */
 export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null): boolean {
-  const t = normCompanyToken(text ?? "");
+  const raw = String(text ?? "");
+  const t = normCompanyToken(raw);
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan de mantenimiento)\b/.test(t)) return false;
+  // "¿Dónde está la unidad AD427MC?" — ubicación viva (no guía del módulo Unidades).
+  if (
+    /\b(donde\s+esta|donde\s+se\s+encuentra)\b/.test(t) &&
+    (/\b(unidad|patente|flota|movil|interno)\b/.test(t) || !!detectLoosePlate(raw))
+  ) {
+    return true;
+  }
   // "GPS 900133" / "Estado 900079" / "Reporte 900100" — arranque con interno.
   if (
     looksLikeNamedServiceWithUnitReference(text) &&
@@ -1360,6 +1379,8 @@ export function looksLikeLiveUnitConsultIntent(text: string | undefined | null):
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|certificado|cobertura)\b/.test(t)) return false;
+  // Cómo consultar un informe (p. ej. resumen de flota) ≠ telemetría en vivo.
+  if (/\binforme(s)?\b/.test(t)) return false;
   if (
     /\b(quiero|necesito|dame|decime|pasame|indic\w*|ver|consultar|mostrar|estado)\b/.test(t) &&
     /\b(ignicio|ignicion|reporte|gps|ubicacion|posicion|unidad|flota|coordenadas)\b/.test(t)
