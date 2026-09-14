@@ -263,8 +263,8 @@ function allowedGuideKinds(): readonly string[] {
   const kinds: string[] = [...GUIDE_KINDS_BASE];
   if (isCisternasKbEnabled()) kinds.push("cisternas");
   if (isCombustibleKbEnabled()) kinds.push("combustible");
-  if (isUtilidadesBloque2KbEnabled()) kinds.push("utilidades_bloque_2");
   // Reconocimiento siempre; la entrega de hr-*/pi-*/inf-*/al-* se gatea aparte.
+  kinds.push("utilidades_bloque_2");
   kinds.push("hojas_de_ruta");
   kinds.push("puntos_de_interes");
   kinds.push("informes");
@@ -415,7 +415,7 @@ function buildSystemPrompt(): string {
   ];
   if (cisternasOn) kindParts.push('"cisternas"');
   if (combustibleOn) kindParts.push('"combustible"');
-  if (utilidadesBloque2On) kindParts.push('"utilidades_bloque_2"');
+  kindParts.push('"utilidades_bloque_2"');
   kindParts.push('"hojas_de_ruta"');
   kindParts.push('"puntos_de_interes"');
   kindParts.push('"informes"');
@@ -436,7 +436,7 @@ function buildSystemPrompt(): string {
     "Informes (menú lateral)",
     "Alertas (menú lateral)",
     "Paneles (menú lateral)",
-    utilidadesBloque2On ? "Utilidades — Bloque 2" : null,
+    "Utilidades — Bloque 2",
   ]
     .filter(Boolean)
     .join(", ");
@@ -537,7 +537,15 @@ articleIds: solo catálogo_utilidades_bloque_2 (prefijo u2-, 0–3). executionRe
 CONTINUIDAD: historial explícito de uno de estos nueve módulos + seguimiento informativo → utilidades_bloque_2.
 - Informe Remitos / Informe Tickets del menú Informes → guideKind=informes (NO utilidades_bloque_2).
 `
-    : "";
+    : `
+guideKind utilidades_bloque_2: reconocé semánticamente los módulos Utilidades→Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades, Remitos y Remitos hormigonera.
+ENTREGA DE CORPUS DESHABILITADA (hard-off):
+- AUN ASÍ usá guideKind=utilidades_bloque_2 cuando el pedido nombre inequívocamente una de esas pantallas.
+- articleIds: [] (no cites ni entregues cuerpos u2-*).
+- Utilidades→Novedades / pantalla Novedades / megáfono → utilidades_bloque_2. NO Opciones, Alertas ni noticias genéricas.
+- Novedades de un ticket, certificado, mantenimiento, odómetro u otro trámite operativo → continue_normal o su módulo real; NO utilidades_bloque_2.
+- Si no está claro si “novedades” es la pantalla o una actualización genérica, need=ambiguous y preguntá cuál de las dos.
+`;
 
   const informesDeliveryBlock = informesMasterOn
     ? `
@@ -966,12 +974,8 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     } else if (guideKind === "puntos_de_interes") {
       articleIds = puntosCorpusOn ? piArticles : [];
       route = promoteArticleGuide(need, route);
-    } else if (
-      guideKind === "utilidades_bloque_2" &&
-      isUtilidadesBloque2KbEnabled() &&
-      u2Articles.length
-    ) {
-      articleIds = u2Articles;
+    } else if (guideKind === "utilidades_bloque_2") {
+      articleIds = isUtilidadesBloque2KbEnabled() ? u2Articles : [];
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "combustible" && isCombustibleKbEnabled() && cbArticles.length) {
       articleIds = cbArticles;
@@ -3385,6 +3389,8 @@ async function refineOpcionesWithCategoryCatalog(params: {
     opciones_refine_stage: "category_detail",
     category_preseleccionada: category,
     mensaje_nuevo: text,
+    instruccion_refine:
+      "Elegí el artículo op-* de DETALLE que corresponda a la función nombrada. Un op-idx-* es solo índice estructural y no alcanza como respuesta de detalle. Si el nombre coincide con una entrada del catálogo acotado, devolvé ese articleId y su itemId como reportId. “Stock diario” corresponde exactamente a op-stock-diario; no lo reemplaces por op-cargas-diario.",
   };
 
   try {
@@ -3395,9 +3401,14 @@ async function refineOpcionesWithCategoryCatalog(params: {
             model: "gpt-4o-mini",
             messages: [
               { role: "system", content: buildSystemPrompt() },
+              {
+                role: "system",
+                content:
+                  "En opciones_refine_stage=category_detail debés seleccionar un artículo de detalle del catálogo acotado; no devuelvas únicamente el índice op-idx-*.",
+              },
               { role: "user", content: JSON.stringify(refinePayload) },
             ],
-            temperature: 0.1,
+            temperature: 0,
             max_tokens: 320,
             response_format: { type: "json_object" },
           },
@@ -3479,9 +3490,9 @@ function fillOpcionesDetailFromScopedCatalog(
 }
 
 /**
- * Segunda decisión semántica cuando el primer paso reconoce una consulta de plataforma
- * pero deja guideKind ambiguo. No inspecciona texto con regex ni fuerza una familia:
- * resuelve únicamente las fronteras de alarmas o conserva la ambigüedad original.
+ * Segunda decisión semántica para las familias con nombres solapados. Se activa por
+ * el resultado estructurado, no por regex del mensaje, y valida la familia antes
+ * de seleccionar artículos de detalle.
  */
 async function refineAmbiguousGuideFrontierIfNeeded(params: {
   openai: OpenAI;
@@ -3494,8 +3505,11 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
   const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
   if (
     interpret.route !== "info_guides" ||
-    interpret.guideKind !== null ||
-    interpret.need !== "ambiguous" ||
+    !(
+      (interpret.guideKind === null && interpret.need === "ambiguous") ||
+      interpret.guideKind === "opciones" ||
+      interpret.guideKind === "alertas"
+    ) ||
     basePayload.ambiguous_guide_frontier_refine === "done"
   ) {
     return interpret;
@@ -3507,7 +3521,11 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
     mensaje_nuevo: text,
     interpret_previo: {
       route: interpret.route,
+      guideKind: interpret.guideKind,
       need: interpret.need,
+      category: interpret.category,
+      reportId: interpret.reportId,
+      articleIds: interpret.articleIds,
       clarifyQuestion: interpret.clarifyQuestion,
       reason: interpret.reason,
     },
@@ -3518,7 +3536,9 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Consultar un tipo de evento del menú Alertas → guideKind=alertas.",
       "Configurar protocolos, criticidad o motivos → guideKind=opciones, category=conducta_alarmas.",
       "Pedir histórico o informe por período → guideKind=informes.",
-      "Si no pertenece claramente a estas fronteras, conservá guideKind=null y la aclaración previa.",
+      "Una pantalla nombrada como Utilidades → Novedades, Utilidades → Auditoría u otro módulo inequívoco del Bloque 2 → guideKind=utilidades_bloque_2, incluso si su corpus está apagado; articleIds=[] si está apagado.",
+      "Novedades de un ticket, certificado, mantenimiento u otro trámite NO son la pantalla Utilidades → Novedades.",
+      "Si no pertenece claramente a estas fronteras, conservá la familia y la interpretación previas.",
     ].join(" "),
   };
 
@@ -3533,7 +3553,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
               {
                 role: "system",
                 content:
-                  "Esta es una segunda pasada de desambiguación. Priorizá instruccion_refine y devolvé la familia decidida cuando el mensaje ya contiene una acción explícita.",
+                  "Esta es una segunda pasada de fronteras. Priorizá instruccion_refine. Una ruta de menú explícita como “Utilidades → Novedades” o “Auditoría en Wara” domina sobre asociaciones temáticas con Alertas u Opciones.",
               },
               { role: "user", content: JSON.stringify(refinePayload) },
             ],
@@ -3551,9 +3571,16 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
     const refined = applyPlatformGuideInterpretGuards(parsed, text, threadText, guardOpts);
     if (
       refined.route === "info_guides" &&
-      ["paneles", "alertas", "opciones", "informes"].includes(refined.guideKind ?? "")
+      ["paneles", "alertas", "opciones", "informes", "utilidades_bloque_2"].includes(
+        refined.guideKind ?? "",
+      )
     ) {
-      return refined;
+      return {
+        ...refined,
+        reason: refined.reason
+          ? `${refined.reason}|cross_family_frontier_checked`
+          : "cross_family_frontier_checked",
+      };
     }
   } catch {
     /* conserva la aclaración segura del primer paso */
@@ -3584,8 +3611,8 @@ async function applySemanticDetailRefinements(params: {
 }
 
 /**
- * Si el 1er interpret cayó en Opciones→conducta_alarmas, repreguntá semánticamente
- * si el pedido es operar/silenciar (paneles), consultar tipo (alertas), informe, o configurar protocolo.
+ * Si el 1er interpret cayó en Opciones, validá semánticamente la frontera de alarmas
+ * antes de completar op-*. No usa palabras clave deterministas.
  */
 async function refineOpcionesAlarmasFrontierIfNeeded(params: {
   openai: OpenAI;
@@ -3597,15 +3624,11 @@ async function refineOpcionesAlarmasFrontierIfNeeded(params: {
 }): Promise<PlatformKnowledgeInterpret> {
   const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
   if (!isOpcionesKbV2Enabled()) return interpret;
+  if (interpret.reason.includes("cross_family_frontier_checked")) return interpret;
   if (interpret.guideKind !== "opciones" || interpret.route !== "info_guides") {
     return interpret;
   }
   const category = (interpret.category || "").toLowerCase();
-  const looksConducta =
-    category === "conducta_alarmas" ||
-    interpret.articleIds.some((id) => id.includes("protocolos") || id.includes("conducta")) ||
-    (interpret.reportId || "").includes("protocolos");
-  if (!looksConducta) return interpret;
   if (basePayload.opciones_alarmas_frontier_refine === "done") return interpret;
 
   const refinePayload = {
@@ -3621,9 +3644,10 @@ async function refineOpcionesAlarmasFrontierIfNeeded(params: {
     instruccion_refine: [
       "Reclasificá SOLO este pedido sobre alarmas/protocolos. Ignorá articleIds previos si contradicen el mensaje.",
       "Si el cliente quiere silenciar, resolver o gestionar una alarma ya activa → guideKind=paneles, reportId=alarmas, articleIds=[\"pn-alarmas\"]. No es Opciones.",
-      "Si consulta un tipo del menú Alertas → guideKind=alertas + al-* del tipo.",
+      "Si consulta dónde ver un tipo de evento del menú Alertas (por ejemplo pánico) → guideKind=alertas + al-* del tipo. Nunca es Opciones.",
       "Si pide informe histórico/por período → guideKind=informes.",
       "Solo si quiere CONFIGURAR protocolos/criticidad/motivos en el menú Opciones → guideKind=opciones, category=conducta_alarmas.",
+      "Si el pedido no trata sobre alarmas, conservá el interpret de Opciones sin cambiar de familia.",
     ].join(" "),
   };
 
@@ -3635,6 +3659,11 @@ async function refineOpcionesAlarmasFrontierIfNeeded(params: {
             model: "gpt-4o-mini",
             messages: [
               { role: "system", content: buildSystemPrompt() },
+              {
+                role: "system",
+                content:
+                  "Esta segunda pasada protege fronteras. Una consulta de visualización de un tipo de alerta no puede quedar en Opciones; Opciones se reserva para configuración.",
+              },
               { role: "user", content: JSON.stringify(refinePayload) },
             ],
             temperature: 0,

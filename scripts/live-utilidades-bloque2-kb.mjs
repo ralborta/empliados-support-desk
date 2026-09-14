@@ -2,8 +2,8 @@
 /**
  * LIVE — Utilidades Bloque 2 KB.
  *
- * Hard-off (flag false): comportamiento productivo actual; NO entrega cuerpos u2-*;
- * NO exige guideKind=utilidades_bloque_2 ni fallback disabled estructurado.
+ * Hard-off (flag false): reconoce la frontera sin entregar cuerpos u2-*;
+ * la respuesta final queda neutral y nunca cae a Opciones/Alertas.
  *
  * Flag on: entrega u2-* con artículos concretos.
  *
@@ -82,11 +82,13 @@ const casesOff = [
     id: "off-auditoria-no-u2-bodies",
     text: "¿Cómo filtro la Auditoría en Wara?",
     forbidU2Bodies: true,
+    forbidGuides: ["opciones", "alertas"],
   },
   {
     id: "off-novedades-no-u2",
     text: "Utilidades → Novedades no abre",
     forbidU2Bodies: true,
+    forbidGuides: ["opciones", "alertas"],
   },
   {
     id: "off-gps",
@@ -153,6 +155,9 @@ for (const c of cases) {
       if (resolved.executor === "info_guides") {
         assert.notEqual(guideKind, "utilidades_bloque_2", `${c.id} not u2`);
       }
+    }
+    for (const forbiddenGuide of c.forbidGuides ?? []) {
+      assert.notEqual(guideKind, forbiddenGuide, `${c.id}: no ${forbiddenGuide}`);
     }
     if (c.expectArticleId && resolved.executor === "info_guides") {
       assertHasArticle(used?.articleIds ?? [], c.expectArticleId, c.id);
