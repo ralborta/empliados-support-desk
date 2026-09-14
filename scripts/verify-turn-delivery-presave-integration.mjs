@@ -234,6 +234,44 @@ assert.equal(sendCalls, 0, "sin segundo envío API");
 assert.equal(retry.waDelivery, "idempotent_inbound");
 assert.equal(retry.skipResponse_s, "true");
 
+console.log("— 3b) API 2xx sin ID → aceptado e idempotente —");
+const WAMID_NO_ID = "wamid.HBgLNTQ5MTEzMzc4ODE5MBUCABEYFjE4MDgyM0B6-no-id";
+const noIdText = "Odometro 900117 sin id";
+await prisma.ticketMessage.create({
+  data: {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: noIdText,
+    externalMessageId: WAMID_NO_ID,
+  },
+});
+let noIdSendCalls = 0;
+const noIdDeliver = createDeliverTurnToWhatsApp({
+  prisma,
+  sendWhatsApp: async () => {
+    noIdSendCalls++;
+    return { rawResponse: { number: PHONE, waited: true } };
+  },
+  sendWhatsAppMessage: mockSendMessage,
+});
+const noIdFirst = await noIdDeliver(
+  PHONE,
+  makePayload("Respuesta aceptada sin ID", WAMID_NO_ID, noIdText),
+);
+assert.equal(noIdSendCalls, 1);
+assert.equal(noIdFirst.waDelivery, "backend");
+assert.equal(noIdFirst.skipResponse_s, "true");
+assert.match(noIdFirst.waOutboundProviderId, /^builderbot-accepted:/);
+
+noIdSendCalls = 0;
+const noIdRetry = await noIdDeliver(
+  PHONE,
+  makePayload("Respuesta aceptada sin ID", WAMID_NO_ID, noIdText),
+);
+assert.equal(noIdSendCalls, 0, "2xx sin ID también queda protegido contra reintentos");
+assert.equal(noIdRetry.waDelivery, "idempotent_inbound");
+
 console.log("— 4) API falla → fallback BBC —");
 const failDeliver = createDeliverTurnToWhatsApp({
   prisma,

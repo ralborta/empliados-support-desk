@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { prisma } from "@/lib/db";
 import {
@@ -354,9 +355,15 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
         return await finishBackendDelivery(providerId, "backend");
       }
 
-      const providerId = String(sendResult.providerMessageId ?? "").trim();
-      if (!providerId) {
-        throw new Error("BuilderBot API OK sin identificador de mensaje saliente");
+      const explicitProviderId = String(sendResult.providerMessageId ?? "").trim();
+      const providerId =
+        explicitProviderId ||
+        `builderbot-accepted:${inboundDeliveryKey ?? turnMessageId ?? randomUUID()}`;
+      if (!explicitProviderId) {
+        console.warn(
+          "[whatsappTurn] BuilderBot aceptó WA sin ID; usando comprobante interno:",
+          providerId,
+        );
       }
 
       return await finishBackendDelivery(providerId, "backend");
