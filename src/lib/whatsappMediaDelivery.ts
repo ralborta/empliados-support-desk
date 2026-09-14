@@ -67,7 +67,7 @@ export async function sendWhatsAppTextWithOptionalMedia(params: {
       };
     }
     if (!mediaId) {
-      throw new Error("BuilderBot API OK sin identificador tras envío de media");
+      return { rawResponse: mediaRes };
     }
     return { providerMessageId: mediaId, rawResponse: mediaRes };
   }
@@ -78,9 +78,6 @@ export async function sendWhatsAppTextWithOptionalMedia(params: {
       return { skippedDuplicate: true };
     }
     const providerMessageId = extractBuilderBotOutboundMessageId(res);
-    if (!providerMessageId) {
-      throw new Error("BuilderBot API OK sin identificador de mensaje saliente");
-    }
     return { providerMessageId, rawResponse: res };
   }
 
