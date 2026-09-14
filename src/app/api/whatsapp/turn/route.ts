@@ -5,9 +5,12 @@ import {
   requireBuilderBotContextAuth,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
+import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { handleWhatsAppTurn } from "@/lib/whatsappTurn";
 
 export const maxDuration = 60;
+const TURN_FAILURE_MESSAGE =
+  "Tuve un inconveniente procesando la consulta. Intentá nuevamente en unos minutos.";
 
 const bodySchema = z
   .object({
@@ -41,6 +44,55 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
     body.key ||
     body.token
   );
+}
+
+type TurnParams = Parameters<typeof handleWhatsAppTurn>[0];
+
+export async function handleWhatsAppTurnFailClosed(
+  params: TurnParams,
+  deps = {
+    handleTurn: handleWhatsAppTurn,
+    sendMessage: sendWhatsAppMessage,
+  },
+) {
+  try {
+    return await deps.handleTurn(params);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[whatsapp/turn] Error interno; respuesta fail-closed:", detail);
+
+    let fallbackSent = false;
+    try {
+      await deps.sendMessage({
+        number: params.rawPhone,
+        message: TURN_FAILURE_MESSAGE,
+      });
+      fallbackSent = true;
+    } catch (sendError) {
+      console.error(
+        "[whatsapp/turn] No se pudo entregar la respuesta fail-closed:",
+        sendError instanceof Error ? sendError.message : String(sendError),
+      );
+    }
+
+    return {
+      ok: false,
+      ok_s: "false",
+      message: "",
+      summaryText: "",
+      deliveredMessage: fallbackSent ? TURN_FAILURE_MESSAGE : "",
+      deliveredMessage_s: fallbackSent ? TURN_FAILURE_MESSAGE : "",
+      skipResponse_s: "true",
+      nextFlow: "reply",
+      nextFlow_s: "reply",
+      executor: "turn_error",
+      executor_s: "turn_error",
+      waSent_s: fallbackSent ? "true" : "false",
+      waDelivery: fallbackSent ? "backend_fail_closed" : "failed",
+      waDelivery_s: fallbackSent ? "backend_fail_closed" : "failed",
+      error: "turn_failed",
+    };
+  }
 }
 
 /**
@@ -89,7 +141,7 @@ export async function POST(req: NextRequest) {
 
   const messageId = (parsed.data.messageId ?? parsed.data.message_id ?? "").trim();
 
-  const payload = await handleWhatsAppTurn({
+  const payload = await handleWhatsAppTurnFailClosed({
     rawPhone,
     body,
     aiImage: aiImage || undefined,
