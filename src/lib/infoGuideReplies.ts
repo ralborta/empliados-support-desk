@@ -44,6 +44,15 @@ import {
   isAlertasKbEnabled,
   buildAlertasDisabledChannelReply,
 } from "@/lib/alertasKnowledge";
+import {
+  isPanelesKbEnabled,
+  buildPanelesDisabledChannelReply,
+} from "@/lib/panelesKnowledge";
+import {
+  isOpcionesKbV2Enabled,
+  isOpcionesSectionEnabled,
+  buildOpcionesSectionDisabledReply,
+} from "@/lib/opcionesKnowledgeV2";
 
 export type InfoGuideKind =
   | "opciones"
@@ -56,7 +65,8 @@ export type InfoGuideKind =
   | "puntos_de_interes"
   | "utilidades_bloque_2"
   | "informes"
-  | "alertas";
+  | "alertas"
+  | "paneles";
 
 export type InfoGuideFallback =
   | null
@@ -72,6 +82,8 @@ export type InfoGuideFallback =
   | "informes_flag_off"
   | "informes_section_off"
   | "alertas_flag_off"
+  | "paneles_flag_off"
+  | "opciones_section_off"
   | "articulos_module_unsupported";
 
 function sanitizeOptInGuideKind(
@@ -81,7 +93,7 @@ function sanitizeOptInGuideKind(
   if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
   if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
   if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) return null;
-  // hojas_de_ruta / puntos_de_interes / informes / alertas: reconocer aunque corpus off.
+  // hojas_de_ruta / puntos_de_interes / informes / alertas / paneles: reconocer aunque corpus off.
   return kind;
 }
 
@@ -174,6 +186,16 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     pick === "modulo alerta"
   ) {
     return "alertas";
+  }
+  if (
+    pick === "paneles" ||
+    pick === "panel" ||
+    pick === "menu paneles" ||
+    pick === "modulo paneles" ||
+    pick === "modulo de paneles" ||
+    pick === "modulo panel"
+  ) {
+    return "paneles";
   }
   if (
     isUtilidadesBloque2KbEnabled() &&
@@ -500,6 +522,12 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué tipo de alerta querés consultar (pánico, zonas, RTO, etc.).",
     ].join("\n");
   }
+  if (detected === "paneles") {
+    return [
+      "Ya te pasé esa parte de Paneles.",
+      "Decime qué vista querés (Alarmas, Notificaciones, Turnos, etc.).",
+    ].join("\n");
+  }
   if (detected === "utilidades_bloque_2") {
     return [
       "Ya te pasé esa parte de Utilidades.",
@@ -530,6 +558,9 @@ export function buildInfoGuideReply(
   }
   if (detected === "alertas" && !isAlertasKbEnabled()) {
     return buildAlertasDisabledChannelReply();
+  }
+  if (detected === "paneles" && !isPanelesKbEnabled()) {
+    return buildPanelesDisabledChannelReply();
   }
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
@@ -582,6 +613,11 @@ export function buildInfoGuideReply(
     message = [
       "Te puedo orientar con el módulo Alertas: listado de eventos por tipo (pánico, zonas, RTO, etc.).",
       "Decime qué tipo querés consultar. No es gestionar alarmas en Paneles ni configurar protocolos en Opciones.",
+    ].join("\n");
+  else if (detected === "paneles")
+    message = [
+      "Te puedo orientar con el módulo Paneles: vistas de monitoreo (Alarmas, Notificaciones, Turnos, etc.).",
+      "Decime qué panel querés. Alarmas ≠ Alertas ≠ Notificaciones ≠ Informes ≠ Protocolos.",
     ].join("\n");
   else if (detected === "utilidades_bloque_2")
     message = [
@@ -791,6 +827,70 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
   };
 
+  const disabledPanelesReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message = buildPanelesDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "paneles",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("paneles_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|paneles_module_disabled`
+          : "paneles_module_disabled",
+      reportId: activeInterpret?.reportId ?? null,
+    };
+    return {
+      message,
+      guideKind: "paneles",
+      interpret: disabledInterpret,
+      fallback: "paneles_flag_off",
+    };
+  };
+
+  const disabledOpcionesSectionReply = (
+    section: string | null | undefined,
+  ): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const sec = section?.trim() || "opciones";
+    const message = buildOpcionesSectionDisabledReply(sec);
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "opciones",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("opciones_section_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|opciones_section_disabled`
+          : "opciones_section_disabled",
+      category: section ?? activeInterpret?.category ?? null,
+      reportId: activeInterpret?.reportId ?? null,
+    };
+    return {
+      message,
+      guideKind: "opciones",
+      interpret: disabledInterpret,
+      fallback: "opciones_section_off",
+    };
+  };
+
   if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
     activeInterpret = {
       ...activeInterpret,
@@ -855,6 +955,29 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     if (activeInterpret.reason?.includes("alertas_module_disabled")) {
       return disabledAlertasReply();
     }
+  }
+  if (activeInterpret?.guideKind === "paneles") {
+    if (!isPanelesKbEnabled()) return disabledPanelesReply();
+    if (activeInterpret.reason?.includes("paneles_module_disabled")) {
+      return disabledPanelesReply();
+    }
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.category &&
+    activeInterpret.category !== "mapa" &&
+    activeInterpret.category !== "shared" &&
+    !isOpcionesSectionEnabled(activeInterpret.category)
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.reason?.includes("opciones_section_disabled")
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
   }
 
   const articulosUnsupportedReply = (): {
@@ -1003,6 +1126,29 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       return disabledAlertasReply();
     }
   }
+  if (activeInterpret?.guideKind === "paneles") {
+    if (!isPanelesKbEnabled()) return disabledPanelesReply();
+    if (activeInterpret.reason?.includes("paneles_module_disabled")) {
+      return disabledPanelesReply();
+    }
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.category &&
+    activeInterpret.category !== "mapa" &&
+    activeInterpret.category !== "shared" &&
+    !isOpcionesSectionEnabled(activeInterpret.category)
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.reason?.includes("opciones_section_disabled")
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
 
   if (!detected) {
     detected = sanitizeOptInGuideKind(
@@ -1058,6 +1204,22 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   ) {
     return disabledAlertasReply();
   }
+  if (
+    (kind === "paneles" || detected === "paneles") &&
+    !isPanelesKbEnabled()
+  ) {
+    return disabledPanelesReply();
+  }
+  if (
+    (kind === "opciones" || detected === "opciones") &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret?.category &&
+    activeInterpret.category !== "mapa" &&
+    activeInterpret.category !== "shared" &&
+    !isOpcionesSectionEnabled(activeInterpret.category)
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
 
   if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) {
     const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
@@ -1094,10 +1256,18 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       activeInterpret.guideKind === "informes" ||
       detected === "alertas" ||
       activeInterpret.guideKind === "alertas" ||
+      detected === "paneles" ||
+      activeInterpret.guideKind === "paneles" ||
       detected === "utilidades_bloque_2" ||
       activeInterpret.guideKind === "utilidades_bloque_2" ||
       detected === "mantenimiento" ||
-      activeInterpret.guideKind === "mantenimiento")
+      activeInterpret.guideKind === "mantenimiento" ||
+      (detected === "opciones" &&
+        isOpcionesKbV2Enabled() &&
+        (articleIds.length > 0 || activeInterpret.guideKind === "opciones")) ||
+      (activeInterpret.guideKind === "opciones" &&
+        isOpcionesKbV2Enabled() &&
+        articleIds.length > 0))
   ) {
     if (detected === "cisternas" || activeInterpret.guideKind === "cisternas") {
       if (!isCisternasKbEnabled()) {
@@ -1267,6 +1437,64 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: "clarify_or_limit",
       };
     }
+    if (detected === "paneles" || activeInterpret.guideKind === "paneles") {
+      if (!isPanelesKbEnabled()) {
+        return disabledPanelesReply();
+      }
+      detected = "paneles";
+      const execIds = articleIds.length ? articleIds : ["pn-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("paneles", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "paneles",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "paneles",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (
+      (detected === "opciones" || activeInterpret.guideKind === "opciones") &&
+      isOpcionesKbV2Enabled()
+    ) {
+      if (
+        activeInterpret?.category &&
+        activeInterpret.category !== "mapa" &&
+        activeInterpret.category !== "shared" &&
+        !isOpcionesSectionEnabled(activeInterpret.category)
+      ) {
+        return disabledOpcionesSectionReply(activeInterpret.category);
+      }
+      detected = "opciones";
+      const execIds = articleIds.length ? articleIds : ["op-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("opciones", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "opciones",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "opciones",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     if (
       detected === "utilidades_bloque_2" ||
       activeInterpret.guideKind === "utilidades_bloque_2"
@@ -1364,6 +1592,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         activeInterpret.category === "shared" ||
         isInformesSectionEnabled(activeInterpret.category))) ||
     (detected === "alertas" && isAlertasKbEnabled()) ||
+    (detected === "paneles" && isPanelesKbEnabled()) ||
     (detected === "utilidades_bloque_2" && isUtilidadesBloque2KbEnabled())
   ) {
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
@@ -1375,8 +1604,12 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "puntos_de_interes" ||
         detected === "informes" ||
         detected === "alertas" ||
+        detected === "paneles" ||
         detected === "utilidades_bloque_2" ||
-        detected === "mantenimiento"
+        detected === "mantenimiento" ||
+        (detected === "opciones" &&
+          isOpcionesKbV2Enabled() &&
+          articleIds.length > 0)
           ? articleIds
           : undefined,
       need,
@@ -1408,8 +1641,12 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "puntos_de_interes" ||
         detected === "informes" ||
         detected === "alertas" ||
+        detected === "paneles" ||
         detected === "utilidades_bloque_2" ||
-        detected === "mantenimiento") &&
+        detected === "mantenimiento" ||
+        (detected === "opciones" &&
+          isOpcionesKbV2Enabled() &&
+          articleIds.length > 0)) &&
       !grounded
     ) {
       if (activeInterpret && (activeInterpret.articleIds.length > 0 || activeInterpret.need)) {

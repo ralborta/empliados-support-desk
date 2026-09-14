@@ -11,6 +11,12 @@ import { buildMantenimientoKnowledgeContext } from "@/lib/mantenimientoKnowledge
 import { buildUtilidadesBloque2KnowledgeContext } from "@/lib/utilidadesBloque2Knowledge";
 import { buildInformesKnowledgeContext } from "@/lib/informesKnowledge";
 import { buildAlertasKnowledgeContext, ALERTAS_HARD_CONSTRAINTS } from "@/lib/alertasKnowledge";
+import { buildPanelesKnowledgeContext, PANELES_HARD_CONSTRAINTS } from "@/lib/panelesKnowledge";
+import {
+  buildOpcionesKnowledgeContext,
+  OPCIONES_V2_HARD_CONSTRAINTS,
+  isOpcionesKbV2Enabled,
+} from "@/lib/opcionesKnowledgeV2";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -29,7 +35,8 @@ export type KnowledgeGuideKind =
   | "puntos_de_interes"
   | "utilidades_bloque_2"
   | "informes"
-  | "alertas";
+  | "alertas"
+  | "paneles";
 
 const KNOWLEDGE_BY_KIND: Record<"opciones" | "unidades", string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
@@ -220,12 +227,21 @@ export async function answerFromKnowledgeBase(
     const { isAlertasKbEnabled } = await import("@/lib/alertasKnowledge");
     if (!isAlertasKbEnabled()) return null;
   }
+  if (kind === "paneles") {
+    const { isPanelesKbEnabled } = await import("@/lib/panelesKnowledge");
+    if (!isPanelesKbEnabled()) return null;
+  }
   if (kind === "utilidades_bloque_2") {
     const { isUtilidadesBloque2KbEnabled } = await import(
       "@/lib/utilidadesBloque2Knowledge"
     );
     if (!isUtilidadesBloque2KbEnabled()) return null;
   }
+
+  const useOpcionesV2 =
+    kind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    (opts?.articleIds?.length ?? 0) > 0;
 
   const knowledge =
     kind === "transporte_publico"
@@ -242,11 +258,15 @@ export async function answerFromKnowledgeBase(
                 ? buildInformesKnowledgeContext(opts?.articleIds ?? [])
               : kind === "alertas"
                 ? buildAlertasKnowledgeContext(opts?.articleIds ?? [])
+              : kind === "paneles"
+                ? buildPanelesKnowledgeContext(opts?.articleIds ?? [])
               : kind === "utilidades_bloque_2"
                 ? buildUtilidadesBloque2KnowledgeContext(opts?.articleIds ?? [])
               : kind === "mantenimiento"
                 ? buildMantenimientoKnowledgeContext(opts?.articleIds ?? [])
-                : KNOWLEDGE_BY_KIND[kind];
+                : useOpcionesV2
+                  ? buildOpcionesKnowledgeContext(opts?.articleIds ?? [])
+                  : KNOWLEDGE_BY_KIND[kind as "opciones" | "unidades"];
   if (!knowledge?.trim()) return null;
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -269,6 +289,10 @@ export async function answerFromKnowledgeBase(
                   ? `\n\n${INFORMES_HARD_CONSTRAINTS}`
                 : kind === "alertas"
                   ? `\n\n${ALERTAS_HARD_CONSTRAINTS}`
+                : kind === "paneles"
+                  ? `\n\n${PANELES_HARD_CONSTRAINTS}`
+                : useOpcionesV2
+                  ? `\n\n${OPCIONES_V2_HARD_CONSTRAINTS}`
                 : kind === "utilidades_bloque_2"
                   ? `\n\n${UTILIDADES_BLOQUE2_HARD_CONSTRAINTS}`
                   : "";

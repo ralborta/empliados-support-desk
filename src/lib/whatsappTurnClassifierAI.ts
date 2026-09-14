@@ -267,6 +267,8 @@ export async function resolveTurnExecutor(
     const isPi = kbInterpret?.guideKind === "puntos_de_interes";
     const isInf = kbInterpret?.guideKind === "informes";
     const isAl = kbInterpret?.guideKind === "alertas";
+    const isPn = kbInterpret?.guideKind === "paneles";
+    const isOp = kbInterpret?.guideKind === "opciones";
     const isU2 =
       kbInterpret?.guideKind === "utilidades_bloque_2" &&
       isUtilidadesBloque2KbEnabled();
@@ -275,7 +277,18 @@ export async function resolveTurnExecutor(
       kbInterpret?.need === "ambiguous" && Boolean(kbInterpret.clarifyQuestion);
     if (
       shouldRouteInterpretToInfoGuides(kbInterpret) &&
-      (isTp || isCs || isCb || isHr || isPi || isInf || isAl || isU2 || isMt || isAmbiguousClarify)
+      (isTp ||
+        isCs ||
+        isCb ||
+        isHr ||
+        isPi ||
+        isInf ||
+        isAl ||
+        isPn ||
+        isOp ||
+        isU2 ||
+        isMt ||
+        isAmbiguousClarify)
     ) {
       const rulesExecutor = classifyTurnExecutor(selectionText, threadText, pendingAction);
       if (rulesExecutor === "unidades" || rulesExecutor === "info_guides" || rulesExecutor === "mantenimiento") {

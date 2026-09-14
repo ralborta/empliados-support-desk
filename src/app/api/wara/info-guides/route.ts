@@ -39,6 +39,7 @@ const bodySchema = z
         "utilidades_bloque_2",
         "informes",
         "alertas",
+        "paneles",
       ])
       .optional(),
     articleIds: z.array(z.string()).optional(),
@@ -176,6 +177,7 @@ export async function POST(req: NextRequest) {
   );
   const { isInformesKbEnabled } = await import("@/lib/informesKnowledge");
   const { isAlertasKbEnabled } = await import("@/lib/alertasKnowledge");
+  const { isPanelesKbEnabled } = await import("@/lib/panelesKnowledge");
   const requestedGuide = parsed.data.guide;
   const cisternasGuideIgnored =
     requestedGuide === "cisternas" && !isCisternasKbEnabled();
@@ -189,9 +191,11 @@ export async function POST(req: NextRequest) {
     requestedGuide === "informes" && !isInformesKbEnabled();
   const alertasCorpusOff =
     requestedGuide === "alertas" && !isAlertasKbEnabled();
+  const panelesCorpusOff =
+    requestedGuide === "paneles" && !isPanelesKbEnabled();
   const utilidadesBloque2GuideIgnored =
     requestedGuide === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled();
-  // Cisternas/Combustible/U2: flag off = ignorar kind. HR/PI/Informes/Alertas: reconocer kind aunque corpus off.
+  // Cisternas/Combustible/U2: flag off = ignorar kind. HR/PI/Informes/Alertas/Paneles: reconocer kind aunque corpus off.
   const optInGuideIgnored =
     cisternasGuideIgnored || combustibleGuideIgnored || utilidadesBloque2GuideIgnored;
   const guide = optInGuideIgnored ? undefined : requestedGuide;
@@ -216,6 +220,8 @@ export async function POST(req: NextRequest) {
             ? "informes_module_disabled"
           : alertasCorpusOff
             ? "alertas_module_disabled"
+          : panelesCorpusOff
+            ? "paneles_module_disabled"
           : null;
   const seededInterpret: PlatformKnowledgeInterpret | null =
     guide ||
@@ -225,7 +231,8 @@ export async function POST(req: NextRequest) {
     hojasRutaCorpusOff ||
     puntosInteresCorpusOff ||
     informesCorpusOff ||
-    alertasCorpusOff
+    alertasCorpusOff ||
+    panelesCorpusOff
       ? {
           route: "info_guides",
           guideKind: (hojasRutaCorpusOff
@@ -236,13 +243,16 @@ export async function POST(req: NextRequest) {
                 ? "informes"
               : alertasCorpusOff
                 ? "alertas"
+              : panelesCorpusOff
+                ? "paneles"
               : ((guide as PlatformKnowledgeInterpret["guideKind"]) ?? null)),
           need: (parsed.data.need as PlatformKnowledgeInterpret["need"]) ?? "procedure",
           articleIds:
             hojasRutaCorpusOff ||
             puntosInteresCorpusOff ||
             informesCorpusOff ||
-            alertasCorpusOff
+            alertasCorpusOff ||
+            panelesCorpusOff
               ? []
               : (parsed.data.articleIds ?? []),
           clarifyQuestion: parsed.data.clarifyQuestion?.trim() || null,
@@ -250,7 +260,8 @@ export async function POST(req: NextRequest) {
             hojasRutaCorpusOff ||
             puntosInteresCorpusOff ||
             informesCorpusOff ||
-            alertasCorpusOff
+            alertasCorpusOff ||
+            panelesCorpusOff
               ? false
               : parsed.data.executionRequest === true,
           confidence: 1,
@@ -291,6 +302,8 @@ export async function POST(req: NextRequest) {
             ? "informes_flag_off"
           : alertasCorpusOff && !grounded.fallback
             ? "alertas_flag_off"
+          : panelesCorpusOff && !grounded.fallback
+            ? "paneles_flag_off"
           : grounded.fallback;
 
   const { logPlatformKbTurn } = await import("@/lib/infoGuideInterpretAI");

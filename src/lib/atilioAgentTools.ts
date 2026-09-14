@@ -120,6 +120,9 @@ const GUIA_INFORMES_SUFFIX =
 const GUIA_ALERTAS_SUFFIX =
   " Con módulo Alertas (30 tipos: pánico, zonas, RTO, etc.): SIEMPRE esta tool — si el corpus está off, límite honesto. Alertas ≠ Paneles→Alarmas ≠ Paneles→Notificaciones ≠ Opciones→Protocolos ≠ Informes históricos. NUNCA derives a opciones legacy por ‘alerta/alarma’.";
 
+const GUIA_PANELES_SUFFIX =
+  " Con módulo Paneles (14 vistas: Alarmas, Notificaciones, Turnos, etc.): SIEMPRE esta tool — si el corpus está off, límite honesto. Alarmas ≠ Alertas ≠ Notificaciones ≠ Protocolos ≠ Informes. NUNCA derives a opciones legacy por ‘panel/alarma’.";
+
 const GUIA_ARTICULOS_UNSUPPORTED_SUFFIX =
   " Con módulo Artículos (stock/remitos/inventario): SIEMPRE esta tool — devolverá límite honesto. NUNCA improvises otro módulo ni digas pasos inventados.";
 
@@ -153,6 +156,7 @@ export function buildAtilioAgentTools(
     description += GUIA_PUNTOS_INTERES_SUFFIX;
     description += GUIA_INFORMES_SUFFIX;
     description += GUIA_ALERTAS_SUFFIX;
+    description += GUIA_PANELES_SUFFIX;
     description += GUIA_ARTICULOS_UNSUPPORTED_SUFFIX;
     if (utilidadesBloque2On) description += GUIA_UTILIDADES_BLOQUE2_SUFFIX;
     if (description === t.function.description) return t;
