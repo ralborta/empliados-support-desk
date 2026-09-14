@@ -67,6 +67,14 @@ import {
   looksLikeInformesGuideFollowupQuestion,
 } from "@/lib/informesKnowledge";
 import {
+  ALERTAS_ARTICLES,
+  isAlertasKbEnabled,
+  listAlertasArticleCatalog,
+  filterDeliverableAlertasArticleIds,
+  itemIdFromAlertasArticleId,
+  buildAlertasDisabledChannelReply,
+} from "@/lib/alertasKnowledge";
+import {
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
 } from "@/lib/waraApi";
@@ -91,7 +99,8 @@ export type PlatformGuideKind =
   | "hojas_de_ruta"
   | "puntos_de_interes"
   | "utilidades_bloque_2"
-  | "informes";
+  | "informes"
+  | "alertas";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -104,6 +113,7 @@ export type PlatformKnowledgeInterpret = {
   reason: string;
   /** Solo guideKind=informes: categoría del menú Informes. */
   category?: string | null;
+  /** Informes: pantalla; Alertas: itemId / artículo al-* (alias de continuidad). */
   reportId?: string | null;
 };
 
@@ -132,6 +142,7 @@ function cacheKey(
   utilidadesBloque2On: boolean,
   informesOn: boolean,
   informesSectionsKey: string,
+  alertasOn: boolean,
   lastGuideKind?: string | null,
   lastGuideCategory?: string | null,
   lastGuideReportId?: string | null,
@@ -141,7 +152,7 @@ function cacheKey(
   const lc = lastGuideCategory ?? "";
   const lr = lastGuideReportId ?? "";
   const la = (lastGuideArticleIds ?? []).join(",");
-  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}${utilidadesBloque2On ? "u21" : "u20"}${informesOn ? "inf1" : "inf0"}:${informesSectionsKey}::lg=${lg}::lc=${lc}::lr=${lr}::la=${la}::${selectionText.trim()}::${threadText.slice(-400)}`;
+  return `${cisternasOn ? "cs1" : "cs0"}${combustibleOn ? "cb1" : "cb0"}${hojasRutaOn ? "hr1" : "hr0"}${puntosInteresOn ? "pi1" : "pi0"}${utilidadesBloque2On ? "u21" : "u20"}${informesOn ? "inf1" : "inf0"}:${informesSectionsKey}:${alertasOn ? "al1" : "al0"}::lg=${lg}::lc=${lc}::lr=${lr}::la=${la}::${selectionText.trim()}::${threadText.slice(-400)}`;
 }
 
 function isInformesDetailArticleId(id: string): boolean {
@@ -205,10 +216,11 @@ function allowedGuideKinds(): readonly string[] {
   if (isCisternasKbEnabled()) kinds.push("cisternas");
   if (isCombustibleKbEnabled()) kinds.push("combustible");
   if (isUtilidadesBloque2KbEnabled()) kinds.push("utilidades_bloque_2");
-  // Reconocimiento siempre; la entrega de hr-*/pi-*/inf-* se gatea aparte.
+  // Reconocimiento siempre; la entrega de hr-*/pi-*/inf-*/al-* se gatea aparte.
   kinds.push("hojas_de_ruta");
   kinds.push("puntos_de_interes");
   kinds.push("informes");
+  kinds.push("alertas");
   return kinds;
 }
 
@@ -221,8 +233,35 @@ function isArticleBackedGuide(kind: PlatformGuideKind | null): boolean {
     kind === "hojas_de_ruta" ||
     kind === "puntos_de_interes" ||
     kind === "utilidades_bloque_2" ||
-    kind === "informes"
+    kind === "informes" ||
+    kind === "alertas"
   );
+}
+
+/** Catálogos Alertas: estructurales (+ índice compacto de tipos); detalle si hay itemId. */
+export function selectAlertasCatalogsForInterpret(opts: {
+  lastGuideReportId?: string | null;
+}): {
+  structural: ReturnType<typeof listAlertasArticleCatalog>;
+  itemId: string | null;
+  itemCatalog: ReturnType<typeof listAlertasArticleCatalog> | null;
+} {
+  const raw = opts.lastGuideReportId?.trim() || null;
+  let itemId: string | null = null;
+  if (raw) {
+    if (raw.startsWith("al-")) {
+      itemId = itemIdFromAlertasArticleId(raw) || raw;
+    } else if (ALERTAS_ARTICLES.some((a) => a.itemId === raw || a.id === raw)) {
+      itemId = raw.startsWith("al-") ? itemIdFromAlertasArticleId(raw) : raw;
+    }
+  }
+  return {
+    structural: listAlertasArticleCatalog({ structuralOnly: true }),
+    itemId,
+    itemCatalog: itemId
+      ? listAlertasArticleCatalog({ structuralOnly: false, itemId })
+      : null,
+  };
 }
 
 function informesSectionsCacheKey(): string {
@@ -258,6 +297,7 @@ function buildSystemPrompt(): string {
   const puntosInteresCorpusOn = isPuntosInteresKbEnabled();
   const utilidadesBloque2On = isUtilidadesBloque2KbEnabled();
   const informesMasterOn = isInformesKbEnabled();
+  const alertasCorpusOn = isAlertasKbEnabled();
   const kindParts = [
     '"opciones"',
     '"unidades"',
@@ -270,6 +310,7 @@ function buildSystemPrompt(): string {
   kindParts.push('"hojas_de_ruta"');
   kindParts.push('"puntos_de_interes"');
   kindParts.push('"informes"');
+  kindParts.push('"alertas"');
   kindParts.push("null");
   const kindEnum = kindParts.join(" | ");
 
@@ -283,6 +324,7 @@ function buildSystemPrompt(): string {
     "Hojas de ruta",
     "Puntos de interés",
     "Informes (menú lateral)",
+    "Alertas (menú lateral)",
     utilidadesBloque2On ? "Utilidades — Bloque 2" : null,
   ]
     .filter(Boolean)
@@ -416,6 +458,32 @@ CONTINUIDAD: si last_guide_kind=informes, conservá category y last_guide_report
 ${informesDeliveryBlock}
 `;
 
+  const alertasDeliveryBlock = alertasCorpusOn
+    ? `
+articleIds: solo catálogo_alertas / catálogo_alertas_item (prefijo al-*, 0–3). executionRequest: puede incluir "al-ejecucion-no-disponible".
+reportId: itemId del tipo (slug) o id al-* cuando el tipo concreto esté claro.
+Pendientes (columnas de fila expandida): NO inventes; usá articles con needsValidation/restrictions.
+`
+    : `
+ENTREGA DE CORPUS DESHABILITADA (flag off):
+- AUN ASÍ usá guideKind=alertas cuando el pedido sea del módulo Alertas (reconocimiento semántico obligatorio).
+- articleIds: [] (no cites cuerpos al-*).
+- need=ambiguous + clarifyQuestion: la guía de Alertas aún no está habilitada; NO derives a opciones ni a paneles salvo que el cliente pida explícitamente gestionar alarma / configurar protocolo / ver informe histórico.
+`;
+
+  const alertasBlock = `
+guideKind alertas: menú Alertas de WARA (30 tipos de eventos clasificados: pánico, zonas, RTO, combustible, puertas, etc.). Es LECTURA/consulta del listado por tipo.
+FRONTERAS (obligatorias):
+- Consultar alertas/eventos por tipo → alertas.
+- Gestionar/silenciar/resolver alarma → NO alertas (Paneles→Alarmas; aún sin guideKind paneles: route=continue_normal o aclará frontera; NUNCA opciones legacy).
+- Notificaciones recientes enviadas → NO alertas (Paneles→Notificaciones; relación funcional observada ≠ equivalencia técnica afirmada).
+- Configurar protocolos/criticidad/motivos de alarma → opciones (Protocolos de alarmas), NO alertas.
+- Histórico por período con filtros + Consultar → informes, NO alertas.
+- “Cargas de combustible” / “agua en combustible” como TIPO del menú Alertas → alertas. Cargar tickets / validar → combustible (si on). Informe de cargas → informes.
+CONTINUIDAD: si last_guide_kind=alertas, conservá reportId (itemId) y last_guide_article_ids en follow-ups salvo intención explícita nueva.
+${alertasDeliveryBlock}
+`;
+
   return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
 Devolvé SOLO JSON válido:
 {
@@ -431,7 +499,7 @@ Devolvé SOLO JSON válido:
   "reason": "breve"
 }
 
-category y reportId solo aplican con guideKind=informes; en otros kinds usá null.
+category solo aplica con guideKind=informes. reportId: informes=pantalla inf-*; alertas=itemId/al-*; en otros kinds usá null.
 
 route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (${modules}).
 route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
@@ -458,7 +526,7 @@ executionRequest en mantenimiento: articleIds puede incluir "mt-ejecucion-no-dis
 Continuá el hilo de mantenimiento: “¿y después dónde la sigo?”, preguntas de OT/estados/paneles tras una guía de mantenimiento → guideKind=mantenimiento (no unidades).
 NO confundir "etapas" de transporte con consulta GPS de una unidad.
 NO confundir pedido de ejecución con capacidad real: executionRequest=true; articleIds puede incluir "tp-ejecucion-no-disponible".
-${cisternasBlock}${combustibleBlock}${hojasRutaBlock}${puntosInteresBlock}${utilidadesBloque2Block}${informesBlock}
+${cisternasBlock}${combustibleBlock}${hojasRutaBlock}${puntosInteresBlock}${utilidadesBloque2Block}${informesBlock}${alertasBlock}
 articleIds transporte: solo IDs del catálogo_transporte (0–3). Vacío si guideKind no es transporte_publico.
 Nunca inventes IDs. Si status needs_validation, podés usarlo con cautela; no uses artículos future.
 Respetá restrictions de cada artículo: no afirmes lo no confirmado.
@@ -553,8 +621,12 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
     const u2Articles = articleIds.filter((id) => u2Ids.has(id));
     const mtArticles = articleIds.filter((id) => mtIds.has(id));
     const infArticles = articleIds.filter((id) => id.startsWith("inf-") && infIds.has(id));
+    const alIds = new Set(listAlertasArticleCatalog({ structuralOnly: false }).map((a) => a.id));
+    for (const a of ALERTAS_ARTICLES) alIds.add(a.id);
+    const alArticles = articleIds.filter((id) => id.startsWith("al-") && alIds.has(id));
     const hojasCorpusOn = isHojasRutaKbEnabled();
     const puntosCorpusOn = isPuntosInteresKbEnabled();
+    const alertasCorpusOn = isAlertasKbEnabled();
 
     const allowedInformesCategories = new Set<string>([
       ...INFORMES_CATEGORIES,
@@ -570,7 +642,14 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
       typeof parsed.reportId === "string" && parsed.reportId.trim()
         ? parsed.reportId.trim()
         : null;
-    if (reportId && !reportId.startsWith("inf-")) reportId = null;
+    if (
+      reportId &&
+      !reportId.startsWith("inf-") &&
+      !reportId.startsWith("al-") &&
+      !ALERTAS_ARTICLES.some((a) => a.itemId === reportId)
+    ) {
+      reportId = null;
+    }
 
     if (guideKind === "informes") {
       if (!category && infArticles.length) {
@@ -598,6 +677,15 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
         articleIds = [];
       }
       void sectionOk;
+      route = promoteArticleGuide(need, route);
+    } else if (guideKind === "alertas") {
+      if (!reportId && alArticles.length) {
+        const first = alArticles[0];
+        reportId = itemIdFromAlertasArticleId(first) || first;
+      }
+      articleIds = alertasCorpusOn
+        ? filterDeliverableAlertasArticleIds(alArticles)
+        : [];
       route = promoteArticleGuide(need, route);
     } else if (guideKind === "hojas_de_ruta") {
       // Reconocimiento siempre; cuerpos solo si corpus on.
@@ -661,11 +749,25 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
           ? filterDeliverableInformesArticleIds(infArticles, category)
           : [];
       route = promoteArticleGuide(need, route);
+    } else if (alArticles.length) {
+      guideKind = "alertas";
+      if (!reportId) {
+        reportId = itemIdFromAlertasArticleId(alArticles[0]) || alArticles[0];
+      }
+      articleIds = alertasCorpusOn
+        ? filterDeliverableAlertasArticleIds(alArticles)
+        : [];
+      route = promoteArticleGuide(need, route);
     } else if (!isArticleBackedGuide(guideKind)) {
       articleIds = [];
     }
 
-    if (guideKind !== "informes") {
+    if (guideKind === "informes") {
+      // keep category + reportId
+    } else if (guideKind === "alertas") {
+      category = null;
+      // keep reportId as itemId alias
+    } else {
       category = null;
       reportId = null;
     }
@@ -700,7 +802,8 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
       confidence,
       reason: String(parsed.reason ?? "").trim(),
       category: guideKind === "informes" ? category : null,
-      reportId: guideKind === "informes" ? reportId : null,
+      reportId:
+        guideKind === "informes" || guideKind === "alertas" ? reportId : null,
     };
   } catch {
     return null;
@@ -1880,6 +1983,45 @@ function normalizeInformesDisabledDelivery(
 }
 
 /**
+ * Flag off: reconoce guideKind=alertas pero no entrega corpus al-*.
+ * NUNCA cae a opciones ni otro módulo.
+ */
+function normalizeAlertasDisabledDelivery(
+  interpret: PlatformKnowledgeInterpret,
+): PlatformKnowledgeInterpret {
+  if (interpret.guideKind !== "alertas") return interpret;
+  if (isAlertasKbEnabled()) {
+    const deliverable = filterDeliverableAlertasArticleIds(interpret.articleIds);
+    if (deliverable.length !== interpret.articleIds.length) {
+      return { ...interpret, articleIds: deliverable };
+    }
+    return interpret;
+  }
+  const disabledReply = buildAlertasDisabledChannelReply();
+  if (
+    interpret.reason?.includes("alertas_module_disabled") &&
+    interpret.route === "info_guides" &&
+    interpret.articleIds.length === 0 &&
+    interpret.clarifyQuestion === disabledReply
+  ) {
+    return interpret;
+  }
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "alertas",
+    need: "ambiguous",
+    articleIds: [],
+    clarifyQuestion: disabledReply,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.95),
+    reason: interpret.reason
+      ? `${interpret.reason}|alertas_module_disabled`
+      : "alertas_module_disabled",
+  };
+}
+
+/**
  * Flag off: reconoce guideKind=puntos_de_interes pero no entrega corpus pi-*.
  */
 function normalizePuntosInteresDisabledDelivery(
@@ -2016,6 +2158,7 @@ export function applyPlatformGuideInterpretGuards(
   next = normalizeHojasRutaDisabledDelivery(next);
   next = normalizePuntosInteresDisabledDelivery(next);
   next = normalizeInformesDisabledDelivery(next);
+  next = normalizeAlertasDisabledDelivery(next);
   // Carga ambigua gana sobre HR/combustible/cisternas (y sobre disabled HR).
   next = correctAmbiguousCargaMisroute(next, selectionText);
   // Artículos sin KB: después de misroutes, para no ser pisado por MT.
@@ -2083,6 +2226,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   const utilidadesBloque2On = isUtilidadesBloque2KbEnabled();
   const informesOn = isInformesKbEnabled();
   const informesSectionsKey = informesSectionsCacheKey();
+  const alertasOn = isAlertasKbEnabled();
   const key = cacheKey(
     text,
     threadText,
@@ -2093,6 +2237,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     utilidadesBloque2On,
     informesOn,
     informesSectionsKey,
+    alertasOn,
     opts.lastGuideKind,
     opts.lastGuideCategory,
     opts.lastGuideReportId,
@@ -2115,6 +2260,9 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     lastGuideCategory: opts.lastGuideCategory,
     lastGuideReportId: opts.lastGuideReportId,
   });
+  const alertasCatalogs = selectAlertasCatalogsForInterpret({
+    lastGuideReportId: opts.lastGuideReportId,
+  });
   const userPayload: Record<string, unknown> = {
     mensaje_nuevo: text,
     historial_reciente: threadText.slice(-2500),
@@ -2130,6 +2278,9 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     catalogo_informes: informesCatalogs.structural,
     informes_corpus_enabled: informesOn,
     informes_sections: Array.from(parseInformesKbSections()),
+    // Alertas: estructurales + índice compacto de 30 tipos; detalle si hay itemId.
+    catalogo_alertas: alertasCatalogs.structural,
+    alertas_corpus_enabled: alertasOn,
     last_guide_kind: opts.lastGuideKind ?? null,
     last_guide_category: opts.lastGuideCategory ?? null,
     last_guide_report_id: opts.lastGuideReportId ?? null,
@@ -2138,6 +2289,9 @@ export async function interpretPlatformKnowledgeTurn(opts: {
   // Continuidad: si ya hay categoría conocida, etapa 2 en el mismo llamado.
   if (informesCatalogs.categoryCatalog) {
     userPayload.catalogo_informes_categoria = informesCatalogs.categoryCatalog;
+  }
+  if (alertasCatalogs.itemCatalog) {
+    userPayload.catalogo_alertas_item = alertasCatalogs.itemCatalog;
   }
   if (utilidadesBloque2On) {
     userPayload.catalogo_utilidades_bloque_2 = catalogU2;
@@ -2375,6 +2529,13 @@ export function buildPlatformGuideClarifyOrLimitMessage(
       return [
         "Puedo explicarte cómo llegar al informe en la plataforma y qué filtros usar.",
         "Por este chat no puedo abrir Informes en tu sesión ni ejecutar Consultar/exportar.",
+        "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
+      ].join("\n");
+    }
+    if (interpret.guideKind === "alertas") {
+      return [
+        "Puedo explicarte cómo consultar Alertas por tipo en la plataforma.",
+        "Por este chat no puedo abrir ni marcar alertas en tu cuenta.",
         "¿Querés el paso a paso para hacerlo vos, o preferís hablar con un asesor?",
       ].join("\n");
     }

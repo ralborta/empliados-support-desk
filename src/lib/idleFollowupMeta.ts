@@ -195,6 +195,8 @@ function idleTopicLabel(kind: IdleTopicKind): string {
       return "Puntos de interés";
     case "informes":
       return "Informes";
+    case "alertas":
+      return "Alertas";
     case "utilidades_bloque_2":
       return "Utilidades";
     case "cisternas":
@@ -228,6 +230,8 @@ function idleTopicHint(kind: IdleTopicKind): string {
       return "Seguimos con Puntos de interés. Decime si necesitás alta, grupos, eventos, forma o import/export.";
     case "informes":
       return "Seguimos con Informes. Decime qué categoría o informe querés ver (no es crear/cargar en otro módulo).";
+    case "alertas":
+      return "Seguimos con Alertas. Decime qué tipo querés consultar (pánico, zonas, RTO, etc.).";
     case "utilidades_bloque_2":
       return "Seguimos con Utilidades. Decime si es Acoplados, Auditoría, recorridos, Comunicador, links de posición, Cuestionarios, Novedades o Remitos.";
     case "cisternas":
@@ -274,6 +278,7 @@ export function idleGuideConflictsWithPending(
     topic === "hojas_de_ruta" ||
     topic === "puntos_de_interes" ||
     topic === "informes" ||
+    topic === "alertas" ||
     topic === "utilidades_bloque_2" ||
     topic === "cisternas" ||
     topic === "combustible" ||

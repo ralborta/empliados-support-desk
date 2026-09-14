@@ -345,9 +345,11 @@ async function invokeExecutor(
   if (executor === "info_guides") {
     const kindRaw = data.guideKind ?? data.guide ?? extras?.guide;
     if (isLastInfoGuideKind(kindRaw)) {
-      if (kindRaw === "informes") {
+      if (kindRaw === "informes" || kindRaw === "alertas") {
         const category =
-          typeof data.category === "string" && data.category.trim()
+          kindRaw === "informes" &&
+          typeof data.category === "string" &&
+          data.category.trim()
             ? data.category.trim()
             : null;
         const reportId =

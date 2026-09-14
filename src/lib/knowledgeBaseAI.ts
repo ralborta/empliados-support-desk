@@ -10,6 +10,7 @@ import { buildPuntosInteresKnowledgeContext } from "@/lib/puntosInteresKnowledge
 import { buildMantenimientoKnowledgeContext } from "@/lib/mantenimientoKnowledge";
 import { buildUtilidadesBloque2KnowledgeContext } from "@/lib/utilidadesBloque2Knowledge";
 import { buildInformesKnowledgeContext } from "@/lib/informesKnowledge";
+import { buildAlertasKnowledgeContext, ALERTAS_HARD_CONSTRAINTS } from "@/lib/alertasKnowledge";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
@@ -27,7 +28,8 @@ export type KnowledgeGuideKind =
   | "hojas_de_ruta"
   | "puntos_de_interes"
   | "utilidades_bloque_2"
-  | "informes";
+  | "informes"
+  | "alertas";
 
 const KNOWLEDGE_BY_KIND: Record<"opciones" | "unidades", string> = {
   opciones: OPCIONES_KNOWLEDGE_BASE,
@@ -214,6 +216,10 @@ export async function answerFromKnowledgeBase(
     const { isInformesKbEnabled } = await import("@/lib/informesKnowledge");
     if (!isInformesKbEnabled()) return null;
   }
+  if (kind === "alertas") {
+    const { isAlertasKbEnabled } = await import("@/lib/alertasKnowledge");
+    if (!isAlertasKbEnabled()) return null;
+  }
   if (kind === "utilidades_bloque_2") {
     const { isUtilidadesBloque2KbEnabled } = await import(
       "@/lib/utilidadesBloque2Knowledge"
@@ -234,6 +240,8 @@ export async function answerFromKnowledgeBase(
               ? buildPuntosInteresKnowledgeContext(opts?.articleIds ?? [])
               : kind === "informes"
                 ? buildInformesKnowledgeContext(opts?.articleIds ?? [])
+              : kind === "alertas"
+                ? buildAlertasKnowledgeContext(opts?.articleIds ?? [])
               : kind === "utilidades_bloque_2"
                 ? buildUtilidadesBloque2KnowledgeContext(opts?.articleIds ?? [])
               : kind === "mantenimiento"
@@ -259,6 +267,8 @@ export async function answerFromKnowledgeBase(
                 ? `\n\n${PUNTOS_INTERES_HARD_CONSTRAINTS}`
                 : kind === "informes"
                   ? `\n\n${INFORMES_HARD_CONSTRAINTS}`
+                : kind === "alertas"
+                  ? `\n\n${ALERTAS_HARD_CONSTRAINTS}`
                 : kind === "utilidades_bloque_2"
                   ? `\n\n${UTILIDADES_BLOQUE2_HARD_CONSTRAINTS}`
                   : "";

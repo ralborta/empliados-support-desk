@@ -40,6 +40,10 @@ import {
   buildInformesDisabledChannelReply,
   buildInformesSectionDisabledReply,
 } from "@/lib/informesKnowledge";
+import {
+  isAlertasKbEnabled,
+  buildAlertasDisabledChannelReply,
+} from "@/lib/alertasKnowledge";
 
 export type InfoGuideKind =
   | "opciones"
@@ -51,7 +55,8 @@ export type InfoGuideKind =
   | "hojas_de_ruta"
   | "puntos_de_interes"
   | "utilidades_bloque_2"
-  | "informes";
+  | "informes"
+  | "alertas";
 
 export type InfoGuideFallback =
   | null
@@ -66,6 +71,7 @@ export type InfoGuideFallback =
   | "utilidades_bloque2_flag_off"
   | "informes_flag_off"
   | "informes_section_off"
+  | "alertas_flag_off"
   | "articulos_module_unsupported";
 
 function sanitizeOptInGuideKind(
@@ -75,7 +81,7 @@ function sanitizeOptInGuideKind(
   if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
   if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
   if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) return null;
-  // hojas_de_ruta / puntos_de_interes / informes: reconocer aunque corpus off.
+  // hojas_de_ruta / puntos_de_interes / informes / alertas: reconocer aunque corpus off.
   return kind;
 }
 
@@ -158,6 +164,16 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
     pick === "modulo informe"
   ) {
     return "informes";
+  }
+  if (
+    pick === "alertas" ||
+    pick === "alerta" ||
+    pick === "menu alertas" ||
+    pick === "modulo alertas" ||
+    pick === "modulo de alertas" ||
+    pick === "modulo alerta"
+  ) {
+    return "alertas";
   }
   if (
     isUtilidadesBloque2KbEnabled() &&
@@ -472,6 +488,18 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
       "Decime qué punto puntual: alta, grupos, forma, eventos, import/export o el depósito.",
     ].join("\n");
   }
+  if (detected === "informes") {
+    return [
+      "Ya te pasé esa parte de Informes.",
+      "Decime qué categoría o informe puntual necesitás.",
+    ].join("\n");
+  }
+  if (detected === "alertas") {
+    return [
+      "Ya te pasé esa parte de Alertas.",
+      "Decime qué tipo de alerta querés consultar (pánico, zonas, RTO, etc.).",
+    ].join("\n");
+  }
   if (detected === "utilidades_bloque_2") {
     return [
       "Ya te pasé esa parte de Utilidades.",
@@ -499,6 +527,9 @@ export function buildInfoGuideReply(
   }
   if (detected === "informes" && !isInformesKbEnabled()) {
     return buildInformesDisabledChannelReply();
+  }
+  if (detected === "alertas" && !isAlertasKbEnabled()) {
+    return buildAlertasDisabledChannelReply();
   }
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
@@ -546,6 +577,11 @@ export function buildInfoGuideReply(
     message = [
       "Te puedo orientar con el menú Informes: categorías (Combustible, Choferes, Hojas de ruta, Mantenimiento y depósito, Puntos, Transporte de pasajeros) e informes generales.",
       "Decime qué informe querés ver. Ojo: ver un informe ≠ crear/cargar en el módulo operativo.",
+    ].join("\n");
+  else if (detected === "alertas")
+    message = [
+      "Te puedo orientar con el módulo Alertas: listado de eventos por tipo (pánico, zonas, RTO, etc.).",
+      "Decime qué tipo querés consultar. No es gestionar alarmas en Paneles ni configurar protocolos en Opciones.",
     ].join("\n");
   else if (detected === "utilidades_bloque_2")
     message = [
@@ -725,6 +761,36 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     };
   };
 
+  const disabledAlertasReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message = buildAlertasDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "alertas",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("alertas_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|alertas_module_disabled`
+          : "alertas_module_disabled",
+      reportId: activeInterpret?.reportId ?? null,
+    };
+    return {
+      message,
+      guideKind: "alertas",
+      interpret: disabledInterpret,
+      fallback: "alertas_flag_off",
+    };
+  };
+
   if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
     activeInterpret = {
       ...activeInterpret,
@@ -782,6 +848,12 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     }
     if (activeInterpret.reason?.includes("informes_section_disabled")) {
       return disabledInformesReply(activeInterpret.category);
+    }
+  }
+  if (activeInterpret?.guideKind === "alertas") {
+    if (!isAlertasKbEnabled()) return disabledAlertasReply();
+    if (activeInterpret.reason?.includes("alertas_module_disabled")) {
+      return disabledAlertasReply();
     }
   }
 
@@ -925,6 +997,12 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       return disabledInformesReply(activeInterpret.category);
     }
   }
+  if (activeInterpret?.guideKind === "alertas") {
+    if (!isAlertasKbEnabled()) return disabledAlertasReply();
+    if (activeInterpret.reason?.includes("alertas_module_disabled")) {
+      return disabledAlertasReply();
+    }
+  }
 
   if (!detected) {
     detected = sanitizeOptInGuideKind(
@@ -973,6 +1051,13 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   ) {
     return disabledInformesReply(activeInterpret.category);
   }
+  // kind forzado O detect explícito (p. ej. "alertas" / "modulo alertas").
+  if (
+    (kind === "alertas" || detected === "alertas") &&
+    !isAlertasKbEnabled()
+  ) {
+    return disabledAlertasReply();
+  }
 
   if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) {
     const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
@@ -1007,6 +1092,8 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       activeInterpret.guideKind === "puntos_de_interes" ||
       detected === "informes" ||
       activeInterpret.guideKind === "informes" ||
+      detected === "alertas" ||
+      activeInterpret.guideKind === "alertas" ||
       detected === "utilidades_bloque_2" ||
       activeInterpret.guideKind === "utilidades_bloque_2" ||
       detected === "mantenimiento" ||
@@ -1155,6 +1242,31 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         fallback: "clarify_or_limit",
       };
     }
+    if (detected === "alertas" || activeInterpret.guideKind === "alertas") {
+      if (!isAlertasKbEnabled()) {
+        return disabledAlertasReply();
+      }
+      detected = "alertas";
+      const execIds = articleIds.length ? articleIds : ["al-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("alertas", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "alertas",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "alertas",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     if (
       detected === "utilidades_bloque_2" ||
       activeInterpret.guideKind === "utilidades_bloque_2"
@@ -1251,6 +1363,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         activeInterpret.category === "mapa" ||
         activeInterpret.category === "shared" ||
         isInformesSectionEnabled(activeInterpret.category))) ||
+    (detected === "alertas" && isAlertasKbEnabled()) ||
     (detected === "utilidades_bloque_2" && isUtilidadesBloque2KbEnabled())
   ) {
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
@@ -1261,6 +1374,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "hojas_de_ruta" ||
         detected === "puntos_de_interes" ||
         detected === "informes" ||
+        detected === "alertas" ||
         detected === "utilidades_bloque_2" ||
         detected === "mantenimiento"
           ? articleIds
@@ -1293,6 +1407,7 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         detected === "hojas_de_ruta" ||
         detected === "puntos_de_interes" ||
         detected === "informes" ||
+        detected === "alertas" ||
         detected === "utilidades_bloque_2" ||
         detected === "mantenimiento") &&
       !grounded

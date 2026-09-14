@@ -17,13 +17,15 @@ export type LastInfoGuideKind =
   | "hojas_de_ruta"
   | "puntos_de_interes"
   | "utilidades_bloque_2"
-  | "informes";
+  | "informes"
+  | "alertas";
 
 export type LastInfoGuideContext = {
   kind: LastInfoGuideKind;
   at: string;
   /** Solo familia informes: categoría activa para continuidad. */
   category?: string | null;
+  /** Informes: pantalla; Alertas: itemId / al-* (alias de continuidad). */
   reportId?: string | null;
   articleIds?: string[];
 };
@@ -48,6 +50,7 @@ const ALLOWED = new Set<string>([
   "puntos_de_interes",
   "utilidades_bloque_2",
   "informes",
+  "alertas",
 ]);
 
 export function isLastInfoGuideKind(value: unknown): value is LastInfoGuideKind {
