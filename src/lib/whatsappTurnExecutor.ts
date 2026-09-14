@@ -2681,13 +2681,21 @@ export async function runTurnExecutorPhase(params: {
       lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
     });
     if (isOperationalUnitInterpret(kbInterpret)) {
+      // Carga de combustible: capturar unidad/patente. NO buscar la frase operativa
+      // como nombre de unidad (evita “No encontré … «cargar»”).
+      if (kbInterpret?.normalTarget === "operational_fuel") {
+        return {
+          message:
+            "Para cargar combustible necesito la unidad: pasame la patente o el nombre/interno.",
+          executor: "unidades",
+          ok: true,
+        };
+      }
       const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
       const execMessage = messageFromPayload(execResult);
       const execOk = execResult.ok !== false && execResult.ok_s !== "false";
       const askUnit =
-        kbInterpret?.normalTarget === "operational_fuel"
-          ? "Para cargar combustible necesito la unidad: pasame la patente o el nombre/interno."
-          : "Para revisar el GPS o el estado necesito la unidad: pasame la patente o el nombre/interno.";
+        "Para revisar el GPS o el estado necesito la unidad: pasame la patente o el nombre/interno.";
       return {
         message: execMessage || askUnit,
         executor: "unidades",
