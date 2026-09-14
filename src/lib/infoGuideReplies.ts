@@ -18,6 +18,8 @@ import type { InfoGuideNeed, PlatformKnowledgeInterpret } from "@/lib/infoGuideI
 import {
   buildPlatformGuideClarifyOrLimitMessage,
   interpretPlatformKnowledgeTurn,
+  platformGuideNeedsSemanticDetailRefine,
+  refinePlatformKnowledgeDetailIfNeeded,
 } from "@/lib/infoGuideInterpretAI";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
@@ -210,7 +212,7 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   // Informes: antes de heurísticas MT (p. ej. “cargas” no debe robar “informe de cargas”).
   const nEarly = pick;
   if (
-    /\binforme(s)?\s+(de|del|sobre|para)\b/.test(nEarly) ||
+    /\binforme(s)?\s+(de|del|sobre|para|historico|histórico)\b/.test(nEarly) ||
     /\bmenu\s+informes\b/.test(nEarly) ||
     /\bmodulo\s+(de\s+)?informes\b/.test(nEarly) ||
     (/\b(como|donde)\s+(veo|consulto|abro|encuentro)\b/.test(nEarly) &&
@@ -1020,6 +1022,13 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       selectionText: rawText,
       threadText,
     });
+    // Un reintento si el 1er interpret falló (timeout/rate-limit): evita caer al blob Opciones.
+    if (!activeInterpret) {
+      activeInterpret = await interpretPlatformKnowledgeTurn({
+        selectionText: rawText,
+        threadText,
+      });
+    }
   }
   if (activeInterpret) {
     const { applyPlatformGuideInterpretGuards } = await import(
@@ -1031,6 +1040,13 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       rawText,
       threadText ?? "",
     );
+    if (platformGuideNeedsSemanticDetailRefine(activeInterpret)) {
+      activeInterpret = await refinePlatformKnowledgeDetailIfNeeded({
+        selectionText: rawText,
+        threadText: threadText ?? "",
+        interpret: activeInterpret,
+      });
+    }
   } else {
     const { applyPlatformGuideInterpretGuards } = await import(
       "@/lib/infoGuideInterpretAI"
@@ -1151,9 +1167,12 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   }
 
   if (!detected) {
-    detected = sanitizeOptInGuideKind(
-      activeInterpret?.guideKind ?? detectInfoGuideKind(rawText),
-    );
+    // Preferir guideKind del intérprete; no reintroducir blob Opciones vía detectInfoGuideKind
+    // cuando ya hay un módulo estructural (alertas/paneles/informes/opciones V2).
+    detected = sanitizeOptInGuideKind(activeInterpret?.guideKind ?? null);
+  }
+  if (!detected && !activeInterpret) {
+    detected = sanitizeOptInGuideKind(detectInfoGuideKind(rawText));
   }
   if (activeInterpret?.guideKind && sanitizeOptInGuideKind(activeInterpret.guideKind)) {
     articleIds = activeInterpret.articleIds;
@@ -1595,6 +1614,25 @@ export async function buildGroundedInfoGuideReplyWithMeta(
     (detected === "paneles" && isPanelesKbEnabled()) ||
     (detected === "utilidades_bloque_2" && isUtilidadesBloque2KbEnabled())
   ) {
+    // Sin detalle entregable: no corpus completo ni blob legacy de Opciones.
+    const structuralEmptyDetail =
+      (detected === "alertas" && articleIds.length === 0) ||
+      (detected === "paneles" && articleIds.length === 0) ||
+      (detected === "informes" && articleIds.length === 0) ||
+      (detected === "opciones" &&
+        isOpcionesKbV2Enabled() &&
+        articleIds.length === 0);
+    if (structuralEmptyDetail && activeInterpret) {
+      return {
+        message:
+          activeInterpret.clarifyQuestion?.trim() ||
+          buildPlatformGuideClarifyOrLimitMessage(activeInterpret) ||
+          buildInfoGuideReply(rawText, detected, lastBotMessage, threadText),
+        guideKind: detected,
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
     const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
       articleIds:
         detected === "transporte_publico" ||
@@ -1659,6 +1697,25 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       }
       fallback = "static_kind";
     }
+  }
+
+  // Nunca reintroducir blob Opciones si el intérprete ya fijó alertas/paneles/informes.
+  if (
+    activeInterpret?.guideKind === "alertas" ||
+    activeInterpret?.guideKind === "paneles" ||
+    activeInterpret?.guideKind === "informes" ||
+    (activeInterpret?.guideKind === "opciones" && isOpcionesKbV2Enabled())
+  ) {
+    const safeKind = activeInterpret.guideKind;
+    return {
+      message:
+        activeInterpret.clarifyQuestion?.trim() ||
+        buildPlatformGuideClarifyOrLimitMessage(activeInterpret) ||
+        buildInfoGuideReply(rawText, safeKind, lastBotMessage, threadText),
+      guideKind: safeKind,
+      interpret: activeInterpret,
+      fallback: fallback ?? "clarify_or_limit",
+    };
   }
 
   const message = buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);

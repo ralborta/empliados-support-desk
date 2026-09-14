@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 /**
- * LIVE — Utilidades Bloque 2 KB (interpret + grounded + resolveTurnExecutor).
+ * LIVE — Utilidades Bloque 2 KB.
  *
- * NO ejecuta runTurnExecutorPhase / WhatsApp real.
+ * Hard-off (flag false): comportamiento productivo actual; NO entrega cuerpos u2-*;
+ * NO exige guideKind=utilidades_bloque_2 ni fallback disabled estructurado.
  *
- * Uso (flag U2 off — contrato safe-off):
- *   WARA_UTILIDADES_BLOQUE2_KB_ENABLED=false WARA_PLATFORM_KB_LLM_INTERPRET=true \
- *   npx tsx scripts/live-utilidades-bloque2-kb.mjs
+ * Flag on: entrega u2-* con artículos concretos.
  *
- * Corpus on:
- *   WARA_UTILIDADES_BLOQUE2_KB_ENABLED=true WARA_PLATFORM_KB_LLM_INTERPRET=true \
- *   npx tsx scripts/live-utilidades-bloque2-kb.mjs
+ * Repetir ×3 en procesos separados.
  */
 import assert from "node:assert/strict";
 import { interpretPlatformKnowledgeTurn } from "../src/lib/infoGuideInterpretAI.ts";
@@ -30,131 +27,156 @@ const u2CorpusOn = ["true", "1", "yes"].includes(
 );
 process.env.WARA_UTILIDADES_BLOQUE2_KB_ENABLED = u2CorpusOn ? "true" : "false";
 
-const cases = [
+function assertHasArticle(ids, expectedId, label) {
+  assert.ok(Array.isArray(ids), `${label}: articleIds array`);
+  assert.ok(ids.length > 0, `${label}: articleIds no vacío`);
+  assert.ok(ids.includes(expectedId), `${label}: esperaba ${expectedId}, got ${ids.join(",")}`);
+}
+
+const casesOn = [
   {
-    id: "auditoria",
+    id: "u2-novedades",
+    text: "Utilidades → Novedades no abre",
+    expectResolve: "info_guides",
+    expectGuide: "utilidades_bloque_2",
+    expectArticleId: "u2-novedades",
+  },
+  {
+    id: "u2-auditoria",
     text: "¿Cómo filtro la Auditoría en Wara?",
-    thread: "",
     expectResolve: "info_guides",
     expectGuide: "utilidades_bloque_2",
-    expectDisabled: !u2CorpusOn,
+    expectArticleId: "u2-auditoria",
   },
   {
-    id: "remitos",
+    id: "u2-remitos",
     text: "¿Cómo uso Remitos?",
-    thread: "",
     expectResolve: "info_guides",
     expectGuide: "utilidades_bloque_2",
-    expectDisabled: !u2CorpusOn,
-  },
-  {
-    id: "novedades-utilidades",
-    text: "Utilidades Novedades no abre",
-    thread: "",
-    expectResolve: "info_guides",
-    expectGuide: "utilidades_bloque_2",
-    expectDisabled: !u2CorpusOn,
-  },
-  {
-    id: "exportar-auditoria",
-    text: "¿Cómo exporto la Auditoría de Utilidades?",
-    thread: "",
-    expectResolve: "info_guides",
-    expectGuide: "utilidades_bloque_2",
-    expectDisabled: !u2CorpusOn,
-  },
-  {
-    id: "novedades-certificado",
-    text: "Tengo novedades sobre el certificado",
-    thread: "",
-    expectNotGuide: "utilidades_bloque_2",
+    expectArticleId: "u2-remitos",
   },
   {
     id: "novedades-ticket",
     text: "¿Dónde veo las novedades de mi ticket?",
-    thread: "",
+    expectNotGuide: "utilidades_bloque_2",
+  },
+  {
+    id: "novedades-certificado",
+    text: "Tengo novedades del certificado",
     expectNotGuide: "utilidades_bloque_2",
   },
   {
     id: "gps",
     text: "Indicame la última posición de la AG",
-    thread: "",
     expectResolve: "unidades",
   },
   {
     id: "odo",
     text: "Quiero corregir el odómetro",
-    thread: "",
     expectResolve: "odometro",
   },
 ];
 
-let failed = 0;
+const casesOff = [
+  {
+    id: "off-auditoria-no-u2-bodies",
+    text: "¿Cómo filtro la Auditoría en Wara?",
+    forbidU2Bodies: true,
+  },
+  {
+    id: "off-novedades-no-u2",
+    text: "Utilidades → Novedades no abre",
+    forbidU2Bodies: true,
+  },
+  {
+    id: "off-gps",
+    text: "Indicame la última posición de la AG",
+    expectResolve: "unidades",
+  },
+  {
+    id: "off-odo",
+    text: "Quiero corregir el odómetro",
+    expectResolve: "odometro",
+  },
+  {
+    id: "off-novedades-ticket",
+    text: "¿Dónde veo las novedades de mi ticket?",
+    expectNotGuide: "utilidades_bloque_2",
+  },
+];
 
+const cases = u2CorpusOn ? casesOn : casesOff;
+
+let failed = 0;
 console.log(
   JSON.stringify({
-    mode: u2CorpusOn ? "corpus_on" : "flag_off_safe",
-    interpret: true,
+    mode: u2CorpusOn ? "corpus_on" : "hard_off_productive",
   }),
 );
 
 for (const c of cases) {
-  await new Promise((r) => setTimeout(r, 700));
-  const resolved = await resolveTurnExecutor(c.text, c.thread || c.text);
-  let guideKind = null;
-  let used = null;
-  let fallback = null;
-  let replyPreview = "";
-  if (resolved.executor === "info_guides") {
-    const interpret = await interpretPlatformKnowledgeTurn({
-      selectionText: c.text,
-      threadText: c.thread,
-    });
-    const meta = await buildGroundedInfoGuideReplyWithMeta(
-      c.text,
-      null,
-      null,
-      c.thread,
-      interpret,
-    );
-    guideKind = meta.guideKind;
-    used = meta.interpret;
-    fallback = meta.fallback;
-    replyPreview = String(meta.message).slice(0, 280);
-  }
-
-  const row = {
-    id: c.id,
-    resolvedExecutor: resolved.executor,
-    guideKind,
-    need: used?.need ?? null,
-    articleIds: used?.articleIds ?? [],
-    fallback,
-    confidence: used?.confidence ?? null,
-    executionRequest: used?.executionRequest ?? null,
-    replyPreview,
-  };
-  console.log(JSON.stringify(row));
-
+  await new Promise((r) => setTimeout(r, 400));
   try {
-    if (c.expectResolve) assert.equal(resolved.executor, c.expectResolve, `${c.id} resolve`);
-    if (c.expectGuide) assert.equal(guideKind, c.expectGuide, `${c.id} guide`);
+    const resolved = await resolveTurnExecutor(c.text, "");
+    let guideKind = null;
+    let used = null;
+    let fallback = null;
+    let replyPreview = "";
+
+    if (resolved.executor === "info_guides") {
+      const interpret = await interpretPlatformKnowledgeTurn({
+        selectionText: c.text,
+        threadText: "",
+      });
+      const meta = await buildGroundedInfoGuideReplyWithMeta(
+        c.text,
+        null,
+        null,
+        "",
+        interpret,
+      );
+      guideKind = meta.guideKind;
+      used = meta.interpret;
+      fallback = meta.fallback;
+      replyPreview = String(meta.message).slice(0, 280);
+    }
+
+    if (c.expectResolve) {
+      assert.equal(resolved.executor, c.expectResolve, `${c.id} resolve`);
+    }
+    if (c.expectGuide) {
+      assert.equal(resolved.executor, "info_guides", `${c.id} only grounded if info_guides`);
+      assert.equal(guideKind, c.expectGuide, `${c.id} guide`);
+    }
     if (c.expectNotGuide) {
       assert.notEqual(guideKind, c.expectNotGuide, `${c.id} not hijacked`);
+      if (resolved.executor === "info_guides") {
+        assert.notEqual(guideKind, "utilidades_bloque_2", `${c.id} not u2`);
+      }
     }
-    if (c.expectDisabled) {
-      assert.equal(fallback, "utilidades_bloque2_flag_off", `${c.id} disabled fallback`);
-      assert.equal((used?.articleIds ?? []).length, 0, `${c.id} no u2-* bodies`);
-      assert.match(replyPreview, /no tengo habilitada|Utilidades/i, `${c.id} disabled msg`);
-    }
-    if (u2CorpusOn && c.expectGuide === "utilidades_bloque_2" && !c.expectDisabled) {
+    if (c.expectArticleId && resolved.executor === "info_guides") {
+      assertHasArticle(used?.articleIds ?? [], c.expectArticleId, c.id);
       assert.notEqual(fallback, "utilidades_bloque2_flag_off", `${c.id} not disabled`);
-      assert.ok(
-        (used?.articleIds ?? []).some((id) => String(id).startsWith("u2-")) ||
-          /Utilidades|Auditoría|Remitos|Novedades/i.test(replyPreview),
-        `${c.id} grounded u2 content`,
-      );
     }
+    if (c.forbidU2Bodies) {
+      const ids = used?.articleIds ?? [];
+      assert.ok(
+        !ids.some((id) => String(id).startsWith("u2-")),
+        `${c.id}: hard-off no debe entregar u2-* (${ids.join(",")})`,
+      );
+      assert.notEqual(guideKind, "utilidades_bloque_2", `${c.id}: hard-off no guideKind u2`);
+    }
+
+    console.log(
+      JSON.stringify({
+        id: c.id,
+        resolvedExecutor: resolved.executor,
+        guideKind,
+        articleIds: used?.articleIds ?? [],
+        fallback,
+        replyPreview,
+      }),
+    );
   } catch (e) {
     failed += 1;
     console.error(`FAIL ${c.id}:`, e instanceof Error ? e.message : e);

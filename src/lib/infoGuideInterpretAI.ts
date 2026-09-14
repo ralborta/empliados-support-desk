@@ -145,6 +145,27 @@ type CacheEntry = { at: number; value: PlatformKnowledgeInterpret | null };
 const interpretCache = new Map<string, CacheEntry>();
 const INTERPRET_CACHE_TTL_MS = 20_000;
 
+function cacheInterpretResult(key: string, value: PlatformKnowledgeInterpret): void {
+  // No cachear continue_normal vacío: evita fijar un miss flaky y bloquear reintentos.
+  if (value.route === "continue_normal" && !value.guideKind) return;
+  // Tampoco fijar opciones sin ítem de detalle (p. ej. solo idx/atributos-seccion).
+  if (
+    value.guideKind === "opciones" &&
+    !value.articleIds.some(
+      (id) =>
+        id.startsWith("op-") &&
+        id !== "op-mapa" &&
+        id !== "op-restricciones" &&
+        id !== "op-atributos-seccion" &&
+        !id.startsWith("op-idx-") &&
+        id !== "op-ejecucion-no-disponible",
+    )
+  ) {
+    return;
+  }
+  interpretCache.set(key, { at: Date.now(), value });
+}
+
 export type PlatformGuideGuardOpts = {
   /** Última guía realmente entregada (metadato estructurado; no prosa del hilo). */
   lastGuideKind?: LastInfoGuideKind | null;
@@ -510,6 +531,7 @@ FRONTERAS:
 - Remitos y Remitos hormigonera → utilidades_bloque_2. Cargas/descargas de viaje y puntos/traza → hojas_de_ruta.
 - “Auditoría” como pantalla/log de WARA → utilidades_bloque_2. Reclamo, incidente o pedido de asesor → continue_normal.
 - Pedir enviar comunicado, guardar/eliminar algo o generar un remito → need=execute, executionRequest=true; no implica capacidad real.
+- Novedades (Utilidades→Novedades / megáfono / pantalla del módulo) → utilidades_bloque_2 + u2-novedades. NO confundir con: novedades de un ticket, novedades de certificado/cobertura, novedades de mantenimiento/odómetro, ni “novedades” genéricas de un trámite operativo → esas van continue_normal u otro guideKind (certificados/tickets), NUNCA u2-novedades.
 - Novedades tiene funcionamiento pendiente: no inventar causa ni pasos.
 articleIds: solo catálogo_utilidades_bloque_2 (prefijo u2-, 0–3). executionRequest puede incluir "u2-ejecucion-no-disponible".
 CONTINUIDAD: historial explícito de uno de estos nueve módulos + seguimiento informativo → utilidades_bloque_2.
@@ -552,6 +574,7 @@ ${informesDeliveryBlock}
     ? `
 articleIds: solo catálogo_alertas / catálogo_alertas_item (prefijo al-*, 0–3). executionRequest: puede incluir "al-ejecucion-no-disponible".
 reportId: itemId del tipo (slug) o id al-* cuando el tipo concreto esté claro.
+Si llega alertas_refine_stage=item_detail + catálogo_alertas_item: elegí el artículo de detalle al-* de ese tipo (no solo índices estructurales).
 Pendientes (columnas de fila expandida): NO inventes; usá articles con needsValidation/restrictions.
 `
     : `
@@ -565,10 +588,10 @@ ENTREGA DE CORPUS DESHABILITADA (flag off):
 guideKind alertas: menú Alertas de WARA (30 tipos de eventos clasificados: pánico, zonas, RTO, combustible, puertas, etc.). Es LECTURA/consulta del listado por tipo.
 FRONTERAS (obligatorias):
 - Consultar alertas/eventos por tipo → alertas.
-- Gestionar/silenciar/resolver alarma → paneles (Alarmas), NO alertas. NUNCA opciones legacy.
-- Notificaciones recientes enviadas → paneles (Notificaciones).
+- Gestionar/silenciar/resolver alarma (alarma activa, silenciar, resolver) → paneles (Alarmas), NO alertas y NUNCA opciones.
+- Notificaciones recientes enviadas → paneles (Notificaciones), NO opciones.
 - Configurar protocolos/criticidad/motivos de alarma → opciones (Protocolos de alarmas), NO alertas.
-- Histórico por período con filtros + Consultar → informes, NO alertas.
+- “Informe histórico…”, “informe de alarmas por período”, filtros + Consultar en menú Informes → informes, NO alertas (aunque diga alarmas).
 - “Cargas de combustible” / “agua en combustible” como TIPO del menú Alertas → alertas. Cargar tickets / validar → combustible (si on). Informe de cargas → informes.
 CONTINUIDAD: si last_guide_kind=alertas, conservá reportId (itemId) y last_guide_article_ids en follow-ups salvo intención explícita nueva.
 ${alertasDeliveryBlock}
@@ -578,6 +601,7 @@ ${alertasDeliveryBlock}
     ? `
 articleIds: solo catálogo_paneles / catálogo_paneles_item (prefijo pn-*, 0–3). executionRequest: puede incluir "pn-ejecucion-no-disponible".
 reportId: itemId del panel (slug) o id pn-* cuando el panel concreto esté claro.
+Si llega paneles_refine_stage=item_detail + catálogo_paneles_item: elegí el artículo pn-* de ese panel.
 `
     : `
 ENTREGA DE CORPUS DESHABILITADA (flag off):
@@ -589,10 +613,10 @@ ENTREGA DE CORPUS DESHABILITADA (flag off):
   const panelesBlock = `
 guideKind paneles: menú Paneles de WARA (14 vistas de monitoreo: Alarmas, Notificaciones, Turnos, Combustible, etc.).
 FRONTERAS (obligatorias):
-- Alarmas (gestionar/silenciar/resolver) → paneles. ≠ Alertas (consulta por tipo). ≠ Notificaciones.
-- Notificaciones recientes → paneles. Relación funcional con Alertas; NO afirmar equivalencia técnica.
+- Alarmas (gestionar/silenciar/resolver una alarma activa) → paneles + pn-alarmas. ≠ Alertas (consulta por tipo). ≠ Notificaciones. ≠ Opciones/protocolos.
+- Notificaciones recientes → paneles + pn-notificaciones. Relación funcional con Alertas; NO afirmar equivalencia técnica; NUNCA opciones.
 - Protocolos / criticidad / motivos → opciones, NO paneles.
-- Histórico con filtros → informes, NO paneles.
+- “Informe de turnos…”, histórico con filtros → informes, NO paneles.
 - Homónimos (combustible, hojas de ruta, mantenimiento) DENTRO de Paneles NO transfieren solos al módulo operativo.
 CONTINUIDAD: si last_guide_kind=paneles, conservá reportId (itemId) y last_guide_article_ids en follow-ups salvo intención explícita nueva.
 ${panelesDeliveryBlock}
@@ -602,8 +626,12 @@ ${panelesDeliveryBlock}
     ? `
 guideKind opciones (V2): configuración en menú Opciones (38 ítems + Atributos). Usá catálogo_opciones / catálogo_opciones_categoria (prefijo op-*, 0–3).
 Elegí category entre: atributos | personas_accesos_empresas | transporte_pasajeros | hojas_ruta | comunicaciones_notificaciones | conducta_alarmas | combustible | mantenimiento_deposito | informes_envios_programados.
+Stock diario / Informe de stock diario → category=informes_envios_programados + op-stock-diario (NUNCA atributos).
 Protocolos de alarmas (Opciones) ≠ módulo Alertas ≠ Paneles→Alarmas.
+Silenciar/resolver alarma activa → paneles, NUNCA opciones.
+Si llega opciones_refine_stage=category_detail + catálogo_opciones_categoria: elegí el ítem de detalle op-* (no solo op-idx-* / mapa).
 articleIds: solo IDs del catálogo op-*. executionRequest puede incluir "op-ejecucion-no-disponible".
+Cargar combustible / tickets operativos → continue_normal o combustible (si on), NUNCA opciones.
 `
     : `
 guideKind opciones: configuración de cuenta (agenda, contactos, perfiles, permisos, notificaciones, protocolos, etc.). articleIds DEBE ser [].
@@ -688,11 +716,63 @@ function promoteArticleGuide(
 function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Normalizar claves/valores que el LLM a veces deforma bajo prompts largos.
+    if (parsed.route == null) {
+      const peekIds = Array.isArray(parsed.articleIds)
+        ? parsed.articleIds.map((id) => String(id))
+        : [];
+      if (
+        peekIds.some((id) => /^(al|pn|op|inf|hr|pi|u2|mt|cb|cs|tp)-/.test(id)) ||
+        (typeof parsed.guideKind === "string" &&
+          ["paneles", "alertas", "opciones", "informes"].includes(parsed.guideKind))
+      ) {
+        parsed.route = "info_guides";
+      } else if (
+        parsed.info_guides === "info_guides" ||
+        parsed.info_guides === "continue_normal"
+      ) {
+        parsed.route = parsed.info_guides;
+      } else if (typeof parsed.info_guides === "string") {
+        parsed.route = parsed.info_guides;
+      }
+    }
+    if (parsed.need == null && parsed["need definition"] != null) {
+      parsed.need = "definition";
+    }
+    if (parsed.need == null && parsed["need procedure"] != null) {
+      parsed.need = "procedure";
+    }
     let route = String(parsed.route ?? "").trim() as PlatformKnowledgeInterpret["route"] | string;
-    if (route !== "info_guides" && route !== "continue_normal") return null;
-    const need = String(parsed.need ?? "").trim() as InfoGuideNeed;
+    if (route !== "info_guides" && route !== "continue_normal") {
+      // LLM a veces pone guideKind en route o inventa values.
+      const rawIds = Array.isArray(parsed.articleIds)
+        ? parsed.articleIds.map((id) => String(id).trim())
+        : [];
+      const rawReport =
+        typeof parsed.reportId === "string" ? parsed.reportId.trim() : "";
+      const rawGuide =
+        typeof parsed.guideKind === "string" ? parsed.guideKind.trim() : "";
+      if (
+        rawIds.some((id) => /^(al|pn|op|inf|hr|pi|u2|mt|cb|cs|tp)-/.test(id)) ||
+        /^(al|pn|op|inf)-/.test(rawReport) ||
+        allowedGuideKinds().includes(rawGuide as PlatformGuideKind) ||
+        allowedGuideKinds().includes(route as PlatformGuideKind)
+      ) {
+        // Si metió el guideKind en route, recuperarlo.
+        if (
+          !parsed.guideKind &&
+          allowedGuideKinds().includes(route as PlatformGuideKind)
+        ) {
+          parsed.guideKind = route;
+        }
+        route = "info_guides";
+      } else {
+        return null;
+      }
+    }
+    let need = String(parsed.need ?? "").trim() as InfoGuideNeed;
     if (!["definition", "procedure", "troubleshoot", "execute", "ambiguous"].includes(need)) {
-      return null;
+      need = parsed.clarifyQuestion ? "ambiguous" : "procedure";
     }
     const guideRaw = parsed.guideKind;
     let guideKind =
@@ -725,7 +805,23 @@ function parseInterpret(raw: string): PlatformKnowledgeInterpret | null {
           reason: "combustible_flag_off",
         };
       }
-      return null;
+      // Recuperar guideKind desde IDs de catálogo (LLM a veces inventa labels).
+      const peekIds = Array.isArray(parsed.articleIds)
+        ? parsed.articleIds.map((id) => String(id).trim())
+        : [];
+      const peekReport =
+        typeof parsed.reportId === "string" ? parsed.reportId.trim() : "";
+      if (peekIds.some((id) => id.startsWith("pn-")) || peekReport.startsWith("pn-")) {
+        guideKind = "paneles";
+      } else if (peekIds.some((id) => id.startsWith("al-")) || peekReport.startsWith("al-")) {
+        guideKind = "alertas";
+      } else if (peekIds.some((id) => id.startsWith("op-")) || peekReport.startsWith("op-")) {
+        guideKind = "opciones";
+      } else if (peekIds.some((id) => id.startsWith("inf-")) || peekReport.startsWith("inf-")) {
+        guideKind = "informes";
+      } else {
+        return null;
+      }
     }
     const confidence = Number(parsed.confidence);
     if (!Number.isFinite(confidence)) return null;
@@ -1783,7 +1879,7 @@ function looksLikeInformesGuideIntent(norm: string): boolean {
   ) {
     return true;
   }
-  if (/\binforme(s)?\s+(de|del|sobre|para)\b/.test(norm)) return true;
+  if (/\binforme(s)?\s+(de|del|sobre|para|historico|histórico)\b/.test(norm)) return true;
   if (
     /\b(como|donde|dónde)\s+(veo|consulto|abro|encuentro|saco|miro)\b/.test(norm) &&
     /\binforme/.test(norm)
@@ -2386,6 +2482,160 @@ function correctPuntosInteresContinuityMisroute(
   };
 }
 
+function correctAlertasContinuityMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  _selectionText: string,
+  _threadText: string,
+  opts?: PlatformGuideGuardOpts,
+): PlatformKnowledgeInterpret {
+  if (opts?.lastGuideKind !== "alertas") return interpret;
+  // Intención explícita de otro módulo gana.
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "alertas"
+  ) {
+    return interpret;
+  }
+  if (interpret.guideKind === "alertas" && hasAlertasDetailArticle(interpret.articleIds)) {
+    return interpret;
+  }
+  // No secuestrar continue_normal (certificados, odómetro, GPS, etc.).
+  if (interpret.route === "continue_normal" && interpret.guideKind == null) {
+    return interpret;
+  }
+  const lastIds = opts?.lastGuideArticleIds ?? [];
+  const lastReport = opts?.lastGuideReportId?.trim() || null;
+  let ids = hasAlertasDetailArticle(lastIds)
+    ? filterDeliverableAlertasArticleIds(lastIds)
+    : [];
+  if (!ids.length && lastReport) {
+    const item =
+      lastReport.startsWith("al-")
+        ? itemIdFromAlertasArticleId(lastReport)
+        : lastReport;
+    const article = ALERTAS_ARTICLES.find(
+      (a) => a.category === "tipo" && (a.itemId === item || a.id === lastReport),
+    );
+    if (article) ids = filterDeliverableAlertasArticleIds([article.id]);
+  }
+  if (!ids.length && !lastReport) return interpret;
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "alertas",
+    need: interpret.need === "execute" ? "execute" : "procedure",
+    articleIds: isAlertasKbEnabled() ? ids : [],
+    reportId: lastReport || resolveAlertasItemId(interpret) || null,
+    clarifyQuestion: null,
+    executionRequest: interpret.need === "execute",
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|alertas_continuity`
+      : "alertas_continuity",
+  };
+}
+
+function correctPanelesContinuityMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  _selectionText: string,
+  _threadText: string,
+  opts?: PlatformGuideGuardOpts,
+): PlatformKnowledgeInterpret {
+  if (opts?.lastGuideKind !== "paneles") return interpret;
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "paneles"
+  ) {
+    return interpret;
+  }
+  if (interpret.guideKind === "paneles" && hasPanelesDetailArticle(interpret.articleIds)) {
+    return interpret;
+  }
+  if (interpret.route === "continue_normal" && interpret.guideKind == null) {
+    return interpret;
+  }
+  const lastIds = opts?.lastGuideArticleIds ?? [];
+  const lastReport = opts?.lastGuideReportId?.trim() || null;
+  let ids = hasPanelesDetailArticle(lastIds)
+    ? filterDeliverablePanelesArticleIds(lastIds)
+    : [];
+  if (!ids.length && lastReport) {
+    const item =
+      lastReport.startsWith("pn-")
+        ? itemIdFromPanelesArticleId(lastReport)
+        : lastReport;
+    const article = PANELES_ARTICLES.find(
+      (a) => a.category === "panel" && (a.itemId === item || a.id === lastReport),
+    );
+    if (article) ids = filterDeliverablePanelesArticleIds([article.id]);
+  }
+  if (!ids.length && !lastReport) return interpret;
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "paneles",
+    need: interpret.need === "execute" ? "execute" : "procedure",
+    articleIds: isPanelesKbEnabled() ? ids : [],
+    reportId: lastReport || resolvePanelesItemId(interpret) || null,
+    clarifyQuestion: null,
+    executionRequest: interpret.need === "execute",
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|paneles_continuity`
+      : "paneles_continuity",
+  };
+}
+
+function correctOpcionesContinuityMisroute(
+  interpret: PlatformKnowledgeInterpret,
+  _selectionText: string,
+  _threadText: string,
+  opts?: PlatformGuideGuardOpts,
+): PlatformKnowledgeInterpret {
+  if (!isOpcionesKbV2Enabled()) return interpret;
+  if (opts?.lastGuideKind !== "opciones") return interpret;
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "opciones"
+  ) {
+    return interpret;
+  }
+  if (interpret.guideKind === "opciones" && hasOpcionesDetailArticle(interpret.articleIds)) {
+    return interpret;
+  }
+  if (interpret.route === "continue_normal" && interpret.guideKind == null) {
+    return interpret;
+  }
+  const lastIds = opts?.lastGuideArticleIds ?? [];
+  const lastCategory = opts?.lastGuideCategory?.trim().toLowerCase() || null;
+  const lastReport = opts?.lastGuideReportId?.trim() || null;
+  let ids = hasOpcionesDetailArticle(lastIds)
+    ? filterDeliverableOpcionesArticleIds(lastIds)
+    : [];
+  if (!ids.length && lastReport && isOpcionesDetailArticleId(lastReport)) {
+    ids = filterDeliverableOpcionesArticleIds([lastReport]);
+  }
+  if (!ids.length && !lastCategory && !lastReport) return interpret;
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "opciones",
+    category: interpret.category || lastCategory,
+    need: interpret.need === "execute" ? "execute" : "procedure",
+    articleIds: ids,
+    reportId: lastReport || interpret.reportId || null,
+    clarifyQuestion: null,
+    executionRequest: interpret.need === "execute",
+    confidence: Math.max(interpret.confidence, 0.9),
+    reason: interpret.reason
+      ? `${interpret.reason}|opciones_continuity`
+      : "opciones_continuity",
+  };
+}
+
 /**
  * Módulo Artículos sin KB: límite honesto; no caer a MT/combustible/cisternas.
  */
@@ -2443,6 +2693,9 @@ export function applyPlatformGuideInterpretGuards(
   );
   next = correctPuntosInteresContinuityMisroute(next, selectionText, threadText);
   next = correctInformesContinuityMisroute(next, selectionText, threadText, opts);
+  next = correctAlertasContinuityMisroute(next, selectionText, threadText, opts);
+  next = correctPanelesContinuityMisroute(next, selectionText, threadText, opts);
+  next = correctOpcionesContinuityMisroute(next, selectionText, threadText, opts);
   next = correctGuideExecuteImperativeMisroute(next, selectionText);
   next = normalizeHojasRutaDisabledDelivery(next);
   next = normalizePuntosInteresDisabledDelivery(next);
@@ -2645,7 +2898,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     let parsed = content ? parseInterpret(content) : null;
     if (parsed) {
       parsed = applyPlatformGuideInterpretGuards(parsed, text, threadText, guardOpts);
-      parsed = await refineInformesWithCategoryCatalog({
+      parsed = await applySemanticDetailRefinements({
         openai,
         basePayload: userPayload,
         interpret: parsed,
@@ -2653,7 +2906,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
         threadText,
         guardOpts,
       });
-      interpretCache.set(key, { at: Date.now(), value: parsed });
+      cacheInterpretResult(key, parsed);
       return parsed;
     }
     const parseMiss = applyPlatformGuideInterpretGuards(
@@ -2672,7 +2925,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       guardOpts,
     );
     if (parseMiss.route === "info_guides" && parseMiss.guideKind) {
-      const refined = await refineInformesWithCategoryCatalog({
+      const refined = await applySemanticDetailRefinements({
         openai,
         basePayload: userPayload,
         interpret: parseMiss,
@@ -2680,11 +2933,48 @@ export async function interpretPlatformKnowledgeTurn(opts: {
         threadText,
         guardOpts,
       });
-      interpretCache.set(key, { at: Date.now(), value: refined });
+      cacheInterpretResult(key, refined);
       return refined;
     }
     return applyOfflinePlatformKnowledgeGuards(text, threadText, guardOpts);
-  } catch {
+  } catch (err) {
+    // Un reintento ante timeout/rate-limit transitorio antes del offline.
+    try {
+      const response = await withOpenAiTimeout(
+        (signal) =>
+          openai.chat.completions.create(
+            {
+              model: "gpt-4o-mini",
+              messages: [
+                { role: "system", content: buildSystemPrompt() },
+                { role: "user", content: JSON.stringify(userPayload) },
+              ],
+              temperature: 0.1,
+              max_tokens: 320,
+              response_format: { type: "json_object" },
+            },
+            { signal },
+          ),
+        INTERPRET_TIMEOUT_MS,
+      );
+      const content = response?.choices?.[0]?.message?.content?.trim();
+      let parsed = content ? parseInterpret(content) : null;
+      if (parsed) {
+        parsed = applyPlatformGuideInterpretGuards(parsed, text, threadText, guardOpts);
+        parsed = await applySemanticDetailRefinements({
+          openai,
+          basePayload: userPayload,
+          interpret: parsed,
+          text,
+          threadText,
+          guardOpts,
+        });
+        cacheInterpretResult(key, parsed);
+        return parsed;
+      }
+    } catch {
+      /* fall through */
+    }
     if (
       looksLikeMaintenanceDomainTermQuestion(text) ||
       looksLikeMaintenanceGuideFollowupQuestion(text, threadText)
@@ -2786,6 +3076,782 @@ async function refineInformesWithCategoryCatalog(params: {
   } catch {
     return interpret;
   }
+}
+
+function isAlertasDetailArticleId(id: string): boolean {
+  const a = ALERTAS_ARTICLES.find((x) => x.id === id);
+  return Boolean(a && a.category === "tipo" && a.itemId);
+}
+
+function hasAlertasDetailArticle(ids: string[]): boolean {
+  return ids.some((id) => isAlertasDetailArticleId(id));
+}
+
+function resolveAlertasItemId(interpret: PlatformKnowledgeInterpret): string | null {
+  const raw = interpret.reportId?.trim() || null;
+  if (raw) {
+    if (raw.startsWith("al-")) return itemIdFromAlertasArticleId(raw) || null;
+    if (ALERTAS_ARTICLES.some((a) => a.itemId === raw)) return raw;
+  }
+  for (const id of interpret.articleIds) {
+    const item = itemIdFromAlertasArticleId(id);
+    if (item) return item;
+  }
+  return null;
+}
+
+function isPanelesDetailArticleId(id: string): boolean {
+  const a = PANELES_ARTICLES.find((x) => x.id === id);
+  return Boolean(a && a.category === "panel" && a.itemId);
+}
+
+function hasPanelesDetailArticle(ids: string[]): boolean {
+  return ids.some((id) => isPanelesDetailArticleId(id));
+}
+
+function resolvePanelesItemId(interpret: PlatformKnowledgeInterpret): string | null {
+  const raw = interpret.reportId?.trim() || null;
+  if (raw) {
+    if (raw.startsWith("pn-")) return itemIdFromPanelesArticleId(raw) || null;
+    if (PANELES_ARTICLES.some((a) => a.itemId === raw)) return raw;
+  }
+  for (const id of interpret.articleIds) {
+    const item = itemIdFromPanelesArticleId(id);
+    if (item) return item;
+  }
+  return null;
+}
+
+function isOpcionesDetailArticleId(id: string): boolean {
+  if (!id.startsWith("op-")) return false;
+  if (id === "op-mapa" || id === "op-restricciones" || id === "op-ejecucion-no-disponible") {
+    return false;
+  }
+  if (id === "op-atributos-seccion" || id.startsWith("op-idx-")) return false;
+  return Boolean(OPCIONES_V2_ARTICLES.some((a) => a.id === id));
+}
+
+function hasOpcionesDetailArticle(ids: string[]): boolean {
+  return ids.some((id) => isOpcionesDetailArticleId(id));
+}
+
+/**
+ * Segundo paso Alertas: con itemId ya fijado y sin ficha de tipo, re-interpreta
+ * solo con el catálogo de ese tipo (no el índice completo).
+ */
+async function refineAlertasWithItemCatalog(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (interpret.guideKind !== "alertas" || interpret.route !== "info_guides") {
+    return interpret;
+  }
+  if (hasAlertasDetailArticle(interpret.articleIds)) return interpret;
+  const itemId = resolveAlertasItemId(interpret);
+  if (!itemId) return interpret;
+
+  // Mapeo 1:1 itemId → al-*: sin segunda llamada LLM.
+  const filledEarly = fillAlertasDetailFromScopedCatalog(interpret, itemId);
+  if (hasAlertasDetailArticle(filledEarly.articleIds)) return filledEarly;
+
+  const itemCatalog = listAlertasArticleCatalog({ structuralOnly: false, itemId });
+  if (!itemCatalog.length) return interpret;
+
+  const refinePayload = {
+    ...basePayload,
+    catalogo_alertas: listAlertasArticleCatalog({ structuralOnly: true }),
+    catalogo_alertas_item: itemCatalog,
+    alertas_refine_stage: "item_detail",
+    item_id_preseleccionado: itemId,
+    reportId_preseleccionado: itemId,
+    mensaje_nuevo: text,
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0.1,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const refined = content ? parseInterpret(content) : null;
+    if (!refined || refined.guideKind !== "alertas") {
+      return fillAlertasDetailFromScopedCatalog(interpret, itemId);
+    }
+    const merged: PlatformKnowledgeInterpret = {
+      ...interpret,
+      ...refined,
+      route: "info_guides",
+      guideKind: "alertas",
+      reportId: refined.reportId || itemId,
+      reason: interpret.reason
+        ? `${interpret.reason}|alertas_item_refine`
+        : "alertas_item_refine",
+    };
+    const guarded = applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+    return fillAlertasDetailFromScopedCatalog(guarded, itemId);
+  } catch {
+    return fillAlertasDetailFromScopedCatalog(interpret, itemId);
+  }
+}
+
+/** Con itemId ya elegido, el catálogo acotado tiene un único tipo entregable. */
+function fillAlertasDetailFromScopedCatalog(
+  interpret: PlatformKnowledgeInterpret,
+  itemId: string,
+): PlatformKnowledgeInterpret {
+  if (interpret.guideKind !== "alertas" || !isAlertasKbEnabled()) return interpret;
+  if (hasAlertasDetailArticle(interpret.articleIds)) return interpret;
+  const article = ALERTAS_ARTICLES.find(
+    (a) => a.category === "tipo" && a.itemId === itemId,
+  );
+  if (!article) return interpret;
+  const ids = filterDeliverableAlertasArticleIds([article.id, ...interpret.articleIds]);
+  if (!ids.length) return interpret;
+  return {
+    ...interpret,
+    articleIds: ids,
+    reportId: interpret.reportId || itemId,
+    reason: interpret.reason
+      ? `${interpret.reason}|alertas_item_catalog_resolve`
+      : "alertas_item_catalog_resolve",
+  };
+}
+
+/**
+ * Segundo paso Paneles: con itemId ya fijado y sin ficha de panel, re-interpreta
+ * solo con el catálogo de ese panel.
+ */
+async function refinePanelesWithItemCatalog(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (interpret.guideKind !== "paneles" || interpret.route !== "info_guides") {
+    return interpret;
+  }
+  if (hasPanelesDetailArticle(interpret.articleIds)) return interpret;
+  const itemId = resolvePanelesItemId(interpret);
+  if (!itemId) return interpret;
+
+  const filledEarly = fillPanelesDetailFromScopedCatalog(interpret, itemId);
+  if (hasPanelesDetailArticle(filledEarly.articleIds)) return filledEarly;
+
+  const itemCatalog = listPanelesArticleCatalog({ structuralOnly: false, itemId });
+  if (!itemCatalog.length) return interpret;
+
+  const refinePayload = {
+    ...basePayload,
+    catalogo_paneles: listPanelesArticleCatalog({ structuralOnly: true }),
+    catalogo_paneles_item: itemCatalog,
+    paneles_refine_stage: "item_detail",
+    item_id_preseleccionado: itemId,
+    reportId_preseleccionado: itemId,
+    mensaje_nuevo: text,
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0.1,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const refined = content ? parseInterpret(content) : null;
+    if (!refined || refined.guideKind !== "paneles") {
+      return fillPanelesDetailFromScopedCatalog(interpret, itemId);
+    }
+    const merged: PlatformKnowledgeInterpret = {
+      ...interpret,
+      ...refined,
+      route: "info_guides",
+      guideKind: "paneles",
+      reportId: refined.reportId || itemId,
+      reason: interpret.reason
+        ? `${interpret.reason}|paneles_item_refine`
+        : "paneles_item_refine",
+    };
+    const guarded = applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+    return fillPanelesDetailFromScopedCatalog(guarded, itemId);
+  } catch {
+    return fillPanelesDetailFromScopedCatalog(interpret, itemId);
+  }
+}
+
+/** Con itemId ya elegido, el catálogo acotado tiene un único panel entregable. */
+function fillPanelesDetailFromScopedCatalog(
+  interpret: PlatformKnowledgeInterpret,
+  itemId: string,
+): PlatformKnowledgeInterpret {
+  if (interpret.guideKind !== "paneles" || !isPanelesKbEnabled()) return interpret;
+  if (hasPanelesDetailArticle(interpret.articleIds)) return interpret;
+  const article = PANELES_ARTICLES.find(
+    (a) => a.category === "panel" && a.itemId === itemId,
+  );
+  if (!article) return interpret;
+  const ids = filterDeliverablePanelesArticleIds([article.id, ...interpret.articleIds]);
+  if (!ids.length) return interpret;
+  return {
+    ...interpret,
+    articleIds: ids,
+    reportId: interpret.reportId || itemId,
+    reason: interpret.reason
+      ? `${interpret.reason}|paneles_item_catalog_resolve`
+      : "paneles_item_catalog_resolve",
+  };
+}
+
+/**
+ * Segundo paso Opciones V2: con category ya fijada y sin ítem de detalle,
+ * re-interpreta solo con el catálogo de esa categoría.
+ */
+async function refineOpcionesWithCategoryCatalog(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (!isOpcionesKbV2Enabled()) return interpret;
+  if (interpret.guideKind !== "opciones" || interpret.route !== "info_guides") {
+    return interpret;
+  }
+  if (hasOpcionesDetailArticle(interpret.articleIds)) return interpret;
+  let category = interpret.category?.trim().toLowerCase() || null;
+  if (!category && interpret.reportId) {
+    category = categoryFromOpcionesArticleId(interpret.reportId);
+  }
+  if (!category && interpret.articleIds.length) {
+    for (const id of interpret.articleIds) {
+      const cat = categoryFromOpcionesArticleId(id);
+      if (cat && cat !== "mapa" && cat !== "shared") {
+        category = cat;
+        break;
+      }
+    }
+  }
+  if (
+    !category ||
+    !(OPCIONES_CATEGORIES as readonly string[]).includes(category as (typeof OPCIONES_CATEGORIES)[number])
+  ) {
+    return interpret;
+  }
+
+  const categoryCatalog = listOpcionesArticleCatalog({
+    structuralOnly: false,
+    category,
+  });
+  if (!categoryCatalog.length) return interpret;
+
+  const refinePayload = {
+    ...basePayload,
+    catalogo_opciones: listOpcionesArticleCatalog({ structuralOnly: true }),
+    catalogo_opciones_categoria: categoryCatalog,
+    opciones_refine_stage: "category_detail",
+    category_preseleccionada: category,
+    mensaje_nuevo: text,
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0.1,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const refined = content ? parseInterpret(content) : null;
+    if (!refined || refined.guideKind !== "opciones") {
+      return fillOpcionesDetailFromScopedCatalog(interpret, category);
+    }
+    const merged: PlatformKnowledgeInterpret = {
+      ...interpret,
+      ...refined,
+      route: "info_guides",
+      guideKind: "opciones",
+      category: refined.category || category,
+      reason: interpret.reason
+        ? `${interpret.reason}|opciones_category_refine`
+        : "opciones_category_refine",
+    };
+    const guarded = applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+    return fillOpcionesDetailFromScopedCatalog(guarded, category);
+  } catch {
+    return fillOpcionesDetailFromScopedCatalog(interpret, category);
+  }
+}
+
+/**
+ * Completa articleIds de detalle cuando el intérprete ya fijó category/reportId
+ * pero omitió el op-* (sin inventar entre varios ítems de la categoría).
+ */
+function fillOpcionesDetailFromScopedCatalog(
+  interpret: PlatformKnowledgeInterpret,
+  category: string,
+): PlatformKnowledgeInterpret {
+  if (!isOpcionesKbV2Enabled()) return interpret;
+  if (interpret.guideKind !== "opciones") return interpret;
+  if (hasOpcionesDetailArticle(interpret.articleIds)) return interpret;
+
+  const fromReport =
+    interpret.reportId && isOpcionesDetailArticleId(interpret.reportId)
+      ? interpret.reportId
+      : null;
+  if (fromReport) {
+    const ids = filterDeliverableOpcionesArticleIds([fromReport, ...interpret.articleIds]);
+    if (ids.length) {
+      return {
+        ...interpret,
+        articleIds: ids,
+        category: interpret.category || category,
+        reason: interpret.reason
+          ? `${interpret.reason}|opciones_report_catalog_resolve`
+          : "opciones_report_catalog_resolve",
+      };
+    }
+  }
+
+  const details = listOpcionesArticleCatalog({ structuralOnly: false, category }).filter(
+    (a) => isOpcionesDetailArticleId(a.id),
+  );
+  // Solo resolver si hay un único ítem de detalle en la categoría (mapeo inequívoco).
+  if (details.length === 1) {
+    const ids = filterDeliverableOpcionesArticleIds([details[0].id, ...interpret.articleIds]);
+    if (ids.length) {
+      return {
+        ...interpret,
+        articleIds: ids,
+        category: interpret.category || category,
+        reportId: interpret.reportId || details[0].id,
+        reason: interpret.reason
+          ? `${interpret.reason}|opciones_unique_catalog_resolve`
+          : "opciones_unique_catalog_resolve",
+      };
+    }
+  }
+  return interpret;
+}
+
+/** Cadena de refinamiento semántico (Informes → Alertas → Paneles → Opciones V2). */
+async function applySemanticDetailRefinements(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  let next = params.interpret;
+  next = await refineInformesWithCategoryCatalog({ ...params, interpret: next });
+  next = await refineAlertasPickItemIfMissing({ ...params, interpret: next });
+  next = await refineAlertasWithItemCatalog({ ...params, interpret: next });
+  next = await refinePanelesPickItemIfMissing({ ...params, interpret: next });
+  next = await refinePanelesWithItemCatalog({ ...params, interpret: next });
+  // Frontera alarmas antes de rellenar op-* de conducta_alarmas.
+  next = await refineOpcionesAlarmasFrontierIfNeeded({ ...params, interpret: next });
+  next = await refineOpcionesWithCategoryCatalog({ ...params, interpret: next });
+  return next;
+}
+
+/**
+ * Si el 1er interpret cayó en Opciones→conducta_alarmas, repreguntá semánticamente
+ * si el pedido es operar/silenciar (paneles), consultar tipo (alertas), informe, o configurar protocolo.
+ */
+async function refineOpcionesAlarmasFrontierIfNeeded(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (!isOpcionesKbV2Enabled()) return interpret;
+  if (interpret.guideKind !== "opciones" || interpret.route !== "info_guides") {
+    return interpret;
+  }
+  const category = (interpret.category || "").toLowerCase();
+  const looksConducta =
+    category === "conducta_alarmas" ||
+    interpret.articleIds.some((id) => id.includes("protocolos") || id.includes("conducta")) ||
+    (interpret.reportId || "").includes("protocolos");
+  if (!looksConducta) return interpret;
+  if (basePayload.opciones_alarmas_frontier_refine === "done") return interpret;
+
+  const refinePayload = {
+    ...basePayload,
+    opciones_alarmas_frontier_refine: "done",
+    mensaje_nuevo: text,
+    interpret_previo: {
+      guideKind: interpret.guideKind,
+      category: interpret.category,
+      reportId: interpret.reportId,
+      articleIds: interpret.articleIds,
+    },
+    instruccion_refine: [
+      "Reclasificá SOLO este pedido sobre alarmas/protocolos. Ignorá articleIds previos si contradicen el mensaje.",
+      "Si el cliente quiere silenciar, resolver o gestionar una alarma ya activa → guideKind=paneles, reportId=alarmas, articleIds=[\"pn-alarmas\"]. No es Opciones.",
+      "Si consulta un tipo del menú Alertas → guideKind=alertas + al-* del tipo.",
+      "Si pide informe histórico/por período → guideKind=informes.",
+      "Solo si quiere CONFIGURAR protocolos/criticidad/motivos en el menú Opciones → guideKind=opciones, category=conducta_alarmas.",
+    ].join(" "),
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const refined = content ? parseInterpret(content) : null;
+    if (!refined || refined.route !== "info_guides" || !refined.guideKind) {
+      return interpret;
+    }
+    if (refined.guideKind === "opciones") {
+      const merged: PlatformKnowledgeInterpret = {
+        ...interpret,
+        ...refined,
+        route: "info_guides",
+        guideKind: "opciones",
+        category: refined.category || category,
+        reason: interpret.reason
+          ? `${interpret.reason}|opciones_alarmas_frontier_keep`
+          : "opciones_alarmas_frontier_keep",
+      };
+      const guarded = applyPlatformGuideInterpretGuards(
+        merged,
+        text,
+        threadText,
+        guardOpts,
+      );
+      return fillOpcionesDetailFromScopedCatalog(
+        guarded,
+        guarded.category || category,
+      );
+    }
+    if (refined.guideKind === "paneles") {
+      let merged: PlatformKnowledgeInterpret = {
+        ...interpret,
+        ...refined,
+        route: "info_guides",
+        guideKind: "paneles",
+        category: null,
+        reason: interpret.reason
+          ? `${interpret.reason}|opciones_alarmas_frontier_to_paneles`
+          : "opciones_alarmas_frontier_to_paneles",
+      };
+      merged = applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+      const itemId = resolvePanelesItemId(merged) || "alarmas";
+      return fillPanelesDetailFromScopedCatalog(merged, itemId);
+    }
+    if (refined.guideKind === "alertas") {
+      let merged: PlatformKnowledgeInterpret = {
+        ...interpret,
+        ...refined,
+        route: "info_guides",
+        guideKind: "alertas",
+        category: null,
+        reason: interpret.reason
+          ? `${interpret.reason}|opciones_alarmas_frontier_to_alertas`
+          : "opciones_alarmas_frontier_to_alertas",
+      };
+      merged = applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+      const itemId = resolveAlertasItemId(merged);
+      return itemId ? fillAlertasDetailFromScopedCatalog(merged, itemId) : merged;
+    }
+    if (refined.guideKind === "informes") {
+      const merged: PlatformKnowledgeInterpret = {
+        ...interpret,
+        ...refined,
+        route: "info_guides",
+        guideKind: "informes",
+        reason: interpret.reason
+          ? `${interpret.reason}|opciones_alarmas_frontier_to_informes`
+          : "opciones_alarmas_frontier_to_informes",
+      };
+      return applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+    }
+    return interpret;
+  } catch {
+    return interpret;
+  }
+}
+
+/**
+ * Si ya hay guideKind=alertas pero aún no hay itemId, pedí al intérprete que elija
+ * el tipo usando solo el catálogo estructural (sin corpus completo de cuerpos).
+ */
+async function refineAlertasPickItemIfMissing(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (interpret.guideKind !== "alertas" || interpret.route !== "info_guides") {
+    return interpret;
+  }
+  if (hasAlertasDetailArticle(interpret.articleIds) || resolveAlertasItemId(interpret)) {
+    return interpret;
+  }
+  if (!isAlertasKbEnabled()) return interpret;
+  if (basePayload.alertas_refine_stage === "pick_item") return interpret;
+
+  const refinePayload = {
+    ...basePayload,
+    catalogo_alertas: listAlertasArticleCatalog({ structuralOnly: true }),
+    alertas_refine_stage: "pick_item",
+    mensaje_nuevo: text,
+    instruccion_refine:
+      "Elegí reportId=itemId del tipo de alerta y articleIds con el al-* correspondiente. Si no hay tipo claro, dejá articleIds vacío y clarifyQuestion.",
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const refined = content ? parseInterpret(content) : null;
+    if (!refined || refined.guideKind !== "alertas") return interpret;
+    const merged: PlatformKnowledgeInterpret = {
+      ...interpret,
+      ...refined,
+      route: "info_guides",
+      guideKind: "alertas",
+      reason: interpret.reason
+        ? `${interpret.reason}|alertas_pick_item`
+        : "alertas_pick_item",
+    };
+    return applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+  } catch {
+    return interpret;
+  }
+}
+
+/**
+ * Si ya hay guideKind=paneles pero aún no hay itemId, pedí elegir el panel
+ * (p. ej. Alarmas al silenciar/resolver) con el catálogo estructural.
+ */
+async function refinePanelesPickItemIfMissing(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
+  if (interpret.guideKind !== "paneles" || interpret.route !== "info_guides") {
+    return interpret;
+  }
+  if (hasPanelesDetailArticle(interpret.articleIds) || resolvePanelesItemId(interpret)) {
+    return interpret;
+  }
+  if (!isPanelesKbEnabled()) return interpret;
+  if (basePayload.paneles_refine_stage === "pick_item") return interpret;
+
+  const refinePayload = {
+    ...basePayload,
+    catalogo_paneles: listPanelesArticleCatalog({ structuralOnly: true }),
+    paneles_refine_stage: "pick_item",
+    mensaje_nuevo: text,
+    instruccion_refine:
+      "Elegí reportId=itemId del panel y articleIds con el pn-* correspondiente. Silenciar/resolver/gestionar alarma → alarmas / pn-alarmas. Notificaciones recientes → notificaciones / pn-notificaciones. Turnos → turnos / pn-turnos.",
+  };
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: buildSystemPrompt() },
+              { role: "user", content: JSON.stringify(refinePayload) },
+            ],
+            temperature: 0,
+            max_tokens: 320,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const refined = content ? parseInterpret(content) : null;
+    if (!refined || refined.guideKind !== "paneles") return interpret;
+    const merged: PlatformKnowledgeInterpret = {
+      ...interpret,
+      ...refined,
+      route: "info_guides",
+      guideKind: "paneles",
+      reason: interpret.reason
+        ? `${interpret.reason}|paneles_pick_item`
+        : "paneles_pick_item",
+    };
+    return applyPlatformGuideInterpretGuards(merged, text, threadText, guardOpts);
+  } catch {
+    return interpret;
+  }
+}
+
+/** True si hay ancla válida (item/category) pero aún falta artículo de detalle entregable. */
+export function platformGuideNeedsSemanticDetailRefine(
+  interpret: PlatformKnowledgeInterpret | null | undefined,
+): boolean {
+  if (!interpret || interpret.route !== "info_guides") return false;
+  if (interpret.guideKind === "informes") {
+    const category = interpret.category?.trim() || null;
+    if (!category || !(INFORMES_CATEGORIES as readonly string[]).includes(category)) {
+      return false;
+    }
+    return !(
+      hasInformesDetailArticle(interpret.articleIds) ||
+      (interpret.reportId != null && isInformesDetailArticleId(interpret.reportId))
+    );
+  }
+  if (interpret.guideKind === "alertas" && isAlertasKbEnabled()) {
+    if (hasAlertasDetailArticle(interpret.articleIds)) return false;
+    return Boolean(resolveAlertasItemId(interpret));
+  }
+  if (interpret.guideKind === "paneles" && isPanelesKbEnabled()) {
+    if (hasPanelesDetailArticle(interpret.articleIds)) return false;
+    return Boolean(resolvePanelesItemId(interpret));
+  }
+  if (interpret.guideKind === "opciones" && isOpcionesKbV2Enabled()) {
+    if (hasOpcionesDetailArticle(interpret.articleIds)) return false;
+    let category = interpret.category?.trim().toLowerCase() || null;
+    if (!category && interpret.reportId) {
+      category = categoryFromOpcionesArticleId(interpret.reportId);
+    }
+    return Boolean(
+      category &&
+        (OPCIONES_CATEGORIES as readonly string[]).includes(
+          category as (typeof OPCIONES_CATEGORIES)[number],
+        ),
+    );
+  }
+  return false;
+}
+
+/**
+ * Re-aplica refinamiento acotado (sin corpus completo) cuando un seed/cache
+ * tiene guideKind + ancla pero articleIds de detalle vacíos.
+ */
+export async function refinePlatformKnowledgeDetailIfNeeded(opts: {
+  selectionText: string;
+  threadText?: string;
+  interpret: PlatformKnowledgeInterpret;
+  lastGuideKind?: LastInfoGuideKind | null;
+  lastGuideCategory?: string | null;
+  lastGuideReportId?: string | null;
+  lastGuideArticleIds?: string[] | null;
+}): Promise<PlatformKnowledgeInterpret> {
+  const interpret = opts.interpret;
+  if (!platformGuideNeedsSemanticDetailRefine(interpret)) return interpret;
+  if (!isPlatformKbLlmInterpretEnabled() || !process.env.OPENAI_API_KEY?.trim()) {
+    return interpret;
+  }
+  const text = opts.selectionText.trim();
+  const threadText = opts.threadText ?? "";
+  const guardOpts: PlatformGuideGuardOpts = {
+    lastGuideKind: opts.lastGuideKind ?? null,
+    lastGuideCategory: opts.lastGuideCategory ?? null,
+    lastGuideReportId: opts.lastGuideReportId ?? null,
+    lastGuideArticleIds: opts.lastGuideArticleIds ?? null,
+  };
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const basePayload: Record<string, unknown> = {
+    mensaje_nuevo: text,
+    historial_reciente: threadText.slice(-2500),
+    last_guide_kind: opts.lastGuideKind ?? null,
+    last_guide_category: opts.lastGuideCategory ?? null,
+    last_guide_report_id: opts.lastGuideReportId ?? null,
+    last_guide_article_ids: opts.lastGuideArticleIds ?? [],
+  };
+  return applySemanticDetailRefinements({
+    openai,
+    basePayload,
+    interpret,
+    text,
+    threadText,
+    guardOpts,
+  });
 }
 
 export function shouldRouteInterpretToInfoGuides(
