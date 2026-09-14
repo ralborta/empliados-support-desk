@@ -265,8 +265,12 @@ type OverlayReadKeepPendingResult = {
   ok: boolean;
 };
 
-function looksLikePendingCertificateUnitReply(text: string, threadText = ""): boolean {
-  return shouldContinueCertificateUnitCollection(text, threadText);
+function looksLikePendingCertificateUnitReply(
+  text: string,
+  threadText = "",
+  pendingAction?: { type?: string; payload?: Record<string, unknown> } | null,
+): boolean {
+  return shouldContinueCertificateUnitCollection(text, threadText, pendingAction);
 }
 
 function executorBody(
@@ -604,6 +608,7 @@ function inferRecoveryExecutor(
   failedExecutor: TurnExecutorId,
   threadText: string,
   execResult?: JsonRecord,
+  pendingAction?: { type?: string; payload?: Record<string, unknown> } | null,
 ): TurnExecutorId | null {
   const delegated = String(execResult?.delegatedTo_s ?? execResult?.delegatedTo ?? "").trim();
   if (delegated === "odometro") return "odometro";
@@ -615,19 +620,25 @@ function inferRecoveryExecutor(
   ) {
     return "odometro";
   }
+
+  // Pending vivo de odómetro: nunca recuperar a certificado por historial.
+  // Solo una intención nueva explícita de certificado puede pivoteear.
+  const liveOdometer =
+    pendingAction?.type === "odometro" ||
+    (failedExecutor === "odometro" &&
+      threadHasActiveOdometerFlow(threadText) &&
+      !threadOdometerRegistrationCompleted(threadText));
+  if (liveOdometer) {
+    if (looksLikeCertificateRequest(selectionText)) return "certificados";
+    return null;
+  }
+
   if (looksLikeCertificateRequest(selectionText)) return "certificados";
   if (
     certificateFlowState(threadText) === "awaiting_unit" &&
     looksLikeFleetUnitSearchInput(selectionText)
   ) {
     return "certificados";
-  }
-  if (
-    failedExecutor === "odometro" &&
-    threadHasActiveOdometerFlow(threadText) &&
-    !threadOdometerRegistrationCompleted(threadText)
-  ) {
-    return null;
   }
   if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return "unidades";
   if (looksLikeLiveUnitConsultIntent(selectionText)) return "unidades";
@@ -2743,6 +2754,7 @@ export async function runTurnExecutorPhase(params: {
       executor,
       threadCtx.classificationThread,
       execResult,
+      pendingAction,
     );
     if (recovery && recovery !== executor) {
       const retryResult = await invokeExecutor(recovery, rawPhone, selectionText, apiKey);

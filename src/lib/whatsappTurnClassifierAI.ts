@@ -218,8 +218,7 @@ export async function resolveTurnExecutor(
     !threadOdometerRegistrationCompleted(threadText) &&
     (threadHasActiveOdometerFlow(threadText) ||
       threadAwaitingHorometerKmValue(threadText) ||
-      (pendingAction?.type === "odometro" &&
-        pendingAction.payload?.stage === "odometer_action_choice"));
+      pendingAction?.type === "odometro");
   const hardOdooIntent =
     looksLikeCustomerConversationCloseRequest(text) ||
     looksLikeHumanAdvisorRequest(text) ||

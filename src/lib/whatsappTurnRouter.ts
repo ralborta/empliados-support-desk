@@ -21,6 +21,7 @@ import {
   looksLikeBriefConfirmation,
   looksLikeExplicitCertificateResendRequest,
   looksLikeCertificateKeyword,
+  looksLikeMaintenanceKeyword,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeStructuredOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
@@ -86,7 +87,10 @@ import { looksLikeIdleNudgeAffirmation } from "@/lib/idleFollowupMeta";
 import type { PendingActionRecord } from "@/lib/pendingAction";
 import {
   hasPendingOdometerActionChoice,
+  isCompatibleLiveOdometerPendingReply,
+  looksLikeBareAffirmationToOdometerActionChoice,
   looksLikeOdometerActionChoiceReply,
+  looksLikeOdometerActionChoiceUnitContinuation,
   shouldSupersedeOdometerActionChoice,
 } from "@/lib/odometerActionChoice";
 
@@ -460,11 +464,33 @@ const TURN_RULES: TurnRule[] = [
   {
     id: "odometer_action_choice_reply",
     reason:
-      "Respuesta corregir/actualizar con expectativa odometer_action_choice en DB (no inferir del texto del bot).",
+      "Respuesta corregir/actualizar o unidad (sin inventar choice) con expectativa odometer_action_choice en DB.",
     decide: ({ text, pendingAction }) => {
       if (!hasPendingOdometerActionChoice(pendingAction)) return null;
       if (shouldSupersedeOdometerActionChoice(text)) return null;
-      return looksLikeOdometerActionChoiceReply(text) ? "odometro" : null;
+      if (looksLikeOdometerActionChoiceReply(text)) return "odometro";
+      if (looksLikeOdometerActionChoiceUnitContinuation(text)) return "odometro";
+      if (looksLikeBareAffirmationToOdometerActionChoice(text)) return "odometro";
+      return null;
+    },
+  },
+  {
+    id: "live_odometer_compatible_field_reply",
+    reason:
+      "Pending odometro: solo respuestas compatibles con el campo esperado (unidad/km/fecha), no consultas laterales ni guías.",
+    decide: ({ text, pendingAction, threadText }) => {
+      if (pendingAction?.type !== "odometro") return null;
+      // action_choice tiene regla propia; no duplicar.
+      if (hasPendingOdometerActionChoice(pendingAction)) return null;
+      if (looksLikeCertificateKeyword(text)) return null;
+      if (looksLikeMaintenanceKeyword(text)) return null;
+      if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+        return null;
+      }
+      if (!isCompatibleLiveOdometerPendingReply(text, pendingAction, threadText)) {
+        return null;
+      }
+      return "odometro";
     },
   },
   {
@@ -515,8 +541,12 @@ const TURN_RULES: TurnRule[] = [
     id: "certificate_unit_context_selection",
     reason: "Respuesta de unidad tras pedido de unidad/patente del flujo de certificado.",
     decide: ({ text, threadText, pendingAction }) => {
-      // Requiere pending DB vivo o, en su defecto, awaiting_unit sin ser consulta GPS.
+      // Requiere pending DB vivo de certificados o, sin pending autoritativo, historial awaiting_unit.
       if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+        return null;
+      }
+      // Pending vivo de otro trámite (odómetro, etc.) veta el historial de certificado.
+      if (pendingAction?.type && pendingAction.type !== "certificados") {
         return null;
       }
       if (
@@ -526,7 +556,7 @@ const TURN_RULES: TurnRule[] = [
         return null;
       }
       return isUnitSelectionMessage(text, threadText) ||
-        shouldContinueCertificateUnitCollection(text, threadText)
+        shouldContinueCertificateUnitCollection(text, threadText, pendingAction)
         ? "certificados"
         : null;
     },
@@ -765,6 +795,8 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "explicit_reclamo_or_ticket_request",
   "technical_support_request",
   "odometer_problem_report",
+  "odometer_action_choice_reply",
+  "live_odometer_compatible_field_reply",
   "explicit_odometer_horometer_start",
   "structured_odometer_update",
   "post_advisor_case_supplement",

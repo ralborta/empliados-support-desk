@@ -2970,11 +2970,14 @@ export function hasPendingCertificateUnitRequest(
   threadText: string,
   pendingAction?: { type?: string; payload?: Record<string, unknown> } | null,
 ): boolean {
-  if (
-    pendingAction?.type === "certificados" &&
-    pendingAction.payload?.stage === "awaiting_unit"
-  ) {
-    return true;
+  const pendingType = pendingAction?.type;
+  // Pending vivo de otro trámite veta el certificado inferido del historial.
+  // El hilo solo aplica cuando no hay pendingAction autoritativo.
+  if (pendingType && pendingType !== "certificados") {
+    return false;
+  }
+  if (pendingType === "certificados") {
+    return pendingAction?.payload?.stage === "awaiting_unit";
   }
   return certificateFlowState(threadText) === "awaiting_unit";
 }

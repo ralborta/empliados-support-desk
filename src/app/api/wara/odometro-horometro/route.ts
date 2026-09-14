@@ -8,7 +8,7 @@ import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate } from "@/lib/waraApi";
+import { registrarCambioOdometroHorometro, resolveWaraSessionByPhone, validatePlateInFleetForPhone, findFleetUnitByPlate, consultarEstadoUnidades } from "@/lib/waraApi";
 import {
   detectLoosePlate,
   detectPlate,
@@ -54,6 +54,7 @@ import {
   lastAwaitingMeterPromptInTail,
   looksLikeBareMeterValue,
   stripMeterValuesMatchingUnitReference,
+  extractUnitCodeNumbersFromMessage,
 } from "@/lib/wara";
 import {
   extractExplicitUnitNameFromText,
@@ -79,7 +80,9 @@ import {
 import { readTurnLayer } from "@/lib/turnLayerContract";
 import {
   hasPendingOdometerActionChoice,
+  looksLikeBareAffirmationToOdometerActionChoice,
   looksLikeOdometerActionChoiceReply,
+  looksLikeOdometerActionChoiceUnitContinuation,
   ODOMETER_ACTION_CHOICE_STAGE,
   parseOdometerActionChoice,
   shouldSupersedeOdometerActionChoice,
@@ -518,13 +521,16 @@ async function resolvePatenteFromFleetForMeterTramite(params: {
   return { kind: "not_found" };
 }
 
-/** Retoma trámite tras consumir expectativa odometer_action_choice (corregir/actualizar). */
+/** Retoma trámite tras consumir expectativa odometer_action_choice.
+ * `choice` es opcional: corregir/actualizar no cambia la API Wara; si el cliente
+ * pasó unidad sin elegir, avanzamos a pedir km+fecha sin inventar la opción.
+ */
 async function resumeOdometerAfterActionChoice(params: {
   rawPhone: string;
   rawText: string;
   patente: string;
   flowThreadText: string;
-  choice: "corregir" | "actualizar";
+  choice?: "corregir" | "actualizar" | null;
 }): Promise<NextResponse> {
   const safePersistFailMessage =
     "Para registrar el cambio de odómetro necesito la unidad (patente o interno) y el kilometraje con fecha y hora de la lectura. ¿Me los pasás?";
@@ -592,7 +598,7 @@ async function resumeOdometerAfterActionChoice(params: {
     summary: message,
     payloadPatch: {
       patente,
-      actionChoiceConsumed: params.choice,
+      ...(params.choice ? { actionChoiceConsumed: params.choice } : { actionChoiceDeferred: true }),
     },
     meterType: "odometro",
     activeExpectation: "km",
@@ -604,7 +610,7 @@ async function resumeOdometerAfterActionChoice(params: {
   await appendOutboundBotMessage(params.rawPhone, message, {
     source: "wara_odometro_response",
     stage: "missing_value_fecha_hora",
-    actionChoice: params.choice,
+    ...(params.choice ? { actionChoice: params.choice } : { actionChoiceDeferred: true }),
   });
   return NextResponse.json(
     { ok: false, error: "Falta odómetro u horómetro", message },
@@ -672,6 +678,119 @@ export async function POST(req: NextRequest) {
           choice,
         });
       }
+    } else if (looksLikeOdometerActionChoiceUnitContinuation(rawText)) {
+      // Unidad sin elegir corregir/actualizar: no inventar la opción; pedir km+fecha.
+      // Resolución determinística del mensaje actual (interno/patente) — sin IA ni
+      // activeUnit/hilo: si el interno explícito no está en flota, se informa y basta.
+      const preliminaryThread = await recentThreadText(rawPhone);
+      const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+      let resolvedPatente = "";
+      if (session.ok && session.sessionToken) {
+        const fleet = await consultarEstadoUnidades(session.sessionToken, []);
+        if (fleet.ok && fleet.unidades.length > 0) {
+          const plateInMsg = detectLoosePlate(rawText);
+          if (plateInMsg) {
+            const want = normalizePlate(plateInMsg);
+            const hit = fleet.unidades.find(
+              (u) => normalizePlate(u.patente || "") === want,
+            );
+            if (hit) resolvedPatente = normalizePlate(hit.patente || "") || "";
+          }
+          if (!resolvedPatente) {
+            const codes = extractUnitCodeNumbersFromMessage(rawText, {
+              expectedField: "unit",
+            });
+            const matches = fleet.unidades.filter((u) =>
+              codes.some((c) => Number(u.movil_id) === c),
+            );
+            if (matches.length === 1) {
+              resolvedPatente = normalizePlate(matches[0].patente || "") || "";
+            } else if (matches.length > 1) {
+              const labels = matches
+                .slice(0, 5)
+                .map((u) => (u.patente || u.unidad || "").trim())
+                .filter(Boolean)
+                .join(", ");
+              const message = `Encontré ${matches.length} unidades (${labels}). ¿Cuál querés? Decime la patente completa.`;
+              await appendOutboundBotMessage(rawPhone, message, {
+                source: "wara_odometro_response",
+                stage: "unit_clarification",
+              });
+              return NextResponse.json(
+                { ok: false, ok_s: "false", error: "Varias unidades", message },
+                { status: BB_STATUS },
+              );
+            }
+          }
+        }
+      }
+      if (resolvedPatente) {
+        return await resumeOdometerAfterActionChoice({
+          rawPhone,
+          rawText,
+          patente: resolvedPatente,
+          flowThreadText: preliminaryThread,
+          choice: null,
+        });
+      }
+      const message =
+        "No encontré esa unidad en la flota de tu empresa. Pasame la patente completa o el interno exacto (o escribí «listado de mis unidades»).";
+      const persisted = await persistOdometerPendingState({
+        prisma,
+        phone: rawPhone,
+        summary: message,
+        payloadPatch: { actionChoiceDeferred: true },
+        meterType: "odometro",
+        activeExpectation: "unit",
+        stage: "missing_plate",
+      });
+      if (!persisted) {
+        return await respondOdometerPersistFailed(rawPhone, "action_choice_unit_missing");
+      }
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "action_choice_unit_not_found",
+      });
+      return NextResponse.json(
+        { ok: false, error: "Unidad no encontrada", message },
+        { status: BB_STATUS },
+      );
+    } else if (looksLikeBareAffirmationToOdometerActionChoice(rawText)) {
+      // «Sí» solo: no inventar corregir/actualizar.
+      const preliminaryThread = await recentThreadText(rawPhone);
+      const unitHint =
+        formatPlateWithSpaces(
+          String(preliminaryPendingAction?.payload?.patente ?? "").trim() ||
+            extractLastPlateFromThread(preliminaryThread) ||
+            "",
+        ) || String(preliminaryPendingAction?.payload?.unitLabel ?? "").trim();
+      const message = unitHint
+        ? `Sobre ${unitHint}: ¿querés *corregir* o *actualizar* el kilometraje? También podés pasarme el interno o la patente.`
+        : "¿Querés *corregir* o *actualizar* el kilometraje? También podés pasarme el interno o la patente de la unidad.";
+      const persisted = await persistOdometerPendingState({
+        prisma,
+        phone: rawPhone,
+        summary: message,
+        payloadPatch: {
+          patente: String(preliminaryPendingAction?.payload?.patente ?? "").trim() || undefined,
+          unitLabel: unitHint || undefined,
+          clarifyStage: "clarify_odometer_intent",
+        },
+        meterType: "odometro",
+        activeExpectation: "clarification",
+        stage: ODOMETER_ACTION_CHOICE_STAGE,
+      });
+      if (!persisted) {
+        return await respondOdometerPersistFailed(rawPhone, "odometer_action_choice_reask");
+      }
+      await appendOutboundBotMessage(rawPhone, message, {
+        source: "wara_odometro_response",
+        stage: "clarify_odometer_intent_reask",
+      });
+      return NextResponse.json(
+        { ok: true, ok_s: "true", flowComplete_s: "true", message },
+        { status: BB_STATUS },
+      );
     }
   }
 

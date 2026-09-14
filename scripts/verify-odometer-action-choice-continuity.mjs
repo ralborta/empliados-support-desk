@@ -82,6 +82,17 @@ assert.equal(
 );
 
 assert.equal(
+  classifyTurnExecutor("Si, en 900173", clarifyThread, pendingActionChoice),
+  "odometro",
+  "sí + interno con action_choice → odometro (no inventa choice)",
+);
+assert.equal(
+  looksLikeOdometerActionChoiceReply("Si"),
+  false,
+  "Sí solo no es corregir/actualizar",
+);
+
+assert.equal(
   shouldRouteTurnToOdometerExecutor({
     selectionText: "Corregir",
     threadText: clarifyThread,
