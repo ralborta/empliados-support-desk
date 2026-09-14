@@ -8,7 +8,7 @@ import {
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
-import { buildGroundedInfoGuideReplyWithMeta, detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import { buildGroundedInfoGuideReplyWithMeta } from "@/lib/infoGuideReplies";
 import type { PlatformKnowledgeInterpret } from "@/lib/infoGuideInterpretAI";
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
@@ -199,7 +199,10 @@ export async function POST(req: NextRequest) {
   const optInGuideIgnored =
     cisternasGuideIgnored || combustibleGuideIgnored || utilidadesBloque2GuideIgnored;
   const guide = optInGuideIgnored ? undefined : requestedGuide;
-  const kind = guide ?? detectInfoGuideKind(rawText);
+  // Solo una selección explícita puede fijar la familia. Para texto libre,
+  // buildGroundedInfoGuideReplyWithMeta usa el intérprete semántico y conserva
+  // detectInfoGuideKind únicamente como fallback offline.
+  const kind = guide ?? null;
   const [previousMessage, threadText] = await Promise.all([
     lastBotMessage(rawPhone),
     recentThreadTextForPhone(rawPhone),
