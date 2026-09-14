@@ -3381,6 +3381,10 @@ async function refineOpcionesWithCategoryCatalog(params: {
     category,
   });
   if (!categoryCatalog.length) return interpret;
+  const detailArticleIds = categoryCatalog
+    .map((article) => article.id)
+    .filter((id) => isOpcionesDetailArticleId(id));
+  if (!detailArticleIds.length) return interpret;
 
   const refinePayload = {
     ...basePayload,
@@ -3400,33 +3404,55 @@ async function refineOpcionesWithCategoryCatalog(params: {
           {
             model: "gpt-4o-mini",
             messages: [
-              { role: "system", content: buildSystemPrompt() },
               {
                 role: "system",
                 content:
-                  "En opciones_refine_stage=category_detail debés seleccionar un artículo de detalle del catálogo acotado; no devuelvas únicamente el índice op-idx-*.",
+                  "Elegí semánticamente el articleId de detalle que coincide con la función pedida. Devolvé solo el JSON exigido por el schema; usá none si ningún detalle coincide.",
               },
               { role: "user", content: JSON.stringify(refinePayload) },
             ],
             temperature: 0,
-            max_tokens: 320,
-            response_format: { type: "json_object" },
+            max_tokens: 80,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "wara_opciones_detail",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    articleId: {
+                      type: "string",
+                      enum: [...detailArticleIds, "none"],
+                    },
+                  },
+                  required: ["articleId"],
+                  additionalProperties: false,
+                },
+              },
+            },
           },
           { signal },
         ),
       INTERPRET_TIMEOUT_MS,
     );
     const content = response?.choices?.[0]?.message?.content?.trim();
-    const refined = content ? parseInterpret(content) : null;
-    if (!refined || refined.guideKind !== "opciones") {
+    const selectedArticleId = content
+      ? (JSON.parse(content) as { articleId?: string }).articleId
+      : null;
+    if (!selectedArticleId || selectedArticleId === "none") {
       return fillOpcionesDetailFromScopedCatalog(interpret, category);
     }
     const merged: PlatformKnowledgeInterpret = {
       ...interpret,
-      ...refined,
       route: "info_guides",
       guideKind: "opciones",
-      category: refined.category || category,
+      category,
+      reportId: selectedArticleId,
+      articleIds: filterDeliverableOpcionesArticleIds([
+        selectedArticleId,
+        ...interpret.articleIds,
+      ]),
       reason: interpret.reason
         ? `${interpret.reason}|opciones_category_refine`
         : "opciones_category_refine",
@@ -3554,7 +3580,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                 content:
                   [
                     "Sos un router semántico estricto de fronteras de WARA.",
-                    "Devolvé SOLO JSON con: route, guideKind, need, articleIds, clarifyQuestion, executionRequest, confidence, reason, category y reportId.",
+                    "Devolvé SOLO la clasificación pedida por el schema.",
                     "Resolver/silenciar/gestionar una alarma es Paneles→Alarmas aunque no diga 'activa'; no pidas aclaración.",
                     "Ver o consultar un tipo de evento, como pánico, es Alertas.",
                     "Configurar protocolos/criticidad/motivos es Opciones.",
@@ -3567,30 +3593,99 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
               { role: "user", content: JSON.stringify(refinePayload) },
             ],
             temperature: 0,
-            max_tokens: 320,
-            response_format: { type: "json_object" },
+            max_tokens: 80,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "wara_cross_family_frontier",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    classification: {
+                      type: "string",
+                      enum: [
+                        "paneles_alarmas",
+                        "alertas_evento",
+                        "opciones_configuracion",
+                        "informes_historico",
+                        "utilidades_modulo",
+                        "sin_cambio",
+                      ],
+                    },
+                  },
+                  required: ["classification"],
+                  additionalProperties: false,
+                },
+              },
+            },
           },
           { signal },
         ),
       INTERPRET_TIMEOUT_MS,
     );
     const content = response?.choices?.[0]?.message?.content?.trim();
-    const parsed = content ? parseInterpret(content) : null;
-    if (!parsed) return interpret;
-    const refined = applyPlatformGuideInterpretGuards(parsed, text, threadText, guardOpts);
-    if (
-      refined.route === "info_guides" &&
-      ["paneles", "alertas", "opciones", "informes", "utilidades_bloque_2"].includes(
-        refined.guideKind ?? "",
-      )
-    ) {
-      return {
-        ...refined,
-        reason: refined.reason
-          ? `${refined.reason}|cross_family_frontier_checked`
-          : "cross_family_frontier_checked",
-      };
-    }
+    const classification = content
+      ? (JSON.parse(content) as { classification?: string }).classification
+      : null;
+    if (!classification || classification === "sin_cambio") return interpret;
+    const familyMap: Record<
+      string,
+      {
+        guideKind: PlatformGuideKind;
+        category: string | null;
+        reportId: string | null;
+        articleIds: string[];
+      }
+    > = {
+      paneles_alarmas: {
+        guideKind: "paneles",
+        category: null,
+        reportId: "alarmas",
+        articleIds: ["pn-alarmas"],
+      },
+      alertas_evento: {
+        guideKind: "alertas",
+        category: null,
+        reportId: null,
+        articleIds: [],
+      },
+      opciones_configuracion: {
+        guideKind: "opciones",
+        category: interpret.category ?? null,
+        reportId: interpret.reportId ?? null,
+        articleIds: interpret.guideKind === "opciones" ? interpret.articleIds : [],
+      },
+      informes_historico: {
+        guideKind: "informes",
+        category: null,
+        reportId: null,
+        articleIds: [],
+      },
+      utilidades_modulo: {
+        guideKind: "utilidades_bloque_2",
+        category: null,
+        reportId: null,
+        articleIds: [],
+      },
+    };
+    const selected = familyMap[classification];
+    if (!selected) return interpret;
+    return applyPlatformGuideInterpretGuards(
+      {
+        ...interpret,
+        ...selected,
+        route: "info_guides",
+        need: "procedure",
+        clarifyQuestion: null,
+        executionRequest: false,
+        confidence: Math.max(interpret.confidence, 0.98),
+        reason: `cross_family_frontier_checked:${classification}`,
+      },
+      text,
+      threadText,
+      guardOpts,
+    );
   } catch {
     /* conserva la aclaración segura del primer paso */
   }
@@ -3613,8 +3708,6 @@ async function applySemanticDetailRefinements(params: {
   next = await refineAlertasWithItemCatalog({ ...params, interpret: next });
   next = await refinePanelesPickItemIfMissing({ ...params, interpret: next });
   next = await refinePanelesWithItemCatalog({ ...params, interpret: next });
-  // Frontera alarmas antes de rellenar op-* de conducta_alarmas.
-  next = await refineOpcionesAlarmasFrontierIfNeeded({ ...params, interpret: next });
   next = await refineOpcionesWithCategoryCatalog({ ...params, interpret: next });
   return next;
 }
