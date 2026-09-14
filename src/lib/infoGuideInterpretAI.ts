@@ -1174,6 +1174,16 @@ function correctMaintenanceMisroute(
   selectionText: string,
   threadText: string,
 ): PlatformKnowledgeInterpret {
+  const normForInformes = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  // Pedido explícito de Informes: no secuestrar a Mantenimiento por hilo MT residual
+  // ni por "dónde" genérico (bug: flotas/recorridos → mt_domain_guard → articleIds=[]).
+  if (looksLikeInformesGuideIntent(normForInformes)) return interpret;
+
   const domainTerm = looksLikeMaintenanceDomainTermQuestion(selectionText);
   const followup = looksLikeMaintenanceGuideFollowupQuestion(selectionText, threadText);
   if (!domainTerm && !followup) return interpret;
@@ -1937,8 +1947,14 @@ function looksLikeInformesGuideIntent(norm: string): boolean {
   }
   if (/\binforme(s)?\s+(de|del|sobre|para|historico|histórico)\b/.test(norm)) return true;
   if (
-    /\b(como|donde|dónde)\s+(veo|consulto|abro|encuentro|saco|miro)\b/.test(norm) &&
+    /\b(como|donde|dónde)\s+(veo|consulto|abro|encuentro|saco|miro|visualizo)\b/.test(norm) &&
     /\binforme/.test(norm)
+  ) {
+    return true;
+  }
+  if (
+    /\b(visualizar|consultar|ver|abrir|sacar)\b.{0,40}\binforme/.test(norm) ||
+    /\binforme\b.{0,40}\b(visualizar|consultar|ver|abrir)\b/.test(norm)
   ) {
     return true;
   }
@@ -1951,7 +1967,7 @@ function inferInformesCategoryFromText(norm: string): string | null {
     return "puntos";
   }
   if (
-    /\b(acoplados|adas|dsm|alarmas|detenciones|historial|instantanea|instantánea|infracciones|ralenti|ralentí|remitos|liquidacion|liquidación|sensores?)\b/.test(
+    /\b(acoplados|adas|dsm|alarmas|detenciones|historial|instantanea|instantánea|infracciones|ralenti|ralentí|remitos|liquidacion|liquidación|sensores?|flotas?|recorridos?)\b/.test(
       norm,
     ) &&
     /\binforme/.test(norm)
@@ -1984,7 +2000,9 @@ function inferInformesCategoryFromText(norm: string): string | null {
     return "puntos";
   }
   if (
-    /\b(historial|instantanea|instantánea|remitos|tickets|acoplados)\b/.test(norm) &&
+    /\b(historial|instantanea|instantánea|remitos|tickets|acoplados|flotas?|recorridos?)\b/.test(
+      norm,
+    ) &&
     /\binforme/.test(norm)
   ) {
     return "generales";
@@ -2001,13 +2019,32 @@ function scoreInformesDetailArticle(
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .toLowerCase();
-  const normWords = new Set(norm.split(/\W+/).filter(Boolean));
+  // Sinónimos conversacionales → tokens del catálogo.
+  const normForScore = norm
+    .replace(/\bflotas\b/g, "flota")
+    .replace(/\brecorridos?\b/g, "historial recorrido");
+  const normWords = new Set(normForScore.split(/\W+/).filter(Boolean));
   let score = 0;
   for (const w of titleNorm.split(/\W+/).filter((x) => x.length > 3)) {
     if (normWords.has(w)) score += 2;
   }
   for (const part of article.id.replace(/^inf-[a-z]+-/, "").split("-")) {
     if (part.length > 2 && normWords.has(part)) score += 1;
+  }
+  // “recorrido(s) de mi unidad” ≈ Historial (posiciones), no Conducta por unidad.
+  if (
+    article.id === "inf-gn-historial" &&
+    /\brecorrido/.test(norm) &&
+    !/\bkilometros?\s+recorridos/.test(norm)
+  ) {
+    score += 4;
+  }
+  if (
+    article.id === "inf-gn-resumen-flota" &&
+    /\bflotas?\b/.test(norm) &&
+    !/\bagro\b/.test(norm)
+  ) {
+    score += 3;
   }
   return score;
 }
@@ -2079,6 +2116,15 @@ function correctInformesCatalogTopicMisroute(
           category,
         )
       : [];
+  // Si venían IDs de otra familia (p. ej. mt-* tras mt_domain_guard), el filtro deja
+  // vacío: no devolver clarify seco — caer al índice/mapa estructural.
+  if (
+    !deliver.length &&
+    isInformesKbEnabled() &&
+    (!category || isInformesSectionEnabled(category))
+  ) {
+    deliver = filterDeliverableInformesArticleIds([structuralPick], category);
+  }
 
   // Etapa 2→3: con sección on, preferir/mejorar detalle según el texto.
   if (
