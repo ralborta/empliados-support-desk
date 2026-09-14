@@ -3549,11 +3549,20 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
           {
             model: "gpt-4o-mini",
             messages: [
-              { role: "system", content: buildSystemPrompt() },
               {
                 role: "system",
                 content:
-                  "Esta es una segunda pasada de fronteras. Priorizá instruccion_refine. Una ruta de menú explícita como “Utilidades → Novedades” o “Auditoría en Wara” domina sobre asociaciones temáticas con Alertas u Opciones.",
+                  [
+                    "Sos un router semántico estricto de fronteras de WARA.",
+                    "Devolvé SOLO JSON con: route, guideKind, need, articleIds, clarifyQuestion, executionRequest, confidence, reason, category y reportId.",
+                    "Resolver/silenciar/gestionar una alarma es Paneles→Alarmas aunque no diga 'activa'; no pidas aclaración.",
+                    "Ver o consultar un tipo de evento, como pánico, es Alertas.",
+                    "Configurar protocolos/criticidad/motivos es Opciones.",
+                    "Histórico o período es Informes.",
+                    "Una ruta explícita Utilidades→Novedades o Auditoría en Wara es utilidades_bloque_2.",
+                    "Si la intención es clara: route=info_guides, need=procedure, clarifyQuestion=null.",
+                    "Si no pertenece a estas fronteras, conservá interpret_previo.",
+                  ].join(" "),
               },
               { role: "user", content: JSON.stringify(refinePayload) },
             ],
