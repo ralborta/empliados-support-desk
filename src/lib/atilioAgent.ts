@@ -539,7 +539,8 @@ export async function runAtilioAgentTurn(
         systemPrompt += `
 
 === MÓDULO COMBUSTIBLE (habilitado) ===
-- Preguntas sobre tickets de combustible, validación de cargas, panel de combustible o informes de combustible de unidad → SIEMPRE guia_informativa.
+- Preguntas informativas sobre tickets de combustible, validación de cargas, panel o informes de combustible → guia_informativa.
+- Acción “Quiero cargar combustible” → consultar_unidades para pedir unidad/patente; NUNCA guia_informativa, Paneles, Opciones ni Informes.
 - NO confundas con Cisternas (tanque de depósito) ni con odómetro.
 - No inventes pantallas ni digas que no hay info sin llamar la tool.`;
       }

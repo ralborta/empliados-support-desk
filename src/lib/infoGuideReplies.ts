@@ -18,6 +18,7 @@ import type { InfoGuideNeed, PlatformKnowledgeInterpret } from "@/lib/infoGuideI
 import {
   buildPlatformGuideClarifyOrLimitMessage,
   interpretPlatformKnowledgeTurn,
+  isFailClosedPlatformInterpret,
   platformGuideNeedsSemanticDetailRefine,
   refinePlatformKnowledgeDetailIfNeeded,
 } from "@/lib/infoGuideInterpretAI";
@@ -694,6 +695,25 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   fallback: InfoGuideFallback;
 }> {
   let activeInterpret = interpret ?? null;
+
+  // Fail-closed del intérprete: respuesta neutra inmediata, sin guards/refine/detect/corpus.
+  if (isFailClosedPlatformInterpret(activeInterpret)) {
+    const message =
+      activeInterpret!.clarifyQuestion?.trim() ||
+      "No pude interpretar bien tu consulta ahora. ¿Podés reformularla en una frase?";
+    return {
+      message,
+      guideKind: null,
+      interpret: {
+        ...activeInterpret!,
+        guideKind: null,
+        articleIds: [],
+        clarifyQuestion: message,
+      },
+      fallback: "clarify_question",
+    };
+  }
+
   let detected = sanitizeOptInGuideKind(kind ?? null);
   let articleIds = activeInterpret?.articleIds ?? [];
   let need: InfoGuideNeed | null = activeInterpret?.need ?? null;

@@ -2667,6 +2667,7 @@ export async function runTurnExecutorPhase(params: {
   if (!isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread)) {
     const {
       interpretPlatformKnowledgeTurn,
+      isOperationalUnitInterpret,
       shouldRouteInterpretToInfoGuides,
     } = await import("@/lib/infoGuideInterpretAI");
     const { classifyTurnExecutor } = await import("@/lib/whatsappTurnRouter");
@@ -2679,6 +2680,20 @@ export async function runTurnExecutorPhase(params: {
       lastGuideReportId: lastGuideCtx?.reportId ?? null,
       lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
     });
+    if (isOperationalUnitInterpret(kbInterpret)) {
+      const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey);
+      const execMessage = messageFromPayload(execResult);
+      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+      const askUnit =
+        kbInterpret?.normalTarget === "operational_fuel"
+          ? "Para cargar combustible necesito la unidad: pasame la patente o el nombre/interno."
+          : "Para revisar el GPS o el estado necesito la unidad: pasame la patente o el nombre/interno.";
+      return {
+        message: execMessage || askUnit,
+        executor: "unidades",
+        ok: execOk,
+      };
+    }
     if (kbInterpret && shouldRouteInterpretToInfoGuides(kbInterpret)) {
       const rulesExecutor = classifyTurnExecutor(
         selectionText,

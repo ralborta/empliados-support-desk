@@ -60,7 +60,7 @@ const BASE_AGENT_TOOLS: OpenAiToolDef[] = [
     function: {
       name: "consultar_unidades",
       description:
-        "Consultar flota, listado, estado GPS/ignición en vivo, o buscar unidad por patente/marca/prefijo. Usala cuando la intención sea listado/flota/cuántas unidades (aunque lo digan distinto). Si la intención no está clara, el backend resuelve; vos redactás o preguntás en natural — NUNCA pidas patente solo para 'poder listar'.",
+        "Consultar flota, listado, estado GPS/ignición en vivo, buscar unidad por patente/marca/prefijo, o iniciar una carga operativa de combustible capturando primero la unidad. Usala cuando la intención sea listado/flota/cuántas unidades (aunque lo digan distinto). Para 'Quiero cargar combustible', pedí unidad/patente; NUNCA uses guia_informativa, Paneles, Opciones ni Informes. Si la intención no está clara, el backend resuelve; vos redactás o preguntás en natural — NUNCA pidas patente solo para 'poder listar'.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -106,7 +106,7 @@ const GUIA_CISTERNAS_SUFFIX =
   " Con cisternas (tanques de combustible de depósito/base) habilitadas en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni registres cargas/mediciones por chat.";
 
 const GUIA_COMBUSTIBLE_SUFFIX =
-  " Con combustible (tickets/validación/panel/informes de unidad) habilitado en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni cargues tickets por chat. No confundas con Cisternas.";
+  " Con preguntas informativas sobre combustible (tickets/validación/panel/informes de unidad) habilitado en backend: usá esta tool. La acción 'Quiero cargar combustible' es operativa: NUNCA uses esta tool; debe ir a consultar_unidades para pedir unidad/patente. No confundas con Cisternas.";
 
 const GUIA_HOJAS_RUTA_SUFFIX =
   " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje): SIEMPRE esta tool — NUNCA inventes Mantenimiento/Unidades ni digas que no hay info. Si el corpus está deshabilitado, la tool devolverá el límite de canal honesto. No confundas con hoja de turno, tickets de combustible de unidad ni tanques de depósito.";

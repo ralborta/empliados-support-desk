@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeout";
+import { OPENAI_DEFAULT_TIMEOUT_MS, logLlmStageError, withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE } from "@/lib/knowledgeBase";
 import { getBotPromptModule } from "@/lib/botPromptStore";
 import { buildTransporteKnowledgeContext } from "@/lib/transportePublicoKnowledge";
@@ -18,6 +18,30 @@ import {
   isOpcionesKbV2Enabled,
 } from "@/lib/opcionesKnowledgeV2";
 import type { InfoGuideNeed } from "@/lib/infoGuideInterpretAI";
+
+/** Excerpt cliente-seguro: sin encabezados internos ### id ni metadatos de corpus. */
+export function buildDeterministicKbClientExcerpt(
+  knowledge: string,
+  maxLen = 900,
+): string | null {
+  const cleaned = knowledge
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return true;
+      if (/^#{1,6}\s+\S/.test(t)) return false;
+      if (/^KB\s+/i.test(t)) return false;
+      if (/^Restricciones:/i.test(t)) return false;
+      if (/^Pendiente de validaci[oó]n:/i.test(t)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!cleaned) return null;
+  if (cleaned.length <= maxLen) return cleaned;
+  return `${cleaned.slice(0, maxLen).trimEnd()}…`;
+}
 
 // El prompt de sistema incluye el manual completo (mucho más texto que el catálogo
 // compacto de unidades), así que le damos algo más de margen que el timeout default
@@ -171,8 +195,8 @@ async function resolveInstructions(kind: KnowledgeGuideKind): Promise<string> {
   try {
     const moduleKey = PROMPT_MODULE_KEY_BY_KIND[kind];
     if (moduleKey) {
-      const module = await getBotPromptModule(moduleKey);
-      const content = module?.content?.trim();
+      const promptModule = await getBotPromptModule(moduleKey);
+      const content = promptModule?.content?.trim();
       // Placeholder sin editar (buildModulePlaceholder) no aporta nada específico del
       // módulo — mejor usar el fallback genérico que un texto vacío de instrucciones.
       if (content && content.length > 200) return content;
@@ -316,29 +340,41 @@ Formato de salida: texto plano de WhatsApp (sin markdown pesado, sin asteriscos 
   });
 
   try {
-    const response = await withOpenAiTimeout((signal) =>
-      openai.chat.completions.create(
-        {
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          temperature: 0.2,
-          max_tokens: 400,
-        },
-        { signal },
-      ),
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ],
+            temperature: 0.2,
+            max_tokens: 400,
+          },
+          { signal },
+        ),
       KNOWLEDGE_BASE_TIMEOUT_MS,
+      { stage: `kb_grounded:${kind}` },
     );
-    if (!response) return null;
+    if (!response) {
+      // Artículos ya fijados: entregar excerpt determinista (evita “No pude consultar”).
+      if ((opts?.articleIds?.length ?? 0) > 0 && knowledge.trim()) {
+        return buildDeterministicKbClientExcerpt(knowledge);
+      }
+      return null;
+    }
     const text = response.choices[0]?.message?.content?.trim();
     // Salvaguarda: si el modelo igual ecoa la directiva interna "FIN" al final
     // (viene de las instrucciones del panel, pensadas para BuilderBot, no para
     // mostrarse al cliente), la recortamos.
     const cleaned = text?.replace(/\s*\bFIN\.?\s*$/i, "").trim();
     return cleaned || null;
-  } catch {
+  } catch (err) {
+    logLlmStageError(`kb_grounded:${kind}`, err);
+    if ((opts?.articleIds?.length ?? 0) > 0 && knowledge.trim()) {
+      return buildDeterministicKbClientExcerpt(knowledge);
+    }
     return null;
   }
 }
