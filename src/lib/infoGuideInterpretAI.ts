@@ -3103,6 +3103,115 @@ async function refineInformesWithCategoryCatalog(params: {
   }
 }
 
+/**
+ * Valida la ficha de Informes cuando no existe una categoría conversacional previa.
+ * Evita que títulos parecidos de categorías distintas se resuelvan por asociación temática.
+ */
+async function refineInformesCrossCategoryArticleIfNeeded(params: {
+  openai: OpenAI;
+  basePayload: Record<string, unknown>;
+  interpret: PlatformKnowledgeInterpret;
+  text: string;
+  threadText: string;
+  guardOpts: PlatformGuideGuardOpts;
+}): Promise<PlatformKnowledgeInterpret> {
+  const { openai, interpret, text, threadText, guardOpts } = params;
+  if (
+    interpret.guideKind !== "informes" ||
+    interpret.route !== "info_guides" ||
+    guardOpts.lastGuideCategory
+  ) {
+    return interpret;
+  }
+  const currentId = interpret.articleIds.find((id) => isInformesDetailArticleId(id));
+  if (!currentId) return interpret;
+
+  const candidates = INFORMES_ARTICLES.filter(
+    (article) =>
+      Boolean(article.reportId) &&
+      article.status !== "future" &&
+      isInformesSectionEnabled(article.category),
+  );
+  const validIds = candidates.map((article) => article.id);
+  if (!validIds.length) return interpret;
+
+  try {
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "Validá qué informe exacto pidió el cliente usando títulos y categorías del catálogo.",
+                  "Elegí por el significado del mensaje actual, no por asociaciones temáticas ni por el historial.",
+                  "Si el artículo previo ya es el exacto, devolvelo.",
+                  "Devolvé únicamente el JSON del schema.",
+                ].join(" "),
+              },
+              {
+                role: "user",
+                content: JSON.stringify({
+                  mensaje_nuevo: text,
+                  historial_reciente: threadText.slice(-800),
+                  articulo_previo: currentId,
+                  catalogo: candidates.map((article) => ({
+                    id: article.id,
+                    category: article.category,
+                    title: article.title,
+                  })),
+                }),
+              },
+            ],
+            temperature: 0,
+            max_tokens: 64,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "wara_informes_cross_category_article",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    articleId: { type: "string", enum: validIds },
+                  },
+                  required: ["articleId"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          { signal },
+        ),
+      INTERPRET_TIMEOUT_MS,
+    );
+    const content = response?.choices[0]?.message?.content?.trim();
+    const selectedId = content
+      ? (JSON.parse(content) as { articleId?: string }).articleId
+      : null;
+    if (!selectedId || selectedId === currentId) return interpret;
+    const selected = candidates.find((article) => article.id === selectedId);
+    if (!selected) return interpret;
+    return applyPlatformGuideInterpretGuards(
+      {
+        ...interpret,
+        category: selected.category,
+        reportId: selected.reportId ?? selected.id,
+        articleIds: [selected.id, ...(selected.relatedIds ?? [])].slice(0, 3),
+        confidence: Math.max(interpret.confidence, 0.98),
+        reason: `${interpret.reason}|informes_cross_category_article`,
+      },
+      text,
+      threadText,
+      guardOpts,
+    );
+  } catch {
+    return interpret;
+  }
+}
+
 function isAlertasDetailArticleId(id: string): boolean {
   const a = ALERTAS_ARTICLES.find((x) => x.id === id);
   return Boolean(a && a.category === "tipo" && a.itemId);
@@ -3749,6 +3858,7 @@ async function applySemanticDetailRefinements(params: {
   let next = params.interpret;
   next = await refineAmbiguousGuideFrontierIfNeeded({ ...params, interpret: next });
   next = await refineInformesWithCategoryCatalog({ ...params, interpret: next });
+  next = await refineInformesCrossCategoryArticleIfNeeded({ ...params, interpret: next });
   next = await refineAlertasPickItemIfMissing({ ...params, interpret: next });
   next = await refineAlertasWithItemCatalog({ ...params, interpret: next });
   next = await refinePanelesPickItemIfMissing({ ...params, interpret: next });

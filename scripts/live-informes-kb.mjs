@@ -132,6 +132,16 @@ const cases = [
     expectFleetListRoute: false,
   },
   {
+    id: "informe-resumen-flota-sin-contexto",
+    text: "Indicame como consultar por el informe de resumen de flota",
+    thread: "",
+    expectResolve: "info_guides",
+    expectGuide: "informes",
+    expectDisabled: !generalesOn,
+    expectArticleId: generalesOn ? "inf-gn-resumen-flota" : null,
+    expectFleetListRoute: false,
+  },
+  {
     id: "listar-informes-no-unidades",
     text: "Listame todos los informes disponibles de la plataforma Wara",
     thread: "Estamos consultando el módulo Informes.",
