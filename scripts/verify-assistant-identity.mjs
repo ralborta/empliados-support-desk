@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * LIVE LLM read-only — identidad oficial Kia.
+ * LIVE LLM read-only — identidad oficial Kira.
  * No llama /turn/execute, no envía WhatsApp y no escribe estado.
  */
 import assert from "node:assert/strict";
@@ -31,7 +31,7 @@ for (const text of identityCases) {
   const interpret = await interpretPlatformKnowledgeTurn({
     selectionText: text,
     threadText:
-      "Kia: Para usar Mantenimiento, entrá a Utilidades. Cliente: Gracias.",
+      "Kira: Para usar Mantenimiento, entrá a Utilidades. Cliente: Gracias.",
     pendingActionType: "odometro",
     lastGuideKind: "mantenimiento",
   });
@@ -48,12 +48,12 @@ for (const text of identityCases) {
     "",
     interpret,
   );
-  assert.match(reply.message, /^Soy Kia,/);
+  assert.match(reply.message, /^Soy Kira,/);
   assert.equal(reply.guideKind, null);
   assert.equal(reply.fallback, null);
   const resolved = await resolveTurnExecutor(
     text,
-    "Kia: Para usar Mantenimiento, entrá a Utilidades.",
+    "Kira: Para usar Mantenimiento, entrá a Utilidades.",
     null,
     { lastGuideKind: "mantenimiento" },
   );

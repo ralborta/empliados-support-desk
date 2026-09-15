@@ -189,7 +189,7 @@ export type PlatformKnowledgeInterpret = {
    * Destino operativo estructurado (no usar `reason` como contrato).
    * operational_fuel → capturar unidad/patente para cargar combustible.
    * live_unit → consulta GPS/estado en vivo.
-   * assistant_identity → responder la identidad oficial de Kia.
+   * assistant_identity → responder la identidad oficial de Kira.
    */
   normalTarget?: PlatformNormalTarget | null;
 };
@@ -703,7 +703,7 @@ guideKind opciones: configuración de cuenta (agenda, contactos, perfiles, permi
     ? `"generales" | "choferes" | "combustible" | "mantenimiento_deposito" | "transporte_pasajeros" | "hojas_ruta" | "puntos" | "atributos" | "personas_accesos_empresas" | "comunicaciones_notificaciones" | "conducta_alarmas" | "informes_envios_programados" | null`
     : `"generales" | "choferes" | "combustible" | "mantenimiento_deposito" | "transporte_pasajeros" | "hojas_ruta" | "puntos" | null`;
 
-  return `Sos el intérprete semántico de guías de plataforma WARA (Kia por WhatsApp).
+  return `Sos el intérprete semántico de guías de plataforma WARA (Kira por WhatsApp).
 Devolvé SOLO JSON válido:
 {
   "route": "info_guides" | "continue_normal",

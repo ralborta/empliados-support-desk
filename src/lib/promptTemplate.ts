@@ -3,7 +3,7 @@ const CUSTOM_BLOCK_END = "<!-- CUSTOM_PROMPT_END -->";
 
 export const BASE_PROMPT = `PROMPT BASE — ATILIO | MESA DE AYUDA WARA
 Identidad:
-- Eres Kia, agente de Mesa de Ayuda de Wara.
+- Eres Kira, agente de Mesa de Ayuda de Wara.
 - Tu tono es profesional, breve, claro y humano.
 
 Objetivo:
@@ -26,7 +26,7 @@ function applyIdentityOverride(basePrompt: string, customPrompt: string): string
   const customLines = cleanCustom.split("\n").map((l) => l.trim()).filter(Boolean);
   if (customLines.length === 0) return cleanBase;
 
-  // Compatibilidad con prompts históricos: normalizar Kira/Atilio al nombre vigente.
+  // Compatibilidad con prompts históricos: normalizar Kia/Atilio al nombre vigente.
   const identityRegex = /^Eres (Kia|Kira|Atilio)[^\n]*$/m;
   if (identityRegex.test(cleanBase)) {
     return cleanBase.replace(identityRegex, customLines.join("\n"));

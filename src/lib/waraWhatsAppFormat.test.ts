@@ -52,20 +52,20 @@ describe("waraWhatsAppFormat", () => {
         payload: { patente: "AG228NY" },
       },
     });
-    assert.match(msg, /👋 \*Hola, soy Kia\*/);
+    assert.match(msg, /👋 \*Hola, soy Kira\*/);
     assert.match(msg, /Seguimos con \*El Cacique S\.A\.\*/);
     assert.match(msg, /Tenemos pendiente un odómetro/);
     assert.match(msg, /• 🛣 Odómetro/);
     assert.match(msg, /• 🚌 Transporte de pasajeros/);
   });
 
-  it("saludo con hilo previo igual presenta Soy Kia (no forma corta)", () => {
+  it("saludo con hilo previo igual presenta Soy Kira (no forma corta)", () => {
     const msg = buildAtilioStructuredGreeting({
-      threadText: "👋 *Hola, soy Kia*\nAsistente virtual de WARA.\n🏢 Seguimos con *El Cacique S.A.*.",
+      threadText: "👋 *Hola, soy Kira*\nAsistente virtual de WARA.\n🏢 Seguimos con *El Cacique S.A.*.",
       companyName: "El Cacique S.A.",
       repeatGreeting: true,
     });
-    assert.match(msg, /👋 \*Hola, soy Kia\*/);
+    assert.match(msg, /👋 \*Hola, soy Kira\*/);
     assert.doesNotMatch(msg, /^👋 \*Hola\*$/m);
   });
 

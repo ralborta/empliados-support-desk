@@ -225,7 +225,7 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     console.error("[unregisteredHandoff] autoAssign:", e);
   }
 
-  // Número no registrado: Kia sigue activa para poder recontestar (ticket + PDF).
+  // Número no registrado: Kira sigue activa para poder recontestar (ticket + PDF).
   await reactivateAtilioForCustomer(
     customer.id,
     prisma,

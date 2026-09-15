@@ -2575,8 +2575,8 @@ export function looksLikeThanksOnlyAcknowledgement(text: string | undefined | nu
 }
 
 /**
- * Solo el nombre del bot como llamado de atención — "Kia", "hola Kia".
- * Kira/Atilio se conservan como alias históricos, sin pregunta ni tema concreto.
+ * Solo el nombre del bot como llamado de atención — "Kira", "hola Kira".
+ * Kia/Atilio se conservan como alias históricos, sin pregunta ni tema concreto.
  */
 export function looksLikeBareAtilioMention(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "")
