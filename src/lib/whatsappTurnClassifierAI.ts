@@ -303,6 +303,7 @@ export async function resolveTurnExecutor(
   {
     const {
       interpretPlatformKnowledgeTurn,
+      isAssistantIdentityInterpret,
       isFailClosedPlatformInterpret,
       isOperationalUnitInterpret,
       shouldRouteInterpretToInfoGuides,
@@ -332,6 +333,15 @@ export async function resolveTurnExecutor(
           route: "info_guides",
         },
         ruleId: "platform_kb_llm_fail_closed",
+      };
+    }
+    if (isAssistantIdentityInterpret(kbInterpret)) {
+      return {
+        executor: "info_guides",
+        source: "ai",
+        aiConfidence: kbInterpret?.confidence,
+        interpret: kbInterpret,
+        ruleId: "assistant_identity",
       };
     }
     if (isOperationalUnitInterpret(kbInterpret)) {

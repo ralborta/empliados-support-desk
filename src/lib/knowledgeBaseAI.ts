@@ -81,7 +81,7 @@ const PROMPT_MODULE_KEY_BY_KIND: Partial<Record<KnowledgeGuideKind, string>> = {
   // transporte_publico / cisternas / combustible: sin módulo de panel → FALLBACK + reglas del kind.
 };
 
-const FALLBACK_INSTRUCTIONS = `Sos Kira, el asistente de soporte de Wara por WhatsApp. Respondé la pregunta del
+const FALLBACK_INSTRUCTIONS = `Sos Kia, la asistente de soporte de Wara por WhatsApp. Respondé la pregunta del
 cliente usando EXCLUSIVAMENTE la base de conocimiento provista abajo (manual real del módulo). No inventes
 pasos, botones, nombres de pantallas ni funcionalidades que no estén en el manual.
 - Español rioplatense, tono cordial y directo, formato de mensaje de WhatsApp (sin markdown pesado).

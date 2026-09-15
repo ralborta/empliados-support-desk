@@ -50,6 +50,9 @@ const bodySchema = z
     clarifyQuestion: z.string().optional(),
     category: z.string().optional(),
     reportId: z.string().optional(),
+    normalTarget: z
+      .enum(["operational_fuel", "live_unit", "assistant_identity"])
+      .optional(),
     api_key: z.string().optional(),
     apiKey: z.string().optional(),
   })
@@ -230,6 +233,7 @@ export async function POST(req: NextRequest) {
     guide ||
     parsed.data.need ||
     parsed.data.articleIds?.length ||
+    parsed.data.normalTarget ||
     optInGuideIgnored ||
     hojasRutaCorpusOff ||
     puntosInteresCorpusOff ||
@@ -271,6 +275,7 @@ export async function POST(req: NextRequest) {
           reason: ignoredReason ?? "seeded_from_turn",
           category: parsed.data.category?.trim() || null,
           reportId: parsed.data.reportId?.trim() || null,
+          normalTarget: parsed.data.normalTarget ?? null,
         }
       : null;
 

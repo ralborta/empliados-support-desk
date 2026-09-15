@@ -18,10 +18,12 @@ import type { InfoGuideNeed, PlatformKnowledgeInterpret } from "@/lib/infoGuideI
 import {
   buildPlatformGuideClarifyOrLimitMessage,
   interpretPlatformKnowledgeTurn,
+  isAssistantIdentityInterpret,
   isFailClosedPlatformInterpret,
   platformGuideNeedsSemanticDetailRefine,
   refinePlatformKnowledgeDetailIfNeeded,
 } from "@/lib/infoGuideInterpretAI";
+import { buildAssistantIdentityReply } from "@/lib/assistantIdentity";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 import {
@@ -695,6 +697,16 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   fallback: InfoGuideFallback;
 }> {
   let activeInterpret = interpret ?? null;
+
+  // Respuesta social estructurada: no detectar módulos ni consultar corpus.
+  if (isAssistantIdentityInterpret(activeInterpret)) {
+    return {
+      message: buildAssistantIdentityReply(),
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: null,
+    };
+  }
 
   // Fail-closed del intérprete: respuesta neutra inmediata, sin guards/refine/detect/corpus.
   if (isFailClosedPlatformInterpret(activeInterpret)) {

@@ -289,6 +289,7 @@ function executorBody(
     clarifyQuestion?: string;
     category?: string;
     reportId?: string;
+    normalTarget?: string;
   },
 ): JsonRecord {
   return {
@@ -308,6 +309,7 @@ function executorBody(
     ...(extras?.clarifyQuestion ? { clarifyQuestion: extras.clarifyQuestion } : {}),
     ...(extras?.category ? { category: extras.category } : {}),
     ...(extras?.reportId ? { reportId: extras.reportId } : {}),
+    ...(extras?.normalTarget ? { normalTarget: extras.normalTarget } : {}),
   };
 }
 
@@ -329,6 +331,7 @@ async function invokeExecutor(
     clarifyQuestion?: string;
     category?: string;
     reportId?: string;
+    normalTarget?: string;
   },
 ): Promise<JsonRecord> {
   const handler = EXECUTOR_HANDLERS[executor];
@@ -1664,6 +1667,7 @@ export async function runTurnExecutorPhase(params: {
           clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
           category: kbInterpret.category ?? undefined,
           reportId: kbInterpret.reportId ?? undefined,
+          normalTarget: kbInterpret.normalTarget ?? undefined,
         });
         const msg = messageFromPayload(execResult);
         if (msg) {
@@ -2724,6 +2728,7 @@ export async function runTurnExecutorPhase(params: {
           clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
           category: kbInterpret.category ?? undefined,
           reportId: kbInterpret.reportId ?? undefined,
+          normalTarget: kbInterpret.normalTarget ?? undefined,
         });
         const msg = messageFromPayload(execResult);
         if (msg) {

@@ -166,8 +166,11 @@ export type PlatformGuideKind =
   | "alertas"
   | "paneles";
 
-/** Destino operativo cuando la frontera semántica sale de info_guides. */
-export type PlatformNormalTarget = "operational_fuel" | "live_unit";
+/** Destino estructurado cuando la frontera semántica sale de una guía de módulo. */
+export type PlatformNormalTarget =
+  | "operational_fuel"
+  | "live_unit"
+  | "assistant_identity";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -186,6 +189,7 @@ export type PlatformKnowledgeInterpret = {
    * Destino operativo estructurado (no usar `reason` como contrato).
    * operational_fuel → capturar unidad/patente para cargar combustible.
    * live_unit → consulta GPS/estado en vivo.
+   * assistant_identity → responder la identidad oficial de Kia.
    */
   normalTarget?: PlatformNormalTarget | null;
 };
@@ -699,7 +703,7 @@ guideKind opciones: configuración de cuenta (agenda, contactos, perfiles, permi
     ? `"generales" | "choferes" | "combustible" | "mantenimiento_deposito" | "transporte_pasajeros" | "hojas_ruta" | "puntos" | "atributos" | "personas_accesos_empresas" | "comunicaciones_notificaciones" | "conducta_alarmas" | "informes_envios_programados" | null`
     : `"generales" | "choferes" | "combustible" | "mantenimiento_deposito" | "transporte_pasajeros" | "hojas_ruta" | "puntos" | null`;
 
-  return `Sos el intérprete semántico de guías de plataforma WARA (Atilio/Kira por WhatsApp).
+  return `Sos el intérprete semántico de guías de plataforma WARA (Kia por WhatsApp).
 Devolvé SOLO JSON válido:
 {
   "route": "info_guides" | "continue_normal",
@@ -718,6 +722,7 @@ category: guideKind=informes (pantallas) o guideKind=opciones con V2 (sección).
 
 route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (${modules}).
 route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
+Una pregunta social sobre el nombre o identidad del asistente NO es una consulta de módulo ni requiere aclaración: se resuelve como assistant_identity en la frontera semántica.
 NUNCA route=info_guides para "necesito un certificado", "certificado de cobertura", "mandame el certificado".
 
 need:
@@ -1874,6 +1879,9 @@ function correctUtilidadesBloque2TopicMisroute(
     .replace(/\s+/g, " ")
     .trim();
   if (!norm || norm.length > 240) return interpret;
+  // Un informe nombrado pertenece al menú Informes aunque comparta nombre con
+  // una pantalla operativa de Utilidades (p. ej. Informe de Acoplados).
+  if (looksLikeInformesGuideIntent(norm)) return interpret;
 
   const exactModulePick = /^(?:modulo(?: de)? |utilidades )?(?:acoplados|auditoria|calculador de recorridos|comunicador|comunicados|compartir posicion|cuestionarios|novedades|remitos|remitos hormigonera)$/.test(
     norm,
@@ -1966,6 +1974,7 @@ function inferInformesCategoryFromText(norm: string): string | null {
   if (/\bresumen(es)?\s+por\s+punto/.test(norm) || /\bentradas?\s+y\s+salidas\b/.test(norm)) {
     return "puntos";
   }
+  if (/\bchofer/.test(norm)) return "choferes";
   if (
     /\b(acoplados|adas|dsm|alarmas|detenciones|historial|instantanea|instantánea|infracciones|ralenti|ralentí|remitos|liquidacion|liquidación|sensores?|flotas?|recorridos?)\b/.test(
       norm,
@@ -1974,7 +1983,6 @@ function inferInformesCategoryFromText(norm: string): string | null {
   ) {
     return "generales";
   }
-  if (/\bchofer/.test(norm)) return "choferes";
   if (
     /\bcargas?\s+de\s+combustible\b/.test(norm) ||
     (/\bcombustible\b/.test(norm) && /\binforme/.test(norm)) ||
@@ -2035,7 +2043,8 @@ function scoreInformesDetailArticle(
   if (
     article.id === "inf-gn-historial" &&
     /\brecorrido/.test(norm) &&
-    !/\bkilometros?\s+recorridos/.test(norm)
+    !/\bkilometros?\s+recorridos/.test(norm) &&
+    !/\bchofer/.test(norm)
   ) {
     score += 4;
   }
@@ -3883,6 +3892,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Planilla de horarios, resumen de servicio u otro informe de Transporte de pasajeros del menú Informes → informes_consulta (nunca crear hoja de turno).",
       "Cargar combustible en una unidad es combustible_operativo: continuar al flujo operativo para capturar unidad/patente; nunca info_guides, Informes, Paneles ni Opciones.",
       "Ubicación, GPS, ignición o estado en vivo de una unidad/patente es unidad_gps_vivo: continuar a Unidades, nunca pedir aclaración de KB.",
+      "Preguntar el nombre, quién es o cómo se llama el asistente es identidad_asistente; no es una consulta sobre módulos.",
       "Una pantalla nombrada como Utilidades → Novedades, Utilidades → Auditoría u otro módulo inequívoco del Bloque 2 → guideKind=utilidades_bloque_2, incluso si su corpus está apagado; articleIds=[] si está apagado.",
       "Novedades de un ticket, certificado, mantenimiento u otro trámite NO son la pantalla Utilidades → Novedades.",
       "Si no pertenece claramente a estas fronteras, conservá la familia y la interpretación previas.",
@@ -3913,6 +3923,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                     "Ambos son Informes; nunca son listado ni consulta en vivo de unidades.",
                     "combustible_operativo: quiere cargar combustible ahora; debe continuar al flujo operativo que pide unidad/patente.",
                     "unidad_gps_vivo: pide ubicación, GPS, ignición o estado actual de una unidad/patente.",
+                    "identidad_asistente: pregunta el nombre, quién es o cómo se llama el asistente.",
                     "Una ruta explícita Utilidades→Novedades o Auditoría en Wara es utilidades_bloque_2.",
                     "Si la intención es clara: route=info_guides, need=procedure, clarifyQuestion=null.",
                     "Si no pertenece a estas fronteras, conservá interpret_previo.",
@@ -3942,6 +3953,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                         "informes_modulo",
                         "combustible_operativo",
                         "unidad_gps_vivo",
+                        "identidad_asistente",
                         "utilidades_modulo",
                         "sin_cambio",
                       ],
@@ -3964,6 +3976,22 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       ? (JSON.parse(content) as { classification?: string }).classification
       : null;
     if (!classification || classification === "sin_cambio") return interpret;
+    if (classification === "identidad_asistente") {
+      return {
+        ...interpret,
+        route: "info_guides",
+        guideKind: null,
+        need: "definition",
+        articleIds: [],
+        clarifyQuestion: null,
+        executionRequest: false,
+        confidence: Math.max(interpret.confidence, 0.98),
+        reason: "cross_family_frontier_checked:identidad_asistente",
+        category: null,
+        reportId: null,
+        normalTarget: "assistant_identity",
+      };
+    }
     if (
       classification === "combustible_operativo" ||
       classification === "unidad_gps_vivo"
@@ -4486,6 +4514,12 @@ export function isOperationalUnitInterpret(
     interpret?.normalTarget === "operational_fuel" ||
     interpret?.normalTarget === "live_unit"
   );
+}
+
+export function isAssistantIdentityInterpret(
+  interpret: PlatformKnowledgeInterpret | null | undefined,
+): boolean {
+  return interpret?.normalTarget === "assistant_identity";
 }
 
 /** Respuesta cuando el intérprete pide aclarar o no hay KB usable. */

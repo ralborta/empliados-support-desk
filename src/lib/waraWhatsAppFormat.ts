@@ -338,7 +338,7 @@ export function formatGreeting(input: {
   companyListBlock?: string | null;
 }): string {
   const intro = !input.introduced
-    ? "👋 *Hola, soy Kira*\nAsistente virtual de WARA."
+    ? "👋 *Hola, soy Kia*\nAsistente virtual de WARA."
     : "👋 *Hola*";
 
   if (input.companyListBlock) {
@@ -429,7 +429,7 @@ export function buildAtilioStructuredGreeting(input: {
   /** Solo menciones bare del nombre del bot: saludo corto sin re-presentarse. */
   omitIntroduction?: boolean;
 }): string {
-  // Saludados estructurados V1 siempre lideran con "soy Kira", salvo omit explícito.
+  // Saludos estructurados V1 siempre lideran con "soy Kia", salvo omit explícito.
   // Antes, repeatGreeting (casi siempre true por ticket abierto) forzaba "👋 Hola" sin presentación.
   const introduced = input.omitIntroduction === true;
   return formatGreeting({

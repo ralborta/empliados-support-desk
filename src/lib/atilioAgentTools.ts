@@ -106,7 +106,10 @@ const GUIA_CISTERNAS_SUFFIX =
   " Con cisternas (tanques de combustible de depósito/base) habilitadas en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni registres cargas/mediciones por chat.";
 
 const GUIA_COMBUSTIBLE_SUFFIX =
-  " Con preguntas informativas sobre combustible (tickets/validación/panel/informes de unidad) habilitado en backend: usá esta tool. La acción 'Quiero cargar combustible' es operativa: NUNCA uses esta tool; debe ir a consultar_unidades para pedir unidad/patente. No confundas con Cisternas.";
+  " Con preguntas informativas sobre combustible (tickets/validación/panel/informes de unidad) habilitado en backend: usá esta tool. La acción 'Quiero cargar combustible' es operativa: NUNCA uses esta tool; debe ir a consultar_unidades para pedir unidad/patente.";
+
+const GUIA_COMBUSTIBLE_CISTERNAS_BOUNDARY =
+  " No confundas tickets de combustible de unidad con Cisternas.";
 
 const GUIA_HOJAS_RUTA_SUFFIX =
   " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje): SIEMPRE esta tool — NUNCA inventes Mantenimiento/Unidades ni digas que no hay info. Si el corpus está deshabilitado, la tool devolverá el límite de canal honesto. No confundas con hoja de turno, tickets de combustible de unidad ni tanques de depósito.";
@@ -151,6 +154,7 @@ export function buildAtilioAgentTools(
     let description = t.function.description;
     if (cisternasOn) description += GUIA_CISTERNAS_SUFFIX;
     if (combustibleOn) description += GUIA_COMBUSTIBLE_SUFFIX;
+    if (cisternasOn && combustibleOn) description += GUIA_COMBUSTIBLE_CISTERNAS_BOUNDARY;
     // HR: reconocimiento siempre (corpus gated en la tool/grounded).
     description += GUIA_HOJAS_RUTA_SUFFIX;
     description += GUIA_PUNTOS_INTERES_SUFFIX;

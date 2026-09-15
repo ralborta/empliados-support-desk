@@ -2575,17 +2575,17 @@ export function looksLikeThanksOnlyAcknowledgement(text: string | undefined | nu
 }
 
 /**
- * Solo el nombre del bot como llamado de atención — "Kira", "hola kira", "Atilio?"
- * (nombre viejo aún reconocido), sin pregunta de capacidades ni tema concreto.
+ * Solo el nombre del bot como llamado de atención — "Kia", "hola Kia".
+ * Kira/Atilio se conservan como alias históricos, sin pregunta ni tema concreto.
  */
 export function looksLikeBareAtilioMention(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "")
     .replace(/[^a-z0-9\s]/g, "")
     .trim();
   if (!norm || norm.length > 40) return false;
-  if (!/\b(atilio|kira)\b/.test(norm)) return false;
+  if (!/\b(atilio|kia|kira)\b/.test(norm)) return false;
   if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
-  return /^(hola\s+)?(atilio|kira)(\s+(estas|esta)\s*(ahi)?)?$/.test(norm);
+  return /^(hola\s+)?(atilio|kia|kira)(\s+(estas|esta)\s*(ahi)?)?$/.test(norm);
 }
 
 /**
