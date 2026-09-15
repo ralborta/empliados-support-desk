@@ -2005,6 +2005,36 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Identidad social (nombre / presentate) ANTES de continuidad de unidad.
+  // Bug prod 2026-09-15: con unidad activa, «Preséntate» iba a flota
+  // («Unidad no encontrada… Preséntate») y «¿cómo te llamás?» improvisaba «Soy Lucas».
+  if (!isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread)) {
+    const {
+      interpretPlatformKnowledgeTurn,
+      isAssistantIdentityInterpret,
+    } = await import("@/lib/infoGuideInterpretAI");
+    const identityInterpret = await interpretPlatformKnowledgeTurn({
+      selectionText,
+      threadText: threadCtx.classificationThread,
+      pendingActionType: pendingAction?.type ?? null,
+      lastGuideKind: lastGuideCtx?.kind ?? null,
+      lastGuideCategory: lastGuideCtx?.category ?? null,
+      lastGuideReportId: lastGuideCtx?.reportId ?? null,
+      lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
+    });
+    if (isAssistantIdentityInterpret(identityInterpret)) {
+      const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
+        need: identityInterpret?.need,
+        clarifyQuestion: identityInterpret?.clarifyQuestion ?? undefined,
+        normalTarget: "assistant_identity",
+      });
+      const msg = messageFromPayload(execResult);
+      if (msg) {
+        return { message: msg, executor: "info_guides", ok: true };
+      }
+    }
+  }
+
   // ——— IA primero (casi todo el diálogo) ———
   // Reglas operativas solo ejecutan después, según la intención entendida.
   let skipSchematicUnitRoute = false;
@@ -2677,6 +2707,7 @@ export async function runTurnExecutorPhase(params: {
   if (!isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread)) {
     const {
       interpretPlatformKnowledgeTurn,
+      isAssistantIdentityInterpret,
       isOperationalUnitInterpret,
       shouldRouteInterpretToInfoGuides,
     } = await import("@/lib/infoGuideInterpretAI");
@@ -2690,6 +2721,17 @@ export async function runTurnExecutorPhase(params: {
       lastGuideReportId: lastGuideCtx?.reportId ?? null,
       lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
     });
+    if (isAssistantIdentityInterpret(kbInterpret)) {
+      const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
+        need: kbInterpret?.need,
+        clarifyQuestion: kbInterpret?.clarifyQuestion ?? undefined,
+        normalTarget: "assistant_identity",
+      });
+      const msg = messageFromPayload(execResult);
+      if (msg) {
+        return { message: msg, executor: "info_guides", ok: true };
+      }
+    }
     if (isOperationalUnitInterpret(kbInterpret)) {
       // Carga de combustible: capturar unidad/patente. NO buscar la frase operativa
       // como nombre de unidad (evita “No encontré … «cargar»”).

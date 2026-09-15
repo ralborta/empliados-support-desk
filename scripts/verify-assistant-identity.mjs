@@ -25,15 +25,19 @@ const identityCases = [
   "Quiero saber cuál es tu nombre",
   "¿Cómo te llamás?",
   "¿Quién sos?",
+  "Preséntate",
+  "Presentate",
 ];
+
+const unitActiveThread =
+  "Kira: La unidad BACKUP2504771 no tiene equipo GPS instalado. Generé el caso #38606.\nCliente: Backup 2504771";
 
 for (const text of identityCases) {
   const interpret = await interpretPlatformKnowledgeTurn({
     selectionText: text,
-    threadText:
-      "Kira: Para usar Mantenimiento, entrá a Utilidades. Cliente: Gracias.",
-    pendingActionType: "odometro",
-    lastGuideKind: "mantenimiento",
+    threadText: unitActiveThread,
+    pendingActionType: null,
+    lastGuideKind: "unidades",
   });
   assert(isAssistantIdentityInterpret(interpret), `${text}: assistant_identity`);
   assert.equal(interpret.route, "info_guides", `${text}: ruta directa`);
@@ -45,7 +49,7 @@ for (const text of identityCases) {
     text,
     null,
     null,
-    "",
+    unitActiveThread,
     interpret,
   );
   assert.match(reply.message, /^Soy Kira,/);
@@ -53,9 +57,9 @@ for (const text of identityCases) {
   assert.equal(reply.fallback, null);
   const resolved = await resolveTurnExecutor(
     text,
-    "Kira: Para usar Mantenimiento, entrá a Utilidades.",
+    unitActiveThread,
     null,
-    { lastGuideKind: "mantenimiento" },
+    { lastGuideKind: "unidades" },
   );
   assert.equal(resolved.executor, "info_guides");
   assert.equal(resolved.ruleId, "assistant_identity");

@@ -48,6 +48,12 @@ describe("looksLikeMetaConversationalReply", () => {
     assert.equal(looksLikeFleetUnitSearchInput("Sigo acá"), false);
     assert.equal(looksLikeSubstantiveCustomerMessage("Sigo acá"), false);
   });
+
+  it("no busca identidad social («Preséntate») en flota", () => {
+    assert.equal(extractFreeTextUnitSearchCandidate("Preséntate"), null);
+    assert.equal(extractFreeTextUnitSearchCandidate("presentate"), null);
+    assert.equal(looksLikeFleetUnitSearchInput("Preséntate"), false);
+  });
 });
 
 describe("looksLikeIdleFollowupPushbackCandidate", () => {

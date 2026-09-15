@@ -722,7 +722,7 @@ category: guideKind=informes (pantallas) o guideKind=opciones con V2 (sección).
 
 route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (${modules}).
 route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
-Una pregunta social sobre el nombre o identidad del asistente NO es una consulta de módulo ni requiere aclaración: se resuelve como assistant_identity en la frontera semántica.
+Una pregunta social sobre el nombre, identidad o presentación del asistente (p. ej. «¿cómo te llamás?», «quién sos», «preséntate») NO es consulta de módulo ni nombre de unidad: se resuelve como assistant_identity en la frontera semántica.
 NUNCA route=info_guides para "necesito un certificado", "certificado de cobertura", "mandame el certificado".
 
 need:
@@ -3861,7 +3861,9 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       interpret.guideKind === "combustible" ||
       interpret.guideKind === "mantenimiento" ||
       interpret.guideKind === "transporte_publico" ||
-      interpret.guideKind === "hojas_de_ruta");
+      interpret.guideKind === "hojas_de_ruta" ||
+      interpret.guideKind === "unidades" ||
+      interpret.route === "continue_normal");
   if (!shouldCheckFrontier) {
     return interpret;
   }
@@ -3892,7 +3894,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Planilla de horarios, resumen de servicio u otro informe de Transporte de pasajeros del menú Informes → informes_consulta (nunca crear hoja de turno).",
       "Cargar combustible en una unidad es combustible_operativo: continuar al flujo operativo para capturar unidad/patente; nunca info_guides, Informes, Paneles ni Opciones.",
       "Ubicación, GPS, ignición o estado en vivo de una unidad/patente es unidad_gps_vivo: continuar a Unidades, nunca pedir aclaración de KB.",
-      "Preguntar el nombre, quién es o cómo se llama el asistente es identidad_asistente; no es una consulta sobre módulos.",
+      "Preguntar el nombre, quién es, cómo se llama, o pedir que se presente («preséntate», «presentate», «quién sos») es identidad_asistente; nunca es búsqueda de unidad ni módulo.",
       "Una pantalla nombrada como Utilidades → Novedades, Utilidades → Auditoría u otro módulo inequívoco del Bloque 2 → guideKind=utilidades_bloque_2, incluso si su corpus está apagado; articleIds=[] si está apagado.",
       "Novedades de un ticket, certificado, mantenimiento u otro trámite NO son la pantalla Utilidades → Novedades.",
       "Si no pertenece claramente a estas fronteras, conservá la familia y la interpretación previas.",
@@ -3923,7 +3925,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                     "Ambos son Informes; nunca son listado ni consulta en vivo de unidades.",
                     "combustible_operativo: quiere cargar combustible ahora; debe continuar al flujo operativo que pide unidad/patente.",
                     "unidad_gps_vivo: pide ubicación, GPS, ignición o estado actual de una unidad/patente.",
-                    "identidad_asistente: pregunta el nombre, quién es o cómo se llama el asistente.",
+                    "identidad_asistente: pregunta el nombre, quién es, cómo se llama, o pide presentación del asistente (preséntate / quién sos).",
                     "Una ruta explícita Utilidades→Novedades o Auditoría en Wara es utilidades_bloque_2.",
                     "Si la intención es clara: route=info_guides, need=procedure, clarifyQuestion=null.",
                     "Si no pertenece a estas fronteras, conservá interpret_previo.",
