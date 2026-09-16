@@ -23,7 +23,7 @@ import {
   platformGuideNeedsSemanticDetailRefine,
   refinePlatformKnowledgeDetailIfNeeded,
 } from "@/lib/infoGuideInterpretAI";
-import { buildAssistantIdentityReply } from "@/lib/assistantIdentity";
+import { buildAssistantIdentityReply, looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 import {
@@ -700,12 +700,21 @@ export async function buildGroundedInfoGuideReplyWithMeta(
 
   // Respuesta social estructurada: no detectar módulos ni consultar corpus.
   if (isAssistantIdentityInterpret(activeInterpret)) {
-    return {
-      message: buildAssistantIdentityReply(),
-      guideKind: null,
-      interpret: activeInterpret,
-      fallback: null,
-    };
+    if (!looksLikeAssistantIdentityQuestion(rawText)) {
+      // Interpret sucio: no devolver «Soy Kira» ante ingreso/cargar número.
+      activeInterpret = {
+        ...activeInterpret,
+        normalTarget: null,
+        reason: `${activeInterpret.reason || "interpret"}|identity_rejected_non_social`,
+      };
+    } else {
+      return {
+        message: buildAssistantIdentityReply(),
+        guideKind: null,
+        interpret: activeInterpret,
+        fallback: null,
+      };
+    }
   }
 
   // Fail-closed del intérprete: respuesta neutra inmediata, sin guards/refine/detect/corpus.

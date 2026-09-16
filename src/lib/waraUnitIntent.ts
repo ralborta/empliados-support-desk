@@ -47,6 +47,7 @@ import {
   type NumericExpectedField,
 } from "@/lib/unitReferenceParser";
 import { classifyTypedLateralQuery } from "@/lib/typedLateralQueries";
+import { looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
 import { classifyOdometerFlowSideQuestion } from "@/lib/pendingConfirmStance";
 import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
@@ -1170,22 +1171,7 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   if (looksLikeMetaConversationalReply(raw)) return null;
   if (looksLikeOutOfScopeSupportClaim(raw)) return null;
   // Bug prod 2026-09-15: «Preséntate» se buscaba en flota como etiqueta de unidad.
-  {
-    const identityNorm = raw
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[¡!¿?.,;:]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (
-      /^(presentate|presentate por favor|presentate porfa|quien sos|quien eres|quien sos vos|como te llamas|como te llamas vos|cual es tu nombre|como es tu nombre)$/.test(
-        identityNorm,
-      )
-    ) {
-      return null;
-    }
-  }
+  if (looksLikeAssistantIdentityQuestion(raw)) return null;
   // Bug real, producción 2026-08-07: "CONFIRMO" (pedido explícito del bot) matcheaba
   // como nombre propio de unidad → "No encontré ninguna unidad que coincida con «CONFIRMO»"
   // en vez de registrar el odómetro pendiente.

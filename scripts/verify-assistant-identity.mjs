@@ -67,17 +67,26 @@ for (const text of identityCases) {
   console.log(JSON.stringify({ text, target: interpret.normalTarget, reply: reply.message }));
 }
 
+import { looksLikeAssistantIdentityQuestion } from "../src/lib/assistantIdentity.ts";
+
 for (const text of [
   "¿Cómo cambio el nombre de una unidad?",
   "¿Cómo se llama el informe de recorridos?",
+  "Cómo ingreso a la plataforma?",
+  "Cómo cargo mi número para que reconozcas que soy cliente?",
 ]) {
+  assert.equal(
+    looksLikeAssistantIdentityQuestion(text),
+    false,
+    `${text}: gate determinista no-identidad`,
+  );
   const interpret = await interpretPlatformKnowledgeTurn({
     selectionText: text,
-    threadText: "",
+    threadText: unitActiveThread,
   });
   assert(
     !isAssistantIdentityInterpret(interpret),
-    `${text}: no confundir nombre de entidad/módulo con identidad`,
+    `${text}: interpret no debe ser assistant_identity`,
   );
 }
 

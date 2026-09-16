@@ -14,6 +14,7 @@
  * Utilidades — Bloque 2: clasificación y entrega solo si WARA_UTILIDADES_BLOQUE2_KB_ENABLED=true.
  */
 import OpenAI from "openai";
+import { looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
 import {
   OPENAI_DEFAULT_TIMEOUT_MS,
   logLlmStageError,
@@ -3894,7 +3895,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Planilla de horarios, resumen de servicio u otro informe de Transporte de pasajeros del menú Informes → informes_consulta (nunca crear hoja de turno).",
       "Cargar combustible en una unidad es combustible_operativo: continuar al flujo operativo para capturar unidad/patente; nunca info_guides, Informes, Paneles ni Opciones.",
       "Ubicación, GPS, ignición o estado en vivo de una unidad/patente es unidad_gps_vivo: continuar a Unidades, nunca pedir aclaración de KB.",
-      "Preguntar el nombre, quién es, cómo se llama, o pedir que se presente («preséntate», «presentate», «quién sos») es identidad_asistente; nunca es búsqueda de unidad ni módulo.",
+      "Preguntar el nombre, quién es, cómo se llama, o pedir que se presente («preséntate», «presentate», «quién sos») es identidad_asistente; nunca es búsqueda de unidad ni módulo. NO uses identidad_asistente para ingreso a la plataforma, cargar número de WhatsApp ni «reconocé que soy cliente».",
       "Una pantalla nombrada como Utilidades → Novedades, Utilidades → Auditoría u otro módulo inequívoco del Bloque 2 → guideKind=utilidades_bloque_2, incluso si su corpus está apagado; articleIds=[] si está apagado.",
       "Novedades de un ticket, certificado, mantenimiento u otro trámite NO son la pantalla Utilidades → Novedades.",
       "Si no pertenece claramente a estas fronteras, conservá la familia y la interpretación previas.",
@@ -3925,7 +3926,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                     "Ambos son Informes; nunca son listado ni consulta en vivo de unidades.",
                     "combustible_operativo: quiere cargar combustible ahora; debe continuar al flujo operativo que pide unidad/patente.",
                     "unidad_gps_vivo: pide ubicación, GPS, ignición o estado actual de una unidad/patente.",
-                    "identidad_asistente: pregunta el nombre, quién es, cómo se llama, o pide presentación del asistente (preséntate / quién sos).",
+                    "identidad_asistente: SOLO pregunta el nombre, quién es, cómo se llama, o pide presentación del asistente (preséntate / quién sos). NUNCA es «cómo ingreso a la plataforma», «cargar mi número» ni «para que me reconozcas como cliente».",
                     "Una ruta explícita Utilidades→Novedades o Auditoría en Wara es utilidades_bloque_2.",
                     "Si la intención es clara: route=info_guides, need=procedure, clarifyQuestion=null.",
                     "Si no pertenece a estas fronteras, conservá interpret_previo.",
@@ -3979,6 +3980,10 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       : null;
     if (!classification || classification === "sin_cambio") return interpret;
     if (classification === "identidad_asistente") {
+      // Fail-safe: el LLM a veces marca «cómo ingreso» / «reconocé cliente» como identidad.
+      if (!looksLikeAssistantIdentityQuestion(text)) {
+        return interpret;
+      }
       return {
         ...interpret,
         route: "info_guides",
@@ -4522,6 +4527,18 @@ export function isAssistantIdentityInterpret(
   interpret: PlatformKnowledgeInterpret | null | undefined,
 ): boolean {
   return interpret?.normalTarget === "assistant_identity";
+}
+
+/**
+ * Identidad oficial solo si el interpret lo dice Y el texto es presentación social.
+ * Evita el loop «Soy Kira» ante ingreso a plataforma / cargar número.
+ */
+export function shouldReplyAssistantIdentity(
+  interpret: PlatformKnowledgeInterpret | null | undefined,
+  text: string | undefined | null,
+): boolean {
+  if (!isAssistantIdentityInterpret(interpret)) return false;
+  return looksLikeAssistantIdentityQuestion(text);
 }
 
 /** Respuesta cuando el intérprete pide aclarar o no hay KB usable. */

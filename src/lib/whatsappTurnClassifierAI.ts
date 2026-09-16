@@ -336,13 +336,20 @@ export async function resolveTurnExecutor(
       };
     }
     if (isAssistantIdentityInterpret(kbInterpret)) {
-      return {
-        executor: "info_guides",
-        source: "ai",
-        aiConfidence: kbInterpret?.confidence,
-        interpret: kbInterpret,
-        ruleId: "assistant_identity",
-      };
+      const { looksLikeAssistantIdentityQuestion } = await import(
+        "@/lib/assistantIdentity"
+      );
+      if (!looksLikeAssistantIdentityQuestion(selectionText)) {
+        // Interpret sucio: no enrutar a Soy Kira.
+      } else {
+        return {
+          executor: "info_guides",
+          source: "ai",
+          aiConfidence: kbInterpret?.confidence,
+          interpret: kbInterpret,
+          ruleId: "assistant_identity",
+        };
+      }
     }
     if (isOperationalUnitInterpret(kbInterpret)) {
       return {

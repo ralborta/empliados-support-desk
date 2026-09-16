@@ -2005,27 +2005,33 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
+  // Acceso a plataforma / cargar número para reconocimiento — ANTES de identidad.
+  // Bug prod 2026-09-15: tras idle, estas preguntas caían en loop «Soy Kira».
+  {
+    const {
+      looksLikePlatformAccessOrPhoneRegisterQuestion,
+      buildPlatformAccessOrPhoneRegisterReply,
+    } = await import("@/lib/assistantIdentity");
+    if (looksLikePlatformAccessOrPhoneRegisterQuestion(selectionText)) {
+      return {
+        message: buildPlatformAccessOrPhoneRegisterReply(selectionText),
+        executor: "info_guides",
+        ok: true,
+      };
+    }
+  }
+
   // Identidad social (nombre / presentate) ANTES de continuidad de unidad.
   // Bug prod 2026-09-15: con unidad activa, «Preséntate» iba a flota
   // («Unidad no encontrada… Preséntate») y «¿cómo te llamás?» improvisaba «Soy Lucas».
-  if (!isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread)) {
-    const {
-      interpretPlatformKnowledgeTurn,
-      isAssistantIdentityInterpret,
-    } = await import("@/lib/infoGuideInterpretAI");
-    const identityInterpret = await interpretPlatformKnowledgeTurn({
-      selectionText,
-      threadText: threadCtx.classificationThread,
-      pendingActionType: pendingAction?.type ?? null,
-      lastGuideKind: lastGuideCtx?.kind ?? null,
-      lastGuideCategory: lastGuideCtx?.category ?? null,
-      lastGuideReportId: lastGuideCtx?.reportId ?? null,
-      lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
-    });
-    if (isAssistantIdentityInterpret(identityInterpret)) {
+  // Solo patrones sociales explícitos — no LLM (evita loop con ingreso/reconocé).
+  {
+    const { looksLikeAssistantIdentityQuestion } = await import(
+      "@/lib/assistantIdentity"
+    );
+    if (looksLikeAssistantIdentityQuestion(selectionText)) {
       const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
-        need: identityInterpret?.need,
-        clarifyQuestion: identityInterpret?.clarifyQuestion ?? undefined,
+        need: "definition",
         normalTarget: "assistant_identity",
       });
       const msg = messageFromPayload(execResult);
@@ -2711,6 +2717,9 @@ export async function runTurnExecutorPhase(params: {
       isOperationalUnitInterpret,
       shouldRouteInterpretToInfoGuides,
     } = await import("@/lib/infoGuideInterpretAI");
+    const { looksLikeAssistantIdentityQuestion } = await import(
+      "@/lib/assistantIdentity"
+    );
     const { classifyTurnExecutor } = await import("@/lib/whatsappTurnRouter");
     const kbInterpret = await interpretPlatformKnowledgeTurn({
       selectionText,
@@ -2721,7 +2730,10 @@ export async function runTurnExecutorPhase(params: {
       lastGuideReportId: lastGuideCtx?.reportId ?? null,
       lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
     });
-    if (isAssistantIdentityInterpret(kbInterpret)) {
+    if (
+      isAssistantIdentityInterpret(kbInterpret) &&
+      looksLikeAssistantIdentityQuestion(selectionText)
+    ) {
       const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
         need: kbInterpret?.need,
         clarifyQuestion: kbInterpret?.clarifyQuestion ?? undefined,
