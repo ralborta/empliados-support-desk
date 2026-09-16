@@ -699,13 +699,15 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   let activeInterpret = interpret ?? null;
 
   // Respuesta social estructurada: no detectar módulos ni consultar corpus.
-  if (isAssistantIdentityInterpret(activeInterpret)) {
+  if (activeInterpret && isAssistantIdentityInterpret(activeInterpret)) {
     if (!looksLikeAssistantIdentityQuestion(rawText)) {
       // Interpret sucio: no devolver «Soy Kira» ante ingreso/cargar número.
+      const prev = activeInterpret;
       activeInterpret = {
-        ...activeInterpret,
+        ...prev,
+        route: prev.route ?? "continue_normal",
         normalTarget: null,
-        reason: `${activeInterpret.reason || "interpret"}|identity_rejected_non_social`,
+        reason: `${prev.reason || "interpret"}|identity_rejected_non_social`,
       };
     } else {
       return {
