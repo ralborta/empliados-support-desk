@@ -8,6 +8,7 @@ import {
   looksLikeMetaConversationalReply,
   looksLikeSubstantiveCustomerMessage,
 } from "./waraApi";
+import { isBarePlatePrefixHint } from "./wara";
 import {
   IDLE_CLOSE_MESSAGE,
   IDLE_NUDGE_MESSAGE,
@@ -124,6 +125,21 @@ describe("shouldHandleIdleFollowupPushback", () => {
     assert.equal(turn?.idlePushback, false);
     assert.match(turn!.message, /Seguimos con la consulta de unidad\/GPS/i);
     assert.doesNotMatch(turn!.message, /NKL 952|Estado GPS/i);
+  });
+
+  it("«Zi» tras nudge idle → afirmación, no prefijo de patente", () => {
+    const thread = [
+      "Atilio: Para gestionar alarmas en la app Wara, seguí estos pasos...",
+      `Atilio: ${IDLE_NUDGE_MESSAGE}`,
+    ].join("\n");
+    assert.equal(isBarePlatePrefixHint("Zi"), false);
+    assert.equal(isBarePlatePrefixHint("zi"), false);
+    assert.equal(looksLikeIdleNudgeAffirmation("Zi", thread), true);
+    assert.equal(looksLikeIdleNudgeAffirmation("zi", thread), true);
+    const turn = resolveIdleFollowupMetaTurn({ selectionText: "Zi", threadText: thread });
+    assert.ok(turn);
+    assert.equal(turn?.idlePushback, false);
+    assert.doesNotMatch(turn!.message, /Unidad no encontrada|patente que empiece con ZI/i);
   });
 
   it("«Si, sigo aqui» tras nudge idle → afirmación + continuidad", () => {

@@ -476,14 +476,14 @@ export function looksLikeIdleNudgeAffirmation(
   if (hasOperationalPayload(raw)) return false;
   const t = normIdleText(raw);
   if (
-    /^(si|sip|sii|dale|ok|okey|okay|bueno|perfecto|listo|aca estoy|aqui estoy|presente|seguimos|sigamos)[\s!.,]*$/.test(
+    /^(si|sip|sii|zi|zii|dale|ok|okey|okay|bueno|perfecto|listo|aca estoy|aqui estoy|presente|seguimos|sigamos)[\s!.,]*$/.test(
       t,
     )
   ) {
     return true;
   }
   // «Si, sigo aquí» / «sí estoy acá» (bug real: no matcheaba y perdía el tema)
-  if (/^(si|sip|dale|ok|bueno)\s+(sigo|estoy)\s+(aca|aqui)\b/.test(t)) return true;
+  if (/^(si|sip|zi|dale|ok|bueno)\s+(sigo|estoy)\s+(aca|aqui)\b/.test(t)) return true;
   if (/^(sigo|estoy)\s+(aca|aqui)(\s+(todavia|aun))?[\s!.,]*$/.test(t)) return true;
   return false;
 }

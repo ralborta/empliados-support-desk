@@ -288,6 +288,12 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "nope",
   "nel",
   "nah",
+  // Bug prod 2026-09-17: «Zi» tras idle nudge → «patente que empiece con ZI».
+  "zi",
+  "zii",
+  "si",
+  "sip",
+  "sii",
   // Bug real, producción 2026-07-31: "La veo detenida" → prefijo VEO (verbo "veo", no patente).
   "veo",
   // Bug real, producción 2026-08-24: "Gps" solo → prefijo GPS → "unidad no encontrada"
@@ -2776,6 +2782,9 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
       "si",
       "sii",
       "sip",
+      // Typo WhatsApp muy común: «Zi» = «Sí» (bug prod 2026-09-17 → prefijo patente ZI).
+      "zi",
+      "zii",
       "dale",
       "dalesi",
       "sidale",
