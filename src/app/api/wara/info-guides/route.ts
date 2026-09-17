@@ -16,9 +16,12 @@ import {
   looksLikeSoftFlowRestart,
   looksLikeInfoGuideModulePick,
   looksLikeTechnicalSupportRequest,
+  looksLikeChangeCompanyRequest,
+  resetCustomerCompanyMenu,
   threadHasGenericPlatformMenuOffer,
 } from "@/lib/waraApi";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
+import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 
 const bodySchema = z
   .object({
@@ -131,6 +134,33 @@ export async function POST(req: NextRequest) {
 
   const rawPhone = (parsed.data.phone ?? parsed.data.from ?? "").trim();
   const rawText = (parsed.data.rawText ?? parsed.data.body ?? "").trim();
+
+  // Bug prod 2026-09-17: con lastGuide Paneles, «reiniciar empresa» caía a info_guides
+  // y reinyectaba Alarmas en vez de abrir el menú multiempresa.
+  if (
+    looksLikeChangeCompanyRequest(rawText) ||
+    (await looksLikeChangeCompanyRequestHybrid(rawText))
+  ) {
+    const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
+    await appendOutboundBotMessage(rawPhone, reset.message, {
+      source: "wara_info_guides_change_company",
+      rawText,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message: reset.message,
+        changeCompany_s: "true",
+        requiresCompanySelection: reset.requiresCompanySelection,
+        requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
+        informational: true,
+        informational_s: "true",
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
 
   if (looksLikeFlowControlCommand(rawText) || looksLikeSoftFlowRestart(rawText)) {
     return NextResponse.json(

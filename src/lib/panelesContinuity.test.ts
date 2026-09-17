@@ -70,15 +70,22 @@ describe("paneles_continuity residual", () => {
   });
 
   it("sí continúa ante follow-up de alarma", () => {
-    const next = applyPlatformGuideInterpretGuards(
-      baseInterpret(),
-      "¿cómo silencio la alarma?",
-      "",
-      opts,
-    );
-    assert.match(String(next.reason), /paneles_continuity/);
-    assert.equal(next.guideKind, "paneles");
-    assert.ok(next.articleIds.includes("pn-alarmas"));
+    const prev = process.env.WARA_PANELES_KB_ENABLED;
+    process.env.WARA_PANELES_KB_ENABLED = "true";
+    try {
+      const next = applyPlatformGuideInterpretGuards(
+        baseInterpret(),
+        "¿cómo silencio la alarma?",
+        "",
+        opts,
+      );
+      assert.match(String(next.reason), /paneles_continuity/);
+      assert.equal(next.guideKind, "paneles");
+      assert.ok(next.articleIds.includes("pn-alarmas"));
+    } finally {
+      if (prev === undefined) delete process.env.WARA_PANELES_KB_ENABLED;
+      else process.env.WARA_PANELES_KB_ENABLED = prev;
+    }
   });
 });
 

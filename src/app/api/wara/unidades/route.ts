@@ -1136,8 +1136,7 @@ export async function POST(req: NextRequest) {
 
   if (
     looksLikeFlowControlCommand(rawText.trim()) ||
-    looksLikeSoftFlowRestart(rawText.trim()) ||
-    looksLikeChangeCompanyRequest(rawText.trim())
+    looksLikeSoftFlowRestart(rawText.trim())
   ) {
     return NextResponse.json(
       {
@@ -1146,6 +1145,27 @@ export async function POST(req: NextRequest) {
         summaryText: "",
         message: "",
         skipResponse_s: "true",
+        action: "none" as const,
+        unidadesCount: 0,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  // Bug prod 2026-09-17: no silenciar «reiniciar empresa» (antes skip vacío);
+  // ejecutar el menú multiempresa como en mantenimiento / info-guides.
+  if (looksLikeChangeCompanyRequest(rawText.trim())) {
+    const { resetCustomerCompanyMenu } = await import("@/lib/waraApi");
+    const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText: reset.message,
+        message: reset.message,
+        changeCompany_s: "true",
+        requiresCompanySelection: reset.requiresCompanySelection,
+        requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
         action: "none" as const,
         unidadesCount: 0,
       },
