@@ -159,3 +159,37 @@ export async function setLastInfoGuideContext(
     return false;
   }
 }
+
+/** Limpia lastInfoGuide (reinicio de empresa / soft reset). */
+export async function clearLastInfoGuideContext(
+  prisma: PrismaClient,
+  phone: string,
+): Promise<boolean> {
+  const normalized = normalizeWhatsAppPhone(phone);
+  if (!normalized) return false;
+  try {
+    const customer = await prisma.customer.findUnique({
+      where: { phone: normalized },
+      select: { sessionNotebook: true },
+    });
+    if (!customer?.sessionNotebook || typeof customer.sessionNotebook !== "object") {
+      return true;
+    }
+    const prev = {
+      ...(customer.sessionNotebook as Record<string, unknown>),
+    } as Record<string, unknown>;
+    if (!("lastInfoGuide" in prev)) return true;
+    delete prev.lastInfoGuide;
+    await prisma.customer.update({
+      where: { phone: normalized },
+      data: { sessionNotebook: prev as unknown as Prisma.InputJsonValue },
+    });
+    return true;
+  } catch (err) {
+    console.error("[lastInfoGuideContext] clear failed", {
+      phone: normalized,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}

@@ -2017,7 +2017,7 @@ export function looksLikeGreeting(text: string | undefined | null): boolean {
   if (!norm) return true;
   // Bug real 2026-09-02: "Buen dia" (singular, sin tilde) NO matcheaba "buenos dias"
   // → el router lo mandaba a búsqueda de unidad ("Unidad no encontrada «Buen dia»").
-  return /^(hola|buenas|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches)|hey|que tal|menu|inicio)(\s+(atilio|kira))?$/.test(
+  return /^(hola|buenas|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches)|hey|que tal|como te va|como andas|como estas|menu|inicio)(\s+(atilio|kira))?$/.test(
     norm,
   );
 }
@@ -3429,6 +3429,10 @@ export async function resetCustomerCompanyMenu(
     });
     await clearActiveUnit(prisma, rawPhone);
     await clearPendingAction(prisma, rawPhone);
+    // Bug prod 2026-09-17: lastInfoGuide (p. ej. paneles/pn-alarmas) sobrevivía al
+    // reinicio y contaminaba el «1» post-empresa y saludos siguientes.
+    const { clearLastInfoGuideContext } = await import("@/lib/lastInfoGuideContext");
+    await clearLastInfoGuideContext(prisma, rawPhone).catch(() => false);
     await prisma.customer.update({
       where: { id: customer.id },
       data: {
@@ -3438,6 +3442,11 @@ export async function resetCustomerCompanyMenu(
         waraSessionAt: null,
       },
     });
+  } else {
+    await clearActiveUnit(prisma, rawPhone);
+    await clearPendingAction(prisma, rawPhone);
+    const { clearLastInfoGuideContext } = await import("@/lib/lastInfoGuideContext");
+    await clearLastInfoGuideContext(prisma, rawPhone).catch(() => false);
   }
   const lookup = await obtenerEmpresaPorNumero(rawPhone);
   const contacts = lookup.contactos ?? [];

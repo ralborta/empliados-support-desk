@@ -89,6 +89,7 @@ import {
   filterDeliverablePanelesArticleIds,
   itemIdFromPanelesArticleId,
   buildPanelesDisabledChannelReply,
+  looksLikePanelesGuideFollowupQuestion,
 } from "@/lib/panelesKnowledge";
 import {
   OPCIONES_V2_ARTICLES,
@@ -2650,8 +2651,8 @@ function correctAlertasContinuityMisroute(
 
 function correctPanelesContinuityMisroute(
   interpret: PlatformKnowledgeInterpret,
-  _selectionText: string,
-  _threadText: string,
+  selectionText: string,
+  threadText: string,
   opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret {
   if (opts?.lastGuideKind !== "paneles") return interpret;
@@ -2666,6 +2667,16 @@ function correctPanelesContinuityMisroute(
     return interpret;
   }
   if (interpret.route === "continue_normal" && interpret.guideKind == null) {
+    return interpret;
+  }
+  // Solo continuidad si el cliente sigue la guía Paneles (no saludo / reinicio / "1").
+  if (
+    !looksLikePanelesGuideFollowupQuestion(
+      selectionText,
+      threadText,
+      opts?.lastGuideKind,
+    )
+  ) {
     return interpret;
   }
   const lastIds = opts?.lastGuideArticleIds ?? [];

@@ -772,6 +772,8 @@ export async function runTurnExecutorPhase(params: {
   if (looksLikeSoftFlowRestart(selectionText)) {
     await clearPendingAction(prisma, rawPhone);
     await clearActiveUnit(prisma, rawPhone).catch(() => undefined);
+    const { clearLastInfoGuideContext } = await import("@/lib/lastInfoGuideContext");
+    await clearLastInfoGuideContext(prisma, rawPhone).catch(() => false);
     const { buildAtilioStructuredGreeting } = await import("@/lib/waraWhatsAppFormat");
     const { resolveCustomerByWaraPhone } = await import("@/lib/waraApi");
     const peek = await resolveCustomerByWaraPhone(prisma, rawPhone);

@@ -530,3 +530,55 @@ REGLAS DURAS Paneles (prioridad absoluta):
 - status needs_validation / anomaly: no completes por analogía; decí el límite.
 - Forma según need; execute = pn-ejecucion-no-disponible.
 - NUNCA digas que silenciaste, resolviste, enviaste o creaste algo en la cuenta.`.trim();
+
+/**
+ * Continuación corta de una guía Paneles ya abierta (lastGuideKind=paneles).
+ * Bug prod 2026-09-17: sin este gate, paneles_continuity reinyectaba pn-alarmas
+ * ante saludo («Cómo te va?»), «reiniciar empresa» y «1» suelto.
+ */
+export function looksLikePanelesGuideFollowupQuestion(
+  raw: string | undefined | null,
+  _threadText = "",
+  lastGuideKind?: string | null,
+): boolean {
+  if (lastGuideKind !== "paneles") return false;
+  const text = String(raw ?? "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:"'`´]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || text.length > 220) return false;
+
+  // Admin / menú empresa / dígito suelto / saludo social → nunca continuidad.
+  if (/^\d{1,2}$/.test(text)) return false;
+  if (
+    /\b(reinici\w*|reici\w*|reset|cambiar|cambio)\b/.test(text) &&
+    /\bempresa\b/.test(text)
+  ) {
+    return false;
+  }
+  if (
+    /^(hola|buenas|buen(os)? dias?|buen(a|as)? (tarde|tardes|noche|noches)|hey|que tal|como te va|como andas|como estas|menu|inicio)( (atilio|kira))?$/.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  if (
+    /^(ok|dale|gracias|listo|perfecto|si|sip|zi|sii)\b/.test(text) &&
+    !/\b(alarma|panel|silenci|resolv|gestionar)\b/.test(text) &&
+    text.length < 40
+  ) {
+    return false;
+  }
+
+  if (/\b(panel(es)?|alarma(s)?|notificacion(es)?|silenci\w*|resolv\w*|gestionar)\b/.test(text)) {
+    return true;
+  }
+  if (/^(y |despues|entonces|ahora |tambien|y despues)/.test(text)) return true;
+  if (/\b(donde|como|que|cual|cuando)\b/.test(text) && text.length < 180) return true;
+  if (/\?/.test(String(raw ?? "")) && text.length < 180) return true;
+  return false;
+}
