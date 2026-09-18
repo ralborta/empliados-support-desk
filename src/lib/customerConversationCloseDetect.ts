@@ -24,10 +24,19 @@ export function looksLikeCustomerConversationCloseRequest(
   const t = normCloseText(text ?? "");
   if (!t || t.length > 140) return false;
 
+  // Bug prod 2026-09-18: «Fin» con odómetro pendiente → «Tomé la referencia Fin»
+  // (utteranceUnderstanding) en vez de cerrar. Cierres cortos explícitos.
+  // No incluir «cancelar» solo: ese token cancela CONFIRMO pendiente más abajo.
+  if (
+    /^(fin|basta|chau|chao|adios|hasta luego|nos vemos|bye)$/.test(t)
+  ) {
+    return true;
+  }
+
   // Singular o plural: ticket(s), caso(s), etc. Bug 2026-08-07: "CERRAR TICKETS"
   // no matcheaba (solo "ticket") y caía a búsqueda de flota («no encontré … TICKETS»).
   const caseWord =
-    "(conversacion(es)?|charlas?|chats?|casos?|tickets?|consultas?|reclamos?)";
+    "(conversacion(es)?|charlas?|chats?|casos?|tickets?|consultas?|reclamos?|tramites?)";
 
   if (
     new RegExp(
@@ -54,6 +63,14 @@ export function looksLikeCustomerConversationCloseRequest(
   }
 
   if (/\b(quiero|necesito|me gustar[ií]a|pod[eé]s|podes)\s+(cerrar|dar por cerrad)/.test(t)) {
+    return true;
+  }
+
+  // «Dato para cerrar la consulta o trámite en curso» (prod 2026-09-18).
+  if (
+    /\b(dato|opcion|opci[oó]n)\s+(para\s+)?(cerrar|finalizar|terminar)\b/.test(t) &&
+    new RegExp(`\\b${caseWord}\\b`).test(t)
+  ) {
     return true;
   }
 

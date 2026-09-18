@@ -193,6 +193,39 @@ export function looksLikeGpsStatusContinuityReply(text: string | undefined | nul
   return /\b(seguimos|continuamos)\s+con\s+(el\s+)?(estado|la\s+unidad)\b/.test(t);
 }
 
+/**
+ * Tras afirmar «seguimos con el estado», no reimprimir el mismo GPS:
+ * ofrecer el siguiente paso útil.
+ * Bug prod 2026-09-18: «Seguimos en el estado de la unidad» → re-dump idéntico.
+ */
+export function buildGpsContinuityNextStepReply(unitLabel?: string | null): string {
+  const label = String(unitLabel ?? "").trim();
+  const unitBit = label ? ` de *${label}*` : "";
+  return [
+    `Seguimos con el estado${unitBit}.`,
+    "",
+    "¿Qué necesitás ahora?",
+    "• Otra unidad (pasame patente o interno)",
+    "• Que un asesor revise este caso",
+    "• Cambiar de tema (odómetro, certificado, mantenimiento…)",
+  ].join("\n");
+}
+
+/** Pedido de cambiar de tema tras el cierre GPS. */
+export function looksLikeGpsTopicChangeReply(text: string | undefined | null): boolean {
+  const t = (text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!t || t.length > 120) return false;
+  if (/\b(seguimos|continuamos|sigamos)\b/.test(t)) return false;
+  return (
+    /^(cambiamos de tema|cambiar de tema|otro tema|otra consulta)[!?.]*$/.test(t) ||
+    /\bcambiamos de tema\b/.test(t)
+  );
+}
+
 /** Patente de la unidad del último resumen GPS en el hilo (sin depender de activeUnit en DB). */
 export function resolvePlateFromRecentGpsThread(threadText: string): string | null {
   if (!threadHasRecentGpsContext(threadText)) return null;

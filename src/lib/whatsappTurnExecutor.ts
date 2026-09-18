@@ -131,6 +131,7 @@ import {
   threadHasRecentCustomerMeterUpdateIntent,
   threadHasRecentCertificateSuccess,
   threadHasRecentMaintenanceSuccess,
+  extractLastPlateFromThread,
 } from "@/lib/wara";
 import {
   getActiveUnit,
@@ -149,6 +150,7 @@ import {
   extractExplicitUnitNameFromText,
   extractMovilIdFromUnitMessage,
   resolveExecutorOverStaleMaintenancePlateSelection,
+  looksLikePlatformUnitVisibilityComplaint,
 } from "@/lib/waraUnitIntent";
 import { waitUntil } from "@vercel/functions";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
@@ -233,7 +235,10 @@ import {
 import {
   isPassthroughGpsWhatsAppMessage,
   looksLikeGpsStatusContinuityReply,
+  looksLikeGpsTopicChangeReply,
+  buildGpsContinuityNextStepReply,
   resolvePlateFromRecentGpsThread,
+  threadHasRecentGpsContext,
 } from "@/lib/waraGpsSummary";
 import { isStructuredWhatsAppTemplate } from "@/lib/waraWhatsAppFormat";
 import type { PendingActionRecord } from "@/lib/pendingAction";
@@ -2061,15 +2066,100 @@ export async function runTurnExecutorPhase(params: {
     sessionNotebook: sessionNotebookForNl,
     activeUnitPlate: activeUnitForNl?.plate,
   });
+  const recentGpsCtx = threadHasRecentGpsContext(threadCtx.classificationThread);
   const gpsContinuityReply = looksLikeGpsStatusContinuityReply(selectionText);
-  const threadGpsPlate = gpsContinuityReply
-    ? resolvePlateFromRecentGpsThread(threadCtx.classificationThread)
-    : null;
+  const gpsTopicChange = looksLikeGpsTopicChangeReply(selectionText);
+  const platformVisibilityComplaint = looksLikePlatformUnitVisibilityComplaint(selectionText);
+
+  // Bug prod 2026-09-18: «No la veo en mi sistema» tras GPS → buscaba «veo» / abría odómetro.
+  if (recentGpsCtx && platformVisibilityComplaint) {
+    const plate =
+      persistedContextPlate ??
+      resolvePlateFromRecentGpsThread(threadCtx.classificationThread) ??
+      extractLastPlateFromThread(threadCtx.classificationThread);
+    const label = plate ? plate.replace(/(.{3})(.{3})(.{2})/, "$1 $2 $3").trim() : null;
+    console.info(
+      `[gps-visibility] phone=${rawPhone.slice(0, 4)}… plate=${plate ?? "n/a"} keep_gps_context`,
+    );
+    return {
+      message: [
+        label
+          ? `Entendido: en Wara la unidad *${label}* tiene el estado que te pasé, pero vos no la ves en tu sistema.`
+          : "Entendido: el estado que te pasé es el de Wara, pero vos no la ves en tu sistema.",
+        "",
+        "Puedo dejar el caso para que un asesor lo revise con tu pantalla, o seguimos con otra unidad.",
+        "¿Querés que lo escale a un asesor, o me pasás otra patente/interno?",
+      ].join("\n"),
+      executor: "unidades",
+      ok: true,
+    };
+  }
+
+  // Bug prod 2026-09-18: «Seguimos en el estado…» reimprimía el mismo GPS.
+  if (recentGpsCtx && gpsContinuityReply) {
+    const plate =
+      persistedContextPlate ??
+      resolvePlateFromRecentGpsThread(threadCtx.classificationThread) ??
+      extractLastPlateFromThread(threadCtx.classificationThread);
+    const label = plate
+      ? plate.replace(/([A-Z0-9]{2,3})([A-Z0-9]{3})([A-Z0-9]{0,2})/i, (_, a, b, c) =>
+          [a, b, c].filter(Boolean).join(" "),
+        )
+      : null;
+    console.info(
+      `[gps-continuity] phone=${rawPhone.slice(0, 4)}… plate=${plate ?? "n/a"} next_step_no_redump`,
+    );
+    return {
+      message: buildGpsContinuityNextStepReply(label),
+      executor: "unidades",
+      ok: true,
+    };
+  }
+
+  if (recentGpsCtx && gpsTopicChange) {
+    const { buildAtilioStructuredGreeting } = await import("@/lib/waraWhatsAppFormat");
+    const peek = await resolveCustomerByWaraPhone(prisma, rawPhone).catch(() => null);
+    return {
+      message: buildAtilioStructuredGreeting({
+        threadText: threadCtx.classificationThread,
+        companyName: peek?.customer?.companyName?.trim() || null,
+      }),
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  const threadGpsPlate = null;
   const effectiveContextPlate = persistedContextPlate ?? threadGpsPlate ?? null;
   const hasPersistedContextUnit = !!effectiveContextPlate;
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
   );
+  // Bug prod 2026-09-18: tras GPS, «M300-80» reabría odómetro pendiente en vez de estado.
+  if (
+    recentGpsCtx &&
+    hasPendingWrite &&
+    !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
+    !looksLikeHorometerOnlyIntent(selectionText) &&
+    !looksLikeBareMeterValue(selectionText) &&
+    (looksLikeUnitNameInMessage(selectionText) ||
+      !!detectLoosePlate(selectionText) ||
+      looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+      looksLikeLiveUnitConsultIntent(selectionText))
+  ) {
+    console.info(
+      `[gps-context] phone=${rawPhone.slice(0, 4)}… unit_token_keeps_gps_over_pending_write`,
+    );
+    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey, {
+      utteranceAction: "unit_status_read",
+    });
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
+    }
+  }
+
   // Pivot a otra unidad: limpiar contexto — excepto certificado en CONFIRMO (sigue en certificados).
   if (looksLikeAnotherUnitConsultRequest(selectionText)) {
     if (

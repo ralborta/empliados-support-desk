@@ -74,6 +74,7 @@ const PUSH_SUITES = [
   "verify-platform-access-routing.mjs",
   "verify-odoo-partner-name-match.mjs",
   "verify-conversation-closing.mjs",
+  "verify-kira-memory-p0.mjs",
   "verify-atilio-reactivate-on-close.mjs",
   "verify-generic-unit-consult-and-ticket-info.mjs",
   "verify-session-unit-continuity.mjs",

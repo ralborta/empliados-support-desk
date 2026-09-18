@@ -619,6 +619,13 @@ const STOPWORDS = new Set([
   "mostrame",
   "mostrá",
   "ver",
+  "veo",
+  "ves",
+  "vemos",
+  "aparece",
+  "figura",
+  "muestra",
+  "sistema",
   "todas",
   "todo",
   "como",
@@ -792,15 +799,57 @@ const TIME_OF_DAY_SEARCH_TOKENS = new Set([
   "anteayer",
 ]);
 
+/**
+ * Queja de visibilidad en la plataforma del cliente tras un GPS (no es búsqueda de flota).
+ * Bug prod 2026-09-18: «No la veo en mi sistema» → buscaba unidad «veo».
+ */
+export function looksLikePlatformUnitVisibilityComplaint(
+  text: string | undefined | null,
+): boolean {
+  const t = String(text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t || t.length > 160) return false;
+  if (detectLoosePlate(t) || looksLikeUnitNameInMessage(t)) return false;
+
+  const negSee =
+    /\b(no\s+(la|lo|las|los)?\s*(veo|encuentro|aparece|figura|muestra)|no\s+aparece|no\s+figura|no\s+esta|no\s+está)\b/.test(
+      t,
+    );
+  if (!negSee) return false;
+
+  if (/\b(sistema|plataforma|wara|app|aplicacion|aplicaci[oó]n|mapa|listado|pantalla|panel)\b/.test(t)) {
+    return true;
+  }
+  // «No la veo» corto con GPS reciente se interpreta en el caller con hilo.
+  return /^(no\s+(la|lo)?\s*(veo|encuentro|aparece|figura)(\s+ahi|\s+all[ií])?[!?.]*)$/.test(t);
+}
+
 export function extractBrandSearchLabel(rawText: string): string | null {
   const raw = String(rawText ?? "").trim();
   if (!raw || raw.length > 160) return null;
+  if (looksLikePlatformUnitVisibilityComplaint(raw)) return null;
+  if (looksLikeCustomerConversationCloseRequest(raw)) return null;
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   const marcaKw = t.match(/\b(?:marca|modelo)\s+([a-z0-9]{3,20})\b/);
   if (marcaKw?.[1] && !STOPWORDS.has(marcaKw[1])) return marcaKw[1];
+
+  const PERCEPTION_VERBS = new Set([
+    "veo",
+    "ves",
+    "vemos",
+    "aparece",
+    "figura",
+    "muestra",
+    "encuentro",
+    "encuentra",
+  ]);
 
   const pick = (cand: string | undefined): string | null => {
     if (!cand) return null;
@@ -810,10 +859,10 @@ export function extractBrandSearchLabel(rawText: string): string | null {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
-    if (norm.length < 3 || STOPWORDS.has(norm)) return null;
+    if (norm.length < 3 || STOPWORDS.has(norm) || PERCEPTION_VERBS.has(norm)) return null;
     if (TIME_OF_DAY_SEARCH_TOKENS.has(norm)) return null;
     if (
-      /^(certificado|certficado|cobertura|mantenimiento|agenda|reporte|estado|gps|ticket|caso|patente|matricula|unidad|flota|posicion|ubicacion|ignicion|odometro|horometro|tambien|también|obtener|saber|consultar|registrar|programar|pedir|generar|ayudar|ayudas|certificado)$/.test(
+      /^(certificado|certficado|cobertura|mantenimiento|agenda|reporte|estado|gps|ticket|caso|patente|matricula|unidad|flota|posicion|ubicacion|ignicion|odometro|horometro|tambien|también|obtener|saber|consultar|registrar|programar|pedir|generar|ayudar|ayudas|certificado|sistema|plataforma)$/.test(
         norm,
       )
     ) {
@@ -848,6 +897,8 @@ function resolveBrandOrNameInFleet(
   if (looksLikeUnitNameInMessage(rawText) || (nameHint && looksLikeUnitNameInMessage(nameHint))) {
     return null;
   }
+  if (looksLikePlatformUnitVisibilityComplaint(rawText)) return null;
+  if (looksLikeCustomerConversationCloseRequest(rawText)) return null;
   const freeLabel =
     nameHint?.trim() ||
     extractFreeTextUnitSearchCandidate(rawText) ||
@@ -1172,6 +1223,7 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   if (looksLikeOutOfScopeSupportClaim(raw)) return null;
   // Bug prod 2026-09-15: «Preséntate» se buscaba en flota como etiqueta de unidad.
   if (looksLikeAssistantIdentityQuestion(raw)) return null;
+  if (looksLikePlatformUnitVisibilityComplaint(raw)) return null;
   // Bug real, producción 2026-08-07: "CONFIRMO" (pedido explícito del bot) matcheaba
   // como nombre propio de unidad → "No encontré ninguna unidad que coincida con «CONFIRMO»"
   // en vez de registrar el odómetro pendiente.

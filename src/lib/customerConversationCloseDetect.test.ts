@@ -21,4 +21,16 @@ describe("customerConversationCloseDetect", () => {
       false,
     );
   });
+
+  it("detecta cierres cortos Fin / chau sin buscarlos como unidad", () => {
+    assert.equal(looksLikeCustomerConversationCloseRequest("Fin"), true);
+    assert.equal(looksLikeCustomerConversationCloseRequest("fin"), true);
+    assert.equal(looksLikeCustomerConversationCloseRequest("Cancelar"), false);
+    assert.equal(
+      looksLikeCustomerConversationCloseRequest(
+        "Dato para cerrar la consulta o tramite en curso",
+      ),
+      true,
+    );
+  });
 });
