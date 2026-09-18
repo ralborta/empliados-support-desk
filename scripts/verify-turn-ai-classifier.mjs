@@ -12,6 +12,7 @@ import {
   isTurnAiClassifyEnabled,
   resolveTurnExecutor,
 } from "../src/lib/whatsappTurnClassifierAI.ts";
+import { shouldRouteTurnToFleetListExecutorHybrid } from "../src/lib/fleetListIntentAI.ts";
 import { threadTextSinceCompanySelection } from "../src/lib/wara.ts";
 
 let failed = 0;
@@ -50,7 +51,6 @@ process.env.WARA_TURN_AI_CLASSIFY = "false";
 assert(!isTurnAiClassifyEnabled(), "flag false desactiva IA");
 
 const samples = [
-  ["listado", "Quiero el listado de mis unidades", ""],
   ["gps", "La unidad AD427MC no está reportando", ""],
   ["odometro", "Quiero cambiar el odometro", "Para registrar el cambio de odómetro necesito la patente."],
   ["info guía", "¿Cómo configuro la agenda?", ""],
@@ -63,15 +63,33 @@ for (const [label, text, thread] of samples) {
   const expected = turnRoute(text, thread);
   const resolved = await resolveTurnExecutor(text, classificationThread);
   assert(resolved.executor === expected, `${label}: resolveTurnExecutor === classifyTurnExecutor (${expected})`);
-  assert(resolved.source === "safety_guard" || resolved.source === "rules", `${label}: source guard o rules sin IA`);
+  assert(
+    resolved.source === "safety_guard" ||
+      resolved.source === "rules" ||
+      resolved.source === "ai",
+    `${label}: fuente de decisión válida`,
+  );
 }
 
 process.env.WARA_TURN_AI_CLASSIFY = prevFlag;
 
-console.log("\n— Guardas incluyen reglas críticas del snapshot —");
+console.log("\n— El listado se resuelve en el gate semántico del ejecutor —");
+const prevFleetFlag = process.env.WARA_FLEET_LIST_INTENT_AI;
+process.env.WARA_FLEET_LIST_INTENT_AI = "false";
+assert(
+  await shouldRouteTurnToFleetListExecutorHybrid({
+    selectionText: "Quiero el listado de mis unidades",
+    threadText: "",
+  }),
+  "listado explícito → gate de flota",
+);
+if (prevFleetFlag === undefined) delete process.env.WARA_FLEET_LIST_INTENT_AI;
+else process.env.WARA_FLEET_LIST_INTENT_AI = prevFleetFlag;
+
+console.log("\n— Guardas conservan únicamente reglas críticas —");
 assert(TURN_SAFETY_GUARD_RULE_IDS.has("pending_confirmation_resolver"), "pending_confirmation en guardas");
-assert(TURN_SAFETY_GUARD_RULE_IDS.has("gps_or_live_unit_consult"), "GPS en guardas");
-assert(TURN_SAFETY_GUARD_RULE_IDS.has("unit_list_request"), "listado en guardas");
+assert(!TURN_SAFETY_GUARD_RULE_IDS.has("gps_or_live_unit_consult"), "GPS delegado a decisión semántica");
+assert(!TURN_SAFETY_GUARD_RULE_IDS.has("unit_list_request"), "listado delegado a decisión semántica");
 
 console.log("\n— Horómetro tras listado: reglas siguen enrutando a odometro —");
 const horoThread = [

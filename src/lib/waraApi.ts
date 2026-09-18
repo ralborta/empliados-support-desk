@@ -1,4 +1,10 @@
 import type { Customer, PrismaClient } from "@prisma/client";
+import { formatGreeting, formatCompanySelected } from "@/lib/waraWhatsAppFormat";
+import { hasPendingWriteNegationCue, looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
+import {
+  looksLikeResolvableUnitReferenceInMessage,
+  shouldRouteGpsConsultToUnidades,
+} from "@/lib/gpsConsultRouting";
 import {
   isPruebasContactAliasesActive,
   resolvePruebasContactAliases,
@@ -13,6 +19,8 @@ import {
   isOdometerFlowSuperseded,
   looksLikeBriefConfirmation,
   looksLikePendingTramiteAffirmation,
+  looksLikeResumePausedTramite,
+  looksLikePendingConfirmComprehensionAck,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeOdometerInfoRequest,
   looksLikeOdometerIntentStart,
@@ -20,17 +28,22 @@ import {
   looksLikeFreshOdometerRestartRequest,
   looksLikeOdometerPendingDataAmendment,
   looksLikeUnitRejection,
+  looksLikeBareNegativeResponse,
   looksLikeGenericCorrectionIntent,
   looksLikeCertificateKeyword,
   looksLikeMaintenanceKeyword,
+  looksLikeNamedServiceWithUnitReference,
   normalizePlate,
   shouldAutoAssignInboundTicket,
   type WaraIncidentType,
   threadAwaitingOdometerPlate,
   threadAwaitingHorometerPlate,
+  threadAwaitingOdometerKmValue,
+  threadAwaitingHorometerKmValue,
   threadHasOdometerUnitClarificationPending,
   threadAwaitingOdometerConfirmDetails,
   threadHasPendingUnitStatusCheckOffer,
+  threadBotRecentlyAskedPlateReference,
   detectLoosePlate,
   detectPlate,
   extractPlatePrefixFromMessage,
@@ -93,18 +106,50 @@ export type WaraCustomerResolution = {
  * Formato de la env: lista separada por comas. Aceptamos cualquier formato (con/sin "+",
  * con/sin "9", con/sin código país); se normaliza igual que `normalizeWhatsAppPhone`.
  *   WARA_TEST_ALLOWED_PHONES="+5492613867127, 5492612478856"
- * Vacío o no seteado => modo abierto (producción real).
+ *
+ * Modo abierto (producción — todos los números): vacío, o sentinelas
+ * `disabled`, `off`, `false`, `open`, `all`, `*`.
  */
+const TEST_WHITELIST_DISABLED_SENTINELS = new Set([
+  "disabled",
+  "off",
+  "false",
+  "no",
+  "none",
+  "open",
+  "all",
+  "*",
+  "0",
+]);
+
+function isTestWhitelistEnvOpen(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return true;
+  const tokens = trimmed
+    .split(/[,;\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) return true;
+  if (tokens.length === 1 && TEST_WHITELIST_DISABLED_SENTINELS.has(tokens[0])) {
+    return true;
+  }
+  return false;
+}
+
 function testPhoneWhitelist(): Set<string> {
   if (/apps\.visionblo\.com/i.test(waraApiBaseUrl())) return new Set();
   const raw = process.env.WARA_TEST_ALLOWED_PHONES?.trim() || "";
-  if (!raw) return new Set();
+  if (isTestWhitelistEnvOpen(raw)) return new Set();
   return new Set(
     raw
       .split(/[,;\s]+/)
       .map((s) => normalizeWhatsAppPhone(s))
       .filter((s) => s.length >= 8)
   );
+}
+
+export function isTestWhitelistOpenMode(): boolean {
+  return !isTestWhitelistEnabled();
 }
 
 export function isTestWhitelistEnabled(): boolean {
@@ -158,6 +203,16 @@ export function looksLikePlateCorrectionRequest(text: string | undefined | null)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
   if (!t) return false;
+  // Bug real 2026-08-29: "NO LE FUNCIONA LA PANTALLA…" matcheaba \bno…\bla\b
+  // y se buscaba «PANTALLA» en flota en vez de derivar a asesor.
+  if (
+    /\b(pantalla|tactil|touch|display|teclado|botonera|hardware|garantia)\b/.test(t) &&
+    /\b(no\s+(le\s+|me\s+|les\s+)?(funciona|anda)|falla|fallando|rota|roto|mal|problema|averia|reclam\w*)\b/.test(
+      t,
+    )
+  ) {
+    return false;
+  }
   if (
     /\b(cambiar|corregir|rectificar|modificar|actualizar)\b.*\b(matr[i]?cula|patente)\b/.test(t)
   ) {
@@ -228,6 +283,7 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
   if (looksLikeBriefConfirmation(raw)) return false;
   // Pausa para consulta lateral ≠ cancelar el registro.
   if (looksLikePendingConfirmDeferForOtherQuery(raw)) return false;
+  if (hasPendingWriteNegationCue(raw)) return true;
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -246,6 +302,8 @@ export function looksLikeOdometerConfirmationRejection(text: string | undefined 
 export function looksLikeMaintenanceConfirmationRejection(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  // «Claro que no» / «no lo confirmes» — veto antes de brief-confirmation (certificados).
+  if (hasPendingWriteNegationCue(raw)) return true;
   if (looksLikeBriefConfirmation(raw)) return false;
   const t = raw
     .normalize("NFD")
@@ -438,6 +496,7 @@ export function looksLikeVehicleBrandOrUnitSearch(text: string | undefined | nul
   // sea un párrafo larguísimo y que mencione una marca real del catálogo cerrado.
   if (!t || t.length > 160) return false;
   if (/\b(empresa|wara|cacique|guara)\b/.test(t)) return false;
+  if (/\b(marca|modelo)\s+[a-z0-9]{3,}/.test(t)) return true;
   const tokens = t.split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return false;
   return tokens.some((token) => VEHICLE_BRAND_TOKENS.has(token));
@@ -492,6 +551,9 @@ export function looksLikeShortAffirmative(text: string | undefined | null): bool
 export function looksLikeOperationalIntent(text: string): boolean {
   const n = normCompanyToken(text);
   if (!n) return false;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(text)) return false;
+  // Botones de menú ("GESTIONAR MANTENIMIENTO") → guía/KB, no consulta operativa.
+  if (parseInfoGuideModulePick(text)) return false;
   return /\b(quiero|necesito|programar|consultar|solicitar|pedir|ver|dame|decime|pasame|reporte|mantenimiento|certificado|patente|odometro|horometro|unidad|unidades|flota|ticket|reclamo|asesor|ubicacion|ignicion|voltaje|offline|falla|problema|ayuda|como hago|como puedo|estado de|ultimo reporte|sin reporte)\b/.test(
     n
   );
@@ -507,8 +569,8 @@ export function looksLikeCompanySelection(text: string | undefined | null): bool
   if (looksLikeOperationalIntent(t)) return false;
   const norm = normCompanyToken(t);
   if (
-    /^(inicio|volver|hola|buenas|menu|ayuda|si|no|confirmo|gracias|buenos dias|buenas tardes|buenas noches)$/.test(
-      norm
+    /^(inicio|volver|hola|buenas|menu|ayuda|si|no|confirmo|gracias|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches))$/.test(
+      norm,
     )
   ) {
     return false;
@@ -543,13 +605,18 @@ function strongCompanyNameMatch(contact: WaraEmpresaContact, mentionedNorm: stri
 const COMPANY_MENTION_EXACT_FILLERS = new Set([
   "en", "con", "de", "del", "la", "los", "las", "el", "al", "y", "o", "que", "mi", "tu", "su",
   "por", "para", "a", "dale", "ok", "porfa", "porfavor", "favor", "che", "bueno", "buena",
+  // Cortesía: "Gracias, quiero cambiar al cacique" no debe dejar «gracias» en el match.
+  "gracias", "grax", "thanks", "ty", "hola", "buenas", "buen", "dias", "tardes", "noches",
+  // Bug 2026-08-18: "Quiero operar con la empresa El Cacique" dejaba «empresa» y no
+  // matcheaba "El Cacique S.A.".
+  "empresa", "empresas", "compania", "companias", "sa", "srl", "es",
 ]);
 /** Raíces (prefijos) para tolerar conjugaciones sin enumerar cada forma — mismo patrón
  * ya usado en el resto del archivo (ej. "ayud\w*", "preventiv\w*"). */
 const COMPANY_MENTION_FILLER_STEMS = [
   "quier", "quisier", "necesit", "pued", "prefier", "gustar",
   "segu", "sig", "continu", "qued", "permanec",
-  "oper", "trabaj", "estar", "and", "pasar", "cambi", "mov", "ir",
+  "oper", "trabaj", "estar", "and", "pasar", "pasam", "cambi", "mov", "ir",
 ];
 function isCompanyMentionFiller(word: string): boolean {
   if (COMPANY_MENTION_EXACT_FILLERS.has(word)) return true;
@@ -619,7 +686,11 @@ export function extractExplicitCompanyMention(
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 160 || contacts.length === 0) return null;
   const norm = normCompanyToken(raw);
-  const m = norm.match(/\bla\s+empresa\s+(?:es|:|=)\s*(.+)/) ?? norm.match(/\bempresa\s*(?:es|:|=)\s*(.+)/);
+  const m =
+    norm.match(/\bla\s+empresa\s+(?:es|:|=)\s*(.+)/) ??
+    norm.match(/\bempresa\s*(?:es|:|=)\s*(.+)/) ??
+    // "con la empresa El Cacique" / "en la empresa Wara" (menú pendiente, 2026-08-18).
+    norm.match(/\b(?:con|en)\s+la\s+empresa\s+(.+)/);
   if (!m) return null;
   const segment = (m[1] ?? "")
     .split(/[,.;]|\by\s+la\s+unidad\b|\bla\s+unidad\b|\bunidad\b|\bpatente\b|\bmatricula\b|\bmovil\b/)[0]
@@ -638,7 +709,7 @@ function looksLikeOdometerConfirmReply(text: string | undefined | null): boolean
     .toLowerCase();
   const t = stripped.replace(/[^a-z]/g, "");
   if (!t) return false;
-  if (t.startsWith("conf")) return true;
+  if (looksLikeFuzzyConfirmoToken(t)) return true;
   if (/\b(gracias|chau|chao|nosvemos|denada)\b/.test(t)) return false;
   return new Set(["si", "dale", "perfecto", "listo", "ok", "confirmo"]).has(t);
 }
@@ -661,22 +732,39 @@ function looksLikeAcknowledgementWithOperationalFollowUp(text: string | undefine
   );
 }
 
+/** Token corto de agradecimiento (incl. abreviaturas rioplatenses: gr, grx). */
+function looksLikeGratitudeAckToken(t: string): boolean {
+  if (
+    /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias|thanks|thank you|ty|thx|tks|grx|grac)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return /^(ok|listo|perfecto|genial|joya|barbaro|obvio|claro|exacto|buenisimo|buenisima|dale|bueno)?\s*(gr|grx|grac|gracias|thanks|ty|thx|tks|agradezco)[\s!.,¡¿]*$/.test(
+    t,
+  );
+}
+
 /** Agradecimiento o cierre breve — no es confirmación operativa ni continuación de trámite. */
 export function looksLikeConversationAcknowledgement(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 140) return false;
   if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
   const t = normCompanyToken(raw);
-  if (
-    /\b(gracias|agradezco|de nada|chau|chao|nos vemos|nada mas|nada mas gracias|listo gracias|ok gracias|perfecto gracias|genial gracias|buenisimo gracias|thanks|thank you|ty|thx|tks)\b/.test(
-      t,
-    )
-  ) {
-    return true;
-  }
-  return /^(ok|listo|perfecto|genial|buenisimo|buenisima|dale gracias|tks|ty|thx|thanks)[\s!.,¡¿]*$/.test(
+  if (looksLikeGratitudeAckToken(t)) return true;
+  // Bug real 2026-09-01: tras certificado emitido, "Bien!" no era ack → reabría
+  // CONFIRMO de otra unidad. Afirmación corta sin pregunta/consulta = cierre social.
+  return /^(ok|listo|perfecto|genial|joya|barbaro|obvio|claro|exacto|buenisimo|buenisima|bien|bueno|excelente|fenomenal|copado|piola|dale gracias|tks|ty|thx|thanks|(muy|todo|re|ta)\s+bien|esta\s+bien)[\s!.,¡¿]*$/.test(
     t,
   );
+}
+
+/**
+ * Coloquial rioplatense de cierre/agradecimiento — alias explícito para callers del executor.
+ */
+export function looksLikeColloquialGratitudeAck(text: string | undefined | null): boolean {
+  return looksLikeConversationAcknowledgement(text);
 }
 
 /**
@@ -696,6 +784,108 @@ export function looksLikeConversationClosing(text: string | undefined | null): b
   if (!raw || raw.length > 140) return false;
   const t = normCompanyToken(raw);
   return /\b(adios|adi[oó]s|chau|chao|hasta luego|hasta pronto|nos vemos|bye|nada mas|no gracias|no nada mas|no nada|eso es todo|eso seria todo|nada por ahora|nada mas por ahora)\b/.test(
+    t,
+  );
+}
+
+function normMetaConversationalText(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Presencia, demora o continuidad social — no patente ni trámite.
+ * Bug real 2026-08-26: «Sigo acá» tras nudge idle se buscaba en la flota.
+ */
+export function looksLikeMetaConversationalReply(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 120) return false;
+  if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
+
+  const t = normMetaConversationalText(raw);
+  if (!t) return false;
+  if (/\b(con|en|para)\s+(el|la)?\s*(wara|cacique|empresa)\b/.test(t)) return false;
+
+  const presence =
+    /^(sigo|estoy|aca|aqui|presente|volvi|volvio|si sigo|aun sigo|todavia sigo)[\s!.,]*$/.test(t) ||
+    /\b(sigo|estoy)\s+(aca|aqui|en linea|todavia|aun)\b/.test(t) ||
+    /\b(aca|aqui)\s+(estoy|sigo|ando|volvi)\b/.test(t) ||
+    /\b(todavia|aun)\s+(aca|aqui|sigo|estoy)\b/.test(t) ||
+    /\bya\s+(estoy|volvi|aca|aqui)\b/.test(t) ||
+    /^presente[\s!.,]*$/.test(t);
+
+  const delayOrReturn =
+    /\b(perdon|disculpa|disculpame)\s+(la\s+)?(demora|tardo|tarde)\b/.test(t) ||
+    /\b(un\s+momento|dame\s+un\s+(momento|minuto|segundo)|ahi\s+voy|esperame|aguardame)\b/.test(t) ||
+    /\brecien\s+(vi|leo|llego|entro)\b/.test(t);
+
+  const shortContinuity =
+    /^(dale|bueno|ok|si|sip)?\s*(seguimos|sigamos|continuamos|continuemos)[\s!.,]*$/.test(t);
+
+  return presence || delayOrReturn || shortContinuity;
+}
+
+/**
+ * El bot ofreció seguir ayudando ("¿Necesitás algo más?" / "¿En qué más te ayudo?").
+ * Un "No" suelto después de eso es cierre, no rechazo de patente ni cancelación de CONFIRMO.
+ * Bug real, producción 2026-08-24: Atilio → "De nada, Daniel. ¿Necesitás algo más?" →
+ * cliente "No" caía al router y no cerraba.
+ */
+export function threadBotOfferedMoreHelp(threadText: string | undefined | null): boolean {
+  const raw = String(threadText ?? "");
+  if (!raw.trim()) return false;
+  const norm = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const offerRes = [
+    /necesitas algo mas/,
+    /en que mas te ayudo/,
+    /en que mas puedo ayudarte/,
+    /queres algo mas/,
+    /algo mas\s*\?/,
+  ];
+  let lastOffer = -1;
+  for (const re of offerRes) {
+    let m: RegExpExecArray | null;
+    const g = new RegExp(re.source, "gi");
+    while ((m = g.exec(norm)) !== null) {
+      lastOffer = Math.max(lastOffer, m.index);
+    }
+  }
+  if (lastOffer < 0) return false;
+  const after = norm.slice(lastOffer);
+  // Si después del offer el bot ya pidió otra cosa operativa, no es este speech-act.
+  if (
+    /(pasame|necesito la|respond[eé]\s+confirmo|te refer[ií]s|voy a registrar|cual es el nuevo)/.test(
+      after.slice(50),
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** "No" / "nada" / "por ahora no" declinando la oferta de más ayuda del bot. */
+export function looksLikeDeclineMoreHelpOffer(
+  text: string | undefined | null,
+  threadText: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 48) return false;
+  if (!threadBotOfferedMoreHelp(threadText)) return false;
+  // "No" tras aclaración de patente / oferta de estado GPS no es cierre social.
+  if (threadBotRecentlyAskedPlateReference(String(threadText ?? ""))) return false;
+  if (threadHasPendingUnitStatusCheckOffer(String(threadText ?? ""))) return false;
+
+  const t = normCompanyToken(raw);
+  if (looksLikeBareNegativeResponse(raw)) return true;
+  return /^(no gracias|gracias no|nada|nada mas|por ahora no|mejor no|no por ahora|eso es todo|asi esta bien|ta bien)$/.test(
     t,
   );
 }
@@ -762,10 +952,21 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   ) {
     return true;
   }
+  // Arranque explícito de medidor (con o sin verbo) gana sobre hilo superseded.
+  // Bug 2026-08-23: "Horometro 900133" tras menú caía a topicChange vacío.
+  if (
+    looksLikeHorometerOnlyIntent(text) ||
+    looksLikeExplicitOdometerUpdateRequest(text) ||
+    looksLikeOdometerIntentStart(text)
+  ) {
+    return true;
+  }
   if (isOdometerFlowSuperseded(threadText)) return false;
   const odometerFlowAwaitingInput =
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
+    threadAwaitingOdometerKmValue(threadText) ||
+    threadAwaitingHorometerKmValue(threadText) ||
     threadHasOdometerUnitClarificationPending(threadText) ||
     threadAwaitingOdometerConfirmDetails(threadText) ||
     hasPendingOdometerConfirmation(threadText);
@@ -779,18 +980,31 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
   ) {
     return true;
   }
-  // "Gracias" sin confirmar — seguir en flujo y recordar CONFIRMO (no skip silencioso).
+  // "Gracias" / "ah entiendo" / "continuamos" con CONFIRMO vivo: no abandonar el trámite.
   if (
     odometerFlowAwaitingInput &&
-    looksLikeConversationAcknowledgement(text) &&
-    hasPendingOdometerConfirmation(threadText)
+    hasPendingOdometerConfirmation(threadText) &&
+    (looksLikeConversationAcknowledgement(text) ||
+      looksLikePendingConfirmComprehensionAck(text) ||
+      looksLikeResumePausedTramite(text))
   ) {
     return true;
   }
   if (looksLikeConversationAcknowledgement(text)) return false;
+  if (looksLikeGreeting(text)) return false;
   if (looksLikeOpcionesInfoRequest(text) || looksLikeUnidadesInfoRequest(text)) return false;
   if (looksLikeAtilioHelpRequest(text)) return false;
   if (odometerFlowAwaitingInput) {
+    const bare = String(text ?? "")
+      .trim()
+      .replace(/\./g, "")
+      .replace(/\s+/g, "");
+    if (threadAwaitingHorometerKmValue(threadText) && /^\d{1,7}$/.test(bare)) {
+      return true;
+    }
+    if (threadAwaitingOdometerKmValue(threadText) && /^\d{4,7}$/.test(bare)) {
+      return true;
+    }
     if (looksLikePlateCorrectionRequest(text)) return true;
     if (looksLikePatenteUnknownReply(text)) return true;
     if (looksLikeOdometerOperationalSupplement(text)) return true;
@@ -806,7 +1020,19 @@ export function shouldContinueOdometerFlow(text: string, threadText: string): bo
 export function looksLikeOpcionesInfoRequest(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
   if (!t) return false;
-  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|odometro|horometro|certificado)\b/.test(t) && !/\b(agenda|contacto|notific|perfil|opciones)\b/.test(t)) {
+  // "ponerse en contacto" / "contacten conmigo" = humano, no módulo Contactos de Opciones.
+  // Bug real 2026-08-20: mensaje de etapas + "se pongan en contacto conmigo Emiliano"
+  // caía a guía Opciones por la palabra «contacto».
+  if (
+    /\b(ponerse|poner|pongan|ponganse|contactar|contacten|contactame|llamen|escribir)\b.{0,24}\bcontacto\b/.test(
+      t,
+    ) ||
+    /\ben\s+contacto\s+conmigo\b/.test(t) ||
+    /\bcontact\w*\s+conmigo\b/.test(t)
+  ) {
+    return false;
+  }
+  if (/\b(mantenimiento|preventiv\w*|correctiv\w*|odometro|horometro|certificado|etapas?|vuelta|gps)\b/.test(t) && !/\b(agenda|notific|perfil|opciones)\b/.test(t)) {
     return false;
   }
   if (
@@ -869,8 +1095,19 @@ export function looksLikeOpcionesGuideInThread(threadText: string): boolean {
 
 /** Guía informativa del módulo Unidades (panel de flota, MIS ATAJOS). */
 export function looksLikeUnidadesInfoRequest(text: string | undefined | null): boolean {
-  const t = normCompanyToken(text ?? "");
+  const raw = String(text ?? "");
+  const t = normCompanyToken(raw);
   if (!t) return false;
+  // Ubicación / estado en vivo de una unidad concreta ≠ guía UI del módulo Unidades.
+  // Bug: "¿Dónde está la unidad AD427MC?" caía a info_guides (pasos del panel) en vez de GPS.
+  if (
+    /\b(donde\s+esta|donde\s+se\s+encuentra|ubicacion\s+(de|del)|posicion\s+(de|del))\b/.test(t) &&
+    (/\b(unidad|patente|movil|interno|flota)\b/.test(t) || !!detectLoosePlate(raw))
+  ) {
+    return false;
+  }
+  // Cómo consultar un informe de plataforma ≠ guía del módulo Unidades.
+  if (/\binforme(s)?\b/.test(t)) return false;
   if (
     /\b(no reporta|no actualiza|offline|sin reporte|ultimo reporte|consultar|reporte en vivo|patente|certificado|odometro|horometro|mantenimiento)\b/.test(
       t
@@ -918,9 +1155,7 @@ function isGenericMaintenanceFallbackText(text: string): boolean {
 
 /** Confirma empresa elegida sin duplicar punto final (p. ej. "S.A." → "S.A.."). */
 export function formatCompanyConfirmMessage(companyName: string): string {
-  const name = companyName.trim().replace(/\.+\s*$/, "").trim();
-  if (!name) return "Perfecto. ¿En qué te puedo ayudar?";
-  return `Perfecto, sigo con ${name}. ¿En qué te puedo ayudar?`;
+  return formatCompanySelected(companyName);
 }
 
 /** Trámite operativo real (programar/registrar), no guía informativa. */
@@ -945,9 +1180,20 @@ export function looksLikeMaintenanceExplorationRequest(raw: string | undefined |
   return infoCue.test(text);
 }
 
-export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = ""): boolean {
+/** Política producto (2026-08): mantenimiento operativo por WhatsApp deshabilitado; solo guía paso a paso en app. */
+export const MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED = false;
+
+export function looksLikeOperationalMaintenanceIntentCore(raw: string, threadText = ""): boolean {
   const text = normCompanyToken(raw);
   if (looksLikeMaintenanceExplorationRequest(raw)) return false;
+  // "Mantenimiento 900133" / "Preventivo M900-112" — servicio + unidad sin verbo.
+  // Sin esto, con menú/guía en el hilo el route devolvía message="" (silencio).
+  if (
+    looksLikeNamedServiceWithUnitReference(raw) &&
+    /\b(mantenimiento|preventiv\w*|correctiv\w*)\b/.test(text)
+  ) {
+    return true;
+  }
   if (
     /\b(quiero|necesito|solicito|pedir|registrar|programar|agendar|dejar|abrir|generar|dar de alta|puedo)\b/.test(
       text,
@@ -959,8 +1205,56 @@ export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = 
   if (!looksLikeMaintenanceGuideContextInThread(threadText)) return false;
   return (
     /\b(puedo|programar|registrar|agendar|generar|hacer|crear|abrir)\b/.test(text) &&
-    /\b(vos|con vos|contigo|atilio|uno|una|lo|preventivo|correctivo|con tu ayuda)\b/.test(text)
+    /\b(vos|con vos|contigo|atilio|kira|uno|una|lo|preventivo|correctivo|con tu ayuda)\b/.test(text)
   );
+}
+
+export function looksLikeOperationalMaintenanceIntent(raw: string, threadText = ""): boolean {
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return false;
+  return looksLikeOperationalMaintenanceIntentCore(raw, threadText);
+}
+
+/** Cliente pide solo el procedimiento en la app; no registro por WhatsApp (bug prod 2026-08-25). */
+export function looksLikeMaintenanceStepByStepOnlyRequest(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text) return false;
+  const inMaintContext =
+    looksLikeMaintenanceGuideContextInThread(threadText) ||
+    /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text);
+  const wantsSteps =
+    /\b(paso a paso|procedimiento|como lo agendo|como lo programo|como se hace|como hago|como carg)\b/.test(
+      text,
+    );
+  const rejectsWhatsAppRegistration =
+    /\b(no deber[ií]as|no podes|no pod[eé]s|no quiero que|no registres|sin registrar|solo quiero|solamente quiero|unicamente quiero|nada mas quiero)\b/.test(
+      text,
+    ) || (/\b(solo|solamente|unicamente|nada mas)\b/.test(text) && wantsSteps);
+  if (wantsSteps && (rejectsWhatsAppRegistration || inMaintContext)) return true;
+  if (rejectsWhatsAppRegistration && /\b(registrar\w*|programar|agendar)\b/.test(text)) return true;
+  return false;
+}
+
+/** Guía informativa de mantenimiento (incluye política solo-app cuando el registro WA está off). */
+export function looksLikeMaintenanceAppGuideRequest(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
+  if (parseInfoGuideModulePick(raw) === "mantenimiento") return true;
+  if (looksLikeMaintenanceDomainTermQuestion(raw)) return true;
+  if (looksLikeMaintenanceInfoRequest(raw)) return true;
+  if (looksLikeMaintenanceExplorationRequest(raw)) return true;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(raw, threadText)) return true;
+  if (looksLikeMaintenanceGuideFollowupQuestion(raw, threadText)) return true;
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
+    if (looksLikeMaintenanceCapabilityQuestion(raw, threadText)) return true;
+    if (looksLikeOperationalMaintenanceIntentCore(raw ?? "", threadText)) return true;
+    const text = normCompanyToken(raw ?? "").trim();
+    if (text === "mantenimiento") return true;
+  }
+  return false;
 }
 
 /**
@@ -978,7 +1272,7 @@ export function looksLikeMaintenanceCapabilityQuestion(
   const threadHasMaintGuide = looksLikeMaintenanceGuideContextInThread(threadText);
   const maintInText = /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan|uno|una)\b/.test(text);
   const asksBotVsSelf =
-    (/\b(vos|tu|atilio|bot|aca|whatsapp|por aca|con vos|contigo)\b/.test(text) &&
+    (/\b(vos|tu|atilio|kira|bot|aca|whatsapp|por aca|con vos|contigo)\b/.test(text) &&
       /\b(podes|pod[eé]s|generar|registrar|programar|abrir|crear|hacer|agendar|haces|hac[eé]s)\b/.test(
         text,
       )) ||
@@ -987,7 +1281,7 @@ export function looksLikeMaintenanceCapabilityQuestion(
     ) ||
     (/\bpuedo\b/.test(text) &&
       /\b(programar|registrar|agendar|hacer|crear|generar)\b/.test(text) &&
-      (/\b(vos|con vos|contigo|atilio)\b/.test(text) || threadHasMaintGuide));
+      (/\b(vos|con vos|contigo|atilio|kira)\b/.test(text) || threadHasMaintGuide));
 
   if (!asksBotVsSelf) return false;
   return maintInText || threadHasMaintGuide;
@@ -1015,11 +1309,39 @@ export function looksLikeUnitReportingStatusCue(text: string | undefined | null)
 /** Mensaje del cliente con contenido (no ack vacío) — evitar ignorar turnos útiles. */
 /** Consulta operativa sobre GPS, ignición, reporte o estado de unidad (no mantenimiento). */
 export function looksLikeGpsOrUnitStatusQuestion(text: string | undefined | null): boolean {
-  const t = normCompanyToken(text ?? "");
+  const raw = String(text ?? "");
+  const t = normCompanyToken(raw);
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan de mantenimiento)\b/.test(t)) return false;
+  // "¿Dónde está la unidad AD427MC?" — ubicación viva (no guía del módulo Unidades).
+  if (
+    /\b(donde\s+esta|donde\s+se\s+encuentra)\b/.test(t) &&
+    (/\b(unidad|patente|flota|movil|interno)\b/.test(t) || !!detectLoosePlate(raw))
+  ) {
+    return true;
+  }
+  // "GPS 900133" / "Estado 900079" / "Reporte 900100" — arranque con interno.
+  if (
+    looksLikeNamedServiceWithUnitReference(text) &&
+    /\b(estado|gps|reporte|ignicio|ignicion|posicion|ubicacion)\b/.test(t)
+  ) {
+    return true;
+  }
   if (looksLikeUnitReportingStatusCue(text)) return true;
   if (/\b(no reporta|no me reporta|sin reporte|falta de reporte|dejo de reportar|offline|sin señal|sin senal)\b/.test(t)) {
+    return true;
+  }
+  // Bug real, producción 2026-08-24: "Gps" / "reporte" solos no tenían questionCue
+  // y caían a isBarePlatePrefixHint → "patente que empiece con GPS". Pedido explícito
+  // de telemetría sin unidad = consulta de estado (el executor pide la patente).
+  if (
+    /^(el\s+|la\s+|un\s+|una\s+|mi\s+)?(estado|gps|reporte|ignicio|ignicion|posicion|ubicacion)(\s+(de\s+)?(la\s+|el\s+)?unidad)?$/.test(
+      t,
+    ) ||
+    /^(quiero|necesito|dame|pasame|decime|ver|consultar|mostrar)\s+(el\s+|la\s+)?(estado|gps|reporte|ignicio|ignicion|posicion|ubicacion)$/.test(
+      t,
+    )
+  ) {
     return true;
   }
   // "Quiero el estado" / "dame el estado" / "quiero saber el estado" — pedido explícito
@@ -1057,6 +1379,8 @@ export function looksLikeLiveUnitConsultIntent(text: string | undefined | null):
   const t = normCompanyToken(text ?? "");
   if (!t || t.length > 220) return false;
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|certificado|cobertura)\b/.test(t)) return false;
+  // Cómo consultar un informe (p. ej. resumen de flota) ≠ telemetría en vivo.
+  if (/\binforme(s)?\b/.test(t)) return false;
   if (
     /\b(quiero|necesito|dame|decime|pasame|indic\w*|ver|consultar|mostrar|estado)\b/.test(t) &&
     /\b(ignicio|ignicion|reporte|gps|ubicacion|posicion|unidad|flota|coordenadas)\b/.test(t)
@@ -1126,9 +1450,9 @@ export function looksLikeTicketCreationInfoQuestion(text: string | undefined | n
 
 export function buildTicketCreationInfoReply(): string {
   return [
-    "Por GPS y telemetría, suele generarse un caso cuando una unidad lleva mucho tiempo sin reportar, cuando hay pérdida de señal con reporte reciente, o cuando la ignición no acompaña al resto de los datos.",
+    "Por GPS y telemetría, suele generarse un caso cuando una unidad lleva mucho tiempo sin reportar, o cuando hay pérdida de señal satelital con reporte reciente.",
     "",
-    "Si la unidad está detenida con ignición apagada y todo alineado, normalmente no hace falta ticket.",
+    "Si la unidad está detenida con ignición apagada y el equipo sigue reportando, es normal: no es falla y no se abre ticket por eso.",
     "",
     "Para otros temas (acceso, facturación, fallas que no se resuelven por acá), escribí \"hablar con un asesor\".",
     "",
@@ -1251,6 +1575,44 @@ export function looksLikeProblemClarificationPushback(text: string | undefined |
   );
 }
 
+/**
+ * Cliente discute el diagnóstico de “falla de ignición”: apagada + reporte vivo
+ * es unidad detenida (criterio V1 Mesa), no un problema.
+ * Bug real 2026-08-21 AG 562 SP.
+ */
+export function looksLikeIgnitionDiagnosisDispute(text: string | undefined | null): boolean {
+  const t = normCompanyToken(text ?? "");
+  if (!t) return false;
+  const mentionsIgnition = /\bignici/.test(t);
+  const asksWhyProblem =
+    /\b(porque|por qu[eé]|porq)\b.{0,50}\b(crees|pensas|pens[aá]s|dijiste|decis|dec[ií]s)\b.{0,40}\b(problema|problemas|falla)\b/.test(
+      t,
+    ) ||
+    /\b(porque|por qu[eé]|porq)\b.{0,30}\b(hay|ves)\b.{0,25}\b(problema|problemas|falla)\b/.test(t);
+  if (!mentionsIgnition) {
+    // Sin nombrar ignición: solo “¿por qué creés que hay problema?” (el hilo aporta contexto).
+    return asksWhyProblem;
+  }
+  return (
+    asksWhyProblem ||
+    /\b(no veo|no es|no hay|no creo|no me parece|tampoco veo)\b.{0,60}\b(problema|falla|error)\b/.test(
+      t,
+    ) ||
+    /\b(no (es|hay) (un )?problema|no (es|hay) falla|esta bien|est[aá] bien|es normal)\b/.test(t)
+  );
+}
+
+/** El hilo reciente habló de falla/inconsistencia de ignición (falso positivo típico). */
+export function threadHasRecentIgnitionFailureClaim(threadText: string): boolean {
+  const tail = threadText.slice(-3500).toLowerCase();
+  return (
+    /falla de ignici/.test(tail) ||
+    /ignici[oó]n no acompa/.test(tail) ||
+    /inconsistencia (de |en )?(los datos de )?ignici/.test(tail) ||
+    /pero la ignici[oó]n no/.test(tail)
+  );
+}
+
 /** Turno de unidad que requiere escuchar antes de diagnosticar GPS o abrir ticket. */
 export function looksLikeConversationalUnitConcern(text: string | undefined | null): boolean {
   return (
@@ -1308,15 +1670,25 @@ export function buildUnitProblemClarificationReply(
 /**
  * Antes de diagnosticar GPS en vivo: escuchar al cliente si el problema es vago,
  * es de historial/recorrido, o ya rechazó la respuesta anterior.
+ *
+ * Si `utteranceAction === "unit_status_read"`, no hay menú de síntomas (telemetría).
+ * Esa es la única autoridad aquí; no hay flag paralelo ni re-parse semántico extra.
  */
 export function resolveConversationalUnitTurn(params: {
   rawText: string;
   threadText: string;
   unitLabel: string;
+  /** Decisión estructurada del intérprete (opcional). */
+  utteranceAction?: string | null;
 }): string | null {
-  const { rawText, threadText, unitLabel } = params;
+  const { rawText, threadText, unitLabel, utteranceAction } = params;
   const norm = normCompanyToken(rawText);
   const label = unitLabel.trim() || "la unidad";
+
+  // unit_status_read → telemetría; limpia de facto la expectativa residual del menú.
+  if (utteranceAction === "unit_status_read") {
+    return null;
+  }
 
   // Trámite odómetro/horómetro — no escuchar como consulta GPS ni repetir pushback.
   if (looksLikeExplicitOdometerUpdateRequest(rawText) || looksLikeHorometerOnlyIntent(rawText)) {
@@ -1350,6 +1722,29 @@ export function resolveConversationalUnitTurn(params: {
   return null;
 }
 
+/** Follow-up: el cliente duda si el pin del mapa es correcto o es la última posición. */
+export function looksLikeGpsPositionClarificationQuestion(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 220) return false;
+  const t = normCompanyToken(raw);
+  if (/\b(mantenimiento|odometro|horometro|certificado)\b/.test(t)) return false;
+  return (
+    /\b(seguro|segura|estas?\s+seguro|confirma(me)?)\b.{0,50}\b(posicion|ubicacion|lugar|coordenadas|mapa|pin)\b/.test(
+      t,
+    ) ||
+    /\b(posicion|ubicacion)\s+(es\s+)?(correcta|actual|la ultima|ultima|real|verdadera|cierta)\b/.test(
+      t,
+    ) ||
+    /\b(es\s+)?(la\s+)?ultima\s+(posicion|ubicacion)\b/.test(t) ||
+    /\b(esta\s+)?(actualizada|al dia|reciente)\s+(la\s+)?(posicion|ubicacion)\b/.test(t) ||
+    /\b(el\s+)?(punto|pin)\s+(es\s+)?(correcto|actual|el\s+ultimo)\b/.test(t) ||
+    /\b(pasame|pasa|dame|mandame|mostrame|mostra|quiero|necesito)\b.{0,30}\b(la\s+)?(ubicacion|posicion)(\s+actual)?\b/.test(
+      t,
+    ) ||
+    /\b(ubicacion|posicion)\s+actual\b/.test(t)
+  );
+}
+
 /** Follow-up conversacional sobre una unidad ya en contexto (no cambio de tema). */
 export function looksLikeUnitConsultFollowUp(text: string | undefined | null): boolean {
   const t = normCompanyToken(text ?? "");
@@ -1371,6 +1766,7 @@ export function looksLikeUnitConsultFollowUp(text: string | undefined | null): b
     /\b(el\s+)?estado\b/.test(t) ||
     looksLikeUnitReportingStatusCue(text) ||
     looksLikeProblemClarificationPushback(text) ||
+    looksLikeGpsPositionClarificationQuestion(text) ||
     (looksLikeBriefConfirmation(text) && t.length >= 6)
   );
 }
@@ -1419,6 +1815,8 @@ export function threadHasRecentNoEquipmentExplanation(threadText: string): boole
 export function looksLikeSubstantiveCustomerMessage(raw: string | undefined | null): boolean {
   const text = (raw ?? "").trim();
   if (text.length < 4) return false;
+  if (looksLikeConversationAcknowledgement(text)) return false;
+  if (looksLikeMetaConversationalReply(text)) return false;
   const norm = normCompanyToken(text);
   if (
     /^(ok|si|no|gracias|muchas gracias|listo|dale|bueno|perfecto|genial|entendido|de acuerdo|confirmo)$/.test(
@@ -1440,15 +1838,79 @@ export function buildUnexpectedTurnFallbackMessage(raw: string | undefined | nul
     );
   }
   return (
-    "Recibí tu consulta. Contame un poco más en concreto qué necesitás " +
-    "(por ejemplo patente, trámite o módulo de Wara) y te guío."
+    "Por acá atiendo consultas de GPS/reporte, odómetro/horómetro, certificados, mantenimiento y guías de Wara. " +
+    "Contame en concreto qué necesitás."
   );
+}
+
+/** Términos / preguntas del dominio Mantenimiento sin decir “mantenimiento”. */
+export function looksLikeMaintenanceDomainTermQuestion(raw: string | undefined | null): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text || text.length > 240) return false;
+  // Checkbox del plan preventivo (§11.5) — no es glosario de Transporte Público.
+  if (/contar a partir de la realizaci[oó]n/.test(text)) return true;
+  if (
+    /a partir de la realizaci[oó]n/.test(text) &&
+    /\b(contar|significa|que es|qué es|quiere decir|para que|para qué)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (/\bconfirmar (la )?realizaci[oó]n\b/.test(text)) return true;
+  if (/\badministrar (la )?tarea\b/.test(text)) return true;
+  if (/\bpr[oó]ximo vencimiento\b/.test(text)) return true;
+  if (
+    /\b(orden(es)? de trabajo|\bot\b|una orden|la orden)\b/.test(text) &&
+    /\b(iniciad|finaliz|estado|pase|pasar|pendiente|acci[oó]n)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (/\btoma y deje\b/.test(text)) return true;
+  if (/\bplan (de )?mantenimiento\b/.test(text) && /\b(asign|unidad|tarea|como|cómo)\b/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+/** Continuación conversacional dentro de una guía de mantenimiento ya abierta. */
+export function looksLikeMaintenanceGuideFollowupQuestion(
+  raw: string | undefined | null,
+  threadText = "",
+): boolean {
+  if (!looksLikeMaintenanceGuideContextInThread(threadText)) return false;
+  const text = normCompanyToken(raw ?? "");
+  if (!text || text.length > 220) return false;
+  if (looksLikeOperationalMaintenanceIntent(raw ?? "", threadText)) return false;
+  if (looksLikeGpsOrUnitStatusQuestion(raw)) return false;
+  // Acks cortos (“ok gracias”, “dale”, “listo”) no son follow-up de guía.
+  if (
+    /^(ok|dale|gracias|listo|perfecto|buen[oa]s?|si|sí|sip)\b/.test(text) &&
+    !/[?]/.test(String(raw ?? "")) &&
+    text.length < 40
+  ) {
+    return false;
+  }
+  // Patente / interno suelto: no es follow-up de guía.
+  if (/^[a-z]{0,3}\d{2,6}[a-z]{0,3}$/i.test(text.replace(/\s+/g, "")) && text.length <= 12) {
+    return false;
+  }
+  if (looksLikeMaintenanceDomainTermQuestion(raw)) return true;
+  if (looksLikeMaintenanceInfoRequest(raw)) return true;
+  if (/\?/.test(String(raw ?? "")) && text.length < 180) return true;
+  if (
+    /^(y |despues|después|entonces|ahora |tambien|también|y despues|y después)/.test(text)
+  ) {
+    return true;
+  }
+  if (/\b(donde|dónde|como|cómo|que|qué|cual|cuál|cuando|cuándo)\b/.test(text)) return true;
+  if (/\b(panel(es)?|tarea|ot\b|orden|seguimiento|siga|sigo|despu[eé]s)\b/.test(text)) return true;
+  return false;
 }
 
 /** Guía informativa del módulo Mantenimiento (cómo usar/configurar), no trámite operativo. */
 export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null): boolean {
   const text = normCompanyToken(raw ?? "");
   if (!text) return false;
+  if (looksLikeMaintenanceDomainTermQuestion(raw)) return true;
   if (looksLikeMaintenanceExplorationRequest(raw)) return true;
   if (looksLikeOperationalMaintenanceIntent(String(raw ?? ""))) return false;
   if (looksLikeTurnoOrAgendaQuestion(String(raw ?? ""))) return false;
@@ -1457,7 +1919,7 @@ export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null):
   const maintenanceDomain =
     /\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan|combustible|rendimiento|consumo|neumatic|rfid|cubierta|averia|falla|orden de trabajo)\b/;
   const howToCue =
-    /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona|saber|conocer|informacion|como se|cómo se|como hago|cómo hago)\b/;
+    /\b(como|ensena|explica|ayuda|paso a paso|configur|crear|cargar|usar|utilizar|modulo|funciona|saber|conocer|informacion|como se|cómo se|como hago|cómo hago|significa|que es|qué es)\b/;
   return maintenanceDomain.test(text) && howToCue.test(text);
 }
 
@@ -1465,6 +1927,15 @@ export function looksLikeMaintenanceInfoRequest(raw: string | undefined | null):
 export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
   const text = normCompanyToken(raw);
   if (/\b(mantenimiento|preventiv\w*|correctiv\w*|tarea|plan)\b/.test(text)) return false;
+  // No confundir planilla de Transporte Público (hoja de turno / turnos de línea) con Agenda/Turnos de Opciones.
+  if (
+    /\bhoja(s)?\s+de\s+turno/.test(text) ||
+    /\btransporte\s+public/.test(text) ||
+    /\bexcepciones?\s+de\s+transporte\b/.test(text) ||
+    /\b(poi|paradas?|traza|kmz|regularidad)\b/.test(text)
+  ) {
+    return false;
+  }
   return /\b(turno|turnos|agenda)\b/.test(text);
 }
 
@@ -1472,10 +1943,16 @@ export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
 export function looksLikeMaintenanceInfoGuideInThread(threadText: string): boolean {
   const tail = threadText.slice(-3500).toLowerCase();
   return (
-    /modulo de mantenimiento/.test(tail) &&
-    (/orientacion de uso|como guia general|tarea preventiva|tarea correctiva|paso a paso/.test(tail) ||
-      /queres que te explique/.test(tail) ||
-      /no genero un ticket por esta consulta/.test(tail))
+    (/modulo de mantenimiento/.test(tail) &&
+      (/orientacion de uso|como guia general|tarea preventiva|tarea correctiva|paso a paso/.test(
+        tail,
+      ) ||
+        /queres que te explique/.test(tail) ||
+        /no genero un ticket por esta consulta/.test(tail))) ||
+    (/mantenimiento/.test(tail) &&
+      /utilidades\s*[→\-]\s*mantenimiento|paneles\s*[→\-]|mis atajos\s*[→\-]?\s*tareas|as[ií] est[aá] armado mantenimiento/.test(
+        tail,
+      ))
   );
 }
 
@@ -1487,10 +1964,11 @@ export function looksLikeMaintenanceGuideContextInThread(threadText: string): bo
   return (
     /mantenimiento preventivo/.test(tail) ||
     (/mantenimiento/.test(tail) &&
-      /utilidades|plan de mantenimiento|tarea correctiva|tarea preventiva|ingresa al sistema wara|ingresar al sistema/.test(
+      /utilidades|plan de mantenimiento|tarea correctiva|tarea preventiva|ingresa al sistema wara|ingresar al sistema|mis atajos|paneles|ordenes de trabajo|órdenes de trabajo|toma y deje/.test(
         tail,
       )) ||
-    (/queres que te explique/.test(tail) && /mantenimiento|preventiv\w*|correctiv\w*|tarea/.test(tail))
+    (/queres que te explique/.test(tail) && /mantenimiento|preventiv\w*|correctiv\w*|tarea/.test(tail)) ||
+    /para asignar (un )?plan/.test(tail)
   );
 }
 
@@ -1533,10 +2011,14 @@ export function shouldSkipStrayMaintenanceRequest(
 }
 
 export function looksLikeGreeting(text: string | undefined | null): boolean {
-  const norm = normCompanyToken(text ?? "");
+  const norm = normCompanyToken(text ?? "")
+    .replace(/[,!?.¡¿]+$/g, "")
+    .trim();
   if (!norm) return true;
-  return /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|que tal|menu|inicio)$/.test(
-    norm
+  // Bug real 2026-09-02: "Buen dia" (singular, sin tilde) NO matcheaba "buenos dias"
+  // → el router lo mandaba a búsqueda de unidad ("Unidad no encontrada «Buen dia»").
+  return /^(hola|buenas|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches)|hey|que tal|como te va|como andas|como estas|menu|inicio)(\s+(atilio|kira))?$/.test(
+    norm,
   );
 }
 
@@ -1555,7 +2037,21 @@ export function looksLikeFlowControlCommand(text: string | undefined | null): bo
 export function looksLikeSoftFlowRestart(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "").replace(/[!?.¡¿]+$/g, "").trim();
   if (!norm) return false;
-  return /^(inicio|menu|volver)$/.test(norm);
+  if (/^(inicio|menu|volver)$/.test(norm)) return true;
+  // Volver al menú / arranque — no es búsqueda de unidad (bug prod 2026-08-25).
+  if (
+    /\b(volvamos|volver|volv[eé]|volvé|regres(?:ar|emos|a)|retorn(?:ar|emos|a))\b/.test(norm) &&
+    /\b(al\s+)?(inicio|menu|menú|principio|comienzo|arranque)\b/.test(norm)
+  ) {
+    return true;
+  }
+  if (
+    /\b(empecemos|empezar|arranquemos|arrancar|comencemos|comenzar)\b/.test(norm) &&
+    /\b(de nuevo|desde cero|otra vez)\b/.test(norm)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Saludo repetido en una conversación que ya venía en curso (no primer contacto). */
@@ -1566,22 +2062,56 @@ export function looksLikeRepeatGreetingInSession(
   if (!looksLikeGreeting(selectionText) || !threadText.trim()) return false;
   const tail = threadText.slice(-3500).toLowerCase();
   return (
-    /atilio|mesa de ayuda wara|seguimos|en qu[eé] te puedo|consulta o servicio|voy a registrar|ten[eé]s \d+ unidades|listo,\s*registr|patente:/.test(
+    /atilio|kira|mesa de ayuda wara|seguimos|en qu[eé] te puedo|en qu[eé] te ayudo|consulta o servicio|voy a registrar|ten[eé]s \d+ unidades|listo,\s*registr|patente:|asistente virtual de wara/.test(
       tail,
     )
   );
 }
 
-/** Cliente elige módulo del menú genérico (Opciones / Unidades / Mantenimiento). */
-export function looksLikeInfoGuideModulePick(text: string | undefined | null): boolean {
-  const n = normCompanyToken(text ?? "")
+export type InfoGuideModulePick = "opciones" | "unidades" | "mantenimiento" | "transporte_publico";
+
+function normalizeInfoGuideModulePickText(text: string | undefined | null): string {
+  return normCompanyToken(text ?? "")
     .replace(/^(ok|dale|si|sip|bueno|perfecto|listo)\s+/, "")
     .trim();
-  if (!n) return false;
-  return (
-    /^(opciones|unidades|mantenimiento)$/.test(n) ||
-    /^modulo (de )?(opciones|unidades|mantenimiento)$/.test(n)
+}
+
+/**
+ * Elección explícita de módulo Wara desde menú o botón WhatsApp
+ * (ej. "Mantenimiento", "GESTIONAR MANTENIMIENTO", "CONSULTAR OPCIONES").
+ */
+export function parseInfoGuideModulePick(
+  text: string | undefined | null,
+): InfoGuideModulePick | null {
+  const n = normalizeInfoGuideModulePickText(text);
+  if (!n) return null;
+  if (/^(opciones|unidades|mantenimiento)$/.test(n)) return n as InfoGuideModulePick;
+  if (
+    /^(transporte( de pasajeros)?|transporte publico|modulo( de)? transporte( de pasajeros| publico)?)$/.test(
+      n,
+    )
+  ) {
+    return "transporte_publico";
+  }
+  const modulo = n.match(/^modulo (de )?(opciones|unidades|mantenimiento)$/);
+  if (modulo?.[2]) return modulo[2] as InfoGuideModulePick;
+  const menu = n.match(
+    /^(gestionar|consultar|ver|info|informacion|guia|ayuda)\s+(de\s+)?(opciones|unidades|mantenimiento)$/,
   );
+  if (menu?.[3]) return menu[3] as InfoGuideModulePick;
+  if (
+    /^(gestionar|consultar|ver|info|informacion|guia|ayuda)\s+(de\s+)?transporte( de pasajeros| publico)?$/.test(
+      n,
+    )
+  ) {
+    return "transporte_publico";
+  }
+  return null;
+}
+
+/** Cliente elige módulo del menú genérico (Opciones / Unidades / Mantenimiento). */
+export function looksLikeInfoGuideModulePick(text: string | undefined | null): boolean {
+  return parseInfoGuideModulePick(text) !== null;
 }
 
 /** Pide soporte / atención humana (no guía de módulos). */
@@ -1602,36 +2132,172 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
 }
 
 /**
+ * Reclamo de flota completa / masivo (sin unidad concreta).
+ * Bug real 2026-09-02: "Ninguna anda" / "están todas quietas" / "Ninguna reporta"
+ * caía a unidades y pedía patente en loop — debe ir a asesor (odoo_ticket).
+ *
+ * No robar GPS de UNA unidad: "la AD356UQ no reporta", "la nissan no reporta".
+ */
+export function looksLikeFleetWideOutageClaim(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 220) return false;
+  if (looksLikeResolvableUnitReferenceInMessage(raw)) return false;
+  if (detectLoosePlate(raw)) return false;
+
+  const n = normCompanyToken(raw);
+  if (/\b(odometro|horometro|kilometraje|\bkm\b|certificado|cobertura|mantenimiento|preventiv\w*|correctiv\w*)\b/.test(n)) {
+    return false;
+  }
+
+  const fleetQuantifier =
+    /\bningun[ao](\s+unidad(?:es)?)?\b/.test(n) ||
+    /\b(tod[ao]s|tods)(\s+(las?\s+)?unidades?)?\b/.test(n) ||
+    /\btoda\s+la\s+flota\b/.test(n) ||
+    /\btodas\s+las\s+unidades\b/.test(n) ||
+    /\bvarias\s+unidades\b/.test(n) ||
+    /\bla\s+flota\s+(entera|completa|toda)\b/.test(n) ||
+    (/\blas\s+unidades\b/.test(n) && /\b(tod[ao]s|tods|quiet\w*|clavad\w*|congelad\w*)\b/.test(n));
+
+  if (!fleetQuantifier) return false;
+
+  // Con "ninguna/ninguno" la negación ya va en el cuantificador ("ninguna reporta").
+  const outageSymptom =
+    /\b(quiet\w*|clavad\w*|congelad\w*|tildad\w*|trabad\w*|parad\w*|offline|sin\s+reporte|sin\s+se[nñ]al)\b/.test(
+      n,
+    ) ||
+    /\b(no\s+)?(reportan?|andan?|funcionan?|marchan?)\b/.test(n) ||
+    /\bno\s+(hay|tiene|tienen)\s+(reporte|senal|señal|gps)\b/.test(n);
+
+  return outageSymptom;
+}
+
+/**
  * Soporte fuera del alcance operativo de Atilio (GPS, odómetro, certificado, flota,
- * mantenimiento programable). Ej.: pantalla táctil, hardware físico, garantía.
- * Debe derivar a asesor y asignar caso — no preguntar patente ni # de ticket previo.
+ * mantenimiento programable, guías de app). Ej.: pantalla táctil, hardware físico, factura.
+ * Debe derivar a operador por panel Wara — no preguntar patente ni # de ticket previo.
+ *
+ * OJO: no derivar consultas operativas en alcance. Hardware físico sí deriva aunque digan "gps".
  */
 export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null): boolean {
   const n = normCompanyToken(text ?? "");
   if (!n || n.length > 280) return false;
+
+  // 0) Falla masiva de flota (sin patente) → asesor; no pedir unidad.
+  if (looksLikeFleetWideOutageClaim(text)) return true;
+
   const hardwareOrPhysical =
     /\b(pantalla|tactil|touch\s*screen|display|teclado|botonera|cargador|fuente|cable|antena|modem|router|tablet|impresora|hardware|garantia)\b/.test(
       n,
     );
+  // Incluye "no le/me funciona", "no anda" (bug 2026-08-29: "NO LE FUNCIONA LA PANTALLA…").
   const brokenOrClaim =
-    /\b(reclamar|reclamo|reclam\w*|falla|fallando|mal|rota|roto|romper|no funciona|funcion\w*\s+mal|problema|averia|danad\w*|defectuos\w*|garantia)\b/.test(
+    /\b(reclamar|reclamo|reclam\w*|falla|fallando|mal|rota|roto|romper|no\s+(le\s+|me\s+|les\s+)?(funciona|anda)|funcion\w*\s+mal|anda\s+mal|problema|averia|danad\w*|defectuos\w*|garantia|quiet\w*|clavad\w*|congelad\w*|tildad\w*|trabad\w*)\b/.test(
       n,
     );
-  // Hardware físico roto → fuera de alcance aunque mencionen "gps" (ej. pantalla del equipo).
-  if (hardwareOrPhysical && brokenOrClaim) return true;
-  // Trámites operativos de Atilio → no es "fuera de alcance".
-  if (
-    /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|reporte|sin reporte|no reporta|flota|patente|matricula|mantenimiento preventiv|mantenimiento correctiv)\b/.test(
+  const platformContext =
+    /\b(web|pagina|sitio|portal|plataforma|sistema|app|aplicacion|aplicativo)\b/.test(n);
+  const fleetWideSymptom =
+    /\b(las unidades|todas las unidades|varias unidades|queda\w* quiet\w*|estan quiet\w*|se quedan quiet\w*)\b/.test(
       n,
-    )
-  ) {
-    return false;
+    );
+  const billingOrAdmin =
+    /\b(factura|facturacion|cobro|cobranza|pago|abono|contrato|cuit|razon social|deuda)\b/.test(n);
+
+  // 1) Hardware físico roto → fuera de alcance (aunque mencionen "gps" / unidad).
+  if (hardwareOrPhysical && brokenOrClaim) return true;
+
+  // 2) Facturación / admin comercial.
+  if (billingOrAdmin && (brokenOrClaim || /\b(reclamar|reclamo|reclam\w*|consulta|problema)\b/.test(n))) {
+    return true;
   }
-  // "necesito reclamar X" genérico (X no es trámite Atilio).
+
+  // 3) Falla general de web/plataforma (o flota quieta en la web).
+  // Antes el paso "en alcance" matcheaba "unidades" y bloqueaba casos reales
+  // ("falla la web, las unidades están quietas" → odoo_ticket, 2026-08-07).
+  const narrowWaraModule =
+    /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|mantenimiento|preventiv\w*|correctiv\w*|etapas?|historial|recorrido|cumplimiento|telemetr\w*|reporte|sin reporte|no reporta)\b/.test(
+      n,
+    );
+  if ((platformContext && brokenOrClaim) || (platformContext && fleetWideSymptom)) {
+    if (!narrowWaraModule) return true;
+  }
+
+  // 4) Temas operativos / guías que Atilio SÍ atiende → no derivar.
+  if (isAtilioInScopeOperationalTopic(n)) return false;
+
+  // 5) "necesito reclamar X" genérico (X no es trámite Atilio — ya filtrado).
   if (/\b(necesito|quiero|vengo a|tengo que|hay que)\b.{0,40}\breclam\w*\b/.test(n)) {
     return true;
   }
   return false;
+}
+
+/** Temas que Atilio debe atender (no derivar como "fuera de alcance"). */
+function isAtilioInScopeOperationalTopic(norm: string): boolean {
+  return (
+    /\b(od[oó]metro|hor[oó]metro|kilometraje|\bkm\b|certificado|cobertura|ignicio|ignicion|reporte|sin reporte|no reporta|flota|patente|matricula|mantenimiento|preventiv\w*|correctiv\w*|gps|estado|unidad|unidades|posicion|ubicacion|telemetr\w*|etapas?|historial|recorrido|cumplimiento|vuelta|odometro|horometro)\b/.test(
+      norm,
+    ) ||
+    /\b(modulo|opciones|perfiles|atajos|agenda de contactos|como uso|como configuro|como cargo|paso a paso)\b/.test(
+      norm,
+    ) ||
+    /\b(que\s+mas\s+(podes|pod[eé]s|puedo)|que\s+(puedo|podes|pod[eé]s)\s+hacer|que\s+servicios?|me\s+(podes|pod[eé]s)\s+ayud)\b/.test(
+      norm,
+    ) ||
+    /\b(m\d{3}-\d{2,3}|interno\s+\d{3,7})\b/.test(norm)
+  );
+}
+
+/**
+ * Cliente pide explícitamente ABRIR UN CASO NUEVO (cerrar el anterior).
+ * Bug real 2026-08-20: "ABRIR UN NUEVO CASO" reutilizaba el caso abierto.
+ */
+export function looksLikeOpenNewCaseRequest(text: string | undefined | null): boolean {
+  const n = normCompanyToken(text ?? "");
+  if (!n || n.length > 160) return false;
+  if (/\b(cerrar|cerrame|resolver)\s+(caso|ticket|reclamo)\b/.test(n)) return false;
+  if (
+    /\b(abrir|crear|generar|levantar)\b.{0,30}\b(nuevo|nueva|otro|otra)\b.{0,20}\b(caso|ticket|reclamo)\b/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(abrir|crear|generar|levantar)\b.{0,25}\b(caso|ticket|reclamo)\b.{0,15}\b(nuevo|nueva|otro|otra)\b/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (/^(abrir|crear|generar)\s+(un\s+)?(nuevo|otra?)\s+(caso|ticket|reclamo)\s*[.!]*$/.test(n)) {
+    return true;
+  }
+  if (/\b(necesito|quiero)\b.{0,25}\b(nuevo|otra?)\s+(caso|ticket|reclamo)\b/.test(n)) return true;
+  return false;
+}
+
+/**
+ * Síntoma GPS de plataforma (etapas/recorrido/historial) sin patente → asesor.
+ * Bug real 2026-08-20: "NO REPORTA ETAPAS DE LA VUELTA" se buscó como unidad «VUELTA».
+ *
+ * Si hay unidad resoluble + síntoma operativo → consultar telemetría primero (unidades).
+ */
+export function looksLikeGpsFeatureIssueForAdvisor(text: string | undefined | null): boolean {
+  if (shouldRouteGpsConsultToUnidades(text)) return false;
+
+  const n = normCompanyToken(text ?? "");
+  if (!n || n.length > 500) return false;
+  if (detectLoosePlate(text ?? "")) return false;
+  const featureCue =
+    /\b(etapas?\s+de\s+la\s+vuelta|etapas?\s+de\s+vuelta|cumplimiento\s+de\s+etapas?|etapas?\b|recorrido|historial)\b/.test(
+      n,
+    ) || (/\bvuelta\b/.test(n) && /\b(etapas?|reporta|muestra|aparece|cumplimiento)\b/.test(n));
+  const problemCue =
+    /\b(no\s+reporta|no\s+muestra|no\s+aparece|no\s+figura|no\s+revisa|tampoco\s+revisa|sin\s+reporte|falta|falla|problema|error|no\s+anda|no\s+funciona|no\s+veo)\b/.test(
+      n,
+    );
+  return featureCue && problemCue;
 }
 
 /** Cliente pide abrir reclamo/ticket/caso (no consulta GPS ni unidad). */
@@ -1641,6 +2307,8 @@ export function looksLikeExplicitReclamoOrTicketRequest(text: string | undefined
   if (looksLikeHumanAdvisorRequest(text)) return false;
   if (/\b(caso|ticket|reclamo)\s+(abierto|activo|pendiente)\b/.test(n)) return false;
   if (/\b(cerrar|cerrame|resolver)\s+(caso|ticket|reclamo)\b/.test(n)) return false;
+  if (looksLikeOpenNewCaseRequest(text)) return true;
+  if (looksLikeGpsFeatureIssueForAdvisor(text)) return true;
 
   if (
     /\b(gps|reporte|ignicion|offline|ubicacion|ultimo reporte|no reporta|sin reporte|patente|matricula)\b/.test(
@@ -1746,6 +2414,12 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
   if (!norm || norm.length > 160) return false;
   if (looksLikeHumanAdvisorRequest(text)) return false;
 
+  const compact = norm.replace(/\s+/g, " ").trim();
+  if (/^(porfa|porfavor|porfis)\s*,?\s*(ayudame|ayud[aá]me)\s*[!.?]*$/.test(compact)) return true;
+  if (/^(ayudame|ayud[aá]me|me ayudas|me ayud[aá]s)(\s+(porfa|porfavor|porfis))?\s*[!.?]*$/.test(compact)) {
+    return true;
+  }
+
   if (/\b(por que|porque|por qué)\s+me\s+deriv/.test(norm)) return true;
   if (/\bno\s+me\s+(deriv|pases|pase)\b/.test(norm)) return true;
 
@@ -1775,7 +2449,7 @@ export function looksLikeAtilioHelpRequest(text: string | undefined | null): boo
   }
 
   return (
-    /\b(vos|tu|atilio|bot|chatbot)\b/.test(norm) ||
+    /\b(vos|tu|atilio|kira|bot|chatbot)\b/.test(norm) ||
     // Raíz "ayud" + cualquier forma de "poder" (incluye plural/condicional: "pueden
     // ayudarme", "podrían ayudar"), no solo 2da persona singular.
     /\b(no\s+me\s+)?(podes|pod[eé]s|puede|pueden|podr[ií]an|podr[ií]as)\s+ayud\w*\b/.test(norm)
@@ -1795,8 +2469,37 @@ function hasConcreteOperationalTopic(text: string, norm: string): boolean {
 }
 
 /**
+ * Meta-consulta sin tema concreto: "¿puedo hacer una consulta?", "tengo una consulta".
+ * Respuesta breve acotada a servicios Wara — no menú largo ni repetir GPS.
+ */
+export function looksLikeServiceScopeConsultationMeta(text: string | undefined | null): boolean {
+  const norm = normCompanyToken(text ?? "");
+  if (!norm || norm.length > 120) return false;
+  if (looksLikeHumanAdvisorRequest(text)) return false;
+  if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
+  if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
+  if (looksLikeExplicitCapabilityMenuRequest(text)) return false;
+  return (
+    /\bpuedo\s+hacer\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\bpuedo\s+(hacerte|consultarte)\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\b(te\s+)?puedo\s+consultarte\b/.test(norm) ||
+    /\b(te\s+)?puedo\s+consultar(\s+algo)?\b/.test(norm) ||
+    /\bpod[eé]s\s+atender\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\btengo\s+(una\s+)?consultas?\b/.test(norm) ||
+    /\bquer[ií]a\s+(hacerte\s+)?(una\s+)?consultas?\b/.test(norm) ||
+    /\b(te\s+)?(hago|hacer[ií]a)\s+(una\s+)?consultas?\b/.test(norm) ||
+    /^consultas?\s*[?.!]*$/.test(norm) ||
+    /\bes\s+(solo\s+)?(una\s+)?consultas?\s*[?.!]*$/.test(norm)
+  );
+}
+
+/**
  * Pregunta EXPLÍCITA de menú de capacidades ("qué gestiones puedo hacer", "qué puedo
- * gestionar/pedir/consultar"). Solo esto merece el panfleto fijo — el resto va a IA.
+ * gestionar/pedir/consultar", "qué más podés hacer"). Solo esto merece el menú fijo —
+ * el resto va a IA.
+ *
+ * Bug real 2026-08-23: "QUE MAS PODES HACER" no matcheaba (faltaba "más"/"cosas") y,
+ * con caso GPS recién abierto, caía a follow-up de unidad activa en vez de capacidades.
  */
 export function looksLikeExplicitCapabilityMenuRequest(
   text: string | undefined | null,
@@ -1806,12 +2509,28 @@ export function looksLikeExplicitCapabilityMenuRequest(
   if (looksLikeHumanAdvisorRequest(text)) return false;
   if (/\b(asesor|agente|persona|humano|humana|operador)\b/.test(norm)) return false;
   if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
+  if (/\bque\s+(gestiones?|tramites?|servicios?|cosas)\s+(puedo|podes|pod[eé]s)\s+(hacer|ofrec)/.test(norm)) {
+    return true;
+  }
   if (/\bque\s+(gestiones?|tramites?)\s+puedo\s+hacer\b/.test(norm)) return true;
+  // "qué más podés hacer", "qué cosas puedo pedir", "qué más hacés"
+  if (
+    /\bque\s+(mas|más|otras?\s+cosas?|cosas)\s+(puedo|podria|podr[ií]a|podes|pod[eé]s|haces|hac[eé]s)\b/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
   if (
     /\bque\s+(puedo|podria|podr[ií]a|podes|pod[eé]s)\s+(hacer|pedirte|pedir|consultar|gestionar|solicitar|tramitar|realizar)\b/.test(
       norm,
     )
   ) {
+    return true;
+  }
+  // "más podés hacer?", "qué servicios tenés?"
+  if (/\b(mas|más)\s+(podes|pod[eé]s|puedo)\s+hacer\b/.test(norm)) return true;
+  if (/\bque\s+servicios?\s+(tenes|ten[eé]s|ofreces|ofrec[eé]s|podes|pod[eé]s)\b/.test(norm)) {
     return true;
   }
   return false;
@@ -1850,28 +2569,23 @@ export function looksLikeThanksOnlyAcknowledgement(text: string | undefined | nu
   if (!raw || raw.length > 140) return false;
   if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
   const t = normCompanyToken(raw);
-  return /^(muchas\s+)?(gracias|agradezco|thanks|thank you|ty|thx|tks)([\s!.,¡¿]*|(\s+(total|mil|de verdad|che))?[\s!.,¡¿]*)$/.test(
+  return /^(muchas\s+)?(gracias|agradezco|thanks|thank you|ty|thx|tks|grx|grac)([\s!.,¡¿]*|(\s+(total|mil|de verdad|che))?[\s!.,¡¿]*)$/.test(
     t,
-  );
+  ) || /^(ok\s+)?(gr|grx|grac)[\s!.,¡¿]*$/.test(t);
 }
 
 /**
- * Solo el nombre del bot como llamado de atención — "Atilio", "hola atilio", "Atilio?",
- * "atilio estás ahí" — sin pregunta de capacidades ni tema concreto. Distinto de
- * looksLikeExplicitCapabilityQuestion a propósito: bug real, producción 2026-07-28 (3ra
- * vuelta): el cliente ya había recibido el mensaje completo de capacidades y, al volver a
- * escribir solo "Atilio", el bot repetía TEXTUALMENTE el mismo párrafo largo en vez de
- * saludar corto y preguntar en qué ayudar — así que esta mención "pelada" del nombre
- * amerita una respuesta breve, no la lista completa de capacidades de nuevo.
+ * Solo el nombre del bot como llamado de atención — "Kira", "hola Kira".
+ * Kia/Atilio se conservan como alias históricos, sin pregunta ni tema concreto.
  */
 export function looksLikeBareAtilioMention(text: string | undefined | null): boolean {
   const norm = normCompanyToken(text ?? "")
     .replace(/[^a-z0-9\s]/g, "")
     .trim();
   if (!norm || norm.length > 40) return false;
-  if (!/\batilio\b/.test(norm)) return false;
+  if (!/\b(atilio|kia|kira)\b/.test(norm)) return false;
   if (hasConcreteOperationalTopic(text ?? "", norm)) return false;
-  return /^(hola\s+)?atilio(\s+(estas|esta)\s*(ahi)?)?$/.test(norm);
+  return /^(hola\s+)?(atilio|kia|kira)(\s+(estas|esta)\s*(ahi)?)?$/.test(norm);
 }
 
 /**
@@ -1895,13 +2609,26 @@ export function looksLikeGenericCapabilityOrTopicSwitchRequest(text: string | un
   return looksLikeExplicitCapabilityQuestion(text) || looksLikeBareAtilioMention(text);
 }
 
-export function buildAtilioHelpCapabilitiesReply(firstName?: string): string {
-  const prefix = firstName?.trim() ? `${firstName.trim()}, ` : "";
-  return (
-    `${prefix}sí, puedo ayudarte por este chat con consultas de unidades (reporte, ubicación, flota), certificados de cobertura, odómetro/horómetro y mantenimiento. ` +
-    `Contame qué necesitás — por ejemplo "reporte de LWK7902" o "listado de mis unidades". ` +
-    `Si preferís hablar con una persona, escribí "hablar con un asesor".`
-  );
+export function buildAtilioHelpCapabilitiesReply(
+  _firstName?: string,
+  companyName?: string,
+): string {
+  const company = companyName?.trim();
+  const lines = [
+    company
+      ? `Dale, con *${company}* te puedo ayudar por acá con esto:`
+      : "Dale, por acá te puedo ayudar con esto:",
+    "",
+    "• 🛣 Cambio de odómetro / ⏱ horómetro",
+    "• 📍 Estados GPS y reportes de unidades",
+    "• 📋 Certificados de cobertura",
+    "• 🔧 Agenda de mantenimientos",
+    "• 🚌 Transporte de pasajeros",
+    "• 📱 Soporte sobre el uso de la app Wara",
+    "",
+    "Contame qué necesitás y lo vemos.",
+  ];
+  return lines.join("\n");
 }
 
 function companySelectionMenuMessage(
@@ -2171,6 +2898,10 @@ export type WaraUnidadEstado = {
   unidad: string;
   /** Matrícula / patente (backoffice: Matrícula, ej. NKL 952). */
   patente: string;
+  /** Marca del vehículo (ej. Nissan, Volkswagen) — cuando Wara la expone aparte del nombre. */
+  marca?: string;
+  /** Modelo del vehículo (ej. Saveiro, Frontier). */
+  modelo?: string;
   ultimo_reporte?: {
     fecha?: string;
     hace_segundos?: number;
@@ -2691,9 +3422,17 @@ export async function resetCustomerCompanyMenu(
   const normalized = normalizeWhatsAppPhone(rawPhone);
   const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
   if (customer) {
-    await clearCustomerTicketHistory(prisma, rawPhone);
+    // Conservar inbound reciente (wamid del turno) para que el delivery guard
+    // de teléfonos protegidos no silencie el menú de empresas tras el reset.
+    await clearCustomerTicketHistory(prisma, rawPhone, {
+      preserveInboundSince: new Date(Date.now() - 5 * 60_000),
+    });
     await clearActiveUnit(prisma, rawPhone);
     await clearPendingAction(prisma, rawPhone);
+    // Bug prod 2026-09-17: lastInfoGuide (p. ej. paneles/pn-alarmas) sobrevivía al
+    // reinicio y contaminaba el «1» post-empresa y saludos siguientes.
+    const { clearLastInfoGuideContext } = await import("@/lib/lastInfoGuideContext");
+    await clearLastInfoGuideContext(prisma, rawPhone).catch(() => false);
     await prisma.customer.update({
       where: { id: customer.id },
       data: {
@@ -2703,6 +3442,11 @@ export async function resetCustomerCompanyMenu(
         waraSessionAt: null,
       },
     });
+  } else {
+    await clearActiveUnit(prisma, rawPhone);
+    await clearPendingAction(prisma, rawPhone);
+    const { clearLastInfoGuideContext } = await import("@/lib/lastInfoGuideContext");
+    await clearLastInfoGuideContext(prisma, rawPhone).catch(() => false);
   }
   const lookup = await obtenerEmpresaPorNumero(rawPhone);
   const contacts = lookup.contactos ?? [];
@@ -3046,6 +3790,86 @@ function waraData(json: Record<string, unknown> | null): Record<string, unknown>
   return json ?? {};
 }
 
+/** Wara a veces manda movil_id como string en JSON; normalizamos en el límite de la API. */
+function coerceWaraMovilId(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = parseInt(trimmed, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
+}
+
+function normalizeWaraUnidadEstado(raw: unknown): WaraUnidadEstado | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const patente = typeof row.patente === "string" ? row.patente : "";
+  const unidadRaw = typeof row.unidad === "string" ? row.unidad.trim() : "";
+  const nombreRaw =
+    typeof row.nombre === "string"
+      ? row.nombre.trim()
+      : typeof row.name === "string"
+        ? row.name.trim()
+        : "";
+  const internoRaw =
+    typeof row.interno === "string"
+      ? row.interno.trim()
+      : typeof row.codigo === "string"
+        ? row.codigo.trim()
+        : "";
+  const unidad = [...new Set([unidadRaw, nombreRaw, internoRaw].filter(Boolean))].join(" ");
+  const marcaRaw =
+    typeof row.marca === "string"
+      ? row.marca
+      : typeof row.brand === "string"
+        ? row.brand
+        : "";
+  const modeloRaw =
+    typeof row.modelo === "string"
+      ? row.modelo
+      : typeof row.model === "string"
+        ? row.model
+        : "";
+  const marca = marcaRaw.trim();
+  const modelo = modeloRaw.trim();
+  if (!patente.trim() && !unidad.trim()) return null;
+  const base = {
+    ...(raw as WaraUnidadEstado),
+    movil_id: coerceWaraMovilId(row.movil_id),
+    patente,
+    unidad,
+    ...(marca ? { marca } : {}),
+    ...(modelo ? { modelo } : {}),
+  };
+  const posRaw = row.ultima_posicion;
+  if (posRaw && typeof posRaw === "object") {
+    const pos = posRaw as Record<string, unknown>;
+    const lat = coerceWaraCoordinate(pos.lat ?? pos.latitude);
+    const lon = coerceWaraCoordinate(pos.lon ?? pos.lng ?? pos.longitude);
+    base.ultima_posicion = {
+      ...(pos as WaraUnidadEstado["ultima_posicion"]),
+      ...(lat != null ? { lat } : {}),
+      ...(lon != null ? { lon } : {}),
+    };
+  }
+  return base;
+}
+
+/** lat/lon pueden venir como string desde Wara. */
+function coerceWaraCoordinate(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim().replace(",", ".");
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 export async function consultarEstadoUnidades(
   sessionToken: string,
   patentes: string[] = []
@@ -3105,11 +3929,14 @@ export async function consultarEstadoUnidades(
     }
 
     const data = waraData(json);
+    const rawUnidades = Array.isArray(data.unidades) ? data.unidades : [];
     return {
       ok: json?.ok !== false,
       status: res.status,
       cliente: typeof data.cliente === "string" ? data.cliente : undefined,
-      unidades: Array.isArray(data.unidades) ? (data.unidades as WaraUnidadEstado[]) : [],
+      unidades: rawUnidades
+        .map((row) => normalizeWaraUnidadEstado(row))
+        .filter((row): row is WaraUnidadEstado => row != null),
       error: json?.ok === false ? errorFromWara(json, "Wara no devolvió unidades") : undefined,
     };
   }

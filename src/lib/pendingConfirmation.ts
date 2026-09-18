@@ -3,10 +3,10 @@ import {
   hasPendingMantenimientoConfirmation,
   hasPendingOdometerConfirmation,
   looksLikeBareMeterValue,
-  looksLikePendingTramiteAffirmation,
   threadAwaitingOdometerConfirmDetails,
   threadHasActiveMeterValueRequest,
 } from "@/lib/wara";
+import { isAffirmationForPendingWrite } from "@/lib/pendingWriteIntent";
 import type { TurnExecutorId } from "@/lib/whatsappTurnRouter";
 
 /** Ejecutores que aceptan CONFIRMO / sí / dale sobre un resumen pendiente. */
@@ -23,7 +23,8 @@ export function resolvePendingConfirmationExecutor(
   threadText: string,
   selectionText: string,
 ): PendingConfirmationExecutor | null {
-  if (!looksLikePendingTramiteAffirmation(selectionText)) return null;
+  if (!hasAnyPendingConfirmation(threadText)) return null;
+  if (!isAffirmationForPendingWrite(selectionText)) return null;
   // "55" u otro valor numérico durante pedido de km/hs → odómetro, no mantenimiento stale.
   if (looksLikeBareMeterValue(selectionText) && threadHasActiveMeterValueRequest(threadText)) {
     return null;

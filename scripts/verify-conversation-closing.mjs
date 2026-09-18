@@ -21,8 +21,11 @@
 import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
+  looksLikeSubstantiveCustomerMessage,
 } from "../src/lib/waraApi.ts";
 import { looksLikeBriefConfirmation, looksLikeOdometerPendingDataAmendment, extractHorometroFromOdometerSummary } from "../src/lib/wara.ts";
+import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationCloseDetect.ts";
+import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -50,7 +53,7 @@ for (const text of farewells) {
 }
 
 console.log("\n— Sanity: agradecimiento simple sigue siendo un ack normal (puede seguir pidiendo cosas) —");
-const plainAcks = ["Ok gracias", "gracias", "perfecto gracias", "listo", "dale gracias"];
+const plainAcks = ["Ok gracias", "Ok GR", "ok gr", "Ok grx", "gracias", "perfecto gracias", "listo", "dale gracias"];
 for (const text of plainAcks) {
   assert(
     looksLikeConversationAcknowledgement(text),
@@ -88,6 +91,15 @@ for (const text of thanksWithNewTramite) {
   );
 }
 
+console.log(
+  "\n— Bug 2026-08-25: 'Ok GR' (gr=gracias) tras menú de síntomas — ack, no reabrir escucha —",
+);
+assert(looksLikeConversationAcknowledgement("Ok GR"), 'looksLikeConversationAcknowledgement("Ok GR")');
+assert(
+  !looksLikeSubstantiveCustomerMessage("Ok GR"),
+  'looksLikeSubstantiveCustomerMessage("Ok GR") === false',
+);
+
 console.log("\n— Bug 2026-07-29: 'Perfecto' confirma trámite, no es cierre social —");
 assert(looksLikeBriefConfirmation("Perfecto") === true, "Perfecto es confirmación breve");
 assert(
@@ -110,6 +122,24 @@ assert(
   looksLikeOdometerPendingDataAmendment("Perdón me equivoqué es 17") === true,
   "me equivoqué es 17 es enmienda de confirmación pendiente",
 );
+
+console.log("\n— Bug real 2026-08-20: 'Quiero resolver conversacion' tras listado de flota —");
+const closeFleetCtx =
+  "🚗 s/ patente · 🔢 taller 01 · 🏭 s/ marca\n➡️ Quedan 13. Escribí *más unidades* para seguir, o una patente / marca para buscar.";
+for (const text of [
+  "Quiero resolver conversacion",
+  "Quiero resolver conversación",
+  "Quiero resolver la conversación",
+]) {
+  assert(
+    looksLikeCustomerConversationCloseRequest(text),
+    `looksLikeCustomerConversationCloseRequest("${text}")`,
+  );
+  assert(
+    classifyTurnExecutor(text, closeFleetCtx) === "odoo_ticket",
+    `classify("${text}") → odoo_ticket (no unidades/agente)`,
+  );
+}
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

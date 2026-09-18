@@ -135,6 +135,24 @@ assert(!threadHasActiveOdometerFlow(reportThread), "odómetro no activo tras con
 assert(looksLikeGpsOrUnitStatusQuestion("no me reporta la AF061DO"), "no me reporta = consulta GPS");
 assert(classifyTurnExecutor("no me reporta la AF061DO", reportThread) === "unidades", "AF061DO → unidades");
 
+console.log("\n— Sin reporte + Decime la patente exacta NO va a odómetro (bug 2026-09-09) —");
+const sinReporteClarify = [
+  "Cliente: Tengo la unidad 300-111 sin reporte",
+  "Bot: Encontré 3 unidades (NKL 952 · M300-111, AF 111 GF · M600-123, AG 228 NY · M900-111). Decime la patente exacta.",
+].join("\n");
+assert(
+  hasPendingUnitConsultPlateRequest(sinReporteClarify),
+  "detecta 'Decime la patente exacta' como pedido GPS",
+);
+assert(
+  classifyTurnExecutor("Es la 300-111", sinReporteClarify) === "unidades",
+  "Es la 300-111 tras sin reporte → unidades",
+);
+assert(
+  classifyTurnExecutor("Es la 300-111", sinReporteClarify) !== "odometro",
+  "Es la 300-111 tras sin reporte NO → odómetro",
+);
+
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
   process.exit(1);

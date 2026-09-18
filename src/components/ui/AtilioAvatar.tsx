@@ -8,11 +8,11 @@ export function AtilioAvatar({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center rounded-full bg-[#4a0e1c] ring-2 ring-[#4a0e1c]/20 ${sizeClass}`}
-      title="Atilio"
+      title="Kira"
     >
       <Image
         src="/wara-logo.png"
-        alt="Atilio"
+        alt="Kira"
         width={imgSize}
         height={imgSize}
         className="h-[55%] w-[55%] object-contain brightness-0 invert"

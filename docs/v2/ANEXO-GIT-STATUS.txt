@@ -1,0 +1,20 @@
+ M scripts/verify-generic-capability-topic-switch.mjs
+?? WARA-AUDITORIA-CODIGO-ACTUAL.md
+?? docs/API-ChatBot-Atilio-4.pdf
+?? docs/Mesa-Ayuda-Wara-Arquitectura-Actual.docx
+?? docs/Mesa-Ayuda-Wara-Capacidades-Operativas.docx
+?? docs/Mesa-Ayuda-Wara-Descripcion-Sistema-E2E.docx
+?? "docs/Propuesta Empliados a  Wara 2.pdf"
+?? docs/assets/
+?? docs/evidencia-incidente-wara-2026-07-25.json
+?? docs/log-odometro-fecha-hora-sin-dato-2026-08-06.md
+?? docs/postman/
+?? docs/v2/
+?? scripts/generar-postman-env-local.mjs
+?? scripts/generar_arquitectura_actual_docx.py
+?? scripts/generar_capacidades_operativas_docx.py
+?? scripts/generar_descripcion_sistema_e2e_docx.py
+?? scripts/reset-all-customers.mjs
+?? scripts/reset-one-customer.mjs
+?? scripts/verify-colloquial-rioplatense-audit.mjs
+?? ~$forme-Proyecto-Wara-60-dias.docx

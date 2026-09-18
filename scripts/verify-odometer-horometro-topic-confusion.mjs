@@ -28,6 +28,7 @@ import {
   threadAwaitingHorometerKmValue,
   threadAwaitingOdometerPlate,
   threadAwaitingOdometerKmValue,
+  lastAwaitingMeterPromptInTail,
 } from "../src/lib/wara.ts";
 
 let passed = 0;
@@ -42,38 +43,30 @@ function check(label, cond) {
 // producción 2026-07-29 donde una pregunta VIEJA de horómetro y una NUEVA de odómetro
 // convivían en el mismo tail de ~2500 caracteres).
 function lastAwaitingFieldPromptInTail(threadText) {
-  const tail = threadText
-    .slice(-2500)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const horoIdx = Math.max(
-    tail.lastIndexOf("para registrar el cambio de horometro necesito la patente"),
-    tail.lastIndexOf("cual es el nuevo horometro en horas"),
-    tail.lastIndexOf("cuantas horas de motor"),
-  );
-  const odoIdx = Math.max(
-    tail.lastIndexOf("para registrar el cambio de odometro necesito la patente"),
-    tail.lastIndexOf("cual es el nuevo odometro en km"),
-    tail.lastIndexOf("cual es el nuevo valor de odometro"),
-  );
-  if (horoIdx < 0 && odoIdx < 0) return null;
-  return horoIdx > odoIdx ? "horometro" : "odometro";
+  return lastAwaitingMeterPromptInTail(threadText);
 }
 
 function computeHorometerFlowActive(rawText, threadText) {
   const rawExplicitlyMentionsOdometroOnly =
     /\bod[oó]metro\b/i.test(rawText) && !/\bhor[oó]metro\b/i.test(rawText);
   if (rawExplicitlyMentionsOdometroOnly) return false;
+  const rawExplicitlyStatesKm =
+    /\b(km|kil[oó]metros?|kilometraje|od[oó]metro)\b/i.test(rawText) &&
+    /\d/.test(rawText) &&
+    !looksLikeHorometerOnlyIntent(rawText);
+  if (rawExplicitlyStatesKm) return false;
+  const awaitingMeterKind = lastAwaitingMeterPromptInTail(threadText);
   const horometerAwaitingInThread =
     threadAwaitingHorometerPlate(threadText) || threadAwaitingHorometerKmValue(threadText);
   const odometerAwaitingInThread =
     threadAwaitingOdometerPlate(threadText) || threadAwaitingOdometerKmValue(threadText);
-  return (
-    looksLikeHorometerOnlyIntent(rawText) ||
-    (horometerAwaitingInThread &&
-      !(odometerAwaitingInThread && lastAwaitingFieldPromptInTail(threadText) === "odometro"))
-  );
+  if (looksLikeHorometerOnlyIntent(rawText)) return true;
+  if (horometerAwaitingInThread || odometerAwaitingInThread) {
+    if (awaitingMeterKind === "odometro") return false;
+    if (awaitingMeterKind === "horometro") return true;
+    return horometerAwaitingInThread && !odometerAwaitingInThread;
+  }
+  return false;
 }
 
 console.log("▶ Bug real #1: mención VIEJA de horómetro (trámite ya resuelto) no debe contaminar un pedido nuevo de odómetro");

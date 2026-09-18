@@ -1,0 +1,343 @@
+
+======== def-hoja ========
+interpret: {
+  "route": "info_guides",
+  "guideKind": "transporte_publico",
+  "need": "definition",
+  "articleIds": [
+    "tp-hoja-turno-crear"
+  ],
+  "clarifyQuestion": null,
+  "executionRequest": false,
+  "confidence": 1,
+  "reason": "Definición de hoja de turno disponible"
+}
+guideKind: transporte_publico
+reply:
+ La hoja de turno es la diagramación del día en el transporte público, donde se asigna una unidad (y chofer, si aplica) a un turno específico. Al guardarla, se activa el tracking en tiempo real, lo que permite comparar el servicio planificado con la ubicación real. Sin una hoja de turno del día, no se puede realizar esta comparación, aunque existan servicio y turno.
+
+======== proc-hoja ========
+interpret: {
+  "route": "info_guides",
+  "guideKind": "transporte_publico",
+  "need": "procedure",
+  "articleIds": [
+    "tp-hoja-turno-crear"
+  ],
+  "clarifyQuestion": null,
+  "executionRequest": false,
+  "confidence": 1,
+  "reason": "Consulta sobre procedimiento para crear una hoja de turno."
+}
+guideKind: transporte_publico
+reply:
+ Para crear una hoja de turno en la app Wara, seguí estos pasos:
+
+1) Verificá la fecha.
+2) Seleccioná el turno correspondiente.
+3) Seleccioná la unidad que vas a asignar.
+4) Asigná el chofer si tu cuenta tiene habilitada la selección manual de chofer.
+5) Guardá la hoja de turno.
+
+Recuerda que sin la hoja de turno del día, no podrás comparar el planificado con lo real.
+
+======== trouble-manana ========
+interpret: {
+  "route": "info_guides",
+  "guideKind": "transporte_publico",
+  "need": "troubleshoot",
+  "articleIds": [
+    "tp-error-hoja-feriado"
+  ],
+  "clarifyQuestion": null,
+  "executionRequest": false,
+  "confidence": 0.9,
+  "reason": "Error al crear hoja de turno"
+}
+guideKind: transporte_publico
+reply:
+ Para resolver el problema de no poder crear la hoja para mañana, te sugiero que verifiques lo siguiente:
+
+1) Confirma si existe un turno para el tipo de día que corresponde a mañana.
+2) Si mañana es feriado o un evento, asegúrate de que esté cargada la excepción de transporte para esa fecha.
+3) Revisa si el mensaje de la plataforma menciona algo sobre el tipo de día o la excepción.
+
+Si necesitas más ayuda, consulta con un administrador de la cuenta.
+
+======== trouble-color ========
+interpret: {
+  "route": "info_guides",
+  "guideKind": "transporte_publico",
+  "need": "troubleshoot",
+  "articleIds": [
+    "tp-error-sin-color"
+  ],
+  "clarifyQuestion": null,
+  "executionRequest": false,
+  "confidence": 0.9,
+  "reason": "Error relacionado con el color del colectivo en el mapa."
+}
+guideKind: transporte_publico
+reply:
+ Para resolver el problema de que el colectivo no aparece con color en el mapa, te sugiero que verifiques lo siguiente:
+
+1) Asegúrate de que haya una hoja de turno del día con esa unidad.
+2) Confirma que la unidad esté reportando GPS.
+3) Revisa si el servicio, turno, traza y etapas son coherentes.
+4) Verifica si la cuenta tiene habilitado el panel de viajes.
+
+Si necesitas más ayuda, te recomiendo consultar con un administrador de la cuenta.
+
+======== execute ========
+interpret: {
+  "route": "info_guides",
+  "guideKind": "transporte_publico",
+  "need": "execute",
+  "articleIds": [
+    "tp-hoja-turno-crear"
+  ],
+  "clarifyQuestion": null,
+  "executionRequest": true,
+  "confidence": 1,
+  "reason": "Solicitud de creación de hoja de turno."
+}
+guideKind: transporte_publico
+reply:
+ No puedo crear la hoja de turno directamente, pero te puedo guiar en cómo hacerlo en la app Wara. 
+
+1) Ve a Utilidades → Transporte de Pasajeros → Hoja de Turnos → Agregar.
+2) Verifica la fecha.
+3) Selecciona el turno.
+4) Selecciona la unidad.
+5) Asigna chofer si tu cuenta tiene esa opción habilitada.
+6) Guarda la hoja de turno.
+
+Recuerda que sin la hoja de turno no podrás comparar el planificado con lo real. Si necesitas más ayuda, consulta con un administrador de la cuenta.
+
+======== ambiguous ========
+interpret: {
+  "route": "continue_normal",
+  "guideKind": null,
+  "need": "ambiguous",
+  "articleIds": [],
+  "clarifyQuestion": "¿Qué tipo de ayuda necesitas con transporte?",
+  "executionRequest": false,
+  "confidence": 0.8,
+  "reason": "Consulta ambigua sobre transporte"
+}
+guideKind: null
+reply:
+ ¿Qué tipo de ayuda necesitas con transporte?
+
+======== followup-feriado ========
+interpret: {
+  "route": "info_guides",
+  "guideKind": "transporte_publico",
+  "need": "definition",
+  "articleIds": [
+    "tp-excepciones"
+  ],
+  "clarifyQuestion": "¿Te refieres a las excepciones de transporte en feriados?",
+  "executionRequest": false,
+  "confidence": 0.8,
+  "reason": "Consulta sobre feriados en el contexto de transporte."
+}
+guideKind: transporte_publico
+reply:
+ Si es feriado, es importante cargar una excepción de transporte para que ese día opere como otro tipo de día, por ejemplo, como un domingo. Esto se hace eligiendo el día en el calendario, indicando cómo se trabaja ese día y luego guardando la configuración. Sin esta excepción, no podrás crear la hoja de turno correspondiente.
+
+======== regresion-perfil ========
+interpret: {
+  "route": "info_guides",
+  "guideKind": "opciones",
+  "need": "definition",
+  "articleIds": [],
+  "clarifyQuestion": null,
+  "executionRequest": false,
+  "confidence": 1,
+  "reason": "Consulta sobre definición de perfil."
+}
+guideKind: opciones
+reply:
+ Un perfil es una plantilla de permisos que define qué puede ver y hacer cada tipo de usuario dentro de la plataforma Wara. Al asignar un perfil a un contacto en la Agenda, se aplican automáticamente todos esos permisos a esa persona. Por ejemplo, un perfil de "Administrador" permite ver y editar toda la flota, mientras que un "Chofer" solo ve sus propias rutas y horarios asignados.
+
+
+=== EVIDENCIA JSON ===
+[
+  {
+    "id": "def-hoja",
+    "text": "¿Qué es una hoja de turno?",
+    "interpret": {
+      "route": "info_guides",
+      "guideKind": "transporte_publico",
+      "need": "definition",
+      "articleIds": [
+        "tp-hoja-turno-crear"
+      ],
+      "clarifyQuestion": null,
+      "executionRequest": false,
+      "confidence": 1,
+      "reason": "Definición de hoja de turno disponible"
+    },
+    "guideKind": "transporte_publico",
+    "usedNeed": "definition",
+    "usedArticles": [
+      "tp-hoja-turno-crear"
+    ],
+    "replyPreview": "La hoja de turno es la diagramación del día en el transporte público, donde se asigna una unidad (y chofer, si aplica) a un turno específico. Al guardarla, se activa el tracking en tiempo real, lo que permite comparar el servicio planificado con la ubicación real. Sin una hoja de",
+    "replyLen": 367
+  },
+  {
+    "id": "proc-hoja",
+    "text": "¿Cómo hago una hoja de turno?",
+    "interpret": {
+      "route": "info_guides",
+      "guideKind": "transporte_publico",
+      "need": "procedure",
+      "articleIds": [
+        "tp-hoja-turno-crear"
+      ],
+      "clarifyQuestion": null,
+      "executionRequest": false,
+      "confidence": 1,
+      "reason": "Consulta sobre procedimiento para crear una hoja de turno."
+    },
+    "guideKind": "transporte_publico",
+    "usedNeed": "procedure",
+    "usedArticles": [
+      "tp-hoja-turno-crear"
+    ],
+    "replyPreview": "Para crear una hoja de turno en la app Wara, seguí estos pasos:\n\n1) Verificá la fecha.\n2) Seleccioná el turno correspondiente.\n3) Seleccioná la unidad que vas a asignar.\n4) Asigná el chofer si tu cuenta tiene habilitada la selección manual de chofer.\n5) Guardá la hoja de turno.\n\n",
+    "replyLen": 369
+  },
+  {
+    "id": "trouble-manana",
+    "text": "No puedo crear la hoja para mañana",
+    "interpret": {
+      "route": "info_guides",
+      "guideKind": "transporte_publico",
+      "need": "troubleshoot",
+      "articleIds": [
+        "tp-error-hoja-feriado"
+      ],
+      "clarifyQuestion": null,
+      "executionRequest": false,
+      "confidence": 0.9,
+      "reason": "Error al crear hoja de turno"
+    },
+    "guideKind": "transporte_publico",
+    "usedNeed": "troubleshoot",
+    "usedArticles": [
+      "tp-error-hoja-feriado"
+    ],
+    "replyPreview": "Para resolver el problema de no poder crear la hoja para mañana, te sugiero que verifiques lo siguiente:\n\n1) Confirma si existe un turno para el tipo de día que corresponde a mañana.\n2) Si mañana es feriado o un evento, asegúrate de que esté cargada la excepción de transporte par",
+    "replyLen": 453
+  },
+  {
+    "id": "trouble-color",
+    "text": "El colectivo no aparece con color",
+    "interpret": {
+      "route": "info_guides",
+      "guideKind": "transporte_publico",
+      "need": "troubleshoot",
+      "articleIds": [
+        "tp-error-sin-color"
+      ],
+      "clarifyQuestion": null,
+      "executionRequest": false,
+      "confidence": 0.9,
+      "reason": "Error relacionado con el color del colectivo en el mapa."
+    },
+    "guideKind": "transporte_publico",
+    "usedNeed": "troubleshoot",
+    "usedArticles": [
+      "tp-error-sin-color"
+    ],
+    "replyPreview": "Para resolver el problema de que el colectivo no aparece con color en el mapa, te sugiero que verifiques lo siguiente:\n\n1) Asegúrate de que haya una hoja de turno del día con esa unidad.\n2) Confirma que la unidad esté reportando GPS.\n3) Revisa si el servicio, turno, traza y etapa",
+    "replyLen": 443
+  },
+  {
+    "id": "execute",
+    "text": "Creame la hoja de turno",
+    "interpret": {
+      "route": "info_guides",
+      "guideKind": "transporte_publico",
+      "need": "execute",
+      "articleIds": [
+        "tp-hoja-turno-crear"
+      ],
+      "clarifyQuestion": null,
+      "executionRequest": true,
+      "confidence": 1,
+      "reason": "Solicitud de creación de hoja de turno."
+    },
+    "guideKind": "transporte_publico",
+    "usedNeed": "execute",
+    "usedArticles": [
+      "tp-hoja-turno-crear"
+    ],
+    "replyPreview": "No puedo crear la hoja de turno directamente, pero te puedo guiar en cómo hacerlo en la app Wara. \n\n1) Ve a Utilidades → Transporte de Pasajeros → Hoja de Turnos → Agregar.\n2) Verifica la fecha.\n3) Selecciona el turno.\n4) Selecciona la unidad.\n5) Asigna chofer si tu cuenta tiene ",
+    "replyLen": 480
+  },
+  {
+    "id": "ambiguous",
+    "text": "Necesito ayuda con transporte",
+    "interpret": {
+      "route": "continue_normal",
+      "guideKind": null,
+      "need": "ambiguous",
+      "articleIds": [],
+      "clarifyQuestion": "¿Qué tipo de ayuda necesitas con transporte?",
+      "executionRequest": false,
+      "confidence": 0.8,
+      "reason": "Consulta ambigua sobre transporte"
+    },
+    "guideKind": null,
+    "usedNeed": "ambiguous",
+    "usedArticles": [],
+    "replyPreview": "¿Qué tipo de ayuda necesitas con transporte?",
+    "replyLen": 44
+  },
+  {
+    "id": "followup-feriado",
+    "text": "¿Y si es feriado?",
+    "interpret": {
+      "route": "info_guides",
+      "guideKind": "transporte_publico",
+      "need": "definition",
+      "articleIds": [
+        "tp-excepciones"
+      ],
+      "clarifyQuestion": "¿Te refieres a las excepciones de transporte en feriados?",
+      "executionRequest": false,
+      "confidence": 0.8,
+      "reason": "Consulta sobre feriados en el contexto de transporte."
+    },
+    "guideKind": "transporte_publico",
+    "usedNeed": "definition",
+    "usedArticles": [
+      "tp-excepciones"
+    ],
+    "replyPreview": "Si es feriado, es importante cargar una excepción de transporte para que ese día opere como otro tipo de día, por ejemplo, como un domingo. Esto se hace eligiendo el día en el calendario, indicando cómo se trabaja ese día y luego guardando la configuración. Sin esta excepción, no",
+    "replyLen": 327
+  },
+  {
+    "id": "regresion-perfil",
+    "text": "qué es un perfil?",
+    "interpret": {
+      "route": "info_guides",
+      "guideKind": "opciones",
+      "need": "definition",
+      "articleIds": [],
+      "clarifyQuestion": null,
+      "executionRequest": false,
+      "confidence": 1,
+      "reason": "Consulta sobre definición de perfil."
+    },
+    "guideKind": "opciones",
+    "usedNeed": "definition",
+    "usedArticles": [],
+    "replyPreview": "Un perfil es una plantilla de permisos que define qué puede ver y hacer cada tipo de usuario dentro de la plataforma Wara. Al asignar un perfil a un contacto en la Agenda, se aplican automáticamente todos esos permisos a esa persona. Por ejemplo, un perfil de \"Administrador\" perm",
+    "replyLen": 384
+  }
+]

@@ -42,7 +42,6 @@ const rejectionPhrases = [
   "no era esa",
   "no quiero esa",
   "es otra unidad",
-  "otra patente",
   // Bug real #2, misma familia, producción 2026-07-23 (captura posterior): "No de otra"
   // es la forma coloquial en la que el cliente dijo "no, es de otra unidad" y no
   // matcheaba ninguna variante anterior — el respaldo de unidad activa repetía la misma
@@ -95,6 +94,8 @@ const anotherUnitPivot = [
   "Quiero consultar por otras unidades",
   "quiero ver otras patentes",
   "tengo otros vehiculos también",
+  "otra patente",
+  "otra unidad",
 ];
 for (const text of anotherUnitPivot) {
   assert(

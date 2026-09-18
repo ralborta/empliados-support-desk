@@ -24,11 +24,14 @@ import {
   looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceInfoRequest,
   looksLikeMaintenanceCapabilityQuestion,
+  looksLikeMaintenanceAppGuideRequest,
+  looksLikeMaintenanceStepByStepOnlyRequest,
   formatCompanyConfirmMessage,
 } from "../src/lib/waraApi.ts";
 import { looksLikeOpenCaseStatusInquiry } from "../src/lib/customerTicketInquiry.ts";
 import { looksLikeCustomerConversationCloseRequest } from "../src/lib/customerConversationClose.ts";
 import { assessUnitReporting } from "../src/lib/waraGpsAssessment.ts";
+import { resolveGpsHeaderMediaUrl } from "../src/lib/waraGpsSummary.ts";
 import {
   extractPlatePrefixFromMessage,
   isBarePlatePrefixHint,
@@ -100,8 +103,8 @@ const routing = [
   // lista cerrada de conjugaciones ("me ayudas", "ayudame", "ayudarme", "podés ayudar")
   // y caía en el default "unidades", pidiendo matrícula. Se generalizó a la raíz "ayud".
   ["quiero q me ayuden con la configuracion", "", "info_guides"],
-  ["quiero programar mantenimiento preventivo", "", "mantenimiento"],
-  ["Quiero programar un mantenimiento", "", "mantenimiento"],
+  ["quiero programar mantenimiento preventivo", "", "info_guides"],
+  ["Quiero programar un mantenimiento", "", "info_guides"],
   ["como funciona el modulo de mantenimiento", "", "info_guides"],
   ["Quiero saber sobre mantenimiento", "", "info_guides"],
 ];
@@ -111,8 +114,12 @@ for (const [text, thread, expect] of routing) {
 
 console.log("— Post-empresa / mantenimiento (no mudo) —");
 assert(
-  looksLikeOperationalMaintenanceIntent("Quiero programar un mantenimiento"),
-  "operational maintenance intent",
+  !looksLikeOperationalMaintenanceIntent("Quiero programar un mantenimiento"),
+  "mantenimiento operativo por WA deshabilitado",
+);
+assert(
+  looksLikeMaintenanceAppGuideRequest("Quiero programar un mantenimiento"),
+  "programar mantenimiento → guía app",
 );
 assert(
   !looksLikeOperationalMaintenanceIntent("Quiero saber sobre mantenimiento"),
@@ -131,8 +138,9 @@ assert(
   "non-odometer operational after company pick",
 );
 assert(
-  formatCompanyConfirmMessage("El Cacique S.A.") ===
-    "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
+  formatCompanyConfirmMessage("El Cacique S.A.").includes("Perfecto, sigo con *El Cacique S.A.*") &&
+    formatCompanyConfirmMessage("El Cacique S.A.").includes("🏢") &&
+    !formatCompanyConfirmMessage("El Cacique S.A.").includes("S.A.."),
   "company confirm without double period",
 );
 
@@ -147,8 +155,8 @@ assert(
   "programar uno con vos tras guía",
 );
 assert(
-  route(scheduleWithBotQ, maintGuideThread) === "mantenimiento",
-  "programar con vos → mantenimiento (no mute)",
+  route(scheduleWithBotQ, maintGuideThread) === "info_guides",
+  "programar con vos → guía app (sin registro WA)",
 );
 assert(
   looksLikeMaintenanceCapabilityQuestion(capabilityQ),
@@ -160,10 +168,10 @@ const maintPlateThread = [
   "Decime la patente de la unidad y si es preventivo o correctivo (y un detalle breve si querés).",
 ].join("\n");
 assert(hasPendingMaintenancePlateRequest(maintPlateThread), "capability reply detecta pedido de patente");
-assert(route("AD", maintPlateThread) === "mantenimiento", "AD tras pedido patente → mantenimiento");
+assert(route("AD", maintPlateThread) === "info_guides", "AD tras pedido patente legacy → guía app");
 assert(
-  route("La q comienza con AD", maintPlateThread) === "mantenimiento",
-  "prefijo AD tras pedido patente → mantenimiento",
+  route("La q comienza con AD", maintPlateThread) === "info_guides",
+  "prefijo AD tras pedido patente legacy → guía app",
 );
 assert(isMaintenancePlateSelectionMessage("AD"), "AD es selección de patente");
 assert(
@@ -171,8 +179,23 @@ assert(
   "inicio trámite NO es selección de patente",
 );
 assert(
-  route("Quiero hacer un mantenimiento", maintPlateThread) === "mantenimiento",
-  "quiero hacer mantenimiento → mantenimiento",
+  route("Quiero hacer un mantenimiento", maintPlateThread) === "info_guides",
+  "quiero hacer mantenimiento → guía app",
+);
+
+const stepByStepOnlyAfterGuide =
+  "Vos no deberias registrarlo, solo quiero que me des el paso a paso";
+const maintGuideOfferThread = [
+  "El modulo de mantenimiento sirve para gestionar tareas preventivas y correctivas.",
+  "¿Querés el paso a paso de preventivo o de correctivo?",
+].join("\n");
+assert(
+  looksLikeMaintenanceStepByStepOnlyRequest(stepByStepOnlyAfterGuide, maintGuideOfferThread),
+  "rechazo registro WA + paso a paso",
+);
+assert(
+  route(stepByStepOnlyAfterGuide, maintGuideOfferThread) === "info_guides",
+  "solo paso a paso tras guía → info_guides (no unidades)",
 );
 
 const longMaintThread = [
@@ -185,7 +208,7 @@ const longMaintThread = [
   "Si esta correcto, responde CONFIRMO para registrarlo.",
 ].join("\n");
 assert(hasPendingMantenimientoConfirmation(longMaintThread), "confirm pendiente hilo largo");
-assert(route("Confirmo", longMaintThread) === "mantenimiento", "Confirmo → mantenimiento");
+assert(route("Confirmo", longMaintThread) === "info_guides", "Confirmo legacy → guía app");
 
 const maintConfirmThread = [
   "Voy a registrar:",
@@ -196,7 +219,7 @@ const maintConfirmThread = [
   "Si esta correcto, responde CONFIRMO para registrarlo.",
 ].join("\n");
 assert(hasPendingMantenimientoConfirmation(maintConfirmThread), "resumen mantenimiento pendiente");
-assert(route("Confirmo", maintConfirmThread) === "mantenimiento", "Confirmo resumen mantenimiento");
+assert(route("Confirmo", maintConfirmThread) === "info_guides", "Confirmo resumen legacy → guía app");
 assert(
   route("Como puedo saber si esta marcado bien el GPS?", maintConfirmThread) === "unidades",
   "GPS tras mantenimiento NO reusa trámite",
@@ -364,12 +387,15 @@ const gps = [
   [unit(300, 400, 450, true), "ok"],
   [unit(5000, 5100, 5200, false), "coherent_pause"],
   [unit(7200, 15000, 7200, false), "missing_report"],
-  [unit(400, 400, 8000, false), "ignition_failure"],
+  [unit(400, 400, 8000, false), "coherent_pause"],
+  [unit(180, 16 * 60, 2 * 3600, false), "coherent_pause"],
   [unit(400, 9000, 400, false), "stale_position"],
 ];
 for (const [u, expect] of gps) {
   const a = assessUnitReporting(u);
   assert(a?.status === expect, `GPS esperaba ${expect}, got ${a?.status ?? "null"}`);
+  const media = resolveGpsHeaderMediaUrl(u, a.status);
+  assert(!media, `status ${expect} no debe adjuntar banner GPS (solo texto)`);
 }
 
 if (failed > 0) {

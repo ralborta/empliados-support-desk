@@ -1,5 +1,13 @@
 import axios from 'axios';
 
+type AxiosPost = typeof axios.post;
+let httpPost: AxiosPost = axios.post.bind(axios);
+
+/** Solo scripts de verificación: evita HTTP real y valida comportamiento del sender. */
+export function setBuilderBotHttpPostForTests(post: AxiosPost | null): void {
+  httpPost = post ?? axios.post.bind(axios);
+}
+
 const BUILDERBOT_BASE_URL =
   process.env.BUILDERBOT_BASE_URL || 'https://app.builderbot.cloud';
 
@@ -12,9 +20,19 @@ export interface SendWhatsAppOptions {
 
 /**
  * Envía un mensaje de WhatsApp vía BuilderBot Cloud (API v2).
+ *
+ * Idempotencia externa: BuilderBot v2 `/messages` no expone clave de idempotencia
+ * por request (solo `checkIfExists`, no reenvío seguro). Política WARA ante POST
+ * ambiguo (timeout/red sin body): priorizar evitar duplicados — no reenviar si el
+ * ledger inbound ya tiene `waOutboundProviderId`; devolver `delivery_persist_failed`
+ * sin BBC fallback. Ver `ensureInboundWaProviderIdStashed` y turnWhatsAppDeliveryLedger.
  */
 export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
-  const { number, message, mediaUrl, checkIfExists = false } = options;
+  const { message, mediaUrl, checkIfExists = false } = options;
+  const number = String(options.number ?? "").replace(/\D/g, "");
+  if (number.length < 8) {
+    throw new Error("Número de WhatsApp inválido");
+  }
 
   const BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
   const API_KEY = process.env.BUILDERBOT_API_KEY || '';
@@ -27,21 +45,23 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
 
   const url = `${BUILDERBOT_BASE_URL}/api/v2/${BOT_ID}/messages`;
 
-  const body: Record<string, any> = {
+  const body: Record<string, unknown> = {
     messages: {
       content: message,
+      ...(mediaUrl ? { mediaUrl } : {}),
     },
     number,
     checkIfExists,
   };
 
-  if (mediaUrl) {
-    body.messages.mediaUrl = mediaUrl;
-  }
+  // Serializar a Buffer UTF-8 explícito: evita mojibake (Ã©/Ã³) si algún
+  // intermediario interpreta el body JSON como Latin-1.
+  const payload = Buffer.from(JSON.stringify(body), "utf8");
 
   const headers = {
-    'Content-Type': 'application/json',
-    'x-api-builderbot': API_KEY,
+    "Content-Type": "application/json; charset=utf-8",
+    "x-api-builderbot": API_KEY,
+    "Content-Length": String(payload.length),
   };
 
   console.log('[BuilderBot] Enviando mensaje:', {
@@ -52,7 +72,11 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
   });
 
   try {
-    const response = await axios.post(url, body, { headers, timeout: 30000 });
+    const response = await httpPost(url, payload, {
+      headers,
+      timeout: 30000,
+      transformRequest: [(data) => data],
+    });
     console.log('[BuilderBot] ✅ Mensaje enviado exitosamente');
     return response.data;
   } catch (error: any) {

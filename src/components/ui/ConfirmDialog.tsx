@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, X } from "lucide-react";
 
 type ConfirmDialogProps = {
@@ -42,11 +43,11 @@ export function ConfirmDialog({
   const confirmClass =
     variant === "danger"
       ? "bg-red-600 hover:bg-red-700 focus:ring-red-100"
-      : "bg-violet-600 hover:bg-violet-700 focus:ring-violet-100";
+      : "bg-[#4a0e1c] hover:bg-[#6b1428] focus:ring-[#4a0e1c]/20";
 
-  return (
+  const dialog = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[1px]"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[1px]"
       role="presentation"
       onClick={loading ? undefined : onCancel}
     >
@@ -110,4 +111,7 @@ export function ConfirmDialog({
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") return dialog;
+  return createPortal(dialog, document.body);
 }
