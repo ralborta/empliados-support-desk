@@ -220,7 +220,7 @@ async function closeTicketForIdle(params: {
       resolution: "IDLE_TIMEOUT",
       resolvedByAI: true,
       aiSummary:
-        "Cierre automático por inactividad del cliente (sin respuesta tras mensajes de Atilio).",
+        "Cierre automático por inactividad del cliente (sin respuesta tras mensajes de Kira).",
       lastMessageAt: params.now,
     },
   });

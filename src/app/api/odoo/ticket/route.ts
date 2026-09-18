@@ -637,7 +637,7 @@ export async function POST(req: NextRequest) {
         aiSummary: fleetWideOutage
           ? "Falla masiva de flota — derivación a operador + alerta ops WA."
           : outOfScopeSupport
-          ? "Fuera de alcance Atilio — derivación a operador (panel Wara, sin Odoo)."
+          ? "Fuera de alcance Kira — derivación a operador (panel Wara, sin Odoo)."
           : undefined,
       });
 
@@ -809,14 +809,14 @@ export async function POST(req: NextRequest) {
 
   const descriptionLines = [
     data.description?.trim() || data.rawText?.trim() || "",
-    data.aiSummary?.trim() ? `Resumen Atilio: ${data.aiSummary.trim()}` : "",
+    data.aiSummary?.trim() ? `Resumen Kira: ${data.aiSummary.trim()}` : "",
     companyName ? `Empresa Wara: ${companyName}` : "",
     plate ? `Patente: ${plate}` : "",
     `Evento: ${eventWithData}`,
     unitInfo?.lastReportDate ? `Último reporte (Wara): ${unitInfo.lastReportDate}` : "",
     customerName ? `Contacto: ${customerName}` : "",
     rawPhone ? `WhatsApp: ${rawPhone}` : "",
-    "Origen: Atilio / WhatsApp",
+    "Origen: Kira / WhatsApp",
   ];
   const description = descriptionLines.filter(Boolean).join("\n");
 

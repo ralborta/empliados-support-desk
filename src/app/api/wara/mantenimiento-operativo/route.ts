@@ -1166,7 +1166,7 @@ export async function POST(req: NextRequest) {
     dedupeKey: `wara_mantenimiento:${plate}:${service}:${text.slice(0, 80)}`,
     subject: `${plate} - ${service}`,
     description: [
-      `Gestión de mantenimiento solicitada desde Atilio / WhatsApp.`,
+      `Gestión de mantenimiento solicitada desde Kira / WhatsApp.`,
       `Empresa Wara: ${company}`,
       `Patente: ${plate}`,
       `Tipo: ${service}`,

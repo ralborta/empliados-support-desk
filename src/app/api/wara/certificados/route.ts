@@ -487,7 +487,7 @@ async function escalateCertificateFailure(params: {
     dedupeKey: `wara_certificados:${params.plate}:${failureCategory}`,
     subject: title,
     description: [
-      `Certificado de cobertura no emitido (gestión vía Atilio / WhatsApp).`,
+      `Certificado de cobertura no emitido (gestión vía Kira / WhatsApp).`,
       `Empresa Wara: ${params.company}`,
       `Patente: ${params.plate}`,
       `Motivo: ${failureCategory}`,

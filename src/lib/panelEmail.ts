@@ -7,7 +7,7 @@
  *
  * Variables:
  *   RESEND_API_KEY    → API key de Resend (dominio remitente debe estar verificado ahí)
- *   PANEL_EMAIL_FROM  → ej. "Atilio <notificaciones@nivel41.com>"
+ *   PANEL_EMAIL_FROM  → ej. "Kira <notificaciones@nivel41.com>"
  *   PANEL_BASE_URL    → https://wara.nivel41.com
  *   SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_SECURE=true (fallback opcional)
  */
@@ -127,13 +127,13 @@ export async function sendAdvisorWelcomeEmail(params: {
   const roleLabel = params.role === "ADMIN" ? "Administrador" : "Asesor de soporte";
   const html = `
     <p>Hola ${escapeHtml(params.name)},</p>
-    <p>Te crearon una cuenta en el panel de Atilio con rol <strong>${roleLabel}</strong>.</p>
+    <p>Te crearon una cuenta en el panel de Kira con rol <strong>${roleLabel}</strong>.</p>
     <p>Ingresá acá: <a href="${PANEL_BASE_URL}/login">${PANEL_BASE_URL}/login</a></p>
     <p>Usá el email <strong>${escapeHtml(params.to)}</strong> y la contraseña que te compartió el administrador.</p>
     <p style="color:#64748b;font-size:12px;">Este es un mensaje automático del panel Wara.</p>
   `;
 
-  const ok = await sendEmail(params.to, "Tu acceso al panel Atilio", html);
+  const ok = await sendEmail(params.to, "Tu acceso al panel Kira", html);
   if (ok) console.log(`[panelEmail] Bienvenida enviada a ${params.to}`);
 }
 
@@ -150,7 +150,7 @@ export async function sendTicketAssignedEmail(params: {
   const url = `${PANEL_BASE_URL}/tickets/${params.ticketId}`;
   const html = `
     <p>Hola ${escapeHtml(params.agentName)},</p>
-    <p>${action} un caso en el panel Atilio:</p>
+    <p>${action} un caso en el panel Kira:</p>
     <ul>
       <li><strong>${escapeHtml(params.ticketCode)}</strong> — ${escapeHtml(params.ticketTitle)}</li>
       <li>Empresa: ${escapeHtml(params.companyName)}</li>
@@ -178,7 +178,7 @@ export async function sendUnassignedTicketAlertEmail(params: {
   const url = `${PANEL_BASE_URL}/tickets/${params.ticketId}`;
   const html = `
     <p>Hola ${escapeHtml(params.adminName)},</p>
-    <p>Llegó un caso nuevo y <strong>no hay ningún asesor conectado</strong> en el panel Atilio para asignarlo automáticamente:</p>
+    <p>Llegó un caso nuevo y <strong>no hay ningún asesor conectado</strong> en el panel Kira para asignarlo automáticamente:</p>
     <ul>
       <li><strong>${escapeHtml(params.ticketCode)}</strong> — ${escapeHtml(params.ticketTitle)}</li>
       <li>Empresa: ${escapeHtml(params.companyName)}</li>

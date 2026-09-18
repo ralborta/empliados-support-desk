@@ -288,7 +288,7 @@ export default function KnowledgeFilesList({
         <div>
           <h2 className="text-xl font-bold text-slate-900">Documentos de ayuda</h2>
           <p className="mt-0.5 text-sm text-slate-500">
-            Subí PDFs de guía para los módulos informativos de Atilio (ChatPDF): Mantenimiento,
+            Subí PDFs de guía para los módulos informativos de Kira (ChatPDF): Mantenimiento,
             Opciones, Unidades, etc. Convención:{" "}
             <span className="font-medium text-slate-600">unidades-modulo-flota.pdf</span>
           </p>

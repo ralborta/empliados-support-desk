@@ -662,7 +662,7 @@ async function createMissingReportTicket(params: {
       const incidentType = params.incidentType ?? "MISSING_REPORT";
       const dedupeKey = `wara_unidades:${plate}:${params.ticketTitleSuffix ?? incidentType}`;
       const odooDescription = [
-        `Consulta/reclamo detectado por Atilio / WhatsApp.`,
+        `Consulta/reclamo detectado por Kira / WhatsApp.`,
         `Empresa Wara: ${params.companyName}`,
         `Patente: ${plate}`,
         params.unit.unidad ? `Nombre unidad: ${params.unit.unidad}` : "",
@@ -738,11 +738,11 @@ async function createMissingReportTicket(params: {
     incidentType,
     priority: "HIGH",
     status: "IN_PROGRESS",
-    aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
+    aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Kira tras validar estado en Wara.`,
   });
 
   const odooDescription = [
-    `Consulta/reclamo detectado por Atilio / WhatsApp.`,
+    `Consulta/reclamo detectado por Kira / WhatsApp.`,
     `Empresa Wara: ${params.companyName}`,
     `Patente: ${plate}`,
     params.unit.unidad ? `Nombre unidad: ${params.unit.unidad}` : "",
@@ -839,7 +839,7 @@ async function createNoEquipmentTicket(params: {
         dedupeKey,
         subject: title,
         description: [
-          `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
+          `Unidad sin equipo GPS instalado detectada por Kira / WhatsApp.`,
           `Empresa Wara: ${params.companyName}`,
           `Patente: ${params.unit.patente || plate}`,
           params.unit.unidad ? `Nombre (campo unidad en API): ${params.unit.unidad}` : "",
@@ -903,7 +903,7 @@ async function createNoEquipmentTicket(params: {
     incidentType: "GENERAL_TECH",
     priority: "NORMAL",
     status: "IN_PROGRESS",
-    aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Atilio.`,
+    aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Kira.`,
   });
 
   const { odooRef, created: odooCreated } = await ensureWaraOdooTicket(prisma, {
@@ -911,7 +911,7 @@ async function createNoEquipmentTicket(params: {
     dedupeKey,
     subject: title,
     description: [
-      `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
+      `Unidad sin equipo GPS instalado detectada por Kira / WhatsApp.`,
       `Empresa Wara: ${params.companyName}`,
       `Patente: ${params.unit.patente || plate}`,
       params.unit.unidad ? `Nombre (campo unidad en API): ${params.unit.unidad}` : "",

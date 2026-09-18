@@ -201,8 +201,8 @@ export async function resolveOutOfScopePlatformHandoff(
   const handoff = await ensureRegisteredAdvisorHandoff(prisma, rawPhone, {
     messageText: opts?.messageText,
     source: opts?.source ?? "out_of_scope_platform_handoff",
-    title: "Fuera de alcance Atilio — derivación a operador",
-    aiSummary: "Consulta fuera del alcance operativo de Atilio; derivada al panel Wara.",
+    title: "Fuera de alcance Kira — derivación a operador",
+    aiSummary: "Consulta fuera del alcance operativo de Kira; derivada al panel Wara.",
     pauseBot: true,
   });
   if (!handoff.shouldNotifyCustomer) {

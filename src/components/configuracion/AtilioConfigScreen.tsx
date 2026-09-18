@@ -76,7 +76,7 @@ function AtilioConfigScreenInner() {
     <div className="mx-auto max-w-7xl space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Configuración de Atilio</h1>
+          <h1 className="text-xl font-bold text-slate-900">Configuración de Kira</h1>
           <p className="text-sm text-slate-500">Tono, documentos de ayuda y textos por trámite.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">

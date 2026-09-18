@@ -13,7 +13,7 @@ const updateCustomerSchema = z.object({
   name: z.string().optional().nullable(),
   companyName: z.string().optional().nullable(),
   licensePlate: z.string().optional().nullable(),
-  /** true = pausar Atilio para este cliente (agente responde manual), false = reactivar */
+  /** true = pausar Kira para este cliente (agente responde manual), false = reactivar */
   botPaused: z.boolean().optional(),
 });
 
