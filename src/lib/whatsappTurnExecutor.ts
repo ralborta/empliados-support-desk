@@ -614,6 +614,30 @@ function executorSkippedSilently(data: JsonRecord): boolean {
   return String(data.skipResponse_s ?? "") === "true" && !messageFromPayload(data);
 }
 
+function formatGpsThreadPlateLabel(plate: string | null): string | null {
+  if (!plate) return null;
+  return plate.replace(/([A-Z0-9]{2,3})([A-Z0-9]{3})([A-Z0-9]{0,2})/i, (_m, a, b, c) =>
+    [a, b, c].filter(Boolean).join(" "),
+  );
+}
+
+/** Tras GPS reciente, un token de unidad no es dato del trámite pendiente. */
+function isGpsContextUnitTokenOverPendingWrite(
+  selectionText: string,
+  pendingAction: PendingActionRecord | null | undefined,
+): boolean {
+  if (!isPendingWriteActionType(pendingAction?.type)) return false;
+  if (looksLikeExplicitOdometerUpdateRequest(selectionText)) return false;
+  if (looksLikeHorometerOnlyIntent(selectionText)) return false;
+  if (looksLikeBareMeterValue(selectionText)) return false;
+  return (
+    looksLikeUnitNameInMessage(selectionText) ||
+    !!detectLoosePlate(selectionText) ||
+    looksLikeGpsOrUnitStatusQuestion(selectionText) ||
+    looksLikeLiveUnitConsultIntent(selectionText)
+  );
+}
+
 function looksLikeCertificateRequest(text: string): boolean {
   return looksLikeCertificateKeyword(text);
 }
@@ -1000,6 +1024,71 @@ export async function runTurnExecutorPhase(params: {
         executor: "info_guides",
         ok: true,
       };
+    }
+  }
+
+  // GPS reciente: short-circuit ANTES de operationPrecedence.
+  // Si no, «M300-80» / «seguimos con el estado» / «no la veo» caen a structured_clarification
+  // del odómetro pendiente (P0 2026-09-18).
+  {
+    const recentGpsCtxEarly = threadHasRecentGpsContext(thread);
+    if (recentGpsCtxEarly) {
+      const gpsPlate =
+        resolvePlateFromRecentGpsThread(thread) ?? extractLastPlateFromThread(thread);
+      const gpsLabel = formatGpsThreadPlateLabel(gpsPlate);
+      const visibilityComplaint = looksLikePlatformUnitVisibilityComplaint(selectionText);
+      if (visibilityComplaint) {
+        console.info(
+          `[gps-visibility] phone=${rawPhone.slice(0, 4)}… plate=${gpsPlate ?? "n/a"} keep_gps_context`,
+        );
+        return {
+          message: [
+            gpsLabel
+              ? `Entendido: en Wara la unidad *${gpsLabel}* tiene el estado que te pasé, pero vos no la ves en tu sistema.`
+              : "Entendido: el estado que te pasé es el de Wara, pero vos no la ves en tu sistema.",
+            "",
+            "Puedo dejar el caso para que un asesor lo revise con tu pantalla, o seguimos con otra unidad.",
+            "¿Querés que lo escale a un asesor, o me pasás otra patente/interno?",
+          ].join("\n"),
+          executor: "unidades",
+          ok: true,
+        };
+      }
+      if (looksLikeGpsStatusContinuityReply(selectionText)) {
+        console.info(
+          `[gps-continuity] phone=${rawPhone.slice(0, 4)}… plate=${gpsPlate ?? "n/a"} next_step_no_redump`,
+        );
+        return {
+          message: buildGpsContinuityNextStepReply(gpsLabel),
+          executor: "unidades",
+          ok: true,
+        };
+      }
+      if (looksLikeGpsTopicChangeReply(selectionText)) {
+        const { buildAtilioStructuredGreeting } = await import("@/lib/waraWhatsAppFormat");
+        const peek = await resolveCustomerByWaraPhone(prisma, rawPhone).catch(() => null);
+        return {
+          message: buildAtilioStructuredGreeting({
+            threadText: thread,
+            companyName: peek?.customer?.companyName?.trim() || null,
+          }),
+          executor: "info_guides",
+          ok: true,
+        };
+      }
+      if (isGpsContextUnitTokenOverPendingWrite(selectionText, pendingAction)) {
+        console.info(
+          `[gps-context] phone=${rawPhone.slice(0, 4)}… unit_token_keeps_gps_over_pending_write`,
+        );
+        const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey, {
+          utteranceAction: "unit_status_read",
+        });
+        const execMessage = messageFromPayload(execResult);
+        const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+        if (execMessage || !executorSkippedSilently(execResult)) {
+          return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
+        }
+      }
     }
   }
 
@@ -2066,68 +2155,7 @@ export async function runTurnExecutorPhase(params: {
     sessionNotebook: sessionNotebookForNl,
     activeUnitPlate: activeUnitForNl?.plate,
   });
-  const recentGpsCtx = threadHasRecentGpsContext(threadCtx.classificationThread);
   const gpsContinuityReply = looksLikeGpsStatusContinuityReply(selectionText);
-  const gpsTopicChange = looksLikeGpsTopicChangeReply(selectionText);
-  const platformVisibilityComplaint = looksLikePlatformUnitVisibilityComplaint(selectionText);
-
-  // Bug prod 2026-09-18: «No la veo en mi sistema» tras GPS → buscaba «veo» / abría odómetro.
-  if (recentGpsCtx && platformVisibilityComplaint) {
-    const plate =
-      persistedContextPlate ??
-      resolvePlateFromRecentGpsThread(threadCtx.classificationThread) ??
-      extractLastPlateFromThread(threadCtx.classificationThread);
-    const label = plate ? plate.replace(/(.{3})(.{3})(.{2})/, "$1 $2 $3").trim() : null;
-    console.info(
-      `[gps-visibility] phone=${rawPhone.slice(0, 4)}… plate=${plate ?? "n/a"} keep_gps_context`,
-    );
-    return {
-      message: [
-        label
-          ? `Entendido: en Wara la unidad *${label}* tiene el estado que te pasé, pero vos no la ves en tu sistema.`
-          : "Entendido: el estado que te pasé es el de Wara, pero vos no la ves en tu sistema.",
-        "",
-        "Puedo dejar el caso para que un asesor lo revise con tu pantalla, o seguimos con otra unidad.",
-        "¿Querés que lo escale a un asesor, o me pasás otra patente/interno?",
-      ].join("\n"),
-      executor: "unidades",
-      ok: true,
-    };
-  }
-
-  // Bug prod 2026-09-18: «Seguimos en el estado…» reimprimía el mismo GPS.
-  if (recentGpsCtx && gpsContinuityReply) {
-    const plate =
-      persistedContextPlate ??
-      resolvePlateFromRecentGpsThread(threadCtx.classificationThread) ??
-      extractLastPlateFromThread(threadCtx.classificationThread);
-    const label = plate
-      ? plate.replace(/([A-Z0-9]{2,3})([A-Z0-9]{3})([A-Z0-9]{0,2})/i, (_, a, b, c) =>
-          [a, b, c].filter(Boolean).join(" "),
-        )
-      : null;
-    console.info(
-      `[gps-continuity] phone=${rawPhone.slice(0, 4)}… plate=${plate ?? "n/a"} next_step_no_redump`,
-    );
-    return {
-      message: buildGpsContinuityNextStepReply(label),
-      executor: "unidades",
-      ok: true,
-    };
-  }
-
-  if (recentGpsCtx && gpsTopicChange) {
-    const { buildAtilioStructuredGreeting } = await import("@/lib/waraWhatsAppFormat");
-    const peek = await resolveCustomerByWaraPhone(prisma, rawPhone).catch(() => null);
-    return {
-      message: buildAtilioStructuredGreeting({
-        threadText: threadCtx.classificationThread,
-        companyName: peek?.customer?.companyName?.trim() || null,
-      }),
-      executor: "info_guides",
-      ok: true,
-    };
-  }
 
   const threadGpsPlate = null;
   const effectiveContextPlate = persistedContextPlate ?? threadGpsPlate ?? null;
@@ -2135,30 +2163,6 @@ export async function runTurnExecutorPhase(params: {
   const threadAwaitingUnitProblem = threadHasRecentUnitProblemListenPrompt(
     threadCtx.classificationThread,
   );
-  // Bug prod 2026-09-18: tras GPS, «M300-80» reabría odómetro pendiente en vez de estado.
-  if (
-    recentGpsCtx &&
-    hasPendingWrite &&
-    !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
-    !looksLikeHorometerOnlyIntent(selectionText) &&
-    !looksLikeBareMeterValue(selectionText) &&
-    (looksLikeUnitNameInMessage(selectionText) ||
-      !!detectLoosePlate(selectionText) ||
-      looksLikeGpsOrUnitStatusQuestion(selectionText) ||
-      looksLikeLiveUnitConsultIntent(selectionText))
-  ) {
-    console.info(
-      `[gps-context] phone=${rawPhone.slice(0, 4)}… unit_token_keeps_gps_over_pending_write`,
-    );
-    const execResult = await invokeExecutor("unidades", rawPhone, selectionText, apiKey, {
-      utteranceAction: "unit_status_read",
-    });
-    const execMessage = messageFromPayload(execResult);
-    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    if (execMessage || !executorSkippedSilently(execResult)) {
-      return phaseFromExecResult(execResult, execMessage, "unidades", execOk);
-    }
-  }
 
   // Pivot a otra unidad: limpiar contexto — excepto certificado en CONFIRMO (sigue en certificados).
   if (looksLikeAnotherUnitConsultRequest(selectionText)) {
