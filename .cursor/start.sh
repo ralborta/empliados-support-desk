@@ -26,10 +26,12 @@ sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${PG_USER}'" |
 sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DB}'" | grep -q 1 \
   || sudo -u postgres psql -c "CREATE DATABASE ${PG_DB} OWNER ${PG_USER};"
 
-# --- Local .env (dev-only dummy values; NOT real secrets) ---
-if [ ! -f .env ]; then
-  echo "[start] Writing dev .env"
-  cat > .env <<'ENV'
+# --- Local .env.local (dev-only dummy values; NOT real secrets) ---
+# .env.local is read by both Next.js (dev) and the verify-* test harness
+# (scripts/load-verify-env.mjs), so the pre-push hook can run DB e2e suites.
+if [ ! -f .env.local ]; then
+  echo "[start] Writing dev .env.local"
+  cat > .env.local <<'ENV'
 # Auto-generated for Cloud Agent dev. NOT for production.
 DATABASE_URL="postgresql://empliados:empliados_local_dev@localhost:5432/empliados?schema=public"
 SESSION_PASSWORD="empliados-session-secret-key-32-chars-minimum-required-for-security"
