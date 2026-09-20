@@ -25,6 +25,10 @@ import {
 } from "@/lib/infoGuideInterpretAI";
 import { buildAssistantIdentityReply, looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
 import { CERTIFICATE_DEFINITION_REPLY } from "@/lib/certificateDefinitionGuide";
+import {
+  isOdometerInformationInterpret,
+  replyForOdometerInformation,
+} from "@/lib/odometerInformationGuide";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 import {
@@ -706,6 +710,15 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   if (activeInterpret?.normalTarget === "certificate_definition") {
     return {
       message: CERTIFICATE_DEFINITION_REPLY,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: null,
+    };
+  }
+
+  if (isOdometerInformationInterpret(activeInterpret)) {
+    return {
+      message: replyForOdometerInformation(activeInterpret),
       guideKind: null,
       interpret: activeInterpret,
       fallback: null,

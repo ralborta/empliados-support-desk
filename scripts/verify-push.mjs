@@ -97,6 +97,7 @@ const PUSH_SUITES = [
   "verify-unregistered-phone-handoff.mjs",
   "verify-transporte-publico-kb.mjs",
   "verify-certificate-definition-guide.mjs",
+  "verify-odometer-information-guide.mjs",
   "verify-cisternas-kb.mjs",
   "verify-combustible-kb.mjs",
   "verify-mantenimiento-kb.mjs",
