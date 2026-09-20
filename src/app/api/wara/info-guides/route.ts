@@ -54,7 +54,12 @@ const bodySchema = z
     category: z.string().optional(),
     reportId: z.string().optional(),
     normalTarget: z
-      .enum(["operational_fuel", "live_unit", "assistant_identity"])
+      .enum([
+        "operational_fuel",
+        "live_unit",
+        "assistant_identity",
+        "certificate_definition",
+      ])
       .optional(),
     api_key: z.string().optional(),
     apiKey: z.string().optional(),

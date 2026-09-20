@@ -24,6 +24,7 @@ import {
   refinePlatformKnowledgeDetailIfNeeded,
 } from "@/lib/infoGuideInterpretAI";
 import { buildAssistantIdentityReply, looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
+import { CERTIFICATE_DEFINITION_REPLY } from "@/lib/certificateDefinitionGuide";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 import {
@@ -342,6 +343,17 @@ function opcionesReply(rawText: string): string {
   ].join("\n");
 }
 
+function unidadesGroupsReply(): string {
+  return [
+    "Para trabajar con grupos en el módulo Unidades:",
+    "",
+    "1. Entrá al módulo Unidades desde la barra lateral.",
+    "2. En el pie del panel usá «Crear grupo» para armar uno nuevo (por zona, tipo de vehículo, etc.).",
+    "3. «Mover unidades» te permite reasignar unidades entre grupos.",
+    "4. Mostrá u ocultá grupos con las acciones del encabezado del panel.",
+  ].join("\n");
+}
+
 function unidadesReply(rawText: string): string {
   const t = norm(rawText);
   if (/\b(atajo|atajos|historial|compartir|orden de trabajo)\b/.test(t)) {
@@ -355,14 +367,7 @@ function unidadesReply(rawText: string): string {
     ].join("\n");
   }
   if (/\b(grupo|crear grupo|mover unidad)\b/.test(t)) {
-    return [
-      "Para trabajar con grupos en el módulo Unidades:",
-      "",
-      "1. Entrá al módulo Unidades desde la barra lateral.",
-      "2. En el pie del panel usá «Crear grupo» para armar uno nuevo (por zona, tipo de vehículo, etc.).",
-      "3. «Mover unidades» te permite reasignar unidades entre grupos.",
-      "4. Mostrá u ocultá grupos con las acciones del encabezado del panel.",
-    ].join("\n");
+    return unidadesGroupsReply();
   }
   if (/\b(punto|color|rojo|verde|azul|alarma)\b/.test(t)) {
     return [
@@ -698,6 +703,15 @@ export async function buildGroundedInfoGuideReplyWithMeta(
 }> {
   let activeInterpret = interpret ?? null;
 
+  if (activeInterpret?.normalTarget === "certificate_definition") {
+    return {
+      message: CERTIFICATE_DEFINITION_REPLY,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: null,
+    };
+  }
+
   // Respuesta social estructurada: no detectar módulos ni consultar corpus.
   if (activeInterpret && isAssistantIdentityInterpret(activeInterpret)) {
     if (!looksLikeAssistantIdentityQuestion(rawText)) {
@@ -734,6 +748,18 @@ export async function buildGroundedInfoGuideReplyWithMeta(
         clarifyQuestion: message,
       },
       fallback: "clarify_question",
+    };
+  }
+
+  if (
+    activeInterpret?.guideKind === "unidades" &&
+    activeInterpret.reportId === "unidades_grupos"
+  ) {
+    return {
+      message: unidadesGroupsReply(),
+      guideKind: "unidades",
+      interpret: activeInterpret,
+      fallback: null,
     };
   }
 

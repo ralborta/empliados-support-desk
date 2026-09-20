@@ -96,6 +96,7 @@ const PUSH_SUITES = [
   "verify-test-whitelist-open.mjs",
   "verify-unregistered-phone-handoff.mjs",
   "verify-transporte-publico-kb.mjs",
+  "verify-certificate-definition-guide.mjs",
   "verify-cisternas-kb.mjs",
   "verify-combustible-kb.mjs",
   "verify-mantenimiento-kb.mjs",

@@ -201,6 +201,7 @@ import {
 } from "@/lib/turnLayerContract";
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
+import { shouldRouteCertificateDefinitionToGuide } from "@/lib/certificateDefinitionGuide";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation } from "@/lib/pendingConfirmation";
 import { classifyConfirmoPhrase, buildConfirmoClarifyReply } from "@/lib/confirmoTokens";
 import { isAffirmationForPendingWrite } from "@/lib/pendingWriteIntent";
@@ -2869,7 +2870,11 @@ export async function runTurnExecutorPhase(params: {
         pendingAction,
       );
       const hardOps = new Set(["certificados", "odometro", "odoo_ticket"]);
-      if (!hardOps.has(rulesExecutor)) {
+      const certificateDefinition = shouldRouteCertificateDefinitionToGuide({
+        interpret: kbInterpret,
+        rulesExecutor,
+      });
+      if (!hardOps.has(rulesExecutor) || certificateDefinition) {
         const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
           guide: kbInterpret.guideKind ?? undefined,
           articleIds: kbInterpret.articleIds,
@@ -2878,7 +2883,9 @@ export async function runTurnExecutorPhase(params: {
           clarifyQuestion: kbInterpret.clarifyQuestion ?? undefined,
           category: kbInterpret.category ?? undefined,
           reportId: kbInterpret.reportId ?? undefined,
-          normalTarget: kbInterpret.normalTarget ?? undefined,
+          normalTarget: certificateDefinition
+            ? "certificate_definition"
+            : (kbInterpret.normalTarget ?? undefined),
         });
         const msg = messageFromPayload(execResult);
         if (msg) {
