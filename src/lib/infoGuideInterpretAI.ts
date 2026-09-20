@@ -172,7 +172,8 @@ export type PlatformGuideKind =
 export type PlatformNormalTarget =
   | "operational_fuel"
   | "live_unit"
-  | "assistant_identity";
+  | "assistant_identity"
+  | "certificate_definition";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -3904,6 +3905,8 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Preguntar qué informes existen o listarlos → informes_catalogo. Preguntar cómo consultar un informe nombrado → informes_consulta. Ambos son guideKind=informes aunque el nombre incluya flota, unidades o GPS.",
       "Un título de informe explícito aunque venga aislado, por ejemplo “Resumen de flota”, también es informes_consulta.",
       "Planilla de horarios, resumen de servicio u otro informe de Transporte de pasajeros del menú Informes → informes_consulta (nunca crear hoja de turno).",
+      "Ayuda o información general sobre el módulo Transporte de pasajeros, sin pedir un informe/histórico concreto → transporte_publico_modulo.",
+      "Crear grupos, mover o reasignar unidades entre grupos dentro del módulo Unidades → unidades_modulo; no es configuración del menú Opciones.",
       "Cargar combustible en una unidad es combustible_operativo: continuar al flujo operativo para capturar unidad/patente; nunca info_guides, Informes, Paneles ni Opciones.",
       "Ubicación, GPS, ignición o estado en vivo de una unidad/patente es unidad_gps_vivo: continuar a Unidades, nunca pedir aclaración de KB.",
       "Preguntar el nombre, quién es, cómo se llama, o pedir que se presente («preséntate», «presentate», «quién sos») es identidad_asistente; nunca es búsqueda de unidad ni módulo. NO uses identidad_asistente para ingreso a la plataforma, cargar número de WhatsApp ni «reconocé que soy cliente».",
@@ -3934,6 +3937,8 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                     "informes_consulta: preguntar cómo abrir o consultar un informe nombrado.",
                     "El título aislado “Resumen de flota” es informes_consulta.",
                     "Planilla de horarios u otros informes de Transporte de pasajeros son informes_consulta, no crear hoja de turno.",
+                    "Ayuda general sobre Transporte de pasajeros, sin pedir un informe concreto, es transporte_publico_modulo.",
+                    "Crear grupos o mover/reasignar unidades entre grupos en el módulo Unidades es unidades_modulo, nunca Opciones.",
                     "Ambos son Informes; nunca son listado ni consulta en vivo de unidades.",
                     "combustible_operativo: quiere cargar combustible ahora; debe continuar al flujo operativo que pide unidad/patente.",
                     "unidad_gps_vivo: pide ubicación, GPS, ignición o estado actual de una unidad/patente.",
@@ -3965,6 +3970,8 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                         "informes_catalogo",
                         "informes_consulta",
                         "informes_modulo",
+                        "transporte_publico_modulo",
+                        "unidades_modulo",
                         "combustible_operativo",
                         "unidad_gps_vivo",
                         "identidad_asistente",
@@ -4032,6 +4039,49 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
         reportId: null,
         normalTarget,
       };
+    }
+    if (classification === "transporte_publico_modulo") {
+      return applyPlatformGuideInterpretGuards(
+        {
+          ...interpret,
+          route: "info_guides",
+          guideKind: "transporte_publico",
+          need: "ambiguous",
+          articleIds: [],
+          clarifyQuestion:
+            "Sí. ¿Necesitás ayuda con servicios y recorridos, paradas, turnos, hojas de turno, monitoreo o un error puntual?",
+          executionRequest: false,
+          confidence: Math.max(interpret.confidence, 0.98),
+          reason: "cross_family_frontier_checked:transporte_publico_modulo",
+          category: null,
+          reportId: null,
+          normalTarget: null,
+        },
+        text,
+        threadText,
+        guardOpts,
+      );
+    }
+    if (classification === "unidades_modulo") {
+      return applyPlatformGuideInterpretGuards(
+        {
+          ...interpret,
+          route: "info_guides",
+          guideKind: "unidades",
+          need: "procedure",
+          articleIds: [],
+          clarifyQuestion: null,
+          executionRequest: false,
+          confidence: Math.max(interpret.confidence, 0.98),
+          reason: "cross_family_frontier_checked:unidades_modulo",
+          category: null,
+          reportId: "unidades_grupos",
+          normalTarget: null,
+        },
+        text,
+        threadText,
+        guardOpts,
+      );
     }
     const familyMap: Record<
       string,
