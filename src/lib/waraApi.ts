@@ -2152,6 +2152,53 @@ export function parseInfoGuideModulePick(
   return null;
 }
 
+/**
+ * Módulo de guía nombrado de forma explícita en el mensaje (pick corto o
+ * «información/ayuda sobre el módulo X»). No es routing por keyword genérico:
+ * solo ancla cuando el cliente nombra inequívocamente un módulo base.
+ */
+export function resolveExplicitPlatformGuideModule(
+  raw: string | undefined | null,
+): InfoGuideModulePick | null {
+  const pick = parseInfoGuideModulePick(raw);
+  if (pick) return pick;
+
+  const text = normCompanyToken(raw ?? "");
+  if (!text || text.length > 240) return null;
+
+  // Informes / Alertas / Paneles con nombre de sección: la frontera los distingue.
+  if (
+    /\b(informe|informes|alerta|alertas)\b/.test(text) &&
+    !/\bmodulo\b/.test(text)
+  ) {
+    return null;
+  }
+
+  const named: InfoGuideModulePick[] = [];
+  if (/\bmantenimiento\b/.test(text)) named.push("mantenimiento");
+  if (/\btransporte(\s+de\s+pasajeros|\s+publico)?\b/.test(text)) {
+    named.push("transporte_publico");
+  }
+  if (/\bopciones\b/.test(text)) named.push("opciones");
+  if (/\bunidades\b/.test(text)) named.push("unidades");
+  if (named.length !== 1) return null;
+
+  const only = named[0];
+  const modulePhrase =
+    /\bmodulo(\s+de)?\s+(mantenimiento|opciones|unidades|transporte)\b/.test(text) ||
+    (only === "transporte_publico" &&
+      /\bmodulo(\s+de)?\s+transporte\b/.test(text));
+  const helpAboutModule =
+    /\b(informaci[oó]n|ayuda|ayudar|consultar|explic|guia|quiero saber|necesito)\b/.test(
+      text,
+    ) &&
+    (/\bmodulo\b/.test(text) ||
+      (only === "mantenimiento" && /\b(wara|plataforma)\b/.test(text)));
+
+  if (modulePhrase || helpAboutModule) return only;
+  return null;
+}
+
 /** Cliente elige módulo del menú genérico (Opciones / Unidades / Mantenimiento). */
 export function looksLikeInfoGuideModulePick(text: string | undefined | null): boolean {
   return parseInfoGuideModulePick(text) !== null;

@@ -106,6 +106,8 @@ import {
 import {
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
+  resolveExplicitPlatformGuideModule,
+  type InfoGuideModulePick,
 } from "@/lib/waraApi";
 
 const INTERPRET_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
@@ -4020,6 +4022,119 @@ function fillOpcionesDetailFromScopedCatalog(
   return interpret;
 }
 
+function frontierClassificationToGuideKind(
+  classification: string,
+): PlatformGuideKind | null {
+  switch (classification) {
+    case "paneles_alarmas":
+      return "paneles";
+    case "alertas_evento":
+      return "alertas";
+    case "opciones_configuracion":
+      return "opciones";
+    case "informes_historico":
+    case "informes_catalogo":
+    case "informes_consulta":
+    case "informes_modulo":
+      return "informes";
+    case "transporte_publico_modulo":
+      return "transporte_publico";
+    case "mantenimiento_modulo":
+      return "mantenimiento";
+    case "unidades_modulo":
+      return "unidades";
+    case "utilidades_modulo":
+      return "utilidades_bloque_2";
+    default:
+      return null;
+  }
+}
+
+function buildExplicitModuleAnchorInterpret(
+  interpret: PlatformKnowledgeInterpret,
+  module: InfoGuideModulePick,
+): PlatformKnowledgeInterpret {
+  if (module === "mantenimiento") {
+    const mtIds = new Set(listMantenimientoArticleCatalog().map((a) => a.id));
+    const kept = interpret.articleIds.filter((id) => mtIds.has(id));
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: "mantenimiento",
+      need:
+        interpret.need === "execute" || interpret.need === "definition"
+          ? interpret.need
+          : interpret.guideKind === "mantenimiento"
+            ? interpret.need
+            : "definition",
+      articleIds: kept.length ? kept : ["mt-concepto-y-mapa"],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: Math.max(interpret.confidence, 0.95),
+      reason: interpret.reason
+        ? `${interpret.reason}|explicit_module_anchor:mantenimiento`
+        : "explicit_module_anchor:mantenimiento",
+      category: null,
+      reportId: null,
+      normalTarget: null,
+    };
+  }
+  if (module === "transporte_publico") {
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: "transporte_publico",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion:
+        "Sí. ¿Necesitás ayuda con servicios y recorridos, paradas, turnos, hojas de turno, monitoreo o un error puntual?",
+      executionRequest: false,
+      confidence: Math.max(interpret.confidence, 0.95),
+      reason: interpret.reason
+        ? `${interpret.reason}|explicit_module_anchor:transporte_publico`
+        : "explicit_module_anchor:transporte_publico",
+      category: null,
+      reportId: null,
+      normalTarget: null,
+    };
+  }
+  if (module === "unidades") {
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: "unidades",
+      need: "procedure",
+      articleIds: [],
+      clarifyQuestion: null,
+      executionRequest: false,
+      confidence: Math.max(interpret.confidence, 0.95),
+      reason: interpret.reason
+        ? `${interpret.reason}|explicit_module_anchor:unidades`
+        : "explicit_module_anchor:unidades",
+      category: null,
+      reportId: "unidades_grupos",
+      normalTarget: null,
+    };
+  }
+  // opciones
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: "opciones",
+    need: "procedure",
+    articleIds: [],
+    clarifyQuestion: null,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.95),
+    reason: interpret.reason
+      ? `${interpret.reason}|explicit_module_anchor:opciones`
+      : "explicit_module_anchor:opciones",
+    category: null,
+    reportId: null,
+    normalTarget: null,
+  };
+}
+
 /**
  * Segunda decisión semántica para las familias con nombres solapados. Se activa por
  * el resultado estructurado, no por regex del mensaje, y valida la familia antes
@@ -4037,6 +4152,19 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
   if (basePayload.ambiguous_guide_frontier_refine === "done") {
     return interpret;
   }
+
+  // Módulo base nombrado de forma explícita: no dejar que la frontera lo secuestre
+  // (bug prod: «módulo Mantenimiento» → transporte_publico_modulo; «Mantenimiento» → paneles_alarmas).
+  const explicitModule = resolveExplicitPlatformGuideModule(text);
+  if (explicitModule) {
+    return applyPlatformGuideInterpretGuards(
+      buildExplicitModuleAnchorInterpret(interpret, explicitModule),
+      text,
+      threadText,
+      guardOpts,
+    );
+  }
+
   // Correr frontera ante ambigüedad, familias solapadas o destinos operativos
   // (combustible/GPS) aunque el primer paso haya caído en mantenimiento u otra guía.
   const shouldCheckFrontier =
@@ -4082,6 +4210,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Un título de informe explícito aunque venga aislado, por ejemplo “Resumen de flota”, también es informes_consulta.",
       "Planilla de horarios, resumen de servicio u otro informe de Transporte de pasajeros del menú Informes → informes_consulta (nunca crear hoja de turno).",
       "Ayuda o información general sobre el módulo Transporte de pasajeros, sin pedir un informe/histórico concreto → transporte_publico_modulo.",
+      "Ayuda o información general sobre el módulo Mantenimiento (planes, OT, paneles de tareas) → mantenimiento_modulo. NUNCA lo clasifiques como transporte_publico_modulo ni paneles_alarmas solo por la palabra módulo.",
       "Crear grupos, mover o reasignar unidades entre grupos dentro del módulo Unidades → unidades_modulo; no es configuración del menú Opciones.",
       "Cargar combustible en una unidad es combustible_operativo: continuar al flujo operativo para capturar unidad/patente; nunca info_guides, Informes, Paneles ni Opciones.",
       "Ubicación, GPS, ignición o estado en vivo de una unidad/patente es unidad_gps_vivo: continuar a Unidades, nunca pedir aclaración de KB.",
@@ -4114,6 +4243,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                     "El título aislado “Resumen de flota” es informes_consulta.",
                     "Planilla de horarios u otros informes de Transporte de pasajeros son informes_consulta, no crear hoja de turno.",
                     "Ayuda general sobre Transporte de pasajeros, sin pedir un informe concreto, es transporte_publico_modulo.",
+                    "Ayuda general sobre el módulo Mantenimiento es mantenimiento_modulo; nunca transporte_publico_modulo ni paneles_alarmas solo por decir módulo.",
                     "Crear grupos o mover/reasignar unidades entre grupos en el módulo Unidades es unidades_modulo, nunca Opciones.",
                     "Ambos son Informes; nunca son listado ni consulta en vivo de unidades.",
                     "combustible_operativo: quiere cargar combustible ahora; debe continuar al flujo operativo que pide unidad/patente.",
@@ -4147,6 +4277,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                         "informes_consulta",
                         "informes_modulo",
                         "transporte_publico_modulo",
+                        "mantenimiento_modulo",
                         "unidades_modulo",
                         "combustible_operativo",
                         "unidad_gps_vivo",
@@ -4173,6 +4304,19 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       ? (JSON.parse(content) as { classification?: string }).classification
       : null;
     if (!classification || classification === "sin_cambio") return interpret;
+
+    // Veto: si el primary ya es mantenimiento y el mensaje nombra mantenimiento,
+    // no permitir que la frontera lo mande a TP/paneles/etc.
+    const frontierKind = frontierClassificationToGuideKind(classification);
+    if (
+      frontierKind &&
+      interpret.guideKind === "mantenimiento" &&
+      /\bmantenimiento\b/i.test(text) &&
+      frontierKind !== "mantenimiento"
+    ) {
+      return interpret;
+    }
+
     if (classification === "identidad_asistente") {
       // Fail-safe: el LLM a veces marca «cómo ingreso» / «reconocé cliente» como identidad.
       if (!looksLikeAssistantIdentityQuestion(text)) {
@@ -4229,6 +4373,32 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
           executionRequest: false,
           confidence: Math.max(interpret.confidence, 0.98),
           reason: "cross_family_frontier_checked:transporte_publico_modulo",
+          category: null,
+          reportId: null,
+          normalTarget: null,
+        },
+        text,
+        threadText,
+        guardOpts,
+      );
+    }
+    if (classification === "mantenimiento_modulo") {
+      const mtIds = new Set(listMantenimientoArticleCatalog().map((a) => a.id));
+      const kept = interpret.articleIds.filter((id) => mtIds.has(id));
+      return applyPlatformGuideInterpretGuards(
+        {
+          ...interpret,
+          route: "info_guides",
+          guideKind: "mantenimiento",
+          need:
+            interpret.need === "execute" || interpret.need === "definition"
+              ? interpret.need
+              : "ambiguous",
+          articleIds: kept.length ? kept : ["mt-concepto-y-mapa"],
+          clarifyQuestion: null,
+          executionRequest: false,
+          confidence: Math.max(interpret.confidence, 0.98),
+          reason: "cross_family_frontier_checked:mantenimiento_modulo",
           category: null,
           reportId: null,
           normalTarget: null,
