@@ -1871,6 +1871,38 @@ export function looksLikeMaintenanceDomainTermQuestion(raw: string | undefined |
   return false;
 }
 
+/**
+ * El mensaje nombra otro módulo de guía distinto de `homeKind`.
+ * Usado para fallar-cerrado la continuidad (cambio de tema explícito).
+ */
+export function looksLikeExplicitGuideDomainSwitchAwayFrom(
+  raw: string | undefined | null,
+  homeKind: string,
+): boolean {
+  const text = normCompanyToken(raw ?? "");
+  if (!text) return false;
+  const families: Array<{ kind: string; re: RegExp }> = [
+    {
+      kind: "transporte_publico",
+      re: /\btransporte(\s+de\s+pasajeros|\s+publico)?\b|\bmodulo\s+(de\s+)?transporte\b/,
+    },
+    { kind: "mantenimiento", re: /\bmantenimiento\b|\bplan\s+(de\s+)?mantenimiento\b/ },
+    { kind: "opciones", re: /\b(modulo\s+(de\s+)?)?opciones\b/ },
+    {
+      kind: "unidades",
+      re: /\b(modulo\s+(de\s+)?)?unidades\b|\bmover\s+unidades\b|\bunidades\s+entre\s+grupos\b/,
+    },
+    { kind: "hojas_de_ruta", re: /\bhojas?\s+de\s+ruta\b/ },
+    { kind: "puntos_de_interes", re: /\bpuntos?\s+de\s+interes\b/ },
+    { kind: "informes", re: /\b(menu\s+)?informes\b/ },
+    { kind: "alertas", re: /\b(menu\s+)?alertas\b/ },
+    { kind: "paneles", re: /\b(menu\s+)?paneles\b/ },
+    { kind: "combustible", re: /\b(modulo\s+(de\s+)?)?combustible\b/ },
+    { kind: "cisternas", re: /\b(modulo\s+(de\s+)?)?cisternas?\b/ },
+  ];
+  return families.some((f) => f.kind !== homeKind && f.re.test(text));
+}
+
 /** Continuación conversacional dentro de una guía de mantenimiento ya abierta. */
 export function looksLikeMaintenanceGuideFollowupQuestion(
   raw: string | undefined | null,
@@ -1881,6 +1913,8 @@ export function looksLikeMaintenanceGuideFollowupQuestion(
   if (!text || text.length > 220) return false;
   if (looksLikeOperationalMaintenanceIntent(raw ?? "", threadText)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(raw)) return false;
+  // Cambio de tema explícito a otro módulo → no es continuidad de Mantenimiento.
+  if (looksLikeExplicitGuideDomainSwitchAwayFrom(raw, "mantenimiento")) return false;
   // Acks cortos (“ok gracias”, “dale”, “listo”) no son follow-up de guía.
   if (
     /^(ok|dale|gracias|listo|perfecto|buen[oa]s?|si|sí|sip)\b/.test(text) &&
@@ -1895,14 +1929,23 @@ export function looksLikeMaintenanceGuideFollowupQuestion(
   }
   if (looksLikeMaintenanceDomainTermQuestion(raw)) return true;
   if (looksLikeMaintenanceInfoRequest(raw)) return true;
-  if (/\?/.test(String(raw ?? "")) && text.length < 180) return true;
+  // Continuidad estructurada: anáfora / seguimiento de la misma guía — no cualquier "?".
   if (
     /^(y |despues|después|entonces|ahora |tambien|también|y despues|y después)/.test(text)
   ) {
     return true;
   }
-  if (/\b(donde|dónde|como|cómo|que|qué|cual|cuál|cuando|cuándo)\b/.test(text)) return true;
-  if (/\b(panel(es)?|tarea|ot\b|orden|seguimiento|siga|sigo|despu[eé]s)\b/.test(text)) return true;
+  if (
+    /\b(donde|dónde|como|cómo|que|qué|cual|cuál|cuando|cuándo)\b/.test(text) &&
+    /\b(panel(es)?|tarea|ot\b|orden|seguimiento|siga|sigo|despu[eé]s|plan|mantenimiento)\b/.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (/\b(panel(es)?|tarea|ot\b|orden|seguimiento|siga|sigo|despu[eé]s)\b/.test(text)) {
+    return true;
+  }
   return false;
 }
 
