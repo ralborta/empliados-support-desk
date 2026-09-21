@@ -60,6 +60,8 @@ const bodySchema = z
         "assistant_identity",
         "certificate_definition",
         "odometer_information",
+        "maintenance_information",
+        "maintenance_operation",
       ])
       .optional(),
     api_key: z.string().optional(),
