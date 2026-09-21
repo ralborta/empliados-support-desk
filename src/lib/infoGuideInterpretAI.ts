@@ -16,11 +16,6 @@
 import OpenAI from "openai";
 import { looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
 import {
-  MAINTENANCE_ASSIGN_PLAN_ARTICLE_ID,
-  MAINTENANCE_CONCEPT_ARTICLE_ID,
-  MAINTENANCE_INFORMATION_AMBIGUOUS_CLARIFY,
-} from "@/lib/maintenanceInformationGuide";
-import {
   OPENAI_DEFAULT_TIMEOUT_MS,
   logLlmStageError,
   withOpenAiTimeout,
@@ -180,9 +175,7 @@ export type PlatformNormalTarget =
   | "assistant_identity"
   | "certificate_definition"
   | "odometer_information"
-  | "odometer_operation"
-  | "maintenance_information"
-  | "maintenance_operation";
+  | "odometer_operation";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -205,8 +198,6 @@ export type PlatformKnowledgeInterpret = {
    * certificate_definition → definición de certificado sin trámite.
    * odometer_information → definición/procedimiento de odómetro/horómetro sin trámite.
    * odometer_operation → actualizar odómetro/horómetro (bloquea frontera; no info_guides).
-   * maintenance_information → concepto/procedimiento de Mantenimiento con artículo KB anclado.
-   * maintenance_operation → registrar/programar mantenimiento (bloquea frontera).
    */
   normalTarget?: PlatformNormalTarget | null;
 };
@@ -2819,9 +2810,7 @@ export function applyPlatformGuideInterpretGuards(
   if (
     interpret.normalTarget === "odometer_information" ||
     interpret.normalTarget === "odometer_operation" ||
-    interpret.normalTarget === "certificate_definition" ||
-    interpret.normalTarget === "maintenance_information" ||
-    interpret.normalTarget === "maintenance_operation"
+    interpret.normalTarget === "certificate_definition"
   ) {
     return interpret;
   }
@@ -3083,34 +3072,13 @@ export async function interpretPlatformKnowledgeTurn(opts: {
       return parsed;
     }
 
-    // Timeout / parse: intentar recuperación tipada (odómetro/mantenimiento anclados)
-    // antes del fail-closed neutro.
+    // Timeout / transporte / parse inválido: fail-closed neutro.
+    // Nunca degradar a Unidades, Mantenimiento u otra KB por reglas legacy offline.
     const failClosed = buildFailClosedPlatformInterpret("primary_timeout_or_parse");
     logLlmStageError(
       "platform_kb_primary_fail_closed",
       new Error(failClosed.reason),
     );
-    const recovered = await applySemanticDetailRefinements({
-      openai,
-      basePayload: userPayload,
-      interpret: failClosed,
-      text,
-      threadText,
-      guardOpts,
-    });
-    if (
-      recovered.normalTarget === "odometer_information" ||
-      recovered.normalTarget === "odometer_operation" ||
-      recovered.normalTarget === "maintenance_information" ||
-      recovered.normalTarget === "maintenance_operation" ||
-      (recovered.route === "info_guides" &&
-        recovered.guideKind &&
-        (recovered.articleIds.length > 0 ||
-          (recovered.need === "ambiguous" && recovered.clarifyQuestion)))
-    ) {
-      cacheInterpretResult(key, recovered);
-      return recovered;
-    }
     return failClosed;
   } catch (err) {
     logLlmStageError("platform_kb_primary_throw", err);
@@ -3151,32 +3119,7 @@ export async function interpretPlatformKnowledgeTurn(opts: {
     } catch (retryErr) {
       logLlmStageError("platform_kb_primary_throw_retry", retryErr);
     }
-    const failClosed = buildFailClosedPlatformInterpret("primary_throw");
-    try {
-      const recovered = await applySemanticDetailRefinements({
-        openai,
-        basePayload: userPayload,
-        interpret: failClosed,
-        text,
-        threadText,
-        guardOpts,
-      });
-      if (
-        recovered.normalTarget === "odometer_information" ||
-        recovered.normalTarget === "odometer_operation" ||
-        recovered.normalTarget === "maintenance_information" ||
-        recovered.normalTarget === "maintenance_operation" ||
-        (recovered.route === "info_guides" &&
-          recovered.guideKind &&
-          (recovered.articleIds.length > 0 ||
-            (recovered.need === "ambiguous" && recovered.clarifyQuestion)))
-      ) {
-        return recovered;
-      }
-    } catch (recoverErr) {
-      logLlmStageError("platform_kb_primary_throw_recover", recoverErr);
-    }
-    return failClosed;
+    return buildFailClosedPlatformInterpret("primary_throw");
   }
 }
 
@@ -4265,7 +4208,6 @@ async function applySemanticDetailRefinements(params: {
 }): Promise<PlatformKnowledgeInterpret> {
   let next = params.interpret;
   next = await resolveMeterInformationTargetIfNeeded({ ...params, interpret: next });
-  next = await resolveMaintenanceInformationTargetIfNeeded({ ...params, interpret: next });
   next = await refineAmbiguousGuideFrontierIfNeeded({ ...params, interpret: next });
   next = await refineInformesCategoryIfNeeded({ ...params, interpret: next });
   next = await refineInformesWithCategoryCatalog({ ...params, interpret: next });
@@ -4310,8 +4252,7 @@ async function resolveMeterInformationTargetIfNeeded(params: {
     interpret.guideKind === "transporte_publico" ||
     interpret.guideKind === "hojas_de_ruta" ||
     interpret.guideKind === "unidades" ||
-    interpret.route === "continue_normal" ||
-    isFailClosedPlatformInterpret(interpret);
+    interpret.route === "continue_normal";
   if (!frontierEligible) {
     return interpret;
   }
@@ -4467,235 +4408,6 @@ async function resolveMeterInformationTargetIfNeeded(params: {
     // not_meter: no anclar; deja fronteras / continuidad.
   } catch (err) {
     logLlmStageError("meter_information_resolve", err);
-  }
-  return interpret;
-}
-
-/**
- * Destino tipado de Mantenimiento ANTES de fronteras.
- * Ancla artículos KB (concepto / asignar plan); no hardcodea la definición.
- */
-async function resolveMaintenanceInformationTargetIfNeeded(params: {
-  openai: OpenAI;
-  basePayload: Record<string, unknown>;
-  interpret: PlatformKnowledgeInterpret;
-  text: string;
-  threadText: string;
-  guardOpts: PlatformGuideGuardOpts;
-}): Promise<PlatformKnowledgeInterpret> {
-  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
-  if (interpret.normalTarget != null) {
-    return interpret;
-  }
-  if (basePayload.maintenance_information_resolve === "done") {
-    return interpret;
-  }
-  const frontierEligible =
-    interpret.guideKind === null ||
-    interpret.need === "ambiguous" ||
-    interpret.guideKind === "opciones" ||
-    interpret.guideKind === "alertas" ||
-    interpret.guideKind === "paneles" ||
-    interpret.guideKind === "informes" ||
-    interpret.guideKind === "combustible" ||
-    interpret.guideKind === "mantenimiento" ||
-    interpret.guideKind === "transporte_publico" ||
-    interpret.guideKind === "hojas_de_ruta" ||
-    interpret.guideKind === "unidades" ||
-    interpret.route === "continue_normal" ||
-    isFailClosedPlatformInterpret(interpret);
-  if (!frontierEligible) {
-    return interpret;
-  }
-
-  const resolvePayload = {
-    ...basePayload,
-    maintenance_information_resolve: "done",
-    mensaje_nuevo: text,
-    interpret_previo: {
-      route: interpret.route,
-      guideKind: interpret.guideKind,
-      need: interpret.need,
-      reason: interpret.reason,
-    },
-    instruccion: [
-      "Clasificá SOLO si el mensaje actual trata el módulo Mantenimiento de Wara (planes, preventivo/correctivo, OT, tareas, toma y deje).",
-      "mt_definition: pregunta qué es / qué significa mantenimiento en Wara.",
-      "mt_procedure_asignar: pregunta cómo asignar un plan o tarea a una unidad.",
-      "mt_procedure: cómo usar/operar mantenimiento en la app (sin pedir registrar ahora).",
-      "mt_ambiguous: dice solo «mantenimiento» o ayuda vaga sin foco.",
-      "mt_execute: quiere registrar/programar/agendar mantenimiento ahora para una unidad.",
-      "not_maintenance: otro dominio (odómetro, certificado, TP, GPS, etc.).",
-      "Dominio del mensaje actual > continuidad del historial (TP, odómetro, etc.).",
-    ].join(" "),
-  };
-
-  try {
-    const response = await withOpenAiTimeout(
-      (signal) =>
-        openai.chat.completions.create(
-          {
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content:
-                  "Sos un clasificador tipado de Mantenimiento en WARA. Devolvé SOLO la clasificación del schema. Dominio actual > continuidad.",
-              },
-              { role: "user", content: JSON.stringify(resolvePayload) },
-            ],
-            temperature: 0,
-            max_tokens: 80,
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: "maintenance_information_resolve",
-                strict: true,
-                schema: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["classification"],
-                  properties: {
-                    classification: {
-                      type: "string",
-                      enum: [
-                        "mt_definition",
-                        "mt_procedure_asignar",
-                        "mt_procedure",
-                        "mt_ambiguous",
-                        "mt_execute",
-                        "not_maintenance",
-                      ],
-                    },
-                  },
-                },
-              },
-            },
-          },
-          { signal },
-        ),
-      INTERPRET_TIMEOUT_MS,
-      { stage: "maintenance_information_resolve" },
-    );
-    const content = response?.choices?.[0]?.message?.content?.trim();
-    const classification = content
-      ? (JSON.parse(content) as { classification?: string }).classification
-      : null;
-
-    console.log(
-      JSON.stringify({
-        stage: "maintenance_information_resolve",
-        primaryRoute: interpret.route,
-        primaryGuideKind: interpret.guideKind,
-        primaryNeed: interpret.need,
-        lastGuideKind: guardOpts.lastGuideKind ?? null,
-        classification,
-        recoveredFromFailClosed: isFailClosedPlatformInterpret(interpret),
-      }),
-    );
-
-    if (classification === "mt_definition") {
-      return applyPlatformGuideInterpretGuards(
-        {
-          route: "info_guides",
-          guideKind: "mantenimiento",
-          need: "definition",
-          articleIds: [MAINTENANCE_CONCEPT_ARTICLE_ID],
-          clarifyQuestion: null,
-          executionRequest: false,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: "maintenance_information_resolve:mt_definition",
-          category: null,
-          reportId: null,
-          normalTarget: "maintenance_information",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-    if (classification === "mt_procedure_asignar") {
-      return applyPlatformGuideInterpretGuards(
-        {
-          route: "info_guides",
-          guideKind: "mantenimiento",
-          need: "procedure",
-          articleIds: [MAINTENANCE_ASSIGN_PLAN_ARTICLE_ID],
-          clarifyQuestion: null,
-          executionRequest: false,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: "maintenance_information_resolve:mt_procedure_asignar",
-          category: null,
-          reportId: null,
-          normalTarget: "maintenance_information",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-    if (classification === "mt_procedure") {
-      return applyPlatformGuideInterpretGuards(
-        {
-          route: "info_guides",
-          guideKind: "mantenimiento",
-          need: "procedure",
-          articleIds: [MAINTENANCE_CONCEPT_ARTICLE_ID],
-          clarifyQuestion: null,
-          executionRequest: false,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: "maintenance_information_resolve:mt_procedure",
-          category: null,
-          reportId: null,
-          normalTarget: "maintenance_information",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-    if (classification === "mt_ambiguous") {
-      return applyPlatformGuideInterpretGuards(
-        {
-          route: "info_guides",
-          guideKind: "mantenimiento",
-          need: "ambiguous",
-          articleIds: [],
-          clarifyQuestion: MAINTENANCE_INFORMATION_AMBIGUOUS_CLARIFY,
-          executionRequest: false,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: "maintenance_information_resolve:mt_ambiguous",
-          category: null,
-          reportId: null,
-          normalTarget: "maintenance_information",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-    if (classification === "mt_execute") {
-      return applyPlatformGuideInterpretGuards(
-        {
-          route: "continue_normal",
-          guideKind: null,
-          need: "execute",
-          articleIds: [],
-          clarifyQuestion: null,
-          executionRequest: true,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: "maintenance_information_resolve:mt_execute",
-          category: null,
-          reportId: null,
-          normalTarget: "maintenance_operation",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-  } catch (err) {
-    logLlmStageError("maintenance_information_resolve", err);
   }
   return interpret;
 }
@@ -5074,12 +4786,6 @@ export function shouldRouteInterpretToInfoGuides(
     return interpret.executionRequest === false;
   }
   if (interpret.normalTarget === "odometer_operation") {
-    return false;
-  }
-  if (interpret.normalTarget === "maintenance_information") {
-    return interpret.executionRequest === false;
-  }
-  if (interpret.normalTarget === "maintenance_operation") {
     return false;
   }
   if (interpret.normalTarget === "certificate_definition") {

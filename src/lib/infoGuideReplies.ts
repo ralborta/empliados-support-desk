@@ -29,10 +29,6 @@ import {
   isOdometerInformationInterpret,
   replyForOdometerInformation,
 } from "@/lib/odometerInformationGuide";
-import {
-  isMaintenanceInformationInterpret,
-  replyFromAnchoredMaintenanceArticles,
-} from "@/lib/maintenanceInformationGuide";
 import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
 import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
 import {
@@ -98,8 +94,7 @@ export type InfoGuideFallback =
   | "alertas_flag_off"
   | "paneles_flag_off"
   | "opciones_section_off"
-  | "articulos_module_unsupported"
-  | "anchored_maintenance_article";
+  | "articulos_module_unsupported";
 
 function sanitizeOptInGuideKind(
   kind: InfoGuideKind | null | undefined,
@@ -728,44 +723,6 @@ export async function buildGroundedInfoGuideReplyWithMeta(
       interpret: activeInterpret,
       fallback: null,
     };
-  }
-
-  if (isMaintenanceInformationInterpret(activeInterpret)) {
-    if (
-      activeInterpret.need === "ambiguous" &&
-      activeInterpret.clarifyQuestion?.trim()
-    ) {
-      return {
-        message: activeInterpret.clarifyQuestion.trim(),
-        guideKind: "mantenimiento",
-        interpret: activeInterpret,
-        fallback: null,
-      };
-    }
-    const articleIds = activeInterpret.articleIds ?? [];
-    if (articleIds.length) {
-      const grounded = await answerFromKnowledgeBase("mantenimiento", rawText, threadText, {
-        articleIds,
-        need: activeInterpret.need,
-      });
-      if (grounded && !looksLikeWeakMaintenanceGuideAnswer(grounded)) {
-        return {
-          message: grounded,
-          guideKind: "mantenimiento",
-          interpret: activeInterpret,
-          fallback: null,
-        };
-      }
-      const anchored = replyFromAnchoredMaintenanceArticles(articleIds, activeInterpret.need);
-      if (anchored) {
-        return {
-          message: anchored,
-          guideKind: "mantenimiento",
-          interpret: activeInterpret,
-          fallback: "anchored_maintenance_article",
-        };
-      }
-    }
   }
 
   // Respuesta social estructurada: no detectar módulos ni consultar corpus.

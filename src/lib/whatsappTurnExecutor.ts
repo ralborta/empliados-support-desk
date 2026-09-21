@@ -2854,18 +2854,6 @@ export async function runTurnExecutorPhase(params: {
         ok: execOk,
       };
     }
-    if (kbInterpret?.normalTarget === "maintenance_operation") {
-      const execResult = await invokeExecutor("mantenimiento", rawPhone, selectionText, apiKey);
-      const execMessage = messageFromPayload(execResult);
-      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-      return {
-        message:
-          execMessage ||
-          "Para registrar el mantenimiento necesito la patente de la unidad junto con un breve detalle.",
-        executor: "mantenimiento",
-        ok: execOk,
-      };
-    }
     if (isOperationalUnitInterpret(kbInterpret)) {
       // Carga de combustible: capturar unidad/patente. NO buscar la frase operativa
       // como nombre de unidad (evita “No encontré … «cargar»”).
