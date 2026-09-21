@@ -731,38 +731,37 @@ export async function buildGroundedInfoGuideReplyWithMeta(
   }
 
   if (isMaintenanceInformationInterpret(activeInterpret)) {
-    const mtInterpret = activeInterpret!;
     if (
-      mtInterpret.need === "ambiguous" &&
-      mtInterpret.clarifyQuestion?.trim()
+      activeInterpret.need === "ambiguous" &&
+      activeInterpret.clarifyQuestion?.trim()
     ) {
       return {
-        message: mtInterpret.clarifyQuestion.trim(),
+        message: activeInterpret.clarifyQuestion.trim(),
         guideKind: "mantenimiento",
-        interpret: mtInterpret,
+        interpret: activeInterpret,
         fallback: null,
       };
     }
-    const articleIds = mtInterpret.articleIds ?? [];
+    const articleIds = activeInterpret.articleIds ?? [];
     if (articleIds.length) {
       const grounded = await answerFromKnowledgeBase("mantenimiento", rawText, threadText, {
         articleIds,
-        need: mtInterpret.need,
+        need: activeInterpret.need,
       });
       if (grounded && !looksLikeWeakMaintenanceGuideAnswer(grounded)) {
         return {
           message: grounded,
           guideKind: "mantenimiento",
-          interpret: mtInterpret,
+          interpret: activeInterpret,
           fallback: null,
         };
       }
-      const anchored = replyFromAnchoredMaintenanceArticles(articleIds, mtInterpret.need);
+      const anchored = replyFromAnchoredMaintenanceArticles(articleIds, activeInterpret.need);
       if (anchored) {
         return {
           message: anchored,
           guideKind: "mantenimiento",
-          interpret: mtInterpret,
+          interpret: activeInterpret,
           fallback: "anchored_maintenance_article",
         };
       }
