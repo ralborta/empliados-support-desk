@@ -2827,6 +2827,22 @@ export async function runTurnExecutorPhase(params: {
       lastGuideReportId: lastGuideCtx?.reportId ?? null,
       lastGuideArticleIds: lastGuideCtx?.articleIds ?? null,
     });
+    if (kbInterpret?.continuity) {
+      const c = kbInterpret.continuity;
+      console.info(
+        `[guide-continuity] phone=${rawPhone.slice(0, 4)}… ` +
+          `primaryGuideKind=${c.primaryGuideKind ?? "null"} ` +
+          `primaryNeed=${c.primaryNeed} ` +
+          `lastGuideKind=${c.lastGuideKind ?? "null"} ` +
+          `lastGuideCategory=${c.lastGuideCategory ?? "null"} ` +
+          `lastGuideReportId=${c.lastGuideReportId ?? "null"} ` +
+          `continuityIntent=${c.continuityIntent} ` +
+          `continuityApplied=${c.continuityApplied} ` +
+          `continuityRejectedReason=${c.continuityRejectedReason ?? "null"} ` +
+          `finalGuideKind=${c.finalGuideKind ?? "null"} ` +
+          `usedAgent=false`,
+      );
+    }
     if (
       isAssistantIdentityInterpret(kbInterpret) &&
       looksLikeAssistantIdentityQuestion(selectionText)

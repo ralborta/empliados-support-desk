@@ -175,6 +175,19 @@ export type PlatformNormalTarget =
   | "assistant_identity"
   | "certificate_definition";
 
+/** Trazabilidad de continuidad de guía por turno (dominio explícito > lastGuide*). */
+export type GuideContinuityTrace = {
+  primaryGuideKind: PlatformGuideKind | null;
+  primaryNeed: InfoGuideNeed;
+  lastGuideKind: LastInfoGuideKind | null;
+  lastGuideCategory: string | null;
+  lastGuideReportId: string | null;
+  continuityIntent: "continue" | "reject" | "none";
+  continuityApplied: boolean;
+  continuityRejectedReason: string | null;
+  finalGuideKind: PlatformGuideKind | null;
+};
+
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
   guideKind: PlatformGuideKind | null;
@@ -195,6 +208,8 @@ export type PlatformKnowledgeInterpret = {
    * assistant_identity → responder la identidad oficial de Kira.
    */
   normalTarget?: PlatformNormalTarget | null;
+  /** Diagnóstico de continuidad; no altera routing por sí solo. */
+  continuity?: GuideContinuityTrace | null;
 };
 
 type CacheEntry = { at: number; value: PlatformKnowledgeInterpret | null };
@@ -1181,6 +1196,7 @@ function correctMaintenanceMisroute(
   interpret: PlatformKnowledgeInterpret,
   selectionText: string,
   threadText: string,
+  opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret {
   const normForInformes = selectionText
     .normalize("NFD")
@@ -1195,6 +1211,44 @@ function correctMaintenanceMisroute(
   const domainTerm = looksLikeMaintenanceDomainTermQuestion(selectionText);
   const followup = looksLikeMaintenanceGuideFollowupQuestion(selectionText, threadText);
   if (!domainTerm && !followup) return interpret;
+
+  // Dominio explícito del turno actual > continuidad de la guía MT anterior.
+  // Términos inequívocos de MT (p. ej. “contar a partir de la realización”) sí pueden
+  // corregir; un follow-up residual nunca pisa transporte_publico / opciones / etc.
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "mantenimiento" &&
+    !domainTerm
+  ) {
+    return {
+      ...interpret,
+      // No heredar artículos/categoría/reportId de la familia anterior.
+      category: interpret.guideKind === "informes" || interpret.guideKind === "opciones"
+        ? interpret.category ?? null
+        : null,
+      reportId:
+        interpret.guideKind === "informes" ||
+        interpret.guideKind === "alertas" ||
+        interpret.guideKind === "paneles" ||
+        interpret.guideKind === "opciones"
+          ? interpret.reportId ?? null
+          : null,
+      reason: interpret.reason
+        ? `${interpret.reason}|continuity_rejected:explicit_domain_switch`
+        : "continuity_rejected:explicit_domain_switch",
+    };
+  }
+
+  // Continuidad: si lastGuideKind es otra familia, no forzar MT solo por hilo residual.
+  if (
+    !domainTerm &&
+    followup &&
+    opts?.lastGuideKind &&
+    opts.lastGuideKind !== "mantenimiento"
+  ) {
+    return interpret;
+  }
 
   const t = selectionText.toLowerCase();
   const wantsContar =
@@ -1236,17 +1290,22 @@ function correctMaintenanceMisroute(
         ? ("procedure" as const)
         : interpret.need;
 
+  const viaContinuity = !domainTerm && followup;
   return {
     ...interpret,
     route: "info_guides",
     guideKind: "mantenimiento",
     need,
     articleIds,
+    category: null,
+    reportId: null,
     executionRequest: false,
     confidence: Math.max(interpret.confidence, 0.9),
     reason: interpret.reason
-      ? `${interpret.reason}|mt_domain_guard`
-      : "mt_domain_guard",
+      ? `${interpret.reason}|${viaContinuity ? "mt_continuity_guard" : "mt_domain_guard"}`
+      : viaContinuity
+        ? "mt_continuity_guard"
+        : "mt_domain_guard",
   };
 }
 
@@ -2226,6 +2285,14 @@ function correctInformesContinuityMisroute(
   const lastCategory = opts?.lastGuideCategory ?? null;
   const lastReportId = opts?.lastGuideReportId ?? null;
   const lastArticleIds = opts?.lastGuideArticleIds ?? null;
+  // Decisión explícita de otro módulo en este turno gana sobre continuidad histórica.
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "informes"
+  ) {
+    return interpret;
+  }
   const norm = selectionText
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
@@ -2557,6 +2624,14 @@ function correctPuntosInteresContinuityMisroute(
   selectionText: string,
   threadText: string,
 ): PlatformKnowledgeInterpret {
+  // Decisión explícita de otro módulo en este turno gana sobre continuidad histórica.
+  if (
+    interpret.route === "info_guides" &&
+    interpret.guideKind &&
+    interpret.guideKind !== "puntos_de_interes"
+  ) {
+    return interpret;
+  }
   if (!looksLikePuntosInteresGuideFollowupQuestion(selectionText, threadText)) {
     return interpret;
   }
@@ -2800,9 +2875,16 @@ export function applyPlatformGuideInterpretGuards(
   threadText: string,
   opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret {
+  const primarySnapshot = {
+    guideKind: interpret.guideKind,
+    need: interpret.need,
+    articleIds: [...interpret.articleIds],
+    category: interpret.category ?? null,
+    reportId: interpret.reportId ?? null,
+  };
   const lastGuideKind = opts?.lastGuideKind ?? null;
   let next = interpret;
-  next = correctMaintenanceMisroute(next, selectionText, threadText);
+  next = correctMaintenanceMisroute(next, selectionText, threadText, opts);
   next = correctHojaDeNounMisroute(next, selectionText);
   next = correctHojasRutaCatalogTopicMisroute(next, selectionText);
   next = correctPuntosInteresCatalogTopicMisroute(next, selectionText);
@@ -2831,7 +2913,101 @@ export function applyPlatformGuideInterpretGuards(
   next = correctAmbiguousCargaMisroute(next, selectionText);
   // Artículos sin KB: después de misroutes, para no ser pisado por MT.
   next = normalizeArticulosModuleUnsupported(next, selectionText);
+  next = attachGuideContinuityTrace(next, {
+    primarySnapshot,
+    opts,
+  });
   return next;
+}
+
+function attachGuideContinuityTrace(
+  interpret: PlatformKnowledgeInterpret,
+  meta: {
+    primarySnapshot: {
+      guideKind: PlatformGuideKind | null;
+      need: InfoGuideNeed;
+      articleIds: string[];
+      category: string | null;
+      reportId: string | null;
+    };
+    opts?: PlatformGuideGuardOpts;
+  },
+): PlatformKnowledgeInterpret {
+  const reason = interpret.reason ?? "";
+  const rejected = /continuity_rejected:explicit_domain_switch/.test(reason);
+  const continuityHit =
+    /_continuity_guard|_continuity\b|mt_continuity_guard|paneles_continuity|alertas_continuity|opciones_continuity/.test(
+      reason,
+    );
+  const lastGuideKind = meta.opts?.lastGuideKind ?? null;
+  const primaryGuideKind = meta.primarySnapshot.guideKind;
+  let continuityIntent: GuideContinuityTrace["continuityIntent"] = "none";
+  let continuityApplied = false;
+  let continuityRejectedReason: string | null = null;
+
+  if (rejected) {
+    continuityIntent = "reject";
+    continuityRejectedReason = "explicit_domain_switch";
+    continuityApplied = false;
+  } else if (
+    continuityHit &&
+    primaryGuideKind != null &&
+    interpret.guideKind != null &&
+    primaryGuideKind !== interpret.guideKind
+  ) {
+    // Invariante: continuidad nunca cambia la familia del primary.
+    continuityIntent = "reject";
+    continuityRejectedReason = "explicit_domain_switch";
+    return {
+      ...interpret,
+      guideKind: primaryGuideKind,
+      need: meta.primarySnapshot.need,
+      articleIds: meta.primarySnapshot.articleIds,
+      category: meta.primarySnapshot.category,
+      reportId: meta.primarySnapshot.reportId,
+      reason: reason
+        ? `${reason}|continuity_rejected:explicit_domain_switch`
+        : "continuity_rejected:explicit_domain_switch",
+      continuity: {
+        primaryGuideKind,
+        primaryNeed: meta.primarySnapshot.need,
+        lastGuideKind,
+        lastGuideCategory: meta.opts?.lastGuideCategory ?? null,
+        lastGuideReportId: meta.opts?.lastGuideReportId ?? null,
+        continuityIntent,
+        continuityApplied: false,
+        continuityRejectedReason,
+        finalGuideKind: primaryGuideKind,
+      },
+    };
+  } else if (continuityHit) {
+    continuityIntent = "continue";
+    continuityApplied = true;
+  } else if (
+    primaryGuideKind != null &&
+    lastGuideKind != null &&
+    primaryGuideKind !== lastGuideKind
+  ) {
+    // Dominio explícito del turno distinto al lastGuide: continuidad no aplica.
+    continuityIntent = "reject";
+    continuityRejectedReason = "explicit_domain_switch";
+    continuityApplied = false;
+  }
+
+  return {
+    ...interpret,
+    continuity: {
+      primaryGuideKind,
+      primaryNeed: meta.primarySnapshot.need,
+      lastGuideKind,
+      lastGuideCategory: meta.opts?.lastGuideCategory ?? null,
+      lastGuideReportId: meta.opts?.lastGuideReportId ?? null,
+      continuityIntent,
+      continuityApplied,
+      continuityRejectedReason,
+      finalGuideKind: interpret.guideKind,
+    },
+  };
 }
 
 /** Offline / sin API: autoridad textual V1 + catálogo (nunca Improvisar Unidades/MT ante HR). */
