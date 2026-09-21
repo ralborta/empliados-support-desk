@@ -1,0 +1,37 @@
+{
+  "name": "@wara-v2/db",
+  "version": "0.2.3",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm prisma:generate && tsc -p tsconfig.json && node ./scripts/copy-generated.mjs",
+    "typecheck": "pnpm prisma:generate && tsc -p tsconfig.json --noEmit",
+    "prisma:generate": "prisma generate --schema ../../prisma-v2/schema.prisma",
+    "prisma:validate": "prisma validate --schema ../../prisma-v2/schema.prisma",
+    "prisma:format": "prisma format --schema ../../prisma-v2/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema ../../prisma-v2/schema.prisma",
+    "prisma:migrate:status": "prisma migrate status --schema ../../prisma-v2/schema.prisma",
+    "test:unit": "pnpm prisma:generate && tsx --test src/index.test.ts",
+    "test:constraints": "pnpm prisma:generate && node ./scripts/with-embedded-pg.mjs pnpm --filter @wara-v2/db exec tsx --test src/constraints.test.ts",
+    "test": "pnpm test:unit && pnpm test:constraints"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.1",
+    "@wara-v2/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "embedded-postgres": "18.4.0-beta.17",
+    "prisma": "^6.19.1",
+    "tsx": "^4.23.5",
+    "typescript": "^5"
+  }
+}

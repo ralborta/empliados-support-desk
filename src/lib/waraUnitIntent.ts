@@ -20,29 +20,54 @@ import {
   threadAwaitingHorometerPlate,
   threadAwaitingOdometerKmValue,
   threadAwaitingOdometerPlate,
+  threadHasActiveMeterValueRequest,
   threadHasActiveOdometerFlow,
+  looksLikeBareMeterValue,
   threadHasFailedUnitSearch,
   threadHasOdometerUnitClarificationPending,
   threadOdometerRegistrationCompleted,
   threadTextSinceCompanySelection,
   hasPendingOdometerConfirmation,
   hasPendingUnitConsultPlateRequest,
+  threadHasRecentCustomerMeterUpdateIntent,
   looksLikeBriefConfirmation,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeBareOdometerTopicMention,
+  looksLikeBareHorometerTopicMention,
   looksLikeHorometerOnlyIntent,
   looksLikePendingTramiteAffirmation,
+  looksLikePendingConfirmHelpOrConfusion,
+  looksLikeOdometerInfoRequest,
+  extractUnitCodeNumbersFromMessage,
 } from "@/lib/wara";
+import {
+  detectServiceIntentInMessage,
+  resolveUnitReferenceFromMessage,
+  type FleetUnitRef,
+  type NumericExpectedField,
+} from "@/lib/unitReferenceParser";
+import { classifyTypedLateralQuery } from "@/lib/typedLateralQueries";
+import { looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
+import { classifyOdometerFlowSideQuestion } from "@/lib/pendingConfirmStance";
+import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import { withOpenAiTimeout } from "@/lib/openaiTimeout";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
+import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   consultarEstadoUnidades,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
+  looksLikeMaintenanceStepByStepOnlyRequest,
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
+  looksLikeGreeting,
+  looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeMetaConversationalReply,
   looksLikeConversationalUnitConcern,
   looksLikeOdometerConfirmationRejection,
+  looksLikeOutOfScopeSupportClaim,
   looksLikePatenteUnknownReply,
   looksLikePlateCorrectionRequest,
   looksLikeSubstantiveCustomerMessage,
@@ -70,6 +95,10 @@ export function buildFleetUnitNotFoundMessage(opts: {
    * parece que el bot ignoró por completo lo que le pasaron.
    */
   searchedText?: string | null;
+  /** Coincidencias cercanas (solo sugerencia; nunca auto-seleccionadas). */
+  nearbyUnits?: WaraUnidadEstado[] | null;
+  /** Ofrecer «cambiar empresa» solo si el contacto tiene otra empresa. */
+  canSwitchCompany?: boolean;
 }): string {
   const company = opts.companyName?.trim() || "tu empresa";
   const prefixFromText = opts.rawText ? extractPlatePrefixFromMessage(opts.rawText) : null;
@@ -82,29 +111,50 @@ export function buildFleetUnitNotFoundMessage(opts: {
           .toUpperCase()
       : null;
   const prefix = (opts.prefix ?? prefixFromText ?? barePrefix)?.trim().toUpperCase() || null;
+  const nearbyLines = formatNearbyUnitSuggestions(opts.nearbyUnits);
+  const switchCompanyLine =
+    opts.canSwitchCompany === true
+      ? "Si la unidad es de otra empresa, escribí «cambiar empresa»."
+      : null;
 
   if (prefix) {
-    return (
-      `No encontré ninguna unidad en ${company} con patente que empiece con ${prefix}. ` +
-      `¿Podés pasarme la matrícula completa (ej. OST 223)? También podés escribir «listado de mis unidades».`
-    );
+    return [
+      "🚗 *Unidad no encontrada*",
+      "",
+      `No encontré ninguna unidad en ${company} con patente que empiece con *${prefix}*.`,
+      "Pasame la matrícula completa (ej. OST 223) o escribí «listado de mis unidades».",
+      ...nearbyLines,
+      ...(switchCompanyLine ? [switchCompanyLine] : []),
+    ].join("\n");
   }
 
   if (opts.plate) {
     const display = formatPlateWithSpaces(opts.plate) ?? opts.plate;
-    return (
-      `La patente ${display} no está en la flota de ${company}. ` +
-      `Revisá que esté bien escrita. Si la unidad es de otra empresa, escribí «cambiar empresa».`
-    );
+    return [
+      "🚗 *Unidad no encontrada*",
+      "",
+      `La patente *${display}* no está en la flota de ${company}.`,
+      "Revisá que esté bien escrita.",
+      ...nearbyLines,
+      ...(switchCompanyLine
+        ? [switchCompanyLine]
+        : opts.canSwitchCompany === false
+          ? []
+          : ["Si la unidad es de otra empresa, escribí «cambiar empresa»."]),
+    ].join("\n");
   }
 
   const searched = opts.searchedText?.trim();
   if (searched) {
-    return (
-      `No encontré ninguna unidad que coincida con «${searched}» en la flota de ${company}. ` +
-      `Revisá que esté bien escrito o pasame la matrícula completa (ej. NKL 952). ` +
-      `Si querés ver opciones de tu flota, escribí «listado de mis unidades».`
-    );
+    return [
+      "🚗 *Unidad no encontrada*",
+      "",
+      `No encontré ninguna unidad que coincida con «${searched}» en la flota de ${company}.`,
+      "Revisá que esté bien escrito o pasame la matrícula completa (ej. NKL 952).",
+      ...nearbyLines,
+      ...(switchCompanyLine ? [switchCompanyLine] : []),
+      "Si querés ver opciones de tu flota, escribí «listado de mis unidades».",
+    ].join("\n");
   }
 
   // Caso sin prefijo/patente detectados: puede ser que el cliente no haya dado
@@ -116,6 +166,73 @@ export function buildFleetUnitNotFoundMessage(opts: {
     `¿Cuál unidad? Pasame la matrícula completa o el nombre/marca exacto para buscarla en la flota de ${company}. ` +
     `Si querés ver todas, escribí «listado de mis unidades».`
   );
+}
+
+function formatNearbyUnitSuggestions(units: WaraUnidadEstado[] | null | undefined): string[] {
+  if (!units?.length) return [];
+  const labels = units
+    .slice(0, 5)
+    .map((u) => formatUnitListLabel(u))
+    .filter(Boolean);
+  if (!labels.length) return [];
+  return [
+    "",
+    "Coincidencias cercanas en esta empresa (no seleccioné ninguna):",
+    ...labels.map((l) => `• ${l}`),
+    "Si alguna es la correcta, pasame la matrícula o el nombre exacto.",
+  ];
+}
+
+/**
+ * Sugerencias cercanas por similitud de dígitos/código de unidad.
+ * Nunca selecciona ni muta estado — solo ranking para el mensaje not-found.
+ */
+export function findNearbyFleetUnits(
+  units: WaraUnidadEstado[],
+  searchedText: string,
+  limit = 5,
+): WaraUnidadEstado[] {
+  const needle = String(searchedText ?? "").trim();
+  if (!needle || !units.length) return [];
+  const needleDigits = needle.replace(/\D/g, "");
+  const needleNorm = normalizeUnitNameToken(needle);
+  const scored: Array<{ unit: WaraUnidadEstado; score: number }> = [];
+
+  for (const unit of units) {
+    const field = String(unit.unidad || "").replace(TYPOGRAPHIC_HYPHENS, "-");
+    const plate = normalizeLoosePlate(unit.patente || "");
+    const unitNorm = normalizeUnitNameToken(field);
+    const unitDigits = `${field}${plate}${unit.movil_id ?? ""}`.replace(/\D/g, "");
+    let score = 0;
+    if (needleNorm && unitNorm && needleNorm === unitNorm) score += 100;
+    if (needleDigits.length >= 4 && unitDigits.includes(needleDigits)) score += 40;
+    if (needleDigits.length >= 4 && unitDigits) {
+      const prefixLen = sharedNumericPrefixLength(needleDigits, unitDigits);
+      if (prefixLen >= 3) score += prefixLen * 3;
+      const dist = levenshteinDistance(needleDigits.slice(0, 8), unitDigits.slice(0, 8));
+      if (dist <= 2) score += 20 - dist * 5;
+    }
+    if (score > 0) scored.push({ unit, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const out: WaraUnidadEstado[] = [];
+  const seen = new Set<string>();
+  for (const { unit } of scored) {
+    const key = `${unit.movil_id ?? ""}|${normalizeLoosePlate(unit.patente || "")}|${normalizeUnitNameToken(unit.unidad || "")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(unit);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function sharedNumericPrefixLength(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i += 1;
+  return i;
 }
 
 /**
@@ -158,13 +275,87 @@ async function customerOnlyThreadText(prisma: PrismaClient, rawPhone: string): P
   }
 }
 
+/** Guiones tipográficos / de WhatsApp → ASCII, para no perder «300-020». */
+const TYPOGRAPHIC_HYPHENS = /[\u00AD\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g;
+
 /** Nombre interno de unidad Wara (ej. M600-026, 300-092) — no es una patente. */
 export function looksLikeUnitNameInMessage(rawText: string | undefined | null): boolean {
   const norm = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-");
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
   if (!norm) return false;
-  return /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm);
+  return (
+    /\b(?:M?\d{3}-\d{2,3})\b/i.test(norm) ||
+    /\bINT\s*[-.]?\s*\d{2,4}\b/i.test(norm) ||
+    extractMovilIdFromUnitMessage(norm) != null
+  );
+}
+
+/**
+ * Token que es nombre de unidad, nunca patente Mercosur: «300-020», «M300-020», «300020».
+ * Bug real 2026-08-18: el cliente escribió solo 300-020 y el bot preguntó
+ * «¿unidad o patente?» en vez de buscar M300-020 en la flota.
+ */
+export function looksLikeDefiniteUnitNameCode(rawText: string | undefined | null): boolean {
+  const text = String(rawText ?? "")
+    .trim()
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
+  if (!text) return false;
+  if (/^(M?\d{3}-\d{2,3})$/i.test(text)) return true;
+  const compact = text.replace(/[\s\-_.]+/g, "").toUpperCase();
+  if (!/^(M?\d{5,6})$/.test(compact)) return false;
+  return !isPlausibleVehiclePlate(compact);
+}
+
+/** Campo numérico que el hilo espera (unidad vs valor de medidor). */
+export function inferNumericExpectedFieldForThread(threadText: string): NumericExpectedField {
+  if (threadHasActiveMeterValueRequest(threadText)) return "meter_value";
+  if (hasPendingUnitConsultPlateRequest(threadText)) return "unit";
+  if (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) {
+    return "unit";
+  }
+  return "none";
+}
+
+export function extractMovilIdFromUnitMessage(
+  rawText: string | undefined | null,
+  opts?: { threadText?: string; fleet?: FleetUnitRef[] },
+): number | null {
+  const text = String(rawText ?? "").trim();
+  if (!text) return null;
+
+  const threadText = opts?.threadText ?? "";
+  const expectedField = threadText ? inferNumericExpectedFieldForThread(threadText) : "none";
+  const resolution = resolveUnitReferenceFromMessage({
+    rawText: text,
+    serviceIntent: detectServiceIntentInMessage(text),
+    expectedField,
+    fleet: opts?.fleet,
+  });
+
+  if (resolution.kind === "dual" && resolution.unitMovilId != null) {
+    return resolution.unitMovilId;
+  }
+  if (resolution.unitMovilId != null) return resolution.unitMovilId;
+  return null;
+}
+
+export function resolveUnitReferenceClarification(
+  rawText: string,
+  opts?: { threadText?: string; fleet?: FleetUnitRef[] },
+): string | null {
+  const threadText = opts?.threadText ?? "";
+  const resolution = resolveUnitReferenceFromMessage({
+    rawText,
+    serviceIntent: detectServiceIntentInMessage(rawText),
+    expectedField: threadText ? inferNumericExpectedFieldForThread(threadText) : "none",
+    fleet: opts?.fleet,
+  });
+  return resolution.kind === "ambiguous" ? resolution.clarification ?? null : null;
+}
+
+function movilIdMatches(unitMovilId: unknown, target: number): boolean {
+  return Number(unitMovilId) === target;
 }
 
 /**
@@ -176,7 +367,7 @@ export function looksLikeAmbiguousUnitCodeToken(rawText: string | undefined | nu
   if (looksLikeUnitNameInMessage(rawText)) return true;
   const compact = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(TYPOGRAPHIC_HYPHENS, "-")
     .replace(/[\s\-_.]+/g, "")
     .toUpperCase();
   if (!compact) return false;
@@ -188,7 +379,7 @@ export function looksLikeAmbiguousUnitCodeToken(rawText: string | undefined | nu
 export function extractAmbiguousUnitCodeToken(rawText: string | undefined | null): string | null {
   const text = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-");
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
   if (!text) return null;
   const labeled = extractExplicitUnitNameFromText(text);
   if (labeled) return labeled;
@@ -211,6 +402,20 @@ export function buildUnitNameOrPlateClarificationReply(token: string): string {
     `o la *patente/matrícula* (ej. AH 755 SM)?\n` +
     `Respondé *unidad* o *patente*.`
   );
+}
+
+/** Código tipo 300-020: buscar como unidad; si no está, decilo (no preguntar patente). */
+export function replyForUnresolvedUnitCodeToken(
+  token: string,
+  opts?: { companyName?: string | null },
+): string {
+  if (looksLikeDefiniteUnitNameCode(token)) {
+    return buildFleetUnitNotFoundMessage({
+      companyName: opts?.companyName,
+      searchedText: token,
+    });
+  }
+  return buildUnitNameOrPlateClarificationReply(token);
 }
 
 export function threadAskedUnitNameOrPlateClarification(threadText: string): boolean {
@@ -272,12 +477,27 @@ export function looksLikeChosePlateReply(rawText: string | undefined | null): bo
 }
 
 /** Entrada que debe resolver contra la flota (patente, prefijo, marca, nombre/etiqueta). */
-export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
+export function looksLikeFleetUnitSearchInput(rawText: string, threadText = ""): boolean {
   const text = String(rawText ?? "").trim();
   if (!text) return false;
+  if (looksLikeMetaConversationalReply(text)) return false;
+  if (looksLikeOutOfScopeSupportClaim(text)) return false;
+  if (looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text)) return false;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(text, threadText)) return false;
+  if (looksLikeFechaHoraLecturaMessage(text)) return false;
   // CONFIRMO / sí / dale nunca son búsqueda de unidad (bug 2026-08-07).
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeCustomerConversationCloseRequest(text)) return false;
+  // Bug prod 2026-08-18: "123600" tras pedir km/hs del odómetro/horómetro matcheaba
+  // movil_id (5–7 dígitos) y el turno iba a unidades en vez de seguir el trámite.
+  if (
+    threadText &&
+    threadHasActiveMeterValueRequest(threadText) &&
+    looksLikeBareMeterValue(text)
+  ) {
+    return false;
+  }
+  if (extractMovilIdFromUnitMessage(text, { threadText }) != null) return true;
   return (
     !!detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
@@ -286,6 +506,7 @@ export function looksLikeFleetUnitSearchInput(rawText: string): boolean {
     looksLikeVehicleBrandOrUnitSearch(text) ||
     looksLikePlateCorrectionRequest(text) ||
     looksLikeUnitNameInMessage(text) ||
+    looksLikeAmbiguousUnitCodeToken(text) ||
     !!extractFreeTextUnitSearchCandidate(text)
   );
 }
@@ -297,6 +518,9 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeSoftFlowRestart(text)) return false;
+  // Nunca tratar "confirmar"/"confirmá" como patente (bug 2026-08-22 → mantenimiento).
+  if (/^confirm[aá](r|cion)?[!?.]*$/i.test(text)) return false;
   if (looksLikeFleetUnitSearchInput(text)) return true;
   if (extractPlatePrefixFromMessage(text) || isBarePlatePrefixHint(text)) return true;
   if (looksLikeVehicleBrandOrUnitSearch(text)) return true;
@@ -308,7 +532,7 @@ export function isMaintenancePlateSelectionMessage(rawText: string): boolean {
   if (looksLikeVagueUnitReference(text)) return true;
   return (
     text.length <= 16 &&
-    !/\b(mantenimiento|preventiv\w*|correctiv\w*|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar)\b/i.test(
+    !/\b(mantenimiento|preventiv\w*|correctiv\w*|quiero|necesito|programar|registrar|reiniciar|inicio|menu|volver|cancelar|confirm\w*)\b/i.test(
       text,
     )
   );
@@ -321,6 +545,7 @@ export function isOdometerPlateSelectionMessage(rawText: string): boolean {
   if (looksLikeBriefConfirmation(text) || looksLikePendingTramiteAffirmation(text)) return false;
   if (looksLikeOdometerConfirmationRejection(text)) return false;
   if (looksLikeFlowControlCommand(text)) return false;
+  if (looksLikeSoftFlowRestart(text)) return false;
   // "ODOMETRO" solo no es una unidad (bug 2026-08-07).
   if (looksLikeBareOdometerTopicMention(text) || looksLikeExplicitOdometerUpdateRequest(text)) {
     return false;
@@ -394,6 +619,13 @@ const STOPWORDS = new Set([
   "mostrame",
   "mostrá",
   "ver",
+  "veo",
+  "ves",
+  "vemos",
+  "aparece",
+  "figura",
+  "muestra",
+  "sistema",
   "todas",
   "todo",
   "como",
@@ -404,6 +636,13 @@ const STOPWORDS = new Set([
   "qué",
   "hola",
   "buenas",
+  "buen",
+  "dia",
+  "dias",
+  "tarde",
+  "tardes",
+  "noche",
+  "noches",
   "porfa",
   "porfavor",
   "algunas",
@@ -447,6 +686,17 @@ const STOPWORDS = new Set([
   "hay",
   "estan",
   "están",
+  "reporta",
+  "reportan",
+  "reportando",
+  "etapas",
+  "etapa",
+  "vuelta",
+  "recorrido",
+  "historial",
+  "muestra",
+  "aparece",
+  "figura",
 ]);
 
 function normalizeToken(value: string): string {
@@ -457,9 +707,9 @@ function normalizeToken(value: string): string {
     .replace(/\s+/g, "");
 }
 
-/** Palabras sueltas (sin acentos, sin unir) del patente+unidad, para matchear por PALABRA COMPLETA. */
+/** Palabras sueltas (sin acentos, sin unir) del patente+unidad+marca+modelo, para matchear por PALABRA COMPLETA. */
 function haystackWordsForUnit(unit: WaraUnidadEstado): string[] {
-  const raw = `${unit.patente ?? ""} ${unit.unidad ?? ""}`;
+  const raw = `${unit.patente ?? ""} ${unit.unidad ?? ""} ${unit.marca ?? ""} ${unit.modelo ?? ""}`;
   return raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -516,6 +766,127 @@ function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
 }
 
+/** Etiqueta legible para listar coincidencias (patente · nombre · marca/modelo). */
+export function formatUnitListLabel(unit: WaraUnidadEstado): string {
+  const plateRaw = unit.patente?.trim() || "";
+  const plate = plateRaw ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw : "";
+  const parts: string[] = [];
+  if (plate) parts.push(plate);
+  const nombre = unit.unidad?.trim() || "";
+  if (nombre && normalizeLoosePlate(nombre) !== normalizeLoosePlate(plate)) parts.push(nombre);
+  const mm = [unit.marca?.trim(), unit.modelo?.trim()].filter(Boolean).join(" ");
+  if (mm) {
+    const hay = `${parts.join(" ")}`.toLowerCase();
+    if (!hay.includes(mm.toLowerCase())) parts.push(mm);
+  }
+  return parts.join(" · ") || "sin datos";
+}
+
+/**
+ * Marca/modelo en lenguaje natural: "la Nissan", "marca Saveiro", "buscar la Hilux".
+ * Complementa el catálogo cerrado de looksLikeVehicleBrandOrUnitSearch.
+ */
+const TIME_OF_DAY_SEARCH_TOKENS = new Set([
+  "tarde",
+  "manana",
+  "madrugada",
+  "noche",
+  "mediodia",
+  "medianoche",
+  "hoy",
+  "ayer",
+  "anoche",
+  "anteayer",
+]);
+
+/**
+ * Queja de visibilidad en la plataforma del cliente tras un GPS (no es búsqueda de flota).
+ * Bug prod 2026-09-18: «No la veo en mi sistema» → buscaba unidad «veo».
+ */
+export function looksLikePlatformUnitVisibilityComplaint(
+  text: string | undefined | null,
+): boolean {
+  const t = String(text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t || t.length > 160) return false;
+  if (detectLoosePlate(t) || looksLikeUnitNameInMessage(t)) return false;
+
+  const negSee =
+    /\b(no\s+(la|lo|las|los)?\s*(veo|encuentro|aparece|figura|muestra)|no\s+aparece|no\s+figura|no\s+esta|no\s+está)\b/.test(
+      t,
+    );
+  if (!negSee) return false;
+
+  if (/\b(sistema|plataforma|wara|app|aplicacion|aplicaci[oó]n|mapa|listado|pantalla|panel)\b/.test(t)) {
+    return true;
+  }
+  // «No la veo» corto con GPS reciente se interpreta en el caller con hilo.
+  return /^(no\s+(la|lo)?\s*(veo|encuentro|aparece|figura)(\s+ahi|\s+all[ií])?[!?.]*)$/.test(t);
+}
+
+export function extractBrandSearchLabel(rawText: string): string | null {
+  const raw = String(rawText ?? "").trim();
+  if (!raw || raw.length > 160) return null;
+  if (looksLikePlatformUnitVisibilityComplaint(raw)) return null;
+  if (looksLikeCustomerConversationCloseRequest(raw)) return null;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const marcaKw = t.match(/\b(?:marca|modelo)\s+([a-z0-9]{3,20})\b/);
+  if (marcaKw?.[1] && !STOPWORDS.has(marcaKw[1])) return marcaKw[1];
+
+  const PERCEPTION_VERBS = new Set([
+    "veo",
+    "ves",
+    "vemos",
+    "aparece",
+    "figura",
+    "muestra",
+    "encuentro",
+    "encuentra",
+  ]);
+
+  const pick = (cand: string | undefined): string | null => {
+    if (!cand) return null;
+    const trimmed = cand.trim();
+    if (detectLoosePlate(trimmed) || looksLikeUnitNameInMessage(trimmed)) return null;
+    const norm = trimmed
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (norm.length < 3 || STOPWORDS.has(norm) || PERCEPTION_VERBS.has(norm)) return null;
+    if (TIME_OF_DAY_SEARCH_TOKENS.has(norm)) return null;
+    if (
+      /^(certificado|certficado|cobertura|mantenimiento|agenda|reporte|estado|gps|ticket|caso|patente|matricula|unidad|flota|posicion|ubicacion|ignicion|odometro|horometro|tambien|también|obtener|saber|consultar|registrar|programar|pedir|generar|ayudar|ayudas|certificado|sistema|plataforma)$/.test(
+        norm,
+      )
+    ) {
+      return null;
+    }
+    return trimmed;
+  };
+
+  const deLa = raw.match(/\bde\s+la\s+([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9-]{2,20})\b/i);
+  const fromDeLa = pick(deLa?.[1]);
+  if (fromDeLa) return fromDeLa;
+
+  const articles = [...raw.matchAll(/\b(?:la|el|una|un)\s+([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9-]{2,20})\b/gi)];
+  if (articles.length) {
+    const fromArticle = pick(articles[articles.length - 1]?.[1]);
+    if (fromArticle) return fromArticle;
+  }
+
+  const verbLead = raw.match(
+    /\b(?:busco|buscar|quiero|necesito|dame|pasame|decime|ver)\s+(?:la|el|una|un|mi|mis)?\s*([A-Za-zÁÉÍÓÚáéíóúÑñ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9-]{2,20})\b/i,
+  );
+  return pick(verbLead?.[1]);
+}
+
 /** Búsqueda determinística por marca/nombre/etiqueta en patente + unidad (campo Wara). */
 function resolveBrandOrNameInFleet(
   rawText: string,
@@ -526,7 +897,12 @@ function resolveBrandOrNameInFleet(
   if (looksLikeUnitNameInMessage(rawText) || (nameHint && looksLikeUnitNameInMessage(nameHint))) {
     return null;
   }
-  const freeLabel = nameHint?.trim() || extractFreeTextUnitSearchCandidate(rawText);
+  if (looksLikePlatformUnitVisibilityComplaint(rawText)) return null;
+  if (looksLikeCustomerConversationCloseRequest(rawText)) return null;
+  const freeLabel =
+    nameHint?.trim() ||
+    extractFreeTextUnitSearchCandidate(rawText) ||
+    extractBrandSearchLabel(rawText);
   const canSearch =
     !!freeLabel ||
     looksLikeVehicleBrandOrUnitSearch(rawText) ||
@@ -556,7 +932,7 @@ function resolveBrandOrNameInFleet(
   if (matches.length > 1) {
     const labels = matches
       .slice(0, 8)
-      .map((u) => (u.patente || u.unidad || "").trim())
+      .map((u) => formatUnitListLabel(u))
       .join(", ");
     return {
       intent: "need_clarification",
@@ -678,6 +1054,8 @@ function compactUnitsForAi(
     movil_id: u.movil_id,
     patente: (u.patente ?? "").trim(),
     unidad: (u.unidad ?? "").trim(),
+    marca: (u.marca ?? "").trim(),
+    modelo: (u.modelo ?? "").trim(),
   }));
 }
 
@@ -841,12 +1219,21 @@ export function extractExplicitUnitSearchLabel(rawText: string): string | null {
 export function extractFreeTextUnitSearchCandidate(rawText: string): string | null {
   const raw = String(rawText ?? "").trim();
   if (!raw || raw.length > 80) return null;
+  if (looksLikeMetaConversationalReply(raw)) return null;
+  if (looksLikeOutOfScopeSupportClaim(raw)) return null;
+  // Bug prod 2026-09-15: «Preséntate» se buscaba en flota como etiqueta de unidad.
+  if (looksLikeAssistantIdentityQuestion(raw)) return null;
+  if (looksLikePlatformUnitVisibilityComplaint(raw)) return null;
   // Bug real, producción 2026-08-07: "CONFIRMO" (pedido explícito del bot) matcheaba
   // como nombre propio de unidad → "No encontré ninguna unidad que coincida con «CONFIRMO»"
   // en vez de registrar el odómetro pendiente.
   if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return null;
   // Bug 2026-08-07: "CERRAR TICKETS" se buscaba en flota en vez de cerrar el caso.
   if (looksLikeCustomerConversationCloseRequest(raw)) return null;
+  if (looksLikeSoftFlowRestart(raw)) return null;
+  if (looksLikeMaintenanceStepByStepOnlyRequest(raw)) return null;
+  // Bug 2026-08-20: "NO REPORTA ETAPAS DE LA VUELTA" → no buscar «VUELTA» en flota.
+  if (looksLikeGpsFeatureIssueForAdvisor(raw)) return null;
   if (looksLikeBareOdometerTopicMention(raw) || looksLikeExplicitOdometerUpdateRequest(raw)) return null;
   if (detectLoosePlate(raw) || extractPlatePrefixFromMessage(raw)) return null;
   // Referencias vagas al hilo ("la unidad mencionada") NO son un nombre a buscar.
@@ -900,7 +1287,7 @@ function isPlausibleFreeTextUnitLabel(cand: string): boolean {
     return false;
   }
   if (
-    /^(una|unidad|patente|matricula|estado|reporte|gps|flota|lista|unidades|marca|nombre|chofer|conductor|mencionada|mencionado|anterior|consultando|hablando|hablamos|estamos|estoy|quiero|necesito|saber|decir|pasame|dame|ultima|ultimo|ubicacion|coordenadas|posicion)$/.test(
+    /^(una|unidad|patente|matricula|estado|reporte|gps|flota|lista|unidades|marca|nombre|chofer|conductor|mencionada|mencionado|anterior|consultando|hablando|hablamos|estamos|estoy|quiero|necesito|saber|decir|pasame|dame|ultima|ultimo|ubicacion|coordenadas|posicion|presentate)$/.test(
       norm,
     )
   ) {
@@ -960,7 +1347,8 @@ export function looksLikeVagueUnitReference(rawText: string): boolean {
   // volvía a pedir matrícula en vez de reusar activeUnit.
   if (
     /\b(de esta|de esa|esta|esa)\s+(patente|matricula|unidad)\b/.test(norm) ||
-    /\b(la misma|esta misma)\s+(patente|matricula|unidad)\b/.test(norm)
+    /\b(la misma|esta misma)\s+(patente|matricula|unidad)\b/.test(norm) ||
+    /\bde la unida[d]?\b/.test(norm)
   ) {
     return true;
   }
@@ -1091,9 +1479,19 @@ function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnida
 
 function normalizeUnitNameToken(value: string): string {
   return value
-    .replace(/[\u2010-\u2015\u2212]/g, "-") // guiones tipográficos → ASCII
+    .replace(TYPOGRAPHIC_HYPHENS, "-")
     .replace(/[\s-]+/g, "")
     .toLowerCase();
+}
+
+/**
+ * Identidad numérica de un código interno: 300-020, M300-020 y M300-20
+ * son el mismo (ceros a la izquierda en el sufijo). La letra inicial se ignora.
+ */
+function unitNameIdentityKey(norm: string): string | null {
+  const m = String(norm ?? "").match(/^([a-z]?)(\d{3})(\d{2,3})$/i);
+  if (!m) return null;
+  return `${Number(m[2])}|${Number(m[3])}`;
 }
 
 /**
@@ -1104,20 +1502,31 @@ function normalizeUnitNameToken(value: string): string {
  * Importante: "M600-170" NO debe matchear un label tipo "Tanda 600-170 backup"
  * (solo el código canónico con M, o el mismo token exacto).
  */
-function unitNameCodesMatch(queryNorm: string, unitCode: string): boolean {
+function unitNameCodesMatch(
+  queryNorm: string,
+  unitCode: string,
+  opts?: { allowMissingMOnUnit?: boolean },
+): boolean {
   if (!queryNorm || !unitCode) return false;
   if (queryNorm === unitCode) return true;
   // Cliente omitió la M (300-097 → M300-097). Solo si el código en Wara trae la M.
   if (!/^m\d/.test(queryNorm) && /^m\d/.test(unitCode) && unitCode === `m${queryNorm}`) {
     return true;
   }
-  return false;
+  const qKey = unitNameIdentityKey(queryNorm);
+  const uKey = unitNameIdentityKey(unitCode);
+  if (!qKey || !uKey || qKey !== uKey) return false;
+  // 300-020 ≡ M300-20 (padding). Query con M no debe matchear «600-170» dentro de
+  // un label tipo "Tanda 600-170 backup".
+  if (!/^m\d/.test(queryNorm)) return true;
+  if (/^m\d/.test(unitCode)) return true;
+  return opts?.allowMissingMOnUnit === true;
 }
 
 /** Códigos M600-170 / 300-092 presentes como token en el campo unidad de Wara. */
 function unitNameCodesFromField(unidad: string): string[] {
   const tokens = new Set<string>();
-  const field = String(unidad ?? "").replace(/[\u2010-\u2015\u2212]/g, "-");
+  const field = String(unidad ?? "").replace(TYPOGRAPHIC_HYPHENS, "-");
   const normalized = normalizeUnitNameToken(field);
   if (normalized) tokens.add(normalized);
   for (const match of field.matchAll(/\b(M?\d{3}-\d{2,3})\b/gi)) {
@@ -1131,27 +1540,32 @@ function unitNameCodesFromField(unidad: string): string[] {
 export function filterUnitsByUnitName(units: WaraUnidadEstado[], query: string): WaraUnidadEstado[] {
   const norm = normalizeUnitNameToken(query);
   if (!norm) return [];
+  const movilId = extractMovilIdFromUnitMessage(query);
+  if (movilId != null) {
+    const byMovil = units.filter((u) => movilIdMatches(u.movil_id, movilId));
+    if (byMovil.length > 0) return byMovil;
+  }
   return units.filter((u) => {
-    const field = String(u.unidad || "").replace(/[\u2010-\u2015\u2212]/g, "-");
+    const field = String(u.unidad || "").replace(TYPOGRAPHIC_HYPHENS, "-");
     const full = normalizeUnitNameToken(field);
-    // Campo unidad ES exactamente el código (con o sin M), no un label largo con el número adentro.
-    if (full && (full === norm || (!/^m\d/.test(norm) && full === `m${norm}`) || (/^m\d/.test(norm) && full === norm.slice(1)))) {
-      return true;
-    }
+    if (full && unitNameCodesMatch(norm, full, { allowMissingMOnUnit: true })) return true;
     return unitNameCodesFromField(field).some((code) => unitNameCodesMatch(norm, code));
   });
 }
 
-/** Código interno Wara en el mensaje (ej. "Unidad: M600-020", "interno M300-083"). */
+/** Código interno Wara en el mensaje (ej. "Unidad: M600-020", "interno M300-083", "INT 145"). */
 export function extractExplicitUnitNameFromText(rawText: string): string | null {
   const text = String(rawText ?? "")
     .trim()
-    .replace(/[\u2010-\u2015\u2212]/g, "-");
+    .replace(TYPOGRAPHIC_HYPHENS, "-");
   if (!text) return null;
   const labeled = text.match(/\bunidad\s*(?:es\s*)?[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (labeled?.[1]) return labeled[1];
   const interno = text.match(/\binterno\s*[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (interno?.[1]) return interno[1];
+  // Bug real 2026-08-20: "INT 145" / "INT-145" se tomaba como patente INT145.
+  const intCode = text.match(/\bINT\s*[-.]?\s*(\d{2,4})\b/i);
+  if (intCode?.[1]) return `INT-${intCode[1]}`;
   const bare = text.match(/\b(M?\d{3}-\d{2,3})\b/i);
   return bare?.[1] ?? null;
 }
@@ -1174,7 +1588,9 @@ function resolveByUnitName(
   if (!unitName || !looksLikeUnitNameInMessage(rawText)) return null;
   const matches = filterUnitsByUnitName(units, unitName);
   if (matches.length === 1) {
-    const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "");
+    const plate =
+      normalizeLoosePlate(matches[0].patente || "") ||
+      (matches[0].patente || "").replace(/\s+/g, "").toUpperCase();
     if (!plate) return null;
     return {
       intent: "consult_status",
@@ -1203,8 +1619,8 @@ function resolveByUnitName(
     intent: "need_clarification",
     searchTerms: [],
     candidatePlates: [],
-    // Bug 2026-08-10: no decir "patente 600006"; preguntar si es unidad o matrícula.
-    clarificationQuestion: buildUnitNameOrPlateClarificationReply(unitName),
+    // 300-020 / M300-020 es nombre de unidad: si no está, decilo; no preguntes patente.
+    clarificationQuestion: replyForUnresolvedUnitCodeToken(unitName),
     source: "rules",
   };
 }
@@ -1616,6 +2032,117 @@ export function resolveNumericUnitSelection(rawText: string, threadText: string)
   return null;
 }
 
+/** Resuelve coincidencias por código de unidad (M300-097 / 300097), no por movil_id de DB. */
+function resolutionFromUnitNameMatches(
+  matches: WaraUnidadEstado[],
+  label: string,
+): UnitQueryResolution | null {
+  if (matches.length === 1) {
+    const plate = normalizeLoosePlate(matches[0].patente || matches[0].unidad || "");
+    if (plate) {
+      return {
+        intent: "consult_status",
+        plate,
+        searchTerms: [],
+        candidatePlates: [plate],
+        source: "rules",
+      };
+    }
+  }
+  if (matches.length > 1) {
+    const labels = matches
+      .slice(0, 5)
+      .map((u) => (u.patente || u.unidad || "").trim())
+      .join(", ");
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: matches
+        .map((u) => normalizeLoosePlate(u.patente || u.unidad || ""))
+        .filter(Boolean),
+      clarificationQuestion: `Encontré ${matches.length} unidades con código parecido a ${label} (${labels}). Decime la matrícula exacta.`,
+      source: "rules",
+    };
+  }
+  return null;
+}
+
+function resolveByMovilIdOrUnitCode(
+  rawText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  // Con flota, resolveNumericRole marca ambiguous si el interno del mensaje no es
+  // movil_id — no perder el candidato antes de buscar por nombre/código en flota.
+  const movilIdFromText = extractMovilIdFromUnitMessage(rawText);
+  const movilId =
+    movilIdFromText ?? extractMovilIdFromUnitMessage(rawText, { fleet: units });
+  if (movilId != null) {
+    const byId = units.filter((u) => movilIdMatches(u.movil_id, movilId));
+    if (byId.length === 1) {
+      const plate = normalizeLoosePlate(byId[0].patente || byId[0].unidad || "");
+      if (plate) {
+        return {
+          intent: "consult_status",
+          plate,
+          searchTerms: [],
+          candidatePlates: [plate],
+          source: "rules",
+        };
+      }
+    }
+    if (byId.length === 0) {
+      const byUnitCode = resolutionFromUnitNameMatches(
+        filterUnitsByUnitName(units, String(movilId)),
+        String(movilId),
+      );
+      if (byUnitCode) return byUnitCode;
+      return {
+        intent: "need_clarification",
+        searchTerms: [],
+        candidatePlates: [],
+        clarificationQuestion: buildFleetUnitNotFoundMessage({
+          searchedText: String(movilId),
+        }),
+        source: "rules",
+      };
+    }
+  }
+
+  const digitsOnly = rawText.trim().replace(/\s+/g, "");
+  if (/^\d{5,7}$/.test(digitsOnly)) {
+    const legacyMovilId = parseInt(digitsOnly, 10);
+    const byId = units.filter((u) => movilIdMatches(u.movil_id, legacyMovilId));
+    if (byId.length === 1) {
+      const plate = normalizeLoosePlate(byId[0].patente || byId[0].unidad || "");
+      if (plate) {
+        return {
+          intent: "consult_status",
+          plate,
+          searchTerms: [],
+          candidatePlates: [plate],
+          source: "rules",
+        };
+      }
+    }
+    if (byId.length === 0) {
+      const byUnitCode = resolutionFromUnitNameMatches(
+        filterUnitsByUnitName(units, digitsOnly),
+        digitsOnly,
+      );
+      if (byUnitCode) return byUnitCode;
+    }
+  }
+
+  const ambiguous = extractAmbiguousUnitCodeToken(rawText);
+  if (ambiguous && !detectLoosePlate(rawText)) {
+    const matches = filterUnitsByUnitName(units, ambiguous);
+    const fromName = resolutionFromUnitNameMatches(matches, ambiguous);
+    if (fromName) return fromName;
+  }
+
+  return null;
+}
+
 function resolveWithRules(
   rawText: string,
   threadText: string,
@@ -1639,6 +2166,9 @@ function resolveWithRules(
   const clarificationPick = resolveClarificationCandidateSelection(rawText, threadText);
   if (clarificationPick) return clarificationPick;
 
+  const movilOrCode = resolveByMovilIdOrUnitCode(rawText, units);
+  if (movilOrCode) return movilOrCode;
+
   if (looksLikeUnitListRequest(rawText)) {
     return { intent: "list_fleet", searchTerms: [], candidatePlates: [], source: "rules" };
   }
@@ -1655,7 +2185,11 @@ function resolveWithRules(
   const unitSelection = resolveUnitSelectionHint(rawText, units);
   if (unitSelection) return unitSelection;
 
-  if (looksLikeVehicleBrandOrUnitSearch(rawText)) {
+  if (
+    looksLikeVehicleBrandOrUnitSearch(rawText) ||
+    !!extractFreeTextUnitSearchCandidate(rawText) ||
+    !!extractBrandSearchLabel(rawText)
+  ) {
     const brandResolution = resolveBrandOrNameInFleet(rawText, units);
     if (brandResolution) return brandResolution;
   }
@@ -1978,6 +2512,9 @@ export async function resolveUnitQuery(params: {
   const clarificationPick = resolveClarificationCandidateSelection(params.rawText, params.threadText);
   if (clarificationPick) return clarificationPick;
 
+  const movilOrCodeEarly = resolveByMovilIdOrUnitCode(params.rawText, params.units);
+  if (movilOrCodeEarly) return movilOrCodeEarly;
+
   const historialForAi = params.aiHistorial ?? params.threadText;
   const overridePrefix = normalizePrefixHint(params.prefixHint);
   const prefixHint = overridePrefix ?? prefixHintFromMessage(params.rawText);
@@ -2150,7 +2687,11 @@ export async function resolveUnitQuery(params: {
   }
 
   // Marca/nombre (Nissan, Saveiro, Altamiranda, etc.) contra el catálogo real.
-  if (looksLikeVehicleBrandOrUnitSearch(params.rawText) || !!extractFreeTextUnitSearchCandidate(params.rawText)) {
+  if (
+    looksLikeVehicleBrandOrUnitSearch(params.rawText) ||
+    !!extractFreeTextUnitSearchCandidate(params.rawText) ||
+    !!extractBrandSearchLabel(params.rawText)
+  ) {
     const brandRules = resolveBrandOrNameInFleet(params.rawText, params.units, params.nameHint);
     if (brandRules) return brandRules;
   }
@@ -2349,15 +2890,89 @@ export async function resolvePlateWithWaraFleet(
   return { ok: false, reason: "not_found" };
 }
 
+/**
+ * Servicio explícito (o hilo de unidad pendiente más reciente) gana sobre selección de
+ * patente de mantenimiento stale en el hilo.
+ * Bug 2026-08-22: "Estado/Certificado/Odómetro 900100" y "900100" tras pedido GPS
+ * caían a CONFIRMO de mantenimiento de otra unidad.
+ */
+export function resolveExecutorOverStaleMaintenancePlateSelection(
+  text: string,
+  threadText: string,
+): "unidades" | "odometro" | "certificados" | null {
+  const intent = detectServiceIntentInMessage(text);
+  if (intent === "estado_gps") return "unidades";
+  if (intent === "certificado") return "certificados";
+  if (intent === "odometro" || intent === "horometro") return "odometro";
+  // mantenimiento explícito en el mensaje → dejar que continúe el flujo de mantenimiento
+  if (intent === "mantenimiento") return null;
+
+  if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+    return "unidades";
+  }
+  if (looksLikeExplicitOdometerUpdateRequest(text) || looksLikeHorometerOnlyIntent(text)) {
+    return "odometro";
+  }
+
+  // Pedido GPS/unidad más reciente que mantenimiento + token de unidad.
+  if (
+    hasPendingUnitConsultPlateRequest(threadText) &&
+    extractMovilIdFromUnitMessage(text, { threadText }) != null
+  ) {
+    return "unidades";
+  }
+  if (
+    threadHasRecentLiveUnitConsultIntent(threadText) &&
+    extractMovilIdFromUnitMessage(text, { threadText }) != null
+  ) {
+    return "unidades";
+  }
+
+  // Trámite odómetro/horómetro pidiendo unidad: el interno es para ese flujo.
+  if (
+    (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) &&
+    extractMovilIdFromUnitMessage(text, { threadText }) != null
+  ) {
+    return "odometro";
+  }
+
+  return null;
+}
+
+/** @deprecated usar resolveExecutorOverStaleMaintenancePlateSelection */
+export function shouldPreferUnidadesOverMaintenancePlateSelection(
+  text: string,
+  threadText: string,
+): boolean {
+  return resolveExecutorOverStaleMaintenancePlateSelection(text, threadText) === "unidades";
+}
+
 /** Marca/prefijo/nombre/patente parcial → executor unidades (búsqueda en flota), no agente. */
 export function shouldRouteTurnToUnidadesExecutor(params: {
   selectionText: string;
   threadText: string;
 }): boolean {
   const { selectionText, threadText } = params;
+  if (looksLikeFechaHoraLecturaMessage(selectionText)) return false;
+  if (
+    looksLikeBareMeterValue(selectionText) &&
+    (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText))
+  ) {
+    return false;
+  }
   if (
     looksLikeExplicitOdometerUpdateRequest(selectionText) ||
     looksLikeHorometerOnlyIntent(selectionText)
+  ) {
+    return false;
+  }
+
+  // Tras pedir horómetro/odómetro, elegir unidad por código → odómetro, no GPS.
+  if (
+    threadHasRecentCustomerMeterUpdateIntent(threadText) &&
+    (isOdometerPlateSelectionMessage(selectionText) ||
+      extractMovilIdFromUnitMessage(selectionText) != null ||
+      looksLikeVagueUnitReference(selectionText))
   ) {
     return false;
   }
@@ -2366,6 +2981,16 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
   if (
     looksLikeLiveUnitConsultIntent(selectionText) ||
     looksLikeGpsOrUnitStatusQuestion(selectionText)
+  ) {
+    return true;
+  }
+
+  // Interno/movil_id tras pedido de unidad para GPS/estado (incl. "900100" solo).
+  if (
+    extractMovilIdFromUnitMessage(selectionText, { threadText }) != null &&
+    (hasPendingUnitConsultPlateRequest(threadText) ||
+      threadHasRecentLiveUnitConsultIntent(threadText) ||
+      detectServiceIntentInMessage(selectionText) === "estado_gps")
   ) {
     return true;
   }
@@ -2401,11 +3026,40 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
     return true;
   }
 
-  if (!looksLikeFleetUnitSearchInput(selectionText)) return false;
+  if (!looksLikeFleetUnitSearchInput(selectionText, threadText)) return false;
   if (looksLikeUnitListRequest(selectionText)) return false;
   if (hasPendingUnitConsultPlateRequest(threadText)) return true;
   if (threadHasRecentLiveUnitConsultIntent(threadText)) return true;
   return false;
+}
+
+/** Consulta lateral durante odómetro activo — no enrutar al executor operativo. */
+function looksLikeOdometerFlowSideQuestionText(selectionText: string, threadText: string): boolean {
+  if (!threadHasActiveOdometerFlow(threadText)) return false;
+  const text = selectionText.trim();
+  if (!text) return false;
+  if (looksLikeFechaHoraLecturaMessage(text)) return false;
+  if (
+    looksLikeBareMeterValue(text) &&
+    (threadHasActiveMeterValueRequest(threadText) ||
+      threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText))
+  ) {
+    return false;
+  }
+  const compact = text.replace(/\s+/g, "");
+  if (/^\d{5,7}$/.test(compact)) return false;
+  if (
+    isOperationalMeterCollectionMessage(text, threadText) &&
+    !classifyTypedLateralQuery(text)
+  ) {
+    return false;
+  }
+  if (extractUnitCodeNumbersFromMessage(text).length > 0) return false;
+  const plate = detectLoosePlate(text);
+  if (plate && isPlausibleVehiclePlate(normalizePlate(plate))) return false;
+  if (classifyTypedLateralQuery(text)) return true;
+  return classifyOdometerFlowSideQuestion(text, threadText) !== null;
 }
 
 /**
@@ -2417,6 +3071,20 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   pendingActionType?: string | null;
 }): boolean {
   const { selectionText, threadText, pendingActionType } = params;
+
+  // Arranque explícito (p. ej. tras consulta GPS u horómetro previo) → executor SIEMPRE,
+  // antes de "superseded" o registro completado en el hilo (bug 2026-08-17: "cambiar odómetro
+  // unidad 900080" caía al follow-up GPS por isOdometerFlowSuperseded).
+  // Incluye mención bare: sin esto WARA_AGENT_MODE improvisaba pedido de patente sin persistir.
+  if (
+    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
+    looksLikeHorometerOnlyIntent(selectionText) ||
+    looksLikeBareOdometerTopicMention(selectionText) ||
+    looksLikeBareHorometerTopicMention(selectionText)
+  ) {
+    return true;
+  }
+
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   // Con pending de odómetro el trámite sigue vivo aunque el hilo dispare un falso
   // "superseded" (bug 2026-08-06: pedido de fecha/hora con "necesito").
@@ -2425,17 +3093,10 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   if (
     hasPendingUnitConsultPlateRequest(threadText) &&
     !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
-    !looksLikeHorometerOnlyIntent(selectionText)
+    !looksLikeHorometerOnlyIntent(selectionText) &&
+    !threadHasRecentCustomerMeterUpdateIntent(threadText)
   ) {
     return false;
-  }
-
-  // Arranque explícito (p. ej. tras consulta GPS/mantenimiento) → executor aunque no haya flujo activo previo.
-  if (
-    looksLikeExplicitOdometerUpdateRequest(selectionText) ||
-    looksLikeHorometerOnlyIntent(selectionText)
-  ) {
-    return true;
   }
 
   const flowActive =
@@ -2446,9 +3107,20 @@ export function shouldRouteTurnToOdometerExecutor(params: {
     hasPendingOdometerConfirmation(threadText);
 
   if (!flowActive) return false;
+  if (looksLikeOdometerFlowSideQuestionText(selectionText, threadText)) return false;
   if (looksLikeFlowControlCommand(selectionText)) return false;
+  if (looksLikeGreeting(selectionText)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(selectionText) || looksLikeLiveUnitConsultIntent(selectionText)) {
     return false;
+  }
+
+  if (
+    looksLikeBareMeterValue(selectionText) &&
+    (threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText) ||
+      pendingActionType === "odometro")
+  ) {
+    return true;
   }
 
   if (threadAwaitingOdometerKmValue(threadText) || threadAwaitingHorometerKmValue(threadText)) {
@@ -2468,6 +3140,17 @@ export function shouldRouteTurnToOdometerExecutor(params: {
   ) {
     return true;
   }
+  // Tras pedir horómetro/odómetro, el cliente confirma unidad por código o referencia.
+  if (
+    threadHasRecentCustomerMeterUpdateIntent(threadText) &&
+    (isOdometerPlateSelectionMessage(selectionText) ||
+      extractMovilIdFromUnitMessage(selectionText) != null ||
+      looksLikeVagueUnitReference(selectionText)) &&
+    !looksLikeGpsOrUnitStatusQuestion(selectionText) &&
+    !looksLikeLiveUnitConsultIntent(selectionText)
+  ) {
+    return true;
+  }
   // Referencia vaga mientras el bot pidió patente para odómetro (p. ej. "De esta patente"
   // tras certificado) — no dejar que el agente pida matrícula otra vez.
   const tail = threadText.slice(-2500).toLowerCase();
@@ -2477,6 +3160,14 @@ export function shouldRouteTurnToOdometerExecutor(params: {
       tail,
     ) &&
     !threadOdometerRegistrationCompleted(threadText)
+  ) {
+    return true;
+  }
+  if (
+    looksLikeFechaHoraLecturaMessage(selectionText) &&
+    (threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText) ||
+      pendingActionType === "odometro")
   ) {
     return true;
   }

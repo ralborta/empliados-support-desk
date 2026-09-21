@@ -47,47 +47,66 @@ export async function classifyFleetListIntentWithAi(
   threadText = "",
 ): Promise<boolean> {
   if (!isFleetListIntentAiEnabled()) return false;
-  if (!looksLikePossibleFleetListRequest(text)) return false;
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const threadTail = threadText.trim().slice(-800);
-  const response = await withOpenAiTimeout(
-    (signal) =>
-      openai.chat.completions.create(
-        {
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `Clasificá si el cliente pide VER el LISTADO / FLOTA / TODAS sus unidades en Wara (no consultar GPS de una patente concreta).
-Respondé SOLO JSON: {"list_fleet":true|false,"confidence":0-1}
-
-list_fleet=true: "me pasás mi lista", "quiero ver mis camiones", "cuántas unidades tengo", "pasame el listado", "no recuerdo la patente, mostrame todo".
-list_fleet=false: consulta de UNA unidad ("cómo está la AD427", "reporte de la Nissan"), odómetro, certificado, mantenimiento, cambiar empresa, saludo.`,
-            },
-            {
-              role: "user",
-              content: threadTail
-                ? `Historial reciente:\n${threadTail}\n\nMensaje actual:\n${text.trim()}`
-                : text.trim(),
-            },
-          ],
-          temperature: 0,
-          max_tokens: 48,
-          response_format: { type: "json_object" },
-        },
-        { signal },
-      ),
-    OPENAI_DEFAULT_TIMEOUT_MS + 1_000,
-  );
-
-  if (!response) return false;
   try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const threadTail = threadText.trim().slice(-1200);
+    const response = await withOpenAiTimeout(
+      (signal) =>
+        openai.chat.completions.create(
+          {
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "Clasificá el OBJETO que el cliente quiere listar o consultar.",
+                  "fleet_units: pide el catálogo/listado de vehículos o unidades de su empresa.",
+                  "platform_reports: pide informes/reportes disponibles o cómo consultar un informe, aunque el informe se llame resumen de flota y contenga las palabras flota/unidades.",
+                  "other: cualquier otro objeto o intención.",
+                  "La acción listar no alcanza: importa qué entidad quiere listar.",
+                  "Devolvé exclusivamente el JSON del schema.",
+                ].join(" "),
+              },
+              {
+                role: "user",
+                content: threadTail
+                  ? `Historial reciente:\n${threadTail}\n\nMensaje actual:\n${text.trim()}`
+                  : text.trim(),
+              },
+            ],
+            temperature: 0,
+            max_tokens: 64,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "wara_list_target",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    target: {
+                      type: "string",
+                      enum: ["fleet_units", "platform_reports", "other"],
+                    },
+                    confidence: { type: "number", minimum: 0, maximum: 1 },
+                  },
+                  required: ["target", "confidence"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          { signal },
+        ),
+      OPENAI_DEFAULT_TIMEOUT_MS + 1_000,
+    );
+    if (!response) return false;
     const parsed = JSON.parse(response.choices[0]?.message?.content ?? "{}") as {
-      list_fleet?: boolean;
+      target?: string;
       confidence?: number;
     };
-    return parsed.list_fleet === true && Number(parsed.confidence) >= 0.78;
+    return parsed.target === "fleet_units" && Number(parsed.confidence) >= 0.78;
   } catch {
     return false;
   }
@@ -98,7 +117,9 @@ export async function shouldRouteTurnToFleetListExecutorHybrid(params: {
   selectionText: string;
   threadText: string;
 }): Promise<boolean> {
-  if (shouldRouteTurnToFleetListExecutor(params)) return true;
-  if (!looksLikePossibleFleetListRequest(params.selectionText)) return false;
+  const strictCandidate = shouldRouteTurnToFleetListExecutor(params);
+  const broadCandidate = looksLikePossibleFleetListRequest(params.selectionText);
+  if (!strictCandidate && !broadCandidate) return false;
+  if (!isFleetListIntentAiEnabled()) return strictCandidate;
   return classifyFleetListIntentWithAi(params.selectionText, params.threadText);
 }

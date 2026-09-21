@@ -44,8 +44,8 @@ function assert(cond, label) {
 console.log("— Offline: post-empresa → mantenimiento —\n");
 
 assert(
-  formatCompanyConfirmMessage("El Cacique S.A.") ===
-    "Perfecto, sigo con El Cacique S.A. ¿En qué te puedo ayudar?",
+  formatCompanyConfirmMessage("El Cacique S.A.").includes("*El Cacique S.A.*") &&
+    !formatCompanyConfirmMessage("El Cacique S.A.").includes("S.A.."),
   "confirmación empresa sin doble punto (S.A..)",
 );
 assert(

@@ -14,6 +14,10 @@ import {
   parseExecutorDialogueState,
 } from "@/lib/executorDialogueState";
 import { composeAgentReplyFromDialogueState } from "@/lib/atilioDialogueCompose";
+import { MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED } from "@/lib/waraApi";
+import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
+import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
+import { isUtilidadesBloque2KbEnabled } from "@/lib/utilidadesBloque2Knowledge";
 
 const EXECUTOR_HANDLERS: Record<TurnExecutorId, (req: NextRequest) => Promise<Response>> = {
   unidades: unidadesPost,
@@ -41,18 +45,27 @@ const TOOL_TO_EXECUTOR: Record<AgentToolName, TurnExecutorId> = {
   guia_informativa: "info_guides",
 };
 
-export const ATILIO_AGENT_TOOLS = [
+type OpenAiToolDef = {
+  type: "function";
+  function: {
+    name: AgentToolName;
+    description: string;
+    parameters: { type: "object"; properties: Record<string, unknown> };
+  };
+};
+
+const BASE_AGENT_TOOLS: OpenAiToolDef[] = [
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "consultar_unidades",
       description:
-        "Consultar flota, listado, estado GPS/ignición en vivo, o buscar unidad por patente/marca/prefijo. Usala cuando la intención sea listado/flota/cuántas unidades (aunque lo digan distinto). Si la intención no está clara, el backend resuelve; vos redactás o preguntás en natural — NUNCA pidas patente solo para 'poder listar'.",
+        "Consultar flota, listado, estado GPS/ignición en vivo, buscar unidad por patente/marca/prefijo, o iniciar una carga operativa de combustible capturando primero la unidad. Usala cuando la intención sea listado/flota/cuántas unidades (aunque lo digan distinto). Para 'Quiero cargar combustible', pedí unidad/patente; NUNCA uses guia_informativa, Paneles, Opciones ni Informes. Si la intención no está clara, el backend resuelve; vos redactás o preguntás en natural — NUNCA pidas patente solo para 'poder listar'.",
       parameters: { type: "object", properties: {} },
     },
   },
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "registrar_odometro_horometro",
       description:
@@ -61,7 +74,7 @@ export const ATILIO_AGENT_TOOLS = [
     },
   },
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "certificado_cobertura",
       description:
@@ -70,33 +83,118 @@ export const ATILIO_AGENT_TOOLS = [
     },
   },
   {
-    type: "function" as const,
-    function: {
-      name: "mantenimiento_operativo",
-      description:
-        "Programar o registrar mantenimiento preventivo/correctivo operativo (no guía informativa).",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "derivar_asesor_ticket",
       description:
-        "Derivar a asesor humano y asignar caso: reclamo/ticket, soporte fuera del alcance de Atilio (pantalla táctil, hardware, garantía, facturación), hablar con operador/mesa, o falla técnica que no sea GPS/odómetro/certificado/mantenimiento. Usar de inmediato — NO pedir número de caso previo ni patente si el tema no es de una unidad GPS.",
+        "Derivar a asesor humano y asignar caso: reclamo/ticket, soporte fuera del alcance de Atilio (pantalla táctil, hardware, garantía, facturación), hablar con operador/mesa, o falla técnica que no sea GPS/odómetro/certificado/mantenimiento. Usar de inmediato — NO pedir número de caso previo ni patente si el tema no es de una unidad GPS. NUNCA uses esta tool solo porque el cliente mencionó mantenimiento.",
       parameters: { type: "object", properties: {} },
     },
   },
   {
-    type: "function" as const,
+    type: "function",
     function: {
       name: "guia_informativa",
       description:
-        "Explicar cómo usar módulos de la plataforma Wara (Opciones, Unidades, Mantenimiento informativo): agenda, contactos, atajos, grupos, etc. Sin acciones en vivo.",
+        "Fuente de verdad para módulos Wara (Opciones, Unidades, Mantenimiento, Transporte Público / de pasajeros): cómo usar la app, conceptos y errores de pantalla. Con «Mantenimiento» o cómo agendar, la tool ya trae el procedimiento completo — devolvilo tal cual, sin preguntar preventivo/correctivo ni configurar. Con transporte de pasajeros / hoja de turno / servicios / paradas, SIEMPRE esta tool — NUNCA inventes que no hay info. Troubleshooting si no pudo cargar. Sin acciones en vivo. Con mantenimiento operativo deshabilitado, SIEMPRE esta tool — NUNCA inventes programar por chat ni pidas unidad para agendar.",
       parameters: { type: "object", properties: {} },
     },
   },
 ];
+
+const GUIA_CISTERNAS_SUFFIX =
+  " Con cisternas (tanques de combustible de depósito/base) habilitadas en backend: SIEMPRE esta tool — NUNCA inventes que no hay info ni registres cargas/mediciones por chat.";
+
+const GUIA_COMBUSTIBLE_SUFFIX =
+  " Con preguntas informativas sobre combustible (tickets/validación/panel/informes de unidad) habilitado en backend: usá esta tool. La acción 'Quiero cargar combustible' es operativa: NUNCA uses esta tool; debe ir a consultar_unidades para pedir unidad/patente.";
+
+const GUIA_COMBUSTIBLE_CISTERNAS_BOUNDARY =
+  " No confundas tickets de combustible de unidad con Cisternas.";
+
+const GUIA_HOJAS_RUTA_SUFFIX =
+  " Con hojas de ruta (listado/predefinidas/calendario/cargas de viaje): SIEMPRE esta tool — NUNCA inventes Mantenimiento/Unidades ni digas que no hay info. Si el corpus está deshabilitado, la tool devolverá el límite de canal honesto. No confundas con hoja de turno, tickets de combustible de unidad ni tanques de depósito.";
+
+const GUIA_PUNTOS_INTERES_SUFFIX =
+  " Con Puntos de interés (Utilidades→POI/geocercas, grupos, eventos, Depósito): SIEMPRE esta tool — si el corpus está off, límite honesto. Paradas TP son independientes; etapas de servicio usan POI previos (no inventes que etapas ≠ PI).";
+
+const GUIA_INFORMES_SUFFIX =
+  " Con menú Informes (riel derecho→Informes: categorías Combustible/Choferes/Hojas de ruta/Mantenimiento/Puntos/TP + generales): SIEMPRE esta tool — si el corpus está off, límite honesto. Informes ≠ crear/cargar en módulos operativos (combustible, hoja de ruta, POI, mantenimiento, remitos, etc.).";
+
+const GUIA_ALERTAS_SUFFIX =
+  " Con módulo Alertas (30 tipos: pánico, zonas, RTO, etc.): SIEMPRE esta tool — si el corpus está off, límite honesto. Alertas ≠ Paneles→Alarmas ≠ Paneles→Notificaciones ≠ Opciones→Protocolos ≠ Informes históricos. NUNCA derives a opciones legacy por ‘alerta/alarma’.";
+
+const GUIA_PANELES_SUFFIX =
+  " Con módulo Paneles (14 vistas: Alarmas, Notificaciones, Turnos, etc.): SIEMPRE esta tool — si el corpus está off, límite honesto. Alarmas ≠ Alertas ≠ Notificaciones ≠ Protocolos ≠ Informes. NUNCA derives a opciones legacy por ‘panel/alarma’.";
+
+const GUIA_ARTICULOS_UNSUPPORTED_SUFFIX =
+  " Con módulo Artículos (stock/remitos/inventario): SIEMPRE esta tool — devolverá límite honesto. NUNCA improvises otro módulo ni digas pasos inventados.";
+
+const GUIA_UTILIDADES_BLOQUE2_SUFFIX =
+  " Con Utilidades — Bloque 2 (Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades, Remitos y Remitos hormigonera) habilitado: SIEMPRE esta tool para guías de esas pantallas. No ejecutes altas, envíos, eliminaciones ni descargas por chat.";
+
+const MANTENIMIENTO_OPERATIVO_TOOL: OpenAiToolDef = {
+  type: "function",
+  function: {
+    name: "mantenimiento_operativo",
+    description:
+      "Programar o registrar mantenimiento preventivo/correctivo operativo por WhatsApp (no guía informativa). Solo si la gestión operativa por WhatsApp está habilitada.",
+    parameters: { type: "object", properties: {} },
+  },
+};
+
+/** Tools expuestas al LLM según política de mantenimiento operativo (+ KBs opt-in). */
+export function buildAtilioAgentTools(
+  operativeEnabled: boolean = MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
+): OpenAiToolDef[] {
+  const cisternasOn = isCisternasKbEnabled();
+  const combustibleOn = isCombustibleKbEnabled();
+  const utilidadesBloque2On = isUtilidadesBloque2KbEnabled();
+  const base: OpenAiToolDef[] = BASE_AGENT_TOOLS.map((t) => {
+    if (t.function.name !== "guia_informativa") return t;
+    let description = t.function.description;
+    if (cisternasOn) description += GUIA_CISTERNAS_SUFFIX;
+    if (combustibleOn) description += GUIA_COMBUSTIBLE_SUFFIX;
+    if (cisternasOn && combustibleOn) description += GUIA_COMBUSTIBLE_CISTERNAS_BOUNDARY;
+    // HR: reconocimiento siempre (corpus gated en la tool/grounded).
+    description += GUIA_HOJAS_RUTA_SUFFIX;
+    description += GUIA_PUNTOS_INTERES_SUFFIX;
+    description += GUIA_INFORMES_SUFFIX;
+    description += GUIA_ALERTAS_SUFFIX;
+    description += GUIA_PANELES_SUFFIX;
+    description += GUIA_ARTICULOS_UNSUPPORTED_SUFFIX;
+    if (utilidadesBloque2On) description += GUIA_UTILIDADES_BLOQUE2_SUFFIX;
+    if (description === t.function.description) return t;
+    return {
+      ...t,
+      function: {
+        ...t.function,
+        description,
+      },
+    };
+  });
+
+  if (operativeEnabled) {
+    const tools = [...base];
+    const derivarIdx = tools.findIndex((t) => t.function.name === "derivar_asesor_ticket");
+    tools.splice(Math.max(derivarIdx, 0), 0, MANTENIMIENTO_OPERATIVO_TOOL);
+    return tools;
+  }
+  return base;
+}
+
+/** @deprecated Preferí buildAtilioAgentTools() — lista estática con política vigente al import. */
+export const ATILIO_AGENT_TOOLS = buildAtilioAgentTools();
+
+/** Si el operativo WA está off, cualquier intento de esa tool se resuelve como guía. */
+export function resolveAgentToolName(
+  toolName: AgentToolName,
+  operativeEnabled: boolean = MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
+): AgentToolName {
+  if (!operativeEnabled && toolName === "mantenimiento_operativo") {
+    return "guia_informativa";
+  }
+  return toolName;
+}
 
 async function invokeExecutorInternal(
   executor: TurnExecutorId,
@@ -140,7 +238,8 @@ export async function executeAtilioAgentTool(params: {
   apiKey: string;
   threadText?: string;
 }): Promise<AgentToolResult> {
-  const executor = TOOL_TO_EXECUTOR[params.toolName];
+  const resolvedName = resolveAgentToolName(params.toolName);
+  const executor = TOOL_TO_EXECUTOR[resolvedName];
   const raw = await invokeExecutorInternal(
     executor,
     params.rawPhone,
@@ -151,10 +250,16 @@ export async function executeAtilioAgentTool(params: {
   const ok = raw.ok !== false && raw.ok_s !== "false";
   const skipResponse = String(raw.skipResponse_s ?? "") === "true" && !backendMessage;
   const flowComplete = String(raw.flowComplete_s ?? "") === "true";
+  const confirmationRequired = String(raw.confirmationRequired_s ?? "") === "true";
   const dialogueState = parseExecutorDialogueState(raw);
   let composedMessage: string | undefined;
 
-  if (agentComposeRequested(raw) && dialogueState) {
+  // Guía informativa: la salida del backend es la fuente de verdad (no reescribir a prosa libre).
+  if (resolvedName === "guia_informativa" && backendMessage) {
+    composedMessage = backendMessage;
+  } else if (confirmationRequired && backendMessage) {
+    composedMessage = backendMessage;
+  } else if (agentComposeRequested(raw) && dialogueState) {
     composedMessage = await composeAgentReplyFromDialogueState({
       threadText: params.threadText ?? "",
       customerMessage: params.customerMessage,

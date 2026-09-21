@@ -7,12 +7,13 @@ import {
   recentThreadTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, isBarePlatePrefixHint, looksLikeBriefConfirmation, looksLikePendingTramiteAffirmation, threadAwaitingHorometerKmValue, threadAwaitingOdometerKmValue, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, extractPlateFromUnitStatusCheckOffer, threadTextSinceCompanySelection, hasPendingOdometerConfirmation, looksLikeOdometerPendingDataAmendment, lastTomoMeterKindInThreadTail } from "@/lib/wara";
 import { looksLikeRelativeDateClarificationQuestion, looksLikeRelativeDateChallenge, resolveRelativeDateChallengeReply, resolveRelativeDateClarificationReply } from "@/lib/odometroFecha";
-import { getPendingAction } from "@/lib/pendingAction";
+import { getPendingAction, clearPendingAction } from "@/lib/pendingAction";
+import { threadHasInconclusiveTramite } from "@/lib/tramiteFlowControl";
 import { clearActiveUnit } from "@/lib/activeUnit";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation, buildPendingConfirmationPoliteAckReply } from "@/lib/pendingConfirmation";
-import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender } from "@/lib/whatsappPhone";
+import { normalizeWhatsAppPhone, isNonHumanWhatsAppSender, findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { looksLikeChangeCompanyRequestHybrid } from "@/lib/whatsappAdminIntentAI";
 import {
   buildCompanyMenuPayload,
@@ -26,6 +27,7 @@ import {
   looksLikeBareAtilioMention,
   looksLikeConversationClosing,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
   looksLikeGenericCapabilityOrTopicSwitchRequest,
   looksLikeExplicitCapabilityMenuRequest,
   looksLikeGreeting,
@@ -36,6 +38,7 @@ import {
   buildAtilioHelpCapabilitiesReply,
   buildTicketCreationInfoReply,
   looksLikeAtilioHelpRequest,
+  looksLikeServiceScopeConsultationMeta,
   looksLikeThanksOnlyAcknowledgement,
   looksLikeSubstantiveCustomerMessage,
   looksLikeTicketCreationInfoQuestion,
@@ -44,6 +47,12 @@ import {
   resolveCustomerForTurnContext,
   selectCompanyForCustomer,
 } from "@/lib/waraApi";
+import {
+  buildAtilioStructuredGreeting,
+  buildBriefServiceScopeConsultationReply,
+  formatContinueConsult,
+  formatSoftClose,
+} from "@/lib/waraWhatsAppFormat";
 import {
   handleCustomerConversationCloseRequest,
   looksLikeCustomerConversationCloseRequest,
@@ -55,6 +64,7 @@ import {
   looksLikeOpenCaseStatusInquiry,
   persistCustomerBotReply,
 } from "@/lib/customerTicketInquiry";
+import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
 /** Evita fallos por espacio final / BOM / CRLF / caracteres invisibles (Slack, Notion, Vercel). */
 function normalizeSecret(s: string): string {
   let t = String(s ?? "");
@@ -344,7 +354,35 @@ export async function customerRegisteredContextResponse(
   }
 
   const normalized = normalizeWhatsAppPhone(trimmed) || trimmed.replace(/\D/g, "");
+
+  // Takeover humano: si Atilio está pausado, NO desmutear/blacklist-remove y no responder.
+  // Bug real 2026-08-20: ensureBuilderBotContactActive deshacía el "Pausar Atilio" del panel
+  // en el siguiente mensaje del cliente, y la "derivación" de la comunicación no se sostenía.
+  const existingCustomer = await findCustomerByWhatsAppNumber(prisma, trimmed);
+  if (existingCustomer?.botPausedAt) {
+    return NextResponse.json({
+      registered: true,
+      registered_s: "true",
+      ignore: true,
+      ignore_s: "true",
+      nextFlow: "ignore",
+      nextFlow_s: "ignore",
+      phone: normalized,
+      name: existingCustomer.name?.trim() || "",
+      companyName: existingCustomer.companyName?.trim() || "",
+      validationSource: "human_takeover_bot_paused",
+      requiresCompanySelection: false,
+      requiresCompanySelection_s: "false",
+      botPaused: true,
+      botPaused_s: "true",
+      testBlocked: false,
+      testBlocked_s: "false",
+      message: "",
+    });
+  }
+
   // Cada mensaje humano válido debe poder hablar con el bot (evita quedar muteado 24h por un bug de flujo).
+  // Solo si NO hay takeover humano activo.
   void ensureBuilderBotContactActive(normalized);
 
   if (normalized.length < 8) {
@@ -371,8 +409,49 @@ export async function customerRegisteredContextResponse(
       looksLikeImplicitCompanyChangeAffirmation(selectionText, earlyThreadForCompany) ||
       (await looksLikeChangeCompanyRequestHybrid(selectionText)))
   ) {
+    const peek = await resolveCustomerByWaraPhone(prisma, trimmed);
+    const peekContacts = peek.lookup?.contactos ?? [];
+    const namedCompany =
+      matchCompanyContinuationMention(selectionText, peekContacts) ??
+      extractExplicitCompanyMention(selectionText, peekContacts);
+    // "Quiero operar / cambiar al Cacique" nombra empresa: elegir de una, sin menú.
+    if (namedCompany) {
+      const picked = await selectCompanyForCustomer(prisma, trimmed, {
+        waraContactId: namedCompany.id,
+      });
+      const companyName =
+        picked.customer?.companyName?.trim() ||
+        namedCompany.empresa?.trim() ||
+        "tu empresa";
+      return NextResponse.json({
+        registered: peek.registered,
+        registered_s: peek.registered ? "true" : "false",
+        ignore: false,
+        ignore_s: "false",
+        phone: normalized,
+        name: peek.customer?.name?.trim() || "",
+        companyName,
+        validationSource: peek.source,
+        waraLookupConfigured: peek.lookup?.configured ?? false,
+        waraContactsCount: peekContacts.length,
+        waraContactId: namedCompany.id,
+        waraContacts: peekContacts,
+        requiresCompanySelection: false,
+        requiresCompanySelection_s: "false",
+        companyPickedThisTurn: true,
+        companyPickedThisTurn_s: "true",
+        nextFlow: "reply",
+        nextFlow_s: "reply",
+        selectionFailed_s: "false",
+        message:
+          picked.menuMessage ?? formatCompanyConfirmMessage(companyName),
+        testBlocked: peek.testBlocked ?? false,
+        testBlocked_s: peek.testBlocked ? "true" : "false",
+      });
+    }
+
     const reset = await resetCustomerCompanyMenu(prisma, trimmed);
-    const resolution = await resolveCustomerByWaraPhone(prisma, trimmed);
+    const resolution = peek;
     const customer = resolution.customer;
     return NextResponse.json({
       registered: resolution.registered,
@@ -512,6 +591,14 @@ export async function customerRegisteredContextResponse(
   const threadOperationalHint = hasKnownPlate
     ? `Patente/matrícula ya mencionada en este hilo: ${lastKnownPlateFormatted}. No la vuelvas a pedir salvo corrección explícita del cliente.`
     : "";
+  const idleMetaTurn = selectionText?.trim()
+    ? resolveIdleFollowupMetaTurn({
+        selectionText,
+        threadText: scopedThreadText || fullThreadText,
+        customerFirstName: customer?.name?.trim().split(/\s+/)[0],
+        pendingAction: (await getPendingAction(prisma, trimmed)) ?? undefined,
+      })
+    : null;
 
   let responseMessage = selectionMessage;
   const threadForMaintIntent = scopedThreadText || fullThreadText;
@@ -523,7 +610,7 @@ export async function customerRegisteredContextResponse(
     looksLikeCompanyListQuestion(selectionText)
   ) {
     responseMessage = buildCompanyStatusReply(activeCompany, contacts.length, waraContactsText);
-  } else if (!responseMessage && needsCompanyMenu && waraContactsText) {
+  } else if (!responseMessage && needsCompanyMenu && waraContactsText && !matchedCompanyMention && !explicitCompanyMentionWhilePending) {
     responseMessage =
       `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
       `${waraContactsText}\n\n` +
@@ -544,29 +631,36 @@ export async function customerRegisteredContextResponse(
     try {
       const {
         ensureUnregisteredPhoneAdvisorHandoff,
-        UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+        buildUnregisteredPhoneCustomerReply,
+        UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
+        buildUnregisteredPhoneWaitingAdvisorReply,
       } = await import("@/lib/unregisteredPhoneHandoff");
       const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, trimmed, {
         contactName: customer?.name ?? undefined,
         messageText: selectionText || undefined,
         source: "builderbot_context",
       });
-      if (handoff.shouldNotifyCustomer) {
-        // BBC flow "derivar" manda el aviso largo de número no registrado.
-        nextFlow = "derivar";
-        responseMessage = "";
-      } else {
-        // Ya derivado: calma (Atilio NO se pausa; no repetir el aviso largo).
-        nextFlow = "reply";
-        responseMessage = UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY;
-        await persistCustomerBotReply(trimmed, responseMessage, {
-          source: "builderbot_context",
-          stage: "unregistered_waiting_advisor",
-        });
-      }
+      // Siempre contestar: 1ª vez derivación; recontacto = ticket ya abierto + PDF.
+      nextFlow = "reply";
+      responseMessage = buildUnregisteredPhoneCustomerReply({
+        isFirstNotify: handoff.shouldNotifyCustomer,
+        ticketCode: handoff.ticket.code,
+      });
+      const persistText = handoff.shouldNotifyCustomer
+        ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
+        : buildUnregisteredPhoneWaitingAdvisorReply(handoff.ticket.code);
+      await persistCustomerBotReply(trimmed, persistText, {
+        source: "builderbot_context",
+        stage: handoff.shouldNotifyCustomer
+          ? "unregistered_first_handoff"
+          : "unregistered_waiting_handoff",
+      });
     } catch (e) {
       console.error("[builderbotCustomerContext] unregistered handoff:", e);
-      nextFlow = "derivar";
+      // Fallback seguro: mismo texto canónico (import puede fallar arriba).
+      nextFlow = "reply";
+      responseMessage =
+        "No encontré empresas asociadas a tu número en Wara. Te derivo con un agente.\n\nTe envío también la guía para cargar un número nuevo en la plataforma.";
     }
   } else if (
     selectionText &&
@@ -603,8 +697,11 @@ export async function customerRegisteredContextResponse(
     // repetía TEXTUALMENTE el mismo párrafo largo. Pedido explícito: "cuando se le diga
     // Atilio... mejor pregunta cómo puede ayudar después de un Hola XXX" — respuesta
     // corta, no la lista completa de capacidades otra vez.
-    const firstName = customer?.name?.trim().split(/\s+/)[0];
-    responseMessage = firstName ? `Hola ${firstName}, ¿en qué te puedo ayudar?` : "Hola, ¿en qué te puedo ayudar?";
+    responseMessage = buildAtilioStructuredGreeting({
+      threadText: scopedThreadText || fullThreadText,
+      companyName: activeCompany,
+      omitIntroduction: true,
+    });
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "atilio_bare_name_mention",
@@ -620,18 +717,25 @@ export async function customerRegisteredContextResponse(
     nextFlow = "reply";
   } else if (
     selectionText &&
-    looksLikeExplicitCapabilityMenuRequest(selectionText) &&
-    // Con CONFIRMO pendiente, no cortar: el turn/IA decide.
+    looksLikeServiceScopeConsultationMeta(selectionText) &&
     !(
       hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
       (await getPendingAction(prisma, trimmed))?.payload
     )
   ) {
-    // Solo "qué puedo hacer / qué gestiones…" → menú fijo. El resto (otra consulta,
-    // ayuda genérica, topic-switch) va al turn/IA — menos heurística, más diálogo.
-    await clearActiveUnit(prisma, trimmed);
+    responseMessage = buildBriefServiceScopeConsultationReply();
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: "service_scope_consultation_meta",
+    });
+    nextFlow = "reply";
+  } else if (
+    selectionText &&
+    looksLikeExplicitCapabilityMenuRequest(selectionText)
+  ) {
+    // Menú fijo de capacidades — gana sobre tema anterior; no cancela trámite en DB.
     const firstName = customer?.name?.trim().split(/\s+/)[0];
-    responseMessage = buildAtilioHelpCapabilitiesReply(firstName);
+    responseMessage = buildAtilioHelpCapabilitiesReply(firstName, activeCompany);
     await persistCustomerBotReply(trimmed, responseMessage, {
       source: "builderbot_context",
       stage: "atilio_help_capabilities",
@@ -655,10 +759,7 @@ export async function customerRegisteredContextResponse(
     } else {
       await clearActiveUnit(prisma, trimmed);
       nextFlow = "reply";
-      const firstName = customer?.name?.trim().split(/\s+/)[0];
-      responseMessage = firstName
-        ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
-        : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
+      responseMessage = formatContinueConsult({ companyName: activeCompany || null });
       await persistCustomerBotReply(trimmed, responseMessage, {
         source: "builderbot_context",
         stage: "flow_reset",
@@ -681,50 +782,49 @@ export async function customerRegisteredContextResponse(
     } else {
       nextFlow = "reply";
       if (!responseMessage) {
-        const firstName = customer?.name?.trim().split(/\s+/)[0];
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-          : "Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?";
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: scopedThreadText || fullThreadText,
+          companyName: activeCompany,
+        });
       }
     }
-  } else if (looksLikeGreeting(selectionText)) {
-    const pendingNow =
-      hasAnyPendingConfirmation(scopedThreadText || fullThreadText) ||
-      !!(await getPendingAction(prisma, trimmed))?.payload ||
-      threadHasActiveOdometerFlow(scopedThreadText || fullThreadText);
-    if (pendingNow) {
-      // Saludo mid-trámite → IA (no reiniciar el tono con menú enlatado).
-      nextFlow = "router";
+  } else if (looksLikeGreeting(selectionText) || looksLikeSoftFlowRestart(selectionText)) {
+    const threadForGreeting = scopedThreadText || fullThreadText;
+    const pendingActionRecord = await getPendingAction(prisma, trimmed);
+    if (
+      await shouldIgnoreDuplicateInicioTurn(trimmed, selectionText)
+    ) {
+      nextFlow = "ignore";
       responseMessage = "";
     } else {
+      const forceRestart = looksLikeSoftFlowRestart(selectionText);
+    const inconclusive =
+      forceRestart || threadHasInconclusiveTramite(threadForGreeting, pendingActionRecord);
+    // Saludo = arrancar de cero aunque haya trámite inconcluso (bug prod 2026-08-17).
+    if (inconclusive) {
+      await clearPendingAction(prisma, trimmed);
+      await clearActiveUnit(prisma, trimmed);
+    }
     nextFlow = "reply";
     if (!responseMessage) {
-      const firstName = customer?.name?.trim().split(/\s+/)[0];
-      const repeatGreeting = looksLikeRepeatGreetingInSession(
-        scopedThreadText || fullThreadText,
-        selectionText,
-      );
-      if (repeatGreeting) {
-        responseMessage = firstName
-          ? `Hola ${firstName}, seguimos por acá. ¿Qué necesitás?`
-          : `Hola, seguimos. ¿En qué te ayudo?`;
-      } else if (lastTicket && (lastKnownPlate || lastTicket.code)) {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿Con qué consulta o servicio querés continuar?`;
-      } else if (multiCompany && waraContactsText) {
-        const hola = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara.`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara.`;
-        responseMessage =
-          `${hola}\n\n` +
-          `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
-          `${waraContactsText}\n\n` +
-          `Respondé con el número de la opción o con el nombre de la empresa.`;
+      // Menú multi-empresa solo en reingresos de sesión (no primer contacto).
+      const sessionReturn =
+        looksLikeRepeatGreetingInSession(threadForGreeting, selectionText) ||
+        !!(lastTicket && (lastKnownPlate || lastTicket.code));
+      const greetingThread = inconclusive ? "" : threadForGreeting;
+      const greetingPending = inconclusive ? null : pendingActionRecord;
+      if (sessionReturn && multiCompany && waraContactsText && !inconclusive) {
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: greetingThread,
+          companyListBlock: waraContactsText,
+          pendingAction: greetingPending,
+        });
       } else {
-        responseMessage = firstName
-          ? `Hola ${firstName}, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`
-          : `Hola, soy Atilio de la Mesa de Ayuda de Wara. ¿En qué te puedo ayudar?`;
+        responseMessage = buildAtilioStructuredGreeting({
+          threadText: greetingThread,
+          companyName: activeCompany,
+          pendingAction: greetingPending,
+        });
       }
     }
     }
@@ -744,10 +844,21 @@ export async function customerRegisteredContextResponse(
     if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
       responseMessage = firstName
-        ? `¡Listo, ${firstName}! Que tengas buen día. Cualquier cosa, escribime por este medio.`
-        : "¡Listo! Que tengas buen día. Cualquier cosa, escribime por este medio.";
+        ? `${formatSoftClose("bye")} ${firstName}.`
+        : formatSoftClose("bye");
     }
     }
+  } else if (idleMetaTurn) {
+    nextFlow = "reply";
+    if (!responseMessage) {
+      responseMessage = idleMetaTurn.message;
+    }
+    await persistCustomerBotReply(trimmed, responseMessage, {
+      source: "builderbot_context",
+      stage: idleMetaTurn.idlePushback
+        ? "idle_followup_pushback"
+        : "meta_conversational_continuity",
+    });
   } else if (
     selectionText &&
     looksLikePendingTramiteAffirmation(selectionText) &&
@@ -836,76 +947,74 @@ export async function customerRegisteredContextResponse(
     (looksLikeRelativeDateClarificationQuestion(selectionText) ||
       looksLikeRelativeDateChallenge(selectionText))
   ) {
-    // Preguntas/desafíos sobre hoy/ayer — respuesta determinista (AR), sin alucinar fechas.
-    nextFlow = "reply";
-    const dateReply =
-      resolveRelativeDateClarificationReply(selectionText) ??
-      resolveRelativeDateChallengeReply(selectionText);
-    if (dateReply && !responseMessage) {
-      const pending = await getPendingAction(prisma, trimmed);
-      const inOdometerFlow =
-        pending?.type === "odometro" ||
-        threadHasActiveOdometerFlow(scopedThreadText || fullThreadText);
-      responseMessage = inOdometerFlow
-        ? `${dateReply} Si veníamos con un cambio de odómetro, decime CONFIRMO cuando quieras registrarlo.`
-        : dateReply;
+    const pending = await getPendingAction(prisma, trimmed);
+    const threadForFlow = scopedThreadText || fullThreadText;
+    const inOdometerFlow =
+      pending?.type === "odometro" || threadHasActiveOdometerFlow(threadForFlow);
+    // Corrección de fecha/hora durante trámite medidor → executor (rearmar resumen), no aclaración suelta.
+    if (inOdometerFlow && looksLikeOdometerPendingDataAmendment(selectionText)) {
+      nextFlow = "router";
+      responseMessage = "";
+    } else {
+      nextFlow = "reply";
+      const dateReply =
+        resolveRelativeDateClarificationReply(selectionText) ??
+        resolveRelativeDateChallengeReply(selectionText);
+      if (dateReply && !responseMessage) {
+        const meterKind =
+          pending?.payload?.meterType === "horometro" ||
+          threadAwaitingHorometerKmValue(threadForFlow) ||
+          lastTomoMeterKindInThreadTail(threadForFlow) === "horometro"
+            ? "horómetro"
+            : "odómetro";
+        responseMessage = inOdometerFlow
+          ? `${dateReply} Si veníamos con un cambio de ${meterKind}, decime CONFIRMO cuando quieras registrarlo.`
+          : dateReply;
+      }
     }
-  } else if (explicitCompanyMentionWhilePending) {
-    // "la empresa es el cacique, la unidad es la AF061DO": declaración explícita de
-    // empresa aunque venga con contenido operativo pegado — tiene que resolverse ANTES
-    // que la rama de abajo (que de otro modo manda el mensaje al router genérico sin
-    // haber registrado la empresa, y el trámite vuelve a pedirla en loop).
+  } else if (explicitCompanyMentionWhilePending || matchedCompanyMention) {
+    // "la empresa es el cacique…" o "quiero operar con la empresa El Cacique":
+    // elegir empresa ANTES del router operativo ("quiero" no es un trámite).
+    const chosen = explicitCompanyMentionWhilePending ?? matchedCompanyMention;
     nextFlow = "reply";
     const picked = await selectCompanyForCustomer(prisma, trimmed, {
-      waraContactId: explicitCompanyMentionWhilePending.id,
+      waraContactId: chosen!.id,
     });
-    if (!responseMessage) {
-      responseMessage =
-        picked.menuMessage ??
-        formatCompanyConfirmMessage(
-          picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
-        );
-    }
-  } else if (selectionText && looksLikeOperationalIntent(selectionText)) {
-    // Trámites operativos (certificado, odómetro, etc.) van al router aunque falte menú empresa.
-    nextFlow = "router";
-    responseMessage = "";
-  } else if (needsCompanyMenu && selectionText && looksLikeCompanySelection(selectionText)) {
+    responseMessage =
+      picked.menuMessage ??
+      formatCompanyConfirmMessage(
+        picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
+      );
+  } else if (needsCompanyMenu) {
+    // Bug real 2026-08-23: con menú de empresa pendiente, el trámite operativo
+    // (Horometro 900133) iba igual al router → 1) menú empresa + 2) "no identifiqué
+    // la unidad" en el mismo segundo. Sin empresa no hay flota confiable: parar acá.
     nextFlow = "reply";
-    if (!responseMessage) {
+    if (!responseMessage && waraContactsText) {
+      responseMessage =
+        `Veo que este número está asociado a más de una empresa en Wara. ¿De cuál escribís?\n\n` +
+        `${waraContactsText}\n\n` +
+        `Respondé con el número de la opción o con el nombre de la empresa.`;
+    } else if (!responseMessage && selectionText && looksLikeCompanySelection(selectionText)) {
       responseMessage =
         `No pude registrar esa opción. ¿De cuál empresa escribís?\n\n${waraContactsText}\n\n` +
         `Respondé con el número de la opción o con el nombre de la empresa.`;
     }
-  } else if (needsCompanyMenu && selectionText && !looksLikeOperationalIntent(selectionText)) {
-    nextFlow = "reply";
-  } else if (needsCompanyMenu && !selectionText.trim()) {
-    nextFlow = "reply";
+  } else if (selectionText && looksLikeOperationalIntent(selectionText)) {
+    // Ya hay empresa (o no hace falta menú): trámites operativos al router.
+    nextFlow = "router";
+    responseMessage = "";
   } else if (strictCompanyPick && multiCompany && selectionMessage) {
     nextFlow = "reply";
   } else if (
     duplicateInicioTurn &&
     selectionText &&
-    !looksLikeGreeting(selectionText) &&
-    !looksLikeSubstantiveCustomerMessage(selectionText) &&
     !isBarePlatePrefixHint(selectionText) &&
     !detectLoosePlate(selectionText) &&
     !hasPendingMaintenancePlateRequest(threadForMaintIntent)
   ) {
     nextFlow = "ignore";
     responseMessage = "";
-  } else if (matchedCompanyMention) {
-    nextFlow = "reply";
-    const picked = await selectCompanyForCustomer(prisma, trimmed, {
-      waraContactId: matchedCompanyMention.id,
-    });
-    if (!responseMessage) {
-      responseMessage =
-        picked.menuMessage ??
-        formatCompanyConfirmMessage(
-          picked.customer?.companyName?.trim() || activeCompany || "tu empresa",
-        );
-    }
   } else if (registered && selectionText.trim()) {
     // Fase 1 completa: /turn clasifica y ejecuta (operativo + guías + derivación).
     nextFlow = "router";

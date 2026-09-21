@@ -16,6 +16,7 @@ import {
   isBarePlatePrefixHint,
   isPlausibleVehiclePlate,
   looksLikeBriefConfirmation,
+  looksLikePendingConfirmHelpOrConfusion,
   normalizePlate,
   looksLikeHorometerOnlyIntent,
   looksLikeExplicitOdometerUpdateRequest,
@@ -35,12 +36,16 @@ import {
   resolveMaintenanceDetailText,
 } from "@/lib/conversationNotebook";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
+import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
+import { buildInfoGuideReply } from "@/lib/infoGuideReplies";
 import {
   looksLikeChangeCompanyRequest,
   looksLikeMaintenanceCapabilityQuestion,
   looksLikeMaintenanceExplorationRequest,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeMaintenanceInfoRequest,
+  looksLikeMaintenanceAppGuideRequest,
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
   looksLikeOpcionesInfoRequest,
   looksLikeUnidadesInfoRequest,
   looksLikePlatformInfoGuideInThread,
@@ -61,6 +66,7 @@ import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
 import { withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
+import { formatFleetUnitLabel, formatMaintenanceConfirm } from "@/lib/waraWhatsAppFormat";
 
 const bodySchema = z
   .object({
@@ -209,49 +215,8 @@ function maintenanceCapabilityReply(): string {
   ].join("\n");
 }
 
-/**
- * Confirmación tolerante: acepta CONFIRMO en cualquier capitalización, con acentos,
- * espacios o puntuación de más, y también un "sí" claro (sí, dale, ok, listo, etc.).
- * No exige mayúsculas ni la palabra exacta.
- */
 function isConfirmed(value: string | undefined): boolean {
-  if (!value?.trim()) return false;
-  const t = value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z]/g, "");
-  if (!t) return false;
-  if (t.startsWith("conf")) return true;
-  const accepted = new Set([
-    "confirmo",
-    "confirmar",
-    "confirmado",
-    "confirma",
-    "siconfirmo",
-    "si",
-    "sii",
-    "sip",
-    "dale",
-    "dalesi",
-    "sidale",
-    "ok",
-    "oka",
-    "okey",
-    "okay",
-    "listo",
-    "correcto",
-    "deacuerdo",
-    "registra",
-    "registralo",
-    "hacelo",
-    "adelante",
-    "avanza",
-    "vamos",
-    "perfecto",
-  ]);
-  return accepted.has(t);
+  return isConfirmedForPendingWrite(value);
 }
 
 /**
@@ -285,7 +250,7 @@ async function recentThreadText(rawPhone: string): Promise<string> {
   }
 }
 
-/** Extrae los datos del resumen "Voy a registrar:" (Patente / Tipo / Prioridad / Detalle). */
+/** Extrae los datos del resumen de confirmación (formato legacy o plantilla WhatsApp). */
 function parseMantenimientoSummary(text: string): {
   patente?: string;
   servicio?: string;
@@ -294,22 +259,24 @@ function parseMantenimientoSummary(text: string): {
 } {
   const out: { patente?: string; servicio?: string; prioridad?: Priority; detalle?: string } = {};
 
+  const stripBold = (value: string): string => value.replace(/^\*+|\*+$/g, "").trim();
+
   const lastCapture = (pattern: RegExp): string | undefined => {
     const matches = [...text.matchAll(pattern)];
     const m = matches.at(-1);
     return m?.[1]?.trim();
   };
 
-  const patente = lastCapture(/Patente:\s*([A-Za-z0-9 ]{5,12})/g);
-  if (patente) out.patente = patente;
+  const patente = lastCapture(/(?:Patente|Unidad):\s*\*?([^*\n]+)/gi);
+  if (patente) out.patente = stripBold(patente);
 
-  const servicio = lastCapture(/Tipo:\s*(.+)/g);
-  if (servicio) out.servicio = servicio.split("\n")[0]?.trim();
+  const servicio = lastCapture(/Tipo:\s*\*?([^*\n]+)/gi);
+  if (servicio) out.servicio = stripBold(servicio.split("\n")[0]?.trim() ?? "");
 
-  const detalle = lastCapture(/Detalle:\s*(.+)/g);
-  if (detalle) out.detalle = detalle.split("\n")[0]?.trim();
+  const detalle = lastCapture(/Detalle:\s*\*?(.+)/gi);
+  if (detalle) out.detalle = stripBold(detalle.split("\n")[0]?.trim() ?? "");
 
-  const prioRaw = lastCapture(/Prioridad:\s*(\w+)/gi);
+  const prioRaw = lastCapture(/Prioridad:\s*\*?(\w+)/gi);
   if (prioRaw) {
     const p = prioRaw.toLowerCase();
     if (/urg/.test(p)) out.prioridad = "URGENT";
@@ -475,24 +442,58 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const rawInboundEarly = parsed.data.rawText?.trim() ?? "";
+  const threadEarly = await recentThreadText(rawPhone);
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
+    const message = buildInfoGuideReply(
+      rawInboundEarly || "mantenimiento",
+      "mantenimiento",
+    );
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "maintenance_app_guide_only",
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        message,
+        informational: true,
+        informational_s: "true",
+        flowComplete_s: "true",
+      },
+      { status: BB_STATUS }
+    );
+  }
+
   const confirmation = parsed.data.confirm ?? parsed.data.confirmation;
-  const rawInbound = parsed.data.rawText?.trim() ?? "";
+  const rawInbound = rawInboundEarly;
   const threadText = await recentThreadText(rawPhone);
   const lastInbound = await recentLastInboundTextForPhone(rawPhone);
   const dbPendingMaint = await getPendingAction(prisma, rawPhone);
   const hasLiveMaintPendingAction = dbPendingMaint?.type === "mantenimiento";
   const pendingMaintConfirm =
     hasPendingMantenimientoConfirmation(threadText) ||
-    (hasLiveMaintPendingAction &&
-      !!dbPendingMaint.payload &&
-      /voy a registrar:/i.test(String(dbPendingMaint.summary ?? threadText)) &&
-      /tipo:/i.test(String(dbPendingMaint.summary ?? threadText)));
+    (hasLiveMaintPendingAction && !!dbPendingMaint.payload);
   const pendingPlateRequest = hasPendingMaintenancePlateRequest(threadText);
-  const summary = parseMantenimientoSummary(
-    /voy a registrar:/i.test(threadText) ? threadText : "",
-  );
+  const summarySource =
+    pendingMaintConfirm ||
+    /voy a registrar:/i.test(threadText) ||
+    /confirmar mantenimiento/i.test(threadText)
+      ? threadText
+      : String(dbPendingMaint?.summary ?? "");
+  const summary = parseMantenimientoSummary(summarySource);
 
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
+  const maintPayload =
+    hasLiveMaintPendingAction && dbPendingMaint.payload
+      ? (dbPendingMaint.payload as {
+          plate?: string;
+          service?: string;
+          priority?: Priority;
+          detalle?: string;
+        })
+      : undefined;
 
   const inboundForConfirm = rawInbound || lastInbound;
   let confirmed = isMaintenanceConfirmationAccepted({
@@ -531,6 +532,37 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Con resumen pendiente: "como puedo hacer?" / "no entiendo" → explicar CONFIRMO,
+  // no rearmar el card con ese texto como Detalle.
+  if (
+    pendingMaintConfirm &&
+    !confirmed &&
+    looksLikePendingConfirmHelpOrConfusion(inboundForConfirm || rawInbound)
+  ) {
+    const message = [
+      "Tranqui: ya armé el resumen de la tarea de mantenimiento.",
+      "Para *registrarla* en Wara respondé *CONFIRMO*.",
+      "Si no querés cargarla, respondé *CANCELAR*.",
+      "Si el detalle o la unidad están mal, decime qué corregir.",
+    ].join("\n");
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_mantenimiento_operativo",
+      stage: "confirmation_help",
+      phone: rawPhone,
+    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        flowComplete_s: "true",
+        message,
+        confirmationRequired: true,
+        confirmationRequired_s: "true",
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   const inboundEarly = rawInbound || lastInbound || confirmation?.trim() || "";
   if (
     (looksLikeExplicitOdometerUpdateRequest(inboundEarly) || looksLikeHorometerOnlyIntent(inboundEarly)) &&
@@ -554,6 +586,8 @@ export async function POST(req: NextRequest) {
   if (pendingMaintConfirm && confirmed) {
     text =
       summary.detalle ||
+      (typeof maintPayload?.detalle === "string" ? maintPayload.detalle : undefined) ||
+      sessionNotebook?.tramite?.detalle ||
       summary.servicio ||
       "Solicitud de gestion de mantenimiento";
   } else {
@@ -633,14 +667,6 @@ export async function POST(req: NextRequest) {
   }
 
   const threadService = inferServiceFromThread(threadText);
-  const maintPayload =
-    hasLiveMaintPendingAction && dbPendingMaint.payload
-      ? (dbPendingMaint.payload as {
-          plate?: string;
-          service?: string;
-          priority?: Priority;
-        })
-      : undefined;
   const service =
     pendingMaintConfirm && confirmed && summary.servicio
       ? summary.servicio
@@ -1056,7 +1082,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const message = `Voy a registrar:\nPatente: ${plate}\nTipo: ${service}\nPrioridad: ${priorityLabel(priority)}\nDetalle: ${text}\n\nSi esta correcto, responde CONFIRMO para registrarlo.`;
+    const plateDisplay = formatFleetUnitLabel(plate);
+    const message = formatMaintenanceConfirm({
+      unitLabel: plateDisplay,
+      service,
+      priorityLabel: priorityLabel(priority),
+      detalle: text,
+    });
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_mantenimiento_operativo",
       stage: "confirmation_required",
@@ -1067,7 +1099,7 @@ export async function POST(req: NextRequest) {
     });
     await setPendingAction(prisma, rawPhone, "mantenimiento", {
       summary: message,
-      payload: { plate, service, priority },
+      payload: { plate, service, priority, detalle: text },
     });
     return NextResponse.json(
       {
@@ -1134,7 +1166,7 @@ export async function POST(req: NextRequest) {
     dedupeKey: `wara_mantenimiento:${plate}:${service}:${text.slice(0, 80)}`,
     subject: `${plate} - ${service}`,
     description: [
-      `Gestión de mantenimiento solicitada desde Atilio / WhatsApp.`,
+      `Gestión de mantenimiento solicitada desde Kira / WhatsApp.`,
       `Empresa Wara: ${company}`,
       `Patente: ${plate}`,
       `Tipo: ${service}`,

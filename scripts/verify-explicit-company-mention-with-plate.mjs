@@ -50,6 +50,10 @@ assert(matched?.id === 11, `extractExplicitCompanyMention resuelve "El Cacique S
 
 console.log("\n— Otras formas de declarar la empresa explícitamente —");
 assert(
+  extractExplicitCompanyMention("Quiero operar con la empresa El Cacique.", contacts)?.id === 11,
+  '"Quiero operar con la empresa El Cacique." resuelve El Cacique (menú post-reinicio)',
+);
+assert(
   extractExplicitCompanyMention("la empresa es el cacique", contacts)?.id === 11,
   '"la empresa es el cacique" (sola) también resuelve',
 );

@@ -1,6 +1,10 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import {
+  buildPendingOperationForkTurnLayer,
+  isTurnLayerForkPending,
+} from "@/lib/turnLayerContract";
 
 /**
  * Estado explícito de trámite pendiente de confirmación — reemplaza (con fallback)
@@ -34,7 +38,7 @@ export async function setPendingAction(
   phone: string,
   type: PendingActionType,
   opts?: { summary?: string; payload?: Record<string, unknown> },
-): Promise<void> {
+): Promise<boolean> {
   const record: PendingActionRecord = {
     type,
     summary: opts?.summary,
@@ -42,13 +46,21 @@ export async function setPendingAction(
     createdAt: new Date().toISOString(),
   };
   const normalized = normalizeWhatsAppPhone(phone);
-  if (!normalized) return;
-  await prisma.customer
-    .update({
+  if (!normalized) return false;
+  try {
+    await prisma.customer.update({
       where: { phone: normalized },
       data: { pendingAction: record as unknown as Prisma.InputJsonValue },
-    })
-    .catch(() => undefined);
+    });
+    return true;
+  } catch (err) {
+    console.error("[pendingAction] setPendingAction failed", {
+      phone: normalized,
+      type,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
 }
 
 export async function clearPendingAction(prisma: PrismaClient, phone: string): Promise<void> {
@@ -62,7 +74,6 @@ export async function clearPendingAction(prisma: PrismaClient, phone: string): P
     .catch(() => undefined);
 }
 
-/** Lee el trámite pendiente vigente (no vencido) para un teléfono, o null. */
 export async function getPendingAction(
   prisma: PrismaClient,
   phone: string,
@@ -81,4 +92,95 @@ export async function getPendingAction(
     return null;
   }
   return record;
+}
+
+/** Fusiona campos en `payload` sin perder el trámite vigente.
+ * @returns true si se persistió; false si no hay pending o falló el write.
+ */
+export async function patchPendingActionPayload(
+  prisma: PrismaClient,
+  phone: string,
+  payloadPatch: Record<string, unknown>,
+): Promise<boolean> {
+  const current = await getPendingAction(prisma, phone);
+  if (!current) return false;
+  const prevPayload = (current.payload ?? {}) as Record<string, unknown>;
+  const patchTurn = payloadPatch.turnLayer;
+  const mergedPayload: Record<string, unknown> = {
+    ...prevPayload,
+    ...payloadPatch,
+  };
+  if (patchTurn && typeof patchTurn === "object") {
+    mergedPayload.turnLayer = {
+      ...((prevPayload.turnLayer as Record<string, unknown>) ?? {}),
+      ...(patchTurn as Record<string, unknown>),
+    };
+  }
+  return setPendingAction(prisma, phone, current.type, {
+    summary: current.summary,
+    payload: mergedPayload,
+  });
+}
+
+/** Shell de recolección + turnLayer (bifurcación lateral) sin resumen CONFIRMO.
+ * Solo paths legacy estrictamente odómetro/horómetro — no usar para cert/maint.
+ */
+export async function ensureOdometerCollectingTurnLayer(
+  prisma: PrismaClient,
+  phone: string,
+  threadText: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const current = await getPendingAction(prisma, phone);
+  if (current?.type === "odometro") {
+    await patchPendingActionPayload(prisma, phone, payload);
+    return;
+  }
+  await setPendingAction(prisma, phone, "odometro", {
+    payload,
+  });
+}
+
+/**
+ * Fork multi-módulo: conserva type + payload/unidad; solo cambia turnLayer.
+ * Verifica persistencia antes de que el caller emita el menú.
+ */
+export async function ensurePendingOperationForkLayer(params: {
+  prisma: PrismaClient;
+  phone: string;
+  pendingAction: PendingActionRecord | null | undefined;
+  pendingOperation?: string | null;
+  pausedExpectation?: string | null;
+  threadText?: string;
+}): Promise<{ ok: boolean }> {
+  const current =
+    params.pendingAction ?? (await getPendingAction(params.prisma, params.phone));
+  if (!current) return { ok: false };
+
+  const previousType = current.type;
+  const previousPayload = { ...(current.payload ?? {}) };
+  const turnLayer = buildPendingOperationForkTurnLayer({
+    pendingAction: current,
+    pendingOperation: params.pendingOperation,
+    pausedExpectation: params.pausedExpectation,
+    threadText: params.threadText,
+  });
+
+  const patched = await patchPendingActionPayload(params.prisma, params.phone, {
+    turnLayer,
+  }).catch(() => false);
+  if (!patched) return { ok: false };
+
+  const refreshed = await getPendingAction(params.prisma, params.phone);
+  if (!refreshed || refreshed.type !== previousType) return { ok: false };
+  if (!isTurnLayerForkPending(refreshed)) return { ok: false };
+
+  // Unidad / datos del trámite no deben haberse perdido por el patch.
+  const refreshedPayload = refreshed.payload ?? {};
+  for (const key of ["patente", "plate", "meterType", "meterKind", "stage"] as const) {
+    if (previousPayload[key] != null && refreshedPayload[key] == null) {
+      return { ok: false };
+    }
+  }
+  return { ok: true };
 }

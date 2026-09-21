@@ -1,4 +1,24 @@
-import { stripBotPromptExamples, stripBotOdometerBotSpeech } from "@/lib/odometroFecha";
+import {
+  botLineAnchorsCertificateUnitAsk,
+  botLineIsCertificateUnitClarification,
+} from "@/lib/certificateFlowMessages";
+import {
+  looksLikeFechaHoraLecturaMessage,
+  stripBotPromptExamples,
+  stripBotOdometerBotSpeech,
+} from "@/lib/odometroFecha";
+import {
+  detectServiceIntentInMessage,
+  extractEmbeddedNumericReferences,
+  extractUnitMovilIdsFromMessage,
+  looksLikeNamedServiceWithUnitReference,
+  type FleetUnitRef,
+  type NumericExpectedField,
+} from "@/lib/unitReferenceParser";
+import { hasPendingWriteNegationCue, looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
+import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
+
+export { looksLikeNamedServiceWithUnitReference };
 
 export type WaraIncidentType =
   | "MISSING_REPORT"
@@ -9,12 +29,8 @@ export type WaraIncidentType =
   | "ADMIN_DERIVATION"
   | "OTHER";
 
-export type ResolutionMode =
-  | "CHAT_RESOLVED"
-  | "PENDING_VALIDATION"
-  | "BACKOFFICE_DERIVED"
-  | "TECH_ESCALATED"
-  | "CLOSED_NO_ACTION";
+export type { ResolutionMode } from "@/lib/types";
+export { resolutionModeLabels } from "@/lib/types";
 
 export const waraIncidentLabels: Record<WaraIncidentType, string> = {
   MISSING_REPORT: "Falta de reporte",
@@ -49,14 +65,6 @@ export function shouldAutoAssignInboundTicket(incidentType: WaraIncidentType): b
   if (BOT_ONLY_INCIDENT_TYPES.has(incidentType)) return false;
   return ADVISOR_ASSIGN_INCIDENT_TYPES.has(incidentType);
 }
-
-export const resolutionModeLabels: Record<ResolutionMode, string> = {
-  CHAT_RESOLVED: "Resuelto en chat",
-  PENDING_VALIDATION: "Pendiente de validación",
-  BACKOFFICE_DERIVED: "Derivado a backoffice",
-  TECH_ESCALATED: "Escalado técnico",
-  CLOSED_NO_ACTION: "Cerrado sin acción",
-};
 
 const PLATE_REGEX_GLOBAL =
   /\b([A-Z]{2}[\s-]?\d{3}[\s-]?[A-Z]{2}|[A-Z]{3}[\s-]?\d{3}|[A-Z]{3}[\s-]?\d{4})\b/gi;
@@ -121,7 +129,18 @@ export function looksLikeBareNumericUnitId(value: string | null | undefined): bo
  * Detecta la primera patente REAL en el texto, ignorando las patentes de ejemplo
  * de los prompts. Si solo hay ejemplos, devuelve null.
  */
-const PLATE_STOPWORDS = new Set(["DEL", "LOS", "LAS", "UNA", "UNO", "CON", "POR", "SUS"]);
+const PLATE_STOPWORDS = new Set([
+  "DEL",
+  "LOS",
+  "LAS",
+  "UNA",
+  "UNO",
+  "CON",
+  "POR",
+  "SUS",
+  // Prefijo de interno de flota (INT 145 / INT-145), no patente Mercosur.
+  "INT",
+]);
 
 export function detectPlate(text: string): string | null {
   if (!text) return null;
@@ -185,7 +204,9 @@ export function looksLikePlateOnlyMessage(text: string): boolean {
   // (que sí puede resolver contra el catálogo real vía filterUnitsByNombre).
   if (!/^[A-Za-z]{2,3}/.test(compact)) return false;
   const norm = normalizePlate(compact);
-  return !!(norm && !isExamplePlate(norm));
+  // INT145 u otros tokens con stopword / formato no-patente no cuentan como patente suelta.
+  if (!norm || isExamplePlate(norm) || !isPlausibleVehiclePlate(norm)) return false;
+  return true;
 }
 
 /** Prefijo suelto de patente (NKL, HEJ, AG) sin ser patente completa. */
@@ -267,8 +288,39 @@ const NON_PLATE_PREFIX_WORDS = new Set([
   "nope",
   "nel",
   "nah",
+  // Bug prod 2026-09-17: «Zi» tras idle nudge → «patente que empiece con ZI».
+  "zi",
+  "zii",
+  "si",
+  "sip",
+  "sii",
   // Bug real, producción 2026-07-31: "La veo detenida" → prefijo VEO (verbo "veo", no patente).
   "veo",
+  // Bug real, producción 2026-08-24: "Gps" solo → prefijo GPS → "unidad no encontrada"
+  // en vez de pedir la patente para el reporte de estado.
+  "gps",
+  "estado",
+  "reporte",
+  "ignicion",
+  "posicion",
+  "ubicacion",
+  "odometro",
+  "horometro",
+  "certificado",
+  "cobertura",
+  "mantenimiento",
+  "preventivo",
+  "correctivo",
+  "flota",
+  "unidad",
+  "unidades",
+  "patente",
+  "matricula",
+  "ticket",
+  "voltaje",
+  "telemetria",
+  "senal",
+  "offline",
 ]);
 
 // Tolerantes a la letra de más/de menos más común en "empieza"/"comienza"
@@ -470,6 +522,7 @@ function isLikelyPlateOrPrefixToken(hint: string): boolean {
 export function extractPlateCorrectionHint(text: string | undefined | null): string | null {
   const raw = String(text ?? "").trim();
   if (!raw) return null;
+  if (looksLikeFechaHoraLecturaMessage(raw)) return null;
   const norm = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -507,7 +560,7 @@ export function extractPlateCorrectionHint(text: string | undefined | null): str
       // pasar nombres de marca reales ("Saveiro", "Nissan") que sí ayudan a resolver.
       if (
         hint.length >= 3 &&
-        !/^(CORRECTA|OTRA|OTRO|ESA|ESE|LA|EL|MIS|UNA|ESA|ESO|UNIDAD|UNIDADES|VEHICULO|VEHICULOS|PATENTE|PATENTES|MATRICULA|MATRICULAS|CAMION|CAMIONES|AUTO|AUTOS|COCHE|MOTO|FLOTA|MENCIONADA|MENCIONADO|ANTERIOR|MISMA|MISMO|DICHA|DICHO|REFERIDA|REFERIDO|CUESTION|ULTIMA|ULTIMO|ULTIMAS|ULTIMOS|UBICACION|COORDENADAS|COORDENADA|POSICION|REPORTE|ESTADO|GPS|CONSULTA)$/.test(
+        !/^(CORRECTA|OTRA|OTRO|ESA|ESE|LA|EL|MIS|UNA|ESA|ESO|UNIDAD|UNIDADES|VEHICULO|VEHICULOS|PATENTE|PATENTES|MATRICULA|MATRICULAS|CAMION|CAMIONES|AUTO|AUTOS|COCHE|MOTO|FLOTA|MENCIONADA|MENCIONADO|ANTERIOR|MISMA|MISMO|DICHA|DICHO|REFERIDA|REFERIDO|CUESTION|ULTIMA|ULTIMO|ULTIMAS|ULTIMOS|UBICACION|COORDENADAS|COORDENADA|POSICION|REPORTE|ESTADO|GPS|CONSULTA|TARDE|MANANA|NOCHE|MADRUGADA|MEDIODIA|MEDIANOCHE|HOY|AYER|ANOCHE|ANTEAYER)$/.test(
           hint,
         )
       ) {
@@ -574,6 +627,38 @@ export function threadHasAgentStyleOdometerConfirmPending(threadText: string): b
   );
 }
 
+/**
+ * Resumen WhatsApp estructurado (🛣 *Confirmar odómetro* / ⏱ *Confirmar horómetro*).
+ * Bug real 2026-08-23: formatMeterConfirm ya no dice "Voy a registrar:" →
+ * hasPendingOdometerConfirmation quedaba false → "Horometro" caía a clarify de odómetro
+ * en vez de preguntar si concluir el pendiente o cambiar de trámite.
+ */
+export function threadHasStructuredMeterConfirmPending(threadText: string): boolean {
+  if (threadOdometerRegistrationCompleted(threadText)) return false;
+  if (isOdometerFlowSuperseded(threadText)) return false;
+  const tail = threadText.slice(-2500).toLowerCase();
+  const lastConfirmIdx = Math.max(
+    tail.lastIndexOf("confirmar odómetro"),
+    tail.lastIndexOf("confirmar odometro"),
+    tail.lastIndexOf("confirmar horómetro"),
+    tail.lastIndexOf("confirmar horometro"),
+  );
+  if (lastConfirmIdx < 0) return false;
+  const afterLastConfirm = tail.slice(lastConfirmIdx);
+  const reopenedAfterConfirm =
+    /perfecto, tomo /.test(afterLastConfirm.slice(18)) ||
+    /cu[aá]l es el nuevo (od[oó]metro|hor[oó]metro)/.test(afterLastConfirm.slice(18)) ||
+    /necesito la patente/.test(afterLastConfirm.slice(18)) ||
+    /pasame el valor del (od[oó]metro|hor[oó]metro)/.test(afterLastConfirm.slice(18)) ||
+    /valor anotado/.test(afterLastConfirm.slice(18));
+  if (reopenedAfterConfirm) return false;
+  return (
+    /respond[eé]\s+\*?confirmo/.test(afterLastConfirm) ||
+    /confirm[aá]s el registro/.test(afterLastConfirm) ||
+    /\bconfirmo\b/.test(afterLastConfirm)
+  );
+}
+
 /** Resumen de odómetro pendiente de confirmación (ChatPDF o backend). */
 export function hasPendingOdometerConfirmation(threadText: string): boolean {
   const tail = threadText.slice(-2500).toLowerCase();
@@ -583,6 +668,7 @@ export function hasPendingOdometerConfirmation(threadText: string): boolean {
   if (threadHasOdometerConfirmStillPendingCue(threadText)) return true;
   if (isOdometerFlowSuperseded(threadText)) return false;
   if (threadHasAgentStyleOdometerConfirmPending(threadText)) return true;
+  if (threadHasStructuredMeterConfirmPending(threadText)) return true;
   // Bug real, producción 2026-07-28: tras confirmar patente incorrecta ("Voy a
   // registrar: Patente LWK 7902...respondé CONFIRMO"), el cliente corrigió la unidad
   // ("no para la unidad HEJ") y el bot volvió a preguntar el valor ("Perfecto, tomo
@@ -707,6 +793,8 @@ export function isOdometerFlowSuperseded(threadText: string): boolean {
     lower.lastIndexOf("nuevo odometro en km"),
     lower.lastIndexOf("pasame el nuevo odómetro en km"),
     lower.lastIndexOf("pasame el nuevo odometro en km"),
+    lower.lastIndexOf("pasame el valor del odómetro"),
+    lower.lastIndexOf("pasame el valor del odometro"),
     lower.lastIndexOf("pasame el nuevo horómetro en horas"),
     lower.lastIndexOf("pasame el nuevo horometro en horas"),
     lower.lastIndexOf("perfecto, tomo "),
@@ -807,6 +895,8 @@ function lastOdometerFlowMarkerIndex(threadText: string): number {
     lower.lastIndexOf("nuevo odometro en km"),
     lower.lastIndexOf("pasame el nuevo odómetro en km"),
     lower.lastIndexOf("pasame el nuevo odometro en km"),
+    lower.lastIndexOf("pasame el valor del odómetro"),
+    lower.lastIndexOf("pasame el valor del odometro"),
     lower.lastIndexOf("pasame el nuevo horómetro en horas"),
     lower.lastIndexOf("pasame el nuevo horometro en horas"),
     lower.lastIndexOf("perfecto, tomo "),
@@ -850,6 +940,9 @@ function odometerFlowPausedByLaterTramite(threadText: string): boolean {
     lower.lastIndexOf("matricula exacta"),
     lower.lastIndexOf("decime la matrícula exacta"),
     lower.lastIndexOf("decime la matricula exacta"),
+    lower.lastIndexOf("decime la patente exacta"),
+    lower.lastIndexOf("patente exacta"),
+    lower.lastIndexOf("decime la patente completa"),
   ].filter((i) => i >= 0);
   if (unitConsultMarkers.length && Math.max(...unitConsultMarkers) > markerIdx) return true;
   const afterTail = after.slice(80).toLowerCase();
@@ -960,12 +1053,49 @@ export function threadAwaitingOdometerConfirmDetails(threadText: string): boolea
   );
 }
 
+/** Cliente pidió cambio de odómetro/horómetro en mensajes recientes del hilo. */
+export function threadHasRecentCustomerMeterUpdateIntent(threadText: string): boolean {
+  const lines = threadText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-24);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (/^(atilio|bot|wara)\s*:/i.test(line)) continue;
+    // Líneas del bot sin prefijo (tests / transcripts compactos).
+    if (
+      /^(perfecto, tomo |para registrar el cambio|voy a registrar:|ten[eé]s \d+ unidades|indic[aá]me la matr[ií]cula|por favor, indic[aá]me|ayudame a encontrar mi unidad|encontr[eé] varias unidades)/i.test(
+        line,
+      )
+    ) {
+      continue;
+    }
+    const msg = line.replace(/^cliente:\s*/i, "").trim();
+    if (!msg) continue;
+    if (looksLikeExplicitOdometerUpdateRequest(msg) || looksLikeHorometerOnlyIntent(msg)) {
+      return true;
+    }
+    const norm = msg
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (
+      /\b(cambiar|actualizar|registrar|informar|modificar)\b/.test(norm) &&
+      /\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(norm)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Tras pedir horómetro/odómetro, el bot pidió aclarar la unidad (varias coincidencias). */
 export function threadHasOdometerUnitClarificationPending(threadText: string): boolean {
   if (isOdometerFlowSuperseded(threadText)) return false;
   const tail = threadText.slice(-3500).toLowerCase();
   const unitPickCue =
-    /encontr[eé] varias unidades|patente exacta|empiezan con|no encontr[eé] ninguna unidad|decime la patente completa|cu[aá]l quer[eé]s|pasame la patente exacta/i.test(
+    /encontr[eé] varias unidades|patente exacta|matricula exacta|matr[ií]cula exacta|confirm[aá].{0,30}matr[ií]cula|empiezan con|no encontr[eé] ninguna unidad|decime la patente completa|cu[aá]l quer[eé]s|pasame la patente exacta/i.test(
       tail,
     );
   if (!unitPickCue) return false;
@@ -985,6 +1115,7 @@ export function threadHasActiveOdometerFlow(threadText: string): boolean {
   return (
     threadAwaitingOdometerPlate(threadText) ||
     threadAwaitingHorometerPlate(threadText) ||
+    threadAwaitingOdometerKmValue(threadText) ||
     threadAwaitingHorometerKmValue(threadText) ||
     threadAwaitingOdometerConfirmDetails(threadText) ||
     threadHasOdometerUnitClarificationPending(threadText) ||
@@ -1049,12 +1180,150 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   return false;
 }
 
+/** Números que identifican unidad (código interno / movil_id), no lectura de medidor — cualquier prefijo numérico. */
+export function extractUnitCodeNumbersFromMessage(
+  rawText: string,
+  opts?: {
+    expectedField?: NumericExpectedField;
+    fleet?: FleetUnitRef[];
+  },
+): number[] {
+  return extractUnitMovilIdsFromMessage({
+    rawText,
+    expectedField: opts?.expectedField ?? "none",
+    fleet: opts?.fleet,
+  });
+}
+
+/** Descarta km/hs que en realidad son código de unidad (ej. 900114 tras "unidad"). */
+export function stripMeterValuesMatchingUnitReference(
+  rawText: string,
+  values: { odometro?: number; horometro?: number },
+  opts?: { preserveMeterValues?: boolean },
+): { odometro?: number; horometro?: number } {
+  if (opts?.preserveMeterValues) return values;
+  const unitCodes = new Set(extractUnitCodeNumbersFromMessage(rawText));
+  if (!unitCodes.size) return values;
+  let { odometro, horometro } = values;
+  if (typeof odometro === "number" && unitCodes.has(odometro)) odometro = undefined;
+  if (typeof horometro === "number" && unitCodes.has(horometro)) horometro = undefined;
+  return { odometro, horometro };
+}
+
+/** Último "Tomé … (N km|h)" del bot en el tail del hilo. */
+export function lastTomoMeterKindInThreadTail(
+  threadText: string,
+): "odometro" | "horometro" | null {
+  const tail = threadText.slice(-2500);
+  const matches = [...tail.matchAll(/tom[eé]\s+[^.\n]+?\(\s*([\d.,]+)\s*(km|h)\s*\)/gi)];
+  if (!matches.length) return null;
+  const unit = matches[matches.length - 1][2].toLowerCase();
+  if (unit === "h") return "horometro";
+  if (unit.startsWith("km")) return "odometro";
+  return null;
+}
+
+/** Último encabezado WhatsApp estructurado 🛣 Odómetro vs ⏱ Horómetro en el tail. */
+export function lastStructuredMeterKindInThreadTail(
+  threadText: string,
+): "odometro" | "horometro" | null {
+  const tail = threadText.slice(-2500);
+  let lastOdo = -1;
+  let lastHoro = -1;
+  for (const m of tail.matchAll(/🛣\s*\*[Oo]d[oó]metro\*/g)) {
+    if (m.index != null) lastOdo = m.index;
+  }
+  for (const m of tail.matchAll(/⏱\s*\*[Hh]or[oó]metro\*/g)) {
+    if (m.index != null) lastHoro = m.index;
+  }
+  if (lastOdo < 0 && lastHoro < 0) return null;
+  return lastHoro > lastOdo ? "horometro" : "odometro";
+}
+
+/**
+ * De todos los prompts del bot pidiendo odómetro u horómetro (texto plano + plantillas
+ * WhatsApp estructuradas), ¿cuál aparece más tarde en el tail del hilo?
+ */
+export function lastAwaitingMeterPromptInTail(
+  threadText: string,
+): "odometro" | "horometro" | null {
+  const tail = threadText.slice(-2500);
+  const tailNorm = tail
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  type Marker = { kind: "odometro" | "horometro"; idx: number };
+  const markers: Marker[] = [];
+  const addNorm = (needle: string, kind: "odometro" | "horometro") => {
+    const n = needle
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const idx = tailNorm.lastIndexOf(n);
+    if (idx >= 0) markers.push({ kind, idx });
+  };
+  addNorm("para registrar el cambio de horometro necesito la patente", "horometro");
+  addNorm("cual es el nuevo horometro en horas", "horometro");
+  addNorm("cuantas horas de motor", "horometro");
+  addNorm("pasame el valor del horometro", "horometro");
+  addNorm("pasame el nuevo horometro", "horometro");
+  addNorm("para registrar el cambio de odometro necesito la patente", "odometro");
+  addNorm("cual es el nuevo odometro en km", "odometro");
+  addNorm("cual es el nuevo valor de odometro", "odometro");
+  addNorm("pasame el valor del odometro", "odometro");
+  addNorm("pasame el nuevo odometro", "odometro");
+  for (const m of tail.matchAll(/🛣️?\s*(?:\*[Oo]d[oó]metro\*|[Oo]d[oó]metro)/g)) {
+    if (m.index != null) markers.push({ kind: "odometro", idx: m.index });
+  }
+  for (const m of tail.matchAll(/⏱️?\s*(?:\*[Hh]or[oó]metro\*|[Hh]or[oó]metro)/g)) {
+    if (m.index != null) markers.push({ kind: "horometro", idx: m.index });
+  }
+  for (const m of tail.matchAll(/🔢\s*valor:\s*\*[\d.,]+\*\s*km/gi)) {
+    if (m.index != null) markers.push({ kind: "odometro", idx: m.index });
+  }
+  for (const m of tail.matchAll(/🔢\s*valor:\s*\*[\d.,]+\*\s*hs/gi)) {
+    if (m.index != null) markers.push({ kind: "horometro", idx: m.index });
+  }
+  if (!markers.length) return null;
+  markers.sort((a, b) => b.idx - a.idx);
+  return markers[0].kind;
+}
+
+function resolveAwaitingMeterKindInThread(threadText: string): "odometro" | "horometro" | null {
+  return (
+    lastTomoMeterKindInThreadTail(threadText) ??
+    lastAwaitingMeterPromptInTail(threadText) ??
+    lastStructuredMeterKindInThreadTail(threadText)
+  );
+}
+
+function threadBotAskedMissingFechaHora(threadText: string): boolean {
+  const tail = threadText.slice(-2500).toLowerCase();
+  return (
+    /me falta la .{0,12}fecha y hora.{0,12} de la lectura/i.test(tail) ||
+    /me falta la fecha y hora de la lectura/i.test(tail)
+  );
+}
+
 /** El bot pidió el nuevo odómetro en km (patente ya confirmada). */
 export function threadAwaitingOdometerKmValue(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  const tail = threadText.slice(-2500).toLowerCase();
+  const scoped = threadTailSinceFleetUnitSearch(threadText);
+  const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
+  if (threadBotAskedMissingFechaHora(scoped)) {
+    const kind = resolveAwaitingMeterKindInThread(scoped);
+    if (kind === "odometro") return true;
+    if (kind === "horometro") return false;
+  }
+  const structuredKind = lastAwaitingMeterPromptInTail(scoped);
+  const tailHasOdometerKmAsk =
+    /pasame el valor del od[oó]metro|pasame el nuevo od[oó]metro|nuevo od[oó]metro en km|valor del od[oó]metro en \*?km|🔢/.test(
+      tail,
+    );
+  if (structuredKind === "odometro" && tailHasOdometerKmAsk) return true;
+  if (structuredKind === "horometro") return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo od[oó]metro/i.test(tail) ||
     /perfecto, tomo .+ pasame el nuevo od[oó]metro/i.test(tail) ||
@@ -1062,8 +1331,9 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
     /cu[aá]l es el nuevo valor de od[oó]metro/i.test(tail) ||
     /nuevo od[oó]metro en km/i.test(tail) ||
     /pasame el nuevo od[oó]metro en km/i.test(tail) ||
-    /od[oó]metro en km,?\s*(y )?la fecha y (la )?hora/i.test(tail) ||
-    /fecha y hora de la lectura/i.test(tail)
+    /pasame el valor del od[oó]metro/i.test(tail) ||
+    /od[oó]metro en .{0,12}km/i.test(tail) ||
+    /od[oó]metro en km,?\s*(y )?la fecha y (la )?hora/i.test(tail)
   );
 }
 
@@ -1071,13 +1341,29 @@ export function threadAwaitingOdometerKmValue(threadText: string): boolean {
 export function threadAwaitingHorometerKmValue(threadText: string): boolean {
   if (threadOdometerRegistrationCompleted(threadText)) return false;
   if (isOdometerFlowSuperseded(threadText)) return false;
-  const tail = threadText.slice(-2500).toLowerCase();
+  const scoped = threadTailSinceFleetUnitSearch(threadText);
+  const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
+  if (threadBotAskedMissingFechaHora(scoped)) {
+    const kind = resolveAwaitingMeterKindInThread(scoped);
+    if (kind === "horometro") return true;
+    if (kind === "odometro") return false;
+  }
+  const structuredKind = lastAwaitingMeterPromptInTail(scoped);
+  const tailHasHorometerHsAsk =
+    /pasame el valor del hor[oó]metro|pasame el nuevo hor[oó]metro|nuevo hor[oó]metro en horas|valor del hor[oó]metro en \*?hs|🔢/.test(
+      tail,
+    );
+  if (structuredKind === "horometro" && tailHasHorometerHsAsk) return true;
+  if (structuredKind === "odometro") return false;
   return (
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
     /perfecto, tomo .+ pasame el nuevo hor[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo hor[oó]metro en horas/i.test(tail) ||
     /pasame el nuevo hor[oó]metro en horas/i.test(tail) ||
+    /pasame el valor del hor[oó]metro/i.test(tail) ||
+    /hor[oó]metro en .{0,12}hs/i.test(tail) ||
+    /hor[oó]metro en horas,?\s*(y )?la fecha/i.test(tail) ||
     /hor[oó]metro en horas,?\s*la fecha y la hora/i.test(tail) ||
     /tom[eé] la fecha.+?cu[aá]ntas horas de motor/i.test(tail)
   );
@@ -1228,6 +1514,20 @@ export function threadHasCertificateUnitPrompt(threadText: string): boolean {
   const tail = lines.slice(-12).join("\n").toLowerCase();
   if (/para el certificado de cobertura necesito la unidad/.test(tail)) return true;
 
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 12; i--) {
+    if (botLineAnchorsCertificateUnitAsk(lines[i])) return true;
+  }
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 12; i--) {
+    if (!botLineIsCertificateUnitClarification(lines[i])) continue;
+    const prior = lines.slice(Math.max(0, i - 12), i).join("\n");
+    if (
+      looksLikeCertificateKeyword(prior) ||
+      lines.slice(0, i).some((l) => botLineAnchorsCertificateUnitAsk(l))
+    ) {
+      return true;
+    }
+  }
+
   // Ancla: el "¿Cuál unidad?" genérico, pero SOLO cuando el pedido que lo motivó fue
   // de certificado (looksLikeCertificateKeyword sobre lo anterior).
   for (let i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) {
@@ -1295,9 +1595,10 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
 }
 
 /**
- * Solo menciona odómetro/horómetro sin decir qué hacer (ej. "ODOMETRO", "el odómetro").
+ * Solo menciona odómetro/kilometraje sin decir qué hacer (ej. "ODOMETRO", "el odómetro").
  * Bug 2026-08-07: tras elegir unidad, "ODOMETRO" se ignoraba / se trataba como síntoma GPS
  * en vez de preguntar si quiere corregir km u otra cosa.
+ * No incluye horómetro: eso es looksLikeBareHorometerTopicMention / looksLikeHorometerOnlyIntent.
  */
 export function looksLikeBareOdometerTopicMention(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
@@ -1306,6 +1607,7 @@ export function looksLikeBareOdometerTopicMention(text: string | undefined | nul
   if (looksLikeOdometerInfoRequest(raw)) return false;
   if (looksLikeOdometerProblemReport(raw)) return false;
   if (looksLikeOdometerHelpRequest(raw)) return false;
+  if (looksLikeHorometerOnlyIntent(raw)) return false;
   if (detectLoosePlate(raw) || detectPlate(raw)) return false;
   const t = raw
     .normalize("NFD")
@@ -1313,7 +1615,21 @@ export function looksLikeBareOdometerTopicMention(text: string | undefined | nul
     .toLowerCase()
     .replace(/[!?.¡¿]+/g, "")
     .trim();
-  return /^(el\s+|la\s+|del\s+|sobre\s+(el\s+)?)?(od[oó]metro|hor[oó]metro|kilometraje)s?$/.test(t);
+  return /^(el\s+|la\s+|del\s+|sobre\s+(el\s+)?)?(od[oó]metro|kilometraje)s?$/.test(t);
+}
+
+/** Solo "horómetro" / "el horómetro" sin verbo de acción. */
+export function looksLikeBareHorometerTopicMention(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 40) return false;
+  if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[!?.¡¿]+/g, "")
+    .trim();
+  return /^(el\s+|la\s+|del\s+|sobre\s+(el\s+)?)?hor[oó]metros?$/.test(t);
 }
 
 /**
@@ -1500,11 +1816,29 @@ export function looksLikeStructuredOdometerUpdateRequest(text: string | undefine
   return false;
 }
 
+/**
+ * "Odometro 900112" / "horómetro M900-112" — servicio + unidad sin verbo
+ * (cambiar/actualizar). Bug real 2026-08-23: no matcheaba intentStart ni bare
+ * mention y, con prompt GPS en el hilo, caía a unidades pidiendo "matrícula exacta".
+ */
+export function looksLikeOdometerServiceWithUnitReference(
+  text: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 200) return false;
+  if (looksLikeOdometerProblemReport(raw)) return false;
+  if (looksLikeOdometerInfoRequest(raw)) return false;
+  const intent = detectServiceIntentInMessage(raw);
+  if (intent !== "odometro" && intent !== "horometro") return false;
+  return looksLikeNamedServiceWithUnitReference(raw);
+}
+
 /** Mensaje actual pide trámite de actualización de odómetro (no guía ni otro módulo). */
 export function looksLikeExplicitOdometerUpdateRequest(text: string | undefined | null): boolean {
   if (looksLikeOdometerProblemReport(text)) return false;
   if (looksLikeOdometerInfoRequest(text)) return false;
   if (looksLikeStructuredOdometerUpdateRequest(text)) return true;
+  if (looksLikeOdometerServiceWithUnitReference(text)) return true;
   return looksLikeOdometerIntentStart(text) || looksLikeOdometerHelpRequest(text);
 }
 
@@ -1577,13 +1911,19 @@ export function lineLooksLikeBotMissingPlatePrompt(line: string): boolean {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+  const hasExample = /(ej\.|ejemplo|marca\/nombre|por ejemplo)/.test(norm);
+  if (!hasExample) return false;
   return (
-    (/para registrar el cambio de odometro necesito la patente/.test(norm) ||
-      (/necesito la patente de la unidad/.test(norm) &&
-        /odometro|horometro|kilometraje/.test(norm)) ||
-      /para programar mantenimiento preventivo necesito la patente/.test(norm) ||
-      /para registrar el mantenimiento necesito la patente/.test(norm)) &&
-    /(ej\.|ejemplo|marca\/nombre|por ejemplo)/.test(norm)
+    /para registrar el cambio de odometro necesito la patente/.test(norm) ||
+    (/necesito la patente de la unidad/.test(norm) &&
+      /odometro|horometro|kilometraje/.test(norm)) ||
+    /para programar mantenimiento preventivo necesito la patente/.test(norm) ||
+    /para registrar el mantenimiento necesito la patente/.test(norm) ||
+    /pasame la matricula de la unidad/.test(norm) ||
+    /para revisar el gps/.test(norm) ||
+    /revisar el gps, la ignicion o el reporte/.test(norm) ||
+    (/necesito la unidad/.test(norm) && /patente/.test(norm)) ||
+    (/cual es la patente o unidad/.test(norm) && /matricula/.test(norm))
   );
 }
 
@@ -1601,7 +1941,7 @@ export function extractLastPlateFromThread(text: string): string | null {
     if (lineLooksLikeBotPlateRejection(line)) continue;
     if (lineLooksLikeBotMissingPlatePrompt(line)) continue;
     const labeled = [
-      ...line.matchAll(/(?:Patente|Matr[ií]cula)[^\n:]*[:\-]\s*([A-Za-z0-9 ]{5,12})/gi),
+      ...line.matchAll(/(?:Patente|Matr[ií]cula|Unidad)[^\n:]*[:\-]\s*\*?([A-Za-z0-9 ]{5,12})/gi),
     ];
     for (let i = labeled.length - 1; i >= 0; i--) {
       const plate = normalizePlate(labeled[i][1]);
@@ -1681,6 +2021,7 @@ export function extractOdometroFromOdometerContext(text: string): number | undef
     /(?:nuevo valor(?: del od[oó]metro)?|el od[oó]metro es|valor del od[oó]metro es|el nuevo valor es)\s*(?:de\s+)?([\d.,]+)\s*(?:km)?/gi,
     /(?:los\s+)?(?:kil[oó]metros?|kilometraje|km)\s*(?:son|es|de|:)?\s*([\d.,]+)/gi,
     /(\d[\d.,]{2,})\s*km\b/gi,
+    /🔢\s*valor:\s*\*([\d.,]+)\*\s*km/gi,
   ];
   for (const re of patterns) {
     const matches = [...tail.matchAll(re)];
@@ -1703,13 +2044,32 @@ export function extractHorometroFromOdometerSummary(text: string): number | unde
   return undefined;
 }
 
-/** Patente confirmada en "Perfecto, tomo OST 225. ¿Cuál es el nuevo horómetro?" */
+/** Patente confirmada en "Perfecto, tomo …" o "Tomé … (N km|h)" del bot. */
 export function extractPlateFromPerfectoTomo(text: string): string | undefined {
-  const matches = [...(text || "").matchAll(/perfecto,\s*tomo\s+([A-Za-z0-9 ]{4,14})/gi)];
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const plate = normalizePlate(matches[i][1].replace(/\.\s*$/, ""));
+  const tryPlate = (raw: string | undefined): string | undefined => {
+    const plate = normalizePlate(String(raw ?? "").replace(/\.\s*$/, "").trim());
     if (plate && isPlausibleVehiclePlate(plate) && !isExamplePlate(plate)) return plate;
+    return undefined;
+  };
+
+  const perfectoMatches = [...(text || "").matchAll(/perfecto,\s*tomo\s+([A-Za-z0-9 ]{4,14})/gi)];
+  for (let i = perfectoMatches.length - 1; i >= 0; i--) {
+    const plate = tryPlate(perfectoMatches[i][1]);
+    if (plate) return plate;
   }
+
+  const tomeMatches = [
+    ...(text || "").matchAll(
+      /\btom[eé]\s+(?:el\s+d[ií]a\s+[\d./]+\s+para\s+)?([A-Za-z0-9 ]{4,14})(?:\s*\([\d.,]+\s*(?:km|h)\))?/gi,
+    ),
+  ];
+  for (let i = tomeMatches.length - 1; i >= 0; i--) {
+    const raw = tomeMatches[i][1]?.trim();
+    if (!raw || /^(?:el|la|d[ií]a|para)\b/i.test(raw)) continue;
+    const plate = tryPlate(raw);
+    if (plate) return plate;
+  }
+
   return undefined;
 }
 
@@ -1751,26 +2111,46 @@ export function resolveOdometerContextPlate(params: {
   return last ?? active ?? summary ?? maintSuccess ?? "";
 }
 
+/** Índice del último pedido de patente para mantenimiento operativo (o -1). */
+export function lastMaintenancePlateAskIndex(threadText: string): number {
+  const lower = threadText
+    .slice(-2500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/mantenimiento/.test(lower)) return -1;
+  const markers = [
+    lower.lastIndexOf("para programar mantenimiento preventivo necesito la patente"),
+    lower.lastIndexOf("para registrar el mantenimiento necesito la patente"),
+    lower.lastIndexOf("necesito la patente de la unidad"),
+    lower.lastIndexOf("decime la patente de la unidad"),
+    lower.lastIndexOf("yo lo dejo cargado en wara"),
+    lower.lastIndexOf("puedo registrar o programar un mantenimiento"),
+  ].filter((i) => i >= 0);
+  if (!markers.length) {
+    if (/patente de la unidad/.test(lower) && /preventivo|correctivo/.test(lower)) {
+      return Math.max(lower.lastIndexOf("patente de la unidad"), 0);
+    }
+    return -1;
+  }
+  return Math.max(...markers);
+}
+
 /** El bot acaba de pedir patente para un trámite operativo de mantenimiento. */
 export function hasPendingMaintenancePlateRequest(threadText: string): boolean {
   if (certificateFlowState(threadText) === "awaiting_unit") return false;
-  const tail = threadText.slice(-2500).toLowerCase();
-  const askedForPlate =
-    /para programar mantenimiento preventivo necesito la patente/.test(tail) ||
-    /para registrar el mantenimiento necesito la patente/.test(tail) ||
-    /necesito la patente de la unidad/.test(tail) ||
-    /decime la patente de la unidad/.test(tail) ||
-    (/patente de la unidad/.test(tail) && /preventivo o correctivo/.test(tail)) ||
-    (/yo lo dejo cargado en wara/.test(tail) && /patente/.test(tail)) ||
-    (/puedo registrar o programar un mantenimiento/.test(tail) && /patente/.test(tail));
-  return askedForPlate && /mantenimiento/.test(tail);
+  const maintAsk = lastMaintenancePlateAskIndex(threadText);
+  if (maintAsk < 0) return false;
+  // Si después hubo un pedido de consulta GPS/unidad, el mantenimiento queda stale.
+  const unitAsk = lastUnitConsultPlateAskIndex(threadText);
+  if (unitAsk > maintAsk) return false;
+  const meterAsk = lastMeterPlateAskIndex(threadText);
+  if (meterAsk > maintAsk) return false;
+  return true;
 }
 
-/** El bot pidió patente/nombre para consultar una unidad (GPS, estado, búsqueda), no odómetro/mantenimiento/cert. */
-export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
-  if (certificateFlowState(threadText) !== "none") return false;
-  if (hasPendingMaintenancePlateRequest(threadText)) return false;
-
+/** Índice del último pedido de unidad para GPS/estado (o -1). */
+export function lastUnitConsultPlateAskIndex(threadText: string): number {
   const lower = threadText
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -1786,6 +2166,13 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("entendido, no era esa"),
     lower.lastIndexOf("decime la matrícula exacta"),
     lower.lastIndexOf("decime la matricula exacta"),
+    // Bug prod 2026-09-09: el bot pide "Decime la patente exacta" (waraUnitIntent)
+    // pero solo se detectaba "matrícula exacta" → se perdía continuidad GPS y el
+    // agente asociaba M300-xxx con odómetro.
+    lower.lastIndexOf("decime la patente exacta"),
+    lower.lastIndexOf("patente exacta"),
+    lower.lastIndexOf("decime la patente completa"),
+    lower.lastIndexOf("patente completa"),
     lower.lastIndexOf("patente de la unidad que quer"),
     lower.lastIndexOf("patente de la unidad que quier"),
     lower.lastIndexOf("pasar la patente de la unidad"),
@@ -1803,14 +2190,10 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("última posición de la"),
     lower.lastIndexOf("ultima posición de la"),
     lower.lastIndexOf("última posicion de la"),
-    // Bug real 2026-08-03: pedido de otra unidad sin reporte ("Pasame la patente...
-    // sin reporte") no matcheaba ningún marcador y threadAwaitingOdometerPlate lo
-    // confundía con trámite de odómetro — "Perfecto, tomo AC 607 XB. ¿Cuál es el nuevo odómetro?"
     lower.lastIndexOf("otra unidad sin reporte"),
     lower.lastIndexOf("nombre de la otra unidad"),
     lower.lastIndexOf("pasame la patente o el nombre"),
     lower.lastIndexOf("la consulto en wara"),
-    // Pedido LN vía info_guides / utterance ("¿Me podés dar la patente o el prefijo…?")
     lower.lastIndexOf("patente o el prefijo"),
     lower.lastIndexOf("patente o prefijo"),
     lower.lastIndexOf("me podes dar la patente"),
@@ -1818,11 +2201,20 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("pasame la patente"),
     lower.lastIndexOf("pasame la matricula"),
     lower.lastIndexOf("pasame la matrícula"),
+    lower.lastIndexOf("patente o el interno"),
+    lower.lastIndexOf("interno de la unidad"),
+    lower.lastIndexOf("podés darme la patente o el interno"),
+    lower.lastIndexOf("podes darme la patente o el interno"),
   ].filter((i) => i >= 0);
-  if (!unitConsultMarkers.length) return false;
+  return unitConsultMarkers.length ? Math.max(...unitConsultMarkers) : -1;
+}
 
-  const lastUnitAsk = Math.max(...unitConsultMarkers);
-  const odoMarkers = [
+function lastMeterPlateAskIndex(threadText: string): number {
+  const lower = threadText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const markers = [
     lower.lastIndexOf("para registrar el cambio de horómetro"),
     lower.lastIndexOf("para registrar el cambio de horometro"),
     lower.lastIndexOf("para registrar el cambio de odómetro"),
@@ -1833,17 +2225,47 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     lower.lastIndexOf("cuál es el nuevo odómetro"),
     lower.lastIndexOf("cual es el nuevo odometro"),
   ].filter((i) => i >= 0);
-  const lastOdo = odoMarkers.length ? Math.max(...odoMarkers) : -1;
-  if (lastOdo >= 0 && lastOdo > lastUnitAsk) return false;
+  return markers.length ? Math.max(...markers) : -1;
+}
 
+/** El bot pidió patente/nombre para consultar una unidad (GPS, estado, búsqueda), no odómetro/mantenimiento/cert. */
+export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
+  if (certificateFlowState(threadText) !== "none") return false;
+  // Bug prod 2026-08-17: aclaración de matrícula en trámite horómetro ≠ consulta GPS.
+  // No usar threadHasActiveOdometerFlow acá (recursión con threadAwaitingOdometerPlate).
+  if (threadHasRecentCustomerMeterUpdateIntent(threadText)) {
+    const meterTail = threadText.slice(-3500).toLowerCase();
+    if (
+      /matr[ií]cula exacta|confirm[aá].{0,30}matr[ií]cula|patente exacta|para registrar el cambio de hor[oó]metro|para registrar el cambio de od[oó]metro/.test(
+        meterTail,
+      )
+    ) {
+      return false;
+    }
+  }
+
+  const lastUnitAsk = lastUnitConsultPlateAskIndex(threadText);
+  if (lastUnitAsk < 0) return false;
+
+  // Recencia: mantenimiento u odómetro más reciente gana.
+  const lastMaint = lastMaintenancePlateAskIndex(threadText);
+  if (lastMaint > lastUnitAsk) return false;
+  const lastOdo = lastMeterPlateAskIndex(threadText);
+  if (lastOdo > lastUnitAsk) return false;
+
+  const lower = threadText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
   const tail = lower.slice(lastUnitAsk, lastUnitAsk + 800);
   return (
     /para revisar el gps.*necesito la unidad/.test(tail) ||
     /(?:entendido, no era esa|cual es la otra unidad)/.test(tail) ||
-    /(?:cual es la matricula|decime la matricula|matricula exacta|indic\w*me la matricula|pas\w*me la patente|marca\/nombre \(ej\.)/.test(
+    /(?:cual es la matricula|decime la matricula|matricula exacta|patente exacta|indic\w*me la matricula|pas\w*me la patente|marca\/nombre \(ej\.)/.test(
       tail,
     ) ||
     /(?:indic\w*|decime|pas\w*me|pasar|necesito que me).{0,40}patente/.test(tail) ||
+    /decime la patente completa/.test(tail) ||
     /(?:ultima)\s+posicion/.test(tail) ||
     /patente de la unidad que quer/.test(tail) ||
     /otra unidad sin reporte/.test(tail) ||
@@ -1851,6 +2273,8 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
     /consulto en wara/.test(tail) ||
     /pasame la patente o el nombre/.test(tail) ||
     /patente o (?:el )?prefijo/.test(tail) ||
+    /patente o el interno/.test(tail) ||
+    /interno de la unidad/.test(tail) ||
     /(?:me )?pode[s]?\s+dar la patente/.test(tail)
   );
 }
@@ -1881,6 +2305,13 @@ export function hasPendingUnitConsultPlateRequest(threadText: string): boolean {
  * Bug real, producción 2026-08-03: "Quiero consultar por otra unidad" matcheaba
  * looksLikeUnitRejection y el bot respondía "Entendido, no era esa" en vez de pedir la otra.
  */
+export function buildAnotherUnitConsultAskMessage(): string {
+  return (
+    "Entendido. ¿Cuál es la otra unidad? Pasame la patente, el código interno (ej. M900-093) " +
+    "o la marca/nombre (ej. Nissan, Saveiro) y la consulto en Wara."
+  );
+}
+
 export function looksLikeAnotherUnitConsultRequest(
   rawText: string | undefined | null,
 ): boolean {
@@ -1897,6 +2328,19 @@ export function looksLikeAnotherUnitConsultRequest(
   if (/\bno\s+quiero\s+(ver\s+)?(esa|ese|esta|este)\b/.test(norm)) return false;
   if (/\b(es|era)\s+otra\b/.test(norm) && !/\b(consult\w*|quiero|ver|revis\w*)\b/.test(norm)) {
     return false;
+  }
+  if (
+    /^(quiero\s+)?(consultar\s+)?(por\s+)?(la\s+)?(otra|otro|otras|otros)\s+(unidad\w*|patente\w*|vehicul\w*|movil\w*|camionet\w*)\s*\.?$/.test(
+      norm,
+    ) ||
+    /^(ver|revisar|chequear|mirar)\s+(la\s+)?(otra|otro)\s+(unidad\w*|vehicul\w*|patente\w*)\s*\.?$/.test(
+      norm,
+    ) ||
+    /^(la\s+)?(otra|otro)\s+(unidad\w*|vehicul\w*|patente\w*|movil\w*)\s*\.?$/.test(norm) ||
+    /\bcambiar\s+(de\s+)?(unidad|patente|vehicul\w*)\b/.test(norm) ||
+    /\bpara\s+(la\s+)?(otra|otro)\s+(unidad\w*|patente\w*|vehicul\w*)\b/.test(norm)
+  ) {
+    return true;
   }
   return (
     /\b(consult\w*|revis\w*|cheque\w*|mir\w*|ver|estado|posicion|ubicacion)\w*\b.{0,40}\b(otra|otras|otro|otros)\s+(unidad\w*|patente\w*|vehicul\w*|camionet\w*)\b/.test(
@@ -1990,6 +2434,7 @@ export function isCertificateFlowSuperseded(threadText: string): boolean {
   const markers = [
     lower.lastIndexOf("para el certificado de cobertura necesito la unidad"),
     lower.lastIndexOf("voy a generar el certificado de cobertura"),
+    lower.lastIndexOf("confirmar certificado"),
   ].filter((i) => i >= 0);
   if (markers.length === 0) return false;
   const cutIdx = Math.max(...markers);
@@ -2020,9 +2465,24 @@ export function isCertificateFlowSuperseded(threadText: string): boolean {
   );
 }
 
+/** Certificado ya emitido en el hilo reciente — no reabrir CONFIRMO pendiente. */
+export function threadHasRecentCertificateSuccess(threadText: string): boolean {
+  const tail = normThreadText(threadText.slice(-6000));
+  return /(?:perfecto,? )?genere el certificado de cobertura/.test(tail);
+}
+
+/** Mantenimiento ya registrado en el hilo reciente. */
+export function threadHasRecentMaintenanceSuccess(threadText: string): boolean {
+  const tail = normThreadText(threadText.slice(-6000));
+  return /deje registrada|mantenimiento registrado|registro registrado|listo,? registre el mantenimiento/.test(
+    tail,
+  );
+}
+
 /** Estado del trámite de certificado según mensajes recientes del hilo. */
 export function certificateFlowState(threadText: string): CertificateFlowState {
   if (isCertificateFlowSuperseded(threadText)) return "none";
+  if (threadHasRecentCertificateSuccess(threadText)) return "none";
   const lines = threadText
     .split("\n")
     .map((l) => l.trim())
@@ -2042,8 +2502,9 @@ export function certificateFlowState(threadText: string): CertificateFlowState {
 
   // El resumen del bot es multilínea (Patente / Empresa / CONFIRMO en líneas distintas).
   if (
-    /voy a generar el certificado de cobertura/.test(tail) &&
-    /responde\s+confirmo/.test(tail)
+    (/voy a generar el certificado de cobertura|confirmar certificado/.test(tail) &&
+      /respond[eé]\s+\**confirmo/.test(tail)) ||
+    (/voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail))
   ) {
     return "awaiting_confirm";
   }
@@ -2075,17 +2536,10 @@ export function threadHasActiveMeterValueRequest(threadText: string): boolean {
   return threadAwaitingHorometerKmValue(threadText) || threadAwaitingOdometerKmValue(threadText);
 }
 
-export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
-  // Odómetro/horómetro en curso manda sobre un resumen viejo de mantenimiento en el hilo.
-  if (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText)) {
-    return false;
-  }
-  const tail = normThreadText(threadText.slice(-4000));
-  const summaryStart = tail.lastIndexOf("voy a registrar:");
-  if (summaryStart === -1) return false;
+function maintenanceConfirmSummaryPending(tail: string, summaryStart: number): boolean {
   const block = tail.slice(summaryStart, summaryStart + 1200);
   if (/odometro|horometro|kilometraje/.test(block)) return false;
-  if (!/tipo:/.test(block) || !/responde\s+confirmo/.test(block)) return false;
+  if (!/tipo:/.test(block) || !/respond[eé]\s+\*?confirmo/.test(block)) return false;
   // Bug real, producción 2026-07-30: tras completar horómetro ("Listo, registré el cambio…")
   // y arrancar mantenimiento en la misma sesión, el chequeo global en los últimos 800
   // caracteres del hilo veía el cierre del horómetro y devolvía false — "Confirmó" volvía
@@ -2098,6 +2552,20 @@ export function hasPendingMantenimientoConfirmation(threadText: string): boolean
   return true;
 }
 
+export function hasPendingMantenimientoConfirmation(threadText: string): boolean {
+  // Odómetro/horómetro o certificado en CONFIRMO mandan sobre un resumen viejo de mantenimiento.
+  if (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText)) {
+    return false;
+  }
+  if (certificateFlowState(threadText) === "awaiting_confirm") return false;
+  const tail = normThreadText(threadText.slice(-4000));
+  const newStart = tail.lastIndexOf("confirmar mantenimiento");
+  if (newStart >= 0 && maintenanceConfirmSummaryPending(tail, newStart)) return true;
+  const legacyStart = tail.lastIndexOf("voy a registrar:");
+  if (legacyStart >= 0 && maintenanceConfirmSummaryPending(tail, legacyStart)) return true;
+  return false;
+}
+
 /**
  * Detalle del resumen "Voy a registrar:" de mantenimiento (último CONFIRMO pendiente).
  * Sirve para reencaminar si el cliente dijo "No" y en realidad pedía una consulta.
@@ -2105,10 +2573,10 @@ export function hasPendingMantenimientoConfirmation(threadText: string): boolean
 export function extractPendingMaintenanceDetalle(threadText: string): string | null {
   if (!hasPendingMantenimientoConfirmation(threadText)) return null;
   const tail = threadText.slice(-4000);
-  const matches = [...tail.matchAll(/Detalle:\s*(.+)/gi)];
+  const matches = [...tail.matchAll(/Detalle:\s*\*?(.+)/gi)];
   const last = matches.at(-1)?.[1]?.trim();
   if (!last) return null;
-  return last.split("\n")[0]?.trim() || null;
+  return last.replace(/\*+$/, "").split("\n")[0]?.trim() || null;
 }
 
 /**
@@ -2123,7 +2591,7 @@ export function isMaintenanceFlowSuperseded(
   const current = normThreadText(String(currentText ?? "").trim());
   if (current) {
     if (
-      /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|que tal)$/.test(
+      /^(hola|buenas|buen(os)?\s*dias?|buen(a|as)?\s*(tarde|tardes|noche|noches)|hey|que tal)$/.test(
         current.replace(/\s+/g, " "),
       )
     ) {
@@ -2193,32 +2661,111 @@ export function looksLikePostAdvisorCaseSupplement(
   threadText: string | undefined | null,
 ): boolean {
   if (!looksLikePostAdvisorCaseThread(threadText)) return false;
+  if (shouldRouteGpsConsultToUnidades(text)) return false;
   const n = String(text ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-  if (!n || n.length > 220) return false;
+  if (!n || n.length > 500) return false;
   if (/^(si|sí|dale|ok)\b/.test(n) && n.length > 4) return true;
   if (/\b(hoy mismo|urgente|sumar|agregar|unidades sin reportar|sin reportar|solucionado)\b/.test(n)) {
+    return true;
+  }
+  // Bug real 2026-08-20: "NO REPORTA ETAPAS…" / "tampoco revisa cumplimiento de etapas"
+  // tras caso abierto → anotar al asesor (no guía Opciones ni flota).
+  if (
+    /\b(no reporta|sin reporte|falta de reporte|offline|etapas|cumplimiento|recorrido|historial|vuelta|javier|informado)\b/.test(
+      n,
+    ) &&
+    !/\b(abrir|crear|generar)\b.{0,20}\b(nuevo|otra?)\b.{0,15}\b(caso|ticket|reclamo)\b/.test(n)
+  ) {
     return true;
   }
   return false;
 }
 
 function stripLeadingAffirmationPrefix(raw: string): string {
-  return raw
+  let s = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/^ahora\s+(si|sí)\s*,?\s*/i, "")
-    .replace(/^(bueno|ok|dale)\s+,?\s*/i, "")
     .trim();
+  if (/^dale\s+(porfa|porfavor|porfis|nom[aá]s|nomas)\b/i.test(s)) return s;
+  return s.replace(/^(bueno|ok|dale|che)\s+,?\s*/i, "").trim();
+}
+
+/** Typos y abreviaturas rioplatenses antes de matchear confirmación breve. */
+function normalizeColloquialInboundForConfirm(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\bvancame\b/g, "avanzame")
+    .replace(/\bbamcame\b/g, "avanzame")
+    .replace(/\bavanza me\b/g, "avanzame")
+    .replace(/\bmete le\b/g, "metele")
+    .replace(/\bnomas\b/g, "nomás");
+}
+
+/** Coloquialismos argentinos de visto bueno (interpretar, no imitar al responder). */
+export function looksLikeColloquialArgentineAffirmation(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 80) return false;
+  const norm = normalizeColloquialInboundForConfirm(stripLeadingAffirmationPrefix(raw));
+  if (!norm) return false;
+  if (/^bancame(\s+(un\s+toque|ahi|a\s*hi|por\s*favor|pf))?$/i.test(norm)) return false;
+  if (/^gracias(\s+(genial|joya|che|atilio|atili[oó]))?$/i.test(norm)) return false;
+  const compact = norm.replace(/[^a-z]/g, "");
+  if (
+    new Set([
+      "joya",
+      "joyita",
+      "genial",
+      "barbaro",
+      "barbara",
+      "obvio",
+      "claro",
+      "deuna",
+      "dalenomás",
+      "dalenomas",
+      "metele",
+      "porfa",
+      "porfavor",
+      "porfis",
+      "avanzame",
+      "avanzá",
+      "avanza",
+      "mandale",
+      "mandale nomás",
+      "hacelo",
+      "registralo",
+      "registralo nomás",
+      "siporfa",
+      "siporfavor",
+      "daleporfa",
+      "daleporfavor",
+    ]).has(compact)
+  ) {
+    return true;
+  }
+  return (
+    /^(dale|si|sip|ok|joya|genial|barbaro|obvio|claro|de una|metele|avanza|avanzame|mandale|hacelo|registralo)(\s+(porfa|porfavor|porfis|nomás|nomas|che))*$/.test(
+      norm,
+    ) ||
+    /^(porfa|porfavor|porfis)$/.test(norm) ||
+    /\b(dale|si|sip)\s+(porfa|porfavor|porfis)\b/.test(norm)
+  );
 }
 
 /** Aceptación breve tipo CONFIRMO / sí / dale / ok. */
 export function looksLikeBriefConfirmation(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
+  if (looksLikeColloquialArgentineAffirmation(raw)) return true;
   const stripped = stripLeadingAffirmationPrefix(raw);
   const t = stripped
     .normalize("NFD")
@@ -2226,12 +2773,18 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
     .toLowerCase()
     .replace(/[^a-z]/g, "");
   if (!t) return false;
-  if (t.startsWith("conf")) return true;
+  // "confirmo" y typos WhatsApp: comnfirmo, confimo, confimro, etc.
+  if (looksLikeFuzzyConfirmoToken(t)) return true;
+  // "confirmar" / "confirmá" / "confirmacion" — clientes no siempre escriben CONFIRMO.
+  if (/^confirma(r|cion)?$/.test(t)) return true;
   if (
     new Set([
       "si",
       "sii",
       "sip",
+      // Typo WhatsApp muy común: «Zi» = «Sí» (bug prod 2026-09-17 → prefijo patente ZI).
+      "zi",
+      "zii",
       "dale",
       "dalesi",
       "sidale",
@@ -2266,21 +2819,152 @@ export function looksLikeBriefConfirmation(text: string | undefined | null): boo
   );
 }
 
+export { looksLikeFuzzyConfirmoToken } from "@/lib/confirmoTokens";
+
+/**
+ * Ante un CONFIRMO pendiente el cliente pide ayuda o no entiende el paso
+ * ("como puedo hacer?", "no entiendo que queres hacer?") — no es detalle del trámite.
+ */
+export function looksLikePendingConfirmHelpOrConfusion(
+  text: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 180) return false;
+  if (looksLikeBriefConfirmation(raw) || looksLikeFuzzyConfirmoToken(raw)) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(cancel|desestim|no confirmo|olvidalo|dejalo)\b/.test(t)) return false;
+  return (
+    /\b(no entiendo|no te entiendo|no comprendo|estoy perdido|me perdi|me confundi)\b/.test(t) ||
+    /\b(que|q)\s+(hago|tengo que hacer|debo hacer|respondo|contesto|tengo que poner)\b/.test(t) ||
+    /\b(como|como hago|como puedo|como sigo)\b.{0,40}\b(hacer|hago|sigo|confirmar|registrar)?\b/.test(
+      t,
+    ) ||
+    /\b(como puedo hacer|como hago|como sigo|y ahora que|y ahora que hago)\b/.test(t) ||
+    /\b(que|q)\s+(queres|quiere|quieren)\s+(que\s+)?(haga|hacer|diga|responda|conteste)\b/.test(
+      t,
+    ) ||
+    /\b(ayuda|ayudame|explicame|explicame que|no se que hacer|no se que responder)\b/.test(t)
+  );
+}
+
+/**
+ * Consulta o pregunta del cliente (no dato operativo): interrogativa, pedido de ayuda,
+ * duda o cambio de tema. Usado con trámite activo para no pisar recolección de datos.
+ */
+export function looksLikeCustomerConsultationMessage(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 220) return false;
+  if (looksLikeBriefConfirmation(raw) || looksLikePendingTramiteAffirmation(raw)) return false;
+  if (looksLikeFuzzyConfirmoToken(raw)) return false;
+  if (looksLikeResumePausedTramite(raw)) return false;
+
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(cancel|desestim|no confirmo|olvidalo|dejalo)\b/.test(t)) return false;
+
+  if (/[?¿]/.test(raw)) return true;
+  if (looksLikePendingConfirmHelpOrConfusion(raw)) return true;
+  if (looksLikeOdometerInfoRequest(raw) || looksLikeOdometerHelpRequest(raw)) return true;
+
+  if (
+    /\b(quiero|necesito)\b/.test(t) &&
+    !/\b(od[oó]metro|hor[oó]metro|kilometraje|confirmo|confirma)\b/.test(t)
+  ) {
+    return true;
+  }
+
+  return (
+    /\b(como|que|q|por\s*que|porque|cuando|donde|quien|cual|cuanto|cuantos)\b/.test(t) ||
+    /\b(puedo|podemos|se puede|debo|deberia|tengo que|hay que|hace falta|me conviene)\b/.test(
+      t,
+    ) ||
+    /\b(ayuda|ayudame|me ayudas|explicame|explic[aá]me|me explicas|contame|decime|aclarame)\b/.test(
+      t,
+    ) ||
+    /\b(no entiendo|no comprendo|no se|duda|aclarar|consulta|informacion|informaci[oó]n)\b/.test(
+      t,
+    ) ||
+    /\b(otra consulta|otro tema|otra cosa|cambiar de tema|algo mas|otro requerimiento)\b/.test(
+      t,
+    )
+  );
+}
+
 /**
  * "Si 19:00 de ayer", "Sí correcto", "Dale esa está bien" — afirmación con dato extra
  * durante confirmación pendiente. No es confirmación pura ni un trámite nuevo.
  */
+/**
+ * Tras una consulta lateral (qué es el odómetro, etc.), el cliente pide retomar
+ * el CONFIRMO pendiente: "continuamos", "bueno seguimos porfa".
+ * No es CONFIRMO (no registrar) ni cambio de empresa ("continuar con El Cacique").
+ */
+export function looksLikeResumePausedTramite(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 120) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(con|en)\s+(el|la)?\s*(wara|cacique|empresa)\b/.test(t)) return false;
+  if (/\bno\s+(continu|seguir|retom)/.test(t) || /\bcancel/.test(t)) return false;
+  return /\b(continuamos|continuar|continuemos|seguimos|sigamos|retomamos|retomar|retomemos|volvamos)\b/.test(
+    t,
+  );
+}
+
+/** "Ah entiendo" / "ah ok" corto después de una explicación, con CONFIRMO aún vivo. */
+export function looksLikePendingConfirmComprehensionAck(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 48) return false;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\b(pasa|cambio|odometro|horometro|patente|confirmo|consulta|lista)\b/.test(t)) {
+    return false;
+  }
+  return /^(ah|aha|aja|ok|bueno|bien)?\s*(entiendo|entendido|claro)(\s+(gracias|ok|dale))?$/.test(t) ||
+    /^(ah ok|ah bueno|ah claro|ok entiendo)$/.test(t);
+}
+
 export function looksLikePendingTramiteAffirmation(text: string | undefined | null): boolean {
-  if (looksLikeBriefConfirmation(text)) return true;
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 140) return false;
+  // Veto primero: «Claro que no» / «no lo confirmes» nunca son afirmación de escritura.
+  if (hasPendingWriteNegationCue(raw)) return false;
+  if (looksLikeBriefConfirmation(text)) return true;
   const norm = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (
-    !/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|de acuerdo)\b/.test(norm) &&
-    !/^ahora\s+(si|sí)\b/.test(norm)
+    !/^(si|sip|sii|dale|ok|okey|listo|perfecto|confirmo|confirma|confirmar|confirmacion|de acuerdo|joya|genial|porfa|porfavor|porfis|avanza|avanzame|obvio|claro)\b/.test(
+      norm,
+    ) &&
+    !/^ahora\s+(si|sí)\b/.test(norm) &&
+    !looksLikeColloquialArgentineAffirmation(raw)
   ) {
     return false;
   }
@@ -2289,6 +2973,44 @@ export function looksLikePendingTramiteAffirmation(text: string | undefined | nu
   }
   if (looksLikeFreshOdometerRestartRequest(raw)) return false;
   return true;
+}
+
+export function hasPendingCertificateUnitRequest(
+  threadText: string,
+  pendingAction?: { type?: string; payload?: Record<string, unknown> } | null,
+): boolean {
+  const pendingType = pendingAction?.type;
+  // Pending vivo de otro trámite veta el certificado inferido del historial.
+  // El hilo solo aplica cuando no hay pendingAction autoritativo.
+  if (pendingType && pendingType !== "certificados") {
+    return false;
+  }
+  if (pendingType === "certificados") {
+    return pendingAction?.payload?.stage === "awaiting_unit";
+  }
+  return certificateFlowState(threadText) === "awaiting_unit";
+}
+
+/** Respuesta del cliente que continúa identificando la unidad en trámite de certificado. */
+export function shouldContinueCertificateUnitCollection(
+  text: string,
+  threadText: string,
+  pendingAction?: { type?: string; payload?: Record<string, unknown> } | null,
+): boolean {
+  if (!hasPendingCertificateUnitRequest(threadText, pendingAction)) return false;
+  if (looksLikeCertificateUnitReply(text, threadText)) return true;
+  const norm = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return false;
+  if (/^(es|era)\s+(la|el)\s+unidad\b/.test(norm)) return true;
+  const compact = norm.replace(/[\s\-_.]+/g, "");
+  if (/^\d{5,7}$/.test(compact)) return true;
+  if (extractUnitCodeNumbersFromMessage(text).length > 0) return true;
+  if (detectLoosePlate(text) || isBarePlatePrefixHint(text)) return true;
+  return false;
 }
 
 export function looksLikeCertificateUnitReply(text: string, threadText = ""): boolean {
@@ -2302,6 +3024,9 @@ export function looksLikeCertificateUnitReply(text: string, threadText = ""): bo
     return false;
   }
   if (certificateFlowState(threadText) !== "awaiting_unit") return false;
+  const compact = text.trim().replace(/[\s\-_.]+/g, "");
+  if (/^\d{5,7}$/.test(compact)) return true;
+  if (extractUnitCodeNumbersFromMessage(text).length > 0) return true;
   if (/\b(de la|para la|la unidad|unidad)\b/.test(norm) && /[a-z0-9]{2,}/.test(norm)) return true;
   return false;
 }
@@ -2430,7 +3155,9 @@ export function detectIncidentType(text: string): WaraIncidentType {
   // Hardware / reclamo fuera de telemetría (pantalla táctil, etc.) → soporte humano.
   if (
     /\b(pantalla|t[aá]ctil|touch|display|teclado|hardware|garant[ií]a)\b/.test(lower) &&
-    /\b(reclam\w*|falla|mal|rota|roto|no funciona|problema|aver[ií]a|defectu)\b/.test(lower)
+    /\b(reclam\w*|falla|mal|rota|roto|no\s+(le\s+|me\s+|les\s+)?(funciona|anda)|problema|aver[ií]a|defectu)\b/.test(
+      lower,
+    )
   ) {
     return "GENERAL_TECH";
   }
