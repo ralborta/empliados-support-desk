@@ -202,7 +202,6 @@ import {
 import { prisma } from "@/lib/db";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { shouldRouteCertificateDefinitionToGuide } from "@/lib/certificateDefinitionGuide";
-import { shouldRouteOdometerInformationToGuide } from "@/lib/odometerInformationGuide";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation } from "@/lib/pendingConfirmation";
 import { classifyConfirmoPhrase, buildConfirmoClarifyReply } from "@/lib/confirmoTokens";
 import { isAffirmationForPendingWrite } from "@/lib/pendingWriteIntent";
@@ -2842,18 +2841,6 @@ export async function runTurnExecutorPhase(params: {
         return { message: msg, executor: "info_guides", ok: true };
       }
     }
-    if (kbInterpret?.normalTarget === "odometer_operation") {
-      const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
-      const execMessage = messageFromPayload(execResult);
-      const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-      return {
-        message:
-          execMessage ||
-          "Para actualizar odómetro u horómetro necesito la unidad y el valor (km o horas).",
-        executor: "odometro",
-        ok: execOk,
-      };
-    }
     if (isOperationalUnitInterpret(kbInterpret)) {
       // Carga de combustible: capturar unidad/patente. NO buscar la frase operativa
       // como nombre de unidad (evita “No encontré … «cargar»”).
@@ -2887,11 +2874,7 @@ export async function runTurnExecutorPhase(params: {
         interpret: kbInterpret,
         rulesExecutor,
       });
-      const odometerInformation = shouldRouteOdometerInformationToGuide({
-        interpret: kbInterpret,
-        rulesExecutor,
-      });
-      if (!hardOps.has(rulesExecutor) || certificateDefinition || odometerInformation) {
+      if (!hardOps.has(rulesExecutor) || certificateDefinition) {
         const execResult = await invokeExecutor("info_guides", rawPhone, selectionText, apiKey, {
           guide: kbInterpret.guideKind ?? undefined,
           articleIds: kbInterpret.articleIds,
@@ -2902,9 +2885,7 @@ export async function runTurnExecutorPhase(params: {
           reportId: kbInterpret.reportId ?? undefined,
           normalTarget: certificateDefinition
             ? "certificate_definition"
-            : odometerInformation
-              ? "odometer_information"
-              : (kbInterpret.normalTarget ?? undefined),
+            : (kbInterpret.normalTarget ?? undefined),
         });
         const msg = messageFromPayload(execResult);
         if (msg) {

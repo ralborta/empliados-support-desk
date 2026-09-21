@@ -173,9 +173,7 @@ export type PlatformNormalTarget =
   | "operational_fuel"
   | "live_unit"
   | "assistant_identity"
-  | "certificate_definition"
-  | "odometer_information"
-  | "odometer_operation";
+  | "certificate_definition";
 
 export type PlatformKnowledgeInterpret = {
   route: "info_guides" | "continue_normal";
@@ -195,9 +193,6 @@ export type PlatformKnowledgeInterpret = {
    * operational_fuel → capturar unidad/patente para cargar combustible.
    * live_unit → consulta GPS/estado en vivo.
    * assistant_identity → responder la identidad oficial de Kira.
-   * certificate_definition → definición de certificado sin trámite.
-   * odometer_information → definición/procedimiento de odómetro/horómetro sin trámite.
-   * odometer_operation → actualizar odómetro/horómetro (bloquea frontera; no info_guides).
    */
   normalTarget?: PlatformNormalTarget | null;
 };
@@ -729,9 +724,8 @@ Devolvé SOLO JSON válido:
 category: guideKind=informes (pantallas) o guideKind=opciones con V2 (sección). reportId: informes=pantalla inf-*; alertas/paneles=itemId; opciones V2=itemId opcional; en otros kinds usá null.
 
 route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (${modules}).
-route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar o actualizar (execute), certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
+route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
 Una pregunta social sobre el nombre, identidad o presentación del asistente (p. ej. «¿cómo te llamás?», «quién sos», «preséntate») NO es consulta de módulo ni nombre de unidad: se resuelve como assistant_identity en la frontera semántica.
-Preguntas informativas sobre qué es o cómo funciona el odómetro/horómetro (sin pedir cargar un valor) → route=info_guides, need=definition|procedure; el destino tipado odometer_information lo fija el paso previo a fronteras.
 NUNCA route=info_guides para "necesito un certificado", "certificado de cobertura", "mandame el certificado".
 
 need:
@@ -2806,14 +2800,6 @@ export function applyPlatformGuideInterpretGuards(
   threadText: string,
   opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret {
-  // Destinos tipados informativos/operativos del mensaje actual: no aplicar continuidad de módulo.
-  if (
-    interpret.normalTarget === "odometer_information" ||
-    interpret.normalTarget === "odometer_operation" ||
-    interpret.normalTarget === "certificate_definition"
-  ) {
-    return interpret;
-  }
   const lastGuideKind = opts?.lastGuideKind ?? null;
   let next = interpret;
   next = correctMaintenanceMisroute(next, selectionText, threadText);
@@ -3877,21 +3863,6 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
   }
   // Correr frontera ante ambigüedad, familias solapadas o destinos operativos
   // (combustible/GPS) aunque el primer paso haya caído en mantenimiento u otra guía.
-  // Veto: un normalTarget tipado del mensaje actual nunca se sustituye por frontera.
-  if (interpret.normalTarget != null) {
-    console.log(
-      JSON.stringify({
-        stage: "cross_family_frontier",
-        frontierAccepted: false,
-        frontierRejectionReason: "typed_normal_target",
-        normalTarget: interpret.normalTarget,
-        primaryGuideKind: interpret.guideKind,
-        primaryNeed: interpret.need,
-        lastGuideKind: guardOpts.lastGuideKind ?? null,
-      }),
-    );
-    return interpret;
-  }
   const shouldCheckFrontier =
     interpret.normalTarget == null &&
     (interpret.guideKind === null ||
@@ -4207,7 +4178,6 @@ async function applySemanticDetailRefinements(params: {
   guardOpts: PlatformGuideGuardOpts;
 }): Promise<PlatformKnowledgeInterpret> {
   let next = params.interpret;
-  next = await resolveMeterInformationTargetIfNeeded({ ...params, interpret: next });
   next = await refineAmbiguousGuideFrontierIfNeeded({ ...params, interpret: next });
   next = await refineInformesCategoryIfNeeded({ ...params, interpret: next });
   next = await refineInformesWithCategoryCatalog({ ...params, interpret: next });
@@ -4217,199 +4187,6 @@ async function applySemanticDetailRefinements(params: {
   next = await refinePanelesWithItemCatalog({ ...params, interpret: next });
   next = await refineOpcionesWithCategoryCatalog({ ...params, interpret: next });
   return next;
-}
-
-/**
- * Destino tipado de odómetro/horómetro informativo ANTES de fronteras cross-family.
- * Si fija normalTarget=odometer_information, la frontera no puede sustituirlo.
- * No usa confidence como autoridad: el clasificador tipado es el ancla.
- */
-async function resolveMeterInformationTargetIfNeeded(params: {
-  openai: OpenAI;
-  basePayload: Record<string, unknown>;
-  interpret: PlatformKnowledgeInterpret;
-  text: string;
-  threadText: string;
-  guardOpts: PlatformGuideGuardOpts;
-}): Promise<PlatformKnowledgeInterpret> {
-  const { openai, basePayload, interpret, text, threadText, guardOpts } = params;
-  if (interpret.normalTarget != null) {
-    return interpret;
-  }
-  if (basePayload.meter_information_resolve === "done") {
-    return interpret;
-  }
-  // Mismo universo que la frontera: solo cuando el turno aún no tiene destino autoritativo.
-  const frontierEligible =
-    interpret.guideKind === null ||
-    interpret.need === "ambiguous" ||
-    interpret.guideKind === "opciones" ||
-    interpret.guideKind === "alertas" ||
-    interpret.guideKind === "paneles" ||
-    interpret.guideKind === "informes" ||
-    interpret.guideKind === "combustible" ||
-    interpret.guideKind === "mantenimiento" ||
-    interpret.guideKind === "transporte_publico" ||
-    interpret.guideKind === "hojas_de_ruta" ||
-    interpret.guideKind === "unidades" ||
-    interpret.route === "continue_normal";
-  if (!frontierEligible) {
-    return interpret;
-  }
-
-  const resolvePayload = {
-    ...basePayload,
-    meter_information_resolve: "done",
-    mensaje_nuevo: text,
-    interpret_previo: {
-      route: interpret.route,
-      guideKind: interpret.guideKind,
-      need: interpret.need,
-      reason: interpret.reason,
-    },
-    instruccion: [
-      "Clasificá SOLO si el mensaje actual trata odómetro u horómetro de una unidad en Wara.",
-      "meter_definition: pregunta qué es / qué significa el odómetro o el horómetro.",
-      "meter_procedure: pregunta cómo se actualiza/carga/cambia el odómetro o horómetro (explicación, no ejecución).",
-      "meter_ambiguous: dice solo odómetro/horómetro o pide ayuda vaga sin dejar claro si quiere info o actualizar.",
-      "meter_execute: quiere registrar/actualizar/cargar un valor ahora (o da km/hs/patente para el trámite).",
-      "not_meter: cualquier otro tema (Transporte Público, certificados, GPS, etc.).",
-      "El historial de Transporte Público u otros módulos NO cambia el dominio si el mensaje actual es de odómetro/horómetro.",
-    ].join(" "),
-  };
-
-  try {
-    const response = await withOpenAiTimeout(
-      (signal) =>
-        openai.chat.completions.create(
-          {
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content:
-                  "Sos un clasificador tipado de odómetro/horómetro en WARA. Devolvé SOLO la clasificación pedida por el schema. Dominio del mensaje actual > continuidad del historial.",
-              },
-              { role: "user", content: JSON.stringify(resolvePayload) },
-            ],
-            temperature: 0,
-            max_tokens: 80,
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: "meter_information_resolve",
-                strict: true,
-                schema: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["classification"],
-                  properties: {
-                    classification: {
-                      type: "string",
-                      enum: [
-                        "meter_definition",
-                        "meter_procedure",
-                        "meter_ambiguous",
-                        "meter_execute",
-                        "not_meter",
-                      ],
-                    },
-                  },
-                },
-              },
-            },
-          },
-          { signal },
-        ),
-      INTERPRET_TIMEOUT_MS,
-      { stage: "meter_information_resolve" },
-    );
-    const content = response?.choices?.[0]?.message?.content?.trim();
-    const classification = content
-      ? (JSON.parse(content) as { classification?: string }).classification
-      : null;
-
-    console.log(
-      JSON.stringify({
-        stage: "meter_information_resolve",
-        primaryRoute: interpret.route,
-        primaryGuideKind: interpret.guideKind,
-        primaryNeed: interpret.need,
-        lastGuideKind: guardOpts.lastGuideKind ?? null,
-        classification,
-      }),
-    );
-
-    if (classification === "meter_definition" || classification === "meter_procedure") {
-      return applyPlatformGuideInterpretGuards(
-        {
-          ...interpret,
-          route: "info_guides",
-          guideKind: null,
-          need: classification === "meter_definition" ? "definition" : "procedure",
-          articleIds: [],
-          clarifyQuestion: null,
-          executionRequest: false,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: `meter_information_resolve:${classification}`,
-          category: null,
-          reportId: null,
-          normalTarget: "odometer_information",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-    if (classification === "meter_ambiguous") {
-      return applyPlatformGuideInterpretGuards(
-        {
-          ...interpret,
-          route: "info_guides",
-          guideKind: null,
-          need: "ambiguous",
-          articleIds: [],
-          clarifyQuestion:
-            "¿Querés saber qué es el odómetro/horómetro o actualizar el valor de una unidad?",
-          executionRequest: false,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: "meter_information_resolve:meter_ambiguous",
-          category: null,
-          reportId: null,
-          normalTarget: "odometer_information",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-    if (classification === "meter_execute") {
-      // Ancla operativa: bloquea frontera TP/Paneles/Opciones; deja el trámite a hardOps.
-      return applyPlatformGuideInterpretGuards(
-        {
-          ...interpret,
-          route: "continue_normal",
-          guideKind: null,
-          need: "execute",
-          articleIds: [],
-          clarifyQuestion: null,
-          executionRequest: true,
-          confidence: Math.max(interpret.confidence, 0.98),
-          reason: "meter_information_resolve:meter_execute",
-          category: null,
-          reportId: null,
-          normalTarget: "odometer_operation",
-        },
-        text,
-        threadText,
-        guardOpts,
-      );
-    }
-    // not_meter: no anclar; deja fronteras / continuidad.
-  } catch (err) {
-    logLlmStageError("meter_information_resolve", err);
-  }
-  return interpret;
 }
 
 /**
@@ -4782,15 +4559,6 @@ export function shouldRouteInterpretToInfoGuides(
   interpret: PlatformKnowledgeInterpret | null,
 ): boolean {
   if (!interpret) return false;
-  if (interpret.normalTarget === "odometer_information") {
-    return interpret.executionRequest === false;
-  }
-  if (interpret.normalTarget === "odometer_operation") {
-    return false;
-  }
-  if (interpret.normalTarget === "certificate_definition") {
-    return interpret.executionRequest === false;
-  }
   if (interpret.guideKind === "cisternas" && !isCisternasKbEnabled()) return false;
   if (interpret.guideKind === "combustible" && !isCombustibleKbEnabled()) return false;
   // HR: reconocer aunque corpus off → info_guides (respuesta disabled estructurada).

@@ -59,7 +59,6 @@ const bodySchema = z
         "live_unit",
         "assistant_identity",
         "certificate_definition",
-        "odometer_information",
       ])
       .optional(),
     api_key: z.string().optional(),
