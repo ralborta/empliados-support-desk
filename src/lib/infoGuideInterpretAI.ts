@@ -3004,6 +3004,19 @@ function isSameFamilyGuideFollowup(
       lastGuideKind,
     );
   }
+  if (lastGuideKind === "hojas_de_ruta") {
+    return looksLikeHojasRutaGuideFollowupQuestion(
+      selectionText,
+      threadText,
+      lastGuideKind,
+    );
+  }
+  if (lastGuideKind === "puntos_de_interes") {
+    return looksLikePuntosInteresGuideFollowupQuestion(selectionText, threadText);
+  }
+  if (lastGuideKind === "informes") {
+    return looksLikeInformesGuideFollowupQuestion(selectionText, threadText);
+  }
   return false;
 }
 
@@ -3026,13 +3039,17 @@ function normalizeAmbiguousIssueWithoutExplicitModule(
   if (interpret.need !== "ambiguous") return interpret;
   if (utteranceNamesGuideKind(selectionText, interpret.guideKind)) return interpret;
 
-  const inventedModule =
-    Boolean(interpret.guideKind) || interpret.articleIds.length > 0;
+  const inheritedModule =
+    Boolean(opts?.lastGuideKind) &&
+    interpret.guideKind != null &&
+    interpret.guideKind === opts.lastGuideKind;
   const missingClarifyOnInfoGuides =
-    interpret.route === "info_guides" && !interpret.clarifyQuestion?.trim();
-  if (!inventedModule && !missingClarifyOnInfoGuides) return interpret;
+    interpret.route === "info_guides" &&
+    !interpret.guideKind &&
+    !interpret.clarifyQuestion?.trim();
+  if (!inheritedModule && !missingClarifyOnInfoGuides) return interpret;
 
-  const clarify = inventedModule
+  const clarify = inheritedModule
     ? buildIssueReferenceClarify(threadText)
     : interpret.clarifyQuestion?.trim() || buildIssueReferenceClarify(threadText);
   return {
