@@ -41,6 +41,7 @@ import {
   looksLikeFlowControlCommand,
   looksLikeSoftFlowRestart,
   looksLikeFleetWideOutageClaim,
+  looksLikeAmbiguousMultiUnitSpeedClaim,
   looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
@@ -393,6 +394,13 @@ const TURN_RULES: TurnRule[] = [
     reason:
       "Falla masiva de flota sin unidad concreta → asesor (no pedir patente ni listado).",
     decide: ({ text }) => (looksLikeFleetWideOutageClaim(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "multi_unit_speed_advisor",
+    reason:
+      "Consulta confusa multi-unidad + velocidad (km/h) → asesor con resumen del pedido.",
+    decide: ({ text }) =>
+      looksLikeAmbiguousMultiUnitSpeedClaim(text) ? "odoo_ticket" : null,
   },
   {
     id: "conversation_close_request",
@@ -779,6 +787,7 @@ const TURN_RULES: TurnRule[] = [
 /** Reglas que NUNCA delega la IA (confirmaciones, Odoo, cert awaiting unit y escrituras). */
 export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "fleet_wide_outage_advisor",
+  "multi_unit_speed_advisor",
   "conversation_close_request",
   "open_case_status_inquiry",
   "open_new_case_request",

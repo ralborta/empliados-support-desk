@@ -24,6 +24,7 @@ import {
   looksLikeTechnicalSupportRequest,
   looksLikeOperationalMaintenanceIntent,
   looksLikeFleetWideOutageClaim,
+  looksLikeAmbiguousMultiUnitSpeedClaim,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
 } from "@/lib/waraApi";
@@ -265,6 +266,14 @@ export async function resolveTurnExecutor(
       executor: "odoo_ticket",
       source: "safety_guard",
       ruleId: "fleet_wide_outage_advisor",
+    };
+  }
+  // Multi-unidad + velocidad confusa → asesor (explicar pedido; no GPS/odómetro).
+  if (looksLikeAmbiguousMultiUnitSpeedClaim(text)) {
+    return {
+      executor: "odoo_ticket",
+      source: "safety_guard",
+      ruleId: "multi_unit_speed_advisor",
     };
   }
 

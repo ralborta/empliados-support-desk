@@ -10,6 +10,7 @@ import {
   resolvePruebasContactAliases,
 } from "@/config/pruebasContactAliases";
 import {
+  detectAllPlates,
   formatPlateWithSpaces,
   hasPendingOdometerConfirmation,
   threadHasOdometerConfirmStillPendingCue,
@@ -2222,6 +2223,101 @@ export function looksLikeTechnicalSupportRequest(text: string | undefined | null
 }
 
 /**
+ * Códigos / etiquetas de unidad en un mensaje (incl. CR-106, M300-097, patentes).
+ * Solo para detectar multi-unidad confusa — no resuelve flota.
+ */
+export function extractUnitLabelsForMultiUnitClaim(text: string | undefined | null): string[] {
+  const raw = String(text ?? "").trim();
+  if (!raw) return [];
+  const out: string[] = [];
+  const push = (label: string) => {
+    const t = label.trim().toUpperCase().replace(/\s+/g, " ");
+    if (!t || out.includes(t)) return;
+    out.push(t);
+  };
+  for (const m of raw.matchAll(/\b(M?\d{3}-\d{2,3})\b/gi)) push(m[1]!);
+  // Prefijo alfanumérico de flota (CR-106, AB-12) — no patente Mercosur.
+  for (const m of raw.matchAll(/\b([A-Za-z]{1,3}-\d{2,4})\b/g)) {
+    const tok = m[1]!;
+    if (/^M?\d/i.test(tok)) continue;
+    push(tok);
+  }
+  for (const plate of detectAllPlates(raw)) {
+    push(formatPlateWithSpaces(plate) || plate);
+  }
+  return out;
+}
+
+/**
+ * Consulta confusa: 2+ unidades + velocidad (km/h / circulan).
+ * Bug real 2026-09-22: "las unidades CR-106 y CR-110 circulan a 254 km/h?"
+ * no era GPS ni odómetro claro → silencio / ruteo errado. Debe derivar a asesor
+ * explicando lo que pidió el usuario (no improvisar telemetría multi-unidad).
+ */
+export function looksLikeAmbiguousMultiUnitSpeedClaim(
+  text: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 280) return false;
+  if (looksLikeExplicitOdometerUpdateRequest(raw)) return false;
+  if (looksLikeHorometerOnlyIntent(raw)) return false;
+
+  const labels = extractUnitLabelsForMultiUnitClaim(raw);
+  if (labels.length < 2) return false;
+
+  const n = normCompanyToken(raw);
+  const speedCue =
+    /\b(km\s*\/\s*h|kmh|kilometros?\s+por\s+hora|velocidad)\b/.test(n) ||
+    /\bcircul\w*\b/.test(n) ||
+    /\b(andan?|van|va|va\s+a|a)\s+\d{2,4}\s*(km)\b/.test(n);
+  if (!speedCue) return false;
+
+  // Evitar odómetro/horómetro explícito disfrazado.
+  if (/\b(odometro|horometro|kilometraje|corregir|actualizar|cargar|registrar)\b/.test(n)) {
+    return false;
+  }
+  return true;
+}
+
+/** Resumen para el panel: qué pidió el cliente. */
+export function buildMultiUnitSpeedAdvisorSummary(text: string | undefined | null): string {
+  const raw = String(text ?? "").trim();
+  const labels = extractUnitLabelsForMultiUnitClaim(raw);
+  const units = labels.length > 0 ? labels.join(", ") : "varias unidades";
+  const speed = raw.match(/\b(\d{2,4})\s*(?:km\s*\/\s*h|kmh|km)\b/i)?.[1];
+  const speedBit = speed ? ` a ~${speed} km/h` : " (velocidad)";
+  return (
+    `Cliente consulta si ${units} circulan/marcan velocidad${speedBit}. ` +
+    "Consulta multi-unidad confusa — derivada a asesor (Kira no responde telemetría multi-unidad)."
+  );
+}
+
+/** Mensaje al cliente: explica lo entendido + deriva (tono natural, no plantilla fija). */
+export function buildMultiUnitSpeedAdvisorHandoffReply(
+  text: string | undefined | null,
+  seed = "",
+): string {
+  const labels = extractUnitLabelsForMultiUnitClaim(text);
+  const units =
+    labels.length >= 2
+      ? `${labels.slice(0, -1).join(", ")} y ${labels[labels.length - 1]}`
+      : labels[0] || "esas unidades";
+  const speed = String(text ?? "").match(/\b(\d{2,4})\s*(?:km\s*\/\s*h|kmh|km)\b/i)?.[1];
+  const speedBit = speed ? ` a ${speed} km/h` : "";
+
+  const variants = [
+    `Entiendo: querés revisar si ${units} están circulando${speedBit}. Eso lo ve mejor un asistente — te paso con uno para que tome tu caso.`,
+    `Anoté tu consulta sobre ${units}${speedBit ? ` (${speedBit.trim()})` : ""}. Yo no puedo cerrar bien ese chequeo multi-unidad; te derivo con un asistente para que lo revise.`,
+    `Vi lo de ${units}${speedBit}. Como involucra varias unidades y la velocidad, te paso con un asistente que va a tomar tu caso.`,
+  ];
+  const day = new Date().toISOString().slice(0, 10);
+  let h = 0;
+  const key = `${seed}|muspeed|${day}`;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return variants[h % variants.length]!;
+}
+
+/**
  * Reclamo de flota completa / masivo (sin unidad concreta).
  * Bug real 2026-09-02: "Ninguna anda" / "están todas quietas" / "Ninguna reporta"
  * caía a unidades y pedía patente en loop — debe ir a asesor (odoo_ticket).
@@ -2274,6 +2370,8 @@ export function looksLikeOutOfScopeSupportClaim(text: string | undefined | null)
 
   // 0) Falla masiva de flota (sin patente) → asesor; no pedir unidad.
   if (looksLikeFleetWideOutageClaim(text)) return true;
+  // 0b) Multi-unidad + velocidad confusa → asesor (explica el pedido; no GPS improvisado).
+  if (looksLikeAmbiguousMultiUnitSpeedClaim(text)) return true;
 
   const hardwareOrPhysical =
     /\b(pantalla|tactil|touch\s*screen|display|teclado|botonera|cargador|fuente|cable|antena|modem|router|tablet|impresora|hardware|garantia)\b/.test(

@@ -21,6 +21,9 @@ import {
   looksLikeOpenNewCaseRequest,
   looksLikeOutOfScopeSupportClaim,
   looksLikeFleetWideOutageClaim,
+  looksLikeAmbiguousMultiUnitSpeedClaim,
+  buildMultiUnitSpeedAdvisorHandoffReply,
+  buildMultiUnitSpeedAdvisorSummary,
   looksLikeTechnicalSupportRequest,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
@@ -538,6 +541,7 @@ export async function POST(req: NextRequest) {
   const advisorRequest = looksLikeHumanAdvisorRequest(data.rawText);
   const outOfScopeSupport = looksLikeOutOfScopeSupportClaim(data.rawText);
   const fleetWideOutage = looksLikeFleetWideOutageClaim(data.rawText);
+  const multiUnitSpeedClaim = looksLikeAmbiguousMultiUnitSpeedClaim(data.rawText);
   const technicalSupport = looksLikeTechnicalSupportRequest(data.rawText);
   const openNewCase = looksLikeOpenNewCaseRequest(data.rawText);
   const gpsFeatureIssue = looksLikeGpsFeatureIssueForAdvisor(data.rawText);
@@ -627,6 +631,8 @@ export async function POST(req: NextRequest) {
           ? "Cliente solicitó abrir un nuevo caso"
           : fleetWideOutage
             ? "Falla masiva de flota"
+            : multiUnitSpeedClaim
+              ? "Consulta multi-unidad / velocidad"
             : advisorRequest
             ? "Cliente solicita asesor humano"
             : gpsFeatureIssue
@@ -636,6 +642,8 @@ export async function POST(req: NextRequest) {
         pauseBot: outOfScopeSupport,
         aiSummary: fleetWideOutage
           ? "Falla masiva de flota — derivación a operador + alerta ops WA."
+          : multiUnitSpeedClaim
+            ? buildMultiUnitSpeedAdvisorSummary(rawText)
           : outOfScopeSupport
           ? "Fuera de alcance Kira — derivación a operador (panel Wara, sin Odoo)."
           : undefined,
@@ -644,9 +652,11 @@ export async function POST(req: NextRequest) {
       // Fuera de alcance: NUNCA crear Helpdesk Odoo — solo ticket local + mensaje.
       if (outOfScopeSupport) {
         const { pickOutOfScopeHandoffReply } = await import("@/lib/advisorHandoff");
-        const message = advisorHandoffLocal.shouldNotifyCustomer
-          ? pickOutOfScopeHandoffReply(rawPhone)
-          : REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY;
+        const message = !advisorHandoffLocal.shouldNotifyCustomer
+          ? REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY
+          : multiUnitSpeedClaim
+            ? buildMultiUnitSpeedAdvisorHandoffReply(rawText, rawPhone)
+            : pickOutOfScopeHandoffReply(rawPhone);
         await appendOutboundBotMessage(rawPhone, message, {
           source: "odoo_ticket",
           stage: "out_of_scope_platform_only",

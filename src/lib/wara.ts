@@ -3117,7 +3117,11 @@ export function detectIncidentType(text: string): WaraIncidentType {
   ) {
     return "GENERAL_TECH";
   }
-  if (/(od[oó]metro|kilometraje|cambio de od[oó]metro|corregir kil[oó]metros|\bkm\b)/.test(lower)) {
+  // "254 km/h" NO es odómetro: \bkm\b pegaba dentro de km/h (bug 2026-09-22).
+  if (
+    /(od[oó]metro|kilometraje|cambio de od[oó]metro|corregir kil[oó]metros)/.test(lower) ||
+    (/\bkm\b/.test(lower) && !/\bkm\s*\/?\s*h\b|\bkmh\b/.test(lower))
+  ) {
     return "ODOMETER_CHANGE";
   }
   if (/(certificado|habilitar monitoreo|certificado de monitoreo)/.test(lower)) {
