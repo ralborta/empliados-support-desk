@@ -69,6 +69,12 @@ async function expireStaleAdvisorSessions(): Promise<number> {
   return stale.length;
 }
 
+/** Hay al menos un SUPPORT con sesión activa y heartbeat vigente. */
+export async function hasConnectedSupportAdvisor(): Promise<boolean> {
+  const ids = await getActiveSupportAdvisorIds();
+  return ids.length > 0;
+}
+
 async function getActiveSupportAdvisorIds(): Promise<string[]> {
   await expireStaleAdvisorSessions();
 

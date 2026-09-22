@@ -6,7 +6,8 @@ import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
-import { autoAssignNewTicket } from "@/lib/advisorDistribution";
+import { autoAssignNewTicket, hasConnectedSupportAdvisor } from "@/lib/advisorDistribution";
+import { withAdvisorOfflineNoticeIfNeeded } from "@/lib/advisorHandoff";
 import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
@@ -1992,6 +1993,10 @@ export async function POST(req: NextRequest) {
               ticketReused: created.reused,
               ticketIssueDetail,
             });
+        }
+        if (action === "ticket") {
+          const advisorOnline = await hasConnectedSupportAdvisor();
+          summaryText = withAdvisorOfflineNoticeIfNeeded(summaryText, advisorOnline);
         }
         // El resumen GPS ya trae formato WhatsApp fijo (emojis, mapa, cierre).
         // agent_compose lo reescribía en prosa sin emojis (WARA_AGENT_MODE).

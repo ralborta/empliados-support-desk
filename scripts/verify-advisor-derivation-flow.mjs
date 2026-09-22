@@ -12,9 +12,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import {
+  ADVISOR_OFFLINE_SOON_REPLY,
+  buildPresenceAwareAdvisorHandoffReply,
   ensureRegisteredAdvisorHandoff,
   REGISTERED_ADVISOR_HANDOFF_REPLY,
   REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY,
+  withAdvisorOfflineNoticeIfNeeded,
 } from "../src/lib/advisorHandoff.ts";
 import {
   ensureUnregisteredPhoneAdvisorHandoff,
@@ -32,6 +35,29 @@ assert.equal(typeof ensureUnregisteredPhoneAdvisorHandoff, "function");
 assert.ok(/deriv[eé]/i.test(REGISTERED_ADVISOR_HANDOFF_REPLY));
 assert.ok(/asesor/i.test(REGISTERED_ADVISOR_HANDOFF_REPLY));
 assert.ok(/asesor/i.test(REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY));
+
+const onlineCase = buildPresenceAwareAdvisorHandoffReply({
+  advisorOnline: true,
+  caseRef: "398566",
+  explicitAdvisorRequest: true,
+});
+assert.match(onlineCase, /Tu caso es \*#398566\*/);
+assert.doesNotMatch(onlineCase, /no hay un asesor conectado/);
+const offlineCase = buildPresenceAwareAdvisorHandoffReply({
+  advisorOnline: false,
+  caseRef: "398566",
+  explicitAdvisorRequest: true,
+});
+assert.match(offlineCase, /Tu caso es \*#398566\*/);
+assert.match(offlineCase, /no hay un asesor conectado/);
+assert.equal(
+  withAdvisorOfflineNoticeIfNeeded("Un asesor de Atención al cliente lo va a revisar.", true),
+  "Un asesor de Atención al cliente lo va a revisar.",
+);
+assert.equal(
+  withAdvisorOfflineNoticeIfNeeded("Un asesor de Atención al cliente lo va a revisar.", false),
+  ADVISOR_OFFLINE_SOON_REPLY,
+);
 assert.ok(
   /No encontré empresas asociadas a tu número en Wara\. Te derivo con un agente\./.test(
     UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
@@ -62,6 +88,11 @@ for (const msg of [
 }
 
 const odooRoute = readFileSync(join(root, "../src/app/api/odoo/ticket/route.ts"), "utf8");
+assert.ok(
+  odooRoute.includes("hasConnectedSupportAdvisor") &&
+    odooRoute.includes("buildPresenceAwareAdvisorHandoffReply"),
+  "odoo/ticket usa presencia de asesor para el texto al cliente",
+);
 assert.ok(
   odooRoute.includes("ensureRegisteredAdvisorHandoff"),
   "odoo/ticket debe crear ticket local al derivar",

@@ -1,5 +1,6 @@
 import type { Customer, PrismaClient, Ticket } from "@prisma/client";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
+import { formatCustomerOdooCaseRefForWhatsApp } from "@/lib/customerOdooCaseRef";
 import { pauseAtilioForCustomer, reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
 import {
   findOpenConversationTicket,
@@ -16,6 +17,61 @@ export const REGISTERED_ADVISOR_HANDOFF_REPLY =
 /** Reingreso mientras ya hay caso en cola de asesor. */
 export const REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY =
   "Ya tenemos tu consulta: un asesor de Atención al Cliente te va a atender lo antes posible por este medio.";
+
+/** Sin SUPPORT conectado: no prometer revisión inmediata. */
+export const ADVISOR_OFFLINE_SOON_REPLY =
+  "Ahora no hay un asesor conectado en línea; te contactamos apenas esté disponible.";
+
+export function buildAdvisorUnavailableCaseReply(caseRef?: string | null): string {
+  const display = caseRef ? formatCustomerOdooCaseRefForWhatsApp(caseRef) : null;
+  if (display) {
+    return `Tu caso es *${display}*. ${ADVISOR_OFFLINE_SOON_REPLY}`;
+  }
+  return ADVISOR_OFFLINE_SOON_REPLY;
+}
+
+/**
+ * Pedido de asesor / caso sin reporte: el texto offline solo si nadie está conectado.
+ * Con asesor en línea y caso, el mensaje de siempre (Tu caso #…).
+ */
+export function buildPresenceAwareAdvisorHandoffReply(opts: {
+  advisorOnline: boolean;
+  caseRef?: string | null;
+  firstNotify?: boolean;
+  explicitAdvisorRequest?: boolean;
+  reused?: boolean;
+  onlineWithCase?: (ref: string) => string;
+}): string {
+  if (!opts.advisorOnline) {
+    return buildAdvisorUnavailableCaseReply(opts.caseRef);
+  }
+  if (opts.caseRef) {
+    if (opts.onlineWithCase) return opts.onlineWithCase(opts.caseRef);
+    const display = formatCustomerOdooCaseRefForWhatsApp(opts.caseRef);
+    if (opts.explicitAdvisorRequest || !opts.reused) {
+      return `Tu caso es *${display}*. Un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+    }
+    return `Ya tenés un caso en revisión (*${display}*). Un asesor de Atención al cliente te va a contactar por este medio.`;
+  }
+  if (opts.firstNotify === false) return REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY;
+  return REGISTERED_ADVISOR_HANDOFF_REPLY;
+}
+
+/** En falta de reporte: si no hay asesor, reemplazar “lo va a revisar” por el aviso offline. */
+export function withAdvisorOfflineNoticeIfNeeded(
+  message: string,
+  advisorOnline: boolean,
+): string {
+  const text = message.trim();
+  if (advisorOnline || !text) return text;
+  if (text.includes("no hay un asesor conectado")) return text;
+  const replaced = text.replace(
+    /Un asesor de Atención al cliente lo (va a revisar|sigue revisando)\.?/gi,
+    ADVISOR_OFFLINE_SOON_REPLY,
+  );
+  if (replaced !== text) return replaced;
+  return `${text} ${ADVISOR_OFFLINE_SOON_REPLY}`;
+}
 
 /** Fuera de alcance Atilio → transferir por panel Wara (sin Odoo). */
 const OUT_OF_SCOPE_HANDOFF_VARIANTS = [

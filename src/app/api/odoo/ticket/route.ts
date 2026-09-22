@@ -51,8 +51,9 @@ import {
   formatCustomerOdooCaseRefForWhatsApp,
 } from "@/lib/customerOdooCaseRef";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
-import { autoAssignNewTicket } from "@/lib/advisorDistribution";
+import { autoAssignNewTicket, hasConnectedSupportAdvisor } from "@/lib/advisorDistribution";
 import {
+  buildPresenceAwareAdvisorHandoffReply,
   ensureRegisteredAdvisorHandoff,
   REGISTERED_ADVISOR_HANDOFF_REPLY,
   REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY,
@@ -557,6 +558,7 @@ export async function POST(req: NextRequest) {
   let advisorHandoffLocal: Awaited<ReturnType<typeof ensureRegisteredAdvisorHandoff>> | null =
     null;
   let closedPreviousForNewCase = false;
+  const advisorOnline = handoffToAdvisor ? await hasConnectedSupportAdvisor() : true;
 
   if (handoffToAdvisor) {
     if (openNewCase && rawPhone) {
@@ -572,7 +574,13 @@ export async function POST(req: NextRequest) {
       ? null
       : await findRecentOdooRef(rawPhone, plate || undefined);
     if (existingAdvisorRef) {
-      const message = advisorSupportFollowup
+      const message = advisorRequest
+        ? buildPresenceAwareAdvisorHandoffReply({
+            advisorOnline,
+            caseRef: existingAdvisorRef,
+            explicitAdvisorRequest: true,
+          })
+        : advisorSupportFollowup
         ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: true })
         : gpsFeatureIssue
           ? `Perfecto, anoté este detalle en tu caso. Un asesor de Atención al cliente lo va a revisar con esa información.`
@@ -688,6 +696,12 @@ export async function POST(req: NextRequest) {
           ? closedPreviousForNewCase
             ? "Cerré el caso anterior y abrí uno nuevo. Un asesor de Atención al cliente te va a contactar por este medio. Contame el detalle del reclamo."
             : "Abrí un caso nuevo. Un asesor de Atención al cliente te va a contactar por este medio. Contame el detalle del reclamo."
+          : advisorRequest
+            ? buildPresenceAwareAdvisorHandoffReply({
+                advisorOnline,
+                firstNotify: advisorHandoffLocal.shouldNotifyCustomer,
+                explicitAdvisorRequest: true,
+              })
           : advisorSupportFollowup
             ? buildAdvisorSupportFollowupMessage(rawText)
             : advisorHandoffLocal.shouldNotifyCustomer
@@ -862,6 +876,13 @@ export async function POST(req: NextRequest) {
           ? closedPreviousForNewCase
             ? `Cerré el caso anterior y abrí el caso *${formatCustomerOdooCaseRefForWhatsApp(ref)}*. Un asesor de Atención al cliente lo va a revisar. Contame el detalle del reclamo si aún no lo hiciste.`
             : `Abrí el caso *${formatCustomerOdooCaseRefForWhatsApp(ref)}*. Un asesor de Atención al cliente lo va a revisar. Contame el detalle del reclamo.`
+          : advisorRequest
+            ? buildPresenceAwareAdvisorHandoffReply({
+                advisorOnline,
+                caseRef: ref,
+                explicitAdvisorRequest: true,
+                reused: !ensured.created,
+              })
           : advisorSupportFollowup
             ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: !ensured.created })
             : buildCustomerOdooCaseAssignedReply(ref, { reused: !ensured.created });
@@ -923,6 +944,12 @@ export async function POST(req: NextRequest) {
     const ref = result.ref ?? null;
     const message = advisorSupportFollowup
       ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: !!ref })
+      : advisorRequest
+        ? buildPresenceAwareAdvisorHandoffReply({
+            advisorOnline,
+            caseRef: ref,
+            explicitAdvisorRequest: true,
+          })
       : ref
         ? buildCustomerOdooCaseAssignedReply(ref)
         : `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
