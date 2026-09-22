@@ -104,11 +104,13 @@ import {
   buildOpcionesSectionDisabledReply,
 } from "@/lib/opcionesKnowledgeV2";
 import {
+  looksLikeGpsOrUnitStatusQuestion,
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
   resolveExplicitPlatformGuideModule,
   type InfoGuideModulePick,
 } from "@/lib/waraApi";
+import { detectAllPlates, formatPlateWithSpaces } from "@/lib/wara";
 
 const INTERPRET_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_ROUTE_CONFIDENCE = 0.72;
@@ -741,7 +743,8 @@ Devolvé SOLO JSON válido:
 category: guideKind=informes (pantallas) o guideKind=opciones con V2 (sección). reportId: informes=pantalla inf-*; alertas/paneles=itemId; opciones V2=itemId opcional; en otros kinds usá null.
 
 route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (${modules}).
-route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
+route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor identificado, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
+Reclamo referencial o vago (se repite un inconveniente, sigue pasando lo mismo, “otra vez”) SIN nombrar un módulo de plataforma ni un síntoma operativo concreto (GPS/reporte/odómetro/certificado): route=info_guides, guideKind=null, articleIds=[], need=ambiguous. NO elijas Alertas, Paneles, Mantenimiento, Transporte ni un menú de módulos. NO ofrezcas cambiar matrícula, nombre o unidad. clarifyQuestion: si el historial tiene UN solo incidente claro (unidad + problema), preguntá si se refiere a ese; si no hay o hay varios, pedí qué inconveniente y con qué unidad.
 Una pregunta social sobre el nombre, identidad o presentación del asistente (p. ej. «¿cómo te llamás?», «quién sos», «preséntate») NO es consulta de módulo ni nombre de unidad: se resuelve como assistant_identity en la frontera semántica.
 NUNCA route=info_guides para "necesito un certificado", "certificado de cobertura", "mandame el certificado".
 
@@ -2675,7 +2678,7 @@ function correctPuntosInteresContinuityMisroute(
 
 function correctAlertasContinuityMisroute(
   interpret: PlatformKnowledgeInterpret,
-  _selectionText: string,
+  selectionText: string,
   _threadText: string,
   opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret {
@@ -2695,6 +2698,10 @@ function correctAlertasContinuityMisroute(
   if (interpret.route === "continue_normal" && interpret.guideKind == null) {
     return interpret;
   }
+  // Reclamo vago / GPS / turno sin Alertas: no inyectar el módulo residual.
+  if (interpret.need === "ambiguous") return interpret;
+  if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return interpret;
+  if (interpret.guideKind !== "alertas") return interpret;
   const lastIds = opts?.lastGuideArticleIds ?? [];
   const lastReport = opts?.lastGuideReportId?.trim() || null;
   let ids = hasAlertasDetailArticle(lastIds)
@@ -2915,11 +2922,133 @@ export function applyPlatformGuideInterpretGuards(
   next = correctAmbiguousCargaMisroute(next, selectionText);
   // Artículos sin KB: después de misroutes, para no ser pisado por MT.
   next = normalizeArticulosModuleUnsupported(next, selectionText);
+  next = normalizeAmbiguousIssueWithoutExplicitModule(
+    next,
+    selectionText,
+    threadText,
+    opts,
+  );
   next = attachGuideContinuityTrace(next, {
     primarySnapshot,
     opts,
   });
   return next;
+}
+
+const DEFAULT_ISSUE_CLARIFY =
+  "Claro. ¿Qué inconveniente se está repitiendo y con qué unidad?";
+
+function buildIssueReferenceClarify(threadText: string): string {
+  const plates = [...new Set(detectAllPlates(threadText))];
+  if (plates.length === 1) {
+    const plate = formatPlateWithSpaces(plates[0]!) || plates[0]!;
+    return `¿Te referís al inconveniente de la unidad ${plate}? Si no, contame cuál es y con qué unidad.`;
+  }
+  return DEFAULT_ISSUE_CLARIFY;
+}
+
+function utteranceNamesGuideKind(
+  selectionText: string,
+  guideKind: PlatformGuideKind | null,
+): boolean {
+  if (!guideKind) return false;
+  if (resolveExplicitPlatformGuideModule(selectionText) === guideKind) return true;
+  const text = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return false;
+  switch (guideKind) {
+    case "alertas":
+      return /\balertas?\b/.test(text);
+    case "paneles":
+      return /\bpaneles?\b/.test(text);
+    case "mantenimiento":
+      return /\bmantenimiento\b/.test(text);
+    case "transporte_publico":
+      return /\btransporte(\s+de\s+pasajeros|\s+publico)?\b/.test(text);
+    case "informes":
+      return /\binformes?\b/.test(text);
+    case "opciones":
+      return /\bopciones\b/.test(text);
+    case "unidades":
+      return /\bunidades\b/.test(text);
+    case "hojas_de_ruta":
+      return /\bhojas?\s+de\s+ruta\b/.test(text);
+    case "puntos_de_interes":
+      return /\bpuntos?\s+de\s+interes\b/.test(text);
+    case "combustible":
+      return /\bcombustible\b/.test(text);
+    case "cisternas":
+      return /\bcisternas?\b/.test(text);
+    default:
+      return false;
+  }
+}
+
+function isSameFamilyGuideFollowup(
+  selectionText: string,
+  threadText: string,
+  lastGuideKind?: LastInfoGuideKind | null,
+): boolean {
+  if (!lastGuideKind) return false;
+  if (lastGuideKind === "mantenimiento") {
+    return looksLikeMaintenanceGuideFollowupQuestion(selectionText, threadText);
+  }
+  if (lastGuideKind === "paneles") {
+    return looksLikePanelesGuideFollowupQuestion(
+      selectionText,
+      threadText,
+      lastGuideKind,
+    );
+  }
+  return false;
+}
+
+/**
+ * Reclamo vago sin módulo explícito: no inventar ni heredar guía/menú/matrícula.
+ * No inspecciona frases fijas: solo need=ambiguous + ausencia de dominio nombrado.
+ */
+function normalizeAmbiguousIssueWithoutExplicitModule(
+  interpret: PlatformKnowledgeInterpret,
+  selectionText: string,
+  threadText: string,
+  opts?: PlatformGuideGuardOpts,
+): PlatformKnowledgeInterpret {
+  if (interpret.normalTarget) return interpret;
+  if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return interpret;
+  if (resolveExplicitPlatformGuideModule(selectionText)) return interpret;
+  if (isSameFamilyGuideFollowup(selectionText, threadText, opts?.lastGuideKind)) {
+    return interpret;
+  }
+  if (interpret.need !== "ambiguous") return interpret;
+  if (utteranceNamesGuideKind(selectionText, interpret.guideKind)) return interpret;
+
+  const inventedModule =
+    Boolean(interpret.guideKind) || interpret.articleIds.length > 0;
+  const missingClarifyOnInfoGuides =
+    interpret.route === "info_guides" && !interpret.clarifyQuestion?.trim();
+  if (!inventedModule && !missingClarifyOnInfoGuides) return interpret;
+
+  const clarify = inventedModule
+    ? buildIssueReferenceClarify(threadText)
+    : interpret.clarifyQuestion?.trim() || buildIssueReferenceClarify(threadText);
+  return {
+    ...interpret,
+    route: "info_guides",
+    guideKind: null,
+    articleIds: [],
+    category: null,
+    reportId: null,
+    clarifyQuestion: clarify,
+    executionRequest: false,
+    confidence: Math.max(interpret.confidence, 0.8),
+    reason: interpret.reason
+      ? `${interpret.reason}|ambiguous_issue_clarify`
+      : "ambiguous_issue_clarify",
+  };
 }
 
 function attachGuideContinuityTrace(

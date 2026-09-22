@@ -112,6 +112,7 @@ const PUSH_SUITES = [
   "verify-out-of-scope-support-advisor.mjs",
   "verify-fleet-outage-ops-alert.mjs",
   "verify-multi-unit-speed-advisor.mjs",
+  "verify-vague-issue-clarify.mjs",
   "verify-outbound-dedup.mjs",
   "verify-company-continuation-mention.mjs",
   "verify-utterance-understanding.mjs",

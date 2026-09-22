@@ -167,4 +167,105 @@ describe("applyPlatformGuideInterpretGuards — precedencia de continuidad", () 
     assert.equal(next.guideKind, "transporte_publico");
     assert.ok(!next.articleIds.some((id) => id.startsWith("mt-")));
   });
+
+  it("reclamo vago sin módulo → pide aclaración", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        route: "info_guides",
+        guideKind: null,
+        need: "ambiguous",
+        clarifyQuestion: null,
+      }),
+      "Se sigue repitiendo el mismo inconveniente",
+      "",
+    );
+    assert.equal(next.guideKind, null);
+    assert.equal(next.need, "ambiguous");
+    assert.match(next.clarifyQuestion ?? "", /inconveniente|unidad/i);
+    assert.doesNotMatch(next.clarifyQuestion ?? "", /matr[ií]cula|patente a cambiar/i);
+  });
+
+  it("reclamo vago no hereda Alertas ni menú", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "alertas",
+        need: "ambiguous",
+        articleIds: ["al-panico"],
+        clarifyQuestion: null,
+      }),
+      "Se sigue repitiendo el mismo inconveniente",
+      "Cliente: Alarmas\nKira: En Alertas ves eventos…",
+      {
+        lastGuideKind: "alertas",
+        lastGuideArticleIds: ["al-panico"],
+      },
+    );
+    assert.equal(next.guideKind, null);
+    assert.deepEqual(next.articleIds, []);
+    assert.equal(next.need, "ambiguous");
+    assert.match(next.clarifyQuestion ?? "", /inconveniente|unidad/i);
+    assert.equal(next.reason?.includes("ambiguous_issue_clarify"), true);
+  });
+
+  it("un solo incidente en historial → aclara con esa unidad", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "paneles",
+        need: "ambiguous",
+        articleIds: ["pn-alarmas"],
+      }),
+      "Se sigue repitiendo el mismo inconveniente",
+      "Cliente: Estado AD427MC\nKira: AD 427 MC reporta hace 2 min.",
+      { lastGuideKind: "paneles", lastGuideArticleIds: ["pn-alarmas"] },
+    );
+    assert.equal(next.guideKind, null);
+    assert.match(next.clarifyQuestion ?? "", /AD\s*427\s*MC/i);
+  });
+
+  it("Alarmas previo + turno sin módulo → no inyecta Alertas", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        route: "continue_normal",
+        guideKind: null,
+        need: "procedure",
+      }),
+      "Se sigue repitiendo el mismo inconveniente",
+      "Cliente: Alarmas\nKira: En Alertas ves pánico y zonas…",
+      { lastGuideKind: "alertas", lastGuideArticleIds: ["al-panico"] },
+    );
+    assert.equal(next.guideKind, null);
+    assert.equal(next.reason?.includes("alertas_continuity"), false);
+  });
+
+  it("follow-up real de mantenimiento no se convierte en aclaración", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "mantenimiento",
+        need: "procedure",
+        articleIds: ["mt-panel-tareas"],
+      }),
+      "¿Y después dónde la sigo?",
+      MT_THREAD,
+      mtOpts,
+    );
+    assert.equal(next.guideKind, "mantenimiento");
+    assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
+  });
+
+  it("GPS explícito no se convierte en guía residual", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        route: "continue_normal",
+        guideKind: null,
+        need: "procedure",
+        normalTarget: "live_unit",
+      }),
+      "mostrame el GPS de AD 306 F",
+      "Cliente: Se sigue repitiendo el mismo inconveniente\nKira: ¿Qué inconveniente…?",
+      { lastGuideKind: "alertas", lastGuideArticleIds: ["al-panico"] },
+    );
+    assert.equal(next.guideKind, null);
+    assert.equal(next.normalTarget, "live_unit");
+    assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
+  });
 });
