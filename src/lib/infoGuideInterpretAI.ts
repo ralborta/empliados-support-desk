@@ -3042,7 +3042,7 @@ function normalizeAmbiguousIssueWithoutExplicitModule(
   const inheritedModule =
     Boolean(opts?.lastGuideKind) &&
     interpret.guideKind != null &&
-    interpret.guideKind === opts.lastGuideKind;
+    interpret.guideKind === opts?.lastGuideKind;
   const missingClarifyOnInfoGuides =
     interpret.route === "info_guides" &&
     !interpret.guideKind &&
