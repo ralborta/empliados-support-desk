@@ -4,7 +4,10 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { applyPlatformGuideInterpretGuards } from "./infoGuideInterpretAI";
+import {
+  applyPlatformGuideInterpretGuards,
+  isCrossFamilyFrontierGrounded,
+} from "./infoGuideInterpretAI";
 import type { PlatformKnowledgeInterpret } from "./infoGuideInterpretAI";
 import {
   looksLikeExplicitGuideDomainSwitchAwayFrom,
@@ -250,6 +253,20 @@ describe("applyPlatformGuideInterpretGuards — precedencia de continuidad", () 
     );
     assert.equal(next.guideKind, "mantenimiento");
     assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
+  });
+
+  it("frontera Paneles no se ancla en reclamo vago", () => {
+    assert.equal(
+      isCrossFamilyFrontierGrounded(
+        "Se sigue repitiendo el mismo inconveniente",
+        "paneles_alarmas",
+      ),
+      false,
+    );
+    assert.equal(
+      isCrossFamilyFrontierGrounded("cómo silencio la alarma", "paneles_alarmas"),
+      true,
+    );
   });
 
   it("GPS explícito no se convierte en guía residual", () => {

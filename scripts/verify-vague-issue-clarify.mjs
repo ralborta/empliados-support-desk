@@ -4,8 +4,11 @@
  * Uso: npx tsx scripts/verify-vague-issue-clarify.mjs
  */
 import assert from "node:assert/strict";
-import { applyPlatformGuideInterpretGuards } from "../src/lib/infoGuideInterpretAI.ts";
-import { shouldRouteInterpretToInfoGuides } from "../src/lib/infoGuideInterpretAI.ts";
+import {
+  applyPlatformGuideInterpretGuards,
+  isCrossFamilyFrontierGrounded,
+  shouldRouteInterpretToInfoGuides,
+} from "../src/lib/infoGuideInterpretAI.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import {
   looksLikeGpsOrUnitStatusQuestion,
@@ -91,5 +94,14 @@ const noInherit = applyPlatformGuideInterpretGuards(
 );
 assert.equal(noInherit.guideKind, null, "Alarmas previo no se inyecta");
 assert.equal(noInherit.reason?.includes("alertas_continuity"), false);
+assert.equal(
+  isCrossFamilyFrontierGrounded(vague, "paneles_alarmas"),
+  false,
+  "frontera no ancla reclamo vago a Paneles",
+);
+assert.equal(
+  isCrossFamilyFrontierGrounded("cómo silencio la alarma", "paneles_alarmas"),
+  true,
+);
 
 console.log("OK verify-vague-issue-clarify");

@@ -4168,6 +4168,49 @@ function fillOpcionesDetailFromScopedCatalog(
   return interpret;
 }
 
+/** La frontera solo aplica si el turno actual nombra esa familia; no el historial. */
+export function isCrossFamilyFrontierGrounded(
+  selectionText: string,
+  classification: string,
+): boolean {
+  const text = selectionText
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  switch (classification) {
+    case "paneles_alarmas":
+      return /\b(paneles?|alarma|alarmas|silenci\w*|resolv\w*|gestionar|notificacion(es)?)\b/.test(
+        text,
+      );
+    case "alertas_evento":
+      return /\b(alertas?|panico|zona|rto|evento)\b/.test(text);
+    case "opciones_configuracion":
+      return /\b(opciones|protocolo|criticidad|motivos?|configur\w*)\b/.test(text);
+    case "informes_historico":
+    case "informes_catalogo":
+    case "informes_consulta":
+    case "informes_modulo":
+      return /\binformes?\b/.test(text);
+    case "transporte_publico_modulo":
+      return /\btransporte\b/.test(text);
+    case "mantenimiento_modulo":
+      return /\bmantenimiento\b/.test(text);
+    case "unidades_modulo":
+      return /\bunidades\b/.test(text);
+    case "utilidades_modulo":
+      return /\b(utilidades|novedades|auditoria)\b/.test(text);
+    case "unidad_gps_vivo":
+    case "combustible_operativo":
+    case "identidad_asistente":
+    case "sin_cambio":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function frontierClassificationToGuideKind(
   classification: string,
 ): PlatformGuideKind | null {
@@ -4363,6 +4406,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       "Preguntar el nombre, quién es, cómo se llama, o pedir que se presente («preséntate», «presentate», «quién sos») es identidad_asistente; nunca es búsqueda de unidad ni módulo. NO uses identidad_asistente para ingreso a la plataforma, cargar número de WhatsApp ni «reconocé que soy cliente».",
       "Una pantalla nombrada como Utilidades → Novedades, Utilidades → Auditoría u otro módulo inequívoco del Bloque 2 → guideKind=utilidades_bloque_2, incluso si su corpus está apagado; articleIds=[] si está apagado.",
       "Novedades de un ticket, certificado, mantenimiento u otro trámite NO son la pantalla Utilidades → Novedades.",
+      "No reclasifiques por residuo del historial. Si el mensaje actual no nombra un módulo ni un síntoma operativo de estas fronteras, devolvé sin_cambio.",
       "Si no pertenece claramente a estas fronteras, conservá la familia y la interpretación previas.",
     ].join(" "),
   };
@@ -4397,6 +4441,7 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
                     "identidad_asistente: SOLO pregunta el nombre, quién es, cómo se llama, o pide presentación del asistente (preséntate / quién sos). NUNCA es «cómo ingreso a la plataforma», «cargar mi número» ni «para que me reconozcas como cliente».",
                     "Una ruta explícita Utilidades→Novedades o Auditoría en Wara es utilidades_bloque_2.",
                     "Si la intención es clara: route=info_guides, need=procedure, clarifyQuestion=null.",
+                    "No uses el historial para inventar Paneles, Alertas, Mantenimiento u otra guía si el mensaje actual no distingue esa frontera.",
                     "Si no pertenece a estas fronteras, conservá interpret_previo.",
                   ].join(" "),
               },
@@ -4450,6 +4495,36 @@ async function refineAmbiguousGuideFrontierIfNeeded(params: {
       ? (JSON.parse(content) as { classification?: string }).classification
       : null;
     if (!classification || classification === "sin_cambio") return interpret;
+
+    if (
+      !isCrossFamilyFrontierGrounded(text, classification) &&
+      !isSameFamilyGuideFollowup(text, threadText, guardOpts.lastGuideKind) &&
+      !looksLikeGpsOrUnitStatusQuestion(text)
+    ) {
+      return applyPlatformGuideInterpretGuards(
+        {
+          ...interpret,
+          route: "info_guides",
+          guideKind: null,
+          need: "ambiguous",
+          articleIds: [],
+          category: null,
+          reportId: null,
+          clarifyQuestion:
+            interpret.clarifyQuestion?.trim() ||
+            buildIssueReferenceClarify(threadText),
+          executionRequest: false,
+          confidence: Math.max(interpret.confidence, 0.85),
+          reason: interpret.reason
+            ? `${interpret.reason}|frontier_rejected:ungrounded:${classification}`
+            : `frontier_rejected:ungrounded:${classification}`,
+          normalTarget: null,
+        },
+        text,
+        threadText,
+        guardOpts,
+      );
+    }
 
     // Veto: si el primary ya es mantenimiento y el mensaje nombra mantenimiento,
     // no permitir que la frontera lo mande a TP/paneles/etc.
