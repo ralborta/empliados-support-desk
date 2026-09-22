@@ -209,8 +209,7 @@ export function TicketDetailView({
         </div>
       </div>
 
-      {tab === "conversacion" ? (
-        <div className="grid gap-3 xl:grid-cols-[1fr_17.5rem]">
+      <div className={tab === "conversacion" ? "grid gap-3 xl:grid-cols-[1fr_17.5rem]" : "hidden"}>
           <div className="flex h-[min(560px,calc(100vh-13rem))] max-h-[min(560px,calc(100vh-13rem))] flex-col overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm">
             <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
               <ConversationThread messages={conversation} />
@@ -265,8 +264,7 @@ export function TicketDetailView({
             />
             <V2OperationPanel ticketId={ticket.id} botPaused={!!ticket.botPaused} />
           </aside>
-        </div>
-      ) : null}
+      </div>
 
       {tab === "archivos" ? (
         <div className="rounded-lg border border-slate-200/90 bg-white p-4 shadow-sm">

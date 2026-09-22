@@ -37,12 +37,27 @@ export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
     false,
   );
 
+  const ticketListSlugs = new Set([
+    "abiertos",
+    "en-progreso",
+    "esperando-cliente",
+    "resueltos",
+    "cerrados",
+    "urgentes",
+    "alta",
+    "normal",
+    "baja",
+  ]);
+  const pathParts = pathname.split("/").filter(Boolean);
+  const isTicketDetail =
+    pathParts[0] === "tickets" && pathParts.length === 2 && !ticketListSlugs.has(pathParts[1] ?? "");
+
   usePollWhenVisible(
     () => {
       router.refresh();
     },
     15_000,
-    true,
+    !isTicketDetail,
   );
 
   return null;

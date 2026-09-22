@@ -890,6 +890,31 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
 
   // Pre-guardado del backend (turn/unidades/certificados) + webhook con wamid estable:
   // fusionar en la fila existente en vez de duplicar en el panel.
+  const recentHumanOutbound = await findRecentSameContentMessage(prisma, {
+    ticketId: targetTicket.id,
+    direction: "OUTBOUND",
+    from: "HUMAN",
+    text: normalizedOutboundText,
+    windowMs: 2 * 60 * 1000,
+  });
+  if (recentHumanOutbound) {
+    await mergeWebhookIntoPlatformOutbound(prisma, {
+      messageId: recentHumanOutbound.id,
+      externalMessageId: messageId,
+      webhookRawPayload: { eventName, data } as Prisma.InputJsonObject,
+    });
+    console.log(
+      `ℹ️ Mensaje saliente fusionado con respuesta humana (${recentHumanOutbound.id})`,
+    );
+    return NextResponse.json({
+      ok: true,
+      ticketId: targetTicket.id,
+      ticketCode: targetTicket.code,
+      merged: true,
+      existingMessageId: recentHumanOutbound.id,
+    });
+  }
+
   const platformPresave = await findPlatformPresavedOutboundDuplicate(prisma, {
     ticketId: targetTicket.id,
     text: normalizedOutboundText,

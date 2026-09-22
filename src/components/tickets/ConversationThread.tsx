@@ -23,11 +23,17 @@ type ThreadItem =
   | { kind: "date"; key: string; label: string }
   | { kind: "group"; key: string; from: string; isInternal: boolean; messages: ThreadMessage[] };
 
+function isAdvisorSide(from: string): boolean {
+  return from === "HUMAN" || from === "BOT";
+}
+
 function collapseConsecutiveDuplicates(messages: ThreadMessage[]): ThreadMessage[] {
   const out: ThreadMessage[] = [];
   for (const msg of messages) {
     const prev = out[out.length - 1];
-    if (prev && prev.from === msg.from && (prev.text || "").trim() === (msg.text || "").trim()) {
+    const sameText = (prev?.text || "").trim() === (msg.text || "").trim();
+    const sameSpeaker = prev?.from === msg.from || (isAdvisorSide(prev?.from ?? "") && isAdvisorSide(msg.from));
+    if (prev && sameText && sameSpeaker) {
       continue;
     }
     out.push(msg);

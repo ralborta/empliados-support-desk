@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 type Props = {
@@ -9,7 +8,6 @@ type Props = {
 };
 
 export function BotPausedToggle({ customerId, initialPaused }: Props) {
-  const router = useRouter();
   const [paused, setPaused] = useState(initialPaused);
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +25,6 @@ export function BotPausedToggle({ customerId, initialPaused }: Props) {
       });
       if (!res.ok) throw new Error("Error al actualizar");
       setPaused(!paused);
-      router.refresh();
     } catch (e) {
       console.error(e);
     } finally {

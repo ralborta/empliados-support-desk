@@ -7,7 +7,11 @@ import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { summarizeConversation } from "@/lib/openai";
 import { uploadFileToBlob } from "@/lib/blob";
-import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+import {
+  assertAdvisorCanAccessTicket,
+  claimConversationOnHumanReply,
+} from "@/lib/advisorDistribution";
+import { findRecentSameContentMessage } from "@/lib/outboundMessageDedup";
 import { pauseAtilioForCustomer } from "@/lib/atilioBotPause";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import type { TicketStatus } from "@/lib/types";
@@ -106,6 +110,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Escribe un mensaje o adjunta un archivo" }, { status: 400 });
   }
 
+  if (direction === "OUTBOUND" && from === "HUMAN") {
+    const recentHuman = await findRecentSameContentMessage(prisma, {
+      ticketId: id,
+      direction: "OUTBOUND",
+      from: "HUMAN",
+      text: messageText,
+      windowMs: 8_000,
+    });
+    if (recentHuman) {
+      return NextResponse.json({ message: recentHuman, sent: true, duplicate: true });
+    }
+  }
+
   // Si es un mensaje OUTBOUND, enviarlo a BuilderBot primero
   let ticketForStatus: { status: TicketStatus; customerId: string } | null = null;
   if (direction === "OUTBOUND") {
@@ -202,6 +219,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       prisma,
       "human_outbound_takeover",
     ).catch((e) => console.error("[Messages] pauseAtilio takeover:", e));
+    await claimConversationOnHumanReply(id, session.user.id).catch((e) =>
+      console.error("[Messages] claimConversation:", e),
+    );
   }
 
   // Actualizar resumen con IA después de agregar el mensaje
