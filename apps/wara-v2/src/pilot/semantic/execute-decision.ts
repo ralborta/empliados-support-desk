@@ -46,6 +46,7 @@ import {
 import { cancelActiveOrPendingTramite, hasCancellableTramite } from "./cancel-active-tramite.js";
 import { FECHA_LECTURA_QUESTION } from "./natural-datetime.js";
 import {
+  ensureNonEmptyReply,
   planAskMissingField,
   planOrchestrationClarify,
   renderResponsePlan,
@@ -76,6 +77,12 @@ import {
 import {
   answerDomainQuestion,
 } from "./domain-knowledge.js";
+import {
+  executeCaseCloseConfirmed,
+  isTicketCaseCloseDecision,
+  planCaseCloseBlockedByPendingWrite,
+  startCaseCloseConfirmation,
+} from "../case-close.js";
 import {
   applyResolvedUnit,
   commitSelectedUnit,
@@ -737,7 +744,8 @@ async function handleAnswerPending(
       pending.action === "odometer_write" ||
       pending.action === "certificate_issue" ||
       pending.action === "maintenance_write" ||
-      pending.action === "odoo_ticket_create";
+      pending.action === "odoo_ticket_create" ||
+      pending.action === "customer_case_close";
     if (isWrite) {
       const gate = assertStructuredWriteConfirmation({
         decisionAnswer: decision.answer,
@@ -766,6 +774,15 @@ async function handleAnswerPending(
           state,
         };
       }
+    }
+
+    if (pending.action === "customer_case_close") {
+      const r = executeCaseCloseConfirmed(state, { dryRun: true });
+      return {
+        handler: "case_close",
+        message: ensureNonEmptyReply(r.message),
+        state,
+      };
     }
 
     if (pending.action === "gps_report") {
@@ -1600,6 +1617,26 @@ export async function executeTurnDecision(
     }
     if (decision.intent === "ticket" || decision.intent === "human_handoff") {
       applyDisposition(state, decision);
+      if (isTicketCaseCloseDecision(decision)) {
+        const pending = state.pendingConfirmation;
+        if (
+          pending &&
+          (pending.action === "odometer_write" ||
+            pending.action === "certificate_issue" ||
+            pending.action === "maintenance_write" ||
+            pending.action === "odoo_ticket_create")
+        ) {
+          return {
+            handler: "case_close",
+            message: ensureNonEmptyReply(
+              renderResponsePlan(planCaseCloseBlockedByPendingWrite(pending.action)),
+            ),
+            state,
+          };
+        }
+        const r = startCaseCloseConfirmation(state);
+        return { handler: "case_close", message: r.message, state };
+      }
       if (!state.selectedUnit) {
         state.pendingEntityResolution = createPendingEntityResolution({
           parentIntent: "ticket",

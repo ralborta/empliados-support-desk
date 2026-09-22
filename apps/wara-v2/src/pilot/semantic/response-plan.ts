@@ -18,6 +18,15 @@ export type ResponsePlan = {
   nextQuestion?: string;
 };
 
+/** Garantía anti-silencio: una decisión válida nunca termina en reply vacío. */
+export const EMPTY_DECISION_FALLBACK =
+  "No pude armar una respuesta clara. ¿Me lo decís de otra forma o en qué te ayudo?";
+
+export function ensureNonEmptyReply(message: string | null | undefined): string {
+  const t = String(message ?? "").trim();
+  return t || EMPTY_DECISION_FALLBACK;
+}
+
 /** Compone una respuesta WhatsApp breve a partir del plan. */
 export function renderResponsePlan(plan: ResponsePlan): string {
   const parts: string[] = [];
@@ -31,7 +40,7 @@ export function renderResponsePlan(plan: ResponsePlan): string {
   if (plan.nextQuestion?.trim()) {
     parts.push(plan.nextQuestion.trim());
   }
-  return parts.join(parts.length > 1 ? "\n\n" : "");
+  return ensureNonEmptyReply(parts.join(parts.length > 1 ? "\n\n" : ""));
 }
 
 export function planAskMissingField(opts: {

@@ -100,6 +100,7 @@ import {
 import { buildInterpretTurnInput } from "./semantic/build-context.js";
 import { applySemanticPolicy } from "./semantic/policy-engine.js";
 import { executeTurnDecision } from "./semantic/execute-decision.js";
+import { ensureNonEmptyReply } from "./semantic/response-plan.js";
 import {
   appendAssistantTurn,
   appendUserTurn,
@@ -498,14 +499,15 @@ async function publishUnifiedBrainReply(
     handler?: string;
   },
 ): Promise<string> {
-  // Solo saludo clasificado (flag off → borrador intacto). Sin renderer LLM general.
-  const message = maybeApplyHumanizedGreeting({
-    draftMessage,
-    decision,
-    state,
-    env: ctx.env,
-    handler: ctx.handler,
-  });
+  const message = ensureNonEmptyReply(
+    maybeApplyHumanizedGreeting({
+      draftMessage,
+      decision,
+      state,
+      env: ctx.env,
+      handler: ctx.handler,
+    }),
+  );
   appendAssistantTurn(state, message, decision);
   return message;
 }

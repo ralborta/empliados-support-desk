@@ -74,6 +74,9 @@ export function summarizePendingForGreeting(state: PilotConversationState): stri
   if (state.pendingConfirmation?.action === "odometer_write") {
     return `la confirmación de odómetro de ${state.pendingConfirmation.unit.label}`;
   }
+  if (state.pendingConfirmation?.action === "customer_case_close") {
+    return "el cierre del caso de soporte";
+  }
   if (state.activeTramite === "odometer_update") {
     const u = state.odometerDraft?.unit?.label ?? state.selectedUnit?.label ?? "la unidad";
     return `la actualización de odómetro/horómetro de ${u}`;

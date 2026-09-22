@@ -203,6 +203,13 @@ export const TurnDecisionSchema = z.object({
       detail: z.string().nullable().optional(),
       certificateType: z.string().nullable().optional(),
       maintenanceType: z.string().nullable().optional(),
+      /**
+       * Acción de ticket/caso estructurada.
+       * close = cerrar caso/conversación de soporte (no cancelar trámite operativo).
+       * create = abrir/derivar ticket nuevo.
+       * status = consultar estado/novedades de caso abierto.
+       */
+      ticketAction: z.enum(["close", "create", "status"]).nullable().optional(),
     })
     .nullable()
     .optional(),
@@ -264,6 +271,7 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
   if ("domainQuestion" in o) o.domainQuestion = nullish(o.domainQuestion);
   if ("companyReference" in o) o.companyReference = nullish(o.companyReference);
   // disposition extendida → currentTramiteDisposition
+  // "close" = cierre de caso/conversación (no cancelar trámite operativo).
   if (!o.currentTramiteDisposition && typeof o.disposition === "string") {
     const map: Record<string, string> = {
       continue_active: "keep",
@@ -271,9 +279,25 @@ export function coerceTurnDecisionRaw(raw: unknown): unknown {
       answer_only: "keep",
       replace_active: "cancel",
       cancel_active: "cancel",
-      close: "cancel",
+      close: "keep",
     };
     o.currentTramiteDisposition = map[o.disposition] ?? "keep";
+  }
+  // disposition close sin ticketAction → ticketAction=close (contrato estructurado).
+  // No pisar consultas de dominio (p.ej. cómo cerrar una alarma).
+  if (
+    o.disposition === "close" &&
+    o.action !== "answer_domain_question" &&
+    o.intent !== "domain_knowledge"
+  ) {
+    const f =
+      o.fields && typeof o.fields === "object" && !Array.isArray(o.fields)
+        ? { ...(o.fields as Record<string, unknown>) }
+        : {};
+    if (f.ticketAction == null) f.ticketAction = "close";
+    o.fields = f;
+    if (!o.intent || o.intent === "none") o.intent = "ticket";
+    if (!o.action || o.action === "general") o.action = "start_intent";
   }
   // speechAct → action/intent hints cuando el modelo omite action
   if (typeof o.speechAct === "string" && !o.action) {

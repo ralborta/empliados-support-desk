@@ -351,11 +351,15 @@ export function reduceConversationState(
   }
 
   // Cancelación estructurada. Amend ya se resolvió arriba; no reescribir cancel→amend.
+  // ticketAction=close / disposition=close NO es cancel de trámite operativo.
+  const wantsCaseClose =
+    turnDecision.fields?.ticketAction === "close" || turnDecision.disposition === "close";
   const wantsCancel =
-    turnDecision.currentTramiteDisposition === "cancel" ||
-    turnDecision.answer === "cancel" ||
-    turnDecision.speechAct === "cancel" ||
-    turnDecision.disposition === "cancel_active";
+    !wantsCaseClose &&
+    (turnDecision.currentTramiteDisposition === "cancel" ||
+      turnDecision.answer === "cancel" ||
+      turnDecision.speechAct === "cancel" ||
+      turnDecision.disposition === "cancel_active");
 
   if (
     wantsCancel &&

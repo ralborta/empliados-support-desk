@@ -24,6 +24,7 @@ import {
   resolveNaturalReadingDatetime,
 } from "./natural-datetime.js";
 import { shouldUseCancelShortcut } from "./cancel-command.js";
+import { isTicketCaseCloseDecision } from "../case-close.js";
 
 const CAPABILITIES = new Set([
   "unit_list",
@@ -300,6 +301,41 @@ function fillExpectedFieldsFromMessage(
 }
 
 /**
+ * Cierre de caso estructurado: no conflacionar con cancel de trámite ni farewell.
+ * Solo normaliza campos ya marcados (ticketAction=close | disposition=close).
+ */
+function coerceTicketCaseClose(decision: TurnDecision): TurnDecision {
+  if (!isTicketCaseCloseDecision(decision)) return decision;
+  // Cómo cerrar alarma ya viene como domain_knowledge — no forzar close.
+  if (decision.action === "answer_domain_question" || decision.intent === "domain_knowledge") {
+    return decision;
+  }
+  return {
+    ...decision,
+    action:
+      decision.action === "general" || decision.action === "answer_pending"
+        ? "start_intent"
+        : decision.action,
+    intent: decision.intent === "none" || !decision.intent ? "ticket" : decision.intent,
+    currentTramiteDisposition: "keep",
+    disposition: "close",
+    answer: null,
+    speechAct:
+      decision.speechAct === "farewell" || decision.speechAct === "cancel"
+        ? "start_intent"
+        : decision.speechAct ?? "start_intent",
+    reasoningCode:
+      decision.reasoningCode === "GENERAL_CONVERSATION"
+        ? "NEW_EXPLICIT_INTENT"
+        : decision.reasoningCode,
+    fields: {
+      ...(decision.fields ?? {}),
+      ticketAction: "close",
+    },
+  };
+}
+
+/**
  * Cancel mal etiquetado cuando el mensaje es corrección de fecha/hora del resumen.
  * No lee intención libre: solo si hay pending de escritura + resolución natural de fecha
  * y NO es cancel inequívoco (veto de seguridad).
@@ -388,6 +424,9 @@ export function applySemanticPolicy(
 
   // Intent de servicio con action=general → start/switch (antes de amend/company).
   decision = coerceGeneralServiceStart(decision, state);
+
+  // Cierre de caso (ticketAction/disposition close) ≠ cancel de trámite.
+  decision = coerceTicketCaseClose(decision);
 
   // Cancel mal etiquetado + fecha relativa del resumen → correct_fields (antes de honor cancel).
   decision = coerceCancelToOdometerFieldCorrection(decision, state, message, {

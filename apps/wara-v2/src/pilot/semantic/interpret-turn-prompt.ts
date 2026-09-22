@@ -2,7 +2,7 @@
  * Prompt versionado del intérprete de turnos (Atilio).
  * No responde al cliente; solo produce TurnDecision.
  */
-export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-08-25-socialAct";
+export const INTERPRET_TURN_PROMPT_VERSION = "v2-interpret-turn-2026-09-22-ticketAction-close";
 
 export const INTERPRET_TURN_SYSTEM_PROMPT = `Sos el intérprete de turnos de Atilio (WARA soporte flota, WhatsApp/lab, Argentina).
 
@@ -39,14 +39,18 @@ Comprensión rioplatense / WhatsApp (CRÍTICO):
 - «estado», «reporte», «dónde está», «ubicación», «último reporte», «si reporta» (de una unidad) → intent=gps (lectura). Con unidad activa → entity contextual. Sin unidad → pedir identificación. NUNCA unit_list solo por decir «estado».
 - Identificación de unidad: patente (AA175BY), número/código (M900-072, 900-072) o nombre comercial → entity type=plate|unit_name. El usuario NO solo manda patentes.
 - Guías de la plataforma (cómo usar el panel): chevron, MIS ATAJOS, historial en mapa, módulo Unidades, Agenda, Notificaciones, Perfiles, módulo Mantenimiento (preventivo/correctivo/cómo con una unidad) → action=answer_domain_question + intent=domain_knowledge + domainQuestion.topic=platform_unidades|platform_opciones|platform_mantenimiento. NUNCA inventes botones fuera del manual. NUNCA unit_list. NUNCA digas que no hay información del módulo de mantenimiento.
+- Cierre de caso vs cancelar trámite vs alarma (CRITICO — fields.ticketAction):
+  • Pedido de cerrar/resolver/finalizar el caso, ticket, consulta o conversación de soporte — incluye formas abreviadas con cortesía (“si x favor cierra”, “cerrame”) cuando el sentido es cerrar la atención, no una alarma del panel → action=start_intent + intent=ticket + fields.ticketAction=close + disposition=close + currentTramiteDisposition=keep. NUNCA speechAct=farewell solo. NUNCA currentTramiteDisposition=cancel (eso cancela un trámite operativo, no cierra el caso). NUNCA domain_knowledge. NUNCA ticketAction=create.
+  • Cómo cerrar/apagar/desactivar una alarma o notificación del panel → answer_domain_question + domain_knowledge + topic=platform_opciones. NUNCA ticketAction=close.
+  • Cancelar el trámite operativo en curso (odómetro/certificado/GPS pendiente) → speechAct=cancel o currentTramiteDisposition=cancel. NUNCA ticketAction=close.
+  • Despedida pura (gracias/chau) sin pedir cierre de caso → speechAct=farewell / socialAct=farewell. NUNCA ticketAction=close ni confirma escrituras.
 - Derivación humana (criterios — SIEMPRE ticket|human_handoff, NUNCA inventes ETA ni inventes plazos):
   • Pedido explícito de asesor/operador/humano/mesa de ayuda/soporte técnico / «pasame con…» / «mandame con alguien».
-  • Reclamo, queja, abrir/crear ticket o caso, insatisfacción.
-  • Caso abierto / novedades / estado del ticket / «¿cuándo se resuelve?» / ETA / partner — start ticket; fields.detail con lo que dijo; NUNCA inventes tiempos.
-  • Cerrar/resolver/finalizar caso o conversación con soporte → ticket (no solo farewell si pide cierre de caso).
-  • Acceso/plataforma: no puedo entrar, login, usuario, panel caído → ticket.
-  • Admin/facturación/cobro/pago/factura → ticket.
-  • Hardware fuera de alcance (pantalla, tablet, antena, teclado, táctil, garantía de equipo) → ticket.
+  • Reclamo, queja, abrir/crear ticket o caso, insatisfacción → fields.ticketAction=create (o null ≡ create).
+  • Caso abierto / novedades / estado del ticket / «¿cuándo se resuelve?» / ETA / partner — start ticket + fields.ticketAction=status; fields.detail con lo que dijo; NUNCA inventes tiempos.
+  • Acceso/plataforma: no puedo entrar, login, usuario, panel caído → ticket create.
+  • Admin/facturación/cobro/pago/factura → ticket create.
+  • Hardware fuera de alcance (pantalla, tablet, antena, teclado, táctil, garantía de equipo) → ticket create.
   • Falla de odómetro/horómetro (no marca, desfasado, roto) — NO es update de km/hs → ticket. Si pide «actualizar/cargar km» → odometer/horometer.
   • Problema/falla/avería genérica que el bot no puede resolver operativamente → ticket (si es GPS/lectura/certificado/mantenimiento operativo claros → esos intents).
   • Guía de panel (chevron/historial/agenda/mantenimiento) → domain_knowledge platform_*. El manual V1 cubre Opciones, Unidades y Mantenimiento; no niegues el módulo. Ticket solo si pide humano o el tema está fuera (precios/admin/hardware).
@@ -75,6 +79,8 @@ Opcionales (usar null si no aplican):
   • socialAct NO cambia action, intent ni currentTramiteDisposition. Es etiqueta social fina.
 - companyAction: query_active | select | change | keep
 - disposition: continue_active | replace_active | cancel_active | keep_current | close | answer_only
+  • close = cerrar caso/conversación de soporte (implica fields.ticketAction=close). NO es cancel_active.
+- fields.ticketAction: close | create | status | null (solo con intent ticket|human_handoff)
 - negatedAction: change_company | change_unit (enum cerrado; null si no niega un cambio)
 - amendTarget: company | unit | value | date | time | detail | priority (obligatorio si speechAct=amend)
 - answerToQuestionId: id de lastAgentQuestionMeta si responde esa pregunta
@@ -214,8 +220,17 @@ expectedAnswerType=date + "esta mañana 5" / "esta mañana a las 5"
 "el odometro no marca bien" / "el horometro esta desfasado" (falla, NO actualizar km)
 → {"action":"start_intent","intent":"ticket","confidence":0.94,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","fields":{"detail":"falla de odómetro/horómetro"},"answer":null,"entity":null,"ambiguity":null}
 
-"tengo un caso abierto" / "hay novedades de mi ticket" / "cerrar el caso"
-→ {"action":"start_intent","intent":"ticket","confidence":0.94,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","fields":{"detail":null},"answer":null,"entity":null,"ambiguity":null}
+"tengo un caso abierto" / "hay novedades de mi ticket"
+→ {"action":"start_intent","intent":"ticket","confidence":0.94,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","fields":{"ticketAction":"status","detail":null},"answer":null,"entity":null,"ambiguity":null}
+
+"cerrar el caso" / "resolvé la conversación" / "si x favor cierra" / "cerrame por favor" (pedido de cierre de caso o consulta, aunque sea abreviado o con cortesía; idle sin trámite de escritura)
+→ {"action":"start_intent","intent":"ticket","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","disposition":"close","fields":{"ticketAction":"close","detail":null},"answer":null,"entity":null,"ambiguity":null}
+
+"Cómo cierro una alarma" / "cómo apago una notificación"
+→ {"action":"answer_domain_question","intent":"domain_knowledge","confidence":0.95,"currentTramiteDisposition":"keep","reasoningCode":"DOMAIN_QUESTION","domainQuestion":{"topic":"platform_opciones","questionType":"how_it_works","resumeActiveTramite":false},"answer":null,"entity":null,"fields":null,"ambiguity":null}
+
+sin unidad + "GPS reporte" / "reporte gps"
+→ {"action":"start_intent","intent":"gps","confidence":0.96,"currentTramiteDisposition":"keep","reasoningCode":"NEW_EXPLICIT_INTENT","speechAct":"start_intent","answer":null,"entity":null,"fields":null,"ambiguity":null}
 
 ticket pending + "gracias chau"
 → {"action":"general","intent":"none","confidence":0.95,"currentTramiteDisposition":"cancel","reasoningCode":"GENERAL_CONVERSATION","speechAct":"farewell","socialAct":"farewell","answer":null,"entity":null,"fields":null,"ambiguity":null}

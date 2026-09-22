@@ -52,7 +52,9 @@ export type PilotPendingConfirmation = {
     | "odometer_write"
     | "maintenance_write"
     | "certificate_issue"
-    | "odoo_ticket_create";
+    | "odoo_ticket_create"
+    /** Cierre de caso/conversación de soporte (escritura de estado de ticket). */
+    | "customer_case_close";
   unit: PilotSelectedUnit;
   askedAt: string;
   question: string;
