@@ -9,8 +9,10 @@ type PanelLiveSyncProps = {
 
 /**
  * Heartbeat de presencia (soporte + admin, para el monitor externo) + refresh suave de
- * listas del panel. El heartbeat en sí sigue siendo SUPPORT-only para el reparto de
- * casos (ver advisorHeartbeat en @/lib/advisorDistribution); para ADMIN solo actualiza
+ * listas del panel. El heartbeat sigue mientras Kira esté abierta, aunque la pestaña
+ * no esté visible. El refresh de listas sí espera a que esté en pantalla.
+ * El heartbeat en sí sigue siendo SUPPORT-only para el reparto de casos
+ * (ver advisorHeartbeat en @/lib/advisorDistribution); para ADMIN solo actualiza
  * presencia (recordAdminPresence), sin tocar nada de cola/asignación.
  */
 export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
@@ -27,10 +29,12 @@ export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPage: pathname }),
+        keepalive: true,
       }).catch(() => undefined);
     },
     30_000,
     tracksPresence,
+    false,
   );
 
   usePollWhenVisible(

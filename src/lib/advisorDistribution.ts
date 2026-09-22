@@ -693,7 +693,8 @@ export async function getUnreadNotificationCount(agentUserId: string): Promise<n
 }
 
 /**
- * Ping desde el panel: mantiene al asesor como conectado mientras la pestaña esté abierta.
+ * Ping desde el panel: mantiene al asesor como conectado mientras Kira esté abierta,
+ * aunque la pestaña no esté visible. Se corta al cerrar pestaña/navegador (sin pings).
  *
  * Si el asesor NO estaba presente (sesión nueva, o venía de un timeout por inactividad),
  * el heartbeat también dispara un reparto de la cola. Esto cubre el caso de una sesión de
