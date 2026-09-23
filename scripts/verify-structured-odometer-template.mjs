@@ -12,7 +12,12 @@ import {
   detectIncidentType,
 } from "../src/lib/wara.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
-import { shouldRouteTurnToUnidadesExecutor } from "../src/lib/waraUnitIntent.ts";
+import {
+  extractExplicitUnitNameFromText,
+  shouldRouteTurnToUnidadesExecutor,
+} from "../src/lib/waraUnitIntent.ts";
+import { extractEmbeddedNumericReferences } from "../src/lib/unitReferenceParser.ts";
+import { messageHasOdometerActionChoiceUnitRef } from "../src/lib/odometerActionChoice.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -40,6 +45,37 @@ assert(detectIncidentType(template) === "ODOMETER_CHANGE", "incidente ODOMETER_C
 assert(
   classifyTurnExecutor(template, "") === "odometro",
   `router → odometro (obtuvo ${classifyTurnExecutor(template, "")})`,
+);
+
+console.log("\n— Interno numérico 4 dígitos (bug 2026-09-23: 3422) —");
+const internoCorto = [
+  "Mandando interno con km desfasados",
+  "Interno: 3422",
+  "Km actual: 114.305 km",
+  "Hora: 12:53",
+  "Fecha: 22/09/26",
+].join("\n");
+const internoInline =
+  "Interno: 3422 Km actual: 114.305 km Hora: 12:53 Fecha: 22/09/26";
+assert(looksLikeStructuredOdometerUpdateRequest(internoCorto), "Mandando + Interno: 3422 → plantilla");
+assert(looksLikeStructuredOdometerUpdateRequest(internoInline), "Interno: 3422 inline → plantilla");
+assert(
+  classifyTurnExecutor(internoInline, "") === "odometro",
+  `router Interno 3422 → odometro (obtuvo ${classifyTurnExecutor(internoInline, "")})`,
+);
+assert(extractExplicitUnitNameFromText(internoInline) === "3422", "extrae interno 3422");
+assert(
+  extractEmbeddedNumericReferences(internoInline).some((r) => r.value === 3422 && r.source === "explicit_interno"),
+  "3422 es interno explícito, no km",
+);
+assert(
+  !extractEmbeddedNumericReferences(internoInline).some((r) => r.value === 114 || r.value === 305),
+  "no toma 114.305 como interno",
+);
+assert(messageHasOdometerActionChoiceUnitRef(internoInline), "continuación de odómetro con Interno: 3422");
+assert(
+  classifyTurnExecutor(internoInline, "") !== "info_guides",
+  "no cae a guía / inconveniente ambiguo",
 );
 
 console.log("\n— Consulta GPS con patente en el mensaje (captura AE 483 VE) —");

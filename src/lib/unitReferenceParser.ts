@@ -34,7 +34,7 @@ export type NumericRoleResolution = {
 };
 
 const EXPLICIT_INTERNO =
-  /\b(?:unida[d]?|interno|nro\.?\s+de\s+interno|n[uú]mero\s+de\s+interno)\s*(?:n[°o.]?\s*)?(\d{5,7})\b/gi;
+  /\b(?:unida[d]?|interno|nro\.?\s+de\s+interno|n[uú]mero\s+de\s+interno)\s*[:\-]?\s*(?:n[°o.]?\s*)?(\d{3,7})\b/gi;
 
 const EMBEDDED_INTERN = /\b(\d{5,7})\b/g;
 

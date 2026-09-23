@@ -74,6 +74,7 @@ export function messageHasOdometerActionChoiceUnitRef(text: string): boolean {
   if (!raw) return false;
   if (detectLoosePlate(raw)) return true;
   if (extractUnitCodeNumbersFromMessage(raw).length > 0) return true;
+  if (/\binterno\s*[:\-]?\s*\d{3,7}\b/i.test(raw)) return true;
   const t = normActionChoiceText(raw);
   const compact = t.replace(/[\s\-_.]+/g, "");
   if (/^\d{5,7}$/.test(compact)) return true;

@@ -1561,8 +1561,12 @@ export function extractExplicitUnitNameFromText(rawText: string): string | null 
   if (!text) return null;
   const labeled = text.match(/\bunidad\s*(?:es\s*)?[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (labeled?.[1]) return labeled[1];
+  const labeledDigits = text.match(/\bunidad\s*(?:es\s*)?[:\-]?\s*(\d{3,7})\b/i);
+  if (labeledDigits?.[1]) return labeledDigits[1];
   const interno = text.match(/\binterno\s*[:\-]?\s*(M?\d{3}-\d{2,3})\b/i);
   if (interno?.[1]) return interno[1];
+  const internoDigits = text.match(/\binterno\s*[:\-]?\s*(\d{3,7})\b/i);
+  if (internoDigits?.[1]) return internoDigits[1];
   // Bug real 2026-08-20: "INT 145" / "INT-145" se tomaba como patente INT145.
   const intCode = text.match(/\bINT\s*[-.]?\s*(\d{2,4})\b/i);
   if (intCode?.[1]) return `INT-${intCode[1]}`;

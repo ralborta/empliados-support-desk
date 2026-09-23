@@ -32,6 +32,10 @@ const fleet = [
 
 // — Fase 1: extracción —
 assert.deepEqual(
+  extractEmbeddedNumericReferences("Interno: 3422 Km actual: 114.305 km").map((r) => r.value),
+  [3422],
+);
+assert.deepEqual(
   extractEmbeddedNumericReferences("Estado 900100").map((r) => r.value),
   [900100],
 );

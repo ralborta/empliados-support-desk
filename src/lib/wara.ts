@@ -1801,7 +1801,9 @@ export function looksLikeStructuredOdometerUpdateRequest(text: string | undefine
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-  const hasUnitName = /\binterno\s*:\s*M?\d{3}-\d{2,3}\b/i.test(raw) || /\bM?\d{3}-\d{2,3}\b/i.test(raw);
+  const hasUnitName =
+    /\binterno\s*:\s*(?:M?\d{3}-\d{2,3}|\d{3,7})\b/i.test(raw) ||
+    /\bM?\d{3}-\d{2,3}\b/i.test(raw);
   const hasKmField =
     /\bkm\s*actual\s*:\s*[\d.,]+/i.test(raw) ||
     /\b(?:odometro|odómetro|kilometraje)\s*:\s*[\d.,]+/i.test(raw);
@@ -1809,7 +1811,11 @@ export function looksLikeStructuredOdometerUpdateRequest(text: string | undefine
   const hasDateOrTime = /\bfecha\s*:\s*\d/i.test(raw) || /\bhora\s*:\s*\d/i.test(raw);
 
   if (hasUnitName && (hasKmField || hasKmInline) && (hasDateOrTime || hasKmField)) return true;
-  if (/\bmando\s+interno\b/i.test(raw) && /\bkm\b/i.test(raw) && (hasUnitName || hasKmField || hasDateOrTime)) {
+  if (
+    /\bmand(?:o|ando)\s+interno\b/i.test(raw) &&
+    /\bkm\b/i.test(raw) &&
+    (hasUnitName || hasKmField || hasDateOrTime)
+  ) {
     return true;
   }
   if (hasUnitName && hasKmField) return true;

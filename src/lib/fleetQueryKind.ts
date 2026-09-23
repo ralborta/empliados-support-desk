@@ -52,7 +52,7 @@ function normFleetQueryText(text: string): string {
 function hasConcreteUnitIdentifier(text: string, norm: string): boolean {
   if (detectLoosePlate(text) || detectPlate(text)) return true;
   if (/\bM?\d{3}-\d{3}\b/i.test(text)) return true;
-  if (/\binterno\s+\d{5,7}\b/i.test(norm)) return true;
+  if (/\binterno\s*[:\-]?\s*\d{3,7}\b/i.test(norm)) return true;
   if (/\b(prefijo|empieza|termina|arranca)\b/.test(norm) && /\b[A-Z]{2,3}\b/i.test(text)) {
     return true;
   }
@@ -71,7 +71,7 @@ function countConcreteUnitIdentifiers(text: string, norm: string): number {
   for (const m of text.matchAll(/\bM?\d{3}-\d{3}\b/gi)) {
     ids.add(`code:${m[0].toUpperCase()}`);
   }
-  for (const m of norm.matchAll(/\binterno\s+(\d{5,7})\b/g)) {
+  for (const m of norm.matchAll(/\binterno\s*[:\-]?\s*(\d{3,7})\b/g)) {
     ids.add(`interno:${m[1]}`);
   }
   return ids.size;

@@ -2582,7 +2582,7 @@ export async function runTurnExecutorPhase(params: {
     }
   }
 
-  // Plantilla operativa de odómetro (interno M300-xxx + km + fecha) — trámite siempre, aunque haya caso abierto.
+  // Plantilla operativa de odómetro (interno M300-xxx / 3422 + km + fecha) — trámite siempre, aunque haya caso abierto.
   if (looksLikeStructuredOdometerUpdateRequest(selectionText)) {
     const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
