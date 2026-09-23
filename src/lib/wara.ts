@@ -1589,7 +1589,12 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
     // Bug real, producción 2026-08-06: "me corregis el odometro del la unidad 2408437"
     // no matcheaba "\bcorregir\b" (conjugación rioplatense "corregís"/"corregime").
     // Caía a unidades y el agente pedía km como si 2408437 ya fuera unidad válida.
-    /\b(actualizar|cambiar|cambio de|correg\w*|modificar|ajust\w*|registrar|realizar)\b/.test(t) &&
+    //
+    // Bug real, producción 2026-09-23: "necesito cargarle el odometro a la unidad
+    // berlingo pañol" no tenía "cargar" en los verbos. "necesito"+"unidad" lo mandaba
+    // a consulta GPS en vivo (looksLikeLiveUnitConsultIntent) y respondía estado
+    // AH 755 DI en vez de arrancar el trámite de odómetro.
+    /\b(actualizar|cambiar|cambio de|correg\w*|modificar|ajust\w*|registrar|realizar|carg(ar|arle|ame|alo|ala|á))\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
   );
 }
