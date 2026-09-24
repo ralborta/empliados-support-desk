@@ -824,6 +824,7 @@ export async function runTurnExecutorPhase(params: {
     const {
       ensureUnregisteredPhoneAdvisorHandoff,
       buildUnregisteredPhoneCustomerReply,
+      looksLikeJustRegisteredPhoneInWara,
     } = await import("@/lib/unregisteredPhoneHandoff");
     const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, rawPhone, {
       messageText: selectionText || undefined,
@@ -833,6 +834,7 @@ export async function runTurnExecutorPhase(params: {
       message: buildUnregisteredPhoneCustomerReply({
         isFirstNotify: handoff.shouldNotifyCustomer,
         ticketCode: handoff.ticket.code,
+        recheckAfterLoad: looksLikeJustRegisteredPhoneInWara(selectionText),
       }),
       executor: "odoo_ticket",
       ok: true,

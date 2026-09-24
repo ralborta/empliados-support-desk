@@ -50,7 +50,11 @@ import {
   extractPlatePrefixFromMessage,
   extractPlateSuffixFromMessage,
 } from "@/lib/wara";
-import { findCustomerByWhatsAppNumber, normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
+import {
+  findCustomerByWhatsAppNumber,
+  normalizeWhatsAppPhone,
+  waraPhoneLookupCandidates,
+} from "@/lib/whatsappPhone";
 import { clearActiveUnit } from "@/lib/activeUnit";
 import { clearCustomerTicketHistory } from "@/lib/customerConversationReset";
 import { clearPendingAction } from "@/lib/pendingAction";
@@ -3181,42 +3185,55 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * que reintentar.
  */
 export async function obtenerEmpresaPorNumero(rawPhone: string): Promise<WaraEmpresaLookupResult> {
-  const maxAttempts = 3;
+  const candidates = waraPhoneLookupCandidates(rawPhone);
   const backoffMs = [300, 800];
   let last: WaraEmpresaLookupResult | null = null;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let result: WaraEmpresaLookupResult;
-    try {
-      result = await obtenerEmpresaPorNumeroOnce(rawPhone);
-    } catch (error) {
-      if (attempt >= maxAttempts) throw error;
-      const message = error instanceof Error ? error.message : "error desconocido";
-      console.warn(
-        `[WaraAPI] ObtenerContactosPorNumero intento ${attempt}/${maxAttempts} lanzó excepción (${message}); reintento`
-      );
-      await sleep(backoffMs[attempt - 1] ?? 800);
-      continue;
-    }
+  for (let candidateIdx = 0; candidateIdx < candidates.length; candidateIdx++) {
+    const candidate = candidates[candidateIdx] ?? rawPhone;
+    const maxAttempts = candidateIdx === 0 ? 3 : 1;
 
-    last = result;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let result: WaraEmpresaLookupResult;
+      try {
+        result = await obtenerEmpresaPorNumeroOnce(candidate);
+      } catch (error) {
+        if (attempt >= maxAttempts) {
+          if (candidateIdx >= candidates.length - 1) throw error;
+          break;
+        }
+        const message = error instanceof Error ? error.message : "error desconocido";
+        console.warn(
+          `[WaraAPI] ObtenerContactosPorNumero intento ${attempt}/${maxAttempts} ` +
+            `candidato=${candidate} lanzó excepción (${message}); reintento`
+        );
+        await sleep(backoffMs[attempt - 1] ?? 800);
+        continue;
+      }
 
-    // Caso bueno: Wara respondió con contactos. Listo (aliases de prueba pueden reemplazar IDs).
-    if (result.ok && result.encontrado && result.contactos.length > 0) {
-      return applyTestContactAliases(result, rawPhone);
-    }
+      last = result;
 
-    // Fallos de pre-vuelo (no configurado o teléfono inválido): no hay nada que reintentar.
-    // Estos casos retornan sin `status` porque ni siquiera llegan a la red.
-    if (!result.configured || (result.status === undefined && !result.ok)) return result;
+      if (result.ok && result.encontrado && result.contactos.length > 0) {
+        if (candidateIdx > 0) {
+          console.log(
+            `[WaraAPI] ObtenerContactosPorNumero match por formato alternativo ` +
+              `whatsapp=${candidates[0]} wara=${candidate} contactos=${result.contactos.length} ` +
+              `ids=${result.contactos.map((c) => c.id).join(",")}`
+          );
+        }
+        return applyTestContactAliases(result, rawPhone);
+      }
 
-    // Resto = intermitencia de staging (5xx/red o 200 vacío). Reintentamos si quedan intentos.
-    if (attempt < maxAttempts) {
-      console.warn(
-        `[WaraAPI] ObtenerContactosPorNumero intento ${attempt}/${maxAttempts} sin datos útiles ` +
-          `(ok=${result.ok}, encontrado=${result.encontrado}, contactos=${result.contactos.length}, status=${result.status ?? "-"}); reintento`
-      );
-      await sleep(backoffMs[attempt - 1] ?? 800);
+      if (!result.configured || (result.status === undefined && !result.ok)) return result;
+
+      if (attempt < maxAttempts) {
+        console.warn(
+          `[WaraAPI] ObtenerContactosPorNumero intento ${attempt}/${maxAttempts} ` +
+            `candidato=${candidate} sin datos útiles ` +
+            `(ok=${result.ok}, encontrado=${result.encontrado}, contactos=${result.contactos.length}, status=${result.status ?? "-"}); reintento`
+        );
+        await sleep(backoffMs[attempt - 1] ?? 800);
+      }
     }
   }
 

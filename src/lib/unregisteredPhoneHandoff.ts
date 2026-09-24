@@ -36,6 +36,34 @@ export function buildUnregisteredPhoneWaitingAdvisorReply(_ticketCode?: string):
   );
 }
 
+/**
+ * El cliente dice que acaba de cargar el número: ya se reconsultó Wara.
+ * No repetir la misma guía; informar el resultado de esa búsqueda.
+ */
+export const UNREGISTERED_PHONE_RECHECK_AFTER_LOAD_REPLY =
+  "Volví a consultar Wara y todavía no veo tu número. Confirmá que quedó guardado como +549… (código de área sin el 0). Un asesor lo revisa con vos.";
+
+export function buildUnregisteredPhoneRecheckAfterLoadReply(): string {
+  return UNREGISTERED_PHONE_RECHECK_AFTER_LOAD_REPLY;
+}
+
+/** “Listo ya lo acabo de cargar” / “ya lo agendé” — no “cargar odómetro”. */
+export function looksLikeJustRegisteredPhoneInWara(text: string | undefined | null): boolean {
+  const t = String(text ?? "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+  if (!t.trim()) return false;
+  if (/\b(odometro|horometro|unidad|patente|interno)\b/.test(t)) return false;
+  return (
+    /\bacabo de cargar\b/.test(t) ||
+    /\bya lo (acabo de )?(cargar|agendar|anotar|poner)\b/.test(t) ||
+    /\blo (cargue|agende)( de nuevo)?\b/.test(t) ||
+    /\bya esta (cargado|agendado)\b/.test(t) ||
+    /\blo volvi a (cargar|agendar)\b/.test(t)
+  );
+}
+
 /** @deprecated Usar buildUnregisteredPhoneWaitingAdvisorReply(). */
 export const UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY =
   "Tu número no está registrado en Wara. Ya tenemos tu consulta abierta; un agente te va a atender.\n\nTe envío la guía para cargar un número nuevo en la plataforma.";
@@ -74,11 +102,13 @@ export function buildUnregisteredPhoneWaitingHandoffMessage(ticketCode: string):
   );
 }
 
-/** Respuesta al cliente (primera o recontacto) + PDF. Nunca vacío. */
+/** Respuesta al cliente (primera, recontacto o reconsulta post-alta). Nunca vacío. */
 export function buildUnregisteredPhoneCustomerReply(opts: {
   isFirstNotify: boolean;
   ticketCode: string;
+  recheckAfterLoad?: boolean;
 }): string {
+  if (opts.recheckAfterLoad) return buildUnregisteredPhoneRecheckAfterLoadReply();
   if (opts.isFirstNotify) return buildUnregisteredPhoneFirstHandoffMessage();
   return buildUnregisteredPhoneWaitingHandoffMessage(opts.ticketCode);
 }

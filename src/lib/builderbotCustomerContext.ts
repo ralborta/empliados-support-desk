@@ -640,26 +640,35 @@ export async function customerRegisteredContextResponse(
         buildUnregisteredPhoneCustomerReply,
         UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
         buildUnregisteredPhoneWaitingAdvisorReply,
+        buildUnregisteredPhoneRecheckAfterLoadReply,
+        looksLikeJustRegisteredPhoneInWara,
       } = await import("@/lib/unregisteredPhoneHandoff");
       const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, trimmed, {
         contactName: customer?.name ?? undefined,
         messageText: selectionText || undefined,
         source: "builderbot_context",
       });
-      // Siempre contestar: 1ª vez derivación; recontacto = ticket ya abierto + PDF.
+      const recheckAfterLoad = looksLikeJustRegisteredPhoneInWara(selectionText);
+      // Siempre contestar: 1ª vez derivación; recontacto = ticket ya abierto + PDF;
+      // “ya lo cargué” = resultado de la reconsulta, sin repetir la guía.
       nextFlow = "reply";
       responseMessage = buildUnregisteredPhoneCustomerReply({
         isFirstNotify: handoff.shouldNotifyCustomer,
         ticketCode: handoff.ticket.code,
+        recheckAfterLoad,
       });
-      const persistText = handoff.shouldNotifyCustomer
-        ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
-        : buildUnregisteredPhoneWaitingAdvisorReply(handoff.ticket.code);
+      const persistText = recheckAfterLoad
+        ? buildUnregisteredPhoneRecheckAfterLoadReply()
+        : handoff.shouldNotifyCustomer
+          ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
+          : buildUnregisteredPhoneWaitingAdvisorReply(handoff.ticket.code);
       await persistCustomerBotReply(trimmed, persistText, {
         source: "builderbot_context",
-        stage: handoff.shouldNotifyCustomer
-          ? "unregistered_first_handoff"
-          : "unregistered_waiting_handoff",
+        stage: recheckAfterLoad
+          ? "unregistered_recheck_after_load"
+          : handoff.shouldNotifyCustomer
+            ? "unregistered_first_handoff"
+            : "unregistered_waiting_handoff",
       });
     } catch (e) {
       console.error("[builderbotCustomerContext] unregistered handoff:", e);

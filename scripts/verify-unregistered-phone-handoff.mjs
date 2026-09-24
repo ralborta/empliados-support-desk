@@ -11,14 +11,17 @@ import {
   UNREGISTERED_PHONE_TICKET_TITLE,
   UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY,
   UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
+  UNREGISTERED_PHONE_RECHECK_AFTER_LOAD_REPLY,
   UNREGISTERED_PHONE_GUIDE_PDF_PATH,
   ensureUnregisteredPhoneAdvisorHandoff,
   buildUnregisteredPhoneFirstHandoffMessage,
   buildUnregisteredPhoneWaitingAdvisorReply,
   buildUnregisteredPhoneWaitingHandoffMessage,
   buildUnregisteredPhoneCustomerReply,
+  looksLikeJustRegisteredPhoneInWara,
   unregisteredPhoneGuidePdfUrl,
 } from "../src/lib/unregisteredPhoneHandoff.ts";
+import { waraPhoneLookupCandidates } from "../src/lib/whatsappPhone.ts";
 import { extractMediaUrlAndCleanText } from "../src/lib/mediaUrlMarker.ts";
 
 assert.equal(
@@ -105,5 +108,36 @@ const again = extractMediaUrlAndCleanText(
 assert.ok(first.text.length > 0 && first.mediaUrl, "1ª vez no vacío + PDF");
 assert.ok(again.text.length > 0 && again.mediaUrl, "recontacto no vacío + PDF");
 assert.doesNotMatch(again.text, /0209266|ticket\s+\d+/i, "recontacto reply sin ticket");
+
+assert.equal(
+  looksLikeJustRegisteredPhoneInWara("Listo ya lo acabo de cargar"),
+  true,
+  "detecta alta de número",
+);
+assert.equal(
+  looksLikeJustRegisteredPhoneInWara("necesito cargarle el odometro"),
+  false,
+  "no confunde cargar odómetro",
+);
+const recheck = extractMediaUrlAndCleanText(
+  buildUnregisteredPhoneCustomerReply({
+    isFirstNotify: false,
+    ticketCode: "0209266",
+    recheckAfterLoad: true,
+  }),
+);
+assert.equal(recheck.text, UNREGISTERED_PHONE_RECHECK_AFTER_LOAD_REPLY, "reconsulta sin guía");
+assert.ok(!recheck.mediaUrl, "reconsulta no reenvía el PDF");
+assert.match(recheck.text, /Volv[ií] a consultar Wara/i, "dice que buscó de nuevo");
+assert.doesNotMatch(recheck.text, /gu[ií]a/i, "no pide de nuevo la guía");
+
+assert.deepEqual(waraPhoneLookupCandidates("5492617172616"), [
+  "5492617172616",
+  "542617172616",
+]);
+assert.deepEqual(waraPhoneLookupCandidates("+54 261 717-2616"), [
+  "542617172616",
+  "5492617172616",
+]);
 
 console.log("OK verify-unregistered-phone-handoff");
