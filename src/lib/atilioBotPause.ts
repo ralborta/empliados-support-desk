@@ -1,6 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { setBuilderBotCloudBlacklist, setBotBlacklist } from "@/lib/builderbot";
+import {
+  ensureBuilderBotContactActive,
+  setBotBlacklist,
+  setBuilderBotCloudBlacklist,
+  setBuilderBotContactMute,
+} from "@/lib/builderbot";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 
 export const TERMINAL_TICKET_STATUSES = ["RESOLVED", "CLOSED"] as const;
@@ -10,8 +15,8 @@ export function isTerminalTicketStatus(status: string): boolean {
 }
 
 /**
- * Pausa Atilio para un cliente (botPausedAt + blacklist BBC).
- * Idempotente: si ya estaba pausado, solo asegura blacklist.
+ * Pausa Atilio para un cliente: botPausedAt + mute=true + blacklist=add.
+ * Idempotente: si ya estaba pausado en DB, igual reconcilia BuilderBot.
  */
 export async function pauseAtilioForCustomer(
   customerId: string,
@@ -31,13 +36,11 @@ export async function pauseAtilioForCustomer(
     });
   }
 
+  let muteOk = true;
+  let blacklistOk = true;
   if (customer.phone) {
-    await setBuilderBotCloudBlacklist(customer.phone, "add").catch((err: unknown) => {
-      console.error(
-        "[atilio] Error al agregar blacklist Cloud:",
-        err instanceof Error ? err.message : err,
-      );
-    });
+    muteOk = await setBuilderBotContactMute(customer.phone, true);
+    blacklistOk = await setBuilderBotCloudBlacklist(customer.phone, "add");
     await setBotBlacklist(customer.phone, "add").catch((err: unknown) => {
       console.error(
         "[atilio] Error al agregar blacklist self-hosted:",
@@ -46,13 +49,15 @@ export async function pauseAtilioForCustomer(
     });
   }
 
-  console.log(`[atilio] Pausado para cliente ${customerId}${reason ? ` (${reason})` : ""}`);
-  return true;
+  console.log(
+    `[atilio] Pausado para cliente ${customerId}${reason ? ` (${reason})` : ""} muteOk=${muteOk} blacklistOk=${blacklistOk}`,
+  );
+  return muteOk && blacklistOk;
 }
 
 /**
- * Reactiva Atilio para un cliente (botPausedAt = null + sacar de blacklist BBC).
- * Idempotente: si ya estaba activo, no hace nada.
+ * Reactiva Atilio y reconcilia el canal remoto aunque `botPausedAt` ya sea null.
+ * Tres estados: botPausedAt local, /mute y /blacklist en BuilderBot.
  */
 export async function reactivateAtilioForCustomer(
   customerId: string,
@@ -63,20 +68,22 @@ export async function reactivateAtilioForCustomer(
     where: { id: customerId },
     select: { id: true, phone: true, botPausedAt: true },
   });
-  if (!customer?.botPausedAt) return false;
+  if (!customer) return false;
 
-  await client.customer.update({
-    where: { id: customerId },
-    data: { botPausedAt: null },
-  });
-
-  if (customer.phone) {
-    await setBuilderBotCloudBlacklist(customer.phone, "remove").catch((err: unknown) => {
-      console.error(
-        "[atilio] Error al quitar blacklist Cloud:",
-        err instanceof Error ? err.message : err,
-      );
+  const localWasPaused = !!customer.botPausedAt;
+  if (localWasPaused) {
+    await client.customer.update({
+      where: { id: customerId },
+      data: { botPausedAt: null },
     });
+  }
+
+  let muteOk = true;
+  let blacklistOk = true;
+  if (customer.phone) {
+    const channel = await ensureBuilderBotContactActive(customer.phone);
+    muteOk = channel.muteOk;
+    blacklistOk = channel.blacklistOk;
     await setBotBlacklist(customer.phone, "remove").catch((err: unknown) => {
       console.error(
         "[atilio] Error al quitar blacklist self-hosted:",
@@ -85,8 +92,10 @@ export async function reactivateAtilioForCustomer(
     });
   }
 
-  console.log(`[atilio] Reactivado para cliente ${customerId}${reason ? ` (${reason})` : ""}`);
-  return true;
+  console.log(
+    `[atilio] Reactivado para cliente ${customerId}${reason ? ` (${reason})` : ""} localWasPaused=${localWasPaused} muteOk=${muteOk} blacklistOk=${blacklistOk}`,
+  );
+  return muteOk && blacklistOk;
 }
 
 /**

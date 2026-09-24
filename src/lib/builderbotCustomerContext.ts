@@ -381,9 +381,15 @@ export async function customerRegisteredContextResponse(
     });
   }
 
-  // Cada mensaje humano válido debe poder hablar con el bot (evita quedar muteado 24h por un bug de flujo).
-  // Solo si NO hay takeover humano activo.
-  void ensureBuilderBotContactActive(normalized);
+  // Cada mensaje humano válido debe poder hablar con el bot. Esperar mute=false +
+  // blacklist=remove: si queda en segundo plano y el flow ya está bloqueado, no se alcanza.
+  const channel = await ensureBuilderBotContactActive(normalized);
+  if (!channel.ok) {
+    console.warn(
+      "[customer-context] BuilderBot no reconcilió mute/blacklist; el turno puede quedar mudo",
+      { muteOk: channel.muteOk, blacklistOk: channel.blacklistOk },
+    );
+  }
 
   if (normalized.length < 8) {
     const placeholderHint = isLikelyBuilderBotPhonePlaceholder(trimmed)

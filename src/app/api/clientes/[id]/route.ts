@@ -5,7 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { pauseAtilioForCustomer, reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
-import { setBuilderBotCloudBlacklist, setBotBlacklist } from "@/lib/builderbot";
+import { ensureBuilderBotContactActive, setBotBlacklist } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 const updateCustomerSchema = z.object({
@@ -164,9 +164,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       { timeout: 120_000 }
     );
 
-    if (existing.botPausedAt && existing.phone) {
-      await setBuilderBotCloudBlacklist(existing.phone, "remove").catch((err: unknown) => {
-        console.error("[Clientes] Blacklist Cloud al borrar:", err instanceof Error ? err.message : err);
+    if (existing.phone) {
+      await ensureBuilderBotContactActive(existing.phone).catch((err: unknown) => {
+        console.error("[Clientes] Reconciliar canal BBC al borrar:", err instanceof Error ? err.message : err);
       });
       await setBotBlacklist(existing.phone, "remove").catch((err: unknown) => {
         console.error("[Clientes] Blacklist self-hosted al borrar:", err instanceof Error ? err.message : err);

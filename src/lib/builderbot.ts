@@ -97,24 +97,27 @@ const BLACKLIST_RETRIES = 3;
 const BLACKLIST_DELAY_MS = 1500;
 const BLACKLIST_SETTLE_MS = 800;
 
-/**
- * Pausa o reactiva el flujo del bot para un número vía BuilderBot Cloud API v2.
- * POST /api/v2/{botId}/blacklist con { number, intent: "add" | "remove" }.
- */
+export type BuilderBotChannelReconcile = {
+  muteOk: boolean;
+  blacklistOk: boolean;
+  ok: boolean;
+};
+
 /**
  * Desmutear / mutear un contacto en BuilderBot Cloud (plugin add_mute del runtime).
  * POST /api/v2/{botId}/mute con { number, status: boolean }.
+ * Distinto de /blacklist: hay que tocar las dos APIs para dejar el canal usable.
  */
 export async function setBuilderBotContactMute(
   number: string,
   muted: boolean
-): Promise<void> {
+): Promise<boolean> {
   const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
   const API_KEY = process.env.BUILDERBOT_API_KEY || "";
-  if (!BOT_ID || !API_KEY) return;
+  if (!BOT_ID || !API_KEY) return true;
 
   const normalizedNumber = String(number).replace(/\D/g, "");
-  if (normalizedNumber.length < 9) return;
+  if (normalizedNumber.length < 9) return false;
 
   const url = `${BUILDERBOT_BASE_URL.replace(/\/$/, "")}/api/v2/${BOT_ID}/mute`;
   try {
@@ -127,6 +130,7 @@ export async function setBuilderBotContactMute(
       }
     );
     console.log("[BuilderBot] Cloud mute OK", muted, normalizedNumber, response.data);
+    return true;
   } catch (error: unknown) {
     const err = error as { response?: { status?: number; data?: unknown }; message?: string };
     console.error("[BuilderBot] Cloud mute falló", muted, normalizedNumber, {
@@ -134,25 +138,43 @@ export async function setBuilderBotContactMute(
       data: err.response?.data,
       message: err?.message,
     });
+    return false;
   }
 }
 
-/** Desmutear contacto en Cloud (mute + blacklist). Llamar al inicio de cada turno válido. */
-export async function ensureBuilderBotContactActive(number: string): Promise<void> {
-  await setBuilderBotContactMute(number, false);
-  await setBuilderBotCloudBlacklist(number, "remove");
+/**
+ * Deja el contacto hablable en Cloud: mute=false + blacklist=remove.
+ * Espera ambas operaciones y reporta si alguna falló.
+ */
+export async function ensureBuilderBotContactActive(
+  number: string
+): Promise<BuilderBotChannelReconcile> {
+  const muteOk = await setBuilderBotContactMute(number, false);
+  const blacklistOk = await setBuilderBotCloudBlacklist(number, "remove");
+  const ok = muteOk && blacklistOk;
+  if (!ok) {
+    console.error("[BuilderBot] Reconciliación mute/blacklist incompleta", {
+      muteOk,
+      blacklistOk,
+    });
+  }
+  return { muteOk, blacklistOk, ok };
 }
 
+/**
+ * Pausa o reactiva el flujo del bot para un número vía BuilderBot Cloud API v2.
+ * POST /api/v2/{botId}/blacklist con { number, intent: "add" | "remove" }.
+ */
 export async function setBuilderBotCloudBlacklist(
   number: string,
   intent: "add" | "remove"
-): Promise<void> {
+): Promise<boolean> {
   const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
   const API_KEY = process.env.BUILDERBOT_API_KEY || "";
-  if (!BOT_ID || !API_KEY) return;
+  if (!BOT_ID || !API_KEY) return true;
 
   const normalizedNumber = String(number).replace(/\D/g, "");
-  if (normalizedNumber.length < 9) return;
+  if (normalizedNumber.length < 9) return false;
 
   const url = `${BUILDERBOT_BASE_URL.replace(/\/$/, "")}/api/v2/${BOT_ID}/blacklist`;
   const headers = {
@@ -167,7 +189,7 @@ export async function setBuilderBotCloudBlacklist(
       const response = await axios.post(url, body, { headers, timeout: 15000 });
       console.log("[BuilderBot] Cloud blacklist OK", intent, normalizedNumber, response.data);
       await sleep(BLACKLIST_SETTLE_MS);
-      return;
+      return true;
     } catch (error: unknown) {
       lastError = error;
       const err = error as { response?: { status?: number; data?: unknown }; message?: string };
@@ -188,6 +210,7 @@ export async function setBuilderBotCloudBlacklist(
     normalizedNumber,
     (lastError as { response?: { data?: unknown } })?.response?.data ?? lastError
   );
+  return false;
 }
 
 const BUILDERBOT_BOT_URL = process.env.BUILDERBOT_BOT_URL || "";

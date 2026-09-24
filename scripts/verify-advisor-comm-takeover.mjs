@@ -48,10 +48,41 @@ assert.ok(
     ctx.indexOf("botPausedAt") < ctx.indexOf("ensureBuilderBotContactActive"),
   "chequeo de pausa debe ir antes de ensureBuilderBotContactActive",
 );
+assert.ok(
+  /await ensureBuilderBotContactActive\(normalized\)/.test(ctx),
+  "contexto debe esperar la reconciliación BBC (no void)",
+);
+assert.ok(
+  !/void ensureBuilderBotContactActive/.test(ctx),
+  "contexto no debe disparar mute/blacklist en segundo plano",
+);
 
 const pauseLib = readFileSync(join(root, "../src/lib/atilioBotPause.ts"), "utf8");
 assert.ok(pauseLib.includes("setBuilderBotCloudBlacklist"), "pause debe blacklist BBC");
 assert.ok(pauseLib.includes("setBotBlacklist"), "pause debe blacklist self-hosted");
+assert.ok(pauseLib.includes("setBuilderBotContactMute"), "pause/reactivate debe tocar /mute BBC");
+assert.ok(
+  pauseLib.includes("ensureBuilderBotContactActive"),
+  "reactivate debe reconciliar mute=false + blacklist=remove",
+);
+assert.ok(
+  !/if\s*\(\s*!customer\?\.botPausedAt\s*\)\s*return\s+false/.test(pauseLib),
+  "reactivate no debe salir si botPausedAt ya es null: hay que reconciliar BBC",
+);
+assert.ok(
+  /localWasPaused/.test(pauseLib),
+  "reactivate debe reconciliar aunque el estado local ya esté activo",
+);
+
+const bbc = readFileSync(join(root, "../src/lib/builderbot.ts"), "utf8");
+assert.ok(
+  /setBuilderBotContactMute[\s\S]*Promise<boolean>/.test(bbc),
+  "mute BBC debe reportar éxito/fallo",
+);
+assert.ok(
+  /setBuilderBotCloudBlacklist[\s\S]*Promise<boolean>/.test(bbc),
+  "blacklist BBC debe reportar éxito/fallo",
+);
 
 const turn = readFileSync(join(root, "../src/lib/whatsappTurn.ts"), "utf8");
 assert.ok(
