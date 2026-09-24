@@ -1,26 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Paperclip, Bold, Italic, List } from "lucide-react";
 import type { MessageDirection } from "@/lib/types";
 import { BotPausedToggle } from "./BotPausedToggle";
+
+function draftKey(ticketId: string): string {
+  return `kira-draft:${ticketId}`;
+}
+
+function readDraft(ticketId: string): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return sessionStorage.getItem(draftKey(ticketId)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeDraft(ticketId: string, value: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (!value.trim()) sessionStorage.removeItem(draftKey(ticketId));
+    else sessionStorage.setItem(draftKey(ticketId), value);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 export function MessageComposer({
   ticketId,
   customerId,
   botPaused = false,
   onSent,
+  embedded = false,
 }: {
   ticketId: string;
   customerId?: string | null;
   botPaused?: boolean;
   onSent?: () => void;
+  embedded?: boolean;
 }) {
   const [text, setText] = useState("");
   const [direction, setDirection] = useState<MessageDirection>("OUTBOUND");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setText(readDraft(ticketId));
+  }, [ticketId]);
+
+  const updateText = (value: string) => {
+    setText(value);
+    writeDraft(ticketId, value);
+  };
 
   const wrapSelection = (before: string, after: string) => {
     const el = document.getElementById("ticket-reply-text") as HTMLTextAreaElement | null;
@@ -29,7 +63,7 @@ export function MessageComposer({
     const end = el.selectionEnd;
     const selected = text.slice(start, end);
     const next = text.slice(0, start) + before + selected + after + text.slice(end);
-    setText(next);
+    updateText(next);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -51,7 +85,7 @@ export function MessageComposer({
         const data = await res.json().catch(() => ({}));
         setError(data.error || "No se pudo guardar el mensaje");
       } else {
-        setText("");
+        updateText("");
         setFile(null);
         if (onSent) {
           onSent();
@@ -69,10 +103,14 @@ export function MessageComposer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+      className={
+        embedded
+          ? "bg-transparent"
+          : "overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+      }
     >
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
-        <span className="text-sm font-semibold text-slate-800">Responder</span>
+      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5">
+        <span className="text-xs font-semibold text-slate-800">Responder</span>
         <select
           value={direction}
           onChange={(e) => setDirection(e.target.value as MessageDirection)}
@@ -85,11 +123,17 @@ export function MessageComposer({
 
       <textarea
         id="ticket-reply-text"
-        className="w-full resize-none border-0 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
-        rows={4}
-        placeholder="Escribir tu respuesta..."
+        className="w-full resize-none border-0 bg-transparent px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+        rows={embedded ? 3 : 4}
+        placeholder="Escribir tu respuesta… Enter envía · Shift+Enter salto de línea"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => updateText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          if (loading || (!text.trim() && !file)) return;
+          e.currentTarget.form?.requestSubmit();
+        }}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
@@ -121,12 +165,12 @@ export function MessageComposer({
           <button
             type="button"
             className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            onClick={() => setText((t) => (t ? `${t}\n• ` : "• "))}
+            onClick={() => updateText(text ? `${text}\n• ` : "• ")}
             title="Lista"
           >
             <List className="h-4 w-4" />
           </button>
-          {file ? <span className="ml-1 max-w-[120px] truncate text-xs text-violet-600">{file.name}</span> : null}
+          {file ? <span className="ml-1 max-w-[120px] truncate text-xs text-[#4a0e1c]">{file.name}</span> : null}
         </div>
 
         <div className="flex items-center gap-2">
@@ -136,7 +180,7 @@ export function MessageComposer({
           <button
             type="submit"
             disabled={loading}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-60"
+            className="rounded-lg bg-[#4a0e1c] px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-[#6b1428] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4a0e1c]/30 disabled:opacity-60 sm:text-sm sm:px-4 sm:py-2"
           >
             {loading ? "Enviando…" : "Enviar respuesta"}
           </button>

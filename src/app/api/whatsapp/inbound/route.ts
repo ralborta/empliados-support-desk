@@ -33,7 +33,9 @@ import {
 } from "@/lib/customerOdooCaseRef";
 import { buildWebhookMessageId, hasStableWebhookMessageId } from "@/lib/webhookMessageId";
 import {
+  decidePanelContentDedup,
   findPlatformPresavedOutboundDuplicate,
+  findRecentSameContentMessage,
   mergeWebhookIntoPlatformOutbound,
   normalizeOutboundDedupText,
 } from "@/lib/outboundMessageDedup";
@@ -61,6 +63,67 @@ export async function POST(req: Request) {
   console.log("📩 Webhook recibido de BuilderBot:", JSON.stringify(payload, null, 2));
 
   const eventName = typeof payload?.eventName === "string" ? payload.eventName : "";
+
+  // Estado del runtime BBC (status.ready al (re)arranque Meta, etc.)
+  if (/^status\./i.test(eventName)) {
+    try {
+      const {
+        markBbcAlertSent,
+        recordBbcStatusEvent,
+        shouldSendBbcTransitionAlert,
+      } = await import("@/lib/bbcRuntimeMonitor");
+      const { sendBbcTransitionAlertEmail } = await import("@/lib/panelEmail");
+      const data =
+        payload?.data && typeof payload.data === "object"
+          ? (payload.data as Record<string, unknown>)
+          : (payload as Record<string, unknown>);
+      const statusRaw =
+        (typeof data.status === "string" && data.status) ||
+        (typeof data?.body === "object" &&
+        data.body &&
+        typeof (data.body as { status?: string }).status === "string"
+          ? (data.body as { status: string }).status
+          : undefined) ||
+        (eventName.match(/status\.(.+)/i)?.[1] ?? undefined);
+      const host =
+        (typeof data.host === "string" && data.host) ||
+        (typeof data.phone === "string" && data.phone) ||
+        undefined;
+      const recorded = await recordBbcStatusEvent({
+        eventName,
+        status: statusRaw,
+        host,
+        raw: payload,
+        source: "webhook",
+      });
+      const lastAlertAt = recorded.lastAlertAt ? new Date(recorded.lastAlertAt) : null;
+      if (
+        shouldSendBbcTransitionAlert({
+          transition: recorded.transition,
+          lastAlertAt,
+        })
+      ) {
+        const emailed = await sendBbcTransitionAlertEmail({
+          bbc: recorded,
+          transition: recorded.transition,
+        });
+        if (emailed) await markBbcAlertSent();
+      }
+      return NextResponse.json({
+        ok: true,
+        message: "Estado BBC registrado",
+        bbc: {
+          status: recorded.status,
+          healthy: recorded.healthy,
+          restarted: Boolean(recorded.restarted),
+        },
+      });
+    } catch (error) {
+      console.error("[inbound] Error registrando estado BBC:", error);
+      return NextResponse.json({ ok: true, message: "Estado BBC recibido (error al persistir)" });
+    }
+  }
+
   const incomingEvents = new Set(["message.incoming"]);
   const outgoingEvents = new Set([
     "message.outgoing",
@@ -276,10 +339,12 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
       const handoff = await ensureUnregisteredPhoneAdvisorHandoff(prisma, customerPhoneRaw, {
         contactName,
         source: "whatsapp_inbound",
+        // Audit-only: no consumir el aviso acá — lo envía context/turn (voz al cliente).
+        deferCustomerNotify: true,
       });
       customer = handoff.customer;
       console.log(
-        `[WhatsApp] Número no validado por Wara (${customerPhone}) → ticket ${handoff.ticket.code} (asesor)`,
+        `[WhatsApp] Número no validado por Wara (${customerPhone}) → ticket ${handoff.ticket.code} (asesor)${handoff.shouldNotifyCustomer ? " — aviso pendiente de context/turn" : ""}`,
       );
     } catch (e) {
       console.error("[WhatsApp] Falló handoff número no registrado:", e);
@@ -369,6 +434,43 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
   });
 
   const rawPayload = { eventName, data };
+  const inboundText = actualMessage || "[Archivo adjunto]";
+  const recentInbound = await findRecentSameContentMessage(prisma, {
+    ticketId: ticket.id,
+    direction: "INBOUND",
+    from: "CUSTOMER",
+    text: inboundText,
+  });
+  if (recentInbound) {
+    const { action } = decidePanelContentDedup({
+      existingExternalMessageId: recentInbound.externalMessageId,
+      incomingExternalMessageId: messageId,
+    });
+    if (action === "idempotent" || action === "skip") {
+      console.log(`ℹ️ Incoming duplicado (${action}) — ${recentInbound.id}`);
+      return NextResponse.json({
+        ok: true,
+        ticketId: ticket.id,
+        idempotent: true,
+        ...builderBotRegistrationFields(registeredInPanel),
+      });
+    }
+    if (action === "merge") {
+      await mergeWebhookIntoPlatformOutbound(prisma, {
+        messageId: recentInbound.id,
+        externalMessageId: messageId,
+        webhookRawPayload: rawPayload as Prisma.InputJsonObject,
+      });
+      console.log(`ℹ️ Incoming fusionado con ${recentInbound.id}`);
+      return NextResponse.json({
+        ok: true,
+        ticketId: ticket.id,
+        merged: true,
+        existingMessageId: recentInbound.id,
+        ...builderBotRegistrationFields(registeredInPanel),
+      });
+    }
+  }
 
   try {
     await prisma.ticketMessage.create({
@@ -376,7 +478,7 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
         ticketId: ticket.id,
         direction: "INBOUND",
         from: "CUSTOMER",
-        text: actualMessage || "[Archivo adjunto]",
+        text: inboundText,
         attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
         rawPayload: {
           ...rawPayload,
@@ -717,7 +819,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
   }
   const customer = chosen.customer;
 
-  const targetTicket =
+  let targetTicket =
     chosen.openTicketId
       ? {
           id: chosen.openTicketId,
@@ -733,10 +835,27 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
         : null;
 
   if (!targetTicket) {
+    const code = await allocateTicketCode(prisma);
+    const created = await prisma.ticket.create({
+      data: {
+        code,
+        customerId: customer.id,
+        contactName: customer.name || "WhatsApp",
+        title: "Conversación WhatsApp",
+        status: "OPEN",
+        priority: "NORMAL",
+        category: "OTHER",
+        channel: "WHATSAPP",
+      },
+    });
+    targetTicket = {
+      id: created.id,
+      code: created.code,
+      status: created.status,
+    };
     console.log(
-      `ℹ️ Cliente encontrado (${customer.phone}) por candidato ${chosen.candidate}, pero sin ticket asociado`
+      `🎫 Ticket creado para salida sin hilo (${customer.phone}): ${created.code}`,
     );
-    return NextResponse.json({ ok: true, message: "No hay ticket" });
   }
 
   // Generar messageId estable (reintentos / stress)
@@ -771,26 +890,67 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
 
   // Pre-guardado del backend (turn/unidades/certificados) + webhook con wamid estable:
   // fusionar en la fila existente en vez de duplicar en el panel.
-  const platformPresave = await findPlatformPresavedOutboundDuplicate(prisma, {
+  const recentHumanOutbound = await findRecentSameContentMessage(prisma, {
     ticketId: targetTicket.id,
+    direction: "OUTBOUND",
+    from: "HUMAN",
     text: normalizedOutboundText,
+    windowMs: 2 * 60 * 1000,
   });
-  if (platformPresave) {
+  if (recentHumanOutbound) {
     await mergeWebhookIntoPlatformOutbound(prisma, {
-      messageId: platformPresave.id,
+      messageId: recentHumanOutbound.id,
       externalMessageId: messageId,
       webhookRawPayload: { eventName, data } as Prisma.InputJsonObject,
     });
     console.log(
-      `ℹ️ Mensaje saliente fusionado con pre-guardado del backend (${platformPresave.id})`,
+      `ℹ️ Mensaje saliente fusionado con respuesta humana (${recentHumanOutbound.id})`,
     );
     return NextResponse.json({
       ok: true,
       ticketId: targetTicket.id,
       ticketCode: targetTicket.code,
       merged: true,
-      existingMessageId: platformPresave.id,
+      existingMessageId: recentHumanOutbound.id,
     });
+  }
+
+  const platformPresave = await findPlatformPresavedOutboundDuplicate(prisma, {
+    ticketId: targetTicket.id,
+    text: normalizedOutboundText,
+  });
+  if (platformPresave) {
+    const { action } = decidePanelContentDedup({
+      existingExternalMessageId: platformPresave.externalMessageId,
+      incomingExternalMessageId: messageId,
+    });
+    if (action === "idempotent" || action === "skip") {
+      console.log(`ℹ️ Mensaje saliente duplicado (${action}) — ${platformPresave.id}`);
+      return NextResponse.json({
+        ok: true,
+        ticketId: targetTicket.id,
+        ticketCode: targetTicket.code,
+        duplicate: true,
+        existingMessageId: platformPresave.id,
+      });
+    }
+    if (action === "merge") {
+      await mergeWebhookIntoPlatformOutbound(prisma, {
+        messageId: platformPresave.id,
+        externalMessageId: messageId,
+        webhookRawPayload: { eventName, data } as Prisma.InputJsonObject,
+      });
+      console.log(
+        `ℹ️ Mensaje saliente fusionado con pre-guardado del backend (${platformPresave.id})`,
+      );
+      return NextResponse.json({
+        ok: true,
+        ticketId: targetTicket.id,
+        ticketCode: targetTicket.code,
+        merged: true,
+        existingMessageId: platformPresave.id,
+      });
+    }
   }
 
   // Respaldo por contenido: SOLO cuando el payload no trae ningún id estable del
@@ -922,7 +1082,7 @@ function isDespedidaWara(text: string): boolean {
   if (/\b(chau|chao)\b|nos vemos|que estés bien|que te vaya bien|cuídate|hasta luego|hasta pronto/i.test(t)) {
     return true;
   }
-  if (t.length <= 88 && /^(ok\s*)?(no\s*,?\s*)?(nada\s*)?(gracias|muchas gracias|te agradezco)[\s!.,¡¿]*$/i.test(t)) {
+  if (t.length <= 88 && /^(ok\s*)?(no\s*,?\s*)?(nada\s*)?(gracias|muchas gracias|te agradezco|gr|grx|grac)[\s!.,¡¿]*$/i.test(t)) {
     return true;
   }
   if (t.length <= 48 && /^(ok\s*)?(chau|chao|nos vemos)[\s!.,¡¿]*$/i.test(t)) {

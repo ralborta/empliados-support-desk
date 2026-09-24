@@ -88,6 +88,10 @@ export async function persistCustomerInbound(
       direction: "INBOUND",
       from: "CUSTOMER",
       text: message,
+      ...(typeof payload.messageId === "string" &&
+      /^wamid\./i.test(String(payload.messageId).trim())
+        ? { externalMessageId: String(payload.messageId).trim() }
+        : {}),
       rawPayload: payload as never,
     },
   });

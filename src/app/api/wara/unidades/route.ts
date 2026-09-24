@@ -1,30 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
+import { looksLikeGpsPlatformUiSymptomOnly } from "@/lib/gpsConsultRouting";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { OPEN_TICKET_THREAD_STATUSES, attachToOpenConversation } from "@/lib/ticketThreading";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
-import { autoAssignNewTicket } from "@/lib/advisorDistribution";
+import { autoAssignNewTicket, hasConnectedSupportAdvisor } from "@/lib/advisorDistribution";
+import { withAdvisorOfflineNoticeIfNeeded } from "@/lib/advisorHandoff";
 import {
   isCustomerContextAuthConfigured,
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
-import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, extractPlatePrefixFromMessage, extractPlateSuffixFromMessage, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
+import { detectLoosePlate, detectPlate, extractLastPlateFromThread, extractPlateFromUnitStatusCheckOffer, extractPlatePrefixFromMessage, extractPlateSuffixFromMessage, formatPlateWithSpaces, hasPendingMaintenancePlateRequest, hasPendingMantenimientoConfirmation, isBarePlatePrefixHint, isPlausibleVehiclePlate, looksLikeAdditionalUnitsMissingReportRequest, looksLikeAnotherUnitConsultRequest, buildAnotherUnitConsultAskMessage, looksLikeBareNegativeResponse, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeUnitRejection, normalizePlate, threadBotRecentlyAskedPlateReference, buildAmbiguousPlateOrNegationClarificationReply, threadHasActiveOdometerFlow, threadHasPendingUnitStatusCheckOffer, threadTextSinceCompanySelection } from "@/lib/wara";
 import {
   consultarEstadoUnidades,
   looksLikeCompanySelection,
   looksLikeChangeCompanyRequest,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
   looksLikeGreeting,
   looksLikeGpsOrUnitStatusQuestion,
+  looksLikeGpsPositionClarificationQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeGenericUnitConsultWithoutPlate,
   looksLikeConversationalUnitConcern,
+  looksLikeIgnitionDiagnosisDispute,
   looksLikeProblemClarificationPushback,
   looksLikeRouteHistoryOrMovementIssue,
   looksLikeUnitConsultFollowUp,
   looksLikeVagueUnitProblemReport,
+  threadHasRecentIgnitionFailureClaim,
   looksLikeMaintenanceConfirmationRejection,
   resolveConversationalUnitTurn,
   threadHasRecentGpsStatusSummary,
@@ -32,6 +38,7 @@ import {
   threadHasRecentUnitCaseOpened,
   looksLikeSubstantiveCustomerMessage,
   resolveWaraSessionByPhone,
+  resolveCustomerByWaraPhone,
   threadHasRecentLiveUnitConsultIntent,
   type WaraUnidadEstado,
 } from "@/lib/waraApi";
@@ -46,7 +53,6 @@ import {
   type ExecutorDialogueState,
 } from "@/lib/executorDialogueState";
 import {
-  buildGpsAssessmentDialogueState,
   buildListenProblemDialogueState,
   buildNoEquipmentDialogueState,
 } from "@/lib/unitDialogueState";
@@ -54,13 +60,23 @@ import { ensureWaraOdooTicket, pickOdooCompanyName } from "@/lib/waraOdooEscalat
 import { findCustomerVisibleOdooCaseRef, withOdooCaseAssignedSuffix } from "@/lib/customerOdooCaseRef";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { assessUnitReporting, formatMinutesAgo, ignitionLabel, telemetryElapsedSeconds } from "@/lib/waraGpsAssessment";
-import { buildGpsClientSummary } from "@/lib/waraGpsSummary";
+import {
+  buildGpsClientSummary,
+  isStructuredGpsWhatsAppSummary,
+  buildGpsPositionClarificationAnalysis,
+  looksLikeGpsStatusContinuityReply,
+  mapsLinkForUnit,
+  resolvePlateFromRecentGpsThread,
+  threadHasRecentGpsContext,
+} from "@/lib/waraGpsSummary";
+import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
 import {
   buildFleetUnitNotFoundMessage,
-  buildUnitNameOrPlateClarificationReply,
   customerOnlyThreadText,
   extractAmbiguousUnitCodeToken,
+  replyForUnresolvedUnitCodeToken,
   extractExplicitUnitSearchLabel,
+  extractMovilIdFromUnitMessage,
   extractTokenFromUnitNameOrPlateClarification,
   filterUnitsByResolvedPlate,
   filterUnitsBySearchTerms,
@@ -74,8 +90,15 @@ import {
   looksLikeUnitNameInMessage,
   resolveUnitQuery,
   threadAskedUnitNameOrPlateClarification,
+  findNearbyFleetUnits,
 } from "@/lib/waraUnitIntent";
 import { getActiveUnit, setActiveUnit, clearActiveUnit, shouldUseActiveUnitFallback, extractActiveUnitNameCode, type ActiveUnitRecord } from "@/lib/activeUnit";
+import { movilIdFromMessageUnderStatusRead } from "@/lib/unitConsultTurnDecision";
+import {
+  hasEmbeddedUnitInternoCandidate,
+  type FleetUnitRef,
+} from "@/lib/unitReferenceParser";
+import { formatFleetListWhatsApp, looksLikeMoreFleetListRequest, nextFleetListOffset } from "@/lib/waraWhatsAppFormat";
 import { clearPendingAction } from "@/lib/pendingAction";
 import {
   clearSessionNotebook,
@@ -96,6 +119,24 @@ const bodySchema = z
     platePrefix: z.string().min(2).max(6).optional(),
     /** Nombre/marca/etiqueta razonada (Altamiranda, Nissan…). */
     unitSearchText: z.string().min(2).max(60).optional(),
+    /**
+     * Overlay de lectura durante escritura pendiente: consultar sin mutar activeUnit
+     * ni notebook. Entidad lateral efímera.
+     */
+    ephemeralOverlayRead: z.boolean().optional(),
+    /**
+     * Acción estructurada del intérprete (unit_status_read → telemetría directa).
+     */
+    utteranceAction: z
+      .enum([
+        "unit_status_read",
+        "unit_reference",
+        "unit_correction",
+        "new_write",
+        "continue_field",
+        "none",
+      ])
+      .optional(),
     unidad: z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]).optional(),
     unidades: z.array(z.union([z.number(), z.string()])).optional(),
     patentes: z.array(z.string()).optional(),
@@ -149,7 +190,7 @@ function formatUnitLabel(unit: WaraUnidadEstado): string {
   const plate = plateRaw ? formatPlateWithSpaces(normalizeLoosePlate(plateRaw)) ?? plateRaw : "";
   const nombre = unit.unidad?.trim() || "";
   if (plate && nombre && normalizeLoosePlate(plate) !== normalizeLoosePlate(nombre)) {
-    return `${plate} (nombre ${nombre})`;
+    return `${plate} (${nombre})`;
   }
   return plate || nombre || "la unidad";
 }
@@ -239,13 +280,12 @@ function looksLikeLocationRequest(text: string | undefined | null): boolean {
 }
 
 function formatLocationAppendix(unit: WaraUnidadEstado): string {
-  const lat = unit.ultima_posicion?.lat;
-  const lon = unit.ultima_posicion?.lon;
-  if (typeof lat !== "number" || typeof lon !== "number") return "";
+  const url = mapsLinkForUnit(unit);
+  if (!url) return "";
   const posAgo = minutesAgo(unit.ultima_posicion?.hace_segundos);
   const fecha = formatWaraDateLocal(unit.ultima_posicion?.fecha);
   const when = fecha ? ` (${fecha})` : "";
-  return `\n\nÚltima ubicación conocida hace ${posAgo}${when}: https://www.google.com/maps?q=${lat},${lon}`;
+  return `\n\nÚltima ubicación conocida hace ${posAgo}${when}:\n${url}`;
 }
 
 function appendLocationIfRequested(summary: string, unit: WaraUnidadEstado, rawText: string): string {
@@ -256,6 +296,49 @@ function appendLocationIfRequested(summary: string, unit: WaraUnidadEstado, rawT
 
 function normalizeLoosePlate(value: string): string {
   return normalizePlate(value)?.replace(/\s+/g, "") ?? "";
+}
+
+/** Interno del mensaje: extractor clásico, o dominio unit_status_read (sin ampliar intent textual). */
+function resolveMessageMovilId(params: {
+  rawText: string;
+  threadText?: string;
+  fleet?: FleetUnitRef[];
+  utteranceAction?: z.infer<typeof bodySchema>["utteranceAction"];
+}): number | null {
+  return (
+    extractMovilIdFromUnitMessage(params.rawText, {
+      threadText: params.threadText,
+      fleet: params.fleet,
+    }) ??
+    movilIdFromMessageUnderStatusRead({
+      utteranceAction: params.utteranceAction ?? null,
+      rawText: params.rawText,
+      fleet: params.fleet,
+    })
+  );
+}
+
+/**
+ * Hay entidad de unidad en el request/mensaje → no caer en activeUnit en silencio
+ * (aunque el match de flota falle después).
+ */
+function hasExplicitUnitEntitySignal(params: {
+  rawText: string;
+  platePrefix?: string | null;
+  unitSearchText?: string | null;
+  utteranceAction?: z.infer<typeof bodySchema>["utteranceAction"];
+  threadText?: string;
+  fleet?: FleetUnitRef[];
+}): boolean {
+  if (params.platePrefix?.trim() || params.unitSearchText?.trim()) return true;
+  if (resolveMessageMovilId(params) != null) return true;
+  if (
+    params.utteranceAction === "unit_status_read" &&
+    hasEmbeddedUnitInternoCandidate(params.rawText)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function parseRequestedPlates(body: z.infer<typeof bodySchema>): string[] {
@@ -315,13 +398,7 @@ function extractLastPlateFromThreadCompat(text: string): string | null {
 
 /** El cliente habla de otra unidad distinta a la del hilo — no reutilizar patente anterior. */
 function looksLikeAnotherUnitRequest(rawText: string | undefined | null): boolean {
-  const norm = (rawText ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  return /\b(otra unidad|otro unidad|otro veh[ií]culo|otra patente|la otra unidad|segunda unidad|otra camioneta|tengo otra|otro m[oó]vil)\b/.test(
-    norm
-  );
+  return looksLikeAnotherUnitConsultRequest(rawText);
 }
 
 function mentionsMissingReportWithoutPlate(rawText: string | undefined | null): boolean {
@@ -407,13 +484,26 @@ function formatUnitNotFoundMessage(opts: {
   wantedPlate?: string;
   unitQuery?: UnitQueryRef | null;
   rawText?: string;
+  fleetUnits?: WaraUnidadEstado[];
+  canSwitchCompany?: boolean;
 }): string {
   const company = opts.companyName;
+  const searchHint =
+    opts.wantedPlate?.trim() ||
+    (opts.unitQuery?.kind === "nombre" ? opts.unitQuery.value : null) ||
+    opts.rawText?.trim() ||
+    "";
+  const nearby =
+    opts.fleetUnits?.length && searchHint
+      ? findNearbyFleetUnits(opts.fleetUnits, searchHint)
+      : [];
   if (opts.wantedPlate) {
     return buildFleetUnitNotFoundMessage({
       companyName: company,
       plate: opts.wantedPlate,
       rawText: opts.rawText,
+      nearbyUnits: nearby,
+      canSwitchCompany: opts.canSwitchCompany,
     });
   }
   if (opts.unitQuery?.kind === "interno_backoffice") {
@@ -423,12 +513,21 @@ function formatUnitNotFoundMessage(opts: {
     );
   }
   if (opts.unitQuery?.kind === "nombre") {
-    return (
-      `No hay ninguna unidad con nombre ${opts.unitQuery.value} en la flota de ${company}. ` +
-      `Probá con la matrícula o revisá el nombre en Wara.`
-    );
+    return buildFleetUnitNotFoundMessage({
+      companyName: company,
+      searchedText: opts.unitQuery.value,
+      rawText: opts.rawText,
+      nearbyUnits: nearby,
+      canSwitchCompany: opts.canSwitchCompany,
+    });
   }
-  return buildFleetUnitNotFoundMessage({ companyName: company, rawText: opts.rawText });
+  return buildFleetUnitNotFoundMessage({
+    companyName: company,
+    rawText: opts.rawText,
+    searchedText: searchHint || null,
+    nearbyUnits: nearby,
+    canSwitchCompany: opts.canSwitchCompany,
+  });
 }
 
 async function appendOutboundBotMessage(rawPhone: string, text: string, payload: Record<string, unknown>) {
@@ -564,7 +663,7 @@ async function createMissingReportTicket(params: {
       const incidentType = params.incidentType ?? "MISSING_REPORT";
       const dedupeKey = `wara_unidades:${plate}:${params.ticketTitleSuffix ?? incidentType}`;
       const odooDescription = [
-        `Consulta/reclamo detectado por Atilio / WhatsApp.`,
+        `Consulta/reclamo detectado por Kira / WhatsApp.`,
         `Empresa Wara: ${params.companyName}`,
         `Patente: ${plate}`,
         params.unit.unidad ? `Nombre unidad: ${params.unit.unidad}` : "",
@@ -640,11 +739,11 @@ async function createMissingReportTicket(params: {
     incidentType,
     priority: "HIGH",
     status: "IN_PROGRESS",
-    aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Atilio tras validar estado en Wara.`,
+    aiSummary: `Unidad ${plate}: ${issueLabel}. Caso generado automáticamente por Kira tras validar estado en Wara.`,
   });
 
   const odooDescription = [
-    `Consulta/reclamo detectado por Atilio / WhatsApp.`,
+    `Consulta/reclamo detectado por Kira / WhatsApp.`,
     `Empresa Wara: ${params.companyName}`,
     `Patente: ${plate}`,
     params.unit.unidad ? `Nombre unidad: ${params.unit.unidad}` : "",
@@ -741,7 +840,7 @@ async function createNoEquipmentTicket(params: {
         dedupeKey,
         subject: title,
         description: [
-          `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
+          `Unidad sin equipo GPS instalado detectada por Kira / WhatsApp.`,
           `Empresa Wara: ${params.companyName}`,
           `Patente: ${params.unit.patente || plate}`,
           params.unit.unidad ? `Nombre (campo unidad en API): ${params.unit.unidad}` : "",
@@ -805,7 +904,7 @@ async function createNoEquipmentTicket(params: {
     incidentType: "GENERAL_TECH",
     priority: "NORMAL",
     status: "IN_PROGRESS",
-    aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Atilio.`,
+    aiSummary: `Unidad ${label} sin equipo GPS instalado (sin telemetría en ConsultarEstadoUnidades). Caso generado por Kira.`,
   });
 
   const { odooRef, created: odooCreated } = await ensureWaraOdooTicket(prisma, {
@@ -813,7 +912,7 @@ async function createNoEquipmentTicket(params: {
     dedupeKey,
     subject: title,
     description: [
-      `Unidad sin equipo GPS instalado detectada por Atilio / WhatsApp.`,
+      `Unidad sin equipo GPS instalado detectada por Kira / WhatsApp.`,
       `Empresa Wara: ${params.companyName}`,
       `Patente: ${params.unit.patente || plate}`,
       params.unit.unidad ? `Nombre (campo unidad en API): ${params.unit.unidad}` : "",
@@ -900,6 +999,57 @@ export async function POST(req: NextRequest) {
   }
   const threadText = await recentThreadText(rawPhone);
   const rawText = parsed.data.rawText ?? "";
+  const ephemeralOverlayRead = parsed.data.ephemeralOverlayRead === true;
+
+  /**
+   * Garantía transversal: durante overlay de lectura no se muta estado conversacional
+   * (activeUnit, pendingAction, notebook). Aplica a TODOS los retornos tempranos.
+   * Excepción documentada: renovación técnica de token Wara (abajo) — no cambia
+   * pending/activeUnit/expectativas; solo refresca credencial de API.
+   */
+  const skipConversationalMutation = ephemeralOverlayRead;
+  async function guardedClearActiveUnit(): Promise<void> {
+    if (skipConversationalMutation) {
+      console.info("[unidades] ephemeralOverlayRead: skip clearActiveUnit");
+      return;
+    }
+    await clearActiveUnit(prisma, rawPhone);
+  }
+  async function guardedSetActiveUnit(
+    plate: string,
+    opts: Parameters<typeof setActiveUnit>[3],
+  ): Promise<void> {
+    if (skipConversationalMutation) {
+      console.info("[unidades] ephemeralOverlayRead: skip setActiveUnit");
+      return;
+    }
+    await setActiveUnit(prisma, rawPhone, plate, opts);
+  }
+  async function guardedClearPendingAction(): Promise<void> {
+    if (skipConversationalMutation) {
+      console.info("[unidades] ephemeralOverlayRead: skip clearPendingAction");
+      return;
+    }
+    await clearPendingAction(prisma, rawPhone).catch(() => {});
+  }
+  async function guardedClearSessionNotebook(): Promise<void> {
+    if (skipConversationalMutation) {
+      console.info("[unidades] ephemeralOverlayRead: skip clearSessionNotebook");
+      return;
+    }
+    if (isConversationNotebookEnabled()) {
+      await clearSessionNotebook(prisma, rawPhone);
+    }
+  }
+  async function guardedPatchSessionNotebook(
+    ...args: Parameters<typeof patchSessionNotebook>
+  ): Promise<void> {
+    if (skipConversationalMutation) {
+      console.info("[unidades] ephemeralOverlayRead: skip patchSessionNotebook");
+      return;
+    }
+    await patchSessionNotebook(...args);
+  }
 
   // Bug real 2026-08-06: "cuando me das respuesta del resultado del analisis?"
   // no debe re-diagnosticar GPS; va a Expectativa de Atención al cliente.
@@ -985,7 +1135,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (looksLikeFlowControlCommand(rawText.trim()) || looksLikeChangeCompanyRequest(rawText.trim())) {
+  if (
+    looksLikeFlowControlCommand(rawText.trim()) ||
+    looksLikeSoftFlowRestart(rawText.trim())
+  ) {
     return NextResponse.json(
       {
         ok: true,
@@ -993,6 +1146,27 @@ export async function POST(req: NextRequest) {
         summaryText: "",
         message: "",
         skipResponse_s: "true",
+        action: "none" as const,
+        unidadesCount: 0,
+      },
+      { status: BB_STATUS }
+    );
+  }
+
+  // Bug prod 2026-09-17: no silenciar «reiniciar empresa» (antes skip vacío);
+  // ejecutar el menú multiempresa como en mantenimiento / info-guides.
+  if (looksLikeChangeCompanyRequest(rawText.trim())) {
+    const { resetCustomerCompanyMenu } = await import("@/lib/waraApi");
+    const reset = await resetCustomerCompanyMenu(prisma, rawPhone);
+    return NextResponse.json(
+      {
+        ok: true,
+        ok_s: "true",
+        summaryText: reset.message,
+        message: reset.message,
+        changeCompany_s: "true",
+        requiresCompanySelection: reset.requiresCompanySelection,
+        requiresCompanySelection_s: reset.requiresCompanySelection ? "true" : "false",
         action: "none" as const,
         unidadesCount: 0,
       },
@@ -1064,10 +1238,8 @@ export async function POST(req: NextRequest) {
   const anotherUnitConsult = looksLikeAnotherUnitConsultRequest(rawText);
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
   if (additionalMissingReport) {
-    await clearActiveUnit(prisma, rawPhone);
-    if (isConversationNotebookEnabled()) {
-      await clearSessionNotebook(prisma, rawPhone);
-    }
+    await guardedClearActiveUnit();
+    await guardedClearSessionNotebook();
     const message =
       "Entendido. Pasame la patente o el nombre de la otra unidad sin reporte (ej. M300-093 o NKL 961) y la consulto en Wara.";
     await appendOutboundBotMessage(rawPhone, message, {
@@ -1080,12 +1252,9 @@ export async function POST(req: NextRequest) {
     );
   }
   if (anotherUnitConsult) {
-    await clearActiveUnit(prisma, rawPhone);
-    if (isConversationNotebookEnabled()) {
-      await clearSessionNotebook(prisma, rawPhone);
-    }
-    const message =
-      "Entendido. Pasame la patente o el nombre de la otra unidad (ej. M300-093 o NKL 961) y la consulto en Wara.";
+    await guardedClearActiveUnit();
+    await guardedClearSessionNotebook();
+    const message = buildAnotherUnitConsultAskMessage();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_unidades_another_unit_consult",
       rawText,
@@ -1101,7 +1270,7 @@ export async function POST(req: NextRequest) {
     hasPendingMantenimientoConfirmation(threadText) &&
     looksLikeMaintenanceConfirmationRejection(rawText)
   ) {
-    await clearPendingAction(prisma, rawPhone).catch(() => {});
+    await guardedClearPendingAction();
     const message =
       "Entendido, no registro ese mantenimiento. Si querías consultar el estado de una unidad, decime la patente o el nombre (ej. Nissan) y te lo miro.";
     await appendOutboundBotMessage(rawPhone, message, {
@@ -1121,10 +1290,8 @@ export async function POST(req: NextRequest) {
     );
   }
   if (explicitRejection) {
-    await clearActiveUnit(prisma, rawPhone);
-    if (isConversationNotebookEnabled()) {
-      await clearSessionNotebook(prisma, rawPhone);
-    }
+    await guardedClearActiveUnit();
+    await guardedClearSessionNotebook();
     const message =
       "Entendido, no era esa. ¿Cuál es la patente o unidad correcta? Pasame la matrícula completa (ej. AE 483 VE) o la marca/nombre (ej. Nissan).";
     await appendOutboundBotMessage(rawPhone, message, {
@@ -1141,7 +1308,7 @@ export async function POST(req: NextRequest) {
     isBarePlatePrefixHint(rawText) &&
     !looksLikeBriefConfirmation(rawText)
   ) {
-    await clearActiveUnit(prisma, rawPhone);
+    await guardedClearActiveUnit();
     const message = buildAmbiguousPlateOrNegationClarificationReply();
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_unidades_rejection_or_clarify",
@@ -1161,7 +1328,7 @@ export async function POST(req: NextRequest) {
   // actual, o pide consultar "una unidad" sin patente (bug OST 225, 2026-07-30).
   const genericUnitConsultWithoutPlate = looksLikeGenericUnitConsultWithoutPlate(rawText);
   if (genericUnitConsultWithoutPlate) {
-    await clearActiveUnit(prisma, rawPhone);
+    await guardedClearActiveUnit();
   }
   const activeUnitRecord =
     !looksLikeAnotherUnitRequest(rawText) && !explicitRejection && !genericUnitConsultWithoutPlate
@@ -1176,6 +1343,9 @@ export async function POST(req: NextRequest) {
       ? null
       : extractLastPlateFromThreadCompat(scopedThreadEarly) ??
         detectPlate(scopedThreadEarly) ??
+        (looksLikeGpsStatusContinuityReply(rawText)
+          ? resolvePlateFromRecentGpsThread(scopedThreadEarly)
+          : null) ??
         contextUnitPlate ??
         null;
 
@@ -1192,10 +1362,12 @@ export async function POST(req: NextRequest) {
       looksLikeAnotherUnitRequest(rawText) ||
       mentionsMissingReportWithoutPlate(rawText) ||
       genericUnitConsultWithoutPlate ||
-      (looksLikeLiveUnitConsultIntent(rawText) && !looksLikeFleetUnitSearchInput(rawText)))
+      (looksLikeLiveUnitConsultIntent(rawText) &&
+        !looksLikeFleetUnitSearchInput(rawText) &&
+        !looksLikeGpsStatusContinuityReply(rawText)))
   ) {
     if (explicitRejection) {
-      await clearActiveUnit(prisma, rawPhone);
+      await guardedClearActiveUnit();
     }
     const askPlate = explicitRejection
       ? "Entendido, no era esa. ¿Cuál es la otra unidad? Pasame la patente (ej. AD427MC) o la marca/nombre (ej. Nissan)."
@@ -1247,6 +1419,9 @@ export async function POST(req: NextRequest) {
   if (!result.ok && (result.status === 401 || result.status === 403)) {
     const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
     if (customer) {
+      // Renovación técnica de token Wara: NO es mutación conversacional.
+      // No toca pendingAction, activeUnit, turnLayer ni notebook. Permitida
+      // incluso con ephemeralOverlayRead (solo invalida credencial de API).
       await prisma.customer.update({
         where: { id: customer.id },
         data: { waraSessionToken: null, waraSessionAt: null },
@@ -1262,6 +1437,25 @@ export async function POST(req: NextRequest) {
     looksLikeUnitListRequest(effectiveRawText) ||
     looksLikeFleetListContinuation(effectiveRawText, threadText);
   let unitQuery = extractUnitQueryFromText(effectiveRawText);
+
+  // Interno/movil_id explícito → resolver por flota, no heredar patente del hilo.
+  if (result.ok && result.unidades.length > 0 && !explicitPlate) {
+    const movilId = resolveMessageMovilId({
+      rawText: effectiveRawText,
+      threadText,
+      fleet: result.unidades,
+      utteranceAction: parsed.data.utteranceAction,
+    });
+    if (movilId != null) {
+      const byMovil = result.unidades.filter((u) => Number(u.movil_id) === movilId);
+      if (byMovil.length === 1) {
+        const resolvedPlate = normalizeLoosePlate(byMovil[0].patente || byMovil[0].unidad || "");
+        if (resolvedPlate) {
+          explicitPlate = formatPlateWithSpaces(resolvedPlate) ?? resolvedPlate;
+        }
+      }
+    }
+  }
 
   // Si BBC mandó plate=600006 (código interno), igual hay que resolver por nombre de unidad.
   const bbcPlateRaw = (parsed.data.patente ?? parsed.data.plate ?? "").trim();
@@ -1297,8 +1491,16 @@ export async function POST(req: NextRequest) {
     // heredando una patente vieja que ya se corrigió en extractSearchTerms.
     // Ampliado 2026-07-29: también aplica si el cliente sigue un hilo conversacional
     // (problema vago, historial/recorrido, pushback) sin nombrar de nuevo la unidad.
+    const messageUnitEntity = hasExplicitUnitEntitySignal({
+      rawText: effectiveRawText,
+      platePrefix: parsed.data.platePrefix,
+      unitSearchText: parsed.data.unitSearchText,
+      utteranceAction: parsed.data.utteranceAction,
+      threadText,
+      fleet: result.unidades,
+    });
     if (
-      !parsed.data.platePrefix?.trim() &&
+      !messageUnitEntity &&
       (liveUnitConsult || conversationalConcern || gpsLoopFollowUp) &&
       shouldUseActiveUnitFallback(effectiveRawText) &&
       activeUnitRecord?.plate &&
@@ -1340,6 +1542,7 @@ export async function POST(req: NextRequest) {
       } else if (
         resolved.intent === "need_clarification" &&
         resolved.candidatePlates.length === 0 &&
+        !messageUnitEntity &&
         shouldUseActiveUnitFallback(effectiveRawText) &&
         activeUnitRecord?.plate &&
         filterUnitsByResolvedPlate(result.unidades, activeUnitRecord.plate).length > 0
@@ -1351,38 +1554,70 @@ export async function POST(req: NextRequest) {
         explicitPlate = formatPlateWithSpaces(activeUnitRecord.plate) ?? activeUnitRecord.plate;
       } else if (resolved.intent === "need_clarification") {
         const companyName = session.companyName || result.cliente || "tu empresa";
+        const explicitMovilId = resolveMessageMovilId({
+          rawText: effectiveRawText,
+          utteranceAction: parsed.data.utteranceAction,
+          fleet: result.unidades,
+        });
         const ambiguousToken =
-          extractAmbiguousUnitCodeToken(effectiveRawText) ||
-          extractExplicitUnitSearchLabel(effectiveRawText);
+          explicitMovilId == null
+            ? extractAmbiguousUnitCodeToken(effectiveRawText) ||
+              extractExplicitUnitSearchLabel(effectiveRawText) ||
+              (parsed.data.unitSearchText?.trim() || null)
+            : null;
         const clarification =
           resolved.clarificationQuestion ??
           (ambiguousToken
-            ? buildUnitNameOrPlateClarificationReply(ambiguousToken)
+            ? replyForUnresolvedUnitCodeToken(ambiguousToken, { companyName })
             : buildFleetUnitNotFoundMessage({
                 companyName,
                 rawText: effectiveRawText,
-                searchedText: extractExplicitUnitSearchLabel(effectiveRawText) ?? undefined,
+                searchedText:
+                  explicitMovilId != null
+                    ? String(explicitMovilId)
+                    : parsed.data.unitSearchText?.trim() ||
+                      extractExplicitUnitSearchLabel(effectiveRawText) ||
+                      undefined,
               }));
         await appendOutboundBotMessage(rawPhone, clarification, {
           source: "wara_unidades_clarification",
           rawText: effectiveRawText,
           resolutionSource: resolved.source,
         });
+        // message + summaryText: el turn siempre debe poder entregar por API
+        // (bug 2026-08-22: “no encontré Nissan” existía pero el cliente no lo vio).
         return NextResponse.json(
-          { ok: true, summaryText: clarification, action: "none" as const, unidadesCount: 0 },
-          { status: BB_STATUS }
+          {
+            ok: true,
+            summaryText: clarification,
+            message: clarification,
+            action: "none" as const,
+            unidadesCount: 0,
+          },
+          { status: BB_STATUS },
         );
       } else if (resolved.plate) {
         const plateMatches = filterUnitsByResolvedPlate(result.unidades, resolved.plate);
         if (plateMatches.length === 0) {
           const companyName = session.companyName || result.cliente || "tu empresa";
-          const ambiguousToken = extractAmbiguousUnitCodeToken(effectiveRawText);
+          const explicitMovilId = resolveMessageMovilId({
+            rawText: effectiveRawText,
+            utteranceAction: parsed.data.utteranceAction,
+            fleet: result.unidades,
+          });
+          const ambiguousToken =
+            explicitMovilId == null ? extractAmbiguousUnitCodeToken(effectiveRawText) : null;
           const notFound =
-            ambiguousToken || looksLikeAmbiguousUnitCodeToken(resolved.plate)
-              ? buildUnitNameOrPlateClarificationReply(
-                  ambiguousToken || String(resolved.plate),
-                )
-              : buildFleetUnitNotFoundMessage({
+            explicitMovilId != null
+              ? buildFleetUnitNotFoundMessage({
+                  companyName,
+                  searchedText: String(explicitMovilId),
+                })
+              : ambiguousToken || looksLikeAmbiguousUnitCodeToken(resolved.plate)
+                ? replyForUnresolvedUnitCodeToken(ambiguousToken || String(resolved.plate), {
+                    companyName,
+                  })
+                : buildFleetUnitNotFoundMessage({
                   companyName,
                   plate: resolved.plate,
                   rawText: effectiveRawText,
@@ -1411,10 +1646,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const messageMovilId = resolveMessageMovilId({
+    rawText: effectiveRawText,
+    threadText,
+    fleet: result.ok ? result.unidades : undefined,
+    utteranceAction: parsed.data.utteranceAction,
+  });
   const useThreadPlate =
     !forceListFleet &&
     !explicitPlate &&
     !unitQuery &&
+    messageMovilId == null &&
+    !parsed.data.unitSearchText?.trim() &&
+    !parsed.data.platePrefix?.trim() &&
     !genericUnitConsultWithoutPlate &&
     !looksLikeGreeting(rawText.trim()) &&
     !looksLikeInternoMetaQuestion(rawText) &&
@@ -1454,40 +1698,47 @@ export async function POST(req: NextRequest) {
   }
   const buildManyUnitsText = (units: WaraUnidadEstado[]): string => {
     const cliente = session.companyName || result.cliente || "este cliente";
-    const max = 8;
-    const labels = units
-      .map((u) => formatUnitLabel(u))
-      .filter((label) => label.length > 0);
-    const head = labels.slice(0, max).join(", ");
-    const remainder = labels.length - max;
-    const suffix = remainder > 0 ? ` y ${remainder} más` : "";
-    if (unitQuery?.kind === "nombre") {
-      return `Encontré ${units.length} unidades con nombre parecido a ${unitQuery.value} en ${cliente}. ${head}${suffix}. Decime la matrícula exacta si querés ver una sola.`;
-    }
-    return `Tenés ${units.length} unidades en ${cliente}. Te muestro ${max} como referencia: ${head}${suffix}. Por WhatsApp no puedo enviar las ${units.length} de una sola vez — decime matrícula, nombre de unidad (ej. M600-157) o marca para buscar una en particular.`;
+    const wantsMore = looksLikeMoreFleetListRequest(effectiveRawText);
+    const offset = wantsMore ? nextFleetListOffset(threadText) : 0;
+    return formatFleetListWhatsApp({
+      companyName: cliente,
+      units,
+      offset,
+      matchHint: unitQuery?.kind === "nombre" ? unitQuery.value : null,
+    });
   };
   let action: "none" | "observation" | "ticket" = "none";
   let ticketRef = "";
   let dialogueState: ExecutorDialogueState | null = null;
   const plateDisplay = wantedPlate ? formatPlateWithSpaces(wantedPlate) ?? wantedPlate : "";
   const maintenanceContext = hasPendingMaintenancePlateRequest(threadText);
+  const customerResolution =
+    filtered.length === 0
+      ? await resolveCustomerByWaraPhone(prisma, rawPhone).catch(() => null)
+      : null;
+  const canSwitchCompany = (customerResolution?.lookup?.contactos?.length ?? 0) > 1;
+  const fleetForNearby = result.ok ? result.unidades : [];
   let summaryText = !result.ok
     ? result.error || "No pude consultar las unidades en Wara."
     : filtered.length === 0
       ? maintenanceContext && wantedPlate
-        ? `Busqué ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"} y no la encontré. Si la unidad es de otra empresa, escribí "cambiar empresa". Si venías programando mantenimiento, mandá la patente con el detalle (por ejemplo: "preventivo ${plateDisplay}").`
+        ? `Busqué ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"} y no la encontré.${canSwitchCompany ? ' Si la unidad es de otra empresa, escribí "cambiar empresa".' : ""} Si venías programando mantenimiento, mandá la patente con el detalle (por ejemplo: "preventivo ${plateDisplay}").`
         : wantedPlate && !explicitPlate
-          ? `No encontré ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. ¿Podés confirmarme la patente exacta? Si es de otra empresa, escribí "cambiar empresa".`
+          ? `No encontré ${plateDisplay} en las unidades de ${session.companyName || result.cliente || "tu empresa"}. ¿Podés confirmarme la patente exacta?${canSwitchCompany ? ' Si es de otra empresa, escribí "cambiar empresa".' : ""}`
           : wantedPlate
             ? formatUnitNotFoundMessage({
                 companyName: session.companyName || result.cliente || "tu empresa",
                 wantedPlate,
                 rawText,
+                fleetUnits: fleetForNearby,
+                canSwitchCompany,
               })
             : formatUnitNotFoundMessage({
                 companyName: session.companyName || result.cliente || "tu empresa",
                 unitQuery,
                 rawText,
+                fleetUnits: fleetForNearby,
+                canSwitchCompany,
               })
       : filtered.length === 1 && !forceListFleet
         ? summarizeUnit(filtered[0])
@@ -1503,13 +1754,13 @@ export async function POST(req: NextRequest) {
     const unit = filtered[0];
     const resolvedPlateForActiveUnit = normalizeLoosePlate(unit.patente || unit.unidad || "");
     if (resolvedPlateForActiveUnit) {
-      await setActiveUnit(prisma, rawPhone, resolvedPlateForActiveUnit, {
+      await guardedSetActiveUnit(resolvedPlateForActiveUnit, {
         label: formatUnitLabel(unit),
         unitName: unit.unidad?.trim() || undefined,
         source: "estado",
       });
       if (isConversationNotebookEnabled()) {
-        await patchSessionNotebook(
+        await guardedPatchSessionNotebook(
           prisma,
           rawPhone,
           {
@@ -1529,8 +1780,60 @@ export async function POST(req: NextRequest) {
       rawText,
       threadText,
       unitLabel: formatUnitLabel(unit),
+      utteranceAction: parsed.data.utteranceAction ?? null,
     });
-    if (conversationalReply) {
+    const positionClarification =
+      looksLikeGpsPositionClarificationQuestion(rawText) && threadHasRecentGpsContext(threadText);
+    const rawNorm = (rawText ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    // Tras un falso “falla ignición”, el cliente discute: re-evaluar como V1
+    // (OFF + GPRS vivo = detenida, sin ticket) en vez de pushback genérico.
+    const ignitionDispute =
+      looksLikeIgnitionDiagnosisDispute(rawText) &&
+      (/\bignici/.test(rawNorm) ||
+        threadHasRecentIgnitionFailureClaim(threadText) ||
+        threadHasRecentGpsContext(threadText));
+    const disputeAssessment = ignitionDispute ? assessUnitReporting(unit) : null;
+    const disputeParkedCorrection =
+      !!disputeAssessment &&
+      (disputeAssessment.status === "coherent_pause" ||
+        (disputeAssessment.status === "ok" && ignitionLabel(unit) === "apagada") ||
+        (disputeAssessment.status === "ignition_failure" && ignitionLabel(unit) === "apagada"));
+    if (disputeParkedCorrection && disputeAssessment) {
+      const label = formatUnitLabel(unit);
+      action = "observation";
+      const correctedAssessment =
+        disputeAssessment.status === "coherent_pause"
+          ? disputeAssessment
+          : {
+              status: "coherent_pause" as const,
+              reportElapsed: disputeAssessment.reportElapsed,
+              positionElapsed: disputeAssessment.positionElapsed ?? disputeAssessment.reportElapsed,
+              ignitionElapsed: disputeAssessment.ignitionElapsed ?? disputeAssessment.reportElapsed,
+            };
+      const correction =
+        `Tenés razón: con ignición *apagada* no es una falla. ` +
+        `La unidad ${label} está *detenida*; el equipo puede seguir reportando por GPRS ` +
+        `sin que el timestamp de ignición se mueva. No corresponde ticket por eso.\n\n`;
+      summaryText =
+        correction +
+        (await buildGpsClientSummary({
+          unitLabel: label,
+          unit,
+          assessment: correctedAssessment,
+          action: "observation",
+        }));
+      dialogueState = null;
+    } else if (positionClarification) {
+      const assessment = assessUnitReporting(unit);
+      if (assessment) {
+        summaryText = buildGpsPositionClarificationAnalysis(unit, assessment);
+        // Aclarar posición no reabre ticket; el diagnóstico previo ya lo hizo si hacía falta.
+        action = "observation";
+      }
+    } else if (conversationalReply) {
       summaryText = conversationalReply;
       if (isAtilioAgentEnabled()) {
         dialogueState = buildListenProblemDialogueState({
@@ -1595,42 +1898,52 @@ export async function POST(req: NextRequest) {
         let ticketIssueDetail: string | undefined;
         let ticketReused = false;
         if (assessment.status === "ok" || assessment.status === "coherent_pause") {
+          if (looksLikeGpsPlatformUiSymptomOnly(rawText)) {
+            action = "ticket";
+            ticketIssueDetail =
+              String(rawText ?? "").trim().slice(0, 220) ||
+              "reclamo de etapas/historial en plataforma con telemetría operativa";
+            const created = await createMissingReportTicket({
+              rawPhone,
+              unit,
+              companyName: pickOdooCompanyName(session.companyName, result.cliente),
+              contactName: session.contactName ?? "",
+              elapsedText,
+              issueDetail: ticketIssueDetail,
+              incidentType: "GENERAL_TECH",
+              ticketTitleSuffix: "Plataforma GPS / etapas",
+            });
+            ticketRef = created.ref;
+            ticketReused = created.reused;
+            summaryText = await buildGpsClientSummary({
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+              ticketRef: created.ref,
+              odooRef: created.odooRef ?? undefined,
+              ticketReused: created.reused,
+              ticketIssueDetail,
+            });
+          } else {
+            action = "observation";
+            summaryText = await buildGpsClientSummary({
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+            });
+          }
+        } else if (assessment.status === "ignition_failure") {
+          // Inconsistencia de dato de ignición: informar, no abrir ticket automático.
+          // Bug real 2026-08-21: ignición apagada en unidad detenida se ticketaba como falla.
           action = "observation";
           summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-          });
-        } else if (assessment.status === "ignition_failure") {
-          action = "ticket";
-          const ignText =
-            assessment.ignitionElapsed != null
-              ? `hace ${minutesAgo(assessment.ignitionElapsed)}`
-              : "sin dato reciente";
-          ticketIssueDetail = `falla de ignición: reporte y posición al día pero la ignición no acompaña (última ignición ${ignText}, ${ignitionLabel(unit)})`;
-          const created = await createMissingReportTicket({
-            rawPhone,
-            unit,
-            companyName: pickOdooCompanyName(session.companyName, result.cliente),
-            contactName: session.contactName ?? "",
-            elapsedText,
-            issueDetail: ticketIssueDetail,
-            incidentType: "GENERAL_TECH",
-            ticketTitleSuffix: "Falla de ignición",
-          });
-          ticketRef = created.ref;
-          ticketReused = created.reused;
-          summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-            ticketRef: created.ref,
-            odooRef: created.odooRef ?? undefined,
-            ticketReused: created.reused,
-            ticketIssueDetail,
-          });
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+            });
         } else if (assessment.status === "stale_position") {
           action = "ticket";
           ticketIssueDetail = assessment.reason;
@@ -1647,15 +1960,15 @@ export async function POST(req: NextRequest) {
           ticketRef = created.ref;
           ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-            ticketRef: created.ref,
-            odooRef: created.odooRef ?? undefined,
-            ticketReused: created.reused,
-            ticketIssueDetail,
-          });
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+              ticketRef: created.ref,
+              odooRef: created.odooRef ?? undefined,
+              ticketReused: created.reused,
+              ticketIssueDetail,
+            });
         } else {
           action = "ticket";
           ticketIssueDetail = `falta de reporte: el GPS no envía datos hace ${elapsedText}`;
@@ -1671,46 +1984,58 @@ export async function POST(req: NextRequest) {
           ticketRef = created.ref;
           ticketReused = created.reused;
           summaryText = await buildGpsClientSummary({
-            unitLabel: label,
-            unit,
-            assessment,
-            action,
-            ticketRef: created.ref,
-            odooRef: created.odooRef ?? undefined,
-            ticketReused: created.reused,
-            ticketIssueDetail,
-          });
+              unitLabel: label,
+              unit,
+              assessment,
+              action,
+              ticketRef: created.ref,
+              odooRef: created.odooRef ?? undefined,
+              ticketReused: created.reused,
+              ticketIssueDetail,
+            });
         }
-        if (isAtilioAgentEnabled()) {
-          dialogueState = buildGpsAssessmentDialogueState({
-            unit,
-            rawText,
-            assessment,
-            action,
-            ticketRef: ticketRef || undefined,
-            ticketReused,
-            ticketIssueDetail,
-            odooRef: ticketRef || undefined,
-          });
+        if (action === "ticket") {
+          const advisorOnline = await hasConnectedSupportAdvisor();
+          summaryText = withAdvisorOfflineNoticeIfNeeded(summaryText, advisorOnline);
         }
+        // El resumen GPS ya trae formato WhatsApp fijo (emojis, mapa, cierre).
+        // agent_compose lo reescribía en prosa sin emojis (WARA_AGENT_MODE).
+        dialogueState = null;
       }
     }
-    summaryText = appendLocationIfRequested(summaryText, unit, rawText);
+    if (!isStructuredGpsWhatsAppSummary(summaryText)) {
+      summaryText = appendLocationIfRequested(summaryText, unit, rawText);
+    }
   }
 
   if (!summaryText.trim() && looksLikeFleetUnitSearchInput(effectiveRawText)) {
-    const ambiguousToken = extractAmbiguousUnitCodeToken(effectiveRawText);
+    const explicitMovilId = resolveMessageMovilId({
+      rawText: effectiveRawText,
+      utteranceAction: parsed.data.utteranceAction,
+      fleet: result.ok ? result.unidades : undefined,
+    });
+    const ambiguousToken =
+      explicitMovilId == null ? extractAmbiguousUnitCodeToken(effectiveRawText) : null;
     summaryText = ambiguousToken
-      ? buildUnitNameOrPlateClarificationReply(ambiguousToken)
+      ? replyForUnresolvedUnitCodeToken(ambiguousToken, {
+          companyName: session.companyName || result.cliente || "tu empresa",
+        })
       : buildFleetUnitNotFoundMessage({
           companyName: session.companyName || result.cliente || "tu empresa",
           rawText: effectiveRawText,
+          searchedText:
+            explicitMovilId != null
+              ? String(explicitMovilId)
+              : undefined,
           plate:
             wantedPlate && isPlausibleVehiclePlate(wantedPlate) ? wantedPlate : undefined,
         });
   }
 
   const composePayload = agentComposePayload(dialogueState);
+  const outbound = extractMediaUrlAndCleanText(summaryText);
+  summaryText = outbound.text;
+  const headerMediaUrl = outbound.mediaUrl;
 
   if (!composePayload.agent_compose_s && summaryText.trim()) {
     await appendOutboundBotMessage(rawPhone, summaryText, {
@@ -1720,6 +2045,7 @@ export async function POST(req: NextRequest) {
       companyName: pickOdooCompanyName(session.companyName, result.cliente),
       action,
       ticketRef,
+      ...(headerMediaUrl ? { mediaUrl: headerMediaUrl } : {}),
     });
   }
 
@@ -1732,6 +2058,7 @@ export async function POST(req: NextRequest) {
       unidadesCount: filtered.length,
       summaryText,
       message: summaryText,
+      ...(headerMediaUrl ? { mediaUrl: headerMediaUrl, mediaUrl_s: headerMediaUrl } : {}),
       action,
       ticketRef,
       odooRef: ticketRef || undefined,

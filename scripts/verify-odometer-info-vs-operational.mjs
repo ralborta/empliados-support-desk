@@ -34,6 +34,7 @@ const operationalStarts = [
   "Podemos cambiar el odometro?",
   "Quiero modificar el odometro",
   "Necesito actualizar el odometro",
+  "necesito cargarle el odometro a la unidad berlingo pañol",
 ];
 
 console.log("— Preguntas informativas —");

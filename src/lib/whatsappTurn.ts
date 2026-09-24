@@ -5,6 +5,12 @@ import {
   recentLastInboundTextForPhone,
   shouldIgnoreDuplicateInicioTurn,
 } from "@/lib/conversationThread";
+import {
+  mergeInboundTextWithAiImage,
+  looksLikeInboundMediaOnlyEvent,
+  selectionHasAiImageContext,
+  hasUsableAiImageDescription,
+} from "@/lib/inboundImagePolicy";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import { bbcShouldSendExecutorMessage, shouldTurnSendWhatsAppToCustomer } from "@/lib/waraInboundAudit";
 import {
@@ -18,12 +24,19 @@ import {
 } from "@/lib/wara";
 import { deliverTurnToWhatsApp } from "@/lib/whatsappTurnDelivery";
 import {
+  findInboundByExternalWamid,
+  isInboundTurnDeliveryComplete,
+  isInboundTurnDeliveryInProgress,
+} from "@/lib/turnWhatsAppDeliveryLedger";
+import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
+import {
   runTurnExecutorPhase,
   scheduleDeferredTurnExecutor,
   shouldDeferTurnExecutor,
 } from "@/lib/whatsappTurnExecutor";
 import { clearPendingAction } from "@/lib/pendingAction";
 import { prisma } from "@/lib/db";
+import { maybeEnqueueWaraV2ShadowCopy } from "@/lib/waraV2ShadowCanaryHook";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -32,9 +45,13 @@ function buildTurnPayload(
   overrides: Partial<JsonRecord> = {},
 ): JsonRecord {
   const nextFlow = String(overrides.nextFlow ?? context.nextFlow ?? "reply");
-  const message = String(
+  const rawMessage = String(
     overrides.message ?? overrides.summaryText ?? context.message ?? context.summaryText ?? "",
   ).trim();
+  const extracted = extractMediaUrlAndCleanText(rawMessage);
+  const message = extracted.text;
+  const mediaUrl =
+    extracted.mediaUrl ?? (String(overrides.mediaUrl ?? "").trim() || undefined);
   const skipResponse =
     overrides.skipResponse_s ??
     (shouldTurnSendWhatsAppToCustomer()
@@ -52,6 +69,7 @@ function buildTurnPayload(
     ok_s: String(overrides.ok_s ?? (overrides.ok === false ? "false" : "true")),
     message,
     summaryText: String(overrides.summaryText ?? message),
+    ...(mediaUrl ? { mediaUrl, mediaUrl_s: mediaUrl } : {}),
     skipResponse_s: skipResponse,
     flowComplete_s: overrides.flowComplete_s ?? "true",
     nextFlow,
@@ -66,18 +84,97 @@ function buildTurnPayload(
 export async function handleWhatsAppTurn(params: {
   rawPhone: string;
   body: string;
+  /** Descripción de imagen/PDF de BBC ({aiImage}) cuando interpretImage está activo. */
+  aiImage?: string;
+  /** BBC indica adjunto sin caption útil (imagen/PDF). */
+  hasMedia?: boolean;
+  /** Id del mensaje WhatsApp (wamid) — dedup y protección anti-smoke en clientes. */
+  messageId?: string;
   apiKey: string;
 }): Promise<JsonRecord> {
-  const { rawPhone, body, apiKey } = params;
-  const rawBody = body.trim();
+  const { rawPhone, body, apiKey, messageId } = params;
+  const trimmedBody = body.trim();
+  const rawBody = mergeInboundTextWithAiImage(trimmedBody, params.aiImage).trim();
   let selectionText = rawBody;
+
+  const deliver = (payload: JsonRecord) =>
+    deliverTurnToWhatsApp(rawPhone, {
+      ...payload,
+      turnSelectionText: selectionText,
+      turnMessageId: messageId ?? "",
+    });
+
+  const turnMessageId = String(messageId ?? "").trim();
+  if (turnMessageId) {
+    const priorInbound = await findInboundByExternalWamid(prisma, turnMessageId);
+    if (priorInbound) {
+      if (isInboundTurnDeliveryComplete(priorInbound.rawPayload)) {
+        return deliver(
+          buildTurnPayload(
+            { registered: true, registered_s: "true" },
+            {
+              message: "",
+              skipResponse_s: "true",
+              nextFlow: "ignore",
+              nextFlow_s: "ignore",
+              executor: "context",
+              executor_s: "duplicate_turn_delivered",
+            },
+          ),
+        );
+      }
+      if (isInboundTurnDeliveryInProgress(priorInbound.rawPayload)) {
+        return deliver(
+          buildTurnPayload(
+            { registered: true, registered_s: "true" },
+            {
+              message: "",
+              skipResponse_s: "true",
+              nextFlow: "ignore",
+              nextFlow_s: "ignore",
+              executor: "context",
+              executor_s: "duplicate_turn_in_progress",
+            },
+          ),
+        );
+      }
+      // Inbound ya persistido (webhook u otro camino): continuar el turno.
+    } else {
+      const priorCollision = await prisma.ticketMessage.findFirst({
+        where: {
+          externalMessageId: turnMessageId,
+          NOT: { direction: "INBOUND", from: "CUSTOMER" },
+        },
+        select: { id: true },
+      });
+      if (priorCollision) {
+        return deliver(
+          buildTurnPayload(
+            { registered: true, registered_s: "true" },
+            {
+              message: "",
+              skipResponse_s: "true",
+              nextFlow: "ignore",
+              nextFlow_s: "ignore",
+              executor: "context",
+              executor_s: "duplicate_message_id",
+            },
+          ),
+        );
+      }
+    }
+  }
+
+  const inboundMediaOnly =
+    params.hasMedia === true ||
+    looksLikeInboundMediaOnlyEvent(trimmedBody) ||
+    looksLikeInboundMediaOnlyEvent(rawBody);
 
   if (!selectionText) {
     const lastInbound = await recentLastInboundTextForPhone(rawPhone);
     if (lastInbound) {
       if (await shouldIgnoreDuplicateInicioTurn(rawPhone, lastInbound)) {
-        return deliverTurnToWhatsApp(
-          rawPhone,
+        return deliver(
           buildTurnPayload(
             { registered: true, registered_s: "true" },
             {
@@ -91,25 +188,64 @@ export async function handleWhatsAppTurn(params: {
           ),
         );
       }
+      // No reusar lastInbound si el body vino vacío: suele ser imagen/archivo sin caption.
       if (
-        looksLikeOperationalIntent(lastInbound) ||
-        looksLikeSubstantiveCustomerMessage(lastInbound)
+        trimmedBody !== "" &&
+        (looksLikeOperationalIntent(lastInbound) ||
+          looksLikeSubstantiveCustomerMessage(lastInbound))
       ) {
         selectionText = lastInbound;
       }
     }
   }
 
-  if (rawBody) {
-    await persistCustomerInbound(rawPhone, rawBody, { source: "whatsapp_turn" }).catch(
-      () => undefined,
+  if (
+    inboundMediaOnly &&
+    !hasUsableAiImageDescription(params.aiImage) &&
+    !selectionHasAiImageContext(selectionText)
+  ) {
+    selectionText = rawBody || trimmedBody || "_event_image__";
+  } else if (
+    !selectionText &&
+    trimmedBody === "" &&
+    !hasUsableAiImageDescription(params.aiImage)
+  ) {
+    // Webhook vacío sin señal de media: no asumir imagen ni contestar al cliente.
+    return deliver(
+      buildTurnPayload(
+        { registered: true, registered_s: "true" },
+        {
+          message: "",
+          skipResponse_s: "true",
+          nextFlow: "ignore",
+          nextFlow_s: "ignore",
+          executor: "context",
+          executor_s: "empty_inbound_no_media",
+        },
+      ),
     );
   }
+
+  if (rawBody) {
+    await persistCustomerInbound(rawPhone, rawBody, {
+      source: "whatsapp_turn",
+      ...(turnMessageId ? { messageId: turnMessageId } : {}),
+    }).catch(() => undefined);
+  }
+
+  // Fase 10A: copia shadow desacoplada (no-op si flags off / kill / sin API V2)
+  if (selectionText) {
+    maybeEnqueueWaraV2ShadowCopy({
+      rawPhone,
+      text: selectionText,
+      hasAttachment: inboundMediaOnly || selectionHasAiImageContext(selectionText),
+    });
+  }
+
   const threadCtx = await loadTurnThreadContext(rawPhone, selectionText);
 
   if (!allowPhoneRequest(rawPhone, 20)) {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(
         { registered: true, registered_s: "true" },
         {
@@ -134,33 +270,37 @@ export async function handleWhatsAppTurn(params: {
   if (contextNextFlow === "ignore") {
     const contextRegistered =
       context.registered === true || String(context.registered_s) === "true";
+    const humanTakeover =
+      context.botPaused === true || String(context.botPaused_s) === "true";
     // No bypassear ignore en números no registrados: ya están derivados a asesor;
     // si no, "Ad198en" u otro mensaje sustantivo reabría el router en loop.
+    // Tampoco bypassear si hay takeover humano (Atilio pausado en panel).
     if (
+      !humanTakeover &&
       contextRegistered &&
       (looksLikeSubstantiveCustomerMessage(selectionText) ||
         isBarePlatePrefixHint(selectionText) ||
-        hasPendingMaintenancePlateRequest(threadCtx.classificationThread))
+        hasPendingMaintenancePlateRequest(threadCtx.classificationThread) ||
+        looksLikeInboundMediaOnlyEvent(selectionText) ||
+        selectionHasAiImageContext(selectionText))
     ) {
       // Bypass: /turn sigue procesando.
     } else {
-      return deliverTurnToWhatsApp(
-        rawPhone,
+      return deliver(
         buildTurnPayload(context, {
           message: "",
           skipResponse_s: "true",
           nextFlow: "ignore",
           nextFlow_s: "ignore",
-          executor: "context",
-          executor_s: "context",
+          executor: humanTakeover ? "human_takeover" : "context",
+          executor_s: humanTakeover ? "human_takeover" : "context",
         }),
       );
     }
   }
 
   if (contextNextFlow === "derivar") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         nextFlow: "derivar",
         nextFlow_s: "derivar",
@@ -171,8 +311,7 @@ export async function handleWhatsAppTurn(params: {
   }
 
   if (contextNextFlow === "reply") {
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         nextFlow: "reply",
         nextFlow_s: "reply",
@@ -190,8 +329,7 @@ export async function handleWhatsAppTurn(params: {
     const resetMessage = firstName
       ? `Hola ${firstName}, arrancamos de nuevo. ¿En qué te puedo ayudar?`
       : "Hola, arrancamos de nuevo. ¿En qué te puedo ayudar?";
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         message: resetMessage,
         nextFlow: "reply",
@@ -205,8 +343,7 @@ export async function handleWhatsAppTurn(params: {
   if (shouldDeferTurnExecutor()) {
     scheduleDeferredTurnExecutor({ rawPhone, selectionText, apiKey });
     // Sin mensaje intermedio: el cliente recibe solo la respuesta real vía waitUntil + API WA.
-    return deliverTurnToWhatsApp(
-      rawPhone,
+    return deliver(
       buildTurnPayload(context, {
         message: "",
         skipResponse_s: "true",
@@ -220,12 +357,12 @@ export async function handleWhatsAppTurn(params: {
   }
 
   const execPhase = await runTurnExecutorPhase({ rawPhone, selectionText, apiKey });
-  return deliverTurnToWhatsApp(
-    rawPhone,
+  return deliver(
     buildTurnPayload(context, {
       ok: execPhase.ok,
       ok_s: execPhase.ok ? "true" : "false",
       message: execPhase.message,
+      mediaUrl: execPhase.mediaUrl,
       nextFlow: "reply",
       nextFlow_s: "reply",
       executor: execPhase.executor,

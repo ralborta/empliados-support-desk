@@ -184,10 +184,8 @@ assert(
 
 console.log("— Código de unidad tipo \"300-092\"/\"M300-093\" que NO está en la flota —");
 
-// Bug real, producción 2026-07-23 + ajuste 2026-08-10: "300-092"/"M300-093" son
-// códigos ambiguos (unidad vs patente). Si no hay match en flota, NO decir
-// "patente X no está" ni un "¿Cuál unidad?" genérico: preguntar si es nombre
-// de unidad o patente/matrícula, reconociendo el dato que escribió el cliente.
+// Bug real, producción 2026-07-23 + 2026-08-18: "300-092" es nombre de unidad.
+// Si no hay match, reconocer el dato y decir que no está — no preguntar si es patente.
 const codeNotInFleet = await resolveUnitQuery({
   rawText: "300-092",
   threadText: "",
@@ -203,8 +201,12 @@ assert(
 );
 const codeAsk = (codeNotInFleet.clarificationQuestion ?? "").toLowerCase();
 assert(
-  codeAsk.includes("unidad") && (codeAsk.includes("patente") || codeAsk.includes("matricula")),
-  "código que no está en la flota → pregunta si es unidad o patente (no asume matrícula)",
+  codeAsk.includes("no encontr"),
+  "código que no está en la flota → dice que no encontró esa unidad",
+);
+assert(
+  !/respond[eé]/.test(codeAsk),
+  "código que no está en la flota → no pregunta unidad vs patente",
 );
 
 console.log("— Marca real + relleno conversacional no listado en STOPWORDS —");

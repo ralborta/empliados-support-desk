@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+/**
+ * LIVE LLM read-only — identidad oficial Kira.
+ * No llama /turn/execute, no envía WhatsApp y no escribe estado.
+ */
+import assert from "node:assert/strict";
+import { loadVerifyEnv } from "./load-verify-env.mjs";
+
+loadVerifyEnv();
+process.env.WARA_PLATFORM_KB_LLM_INTERPRET = "true";
+
+const {
+  interpretPlatformKnowledgeTurn,
+  isAssistantIdentityInterpret,
+} = await import("../src/lib/infoGuideInterpretAI.ts");
+const { buildGroundedInfoGuideReplyWithMeta } = await import(
+  "../src/lib/infoGuideReplies.ts"
+);
+const { resolveTurnExecutor } = await import(
+  "../src/lib/whatsappTurnClassifierAI.ts"
+);
+
+const identityCases = [
+  "¿Cómo es tu nombre?",
+  "Quiero saber cuál es tu nombre",
+  "¿Cómo te llamás?",
+  "¿Quién sos?",
+  "Preséntate",
+  "Presentate",
+];
+
+const unitActiveThread =
+  "Kira: La unidad BACKUP2504771 no tiene equipo GPS instalado. Generé el caso #38606.\nCliente: Backup 2504771";
+
+for (const text of identityCases) {
+  const interpret = await interpretPlatformKnowledgeTurn({
+    selectionText: text,
+    threadText: unitActiveThread,
+    pendingActionType: null,
+    lastGuideKind: "unidades",
+  });
+  assert(isAssistantIdentityInterpret(interpret), `${text}: assistant_identity`);
+  assert.equal(interpret.route, "info_guides", `${text}: ruta directa`);
+  assert.equal(interpret.guideKind, null, `${text}: sin módulo`);
+  assert.deepEqual(interpret.articleIds, [], `${text}: sin artículos`);
+  assert.equal(interpret.clarifyQuestion, null, `${text}: sin aclaración`);
+
+  const reply = await buildGroundedInfoGuideReplyWithMeta(
+    text,
+    null,
+    null,
+    unitActiveThread,
+    interpret,
+  );
+  assert.match(reply.message, /^Soy Kira,/);
+  assert.equal(reply.guideKind, null);
+  assert.equal(reply.fallback, null);
+  const resolved = await resolveTurnExecutor(
+    text,
+    unitActiveThread,
+    null,
+    { lastGuideKind: "unidades" },
+  );
+  assert.equal(resolved.executor, "info_guides");
+  assert.equal(resolved.ruleId, "assistant_identity");
+  assert.equal(resolved.interpret?.normalTarget, "assistant_identity");
+  console.log(JSON.stringify({ text, target: interpret.normalTarget, reply: reply.message }));
+}
+
+import { looksLikeAssistantIdentityQuestion } from "../src/lib/assistantIdentity.ts";
+
+for (const text of [
+  "¿Cómo cambio el nombre de una unidad?",
+  "¿Cómo se llama el informe de recorridos?",
+  "Cómo ingreso a la plataforma?",
+  "Cómo cargo mi número para que reconozcas que soy cliente?",
+]) {
+  assert.equal(
+    looksLikeAssistantIdentityQuestion(text),
+    false,
+    `${text}: gate determinista no-identidad`,
+  );
+  const interpret = await interpretPlatformKnowledgeTurn({
+    selectionText: text,
+    threadText: unitActiveThread,
+  });
+  assert(
+    !isAssistantIdentityInterpret(interpret),
+    `${text}: interpret no debe ser assistant_identity`,
+  );
+}
+
+console.log("verify-assistant-identity: OK");

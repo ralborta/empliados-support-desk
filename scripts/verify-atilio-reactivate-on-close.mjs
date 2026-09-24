@@ -49,6 +49,18 @@ check(
   /patch\.status && ticket\.status !== patch\.status/.test(quickAction),
 );
 
+console.log("\n▶ reactivate reconcilia mute/blacklist aunque botPausedAt sea null");
+const pauseLib = fs.readFileSync(path.join(root, "src/lib/atilioBotPause.ts"), "utf8");
+check(
+  "reactivate no sale temprano si botPausedAt ya es null",
+  !/if\s*\(\s*!customer\?\.botPausedAt\s*\)\s*return\s+false/.test(pauseLib),
+);
+check(
+  "reactivate llama ensureBuilderBotContactActive",
+  /ensureBuilderBotContactActive/.test(pauseLib),
+);
+check("reactivate registra localWasPaused", /localWasPaused/.test(pauseLib));
+
 console.log("\n▶ reactivateAtilioAfterTicketClosed no reactiva si ya estaba terminal");
 const noop = await reactivateAtilioAfterTicketClosed({
   customerId: "fake-customer",

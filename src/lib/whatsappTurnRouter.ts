@@ -1,8 +1,12 @@
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationClose";
+import { shouldRouteGpsConsultToUnidades } from "@/lib/gpsConsultRouting";
 import { looksLikeOpenCaseStatusInquiry, looksLikeCaseResolutionEtaInquiry } from "@/lib/customerTicketInquiry";
 import { resolvePendingConfirmationExecutor } from "@/lib/pendingConfirmation";
+import { isAffirmationForPendingWrite } from "@/lib/pendingWriteIntent";
+import { looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
 import {
   certificateFlowState,
+  shouldContinueCertificateUnitCollection,
   detectIncidentType,
   detectLoosePlate,
   hasPendingCertificateConfirmation,
@@ -17,6 +21,7 @@ import {
   looksLikeBriefConfirmation,
   looksLikeExplicitCertificateResendRequest,
   looksLikeCertificateKeyword,
+  looksLikeMaintenanceKeyword,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeStructuredOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
@@ -34,13 +39,22 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
+  looksLikeSoftFlowRestart,
+  looksLikeFleetWideOutageClaim,
+  looksLikeAmbiguousMultiUnitSpeedClaim,
+  looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeHumanAdvisorRequest,
   looksLikeLiveUnitConsultIntent,
   looksLikeMaintenanceCapabilityQuestion,
+  looksLikeMaintenanceAppGuideRequest,
+  looksLikeMaintenanceStepByStepOnlyRequest,
+  MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED,
+  looksLikeOpenNewCaseRequest,
   looksLikeOutOfScopeSupportClaim,
   looksLikeSubstantiveCustomerMessage,
   looksLikeMaintenanceGuideContextInThread,
+  looksLikeMaintenanceGuideFollowupQuestion,
   looksLikeMaintenanceInfoGuideInThread,
   looksLikeMaintenanceInfoRequest,
   looksLikeNonOdometerOperationalIntent,
@@ -59,8 +73,27 @@ import {
   shouldContinueOdometerFlow,
   threadHasRecentLiveUnitConsultIntent,
 } from "@/lib/waraApi";
-import { looksLikeUnitListRequest, isMaintenancePlateSelectionMessage, looksLikeFleetUnitSearchInput, looksLikeUnitNameInMessage, looksLikeVagueUnitReference, threadHasRecentFleetUnitSearchRequest } from "@/lib/waraUnitIntent";
+import {
+  extractMovilIdFromUnitMessage,
+  isMaintenancePlateSelectionMessage,
+  looksLikeFleetUnitSearchInput,
+  looksLikeUnitListRequest,
+  looksLikeUnitNameInMessage,
+  looksLikeVagueUnitReference,
+  resolveExecutorOverStaleMaintenancePlateSelection,
+  threadHasRecentFleetUnitSearchRequest,
+} from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
+import { looksLikeIdleNudgeAffirmation } from "@/lib/idleFollowupMeta";
+import type { PendingActionRecord } from "@/lib/pendingAction";
+import {
+  hasPendingOdometerActionChoice,
+  isCompatibleLiveOdometerPendingReply,
+  looksLikeBareAffirmationToOdometerActionChoice,
+  looksLikeOdometerActionChoiceReply,
+  looksLikeOdometerActionChoiceUnitContinuation,
+  shouldSupersedeOdometerActionChoice,
+} from "@/lib/odometerActionChoice";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
 export type TurnExecutorId =
@@ -108,6 +141,7 @@ function looksLikeOdometerIntent(text: string, threadText: string): boolean {
 }
 
 function looksLikeMaintenanceOperational(text: string, threadText: string): boolean {
+  if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return false;
   if (isMaintenanceFlowSuperseded(threadText, text)) return false;
   if (looksLikeGpsOrUnitStatusQuestion(text)) return false;
   const incident = detectIncidentType(text);
@@ -138,16 +172,13 @@ function looksLikeMaintenanceOperational(text: string, threadText: string): bool
   return /\b(mantenimiento|preventiv\w*|correctiv\w*|service|taller|reparaci[oó]n)\b/.test(blob);
 }
 
-function isCertificateUnitContext(threadText: string): boolean {
-  return certificateFlowState(threadText) === "awaiting_unit";
-}
-
 function isUnitSelectionMessage(text: string, threadText = ""): boolean {
   return (
     !!detectLoosePlate(text) ||
     isBarePlatePrefixHint(text) ||
     !!extractPlatePrefixFromMessage(text) ||
     isMaintenancePlateSelectionMessage(text) ||
+    extractMovilIdFromUnitMessage(text, { threadText }) != null ||
     looksLikeCertificateUnitReply(text, threadText) ||
     looksLikeVehicleBrandOrUnitSearch(text) ||
     looksLikePlateCorrectionRequest(text) ||
@@ -216,7 +247,8 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "flow_control_block",
     reason: "Comando de flujo (reinicio/cancelar) se resuelve aparte, no es guía.",
-    decide: ({ text }) => (looksLikeFlowControlCommand(text) ? false : undefined),
+    decide: ({ text }) =>
+      looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text) ? false : undefined,
   },
   {
     id: "technical_support_block",
@@ -226,10 +258,13 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "pending_maintenance_plate_block",
     reason: "Selección de unidad tras pedido de patente de mantenimiento es operativo, no guía.",
-    decide: ({ text, threadText }) =>
-      hasPendingMaintenancePlateRequest(threadText) && isUnitSelectionMessage(text, threadText)
-        ? false
-        : undefined,
+    decide: ({ text, threadText }) => {
+      if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
+        return undefined;
+      }
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return undefined;
+      return false;
+    },
   },
   {
     id: "unit_selection_in_maintenance_guide_block",
@@ -248,8 +283,11 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "maintenance_capability_question_block",
     reason: "Pregunta de capacidad (¿podés registrarlo vos?) es operativo, no guía.",
-    decide: ({ text, threadText }) =>
-      looksLikeMaintenanceCapabilityQuestion(text, threadText) ? false : undefined,
+    decide: ({ text, threadText }) => {
+      if (!looksLikeMaintenanceCapabilityQuestion(text, threadText)) return undefined;
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return true;
+      return false;
+    },
   },
   {
     id: "module_pick_allow",
@@ -264,7 +302,8 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "maintenance_info_allow",
     reason: "Pedido explícito de guía del módulo Mantenimiento.",
-    decide: ({ text }) => (looksLikeMaintenanceInfoRequest(text) ? true : undefined),
+    decide: ({ text, threadText }) =>
+      looksLikeMaintenanceAppGuideRequest(text, threadText) ? true : undefined,
   },
   {
     id: "unidades_info_allow",
@@ -286,20 +325,30 @@ const INFO_GUIDE_RULES: InfoGuideRule[] = [
   {
     id: "maintenance_info_guide_in_thread_allow",
     reason:
-      "Venimos de una guía informativa de mantenimiento y el mensaje no es operativo: seguir en guía solo si es explícito o elige módulo.",
+      "Venimos de una guía informativa de mantenimiento y el mensaje no es operativo: seguir en guía (incluye follow-ups).",
     decide: ({ text, threadText }) => {
       if (!looksLikeMaintenanceInfoGuideInThread(threadText)) return undefined;
       if (looksLikeMaintenanceOperational(text, threadText)) return undefined;
-      return !!detectInfoGuideKind(text) || looksLikeInfoGuideModulePick(text);
+      return (
+        !!detectInfoGuideKind(text) ||
+        looksLikeInfoGuideModulePick(text) ||
+        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText) ||
+        looksLikeMaintenanceGuideFollowupQuestion(text, threadText)
+      );
     },
   },
   {
     id: "maintenance_guide_context_in_thread_allow",
-    reason: "Contexto general de guía de mantenimiento en el hilo, mensaje no operativo.",
+    reason: "Contexto general de guía de mantenimiento en el hilo, mensaje no operativo (incluye follow-ups).",
     decide: ({ text, threadText }) => {
       if (!looksLikeMaintenanceGuideContextInThread(threadText)) return undefined;
       if (looksLikeMaintenanceOperational(text, threadText)) return undefined;
-      return !!detectInfoGuideKind(text) || looksLikeInfoGuideModulePick(text);
+      return (
+        !!detectInfoGuideKind(text) ||
+        looksLikeInfoGuideModulePick(text) ||
+        looksLikeMaintenanceStepByStepOnlyRequest(text, threadText) ||
+        looksLikeMaintenanceGuideFollowupQuestion(text, threadText)
+      );
     },
   },
   {
@@ -328,7 +377,11 @@ function looksLikeBbcInfoGuide(text: string, threadText: string): boolean {
  * por rama) — ver docs/FASE-1.md y scripts/turn-classification.snapshot.json
  * para el comportamiento congelado que esta tabla debe reproducir exactamente.
  */
-type TurnRuleContext = { text: string; threadText: string };
+type TurnRuleContext = {
+  text: string;
+  threadText: string;
+  pendingAction?: PendingActionRecord | null;
+};
 type TurnRule = {
   id: string;
   reason: string;
@@ -337,9 +390,17 @@ type TurnRule = {
 
 const TURN_RULES: TurnRule[] = [
   {
-    id: "unit_list_request",
-    reason: "Pedido explícito de listado de unidades.",
-    decide: ({ text }) => (looksLikeUnitListRequest(text) ? "unidades" : null),
+    id: "fleet_wide_outage_advisor",
+    reason:
+      "Falla masiva de flota sin unidad concreta → asesor (no pedir patente ni listado).",
+    decide: ({ text }) => (looksLikeFleetWideOutageClaim(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "multi_unit_speed_advisor",
+    reason:
+      "Consulta confusa multi-unidad + velocidad (km/h) → asesor con resumen del pedido.",
+    decide: ({ text }) =>
+      looksLikeAmbiguousMultiUnitSpeedClaim(text) ? "odoo_ticket" : null,
   },
   {
     id: "conversation_close_request",
@@ -362,13 +423,30 @@ const TURN_RULES: TurnRule[] = [
     decide: ({ text }) => (looksLikeTicketCreationInfoQuestion(text) ? "info_guides" : null),
   },
   {
+    id: "open_new_case_request",
+    reason: "Cliente pide abrir un caso nuevo (cerrar el anterior) → Odoo/asesor.",
+    decide: ({ text }) => (looksLikeOpenNewCaseRequest(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "resolvable_unit_telemetry_consult",
+    reason:
+      "Unidad identificable + síntoma GPS → consultar telemetría en unidades antes de asesor.",
+    decide: ({ text }) => (shouldRouteGpsConsultToUnidades(text) ? "unidades" : null),
+  },
+  {
+    id: "gps_feature_issue_advisor",
+    reason: "GPS etapas/recorrido/historial sin patente → asesor (no buscar flota).",
+    decide: ({ text }) => (looksLikeGpsFeatureIssueForAdvisor(text) ? "odoo_ticket" : null),
+  },
+  {
     id: "human_advisor_request",
     reason: "Pedido explícito de hablar con un asesor humano.",
     decide: ({ text }) => (looksLikeHumanAdvisorRequest(text) ? "odoo_ticket" : null),
   },
   {
     id: "out_of_scope_support_claim",
-    reason: "Soporte fuera de alcance Atilio (hardware, pantalla, etc.) → asesor.",
+    reason:
+      "Soporte fuera de alcance Atilio → operador por panel Wara (sin Odoo).",
     decide: ({ text }) => (looksLikeOutOfScopeSupportClaim(text) ? "odoo_ticket" : null),
   },
   {
@@ -385,6 +463,38 @@ const TURN_RULES: TurnRule[] = [
     id: "odometer_problem_report",
     reason: "Falla/desfase de odómetro es soporte, no menú de guías ni pedir km.",
     decide: ({ text }) => (looksLikeOdometerProblemReport(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "odometer_action_choice_reply",
+    reason:
+      "Respuesta corregir/actualizar o unidad (sin inventar choice) con expectativa odometer_action_choice en DB.",
+    decide: ({ text, pendingAction }) => {
+      if (!hasPendingOdometerActionChoice(pendingAction)) return null;
+      if (shouldSupersedeOdometerActionChoice(text)) return null;
+      if (looksLikeOdometerActionChoiceReply(text)) return "odometro";
+      if (looksLikeOdometerActionChoiceUnitContinuation(text)) return "odometro";
+      if (looksLikeBareAffirmationToOdometerActionChoice(text)) return "odometro";
+      return null;
+    },
+  },
+  {
+    id: "live_odometer_compatible_field_reply",
+    reason:
+      "Pending odometro: solo respuestas compatibles con el campo esperado (unidad/km/fecha), no consultas laterales ni guías.",
+    decide: ({ text, pendingAction, threadText }) => {
+      if (pendingAction?.type !== "odometro") return null;
+      // action_choice tiene regla propia; no duplicar.
+      if (hasPendingOdometerActionChoice(pendingAction)) return null;
+      if (looksLikeCertificateKeyword(text)) return null;
+      if (looksLikeMaintenanceKeyword(text)) return null;
+      if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+        return null;
+      }
+      if (!isCompatibleLiveOdometerPendingReply(text, pendingAction, threadText)) {
+        return null;
+      }
+      return "odometro";
+    },
   },
   {
     id: "explicit_odometer_horometer_start",
@@ -409,17 +519,49 @@ const TURN_RULES: TurnRule[] = [
       looksLikePostAdvisorCaseSupplement(text, threadText) ? "odoo_ticket" : null,
   },
   {
-    id: "certificate_unit_context_selection",
-    reason: "Respuesta de unidad tras 'necesito la unidad' del flujo de certificado.",
+    id: "certificate_unit_change_during_confirm",
+    reason: "Cambio de unidad durante CONFIRMO de certificado — retomar certificados.",
     decide: ({ text, threadText }) =>
-      isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText) ? "certificados" : null,
+      certificateFlowState(threadText) === "awaiting_confirm" &&
+      looksLikeCertificateUnitPivot(text)
+        ? "certificados"
+        : null,
   },
   {
     id: "gps_or_live_unit_consult",
-    reason: "GPS/ignición/reporte en vivo — prioridad sobre guías y mantenimiento arrastrado del hilo.",
-    decide: ({ text, threadText }) => {
-      if (isCertificateUnitContext(threadText) && isUnitSelectionMessage(text, threadText)) return null;
-      return looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text) ? "unidades" : null;
+    reason:
+      "GPS/ignición/reporte en vivo — autoridad read; no etiquetar certificado por historial stale.",
+    decide: ({ text, pendingAction }) => {
+      const isGps =
+        looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text);
+      if (!isGps) return null;
+      // Solo un certificado VIVO en DB puede competir; el historial de hilo no secuestra GPS.
+      if (pendingAction?.type === "certificados") return null;
+      return "unidades";
+    },
+  },
+  {
+    id: "certificate_unit_context_selection",
+    reason: "Respuesta de unidad tras pedido de unidad/patente del flujo de certificado.",
+    decide: ({ text, threadText, pendingAction }) => {
+      // Requiere pending DB vivo de certificados o, sin pending autoritativo, historial awaiting_unit.
+      if (looksLikeGpsOrUnitStatusQuestion(text) || looksLikeLiveUnitConsultIntent(text)) {
+        return null;
+      }
+      // Pending vivo de otro trámite (odómetro, etc.) veta el historial de certificado.
+      if (pendingAction?.type && pendingAction.type !== "certificados") {
+        return null;
+      }
+      if (
+        pendingAction?.type !== "certificados" &&
+        certificateFlowState(threadText) !== "awaiting_unit"
+      ) {
+        return null;
+      }
+      return isUnitSelectionMessage(text, threadText) ||
+        shouldContinueCertificateUnitCollection(text, threadText, pendingAction)
+        ? "certificados"
+        : null;
     },
   },
   {
@@ -511,9 +653,12 @@ const TURN_RULES: TurnRule[] = [
       if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
         return null;
       }
+      const override = resolveExecutorOverStaleMaintenancePlateSelection(text, threadText);
+      if (override) return override;
       if (threadHasRecentLiveUnitConsultIntent(threadText) && looksLikeVehicleBrandOrUnitSearch(text)) {
         return "unidades";
       }
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) return "info_guides";
       return "mantenimiento";
     },
   },
@@ -526,7 +671,14 @@ const TURN_RULES: TurnRule[] = [
     id: "pending_confirmation_resolver",
     reason: "Confirmaciones pendientes explícitas en el hilo — resolver único (cert > odo > maint).",
     decide: ({ text, threadText }) => {
-      if (looksLikeFlowControlCommand(text)) return null;
+      if (looksLikeFlowControlCommand(text) || looksLikeSoftFlowRestart(text)) return null;
+      if (
+        !MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED &&
+        hasPendingMantenimientoConfirmation(threadText) &&
+        isAffirmationForPendingWrite(text)
+      ) {
+        return "info_guides";
+      }
       return resolvePendingConfirmationExecutor(threadText, text) ?? null;
     },
   },
@@ -567,14 +719,17 @@ const TURN_RULES: TurnRule[] = [
   {
     id: "pending_maintenance_plate_selection_redundant",
     reason: "Patente pedida en contexto de mantenimiento (también cubierto arriba; redundante por claridad).",
-    decide: ({ text, threadText }) =>
-      looksLikeCertificateIntent(text, threadText)
-        ? null
-        : certificateFlowState(threadText) === "none" &&
-            hasPendingMaintenancePlateRequest(threadText) &&
-            isUnitSelectionMessage(text, threadText)
-          ? "mantenimiento"
-          : null,
+    decide: ({ text, threadText }) => {
+      if (looksLikeCertificateIntent(text, threadText)) return null;
+      if (certificateFlowState(threadText) !== "none") return null;
+      if (!hasPendingMaintenancePlateRequest(threadText) || !isUnitSelectionMessage(text, threadText)) {
+        return null;
+      }
+      if (!MAINTENANCE_WHATSAPP_OPERATIVE_ENABLED) {
+        return resolveExecutorOverStaleMaintenancePlateSelection(text, threadText) ?? "info_guides";
+      }
+      return resolveExecutorOverStaleMaintenancePlateSelection(text, threadText) ?? "mantenimiento";
+    },
   },
   {
     id: "maintenance_operational",
@@ -588,6 +743,12 @@ const TURN_RULES: TurnRule[] = [
       const incident = detectIncidentType(text);
       return incident === "ADMIN_DERIVATION" || incident === "ACCESS_PLATFORM" ? "odoo_ticket" : null;
     },
+  },
+  {
+    id: "idle_nudge_affirmation",
+    reason: "Si/dale tras nudge idle — continuidad social, no replay GPS ni unidad activa.",
+    decide: ({ text, threadText }) =>
+      looksLikeIdleNudgeAffirmation(text, threadText) ? "info_guides" : null,
   },
   {
     id: "loose_plate_or_operational_fallback",
@@ -623,20 +784,26 @@ const TURN_RULES: TurnRule[] = [
   },
 ];
 
-/** Reglas que NUNCA delega la IA (confirmaciones, Odoo, GPS en vivo, cert awaiting unit). */
+/** Reglas que NUNCA delega la IA (confirmaciones, Odoo, cert awaiting unit y escrituras). */
 export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
-  "unit_list_request",
+  "fleet_wide_outage_advisor",
+  "multi_unit_speed_advisor",
   "conversation_close_request",
   "open_case_status_inquiry",
+  "open_new_case_request",
+  "resolvable_unit_telemetry_consult",
+  "gps_feature_issue_advisor",
   "human_advisor_request",
   "out_of_scope_support_claim",
   "explicit_reclamo_or_ticket_request",
   "technical_support_request",
   "odometer_problem_report",
+  "odometer_action_choice_reply",
+  "live_odometer_compatible_field_reply",
   "explicit_odometer_horometer_start",
   "structured_odometer_update",
   "post_advisor_case_supplement",
-  "gps_or_live_unit_consult",
+  "certificate_unit_change_during_confirm",
   "certificate_unit_context_selection",
   "unit_consult_plate_selection",
   "pending_confirmation_resolver",
@@ -648,8 +815,9 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
 export function classifyTurnExecutorSafetyGuards(
   selectionText: string,
   threadText: string,
+  pendingAction?: PendingActionRecord | null,
 ): { executor: TurnExecutorId; ruleId: string } | null {
-  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText };
+  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText, pendingAction };
   for (const rule of TURN_RULES) {
     if (!TURN_SAFETY_GUARD_RULE_IDS.has(rule.id)) continue;
     const executor = rule.decide(ctx);
@@ -664,8 +832,12 @@ export function classifyTurnExecutorSafetyGuards(
  * Reglas explícitas y ordenadas en TURN_RULES — agregar una regla nueva implica decidir
  * conscientemente en qué posición de la lista va, no adivinar el orden de un cascade de `if`.
  */
-export function classifyTurnExecutor(selectionText: string, threadText: string): TurnExecutorId {
-  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText };
+export function classifyTurnExecutor(
+  selectionText: string,
+  threadText: string,
+  pendingAction?: PendingActionRecord | null,
+): TurnExecutorId {
+  const ctx: TurnRuleContext = { text: selectionText.trim(), threadText, pendingAction };
   for (const rule of TURN_RULES) {
     const executor = rule.decide(ctx);
     if (executor) return executor;

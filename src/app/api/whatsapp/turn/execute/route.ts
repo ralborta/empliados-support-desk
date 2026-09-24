@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { sendWhatsAppMessage } from "@/lib/builderbot";
 import {
   isCustomerContextAuthConfigured,
   requireBuilderBotContextAuth,
@@ -8,6 +7,7 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { runTurnExecutorPhase } from "@/lib/whatsappTurnExecutor";
+import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 
 export const maxDuration = 120;
 
@@ -78,13 +78,19 @@ export async function POST(req: NextRequest) {
       selectionText,
       apiKey: apiKey ?? "",
     });
-    if (result.message) {
-      await sendWhatsAppMessage({ number: rawPhone, message: result.message });
-      await persistCustomerBotReply(rawPhone, result.message, {
-        source: "whatsapp_turn_execute",
-        executor: result.executor,
-        waDelivery: "backend_deferred",
-      }).catch(() => undefined);
+    if (result.message || result.mediaUrl) {
+      await sendWhatsAppTextWithOptionalMedia({
+        number: rawPhone,
+        message: result.message,
+        mediaUrl: result.mediaUrl,
+      });
+      if (result.message) {
+        await persistCustomerBotReply(rawPhone, result.message, {
+          source: "whatsapp_turn_execute",
+          executor: result.executor,
+          waDelivery: "backend_deferred",
+        }).catch(() => undefined);
+      }
     }
     return NextResponse.json({
       ok: result.ok,

@@ -15,9 +15,16 @@ import {
   consultarEstadoUnidades,
   looksLikeAtilioHelpRequest,
   looksLikeExplicitReclamoOrTicketRequest,
+  looksLikeGpsFeatureIssueForAdvisor,
   looksLikeGreeting,
   looksLikeHumanAdvisorRequest,
+  looksLikeOpenNewCaseRequest,
   looksLikeOutOfScopeSupportClaim,
+  looksLikeFleetWideOutageClaim,
+  looksLikeAmbiguousMultiUnitSpeedClaim,
+  buildMultiUnitSpeedAdvisorHandoffReply,
+  buildMultiUnitSpeedAdvisorSummary,
+  looksLikeTechnicalSupportRequest,
   looksLikeVehicleBrandOrUnitSearch,
   resolveWaraSessionByPhone,
 } from "@/lib/waraApi";
@@ -39,12 +46,33 @@ import {
   looksLikeOpenCaseStatusInquiry,
 } from "@/lib/customerTicketInquiry";
 import {
-  findCustomerVisibleOdooCaseRef,
   buildCustomerOdooCaseAssignedReply,
+  findCustomerVisibleOdooCaseRef,
+  formatCustomerOdooCaseRefForWhatsApp,
 } from "@/lib/customerOdooCaseRef";
 import { ensureWaraOdooTicket } from "@/lib/waraOdooEscalation";
-import { autoAssignNewTicket } from "@/lib/advisorDistribution";
+import { autoAssignNewTicket, hasConnectedSupportAdvisor } from "@/lib/advisorDistribution";
+import {
+  buildPresenceAwareAdvisorHandoffReply,
+  ensureRegisteredAdvisorHandoff,
+  REGISTERED_ADVISOR_HANDOFF_REPLY,
+  REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY,
+} from "@/lib/advisorHandoff";
+import { maybeNotifyFleetOutageOpsAlert } from "@/lib/fleetOutageOpsAlert";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
+
+function fireFleetOutageOpsAlertBestEffort(params: {
+  ticketId: string;
+  customerPhone: string;
+  customerName?: string;
+  companyName?: string;
+  ticketCode?: string;
+  messageText: string;
+}): void {
+  void maybeNotifyFleetOutageOpsAlert(prisma, params).catch((e) =>
+    console.error("[odoo/ticket] fleetOutageOpsAlert:", e),
+  );
+}
 
 /**
  * Crea un ticket de reclamo/escalamiento en Odoo Helpdesk (equipo "Atención al cliente").
@@ -124,6 +152,22 @@ function buildEvent(explicit: string | undefined, rawText: string | undefined): 
   return "Consulta/reclamo";
 }
 
+function buildAdvisorSupportFollowupMessage(rawText: string, opts?: { hasCaseRef?: boolean }): string {
+  const t = rawText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const mentionsFleet = /\b(unidades|flota|moviles|movil)\b/.test(t);
+  const asksAboutWeb = /\b(web|pagina|portal|plataforma|sistema|app|aplicacion)\b/.test(t);
+  const prompt =
+    mentionsFleet || asksAboutWeb
+      ? "Contame, por favor, qué estabas intentando hacer, si te pasa con todas las unidades o solo algunas, y si te aparece algún error o imagen."
+      : "Contame, por favor, un poco más de detalle de lo que pasó y si te apareció algún error o imagen.";
+  return opts?.hasCaseRef
+    ? `Ya tenés un caso en revisión. Un asesor de Atención al cliente lo va a seguir por este medio. ${prompt}`
+    : `Ya derivé esto a un asesor de Atención al cliente para que lo revise. ${prompt}`;
+}
+
 /** Convierte segundos en un texto legible: "18 h", "3 d 4 h", "45 min". */
 function humanizeElapsed(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "";
@@ -195,6 +239,65 @@ async function findRecentOdooRef(rawPhone: string, plate?: string): Promise<stri
   });
 }
 
+/**
+ * Cierra el ticket local abierto para poder abrir un caso nuevo (pedido explícito del cliente).
+ * Conserva historial; marca RESOLVED con fuente customer_new_case_request.
+ */
+async function closeOpenTicketForNewCaseRequest(params: {
+  rawPhone: string;
+  messageText: string;
+}): Promise<{ closed: boolean; previousTicketId: string | null }> {
+  const customer = await findCustomerByWhatsAppNumber(prisma, params.rawPhone);
+  if (!customer) return { closed: false, previousTicketId: null };
+
+  const openTicket = await prisma.ticket.findFirst({
+    where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!openTicket) return { closed: false, previousTicketId: null };
+
+  const inboundText = params.messageText.trim() || "Cliente pidió abrir un nuevo caso";
+  await prisma.ticketMessage.create({
+    data: {
+      ticketId: openTicket.id,
+      direction: "INBOUND",
+      from: "CUSTOMER",
+      text: inboundText,
+      rawPayload: {
+        source: "customer_new_case_request",
+        customerRequestedNewCase: true,
+      },
+    },
+  });
+
+  await prisma.ticket.update({
+    where: { id: openTicket.id },
+    data: {
+      status: "RESOLVED",
+      resolution: "CHAT_RESOLVED",
+      lastMessageAt: new Date(),
+      aiSummary:
+        openTicket.aiSummary ??
+        `Cerrado a pedido del cliente para abrir un caso nuevo (${inboundText.slice(0, 120)}).`,
+    },
+  });
+
+  await prisma.ticketEvent.create({
+    data: {
+      ticketId: openTicket.id,
+      type: "STATUS_CHANGED",
+      payload: {
+        status: "RESOLVED",
+        resolution: "CHAT_RESOLVED",
+        source: "customer_whatsapp_new_case_request",
+        message: params.messageText,
+      },
+    },
+  });
+
+  return { closed: true, previousTicketId: openTicket.id };
+}
+
 function extractLastPlateFromThreadCompat(text: string): string | null {
   const plate = extractLastPlateFromThread(text);
   return plate && isPlausibleVehiclePlate(plate) ? normalizePlateForTitle(plate) : null;
@@ -245,20 +348,6 @@ export async function POST(req: NextRequest) {
   const authError = requireBuilderBotContextAuth(req);
   if (authError) return authError;
 
-  const cfg = getOdooConfig();
-  if (!cfg) {
-    return NextResponse.json(
-      {
-        ok: false,
-        ok_s: "false",
-        message: "No pude registrar el caso en este momento. Te derivo con un asesor.",
-        error: "Odoo no configurado",
-        missing: getOdooConfigStatus().missing,
-      },
-      { status: BB_STATUS }
-    );
-  }
-
   const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
@@ -276,6 +365,7 @@ export async function POST(req: NextRequest) {
 
   const data = parsed.data;
   const rawPhone = (data.from ?? data.phone ?? data.customerPhone ?? "").trim();
+  const cfg = getOdooConfig();
 
   if (rawPhone && !allowPhoneRequest(rawPhone, 15)) {
     return NextResponse.json(
@@ -450,23 +540,86 @@ export async function POST(req: NextRequest) {
   const event = buildEvent(data.event ?? data.evento, data.rawText);
   const explicitSubject = (data.subject ?? data.title ?? "").trim();
   const advisorRequest = looksLikeHumanAdvisorRequest(data.rawText);
+  const outOfScopeSupport = looksLikeOutOfScopeSupportClaim(data.rawText);
+  const fleetWideOutage = looksLikeFleetWideOutageClaim(data.rawText);
+  const multiUnitSpeedClaim = looksLikeAmbiguousMultiUnitSpeedClaim(data.rawText);
+  const technicalSupport = looksLikeTechnicalSupportRequest(data.rawText);
+  const openNewCase = looksLikeOpenNewCaseRequest(data.rawText);
+  const gpsFeatureIssue = looksLikeGpsFeatureIssueForAdvisor(data.rawText);
+  const advisorSupportFollowup =
+    !openNewCase && (outOfScopeSupport || (technicalSupport && !advisorRequest));
   // Reclamo fuera de alcance Atilio (pantalla táctil, etc.) o pedido explícito de
   // reclamo/ticket → derivar y asignar SIN exigir patente ni # de caso previo.
   const handoffToAdvisor =
     advisorRequest ||
     looksLikeExplicitReclamoOrTicketRequest(data.rawText) ||
-    looksLikeOutOfScopeSupportClaim(data.rawText);
+    outOfScopeSupport;
+
+  let advisorHandoffLocal: Awaited<ReturnType<typeof ensureRegisteredAdvisorHandoff>> | null =
+    null;
+  let closedPreviousForNewCase = false;
+  const advisorOnline = handoffToAdvisor ? await hasConnectedSupportAdvisor() : true;
 
   if (handoffToAdvisor) {
-    const existingAdvisorRef = await findRecentOdooRef(rawPhone, plate || undefined);
+    if (openNewCase && rawPhone) {
+      const closed = await closeOpenTicketForNewCaseRequest({
+        rawPhone,
+        messageText: rawText,
+      });
+      closedPreviousForNewCase = closed.closed;
+    }
+
+    // Pedido de caso NUEVO: no reutilizar el Odoo del caso que acabamos de cerrar.
+    const existingAdvisorRef = openNewCase
+      ? null
+      : await findRecentOdooRef(rawPhone, plate || undefined);
     if (existingAdvisorRef) {
-      const message = `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
+      const message = advisorRequest
+        ? buildPresenceAwareAdvisorHandoffReply({
+            advisorOnline,
+            caseRef: existingAdvisorRef,
+            explicitAdvisorRequest: true,
+          })
+        : advisorSupportFollowup
+        ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: true })
+        : gpsFeatureIssue
+          ? `Perfecto, anoté este detalle en tu caso. Un asesor de Atención al cliente lo va a revisar con esa información.`
+          : `Ya tenés un caso en revisión. Un asesor de Atención al cliente te va a contactar por este medio. ¿Querés sumar algo más al reclamo?`;
       await appendOutboundBotMessage(rawPhone, message, {
         source: "odoo_ticket",
-        stage: "advisor_existing_case",
+        stage: gpsFeatureIssue ? "advisor_case_supplement" : "advisor_existing_case",
         ref: existingAdvisorRef,
         plate: plate || undefined,
       });
+      if (localCustomer && (gpsFeatureIssue || fleetWideOutage)) {
+        const openTicket = await prisma.ticket.findFirst({
+          where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+          orderBy: { lastMessageAt: "desc" },
+        });
+        if (openTicket) {
+          if (gpsFeatureIssue) {
+            await prisma.ticketMessage.create({
+              data: {
+                ticketId: openTicket.id,
+                direction: "INBOUND",
+                from: "CUSTOMER",
+                text: rawText,
+                rawPayload: { source: "advisor_case_supplement", odooRef: existingAdvisorRef },
+              },
+            });
+          }
+          if (fleetWideOutage) {
+            fireFleetOutageOpsAlertBestEffort({
+              ticketId: openTicket.id,
+              customerPhone: rawPhone,
+              customerName: customerName || undefined,
+              companyName: companyName || undefined,
+              ticketCode: openTicket.code,
+              messageText: rawText,
+            });
+          }
+        }
+      }
       return NextResponse.json({
         ok: true,
         ok_s: "true",
@@ -475,6 +628,100 @@ export async function POST(req: NextRequest) {
         reused_s: "true",
         message,
       });
+    }
+
+    if (rawPhone) {
+      advisorHandoffLocal = await ensureRegisteredAdvisorHandoff(prisma, rawPhone, {
+        contactName: customerName || undefined,
+        messageText: rawText || undefined,
+        source: openNewCase ? "odoo_ticket_new_case" : "odoo_ticket",
+        title: openNewCase
+          ? "Cliente solicitó abrir un nuevo caso"
+          : fleetWideOutage
+            ? "Falla masiva de flota"
+            : multiUnitSpeedClaim
+              ? "Consulta multi-unidad / velocidad"
+            : advisorRequest
+            ? "Cliente solicita asesor humano"
+            : gpsFeatureIssue
+              ? rawText.slice(0, 120).trim() || "GPS: etapas / recorrido"
+              : rawText.slice(0, 120).trim() || "Reclamo / soporte",
+        // Fuera de alcance: solo mesa Wara; pausar bot para el operador.
+        pauseBot: outOfScopeSupport,
+        aiSummary: fleetWideOutage
+          ? "Falla masiva de flota — derivación a operador + alerta ops WA."
+          : multiUnitSpeedClaim
+            ? buildMultiUnitSpeedAdvisorSummary(rawText)
+          : outOfScopeSupport
+          ? "Fuera de alcance Kira — derivación a operador (panel Wara, sin Odoo)."
+          : undefined,
+      });
+
+      // Fuera de alcance: NUNCA crear Helpdesk Odoo — solo ticket local + mensaje.
+      if (outOfScopeSupport) {
+        const { pickOutOfScopeHandoffReply } = await import("@/lib/advisorHandoff");
+        const message = !advisorHandoffLocal.shouldNotifyCustomer
+          ? REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY
+          : multiUnitSpeedClaim
+            ? buildMultiUnitSpeedAdvisorHandoffReply(rawText, rawPhone)
+            : pickOutOfScopeHandoffReply(rawPhone);
+        await appendOutboundBotMessage(rawPhone, message, {
+          source: "odoo_ticket",
+          stage: "out_of_scope_platform_only",
+          ticketCode: advisorHandoffLocal.ticket.code,
+        });
+        if (fleetWideOutage) {
+          fireFleetOutageOpsAlertBestEffort({
+            ticketId: advisorHandoffLocal.ticket.id,
+            customerPhone: rawPhone,
+            customerName: customerName || undefined,
+            companyName: companyName || undefined,
+            ticketCode: advisorHandoffLocal.ticket.code,
+            messageText: rawText,
+          });
+        }
+        return NextResponse.json({
+          ok: true,
+          ok_s: "true",
+          message,
+          ticketCode: advisorHandoffLocal.ticket.code,
+          skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
+          flowComplete_s: "true",
+          platformOnly_s: "true",
+        });
+      }
+
+      if (!cfg) {
+        const message = openNewCase
+          ? closedPreviousForNewCase
+            ? "Cerré el caso anterior y abrí uno nuevo. Un asesor de Atención al cliente te va a contactar por este medio. Contame el detalle del reclamo."
+            : "Abrí un caso nuevo. Un asesor de Atención al cliente te va a contactar por este medio. Contame el detalle del reclamo."
+          : advisorRequest
+            ? buildPresenceAwareAdvisorHandoffReply({
+                advisorOnline,
+                firstNotify: advisorHandoffLocal.shouldNotifyCustomer,
+                explicitAdvisorRequest: true,
+              })
+          : advisorSupportFollowup
+            ? buildAdvisorSupportFollowupMessage(rawText)
+            : advisorHandoffLocal.shouldNotifyCustomer
+              ? REGISTERED_ADVISOR_HANDOFF_REPLY
+              : REGISTERED_ADVISOR_HANDOFF_WAITING_REPLY;
+        await appendOutboundBotMessage(rawPhone, message, {
+          source: "odoo_ticket",
+          stage: openNewCase ? "advisor_handoff_new_case_local_only" : "advisor_handoff_local_only",
+          ticketCode: advisorHandoffLocal.ticket.code,
+          closedPrevious: closedPreviousForNewCase,
+        });
+        return NextResponse.json({
+          ok: true,
+          ok_s: "true",
+          message,
+          ticketCode: advisorHandoffLocal.ticket.code,
+          skipResponse_s: bbcShouldSendExecutorMessage() ? "false" : "true",
+          flowComplete_s: "true",
+        });
+      }
     }
   }
 
@@ -565,9 +812,13 @@ export async function POST(req: NextRequest) {
   const subject =
     explicitSubject ||
     (handoffToAdvisor && !plate
-      ? advisorRequest
-        ? "Cliente solicita asesor humano"
-        : (rawText.slice(0, 120).trim() || event || "Reclamo / soporte")
+      ? openNewCase
+        ? "Cliente solicitó abrir un nuevo caso"
+        : advisorRequest
+          ? "Cliente solicita asesor humano"
+          : gpsFeatureIssue
+            ? rawText.slice(0, 120).trim() || "GPS: etapas / recorrido"
+            : rawText.slice(0, 120).trim() || event || "Reclamo / soporte"
       : plate
         ? `${plate} - ${event}`
         : event);
@@ -582,25 +833,26 @@ export async function POST(req: NextRequest) {
 
   const descriptionLines = [
     data.description?.trim() || data.rawText?.trim() || "",
-    data.aiSummary?.trim() ? `Resumen Atilio: ${data.aiSummary.trim()}` : "",
+    data.aiSummary?.trim() ? `Resumen Kira: ${data.aiSummary.trim()}` : "",
     companyName ? `Empresa Wara: ${companyName}` : "",
     plate ? `Patente: ${plate}` : "",
     `Evento: ${eventWithData}`,
     unitInfo?.lastReportDate ? `Último reporte (Wara): ${unitInfo.lastReportDate}` : "",
     customerName ? `Contacto: ${customerName}` : "",
     rawPhone ? `WhatsApp: ${rawPhone}` : "",
-    "Origen: Atilio / WhatsApp",
+    "Origen: Kira / WhatsApp",
   ];
   const description = descriptionLines.filter(Boolean).join("\n");
 
   const dedupeKey = `odoo_ticket:${rawPhone}:${plate || "no-plate"}:${subject.slice(0, 120)}`;
-  const localTicket =
-    localCustomer &&
-    (await prisma.ticket.findFirst({
-      where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
-      orderBy: { lastMessageAt: "desc" },
-      select: { id: true },
-    }));
+  const localTicket = advisorHandoffLocal
+    ? { id: advisorHandoffLocal.ticket.id }
+    : localCustomer &&
+      (await prisma.ticket.findFirst({
+        where: { customerId: localCustomer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+        orderBy: { lastMessageAt: "desc" },
+        select: { id: true },
+      }));
 
   try {
     if (localTicket) {
@@ -620,7 +872,20 @@ export async function POST(req: NextRequest) {
 
       if (ensured.odooRef) {
         const ref = ensured.odooRef;
-        const message = buildCustomerOdooCaseAssignedReply(ref, { reused: !ensured.created });
+        const message = openNewCase
+          ? closedPreviousForNewCase
+            ? `Cerré el caso anterior y abrí el caso *${formatCustomerOdooCaseRefForWhatsApp(ref)}*. Un asesor de Atención al cliente lo va a revisar. Contame el detalle del reclamo si aún no lo hiciste.`
+            : `Abrí el caso *${formatCustomerOdooCaseRefForWhatsApp(ref)}*. Un asesor de Atención al cliente lo va a revisar. Contame el detalle del reclamo.`
+          : advisorRequest
+            ? buildPresenceAwareAdvisorHandoffReply({
+                advisorOnline,
+                caseRef: ref,
+                explicitAdvisorRequest: true,
+                reused: !ensured.created,
+              })
+          : advisorSupportFollowup
+            ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: !ensured.created })
+            : buildCustomerOdooCaseAssignedReply(ref, { reused: !ensured.created });
 
         if (handoffToAdvisor) {
           try {
@@ -651,6 +916,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (!cfg) {
+      return NextResponse.json(
+        {
+          ok: false,
+          ok_s: "false",
+          message: "No pude registrar el caso en este momento. Te derivo con un asesor.",
+          error: "Odoo no configurado",
+          missing: getOdooConfigStatus().missing,
+        },
+        { status: BB_STATUS },
+      );
+    }
+
     const result = await createHelpdeskTicket(cfg, {
       subject,
       description,
@@ -664,9 +942,17 @@ export async function POST(req: NextRequest) {
     });
 
     const ref = result.ref ?? null;
-    const message = ref
-      ? buildCustomerOdooCaseAssignedReply(ref)
-      : `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
+    const message = advisorSupportFollowup
+      ? buildAdvisorSupportFollowupMessage(rawText, { hasCaseRef: !!ref })
+      : advisorRequest
+        ? buildPresenceAwareAdvisorHandoffReply({
+            advisorOnline,
+            caseRef: ref,
+            explicitAdvisorRequest: true,
+          })
+      : ref
+        ? buildCustomerOdooCaseAssignedReply(ref)
+        : `Listo, generé tu caso y un asesor de Atención al cliente lo va a revisar. Te avisamos por este medio cualquier novedad.`;
 
     await appendOutboundBotMessage(rawPhone, message, {
       source: "odoo_ticket",

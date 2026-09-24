@@ -7,7 +7,12 @@ import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { summarizeConversation } from "@/lib/openai";
 import { uploadFileToBlob } from "@/lib/blob";
-import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+import {
+  assertAdvisorCanAccessTicket,
+  claimConversationOnHumanReply,
+} from "@/lib/advisorDistribution";
+import { findRecentSameContentMessage } from "@/lib/outboundMessageDedup";
+import { pauseAtilioForCustomer } from "@/lib/atilioBotPause";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import type { TicketStatus } from "@/lib/types";
 
@@ -25,6 +30,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     select: {
       id: true,
       from: true,
+      direction: true,
       text: true,
       createdAt: true,
       attachments: true,
@@ -104,15 +110,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Escribe un mensaje o adjunta un archivo" }, { status: 400 });
   }
 
+  if (direction === "OUTBOUND" && from === "HUMAN") {
+    const recentHuman = await findRecentSameContentMessage(prisma, {
+      ticketId: id,
+      direction: "OUTBOUND",
+      from: "HUMAN",
+      text: messageText,
+      windowMs: 8_000,
+    });
+    if (recentHuman) {
+      return NextResponse.json({ message: recentHuman, sent: true, duplicate: true });
+    }
+  }
+
   // Si es un mensaje OUTBOUND, enviarlo a BuilderBot primero
-  let ticketForStatus: { status: TicketStatus } | null = null;
+  let ticketForStatus: { status: TicketStatus; customerId: string } | null = null;
   if (direction === "OUTBOUND") {
     // Obtener el teléfono del cliente del ticket
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: { customer: true },
     });
-    ticketForStatus = ticket;
+    ticketForStatus = ticket
+      ? { status: ticket.status as TicketStatus, customerId: ticket.customerId }
+      : null;
 
     if (!ticket) {
       return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
@@ -122,20 +143,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: "Cliente sin teléfono registrado" }, { status: 400 });
     }
 
-    // Enviar mensaje a BuilderBot → WhatsApp
-    try {
-      await sendWhatsAppMessage({
-        number: ticket.customer.phone,
-        message: text.trim() || " ",
-        mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
-      });
-      console.log(`[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`);
-    } catch (error: any) {
-      console.error(`[Messages] ❌ Error al enviar mensaje:`, error);
-      return NextResponse.json({ 
-        error: "No se pudo enviar el mensaje al cliente", 
-        details: error.message 
-      }, { status: 500 });
+    // Enviar mensaje a BuilderBot → WhatsApp (suprimido en V2 LAB)
+    const labSuppress =
+      process.env.WARA_V2_LAB_MODE === "true" || process.env.DELIVERY_ENABLED === "false";
+    if (!labSuppress) {
+      try {
+        await sendWhatsAppMessage({
+          number: ticket.customer.phone,
+          message: text.trim() || " ",
+          mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
+        });
+        console.log(`[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`);
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[Messages] ❌ Error al enviar mensaje:`, error);
+        return NextResponse.json({
+          error: "No se pudo enviar el mensaje al cliente",
+          details: errMsg,
+        }, { status: 500 });
+      }
+    } else {
+      console.log(`[Messages] LAB: mensaje humano simulado (sin WhatsApp) → ${ticket.customer.phone}`);
     }
   }
 
@@ -182,6 +210,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         : {}),
     },
   });
+
+  // Asesor escribe al cliente → takeover: pausar Atilio (blacklist BBC) sin botón manual.
+  // Bug real 2026-08-20: la derivación de la comunicación no ocurría al atender el chat.
+  if (direction === "OUTBOUND" && from === "HUMAN" && ticketForStatus?.customerId) {
+    await pauseAtilioForCustomer(
+      ticketForStatus.customerId,
+      prisma,
+      "human_outbound_takeover",
+    ).catch((e) => console.error("[Messages] pauseAtilio takeover:", e));
+    await claimConversationOnHumanReply(id, session.user.id).catch((e) =>
+      console.error("[Messages] claimConversation:", e),
+    );
+  }
 
   // Actualizar resumen con IA después de agregar el mensaje
   try {
