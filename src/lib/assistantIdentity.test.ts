@@ -68,7 +68,7 @@ describe("replies", () => {
     const msg = buildPlatformAccessOrPhoneRegisterReply(
       "Cómo cargo mi número para que reconozcas que soy cliente?",
     );
-    assert.match(msg, /\[\[MEDIA_URL\]\].*como-cargo-mi-numero-en-wara\.pdf/);
+    assert.match(msg, /\[\[MEDIA_URL\]\].*Como cargo mi numero en la plataforma Wara\.pdf/);
     assert.match(msg, /Agenda/i);
     assert.doesNotMatch(msg, /^Soy Kira/);
   });

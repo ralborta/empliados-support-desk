@@ -1,5 +1,19 @@
 import axios from 'axios';
 
+const UNREGISTERED_GUIDE_WHATSAPP_FILE_NAME =
+  "Como cargo mi numero en la plataforma Wara.pdf";
+
+function fileNameForWhatsAppMediaUrl(mediaUrl: string | undefined): string | undefined {
+  if (!mediaUrl) return undefined;
+  if (
+    /como-cargo-mi-numero-en-wara/i.test(mediaUrl) ||
+    /Como cargo mi numero en la plataforma Wara/i.test(mediaUrl)
+  ) {
+    return UNREGISTERED_GUIDE_WHATSAPP_FILE_NAME;
+  }
+  return undefined;
+}
+
 type AxiosPost = typeof axios.post;
 let httpPost: AxiosPost = axios.post.bind(axios);
 
@@ -15,6 +29,8 @@ export interface SendWhatsAppOptions {
   number: string; // número en formato internacional (ej: 5491112345678)
   message: string; // contenido del mensaje
   mediaUrl?: string; // opcional
+  /** Nombre del documento en WhatsApp (PDF). Evita el sufijo numérico del CDN. */
+  fileName?: string;
   checkIfExists?: boolean; // default false
 }
 
@@ -29,6 +45,8 @@ export interface SendWhatsAppOptions {
  */
 export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
   const { message, mediaUrl, checkIfExists = false } = options;
+  const fileName =
+    String(options.fileName ?? "").trim() || fileNameForWhatsAppMediaUrl(mediaUrl);
   const number = String(options.number ?? "").replace(/\D/g, "");
   if (number.length < 8) {
     throw new Error("Número de WhatsApp inválido");
@@ -49,6 +67,7 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
     messages: {
       content: message,
       ...(mediaUrl ? { mediaUrl } : {}),
+      ...(mediaUrl && fileName ? { fileName, filename: fileName } : {}),
     },
     number,
     checkIfExists,

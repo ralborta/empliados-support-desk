@@ -14,7 +14,21 @@ import { resolveCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 export const UNREGISTERED_PHONE_TICKET_TITLE = "Número no registrado en Wara";
 
 /** Asset estático en /public/guides — URL pública para mediaUrl de BuilderBot. */
-export const UNREGISTERED_PHONE_GUIDE_PDF_PATH = "/guides/como-cargo-mi-numero-en-wara.pdf";
+export const UNREGISTERED_PHONE_GUIDE_PDF_PATH = "/guides/Como cargo mi numero en la plataforma Wara.pdf";
+
+/** Nombre visible en WhatsApp (sin sufijo numérico de CDN). */
+export const UNREGISTERED_PHONE_GUIDE_DOCUMENT_NAME =
+  "Como cargo mi numero en la plataforma Wara.pdf";
+
+export function isUnregisteredPhoneGuidePdfUrl(mediaUrl: string | undefined | null): boolean {
+  const u = String(mediaUrl ?? "");
+  return /como-cargo-mi-numero-en-wara/i.test(u) || /Como cargo mi numero en la plataforma Wara/i.test(u);
+}
+
+export function fileNameForWhatsAppMediaUrl(mediaUrl: string | undefined | null): string | undefined {
+  if (isUnregisteredPhoneGuidePdfUrl(mediaUrl)) return UNREGISTERED_PHONE_GUIDE_DOCUMENT_NAME;
+  return undefined;
+}
 
 /**
  * Primera respuesta cuando el número no está en Wara.

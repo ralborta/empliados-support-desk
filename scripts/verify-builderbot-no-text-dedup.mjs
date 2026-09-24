@@ -24,5 +24,18 @@ await sendWhatsAppMessage({ number: phone, message: text });
 await sendWhatsAppMessage({ number: phone, message: text });
 assert.equal(postCount, 2, "dos POST API con mismo texto");
 
+let lastBody = "";
+setBuilderBotHttpPostForTests(async (_url, payload) => {
+  lastBody = Buffer.isBuffer(payload) ? payload.toString("utf8") : String(payload);
+  return { data: { messages: [{ id: "wamid.filename" }] } };
+});
+await sendWhatsAppMessage({
+  number: phone,
+  message: "Guia",
+  mediaUrl: "https://wara.nivel41.com/guides/como-cargo-mi-numero-en-wara.pdf",
+});
+assert.match(lastBody, /Como cargo mi numero en la plataforma Wara\.pdf/, "fileName limpio en BBC");
+assert.doesNotMatch(lastBody, /1790\d+|f86f1433c/, "sin sufijo numérico en fileName");
+
 setBuilderBotHttpPostForTests(null);
 console.log("✓ verify-builderbot-no-text-dedup OK");

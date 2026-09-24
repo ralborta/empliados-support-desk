@@ -13,6 +13,7 @@ import {
   UNREGISTERED_PHONE_WAITING_ADVISOR_REPLY,
   UNREGISTERED_PHONE_RECHECK_AFTER_LOAD_REPLY,
   UNREGISTERED_PHONE_GUIDE_PDF_PATH,
+  UNREGISTERED_PHONE_GUIDE_DOCUMENT_NAME,
   ensureUnregisteredPhoneAdvisorHandoff,
   buildUnregisteredPhoneFirstHandoffMessage,
   buildUnregisteredPhoneWaitingAdvisorReply,
@@ -79,8 +80,13 @@ assert.doesNotMatch(
 
 assert.equal(
   UNREGISTERED_PHONE_GUIDE_PDF_PATH,
-  "/guides/como-cargo-mi-numero-en-wara.pdf",
+  "/guides/Como cargo mi numero en la plataforma Wara.pdf",
   "path estático del PDF",
+);
+assert.equal(
+  UNREGISTERED_PHONE_GUIDE_DOCUMENT_NAME,
+  "Como cargo mi numero en la plataforma Wara.pdf",
+  "nombre visible del documento, sin sufijo numérico",
 );
 
 const bundled = buildUnregisteredPhoneFirstHandoffMessage();
@@ -89,7 +95,7 @@ assert.equal(extracted.text, UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY, "texto limp
 assert.ok(extracted.mediaUrl, "incluye mediaUrl del PDF");
 assert.match(
   String(extracted.mediaUrl),
-  /\/guides\/como-cargo-mi-numero-en-wara\.pdf$/,
+  /\/guides\/Como cargo mi numero en la plataforma Wara\.pdf$/,
   "mediaUrl apunta al PDF de la guía",
 );
 assert.match(unregisteredPhoneGuidePdfUrl(), /^https:\/\//, "URL absoluta https");
