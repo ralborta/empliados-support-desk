@@ -1468,13 +1468,44 @@ function filterUnitsBySearchTerms(units: WaraUnidadEstado[], terms: string[]): W
 function filterUnitsByPlate(units: WaraUnidadEstado[], plate: string): WaraUnidadEstado[] {
   const wanted = normalizeLoosePlate(plate);
   if (!wanted) return [];
+  // Exacta primero: ZBF1418 no debe arrastrar ZBF14180 por includes().
+  // Bug real 2026-09-28 (#2809269): el cliente pegó la fila del listado con *ZBF 1418*
+  // y el bot trató ZBF14180+ZBF1418 como “varias parecidas” / re-listó en vez de consultar.
+  const exact = units.filter((u) => {
+    const unitPlate = normalizeLoosePlate(u.patente || u.unidad || "");
+    return Boolean(unitPlate && unitPlate === wanted);
+  });
+  if (exact.length > 0) return exact;
+  if (!isPlausibleVehiclePlate(wanted)) return [];
   return units.filter((u) => {
     const unitPlate = normalizeLoosePlate(u.patente || u.unidad || "");
     if (!unitPlate) return false;
-    if (unitPlate === wanted) return true;
-    if (!isPlausibleVehiclePlate(wanted)) return false;
     return unitPlate.includes(wanted) || wanted.includes(unitPlate);
   });
+}
+
+/** Nro interno en fila pegada del listado WhatsApp: `🔢 *35*` / `- 35 -`. */
+function extractFleetListInternoFromMessage(rawText: string): string | null {
+  const text = String(rawText ?? "").trim();
+  if (!text) return null;
+  const m =
+    text.match(/🔢\s*\*?(\d{1,6})\*?/) ||
+    text.match(/(?:^|[\s·\-|])\*?(\d{1,6})\*?(?:\s*[\-·|]|\s+s\/|\s*$)/);
+  const nro = m?.[1]?.trim();
+  if (!nro) return null;
+  if (/^\d{5,}$/.test(nro)) return null; // evita IDs largos / km
+  return nro;
+}
+
+function preferFleetListInternoMatch(
+  matches: WaraUnidadEstado[],
+  rawText: string,
+): WaraUnidadEstado[] {
+  if (matches.length <= 1) return matches;
+  const nro = extractFleetListInternoFromMessage(rawText);
+  if (!nro) return matches;
+  const byNro = matches.filter((u) => String(u.unidad ?? "").trim() === nro);
+  return byNro.length === 1 ? byNro : matches;
 }
 
 function normalizeUnitNameToken(value: string): string {
@@ -1975,7 +2006,10 @@ function resolveExplicitPlateInMessage(
   if (!plateFromMessage) return null;
 
   const plate = normalizeLoosePlate(plateFromMessage);
-  let matches = filterUnitsByPlate(units, plate);
+  let matches = preferFleetListInternoMatch(
+    filterUnitsByPlate(units, plate),
+    rawText,
+  );
   if (matches.length === 0) {
     const fuzzy = fuzzyMatchUnitByPlate(units, plate);
     if (fuzzy) matches = [fuzzy];
@@ -2034,6 +2068,35 @@ export function resolveNumericUnitSelection(rawText: string, threadText: string)
     if (plates.length > 1 && idx < plates.length) return plates[idx];
   }
   return null;
+}
+
+/**
+ * Nro interno suelto (ej. "35") después de un listado de flota formateado.
+ * El pie del listado invita a “pasame la patente o el nro”.
+ */
+function resolveFleetListInternoSelection(
+  rawText: string,
+  threadText: string,
+  units: WaraUnidadEstado[],
+): UnitQueryResolution | null {
+  const t = rawText.trim();
+  if (!/^\d{1,6}$/.test(t)) return null;
+  if (detectLoosePlate(rawText)) return null;
+  const tail = threadText.slice(-3500).toLowerCase();
+  if (!/listado de unidades/.test(tail) && !/si quer[eé]s el estado de una/.test(tail)) {
+    return null;
+  }
+  const matches = units.filter((u) => String(u.unidad ?? "").trim() === t);
+  if (matches.length !== 1) return null;
+  const plate = normalizeLoosePlate(matches[0]!.patente || matches[0]!.unidad || "");
+  if (!plate) return null;
+  return {
+    intent: "consult_status",
+    plate,
+    searchTerms: [],
+    candidatePlates: [plate],
+    source: "rules",
+  };
 }
 
 /** Resuelve coincidencias por código de unidad (M300-097 / 300097), no por movil_id de DB. */
@@ -2172,6 +2235,10 @@ function resolveWithRules(
 
   const movilOrCode = resolveByMovilIdOrUnitCode(rawText, units);
   if (movilOrCode) return movilOrCode;
+
+  // Tras listado WhatsApp: “pasame la patente o el nro” → nro = campo unidad (ej. 35).
+  const fleetListInterno = resolveFleetListInternoSelection(rawText, threadText, units);
+  if (fleetListInterno) return fleetListInterno;
 
   if (looksLikeUnitListRequest(rawText)) {
     return { intent: "list_fleet", searchTerms: [], candidatePlates: [], source: "rules" };

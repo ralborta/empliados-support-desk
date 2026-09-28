@@ -27,6 +27,7 @@ const PUSH_SUITES = [
   "verify-ac574-reporting-thread.mjs",
   "verify-more-units-request-routing.mjs",
   "verify-fleet-list-agent-bypass.mjs",
+  "verify-fleet-list-row-pick.mjs",
   "verify-odometer-plate-continuity.mjs",
   "verify-odometer-fecha-hora.mjs",
   "verify-odometer-fecha-tarde-unit-lock.mjs",
