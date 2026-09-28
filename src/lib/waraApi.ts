@@ -1984,14 +1984,6 @@ export function looksLikeTurnoOrAgendaQuestion(raw: string): boolean {
   ) {
     return false;
   }
-  // “crear/cargar un turno” sin “agenda/opciones” = planilla TP, no Agenda de Opciones.
-  if (
-    /\b(turno|turnos)\b/.test(text) &&
-    /\b(crear|creo|cargar|cargo|como|cómo)\b/.test(text) &&
-    !/\b(agenda|opciones)\b/.test(text)
-  ) {
-    return false;
-  }
   return /\b(turno|turnos|agenda)\b/.test(text);
 }
 

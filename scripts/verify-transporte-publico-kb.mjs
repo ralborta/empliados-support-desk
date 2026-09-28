@@ -41,17 +41,15 @@ assert.match(ctx, /Excepciones/i);
 assert.doesNotMatch(ctx, /Editor de Servicios WARA en desarrollo como ya usable/i);
 
 assert.equal(looksLikeTransportePublicoHowToRequest("Cómo cargo un servicio nuevo"), true);
-assert.equal(looksLikeTransportePublicoHowToRequest("Quiero ver como crear un turno"), true);
+assert.equal(looksLikeTransportePublicoHowToRequest("Quiero ver como crear un turno"), false);
 assert.equal(
   looksLikeTransportePublicoHowToRequest("Se sigue repitiendo el mismo inconveniente"),
   false,
 );
+assert.equal(looksLikeTransportePublicoHowToRequest("Cómo creo un turno de mantenimiento"), false);
+assert.equal(looksLikeTransportePublicoHowToRequest("Cómo saco un certificado"), false);
 assert.deepEqual(resolveTransporteHowToArticleIds("Cómo cargo un servicio nuevo"), [
   "tp-servicio-crear",
-  "tp-conceptos-pilares",
-]);
-assert.deepEqual(resolveTransporteHowToArticleIds("Quiero ver como crear un turno"), [
-  "tp-turno-crear",
   "tp-conceptos-pilares",
 ]);
 assert.equal(
@@ -61,6 +59,38 @@ assert.equal(
     "transporte_publico",
   ),
   true,
+);
+assert.equal(
+  looksLikeTransportePublicoGuideFollowupQuestion(
+    "Quiero ver como crear un turno",
+    "Kira: Sí. ¿Necesitás ayuda con servicios…?",
+    "transporte_publico",
+  ),
+  true,
+);
+assert.equal(
+  looksLikeTransportePublicoGuideFollowupQuestion(
+    "Cómo saco un certificado",
+    "Kira: Sí. ¿Necesitás ayuda con servicios…?",
+    "transporte_publico",
+  ),
+  false,
+);
+assert.equal(
+  looksLikeTransportePublicoGuideFollowupQuestion(
+    "Dónde está la unidad AG 562 SP",
+    "Kira: Sí. ¿Necesitás ayuda con servicios…?",
+    "transporte_publico",
+  ),
+  false,
+);
+assert.equal(
+  looksLikeTransportePublicoGuideFollowupQuestion(
+    "Cómo ingreso a la plataforma",
+    "Kira: Sí. ¿Necesitás ayuda con servicios…?",
+    "transporte_publico",
+  ),
+  false,
 );
 assert.equal(
   looksLikeTransportePublicoGuideFollowupQuestion(

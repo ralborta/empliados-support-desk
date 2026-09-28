@@ -511,48 +511,67 @@ function normalizeTransporteUtterance(raw: string | undefined | null): string {
     .trim();
 }
 
-/**
- * Cómo crear/cargar servicio, turno u hoja de turno en Transporte Público.
- * No cubre reclamo de unidad ni “carga” de mercadería/combustible.
- */
-export function looksLikeTransportePublicoHowToRequest(
+/** Temas ajenos a TP: la continuidad/how-to no deben secuestrarlos. */
+export function looksLikeTransportePublicoForeignTopic(
   raw: string | undefined | null,
 ): boolean {
   const text = normalizeTransporteUtterance(raw);
-  if (!text || text.length > 240) return false;
+  if (!text) return false;
   if (
-    /\b(inconveniente|reclamo|falla|no reporta|odometro|horometro|certificado|cobertura|gps|ignicion)\b/.test(
-      text,
-    )
+    /\b(certificado|cobertura|odometro|horometro|gps|ignicion|no reporta)\b/.test(text)
   ) {
-    return false;
-  }
-  if (/\bhojas?\s+de\s+ruta\b/.test(text)) return false;
-  if (/\b(combustible|cisterna|ticket de combustible)\b/.test(text)) return false;
-
-  const howCue =
-    /\b(como|cargar|cargo|crear|creo|quiero|necesito|ver|explic|paso a paso|ayud|ensen|haceme|creame|armame)\b/.test(
-      text,
-    );
-  if (!howCue) return false;
-
-  if (/\bhojas?\s+de\s+turno\b/.test(text)) return true;
-  if (/\btransporte(\s+de\s+pasajeros|\s+publico)?\b/.test(text)) return true;
-  if (/\b(turno|turnos)\b/.test(text) && !/\b(agenda|opciones)\b/.test(text)) {
     return true;
   }
   if (
-    /\bservicios?\b/.test(text) &&
-    /\b(nuevo|nuevos|cargar|cargo|crear|creo|wara|plataforma|linea|recorrido|pasajer)\b/.test(
+    /\b(ingreso|ingresar|acceso|acceder|login|contrasena|password|cargar (mi )?numero)\b/.test(
       text,
-    )
+    ) &&
+    /\b(plataforma|wara|cuenta|sistema)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (/\bingreso a (la )?plataforma\b/.test(text)) return true;
+  if (/\bmantenimiento\b/.test(text) && !/\btransporte\b/.test(text)) return true;
+  if (/\b(agenda|opciones)\b/.test(text)) return true;
+  if (/\bhojas?\s+de\s+ruta\b/.test(text)) return true;
+  if (/\b(combustible|cisterna)\b/.test(text)) return true;
+  if (
+    /\b(inconveniente|reclamo|falla)\b/.test(text) &&
+    !/\b(servicio|turno|parada|transporte)\b/.test(text)
   ) {
     return true;
   }
   return false;
 }
 
-/** Artículos TP según el how-to del mensaje (servicio / turno / hoja / general). */
+/**
+ * Señal estrecha de how-to de servicio TP (no “turno” suelto ni otros módulos).
+ * Solo para rescatar aclaración de patente residual / anclar frontera — no routing general.
+ */
+export function looksLikeTransportePublicoServicioHowTo(
+  raw: string | undefined | null,
+): boolean {
+  const text = normalizeTransporteUtterance(raw);
+  if (!text || text.length > 240) return false;
+  if (looksLikeTransportePublicoForeignTopic(raw)) return false;
+  if (!/\bservicios?\b/.test(text)) return false;
+  if (
+    !/\b(nuevo|nuevos|cargar|cargo|crear|creo)\b/.test(text) &&
+    !/\btransporte(\s+de\s+pasajeros|\s+publico)?\b/.test(text)
+  ) {
+    return false;
+  }
+  return /\b(como|cargar|cargo|crear|creo|quiero|necesito)\b/.test(text);
+}
+
+/** @deprecated Preferí looksLikeTransportePublicoServicioHowTo + continuidad de menú. */
+export function looksLikeTransportePublicoHowToRequest(
+  raw: string | undefined | null,
+): boolean {
+  return looksLikeTransportePublicoServicioHowTo(raw);
+}
+
+/** Artículos TP según el mensaje (servicio / ítem de menú / general). */
 export function resolveTransporteHowToArticleIds(
   raw: string | undefined | null,
 ): string[] {
@@ -565,6 +584,12 @@ export function resolveTransporteHowToArticleIds(
   }
   if (/\bservicios?\b/.test(text) || /\brecorrido|linea\b/.test(text)) {
     return ["tp-servicio-crear", "tp-conceptos-pilares"];
+  }
+  if (/\bparadas?\b/.test(text)) {
+    return ["tp-paradas-asignar", "tp-paradas-vs-etapas"];
+  }
+  if (/\bmonitoreo\b/.test(text)) {
+    return ["tp-monitoreo-colores", "tp-conceptos-pilares"];
   }
   return ["tp-conceptos-pilares", "tp-flujo-implementacion"];
 }
@@ -585,22 +610,20 @@ export function looksLikeTransportePublicoGuideContextInThread(
 }
 
 /**
- * Continuación de una guía Transporte Público ya abierta.
- * Incluye “Eso” / selección corta del menú TP y how-to de servicio/turno.
+ * Continuación solo si lastGuideKind=transporte_publico y el mensaje
+ * referencia el menú/ítem TP (o “Eso”), no cualquier “cómo/dónde”.
  */
 export function looksLikeTransportePublicoGuideFollowupQuestion(
   raw: string | undefined | null,
   threadText = "",
   lastGuideKind?: string | null,
 ): boolean {
-  const tpHome =
-    lastGuideKind === "transporte_publico" ||
-    looksLikeTransportePublicoGuideContextInThread(threadText);
-  if (!tpHome) return false;
+  if (lastGuideKind !== "transporte_publico") return false;
+  void threadText;
 
   const text = normalizeTransporteUtterance(raw);
   if (!text || text.length > 220) return false;
-
+  if (looksLikeTransportePublicoForeignTopic(raw)) return false;
   if (/^\d{1,2}$/.test(text)) return false;
   if (
     /^(hola|buenas|buen(os)? dias?|buen(a|as)? (tarde|tardes|noche|noches)|hey|menu|inicio|chau|adios)( (atilio|kira))?$/.test(
@@ -615,33 +638,26 @@ export function looksLikeTransportePublicoGuideFollowupQuestion(
   ) {
     return false;
   }
-  if (
-    /\b(inconveniente|reclamo|falla|no reporta|odometro|horometro|gps)\b/.test(text)
-  ) {
-    return false;
-  }
-  if (/\bhojas?\s+de\s+ruta\b/.test(text)) return false;
-  if (/\bmantenimiento\b/.test(text) && !/\btransporte\b/.test(text)) return false;
 
-  // Selección corta del menú TP (“Eso”, “exacto”, “eso mismo”).
+  // Selección corta del menú TP.
   if (
     /^(eso|eso mismo|exacto|asi|asi es|ese|esa|eso es)\b/.test(text) &&
     text.length < 40
   ) {
     return true;
   }
-  if (looksLikeTransportePublicoHowToRequest(raw)) return true;
+
+  // Ítem del menú TP (servicios, turnos, paradas, …) — no “cómo” genérico.
   if (
-    /\b(servicio|servicios|turno|turnos|parada|paradas|recorrido|monitoreo|excepcion)\b/.test(
+    /\b(servicios?\s+y\s+recorridos|servicios?|recorridos?|paradas?|turnos?|hojas?\s+de\s+turno|monitoreo|excepciones?)\b/.test(
       text,
     )
   ) {
     return true;
   }
-  if (/^(y |despues|entonces|ahora |tambien|y despues)/.test(text)) return true;
-  if (/\b(donde|como|que|cual|cuando)\b/.test(text) && text.length < 180) {
-    return true;
-  }
+
+  if (looksLikeTransportePublicoServicioHowTo(raw)) return true;
+
   return false;
 }
 

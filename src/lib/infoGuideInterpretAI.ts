@@ -57,6 +57,7 @@ import {
   TRANSPORTE_PUBLICO_ARTICLES,
   listTransporteArticleCatalog,
   looksLikeTransportePublicoGuideFollowupQuestion,
+  looksLikeTransportePublicoServicioHowTo,
   looksLikeTransportePublicoHowToRequest,
   resolveTransporteHowToArticleIds,
 } from "@/lib/transportePublicoKnowledge";
@@ -3039,8 +3040,8 @@ function isSameFamilyGuideFollowup(
 }
 
 /**
- * Continuidad TP: “Eso” / servicio / turno tras menú o guía abierta.
- * No reinyecta TP ante reclamo vago ni GPS.
+ * Continuidad TP: solo “Eso” / ítem del menú TP con lastGuideKind=transporte_publico.
+ * No pisa normalTarget ni módulos que el intérprete ya eligió.
  */
 function correctTransportePublicoContinuityMisroute(
   interpret: PlatformKnowledgeInterpret,
@@ -3049,6 +3050,9 @@ function correctTransportePublicoContinuityMisroute(
   opts?: PlatformGuideGuardOpts,
 ): PlatformKnowledgeInterpret {
   if (opts?.lastGuideKind !== "transporte_publico") return interpret;
+  if (interpret.normalTarget) return interpret;
+  if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return interpret;
+  // No sobrescribir una decisión de módulo distinta del intérprete.
   if (
     interpret.route === "info_guides" &&
     interpret.guideKind &&
@@ -3074,11 +3078,15 @@ function correctTransportePublicoContinuityMisroute(
     return interpret;
   }
 
-  const articleIds = looksLikeTransportePublicoHowToRequest(selectionText)
+  const articleIds = looksLikeTransportePublicoServicioHowTo(selectionText)
     ? resolveTransporteHowToArticleIds(selectionText)
-    : opts?.lastGuideArticleIds?.some((id) => id.startsWith("tp-"))
-      ? opts.lastGuideArticleIds.filter((id) => id.startsWith("tp-")).slice(0, 3)
-      : ["tp-conceptos-pilares", "tp-flujo-implementacion"];
+    : /\b(turno|turnos|hojas?\s+de\s+turno|parada|paradas|monitoreo|recorrido)\b/i.test(
+          selectionText,
+        )
+      ? resolveTransporteHowToArticleIds(selectionText)
+      : opts?.lastGuideArticleIds?.some((id) => id.startsWith("tp-"))
+        ? opts.lastGuideArticleIds.filter((id) => id.startsWith("tp-")).slice(0, 3)
+        : ["tp-conceptos-pilares", "tp-flujo-implementacion"];
 
   return {
     ...interpret,
@@ -3094,79 +3102,47 @@ function correctTransportePublicoContinuityMisroute(
       : "tp_continuity_guard",
     category: null,
     reportId: null,
-    normalTarget: null,
   };
 }
 
 /**
- * How-to de servicio/turno (aunque no diga “transporte”) → guía TP, no patente del hilo.
+ * Solo rescata need=ambiguous sin módulo (evitar patente residual) ante
+ * “cargar/crear un servicio…”. No pisa interpretaciones ya resueltas.
  */
 function correctTransportePublicoHowToMisroute(
   interpret: PlatformKnowledgeInterpret,
   selectionText: string,
 ): PlatformKnowledgeInterpret {
-  if (!looksLikeTransportePublicoHowToRequest(selectionText)) return interpret;
+  if (interpret.normalTarget) return interpret;
+  if (!looksLikeTransportePublicoServicioHowTo(selectionText)) return interpret;
   if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return interpret;
-
-  const norm = selectionText
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (
-    interpret.route === "info_guides" &&
-    interpret.guideKind &&
-    interpret.guideKind !== "transporte_publico" &&
-    interpret.guideKind !== "hojas_de_ruta" &&
-    interpret.guideKind !== "combustible" &&
-    interpret.guideKind !== "cisternas"
-  ) {
-    const explicit = resolveExplicitPlatformGuideModule(selectionText);
-    if (explicit && explicit !== "transporte_publico") return interpret;
-    // “Crear un turno” a menudo cae en Opciones/Agenda; si no nombra agenda/opciones, es TP.
-    if (
-      interpret.guideKind === "opciones" &&
-      !/\b(opciones|agenda)\b/.test(norm)
-    ) {
-      // seguir y pisar con TP
-    } else if (
-      interpret.guideKind === "mantenimiento" ||
-      interpret.guideKind === "alertas" ||
-      interpret.guideKind === "paneles" ||
-      interpret.guideKind === "informes" ||
-      interpret.guideKind === "opciones" ||
-      interpret.guideKind === "unidades"
-    ) {
-      return interpret;
-    }
-  }
-  if (
-    interpret.guideKind === "transporte_publico" &&
-    interpret.route === "info_guides" &&
-    interpret.articleIds.some((id) => id.startsWith("tp-")) &&
-    interpret.need !== "ambiguous"
-  ) {
+  // Nunca sobrescribir un módulo que el LLM/otra guarda ya eligió.
+  if (interpret.guideKind && interpret.guideKind !== "transporte_publico") {
     return interpret;
   }
+  if (interpret.need !== "ambiguous" && interpret.guideKind === "transporte_publico") {
+    if (interpret.articleIds.some((id) => id.startsWith("tp-"))) return interpret;
+  }
+  if (interpret.need !== "ambiguous" && !interpret.guideKind) {
+    return interpret;
+  }
+  if (interpret.need !== "ambiguous") return interpret;
 
   const articleIds = resolveTransporteHowToArticleIds(selectionText);
   return {
     ...interpret,
     route: "info_guides",
     guideKind: "transporte_publico",
-    need: interpret.need === "execute" ? "execute" : "procedure",
+    need: "procedure",
     articleIds,
     clarifyQuestion: null,
-    executionRequest: interpret.need === "execute",
+    executionRequest: false,
     confidence: Math.max(interpret.confidence, 0.92),
     reason: interpret.reason
       ? `${interpret.reason}|tp_howto_guard`
       : "tp_howto_guard",
     category: null,
     reportId: null,
-    normalTarget: null,
   };
 }
 
@@ -3183,7 +3159,7 @@ function normalizeAmbiguousIssueWithoutExplicitModule(
   if (interpret.normalTarget) return interpret;
   if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return interpret;
   if (resolveExplicitPlatformGuideModule(selectionText)) return interpret;
-  if (looksLikeTransportePublicoHowToRequest(selectionText)) return interpret;
+  if (looksLikeTransportePublicoServicioHowTo(selectionText)) return interpret;
   if (isSameFamilyGuideFollowup(selectionText, threadText, opts?.lastGuideKind)) {
     return interpret;
   }
@@ -4347,7 +4323,7 @@ export function isCrossFamilyFrontierGrounded(
     case "transporte_publico_modulo":
       return (
         /\btransporte\b/.test(text) ||
-        looksLikeTransportePublicoHowToRequest(selectionText)
+        looksLikeTransportePublicoServicioHowTo(selectionText)
       );
     case "mantenimiento_modulo":
       return /\bmantenimiento\b/.test(text);

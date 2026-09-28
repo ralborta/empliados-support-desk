@@ -316,7 +316,7 @@ describe("applyPlatformGuideInterpretGuards — precedencia de continuidad", () 
           "Sí. ¿Necesitás ayuda con servicios y recorridos, paradas, turnos, hojas de turno, monitoreo o un error puntual?",
       }),
       "Eso",
-      "Cliente: Sabes de transporte publico?\nKira: Sí. ¿Necesitás ayuda con servicios y recorridos…?\nCliente: Estado AG 562 SP",
+      "Cliente: Sabes de transporte publico?\nKira: Sí. ¿Necesitás ayuda con servicios y recorridos…?",
       { lastGuideKind: "transporte_publico", lastGuideArticleIds: [] },
     );
     assert.equal(next.guideKind, "transporte_publico");
@@ -327,12 +327,14 @@ describe("applyPlatformGuideInterpretGuards — precedencia de continuidad", () 
     assert.equal(next.reason?.includes("tp_continuity_guard"), true);
   });
 
-  it("crear un turno → TP tp-turno-crear (no Opciones/Agenda)", () => {
+  it("crear un turno tras menú TP → continuidad (ítem del menú)", () => {
     const next = applyPlatformGuideInterpretGuards(
       baseInterpret({
-        guideKind: "opciones",
-        need: "procedure",
+        guideKind: "transporte_publico",
+        need: "ambiguous",
         articleIds: [],
+        clarifyQuestion:
+          "Sí. ¿Necesitás ayuda con servicios y recorridos, paradas, turnos…?",
       }),
       "Quiero ver como crear un turno",
       "Cliente: Sabes de transporte publico?\nKira: Sí. ¿Necesitás ayuda con servicios…",
@@ -341,6 +343,7 @@ describe("applyPlatformGuideInterpretGuards — precedencia de continuidad", () 
     assert.equal(next.guideKind, "transporte_publico");
     assert.ok(next.articleIds.includes("tp-turno-crear"));
     assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
+    assert.equal(next.reason?.includes("tp_continuity_guard"), true);
   });
 
   it("reclamo vago sigue pidiendo aclaración (no se rompe)", () => {
@@ -371,5 +374,78 @@ describe("applyPlatformGuideInterpretGuards — precedencia de continuidad", () 
       ),
       false,
     );
+  });
+
+  it("negativos: certificado / GPS / ingreso / mantenimiento / agenda no caen a TP", () => {
+    const tpOpts = {
+      lastGuideKind: "transporte_publico" as const,
+      lastGuideArticleIds: ["tp-conceptos-pilares"],
+    };
+    const thread =
+      "Cliente: transporte publico\nKira: Sí. ¿Necesitás ayuda con servicios y recorridos, paradas, turnos…?";
+
+    const certificado = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: null,
+        need: "procedure",
+        normalTarget: null,
+      }),
+      "Cómo saco un certificado",
+      thread,
+      tpOpts,
+    );
+    assert.notEqual(certificado.guideKind, "transporte_publico");
+    assert.equal(certificado.reason?.includes("tp_continuity_guard"), false);
+
+    const gps = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        route: "continue_normal",
+        guideKind: null,
+        need: "procedure",
+        normalTarget: "live_unit",
+      }),
+      "Dónde está la unidad AG 562 SP",
+      thread,
+      tpOpts,
+    );
+    assert.equal(gps.normalTarget, "live_unit");
+    assert.notEqual(gps.guideKind, "transporte_publico");
+    assert.equal(gps.reason?.includes("tp_continuity_guard"), false);
+
+    const ingreso = applyPlatformGuideInterpretGuards(
+      baseInterpret({ guideKind: null, need: "ambiguous" }),
+      "Cómo ingreso a la plataforma",
+      thread,
+      tpOpts,
+    );
+    assert.notEqual(ingreso.guideKind, "transporte_publico");
+    assert.equal(ingreso.reason?.includes("tp_continuity_guard"), false);
+
+    const mant = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "mantenimiento",
+        need: "procedure",
+        articleIds: ["mt-concepto-y-mapa"],
+      }),
+      "Cómo creo un turno de mantenimiento",
+      thread,
+      tpOpts,
+    );
+    assert.equal(mant.guideKind, "mantenimiento");
+    assert.equal(mant.reason?.includes("tp_howto_guard"), false);
+    assert.equal(mant.reason?.includes("tp_continuity_guard"), false);
+
+    const agenda = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "opciones",
+        need: "procedure",
+        articleIds: [],
+      }),
+      "Cómo configuro la agenda de turnos en opciones",
+      thread,
+      tpOpts,
+    );
+    assert.equal(agenda.guideKind, "opciones");
+    assert.equal(agenda.reason?.includes("tp_continuity_guard"), false);
   });
 });
