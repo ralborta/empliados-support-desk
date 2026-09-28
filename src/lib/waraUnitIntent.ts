@@ -65,6 +65,8 @@ import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
   looksLikeMetaConversationalReply,
+  looksLikeConversationClosing,
+  looksLikeConversationAcknowledgement,
   looksLikeConversationalUnitConcern,
   looksLikeOdometerConfirmationRejection,
   looksLikeOutOfScopeSupportClaim,
@@ -833,6 +835,13 @@ export function extractBrandSearchLabel(rawText: string): string | null {
   if (!raw || raw.length > 160) return null;
   if (looksLikePlatformUnitVisibilityComplaint(raw)) return null;
   if (looksLikeCustomerConversationCloseRequest(raw)) return null;
+  if (
+    looksLikeConversationClosing(raw) ||
+    looksLikeConversationAcknowledgement(raw) ||
+    looksLikeMetaConversationalReply(raw)
+  ) {
+    return null;
+  }
   const t = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -899,6 +908,13 @@ function resolveBrandOrNameInFleet(
   }
   if (looksLikePlatformUnitVisibilityComplaint(rawText)) return null;
   if (looksLikeCustomerConversationCloseRequest(rawText)) return null;
+  if (
+    looksLikeConversationClosing(rawText) ||
+    looksLikeConversationAcknowledgement(rawText) ||
+    looksLikeMetaConversationalReply(rawText)
+  ) {
+    return null;
+  }
   const freeLabel =
     nameHint?.trim() ||
     extractFreeTextUnitSearchCandidate(rawText) ||
@@ -1220,6 +1236,8 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   const raw = String(rawText ?? "").trim();
   if (!raw || raw.length > 80) return null;
   if (looksLikeMetaConversationalReply(raw)) return null;
+  // Bug prod 2026-09-28: «No. Gracias.» tras listado/nudge se buscaba como patente.
+  if (looksLikeConversationClosing(raw) || looksLikeConversationAcknowledgement(raw)) return null;
   if (looksLikeOutOfScopeSupportClaim(raw)) return null;
   // Bug prod 2026-09-15: «Preséntate» se buscaba en flota como etiqueta de unidad.
   if (looksLikeAssistantIdentityQuestion(raw)) return null;
@@ -1274,9 +1292,19 @@ function isPlausibleFreeTextUnitLabel(cand: string): boolean {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
   if (!norm || norm.length < 4) return false;
   if (STOPWORDS.has(norm)) return false;
+  // Cortesía / cierre — nunca etiqueta de flota (también con "No. Gracias.").
+  if (
+    /^(no|nop|nope|gracias|no gracias|gracias no|nada|nada mas|chau|adios|bye|listo|ok gracias)([\s!.,]*)?$/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
   if (/^(confirmo|confirmado|confirma|confirmar|confirmacion)$/.test(norm)) return false;
   // Verbos / pedidos de gestión: no son etiquetas de flota.
   if (
@@ -2215,6 +2243,20 @@ function resolveWithRules(
   threadText: string,
   units: WaraUnidadEstado[]
 ): UnitQueryResolution {
+  // Cortesía / cierre — no buscar tokens («gracias») en flota.
+  if (
+    looksLikeConversationClosing(rawText) ||
+    looksLikeConversationAcknowledgement(rawText) ||
+    looksLikeMetaConversationalReply(rawText)
+  ) {
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: [],
+      source: "rules",
+    };
+  }
+
   const numericPlate = resolveNumericUnitSelection(rawText, threadText);
   if (numericPlate) {
     const matches = filterUnitsByPlate(units, numericPlate);
@@ -2571,6 +2613,19 @@ export async function resolveUnitQuery(params: {
    */
   aiHistorial?: string;
 }): Promise<UnitQueryResolution> {
+  if (
+    looksLikeConversationClosing(params.rawText) ||
+    looksLikeConversationAcknowledgement(params.rawText) ||
+    looksLikeMetaConversationalReply(params.rawText)
+  ) {
+    return {
+      intent: "need_clarification",
+      searchTerms: [],
+      candidatePlates: [],
+      source: "rules",
+    };
+  }
+
   if (looksLikeOdometerConfirmationRejection(params.rawText)) {
     return {
       intent: "need_clarification",
@@ -3025,6 +3080,14 @@ export function shouldRouteTurnToUnidadesExecutor(params: {
 }): boolean {
   const { selectionText, threadText } = params;
   if (looksLikeFechaHoraLecturaMessage(selectionText)) return false;
+  // Cortesía / cierre nunca es búsqueda de flota (también «No. Gracias.»).
+  if (
+    looksLikeConversationClosing(selectionText) ||
+    looksLikeConversationAcknowledgement(selectionText) ||
+    looksLikeMetaConversationalReply(selectionText)
+  ) {
+    return false;
+  }
   if (
     looksLikeBareMeterValue(selectionText) &&
     (threadHasActiveMeterValueRequest(threadText) || threadHasActiveOdometerFlow(threadText))

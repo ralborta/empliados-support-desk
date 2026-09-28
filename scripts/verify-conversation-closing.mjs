@@ -47,6 +47,10 @@ const farewells = [
   "No nada más gracias",
   "no gracias",
   "nada más por ahora",
+  // Bug 2026-09-28: puntuación rioplatense («No. Gracias.») no matcheaba sin normalizar.
+  "No. Gracias.",
+  "No. Gracias",
+  "No, gracias",
 ];
 for (const text of farewells) {
   assert(looksLikeConversationClosing(text), `looksLikeConversationClosing("${text}") === true`);

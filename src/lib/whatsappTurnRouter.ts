@@ -37,6 +37,7 @@ import {
 } from "@/lib/wara";
 import {
   looksLikeConversationAcknowledgement,
+  looksLikeConversationClosing,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
   looksLikeSoftFlowRestart,
@@ -84,7 +85,7 @@ import {
   threadHasRecentFleetUnitSearchRequest,
 } from "@/lib/waraUnitIntent";
 import { detectInfoGuideKind } from "@/lib/infoGuideReplies";
-import { looksLikeIdleNudgeAffirmation } from "@/lib/idleFollowupMeta";
+import { looksLikeIdleNudgeAffirmation, looksLikeIdleNudgeDecline } from "@/lib/idleFollowupMeta";
 import type { PendingActionRecord } from "@/lib/pendingAction";
 import {
   hasPendingOdometerActionChoice,
@@ -406,6 +407,12 @@ const TURN_RULES: TurnRule[] = [
     id: "conversation_close_request",
     reason: "Cliente pide cerrar la conversación/caso.",
     decide: ({ text }) => (looksLikeCustomerConversationCloseRequest(text) ? "odoo_ticket" : null),
+  },
+  {
+    id: "conversation_closing_courtesy",
+    reason:
+      "Despedida / «No. Gracias.» — cierre social, no búsqueda de flota (bug 2026-09-28).",
+    decide: ({ text }) => (looksLikeConversationClosing(text) ? "info_guides" : null),
   },
   {
     id: "open_case_status_inquiry",
@@ -751,6 +758,12 @@ const TURN_RULES: TurnRule[] = [
       looksLikeIdleNudgeAffirmation(text, threadText) ? "info_guides" : null,
   },
   {
+    id: "idle_nudge_decline",
+    reason: "No/No gracias tras nudge idle — cierre, no búsqueda de flota.",
+    decide: ({ text, threadText }) =>
+      looksLikeIdleNudgeDecline(text, threadText) ? "info_guides" : null,
+  },
+  {
     id: "loose_plate_or_operational_fallback",
     reason: "Patente/prefijo suelto, incidente detectado, o intención operativa genérica → consulta de unidad.",
     decide: ({ text, threadText }) => {
@@ -789,6 +802,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "fleet_wide_outage_advisor",
   "multi_unit_speed_advisor",
   "conversation_close_request",
+  "conversation_closing_courtesy",
   "open_case_status_inquiry",
   "open_new_case_request",
   "resolvable_unit_telemetry_consult",
@@ -810,6 +824,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "pending_mantenimiento_confirmation_diverted_by_new_topic",
   "post_advisor_case_no_reopen",
   "incident_admin_or_access",
+  "idle_nudge_decline",
 ]);
 
 export function classifyTurnExecutorSafetyGuards(

@@ -488,6 +488,37 @@ export function looksLikeIdleNudgeAffirmation(
   return false;
 }
 
+/**
+ * "No" / "No. Gracias." tras nudge idle = no sigue, cerrar — no buscar en flota.
+ * Bug real 2026-09-28: tras listado + «¿Seguís ahí?», «No. Gracias.» → Unidad no encontrada.
+ */
+export function looksLikeIdleNudgeDecline(
+  text: string | undefined | null,
+  threadText: string,
+): boolean {
+  if (!threadLastBotOutboundWasIdleNudge(threadText)) return false;
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 64) return false;
+  if (hasOperationalPayload(raw)) return false;
+  const t = normIdleText(raw);
+  if (!t) return false;
+  if (
+    /^(no|nop|nope|nah|nel|no gracias|gracias no|nada|nada mas|por ahora no|mejor no|no por ahora|eso es todo|chau|adios|bye)[\s!.,]*$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function buildIdleNudgeDeclineReply(opts?: {
+  customerFirstName?: string | null;
+}): string {
+  const prefix = formatIdleMetaCustomerPrefix(opts?.customerFirstName);
+  return `${prefix}👋 ¡Chau! Cualquier cosa avisame.`;
+}
+
 export function buildIdleNudgeAffirmationReply(opts?: {
   customerFirstName?: string | null;
 }): string {
@@ -618,6 +649,15 @@ export function resolveIdleFollowupMetaTurn(params: {
         selectionText,
         lastGuideKind,
       }),
+    };
+  }
+
+  if (looksLikeIdleNudgeDecline(selectionText, threadText)) {
+    return {
+      intercept: true,
+      idlePushback: false,
+      preferGuideOverPending: true,
+      message: buildIdleNudgeDeclineReply({ customerFirstName }),
     };
   }
 

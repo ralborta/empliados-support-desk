@@ -71,6 +71,7 @@ import {
   threadHasRecentUnitCaseOpened,
   looksLikeColloquialGratitudeAck,
   looksLikeConversationAcknowledgement,
+  looksLikeConversationClosing,
   looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
 import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
@@ -1339,6 +1340,21 @@ export async function runTurnExecutorPhase(params: {
   ) {
     return {
       message: "De nada. ¿En qué más te ayudo?",
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  // Despedida / "No. Gracias." sin CONFIRMO pendiente → cierre, no búsqueda de flota.
+  // Bug real 2026-09-28: tras listado + nudge idle, «No. Gracias.» → Unidad no encontrada.
+  if (
+    looksLikeConversationClosing(selectionText) &&
+    !pendingKind &&
+    !hasAnyPendingConfirmation(thread) &&
+    !pendingAction?.payload
+  ) {
+    return {
+      message: formatSoftClose("bye"),
       executor: "info_guides",
       ok: true,
     };

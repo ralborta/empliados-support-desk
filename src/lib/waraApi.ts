@@ -787,8 +787,12 @@ export function looksLikeColloquialGratitudeAck(text: string | undefined | null)
 export function looksLikeConversationClosing(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw || raw.length > 140) return false;
-  const t = normCompanyToken(raw);
-  return /\b(adios|adi[oó]s|chau|chao|hasta luego|hasta pronto|nos vemos|bye|nada mas|no gracias|no nada mas|no nada|eso es todo|eso seria todo|nada por ahora|nada mas por ahora)\b/.test(
+  // Misma normalización que meta/idle: "No. Gracias." ≡ "no gracias".
+  // Bug real 2026-09-28: con punto/coma, normCompanyToken dejaba "no. gracias." y
+  // no matcheaba → se buscaba «No. Gracias.» como patente en flota.
+  const t = normMetaConversationalText(raw);
+  if (!t) return false;
+  return /\b(adios|chau|chao|hasta luego|hasta pronto|nos vemos|bye|nada mas|no gracias|gracias no|no nada mas|no nada|eso es todo|eso seria todo|nada por ahora|nada mas por ahora)\b/.test(
     t,
   );
 }
@@ -888,7 +892,7 @@ export function looksLikeDeclineMoreHelpOffer(
   if (threadBotRecentlyAskedPlateReference(String(threadText ?? ""))) return false;
   if (threadHasPendingUnitStatusCheckOffer(String(threadText ?? ""))) return false;
 
-  const t = normCompanyToken(raw);
+  const t = normMetaConversationalText(raw);
   if (looksLikeBareNegativeResponse(raw)) return true;
   return /^(no gracias|gracias no|nada|nada mas|por ahora no|mejor no|no por ahora|eso es todo|asi esta bien|ta bien)$/.test(
     t,
