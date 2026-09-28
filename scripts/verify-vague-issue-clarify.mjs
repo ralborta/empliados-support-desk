@@ -104,4 +104,31 @@ assert.equal(
   true,
 );
 
+// How-to TP no debe caer a aclaración de patente residual.
+const servicioNuevo = applyPlatformGuideInterpretGuards(
+  {
+    route: "info_guides",
+    guideKind: null,
+    need: "ambiguous",
+    articleIds: [],
+    clarifyQuestion: null,
+    executionRequest: false,
+    confidence: 0.8,
+    reason: "llm_plain",
+    category: null,
+    reportId: null,
+    normalTarget: null,
+  },
+  "Cómo cargo un servicio nuevo",
+  "Cliente: Estado AG 562 SP\nKira: AG 562 SP detenida.",
+  { lastGuideKind: "alertas", lastGuideArticleIds: ["al-panico"] },
+);
+assert.equal(servicioNuevo.guideKind, "transporte_publico");
+assert.ok(servicioNuevo.articleIds.includes("tp-servicio-crear"));
+assert.equal(servicioNuevo.reason?.includes("ambiguous_issue_clarify"), false);
+assert.equal(
+  isCrossFamilyFrontierGrounded("Cómo cargo un servicio nuevo", "transporte_publico_modulo"),
+  true,
+);
+
 console.log("OK verify-vague-issue-clarify");

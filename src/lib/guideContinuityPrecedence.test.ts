@@ -285,4 +285,91 @@ describe("applyPlatformGuideInterpretGuards — precedencia de continuidad", () 
     assert.equal(next.normalTarget, "live_unit");
     assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
   });
+
+  it("cargar un servicio nuevo → TP (no patente residual AG 562 SP)", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: null,
+        need: "ambiguous",
+        clarifyQuestion: null,
+      }),
+      "Cómo cargo un servicio nuevo",
+      "Cliente: Estado AG 562 SP\nKira: La unidad AG 562 SP está detenida.",
+      { lastGuideKind: "alertas", lastGuideArticleIds: ["al-panico"] },
+    );
+    assert.equal(next.guideKind, "transporte_publico");
+    assert.equal(next.need, "procedure");
+    assert.ok(next.articleIds.includes("tp-servicio-crear"));
+    assert.equal(next.clarifyQuestion, null);
+    assert.doesNotMatch(next.clarifyQuestion ?? "", /AG\s*562\s*SP/i);
+    assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
+    assert.equal(next.reason?.includes("tp_howto_guard"), true);
+  });
+
+  it("Eso tras menú TP → continuidad TP (no vuelve a la unidad)", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "transporte_publico",
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion:
+          "Sí. ¿Necesitás ayuda con servicios y recorridos, paradas, turnos, hojas de turno, monitoreo o un error puntual?",
+      }),
+      "Eso",
+      "Cliente: Sabes de transporte publico?\nKira: Sí. ¿Necesitás ayuda con servicios y recorridos…?\nCliente: Estado AG 562 SP",
+      { lastGuideKind: "transporte_publico", lastGuideArticleIds: [] },
+    );
+    assert.equal(next.guideKind, "transporte_publico");
+    assert.equal(next.need, "procedure");
+    assert.ok(next.articleIds.some((id) => id.startsWith("tp-")));
+    assert.equal(next.clarifyQuestion, null);
+    assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
+    assert.equal(next.reason?.includes("tp_continuity_guard"), true);
+  });
+
+  it("crear un turno → TP tp-turno-crear (no Opciones/Agenda)", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "opciones",
+        need: "procedure",
+        articleIds: [],
+      }),
+      "Quiero ver como crear un turno",
+      "Cliente: Sabes de transporte publico?\nKira: Sí. ¿Necesitás ayuda con servicios…",
+      { lastGuideKind: "transporte_publico" },
+    );
+    assert.equal(next.guideKind, "transporte_publico");
+    assert.ok(next.articleIds.includes("tp-turno-crear"));
+    assert.equal(next.reason?.includes("ambiguous_issue_clarify"), false);
+  });
+
+  it("reclamo vago sigue pidiendo aclaración (no se rompe)", () => {
+    const next = applyPlatformGuideInterpretGuards(
+      baseInterpret({
+        guideKind: "alertas",
+        need: "ambiguous",
+        articleIds: ["al-panico"],
+      }),
+      "Se sigue repitiendo el mismo inconveniente",
+      "Cliente: Estado AG 562 SP\nKira: AG 562 SP detenida.",
+      { lastGuideKind: "alertas", lastGuideArticleIds: ["al-panico"] },
+    );
+    assert.equal(next.guideKind, null);
+    assert.match(next.clarifyQuestion ?? "", /AG\s*562\s*SP|inconveniente/i);
+    assert.equal(next.reason?.includes("ambiguous_issue_clarify"), true);
+  });
+
+  it("frontera TP se ancla con how-to de servicio sin decir transporte", () => {
+    assert.equal(
+      isCrossFamilyFrontierGrounded("Cómo cargo un servicio nuevo", "transporte_publico_modulo"),
+      true,
+    );
+    assert.equal(
+      isCrossFamilyFrontierGrounded(
+        "Se sigue repitiendo el mismo inconveniente",
+        "transporte_publico_modulo",
+      ),
+      false,
+    );
+  });
 });

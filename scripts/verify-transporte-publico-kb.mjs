@@ -9,6 +9,9 @@ import {
   listTransporteArticleCatalog,
   buildTransporteKnowledgeContext,
   getTransporteArticlesByIds,
+  looksLikeTransportePublicoHowToRequest,
+  looksLikeTransportePublicoGuideFollowupQuestion,
+  resolveTransporteHowToArticleIds,
 } from "../src/lib/transportePublicoKnowledge.ts";
 import { buildGroundedInfoGuideReply } from "../src/lib/infoGuideReplies.ts";
 import { OPCIONES_KNOWLEDGE_BASE, UNIDADES_KNOWLEDGE_BASE } from "../src/lib/knowledgeBase.ts";
@@ -36,6 +39,37 @@ const ctx = buildTransporteKnowledgeContext(["tp-hoja-turno-crear", "tp-excepcio
 assert.match(ctx, /Hoja de Turno/i);
 assert.match(ctx, /Excepciones/i);
 assert.doesNotMatch(ctx, /Editor de Servicios WARA en desarrollo como ya usable/i);
+
+assert.equal(looksLikeTransportePublicoHowToRequest("Cómo cargo un servicio nuevo"), true);
+assert.equal(looksLikeTransportePublicoHowToRequest("Quiero ver como crear un turno"), true);
+assert.equal(
+  looksLikeTransportePublicoHowToRequest("Se sigue repitiendo el mismo inconveniente"),
+  false,
+);
+assert.deepEqual(resolveTransporteHowToArticleIds("Cómo cargo un servicio nuevo"), [
+  "tp-servicio-crear",
+  "tp-conceptos-pilares",
+]);
+assert.deepEqual(resolveTransporteHowToArticleIds("Quiero ver como crear un turno"), [
+  "tp-turno-crear",
+  "tp-conceptos-pilares",
+]);
+assert.equal(
+  looksLikeTransportePublicoGuideFollowupQuestion(
+    "Eso",
+    "Kira: Sí. ¿Necesitás ayuda con servicios y recorridos, paradas, turnos…?",
+    "transporte_publico",
+  ),
+  true,
+);
+assert.equal(
+  looksLikeTransportePublicoGuideFollowupQuestion(
+    "Se sigue repitiendo el mismo inconveniente",
+    "Kira: Sí. ¿Necesitás ayuda con servicios…?",
+    "transporte_publico",
+  ),
+  false,
+);
 
 const excludedHints = [
   /contraseña/i,
