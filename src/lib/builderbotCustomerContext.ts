@@ -648,28 +648,33 @@ export async function customerRegisteredContextResponse(
         messageText: selectionText || undefined,
         source: "builderbot_context",
       });
-      const recheckAfterLoad = looksLikeJustRegisteredPhoneInWara(selectionText);
-      // Siempre contestar: 1ª vez derivación; recontacto = ticket ya abierto + PDF;
-      // “ya lo cargué” = resultado de la reconsulta, sin repetir la guía.
-      nextFlow = "reply";
-      responseMessage = buildUnregisteredPhoneCustomerReply({
-        isFirstNotify: handoff.shouldNotifyCustomer,
-        ticketCode: handoff.ticket.code,
-        recheckAfterLoad,
-      });
-      const persistText = recheckAfterLoad
-        ? buildUnregisteredPhoneRecheckAfterLoadReply()
-        : handoff.shouldNotifyCustomer
-          ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
-          : buildUnregisteredPhoneWaitingAdvisorReply(handoff.ticket.code);
-      await persistCustomerBotReply(trimmed, persistText, {
-        source: "builderbot_context",
-        stage: recheckAfterLoad
-          ? "unregistered_recheck_after_load"
+      if (handoff.advisorPaused) {
+        nextFlow = "ignore";
+        responseMessage = "";
+      } else {
+        const recheckAfterLoad = looksLikeJustRegisteredPhoneInWara(selectionText);
+        // Siempre contestar: 1ª vez derivación; recontacto = ticket ya abierto + PDF;
+        // “ya lo cargué” = resultado de la reconsulta, sin repetir la guía.
+        nextFlow = "reply";
+        responseMessage = buildUnregisteredPhoneCustomerReply({
+          isFirstNotify: handoff.shouldNotifyCustomer,
+          ticketCode: handoff.ticket.code,
+          recheckAfterLoad,
+        });
+        const persistText = recheckAfterLoad
+          ? buildUnregisteredPhoneRecheckAfterLoadReply()
           : handoff.shouldNotifyCustomer
-            ? "unregistered_first_handoff"
-            : "unregistered_waiting_handoff",
-      });
+            ? UNREGISTERED_PHONE_FIRST_HANDOFF_REPLY
+            : buildUnregisteredPhoneWaitingAdvisorReply(handoff.ticket.code);
+        await persistCustomerBotReply(trimmed, persistText, {
+          source: "builderbot_context",
+          stage: recheckAfterLoad
+            ? "unregistered_recheck_after_load"
+            : handoff.shouldNotifyCustomer
+              ? "unregistered_first_handoff"
+              : "unregistered_waiting_handoff",
+        });
+      }
     } catch (e) {
       console.error("[builderbotCustomerContext] unregistered handoff:", e);
       // Fallback seguro: mismo texto canónico (import puede fallar arriba).

@@ -134,6 +134,8 @@ export type UnregisteredPhoneHandoffResult = {
   isNewTicket: boolean;
   /** Primera vez: copy de derivación. Después: copy de ticket ya abierto (siempre se contesta). */
   shouldNotifyCustomer: boolean;
+  /** El asesor pausó a Kira: no reactivar ni escribirle al cliente. */
+  advisorPaused: boolean;
 };
 
 /**
@@ -230,6 +232,8 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     }
   }
 
+  const advisorPaused = Boolean(customer.botPausedAt);
+
   const priorNotice = await prisma.ticketEvent.findFirst({
     where: {
       ticketId: ticket.id,
@@ -238,7 +242,7 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     },
     select: { id: true },
   });
-  const shouldNotifyCustomer = !priorNotice;
+  const shouldNotifyCustomer = !priorNotice && !advisorPaused;
   if (shouldNotifyCustomer && !deferCustomerNotify) {
     await prisma.ticketEvent.create({
       data: {
@@ -269,12 +273,19 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     console.error("[unregisteredHandoff] autoAssign:", e);
   }
 
-  // Número no registrado: Kira sigue activa para poder recontestar (ticket + PDF).
-  await reactivateAtilioForCustomer(
-    customer.id,
-    prisma,
-    "unregistered_phone_handoff_keep_active",
-  ).catch((e) => console.error("[unregisteredHandoff] reactivateAtilio:", e));
+  // Si el asesor pausó a Kira, el aviso de número no registrado no la vuelve a prender
+  // ni le escribe al cliente. Sin pausa, Kira sigue activa para el ticket y el PDF.
+  if (!advisorPaused) {
+    await reactivateAtilioForCustomer(
+      customer.id,
+      prisma,
+      "unregistered_phone_handoff_keep_active",
+    ).catch((e) => console.error("[unregisteredHandoff] reactivateAtilio:", e));
+  } else {
+    console.log(
+      `[unregisteredHandoff] Kira sigue pausada para ${customer.id}: el asesor tiene el chat`,
+    );
+  }
 
   const refreshed =
     (await prisma.ticket.findUnique({ where: { id: ticket.id } })) ?? ticket;
@@ -284,5 +295,6 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     ticket: refreshed,
     isNewTicket,
     shouldNotifyCustomer,
+    advisorPaused,
   };
 }

@@ -201,6 +201,7 @@ import {
   clearClarificationRestoreExpectation,
 } from "@/lib/turnLayerContract";
 import { prisma } from "@/lib/db";
+import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { shouldRouteCertificateDefinitionToGuide } from "@/lib/certificateDefinitionGuide";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation } from "@/lib/pendingConfirmation";
@@ -755,6 +756,11 @@ export async function runTurnExecutorPhase(params: {
 }): Promise<{ message: string; mediaUrl?: string; executor: TurnExecutorId; ok: boolean }> {
   const { rawPhone, selectionText, apiKey } = params;
 
+  const pausedCustomer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+  if (pausedCustomer?.botPausedAt) {
+    return { message: "", executor: "odoo_ticket", ok: true };
+  }
+
   if (
     looksLikeChangeCompanyRequest(selectionText) ||
     (await looksLikeChangeCompanyRequestHybrid(selectionText))
@@ -831,6 +837,9 @@ export async function runTurnExecutorPhase(params: {
       messageText: selectionText || undefined,
       source: "turn_executor",
     });
+    if (handoff.advisorPaused) {
+      return { message: "", executor: "odoo_ticket", ok: true };
+    }
     return {
       message: buildUnregisteredPhoneCustomerReply({
         isFirstNotify: handoff.shouldNotifyCustomer,
