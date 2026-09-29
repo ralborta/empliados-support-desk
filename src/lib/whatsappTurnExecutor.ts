@@ -201,7 +201,6 @@ import {
   clearClarificationRestoreExpectation,
 } from "@/lib/turnLayerContract";
 import { prisma } from "@/lib/db";
-import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
 import { runAtilioAgentTurn } from "@/lib/atilioAgent";
 import { shouldRouteCertificateDefinitionToGuide } from "@/lib/certificateDefinitionGuide";
 import { resolvePendingConfirmationExecutor, hasAnyPendingConfirmation } from "@/lib/pendingConfirmation";
@@ -755,11 +754,6 @@ export async function runTurnExecutorPhase(params: {
   apiKey: string;
 }): Promise<{ message: string; mediaUrl?: string; executor: TurnExecutorId; ok: boolean }> {
   const { rawPhone, selectionText, apiKey } = params;
-
-  const pausedCustomer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
-  if (pausedCustomer?.botPausedAt) {
-    return { message: "", executor: "odoo_ticket", ok: true };
-  }
 
   if (
     looksLikeChangeCompanyRequest(selectionText) ||
