@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { usePollWhenVisible } from "@/lib/hooks/usePollWhenVisible";
+import { dispatchPanelInboxChanged } from "@/lib/panelLiveEvents";
 
 type PanelLiveSyncProps = {
   userRole?: string | null;
@@ -14,6 +15,9 @@ type PanelLiveSyncProps = {
  * El heartbeat en sí sigue siendo SUPPORT-only para el reparto de casos
  * (ver advisorHeartbeat en @/lib/advisorDistribution); para ADMIN solo actualiza
  * presencia (recordAdminPresence), sin tocar nada de cola/asignación.
+ *
+ * También avisa al sidebar para refrescar contadores (Esperando cliente, etc.) —
+ * el fetch one-shot previo dejaba el menú stale si el asesor no navegaba.
  */
 export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
   const router = useRouter();
@@ -54,6 +58,7 @@ export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
 
   usePollWhenVisible(
     () => {
+      dispatchPanelInboxChanged();
       router.refresh();
     },
     15_000,
