@@ -121,6 +121,16 @@ assert.equal(
   "detecta alta de número",
 );
 assert.equal(
+  looksLikeJustRegisteredPhoneInWara("ya cargue mi numero"),
+  true,
+  "detecta «ya cargue mi numero» (bug 2026-09-30)",
+);
+assert.equal(
+  looksLikeJustRegisteredPhoneInWara("Ya cargué mi número"),
+  true,
+  "detecta con tilde",
+);
+assert.equal(
   looksLikeJustRegisteredPhoneInWara("necesito cargarle el odometro"),
   false,
   "no confunde cargar odómetro",

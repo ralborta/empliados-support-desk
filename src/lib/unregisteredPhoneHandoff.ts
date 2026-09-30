@@ -61,7 +61,7 @@ export function buildUnregisteredPhoneRecheckAfterLoadReply(): string {
   return UNREGISTERED_PHONE_RECHECK_AFTER_LOAD_REPLY;
 }
 
-/** “Listo ya lo acabo de cargar” / “ya lo agendé” — no “cargar odómetro”. */
+/** “Listo ya lo acabo de cargar” / “ya cargué mi número” — no “cargar odómetro”. */
 export function looksLikeJustRegisteredPhoneInWara(text: string | undefined | null): boolean {
   const t = String(text ?? "")
     .normalize("NFD")
@@ -74,7 +74,13 @@ export function looksLikeJustRegisteredPhoneInWara(text: string | undefined | nu
     /\bya lo (acabo de )?(cargar|agendar|anotar|poner)\b/.test(t) ||
     /\blo (cargue|agende)( de nuevo)?\b/.test(t) ||
     /\bya esta (cargado|agendado)\b/.test(t) ||
-    /\blo volvi a (cargar|agendar)\b/.test(t)
+    /\blo volvi a (cargar|agendar)\b/.test(t) ||
+    // Bug real 2026-09-30: «ya cargue mi numero» no matcheaba → reenviaba PDF en loop.
+    /\bya\s+(cargue|agende|anote|puse)\b.{0,24}\b(mi\s+)?(numero|celular|telefono|whatsapp)\b/.test(
+      t,
+    ) ||
+    /\b(cargue|agende)\s+(mi\s+)?(numero|celular|telefono)\b/.test(t) ||
+    /\bnumero\s+(ya\s+)?(cargado|agendado|cargue|agende)\b/.test(t)
   );
 }
 
