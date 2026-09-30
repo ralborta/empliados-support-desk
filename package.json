@@ -2,6 +2,7 @@
   "name": "empliados-support-desk",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.33.3",
   "scripts": {
     "dev": "next dev",
     "build": "prisma migrate deploy && next build",
