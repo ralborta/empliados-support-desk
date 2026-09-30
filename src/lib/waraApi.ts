@@ -788,6 +788,58 @@ export function looksLikeSoftSocialContinue(text: string | undefined | null): bo
   return false;
 }
 
+/** El bot acaba de preguntar por «inconveniente… y con qué unidad» (clarify vago). */
+export function threadBotAskedAmbiguousIssueClarify(
+  threadText: string | undefined | null,
+): boolean {
+  const raw = String(threadText ?? "");
+  if (!raw.trim()) return false;
+  const tail = raw
+    .slice(-1800)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /que inconveniente se esta repitiendo/.test(tail) ||
+    /inconveniente de la unidad/.test(tail) ||
+    (/inconveniente/.test(tail) && /con que unidad/.test(tail))
+  );
+}
+
+/**
+ * Pushback al clarify vago: «Qué inconveniente?» / «no hay inconveniente».
+ * Bug real 2026-09-29: respondía con tutorial de Transporte Público.
+ */
+export function looksLikeAmbiguousIssueClarifyPushback(
+  text: string | undefined | null,
+  threadText?: string | undefined | null,
+): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 80) return false;
+  if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
+  if (!threadBotAskedAmbiguousIssueClarify(threadText)) return false;
+  const t = normMetaConversationalText(raw);
+  if (!t) return false;
+  if (
+    /^(que|cual|q)\s+(inconveniente|problema|falla|error|tema)(\s+es)?$/.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /^(a\s+que\s+te\s+referis|de\s+que\s+hablas|que\s+decis|no\s+hay\s+(inconveniente|problema)|no\s+tuve\s+(ningun\s+)?(inconveniente|problema)|no\s+se\s+(a\s+)?que\s+te\s+referis)$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/^(ninguno|ningun\s+inconveniente|no\s+hay\s+nada)$/.test(t)) return true;
+  return false;
+}
+
+export function buildAmbiguousIssueClarifyPushbackReply(): string {
+  return "Perdón, me adelanté. Decime en qué te puedo ayudar.";
+}
+
 /**
  * Coloquial rioplatense de cierre/agradecimiento — alias explícito para callers del executor.
  */

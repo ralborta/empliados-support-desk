@@ -112,6 +112,8 @@ import {
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
   looksLikeSoftSocialContinue,
+  looksLikeAmbiguousIssueClarifyPushback,
+  buildAmbiguousIssueClarifyPushbackReply,
   resolveExplicitPlatformGuideModule,
   type InfoGuideModulePick,
 } from "@/lib/waraApi";
@@ -750,6 +752,7 @@ category: guideKind=informes (pantallas) o guideKind=opciones con V2 (sección).
 route=info_guides SOLO si el cliente pide información sobre CÓMO usar la plataforma o conceptos/procedimientos/errores de módulos (${modules}).
 route=continue_normal si es: consulta GPS/live de unidad, listado de flota, odómetro/horómetro a registrar, certificado de cobertura/monitoreo/constancia a emitir o reenviar, reclamo/asesor identificado, saludo puro, confirmación de trámite, patente suelta operativa, tanque vacío de una UNIDAD/vehículo sin contexto de módulo de plataforma.
 Reclamo referencial o vago (se repite un inconveniente, sigue pasando lo mismo, “otra vez”) SIN nombrar un módulo de plataforma ni un síntoma operativo concreto (GPS/reporte/odómetro/certificado): route=info_guides, guideKind=null, articleIds=[], need=ambiguous. NO elijas Alertas, Paneles, Mantenimiento, Transporte ni un menú de módulos. NO ofrezcas cambiar matrícula, nombre o unidad. clarifyQuestion: si el historial tiene UN solo incidente claro (unidad + problema), preguntá si se refiere a ese; si no hay o hay varios, pedí qué inconveniente y con qué unidad.
+Si el bot YA preguntó «qué inconveniente… y con qué unidad» y el cliente responde con pushback («qué inconveniente?», «a qué te referís», «no hay inconveniente»): route=info_guides, guideKind=null, articleIds=[], need=ambiguous, clarifyQuestion disculpándote y pidiendo en qué ayudás — NUNCA transporte_publico ni un tutorial de servicio/turno.
 Una pregunta social sobre el nombre, identidad o presentación del asistente (p. ej. «¿cómo te llamás?», «quién sos», «preséntate») NO es consulta de módulo ni nombre de unidad: se resuelve como assistant_identity en la frontera semántica.
 NUNCA route=info_guides para "necesito un certificado", "certificado de cobertura", "mandame el certificado".
 
@@ -2898,6 +2901,25 @@ export function applyPlatformGuideInterpretGuards(
   };
   const lastGuideKind = opts?.lastGuideKind ?? null;
   let next = interpret;
+  // Pushback al clarify «inconveniente + unidad»: no dump de TP/Alertas/etc.
+  if (looksLikeAmbiguousIssueClarifyPushback(selectionText, threadText)) {
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      category: null,
+      reportId: null,
+      clarifyQuestion: buildAmbiguousIssueClarifyPushbackReply(),
+      executionRequest: false,
+      confidence: Math.max(interpret.confidence, 0.9),
+      reason: interpret.reason
+        ? `${interpret.reason}|ambiguous_issue_pushback`
+        : "ambiguous_issue_pushback",
+      normalTarget: null,
+    };
+  }
   next = correctMaintenanceMisroute(next, selectionText, threadText, opts);
   next = correctHojaDeNounMisroute(next, selectionText);
   next = correctHojasRutaCatalogTopicMisroute(next, selectionText);

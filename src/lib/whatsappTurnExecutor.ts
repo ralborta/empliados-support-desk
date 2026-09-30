@@ -73,6 +73,8 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
   looksLikeSoftSocialContinue,
+  looksLikeAmbiguousIssueClarifyPushback,
+  buildAmbiguousIssueClarifyPushbackReply,
   looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
 import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
@@ -1374,6 +1376,21 @@ export async function runTurnExecutorPhase(params: {
   ) {
     return {
       message: "Dale. ¿En qué más te ayudo?",
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  // Pushback al clarify vago («Qué inconveniente?») → disculpa + menú abierto, no guía TP.
+  // Bug real 2026-09-29: respondía con tutorial de armar servicio de Transporte Público.
+  if (
+    looksLikeAmbiguousIssueClarifyPushback(selectionText, thread) &&
+    !pendingKind &&
+    !hasAnyPendingConfirmation(thread) &&
+    !pendingAction?.payload
+  ) {
+    return {
+      message: buildAmbiguousIssueClarifyPushbackReply(),
       executor: "info_guides",
       ok: true,
     };

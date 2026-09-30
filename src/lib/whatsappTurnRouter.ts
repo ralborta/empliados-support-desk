@@ -39,6 +39,7 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
   looksLikeSoftSocialContinue,
+  looksLikeAmbiguousIssueClarifyPushback,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
   looksLikeSoftFlowRestart,
@@ -420,6 +421,13 @@ const TURN_RULES: TurnRule[] = [
     reason:
       "«Si bueno» / relleno social — ofrecer más ayuda, no clarify de unidad (bug 2026-09-29).",
     decide: ({ text }) => (looksLikeSoftSocialContinue(text) ? "info_guides" : null),
+  },
+  {
+    id: "ambiguous_issue_clarify_pushback",
+    reason:
+      "«Qué inconveniente?» tras clarify vago — disculpa, no tutorial TP (bug 2026-09-29).",
+    decide: ({ text, threadText }) =>
+      looksLikeAmbiguousIssueClarifyPushback(text, threadText) ? "info_guides" : null,
   },
   {
     id: "open_case_status_inquiry",
@@ -811,6 +819,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "conversation_close_request",
   "conversation_closing_courtesy",
   "soft_social_continue",
+  "ambiguous_issue_clarify_pushback",
   "open_case_status_inquiry",
   "open_new_case_request",
   "resolvable_unit_telemetry_consult",
