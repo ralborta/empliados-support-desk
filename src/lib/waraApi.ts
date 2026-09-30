@@ -788,6 +788,29 @@ export function looksLikeSoftSocialContinue(text: string | undefined | null): bo
   return false;
 }
 
+/**
+ * Cierre positivo tras ayuda («ya está todo ok!», «todo bien»).
+ * Bug real 2026-09-30: caía a «No puedo ayudarte… cargar un servicio» (TP) en vez de agradecer.
+ */
+export function looksLikeAllGoodResolutionAck(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 72) return false;
+  if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
+  const t = normMetaConversationalText(raw);
+  if (!t) return false;
+  if (/^ya\s+(esta|quedo)\s+todo\s+(ok|bien|listo|perfecto)$/.test(t)) return true;
+  if (/^ya\s+esta(\s+todo)?(\s+(ok|bien|listo|perfecto))?$/.test(t)) return true;
+  if (/^ya\s+quedo(\s+todo)?(\s+(ok|bien|listo|perfecto))?$/.test(t)) return true;
+  if (/^(todo\s+(ok|bien|listo)|listo\s+todo|quedo\s+(ok|bien|listo))$/.test(t)) return true;
+  if (/^(listo|perfecto|genial)\s+ya\s+(esta|quedo)$/.test(t)) return true;
+  if (/^ya\s+(resolvi|ande|listo)$/.test(t)) return true;
+  return false;
+}
+
+export function buildAllGoodResolutionAckReply(): string {
+  return "¡Genial! Me alegra. Cualquier cosa avisame.";
+}
+
 /** El bot acaba de preguntar por «inconveniente… y con qué unidad» (clarify vago). */
 export function threadBotAskedAmbiguousIssueClarify(
   threadText: string | undefined | null,

@@ -39,6 +39,7 @@ import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
   looksLikeSoftSocialContinue,
+  looksLikeAllGoodResolutionAck,
   looksLikeAmbiguousIssueClarifyPushback,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
@@ -421,6 +422,12 @@ const TURN_RULES: TurnRule[] = [
     reason:
       "«Si bueno» / relleno social — ofrecer más ayuda, no clarify de unidad (bug 2026-09-29).",
     decide: ({ text }) => (looksLikeSoftSocialContinue(text) ? "info_guides" : null),
+  },
+  {
+    id: "all_good_resolution_ack",
+    reason:
+      "«Ya está todo ok!» — cierre agradecido, no rechazo TP (bug 2026-09-30).",
+    decide: ({ text }) => (looksLikeAllGoodResolutionAck(text) ? "info_guides" : null),
   },
   {
     id: "ambiguous_issue_clarify_pushback",
@@ -819,6 +826,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "conversation_close_request",
   "conversation_closing_courtesy",
   "soft_social_continue",
+  "all_good_resolution_ack",
   "ambiguous_issue_clarify_pushback",
   "open_case_status_inquiry",
   "open_new_case_request",

@@ -112,6 +112,8 @@ import {
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
   looksLikeSoftSocialContinue,
+  looksLikeAllGoodResolutionAck,
+  buildAllGoodResolutionAckReply,
   looksLikeAmbiguousIssueClarifyPushback,
   buildAmbiguousIssueClarifyPushbackReply,
   resolveExplicitPlatformGuideModule,
@@ -2901,6 +2903,25 @@ export function applyPlatformGuideInterpretGuards(
   };
   const lastGuideKind = opts?.lastGuideKind ?? null;
   let next = interpret;
+  // «Ya está todo ok!» — cierre social, no dump TP ni clarify de inconveniente.
+  if (looksLikeAllGoodResolutionAck(selectionText)) {
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      category: null,
+      reportId: null,
+      clarifyQuestion: buildAllGoodResolutionAckReply(),
+      executionRequest: false,
+      confidence: Math.max(interpret.confidence, 0.9),
+      reason: interpret.reason
+        ? `${interpret.reason}|all_good_resolution_ack`
+        : "all_good_resolution_ack",
+      normalTarget: null,
+    };
+  }
   // Pushback al clarify «inconveniente + unidad»: no dump de TP/Alertas/etc.
   if (looksLikeAmbiguousIssueClarifyPushback(selectionText, threadText)) {
     return {
@@ -3185,6 +3206,7 @@ function normalizeAmbiguousIssueWithoutExplicitModule(
   if (looksLikeTransportePublicoServicioHowTo(selectionText)) return interpret;
   // "Si bueno" no es reclamo vago — no pedir unidad/inconveniente.
   if (looksLikeSoftSocialContinue(selectionText)) return interpret;
+  if (looksLikeAllGoodResolutionAck(selectionText)) return interpret;
   if (isSameFamilyGuideFollowup(selectionText, threadText, opts?.lastGuideKind)) {
     return interpret;
   }

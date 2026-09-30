@@ -75,6 +75,8 @@ import {
   looksLikeSoftSocialContinue,
   looksLikeAmbiguousIssueClarifyPushback,
   buildAmbiguousIssueClarifyPushbackReply,
+  looksLikeAllGoodResolutionAck,
+  buildAllGoodResolutionAckReply,
   looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
 import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
@@ -1376,6 +1378,21 @@ export async function runTurnExecutorPhase(params: {
   ) {
     return {
       message: "Dale. ¿En qué más te ayudo?",
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  // «Ya está todo ok!» → cierre agradecido, no rechazo de TP/guía.
+  // Bug real 2026-09-30: «No puedo ayudarte… cargar un servicio nuevo».
+  if (
+    looksLikeAllGoodResolutionAck(selectionText) &&
+    !pendingKind &&
+    !hasAnyPendingConfirmation(thread) &&
+    !pendingAction?.payload
+  ) {
+    return {
+      message: buildAllGoodResolutionAckReply(),
       executor: "info_guides",
       ok: true,
     };
