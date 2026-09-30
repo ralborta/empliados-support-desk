@@ -6,6 +6,7 @@ import type { NumericExpectedField } from "@/lib/unitReferenceParser";
 import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   looksLikeBareMeterValue,
+  looksLikeMeterValueWithFechaHora,
   threadAwaitingOdometerKmValue,
   threadAwaitingHorometerKmValue,
   threadAwaitingOdometerPlate,
@@ -42,6 +43,14 @@ export function statusIntentOverridesMeterOperationalParse(text: string): boolea
 export function isOperationalMeterCollectionMessage(text: string, threadText: string): boolean {
   if (statusIntentOverridesMeterOperationalParse(text)) return false;
   if (looksLikeFechaHoraLecturaMessage(text)) return true;
+  if (
+    looksLikeMeterValueWithFechaHora(text) &&
+    (threadHasActiveMeterValueRequest(threadText) ||
+      threadAwaitingOdometerKmValue(threadText) ||
+      threadAwaitingHorometerKmValue(threadText))
+  ) {
+    return true;
+  }
   if (
     looksLikeBareMeterValue(text) &&
     (threadHasActiveMeterValueRequest(threadText) ||

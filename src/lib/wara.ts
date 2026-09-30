@@ -2539,7 +2539,21 @@ function normThreadText(text: string): string {
 /** Valor numérico solo (km u horas) durante trámite de odómetro/horómetro. */
 export function looksLikeBareMeterValue(text: string | undefined | null): boolean {
   const t = String(text ?? "").trim();
-  return /^\d{1,7}$/.test(t);
+  if (/^\d{1,7}$/.test(t)) return true;
+  // "260486 km" / "168 hs" — mismo dato con unidad explícita.
+  return /^\d{1,7}\s*(?:km|k|hs?|horas?)$/i.test(t);
+}
+
+/**
+ * Km/hs + fecha/hora en el mismo mensaje (formato que el bot pide al cliente).
+ * Bug real 2026-09-30: «260486 Km - 30/09/2026 a las 11:04» no era medidor ni fecha.
+ */
+export function looksLikeMeterValueWithFechaHora(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 120) return false;
+  const hasMeter = /\b\d{3,7}\s*(?:km|k\b|hs?|horas?)?\b/i.test(raw);
+  if (!hasMeter) return false;
+  return looksLikeFechaHoraLecturaMessage(raw);
 }
 
 /** El bot acaba de pedir km u horas (patente ya confirmada). */

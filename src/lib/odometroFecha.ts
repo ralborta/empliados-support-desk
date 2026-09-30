@@ -588,21 +588,33 @@ export function fechaLecturaTieneHora(
 /**
  * Fecha/hora de lectura del medidor (no búsqueda de unidad ni km/hs de motor).
  * Bug real 2026-08-17: "Hoy a las 4 de la tarde" matcheaba «de la tarde» como marca.
+ * Bug real 2026-09-30: "260486 Km - 30/09/2026 a las 11:04" (formato que el bot pide)
+ * salía false por el veto de km y el KB lo mandaba a «¿inconveniente de la unidad…?».
  */
 export function looksLikeFechaHoraLecturaMessage(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
   if (!raw) return false;
-  if (/\b\d+\s*(?:km|k\b|hs?|horas?)\b/i.test(raw)) return false;
-  const norm = normalizeFechaInput(raw).replace(/[!?.¡¿]+/g, "").trim();
+  const hadMeter = /\b\d+\s*(?:km|k\b|hs?|horas?)\b/i.test(raw);
+  // Quitar el tramo de medidor para reconocer el formato combinado km + fecha/hora.
+  const probe = hadMeter
+    ? raw
+        .replace(/\b\d{1,7}\s*(?:km|k|hs?|horas?)\b/gi, " ")
+        .replace(/[\u2013\u2014\-–—]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    : raw;
+  if (hadMeter && (!probe || probe.length < 3)) return false;
+  if (/\b\d+\s*(?:km|k\b|hs?|horas?)\b/i.test(probe)) return false;
+  const norm = normalizeFechaInput(probe).replace(/[!?.¡¿]+/g, "").trim();
   if (parseColloquialTimeFromText(norm)) {
     if (/\b(hoy|ayer|anteayer|anoche|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(norm)) return true;
     return true;
   }
-  if (looksLikeClockTimeOnlyMessage(raw)) return true;
+  if (looksLikeClockTimeOnlyMessage(probe)) return true;
   if (/\b(hoy|ayer|anteayer|anoche)\b/.test(norm) && /\ba\s+las?\s+\d/.test(norm)) return true;
-  const parsed = parseFechaFromText(raw, "America/Argentina/Buenos_Aires");
+  const parsed = parseFechaFromText(probe, "America/Argentina/Buenos_Aires");
   if (!parsed) return false;
-  if (fechaLecturaTieneHora(parsed, raw)) return true;
+  if (fechaLecturaTieneHora(parsed, probe)) return true;
   return /\b(hoy|ayer|anteayer|anoche|\d{1,2}\/\d{1,2}\/\d{2,4})\b/.test(norm);
 }
 
