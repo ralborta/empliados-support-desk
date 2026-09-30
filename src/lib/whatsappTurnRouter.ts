@@ -38,6 +38,7 @@ import {
 import {
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
+  looksLikeSoftSocialContinue,
   looksLikeExplicitReclamoOrTicketRequest,
   looksLikeFlowControlCommand,
   looksLikeSoftFlowRestart,
@@ -413,6 +414,12 @@ const TURN_RULES: TurnRule[] = [
     reason:
       "Despedida / «No. Gracias.» — cierre social, no búsqueda de flota (bug 2026-09-28).",
     decide: ({ text }) => (looksLikeConversationClosing(text) ? "info_guides" : null),
+  },
+  {
+    id: "soft_social_continue",
+    reason:
+      "«Si bueno» / relleno social — ofrecer más ayuda, no clarify de unidad (bug 2026-09-29).",
+    decide: ({ text }) => (looksLikeSoftSocialContinue(text) ? "info_guides" : null),
   },
   {
     id: "open_case_status_inquiry",
@@ -803,6 +810,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "multi_unit_speed_advisor",
   "conversation_close_request",
   "conversation_closing_courtesy",
+  "soft_social_continue",
   "open_case_status_inquiry",
   "open_new_case_request",
   "resolvable_unit_telemetry_consult",

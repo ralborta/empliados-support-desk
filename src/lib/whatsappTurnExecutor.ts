@@ -72,6 +72,7 @@ import {
   looksLikeColloquialGratitudeAck,
   looksLikeConversationAcknowledgement,
   looksLikeConversationClosing,
+  looksLikeSoftSocialContinue,
   looksLikeSoftFlowRestart,
 } from "@/lib/waraApi";
 import { resolveIdleFollowupMetaTurn } from "@/lib/idleFollowupMeta";
@@ -1358,6 +1359,21 @@ export async function runTurnExecutorPhase(params: {
   ) {
     return {
       message: formatSoftClose("bye"),
+      executor: "info_guides",
+      ok: true,
+    };
+  }
+
+  // "Si bueno" / relleno social sin trámite pendiente → ofrecer más ayuda, no pedir unidad.
+  // Bug real 2026-09-29: interpret KB → «¿Qué inconveniente… y con qué unidad?»
+  if (
+    looksLikeSoftSocialContinue(selectionText) &&
+    !pendingKind &&
+    !hasAnyPendingConfirmation(thread) &&
+    !pendingAction?.payload
+  ) {
+    return {
+      message: "Dale. ¿En qué más te ayudo?",
       executor: "info_guides",
       ok: true,
     };

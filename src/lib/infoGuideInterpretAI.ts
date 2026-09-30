@@ -111,6 +111,7 @@ import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
+  looksLikeSoftSocialContinue,
   resolveExplicitPlatformGuideModule,
   type InfoGuideModulePick,
 } from "@/lib/waraApi";
@@ -3160,6 +3161,8 @@ function normalizeAmbiguousIssueWithoutExplicitModule(
   if (looksLikeGpsOrUnitStatusQuestion(selectionText)) return interpret;
   if (resolveExplicitPlatformGuideModule(selectionText)) return interpret;
   if (looksLikeTransportePublicoServicioHowTo(selectionText)) return interpret;
+  // "Si bueno" no es reclamo vago — no pedir unidad/inconveniente.
+  if (looksLikeSoftSocialContinue(selectionText)) return interpret;
   if (isSameFamilyGuideFollowup(selectionText, threadText, opts?.lastGuideKind)) {
     return interpret;
   }

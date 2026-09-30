@@ -766,6 +766,29 @@ export function looksLikeConversationAcknowledgement(text: string | undefined | 
 }
 
 /**
+ * Relleno social corto ("Si bueno", "Ah bueno", "Si dale") — no es pedido operativo
+ * ni reclamo vago. Bug real 2026-09-29: caía al clarify de
+ * «¿Qué inconveniente se está repitiendo y con qué unidad?» en vez de ofrecer más ayuda.
+ */
+export function looksLikeSoftSocialContinue(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 48) return false;
+  if (looksLikeAcknowledgementWithOperationalFollowUp(raw)) return false;
+  const t = normMetaConversationalText(raw);
+  if (!t) return false;
+  if (
+    /^(si|sip|sii|zi|zii)?\s*(bueno|dale|ok|oka|okey|okay|listo|perfecto|claro|joya|barbaro)(\s+(si|sip|dale|ok))?$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/^(ah|eh|bueno)\s+(si|sip|dale|ok|bueno|claro|listo)$/.test(t)) return true;
+  if (/^(si bueno|bueno si|si dale|dale si|ah bueno|ok bueno|bueno ok)$/.test(t)) return true;
+  return false;
+}
+
+/**
  * Coloquial rioplatense de cierre/agradecimiento — alias explícito para callers del executor.
  */
 export function looksLikeColloquialGratitudeAck(text: string | undefined | null): boolean {

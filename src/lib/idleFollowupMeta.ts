@@ -16,6 +16,7 @@ import { isLastInfoGuideKind } from "@/lib/lastInfoGuideContext";
 import {
   looksLikeMetaConversationalReply,
   looksLikeOperationalIntent,
+  looksLikeSoftSocialContinue,
 } from "@/lib/waraApi";
 import { buildInconclusiveTramiteResumePrompt } from "@/lib/tramiteFlowControl";
 
@@ -482,6 +483,8 @@ export function looksLikeIdleNudgeAffirmation(
   ) {
     return true;
   }
+  // «Si bueno» / «Ah bueno» (bug 2026-09-29: no matcheaba y caía a clarify de unidad)
+  if (looksLikeSoftSocialContinue(raw)) return true;
   // «Si, sigo aquí» / «sí estoy acá» (bug real: no matcheaba y perdía el tema)
   if (/^(si|sip|zi|dale|ok|bueno)\s+(sigo|estoy)\s+(aca|aqui)\b/.test(t)) return true;
   if (/^(sigo|estoy)\s+(aca|aqui)(\s+(todavia|aun))?[\s!.,]*$/.test(t)) return true;
