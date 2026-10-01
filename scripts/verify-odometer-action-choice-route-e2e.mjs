@@ -238,8 +238,8 @@ assert.equal(
 );
 assert.equal(
   classifyTurnExecutor("Corregir", threadAfterClarify),
-  "unidades",
-  "sin expectativa DB no infiere del menú del bot",
+  "odometro",
+  "sin expectativa DB pero con menú en hilo → odometro (bug 2026-10-01)",
 );
 
 const step4 = await postOdometer("Corregir");

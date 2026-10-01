@@ -769,6 +769,8 @@ export function looksLikeConversationAcknowledgement(text: string | undefined | 
  * Relleno social corto ("Si bueno", "Ah bueno", "Si dale") — no es pedido operativo
  * ni reclamo vago. Bug real 2026-09-29: caía al clarify de
  * «¿Qué inconveniente se está repitiendo y con qué unidad?» en vez de ofrecer más ayuda.
+ *
+ * No matchea «dale»/«ok»/«listo» solos: eso es ack operativo (p. ej. post-asesor).
  */
 export function looksLikeSoftSocialContinue(text: string | undefined | null): boolean {
   const raw = String(text ?? "").trim();
@@ -777,7 +779,7 @@ export function looksLikeSoftSocialContinue(text: string | undefined | null): bo
   const t = normMetaConversationalText(raw);
   if (!t) return false;
   if (
-    /^(si|sip|sii|zi|zii)?\s*(bueno|dale|ok|oka|okey|okay|listo|perfecto|claro|joya|barbaro)(\s+(si|sip|dale|ok))?$/.test(
+    /^(si|sip|sii|zi|zii)\s+(bueno|dale|ok|oka|okey|okay|listo|perfecto|claro|joya|barbaro)(\s+(si|sip|dale|ok))?$/.test(
       t,
     )
   ) {
