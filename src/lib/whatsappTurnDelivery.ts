@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isBotPausedForPhone } from "@/lib/atilioBotPause";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { prisma } from "@/lib/db";
 import {
@@ -24,12 +25,14 @@ export type TurnDeliveryDeps = {
   prisma: typeof prisma;
   sendWhatsApp: typeof sendWhatsAppTextWithOptionalMedia;
   sendWhatsAppMessage: typeof sendWhatsAppMessage;
+  isBotPausedForPhone?: typeof isBotPausedForPhone;
 };
 
 const defaultDeps: TurnDeliveryDeps = {
   prisma,
   sendWhatsApp: sendWhatsAppTextWithOptionalMedia,
   sendWhatsAppMessage,
+  isBotPausedForPhone,
 };
 
 /**
@@ -38,6 +41,9 @@ const defaultDeps: TurnDeliveryDeps = {
  *
  * Idempotencia por inbound wamid o `inbound:<ticketMessageId>` — nunca por texto.
  * Presave del executor ≠ entregado: solo `delivered` tras API OK con id del proveedor.
+ *
+ * Contrato 2026-10-01: si botPausedAt, no envía texto/PDF/media (ni fallback BBC).
+ * Solo «Reactivar Kira» levanta esa barrera.
  */
 export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
   return async function deliverTurnToWhatsApp(
@@ -56,6 +62,27 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
 
     if (!message || nextFlow === "ignore") {
       return { ...payload, message, skipResponse_s: "true" };
+    }
+
+    const pausedCheck = deps.isBotPausedForPhone ?? isBotPausedForPhone;
+    if (await pausedCheck(rawPhone, deps.prisma)) {
+      console.log(
+        `[whatsappTurn] Entrega bloqueada: Kira pausada (humano) phone=${rawPhone.slice(0, 6)}…`,
+      );
+      return {
+        ...payload,
+        message: "",
+        summaryText: "",
+        mediaUrl: "",
+        mediaUrl_s: "",
+        skipResponse_s: "true",
+        nextFlow: "ignore",
+        nextFlow_s: "ignore",
+        waDelivery: "human_takeover_paused",
+        waDelivery_s: "human_takeover_paused",
+        executor: "human_takeover",
+        executor_s: "human_takeover",
+      };
     }
 
     if (nextFlow === "router") {

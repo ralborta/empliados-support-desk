@@ -1,7 +1,7 @@
 import type { Customer, PrismaClient, Ticket } from "@prisma/client";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
 import { formatCustomerOdooCaseRefForWhatsApp } from "@/lib/customerOdooCaseRef";
-import { pauseAtilioForCustomer, reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
+import { pauseAtilioForCustomer } from "@/lib/atilioBotPause";
 import {
   findOpenConversationTicket,
   mergeDuplicateOpenTicketsForCustomer,
@@ -228,11 +228,8 @@ export async function ensureRegisteredAdvisorHandoff(
     await pauseAtilioForCustomer(customer.id, prisma, source).catch((e) =>
       console.error("[advisorHandoff] pauseAtilio:", e),
     );
-  } else {
-    await reactivateAtilioForCustomer(customer.id, prisma, "advisor_handoff_keep_active").catch(
-      (e) => console.error("[advisorHandoff] reactivateAtilio:", e),
-    );
   }
+  // Contrato 2026-10-01: no reactivar aquí. Solo «Reactivar Kira» levanta la pausa.
 
   const refreshed =
     (await prisma.ticket.findUnique({ where: { id: ticket.id } })) ?? ticket;

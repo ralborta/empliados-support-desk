@@ -1,6 +1,5 @@
 import type { Customer, PrismaClient, Ticket } from "@prisma/client";
 import { autoAssignNewTicket } from "@/lib/advisorDistribution";
-import { reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
 import { withMediaUrlMarker } from "@/lib/mediaUrlMarker";
 import {
   findOpenConversationTicket,
@@ -279,15 +278,10 @@ export async function ensureUnregisteredPhoneAdvisorHandoff(
     console.error("[unregisteredHandoff] autoAssign:", e);
   }
 
-  // Si el asesor pausó a Kira, el aviso de número no registrado no la vuelve a prender
-  // ni le escribe al cliente. Sin pausa, Kira sigue activa para el ticket y el PDF.
-  if (!advisorPaused) {
-    await reactivateAtilioForCustomer(
-      customer.id,
-      prisma,
-      "unregistered_phone_handoff_keep_active",
-    ).catch((e) => console.error("[unregisteredHandoff] reactivateAtilio:", e));
-  } else {
+  // Contrato 2026-10-01: con o sin pausa humana, este handoff NO reactiva Kira.
+  // Si el asesor ya pausó, no se notifica ni se escribe; si no, Kira puede seguir
+  // activa hasta un OUTBOUND HUMAN / pausa manual — nunca se fuerza unmute acá.
+  if (advisorPaused) {
     console.log(
       `[unregisteredHandoff] Kira sigue pausada para ${customer.id}: el asesor tiene el chat`,
     );

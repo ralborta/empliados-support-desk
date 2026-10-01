@@ -268,15 +268,27 @@ export async function handleWhatsAppTurn(params: {
   const contextNextFlow = String(context.nextFlow ?? "derivar");
 
   if (contextNextFlow === "ignore") {
-    const contextRegistered =
-      context.registered === true || String(context.registered_s) === "true";
     const humanTakeover =
       context.botPaused === true || String(context.botPaused_s) === "true";
+    // Contrato 2026-10-01: con takeover humano NUNCA bypassear ignore
+    // (ni mensajes sustantivos, ni media, ni pending maintenance).
+    if (humanTakeover) {
+      return deliver(
+        buildTurnPayload(context, {
+          message: "",
+          skipResponse_s: "true",
+          nextFlow: "ignore",
+          nextFlow_s: "ignore",
+          executor: "human_takeover",
+          executor_s: "human_takeover",
+        }),
+      );
+    }
+    const contextRegistered =
+      context.registered === true || String(context.registered_s) === "true";
     // No bypassear ignore en números no registrados: ya están derivados a asesor;
     // si no, "Ad198en" u otro mensaje sustantivo reabría el router en loop.
-    // Tampoco bypassear si hay takeover humano (Atilio pausado en panel).
     if (
-      !humanTakeover &&
       contextRegistered &&
       (looksLikeSubstantiveCustomerMessage(selectionText) ||
         isBarePlatePrefixHint(selectionText) ||
@@ -284,7 +296,7 @@ export async function handleWhatsAppTurn(params: {
         looksLikeInboundMediaOnlyEvent(selectionText) ||
         selectionHasAiImageContext(selectionText))
     ) {
-      // Bypass: /turn sigue procesando.
+      // Bypass: /turn sigue procesando (solo si NO hay pausa humana).
     } else {
       return deliver(
         buildTurnPayload(context, {
@@ -292,8 +304,8 @@ export async function handleWhatsAppTurn(params: {
           skipResponse_s: "true",
           nextFlow: "ignore",
           nextFlow_s: "ignore",
-          executor: humanTakeover ? "human_takeover" : "context",
-          executor_s: humanTakeover ? "human_takeover" : "context",
+          executor: "context",
+          executor_s: "context",
         }),
       );
     }
