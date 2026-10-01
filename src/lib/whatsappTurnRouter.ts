@@ -95,6 +95,7 @@ import {
   isCompatibleLiveOdometerPendingReply,
   looksLikeBareAffirmationToOdometerActionChoice,
   looksLikeOdometerActionChoiceReply,
+  looksLikeOdometerActionChoiceInContext,
   looksLikeOdometerActionChoiceUnitContinuation,
   shouldSupersedeOdometerActionChoice,
 } from "@/lib/odometerActionChoice";
@@ -497,7 +498,10 @@ const TURN_RULES: TurnRule[] = [
     id: "odometer_action_choice_reply",
     reason:
       "Respuesta corregir/actualizar o unidad (sin inventar choice) con expectativa odometer_action_choice en DB.",
-    decide: ({ text, pendingAction }) => {
+    decide: ({ text, pendingAction, threadText }) => {
+      if (looksLikeOdometerActionChoiceInContext(text, threadText, pendingAction)) {
+        return "odometro";
+      }
       if (!hasPendingOdometerActionChoice(pendingAction)) return null;
       if (shouldSupersedeOdometerActionChoice(text)) return null;
       if (looksLikeOdometerActionChoiceReply(text)) return "odometro";

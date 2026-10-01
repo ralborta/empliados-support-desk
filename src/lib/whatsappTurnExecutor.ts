@@ -174,6 +174,7 @@ import {
 import {
   hasPendingOdometerActionChoice,
   looksLikeOdometerActionChoiceReply,
+  looksLikeOdometerActionChoiceInContext,
   shouldSupersedeOdometerActionChoice,
 } from "@/lib/odometerActionChoice";
 import {
@@ -1411,6 +1412,23 @@ export async function runTurnExecutorPhase(params: {
       executor: "info_guides",
       ok: true,
     };
+  }
+
+  // «Actualizar»/«Corregir» tras menú de odómetro → executor, no clarify de inconveniente.
+  // Bug real 2026-10-01: KB inventaba «¿Qué inconveniente se está repitiendo…?»
+  if (
+    looksLikeOdometerActionChoiceInContext(
+      selectionText,
+      thread,
+      pendingAction,
+    )
+  ) {
+    const execResult = await invokeExecutor("odometro", rawPhone, selectionText, apiKey);
+    const execMessage = messageFromPayload(execResult);
+    const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    if (execMessage || !executorSkippedSilently(execResult)) {
+      return { message: execMessage, executor: "odometro", ok: execOk };
+    }
   }
 
   // Meta-conversacional / pushback idle (acotado al último cierre automático).
@@ -2878,7 +2896,14 @@ export async function runTurnExecutorPhase(params: {
   // Con WARA_AGENT_MODE el LLM improvisaba "no tengo info" sin llamar guia_informativa
   // (bug prod 2026-09-08: "módulo de transporte de pasajeros").
   // No pisar trámites operativos que las reglas ya resolvieron (cert/odo/asesor).
-  if (!isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread)) {
+  if (
+    !isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread) &&
+    !looksLikeOdometerActionChoiceInContext(
+      selectionText,
+      threadCtx.classificationThread,
+      pendingAction,
+    )
+  ) {
     const {
       interpretPlatformKnowledgeTurn,
       isAssistantIdentityInterpret,

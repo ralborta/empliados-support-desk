@@ -1572,7 +1572,8 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
   const raw = String(text ?? "").trim();
   if (!raw) return false;
   if (looksLikeOdometerInfoRequest(raw)) return false;
-  if (detectLoosePlate(raw) || detectPlate(raw)) return false;
+  // Patente/unidad en el mismo mensaje NO anula el arranque: «cambio de odómetro de la AG 562 SP…».
+  // Bug real 2026-10-01: detectLoosePlate hacía return false y el turno caía mal / silencio.
   const t = insertMissingSpaceAfterOdometerKeywords(
     raw
       .normalize("NFD")

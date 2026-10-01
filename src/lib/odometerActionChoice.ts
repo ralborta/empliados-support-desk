@@ -59,6 +59,41 @@ export function looksLikeOdometerActionChoiceReply(text: string): boolean {
 }
 
 /**
+ * El bot preguntó corregir vs actualizar odómetro (menú clarify).
+ * Fallback si pendingAction no está / se perdió — el hilo sí lo tiene.
+ */
+export function threadBotAskedOdometerActionChoice(
+  threadText: string | undefined | null,
+): boolean {
+  const raw = String(threadText ?? "");
+  if (!raw.trim()) return false;
+  const tail = raw
+    .slice(-2200)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    /que necesitas con el odometro/.test(tail) ||
+    /corregir o actualizar el kilometraje/.test(tail) ||
+    (/corregir o actualizar/.test(tail) && /\bodometro\b/.test(tail))
+  );
+}
+
+/**
+ * «Actualizar» / «Corregir» como respuesta al menú de odómetro (pending o hilo).
+ * Bug real 2026-10-01: sin esto el KB inventaba «¿Qué inconveniente… y con qué unidad?».
+ */
+export function looksLikeOdometerActionChoiceInContext(
+  text: string,
+  threadText: string,
+  pendingAction?: PendingActionRecord | { type?: string; payload?: Record<string, unknown> } | null,
+): boolean {
+  if (!looksLikeOdometerActionChoiceReply(text)) return false;
+  if (hasPendingOdometerActionChoice(pendingAction)) return true;
+  return threadBotAskedOdometerActionChoice(threadText);
+}
+
+/**
  * Afirmación breve sin unidad ni elección corregir/actualizar.
  * No inventa la opción: el trámite debe repreguntar o pedir datos.
  */

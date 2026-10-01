@@ -71,8 +71,8 @@ assert.equal(
 );
 assert.equal(
   classifyTurnExecutor("Corregir", clarifyThread),
-  "unidades",
-  "sin pendingAction el router no infiere del menú del bot",
+  "odometro",
+  "sin pendingAction pero con menú en hilo → odometro (bug 2026-10-01 Actualizar→inconveniente)",
 );
 
 assert.equal(

@@ -112,6 +112,8 @@ import {
   looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceGuideFollowupQuestion,
   looksLikeSoftSocialContinue,
+  looksLikeAllGoodResolutionAck,
+  buildAllGoodResolutionAckReply,
   looksLikeAmbiguousIssueClarifyPushback,
   buildAmbiguousIssueClarifyPushbackReply,
   resolveExplicitPlatformGuideModule,
@@ -119,6 +121,10 @@ import {
 } from "@/lib/waraApi";
 import { detectAllPlates, formatPlateWithSpaces } from "@/lib/wara";
 import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
+import {
+  looksLikeOdometerActionChoiceReply,
+  threadBotAskedOdometerActionChoice,
+} from "@/lib/odometerActionChoice";
 
 const INTERPRET_TIMEOUT_MS = OPENAI_DEFAULT_TIMEOUT_MS + 2_000;
 const MIN_ROUTE_CONFIDENCE = 0.72;
@@ -2902,6 +2908,25 @@ export function applyPlatformGuideInterpretGuards(
   };
   const lastGuideKind = opts?.lastGuideKind ?? null;
   let next = interpret;
+  // «Ya está todo ok!» — cierre social, no dump TP ni clarify de inconveniente.
+  if (looksLikeAllGoodResolutionAck(selectionText)) {
+    return {
+      ...interpret,
+      route: "info_guides",
+      guideKind: null,
+      need: "ambiguous",
+      articleIds: [],
+      category: null,
+      reportId: null,
+      clarifyQuestion: buildAllGoodResolutionAckReply(),
+      executionRequest: false,
+      confidence: Math.max(interpret.confidence, 0.9),
+      reason: interpret.reason
+        ? `${interpret.reason}|all_good_resolution_ack`
+        : "all_good_resolution_ack",
+      normalTarget: null,
+    };
+  }
   // Pushback al clarify «inconveniente + unidad»: no dump de TP/Alertas/etc.
   if (looksLikeAmbiguousIssueClarifyPushback(selectionText, threadText)) {
     return {
@@ -3186,8 +3211,16 @@ function normalizeAmbiguousIssueWithoutExplicitModule(
   if (looksLikeTransportePublicoServicioHowTo(selectionText)) return interpret;
   // "Si bueno" no es reclamo vago — no pedir unidad/inconveniente.
   if (looksLikeSoftSocialContinue(selectionText)) return interpret;
+  if (looksLikeAllGoodResolutionAck(selectionText)) return interpret;
   // Dato de odómetro/horómetro en curso — no reinventar «inconveniente de la unidad».
   if (isOperationalMeterCollectionMessage(selectionText, threadText)) return interpret;
+  // «Actualizar»/«Corregir» del menú de odómetro — no clarify de inconveniente.
+  if (
+    looksLikeOdometerActionChoiceReply(selectionText) &&
+    threadBotAskedOdometerActionChoice(threadText)
+  ) {
+    return interpret;
+  }
   if (isSameFamilyGuideFollowup(selectionText, threadText, opts?.lastGuideKind)) {
     return interpret;
   }
