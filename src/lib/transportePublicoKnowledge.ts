@@ -661,3 +661,133 @@ export function looksLikeTransportePublicoGuideFollowupQuestion(
   return false;
 }
 
+/**
+ * Pedido de editar/eliminar una vuelta en planilla horaria / turno TP.
+ * Bug real 2026-09-29: Kira preguntaba «¿Qué inconveniente específico… Planilla de
+ * Horarios?» en loop aunque el cliente ya pedía eliminar una vuelta repetida.
+ * No confundir con consulta GPS de etapas/vuelta de unidad.
+ */
+export function looksLikeTransportePublicoVueltaPlanillaRequest(
+  raw: string | undefined | null,
+): boolean {
+  const text = normalizeTransporteUtterance(raw);
+  if (!text || text.length > 280) return false;
+  if (looksLikeTransportePublicoForeignTopic(raw)) return false;
+  if (
+    /\b(gps|ignicion|patente|matricula|odometro|horometro|certificado|no reporta)\b/.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+
+  const hasVuelta = /\bvueltas?\b/.test(text);
+  const hasPlanillaOrTurno =
+    /\bplanilla(\s+de)?\s+horarios?\b/.test(text) ||
+    /\bplanilla\b/.test(text) ||
+    /\bturnos?\b/.test(text) ||
+    /\bhojas?\s+de\s+turno\b/.test(text);
+  const editVerb =
+    /\b(eliminar|elimino|elimine|borrar|borro|sacar|saco|quitar|quito|corregir|editar|modificar)\b/.test(
+      text,
+    );
+  const duplicateIssue =
+    /\bvueltas?\s+(repetid\w*|duplicad\w*|de\s+mas|demas|perdid\w*)\b/.test(text) ||
+    /\b(repetid\w*|duplicad\w*)\s+(la\s+)?vueltas?\b/.test(text);
+
+  if (hasVuelta && hasPlanillaOrTurno && (editVerb || duplicateIssue)) return true;
+  if (hasVuelta && editVerb && hasPlanillaOrTurno) return true;
+  // «eliminar una vuelta de Planilla de Horarios» (orden libre).
+  if (hasVuelta && editVerb && /\b(planilla|horario|turnos?)\b/.test(text)) return true;
+  return false;
+}
+
+/** El bot preguntó inconveniente específico sobre vuelta/planilla (clarify LLM). */
+export function threadBotAskedPlanillaVueltaIssueClarify(
+  threadText: string | undefined | null,
+): boolean {
+  const raw = String(threadText ?? "");
+  if (!raw.trim()) return false;
+  const tail = raw
+    .slice(-2200)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!/\b(inconveniente|problema|falla|issue)\b/.test(tail)) return false;
+  return (
+    /\b(planilla(\s+de)?\s+horarios?|planilla|vueltas?)\b/.test(tail) &&
+    /\b(especific\w*|con la vuelta|de la planilla)\b/.test(tail)
+  );
+}
+
+/**
+ * Respuesta al clarify de planilla/vuelta: «vuelta repetida», «eliminar…», etc.
+ * No aplica sin ese clarify previo en el hilo.
+ */
+export function looksLikePlanillaVueltaIssueClarifyFollowup(
+  text: string | undefined | null,
+  threadText: string | undefined | null,
+): boolean {
+  if (!threadBotAskedPlanillaVueltaIssueClarify(threadText)) return false;
+  const t = normalizeTransporteUtterance(text);
+  if (!t || t.length > 160) return false;
+  if (looksLikeTransportePublicoForeignTopic(text)) return false;
+  if (looksLikeTransportePublicoVueltaPlanillaRequest(text)) return true;
+  if (
+    /\b(vuelta|vueltas)\b/.test(t) &&
+    /\b(repetid\w*|duplicad\w*|perdid\w*|de\s+mas|demas|eliminar|borrar|sacar|quitar)\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/^(perdon|perdona|disculpa)[,.]?\s+/.test(t) && /\bvuelta\b/.test(t)) return true;
+  return false;
+}
+
+/** Pedido o follow-up de edición de vuelta en planilla/turno — ruta guía TP. */
+export function looksLikeTransportePublicoVueltaPlanillaGuideTurn(
+  text: string | undefined | null,
+  threadText: string | undefined | null,
+): boolean {
+  return (
+    looksLikeTransportePublicoVueltaPlanillaRequest(text) ||
+    looksLikePlanillaVueltaIssueClarifyFollowup(text, threadText)
+  );
+}
+
+export function buildTransportePublicoVueltaPlanillaInterpret(
+  interpret: {
+    confidence: number;
+    reason: string | null;
+  },
+): {
+  route: "info_guides";
+  guideKind: "transporte_publico";
+  need: "execute";
+  articleIds: string[];
+  clarifyQuestion: null;
+  executionRequest: true;
+  confidence: number;
+  reason: string;
+  category: null;
+  reportId: null;
+  normalTarget: null;
+} {
+  return {
+    route: "info_guides",
+    guideKind: "transporte_publico",
+    need: "execute",
+    articleIds: ["tp-ejecucion-no-disponible", "tp-turno-crear"],
+    clarifyQuestion: null,
+    executionRequest: true,
+    confidence: Math.max(interpret.confidence, 0.92),
+    reason: interpret.reason
+      ? `${interpret.reason}|tp_vuelta_planilla_guard`
+      : "tp_vuelta_planilla_guard",
+    category: null,
+    reportId: null,
+    normalTarget: null,
+  };
+}
+

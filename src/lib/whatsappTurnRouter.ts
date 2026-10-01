@@ -99,6 +99,7 @@ import {
   looksLikeOdometerActionChoiceUnitContinuation,
   shouldSupersedeOdometerActionChoice,
 } from "@/lib/odometerActionChoice";
+import { looksLikeTransportePublicoVueltaPlanillaGuideTurn } from "@/lib/transportePublicoKnowledge";
 
 /** Ejecutores HTTP del backend (Fase 1 completa — sin BBC Router GPT). */
 export type TurnExecutorId =
@@ -436,6 +437,15 @@ const TURN_RULES: TurnRule[] = [
       "«Qué inconveniente?» tras clarify vago — disculpa, no tutorial TP (bug 2026-09-29).",
     decide: ({ text, threadText }) =>
       looksLikeAmbiguousIssueClarifyPushback(text, threadText) ? "info_guides" : null,
+  },
+  {
+    id: "tp_vuelta_planilla_edit",
+    reason:
+      "Eliminar/editar vuelta de planilla/turno — guía TP, no loop de inconveniente (bug 2026-09-29).",
+    decide: ({ text, threadText }) =>
+      looksLikeTransportePublicoVueltaPlanillaGuideTurn(text, threadText)
+        ? "info_guides"
+        : null,
   },
   {
     id: "open_case_status_inquiry",
@@ -832,6 +842,7 @@ export const TURN_SAFETY_GUARD_RULE_IDS = new Set<string>([
   "soft_social_continue",
   "all_good_resolution_ack",
   "ambiguous_issue_clarify_pushback",
+  "tp_vuelta_planilla_edit",
   "open_case_status_inquiry",
   "open_new_case_request",
   "resolvable_unit_telemetry_consult",
