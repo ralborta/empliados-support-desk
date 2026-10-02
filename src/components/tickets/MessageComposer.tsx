@@ -32,12 +32,15 @@ export function MessageComposer({
   ticketId,
   customerId,
   botPaused = false,
+  onBotPausedChange,
   onSent,
   embedded = false,
 }: {
   ticketId: string;
   customerId?: string | null;
   botPaused?: boolean;
+  /** Actualiza el badge/botón en el ticket sin F5 (pausa automática al enviar). */
+  onBotPausedChange?: (paused: boolean) => void;
   onSent?: () => void;
   embedded?: boolean;
 }) {
@@ -85,6 +88,10 @@ export function MessageComposer({
         const data = await res.json().catch(() => ({}));
         setError(data.error || "No se pudo guardar el mensaje");
       } else {
+        // OUTBOUND al cliente pausa Kira en el servidor: reflejar en UI al instante.
+        if (direction === "OUTBOUND") {
+          onBotPausedChange?.(true);
+        }
         updateText("");
         setFile(null);
         if (onSent) {
@@ -175,7 +182,11 @@ export function MessageComposer({
 
         <div className="flex items-center gap-2">
           {customerId && direction === "OUTBOUND" ? (
-            <BotPausedToggle customerId={customerId} initialPaused={botPaused} />
+            <BotPausedToggle
+              customerId={customerId}
+              paused={botPaused}
+              onPausedChange={onBotPausedChange}
+            />
           ) : null}
           <button
             type="submit"

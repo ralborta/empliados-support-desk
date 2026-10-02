@@ -99,7 +99,12 @@ export function TicketDetailView({
       direction: m.direction,
     })),
   );
+  const [botPaused, setBotPaused] = useState(!!ticket.botPaused);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setBotPaused(!!ticket.botPaused);
+  }, [ticket.botPaused, ticket.id]);
 
   const refreshMessages = useCallback(async () => {
     try {
@@ -179,7 +184,7 @@ export function TicketDetailView({
               )}
             </div>
             <div className="mt-2">
-              <TicketV2HeaderBadges ticketId={ticket.id} botPaused={!!ticket.botPaused} />
+              <TicketV2HeaderBadges ticketId={ticket.id} botPaused={botPaused} />
             </div>
           </div>
           <p className="shrink-0 text-[11px] text-slate-400" title={formatDateTimeAR(ticket.createdAt)}>
@@ -218,7 +223,8 @@ export function TicketDetailView({
               <MessageComposer
                 ticketId={ticket.id}
                 customerId={ticket.customerId}
-                botPaused={!!ticket.botPaused}
+                botPaused={botPaused}
+                onBotPausedChange={setBotPaused}
                 onSent={refreshMessages}
                 embedded
               />
@@ -262,7 +268,7 @@ export function TicketDetailView({
               ticketId={ticket.id}
               currentPriority={ticket.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT"}
             />
-            <V2OperationPanel ticketId={ticket.id} botPaused={!!ticket.botPaused} />
+            <V2OperationPanel ticketId={ticket.id} botPaused={botPaused} />
           </aside>
       </div>
 
