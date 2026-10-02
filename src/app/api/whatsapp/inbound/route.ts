@@ -888,7 +888,7 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
 
   const normalizedOutboundText = normalizeOutboundDedupText(messageText);
 
-  // Pre-guardado del backend (turn/unidades/certificados) + webhook con wamid estable:
+  // Pre-guardado del backend (turn/unidades/certificados) + intento humano panel:
   // fusionar en la fila existente en vez de duplicar en el panel.
   const recentHumanOutbound = await findRecentSameContentMessage(prisma, {
     ticketId: targetTicket.id,
@@ -992,14 +992,20 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
     }
   }
 
-  const rawPayload = { eventName, data };
+  // Sin vínculo a intento panel / pre-guardado bot: no afirmar autoría Kira ni asesor.
+  const rawPayload = {
+    eventName,
+    data,
+    authorship: "unconfirmed",
+    source: "webhook_outgoing_unlinked",
+    deliveryStatus: "sent",
+  };
 
-  // Guardar el mensaje saliente del agente desde BuilderBot
   await prisma.ticketMessage.create({
     data: {
       ticketId: targetTicket.id,
       direction: "OUTBOUND",
-      from: "BOT", // Mensaje enviado por agente desde BuilderBot, se muestra como bot (verde)
+      from: "BOT",
       text: messageText || "[Archivo adjunto]",
       attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
       rawPayload,

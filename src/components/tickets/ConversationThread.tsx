@@ -17,6 +17,9 @@ export type ThreadMessage = {
   createdAt: string;
   direction?: string;
   attachments: unknown;
+  deliveryStatus?: string | null;
+  authorship?: string | null;
+  clientAttemptId?: string | null;
 };
 
 type ThreadItem =
@@ -54,7 +57,8 @@ function buildThreadItems(messages: ThreadMessage[]): ThreadItem[] {
     }
 
     const isInternal = msg.direction === "INTERNAL_NOTE";
-    const groupFrom = isInternal ? "__INTERNAL__" : msg.from;
+    const authorshipKey = msg.authorship === "unconfirmed" ? "unconfirmed" : "known";
+    const groupFrom = isInternal ? "__INTERNAL__" : `${msg.from}:${authorshipKey}`;
     const last = items[items.length - 1];
     if (last?.kind === "group" && last.from === groupFrom) {
       last.messages.push(msg);
@@ -71,17 +75,25 @@ function buildThreadItems(messages: ThreadMessage[]): ThreadItem[] {
   return items;
 }
 
-function bubbleClass(from: string, isInternal: boolean): string {
+function bubbleClass(from: string, isInternal: boolean, authorship?: string | null): string {
   if (isInternal) {
     return "bg-amber-50 text-amber-950 ring-1 ring-amber-200/80 border-l-2 border-amber-400";
+  }
+  if (authorship === "unconfirmed") {
+    return "bg-slate-100 text-slate-800 ring-1 ring-slate-300/80";
   }
   if (from === "CUSTOMER") return "bg-white text-slate-800 ring-1 ring-slate-200/90";
   if (from === "BOT") return "bg-emerald-50/90 text-emerald-950 ring-1 ring-emerald-200/70";
   return "bg-[#4a0e1c]/[0.06] text-slate-900 ring-1 ring-[#4a0e1c]/10";
 }
 
-function senderLabel(from: string, isInternal: boolean): string {
+function senderLabel(
+  from: string,
+  isInternal: boolean,
+  authorship?: string | null,
+): string {
   if (isInternal) return "Nota interna";
+  if (authorship === "unconfirmed") return "Origen sin confirmar";
   return fromLabels[from as "CUSTOMER" | "BOT" | "HUMAN"] || from;
 }
 
@@ -110,9 +122,16 @@ export function ConversationThread({ messages }: { messages: ThreadMessage[] }) 
           );
         }
 
-        const { from, isInternal, messages: groupMsgs } = item;
-        const label = senderLabel(from === "__INTERNAL__" ? "HUMAN" : from, isInternal);
+        const { from: groupKey, isInternal, messages: groupMsgs } = item;
+        const from = groupKey.includes(":") ? groupKey.split(":")[0]! : groupKey;
+        const groupAuthorship = groupMsgs[0]?.authorship ?? null;
+        const label = senderLabel(
+          from === "__INTERNAL__" ? "HUMAN" : from,
+          isInternal,
+          groupAuthorship,
+        );
         const first = groupMsgs[0]!;
+        const showUnconfirmedAvatar = groupAuthorship === "unconfirmed";
 
         return (
           <div key={item.key} className="flex gap-2.5">
@@ -120,6 +139,10 @@ export function ConversationThread({ messages }: { messages: ThreadMessage[] }) 
               {isInternal ? (
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-800">
                   <Lock className="h-3.5 w-3.5" aria-hidden />
+                </span>
+              ) : showUnconfirmedAvatar ? (
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-600">
+                  <User className="h-3.5 w-3.5" aria-hidden />
                 </span>
               ) : from === "BOT" ? (
                 <AtilioAvatar size="sm" />
@@ -137,18 +160,30 @@ export function ConversationThread({ messages }: { messages: ThreadMessage[] }) 
                 <time dateTime={first.createdAt}>{formatDateTimeAR(first.createdAt)}</time>
               </div>
               <div className="space-y-1">
-                {groupMsgs.map((msg) => (
-                  <div key={msg.id}>
-                    <div
-                      className={`inline-block max-w-[min(100%,42rem)] rounded-2xl px-3 py-2 text-sm leading-relaxed ${bubbleClass(from === "__INTERNAL__" ? "HUMAN" : from, isInternal)}`}
-                    >
-                      {msg.text || "[Sin texto]"}
+                {groupMsgs.map((msg) => {
+                  const pending =
+                    msg.deliveryStatus === "pending" ||
+                    msg.deliveryStatus === "confirmation_pending";
+                  return (
+                    <div key={msg.id}>
+                      <div
+                        className={`inline-block max-w-[min(100%,42rem)] rounded-2xl px-3 py-2 text-sm leading-relaxed ${pending ? "opacity-70" : ""} ${bubbleClass(from === "__INTERNAL__" ? "HUMAN" : from, isInternal, msg.authorship)}`}
+                      >
+                        {msg.text || "[Sin texto]"}
+                        {pending ? (
+                          <span className="mt-1 block text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                            {msg.deliveryStatus === "confirmation_pending"
+                              ? "Confirmando entrega…"
+                              : "Enviando…"}
+                          </span>
+                        ) : null}
+                      </div>
+                      {msg.attachments ? (
+                        <MessageAttachments attachments={msg.attachments as Attachment[]} />
+                      ) : null}
                     </div>
-                    {msg.attachments ? (
-                      <MessageAttachments attachments={msg.attachments as Attachment[]} />
-                    ) : null}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Paperclip, Bold, Italic, List } from "lucide-react";
 import type { MessageDirection } from "@/lib/types";
 import { BotPausedToggle } from "./BotPausedToggle";
 
 function draftKey(ticketId: string): string {
   return `kira-draft:${ticketId}`;
+}
+
+function attemptKey(ticketId: string): string {
+  return `kira-attempt:${ticketId}`;
 }
 
 function readDraft(ticketId: string): string {
@@ -26,6 +30,32 @@ function writeDraft(ticketId: string, value: string): void {
   } catch {
     /* ignore quota / private mode */
   }
+}
+
+function readStoredAttemptId(ticketId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem(attemptKey(ticketId));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredAttemptId(ticketId: string, attemptId: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (!attemptId) sessionStorage.removeItem(attemptKey(ticketId));
+    else sessionStorage.setItem(attemptKey(ticketId), attemptId);
+  } catch {
+    /* ignore */
+  }
+}
+
+function newAttemptId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `att-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function MessageComposer({
@@ -49,14 +79,62 @@ export function MessageComposer({
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusHint, setStatusHint] = useState<string | null>(null);
+  const attemptIdRef = useRef<string | null>(null);
+  const sentTextRef = useRef<string>("");
 
   useEffect(() => {
     setText(readDraft(ticketId));
+    attemptIdRef.current = readStoredAttemptId(ticketId);
+    setError(null);
+    setStatusHint(null);
   }, [ticketId]);
 
   const updateText = (value: string) => {
     setText(value);
     writeDraft(ticketId, value);
+  };
+
+  const clearDraftIfUnchanged = (sentText: string) => {
+    // Solo limpia si el borrador sigue siendo el del intento confirmado.
+    setText((current) => {
+      if (current.trim() === sentText.trim()) {
+        writeDraft(ticketId, "");
+        return "";
+      }
+      return current;
+    });
+  };
+
+  const waitForAttemptConfirmation = async (attemptId: string, sentText: string) => {
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const res = await fetch(`/api/tickets/${ticketId}/messages`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const messages = Array.isArray(data.messages) ? data.messages : [];
+        const match = messages.find(
+          (m: { clientAttemptId?: string | null; deliveryStatus?: string | null }) =>
+            m.clientAttemptId === attemptId && m.deliveryStatus === "sent",
+        );
+        if (match) {
+          clearDraftIfUnchanged(sentText);
+          attemptIdRef.current = null;
+          writeStoredAttemptId(ticketId, null);
+          setStatusHint(null);
+          setFile(null);
+          onSent?.();
+          return;
+        }
+      } catch {
+        /* ignore poll errors */
+      }
+    }
+    setStatusHint(
+      "Sigue en confirmación pendiente. Si el cliente lo recibió, no reenvíes: esperá o refrescá el hilo.",
+    );
   };
 
   const wrapSelection = (before: string, after: string) => {
@@ -74,31 +152,66 @@ export function MessageComposer({
     if (!text.trim() && !file) return;
     setLoading(true);
     setError(null);
+    setStatusHint(null);
+
+    const outboundText = text;
+    sentTextRef.current = outboundText;
+
+    if (direction === "OUTBOUND") {
+      if (!attemptIdRef.current) {
+        attemptIdRef.current = newAttemptId();
+        writeStoredAttemptId(ticketId, attemptIdRef.current);
+      }
+    }
+
     try {
       const formData = new FormData();
       formData.append("text", text);
       formData.append("direction", direction);
       formData.append("from", "HUMAN");
+      if (direction === "OUTBOUND" && attemptIdRef.current) {
+        formData.append("clientAttemptId", attemptIdRef.current);
+      }
       if (file) formData.append("file", file);
+
       const res = await fetch(`/api/tickets/${ticketId}/messages`, {
         method: "POST",
         body: formData,
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => ({}));
+      const deliveryStatus = String(data.deliveryStatus || "");
+
+      if (direction === "OUTBOUND") {
+        // Takeover local aunque la confirmación del proveedor esté pendiente.
+        onBotPausedChange?.(true);
+        onSent?.();
+
+        if (deliveryStatus === "sent" || (res.ok && !deliveryStatus && res.status === 200)) {
+          clearDraftIfUnchanged(outboundText);
+          attemptIdRef.current = null;
+          writeStoredAttemptId(ticketId, null);
+          setFile(null);
+          setStatusHint(null);
+        } else if (deliveryStatus === "confirmation_pending" || res.status === 202) {
+          setStatusHint("Confirmación pendiente del proveedor…");
+          setFile(null);
+          void waitForAttemptConfirmation(attemptIdRef.current || "", outboundText);
+        } else if (deliveryStatus === "failed" || res.status === 422 || !res.ok) {
+          setError(data.error || "No se pudo enviar el mensaje al cliente");
+          // Conserva attemptId + borrador para reintento seguro (mismo id).
+        } else {
+          clearDraftIfUnchanged(outboundText);
+          attemptIdRef.current = null;
+          writeStoredAttemptId(ticketId, null);
+          setFile(null);
+        }
+      } else if (!res.ok) {
         setError(data.error || "No se pudo guardar el mensaje");
       } else {
-        // OUTBOUND al cliente pausa Kira en el servidor: reflejar en UI al instante.
-        if (direction === "OUTBOUND") {
-          onBotPausedChange?.(true);
-        }
         updateText("");
         setFile(null);
-        if (onSent) {
-          onSent();
-        } else {
-          window.location.reload();
-        }
+        if (onSent) onSent();
+        else window.location.reload();
       }
     } catch {
       setError("Error de red");
@@ -199,6 +312,7 @@ export function MessageComposer({
       </div>
 
       {error ? <p className="px-4 pb-3 text-xs text-red-600">{error}</p> : null}
+      {statusHint ? <p className="px-4 pb-3 text-xs text-amber-700">{statusHint}</p> : null}
     </form>
   );
 }

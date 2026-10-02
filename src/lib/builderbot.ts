@@ -104,9 +104,13 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
       status: error.response?.status,
       data: error.response?.data,
     });
-    throw new Error(
+    const wrapped = new Error(
       `Error al enviar mensaje a BuilderBot: ${error.message}`
-    );
+    ) as Error & { code?: string; response?: unknown; cause?: unknown };
+    wrapped.code = error.code;
+    wrapped.response = error.response;
+    wrapped.cause = error;
+    throw wrapped;
   }
 }
 

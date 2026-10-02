@@ -123,6 +123,8 @@ export async function mergeWebhookIntoPlatformOutbound(
       rawPayload: {
         ...prior,
         webhookOutgoing: params.webhookRawPayload,
+        // Confirmación del proveedor: el intento panel deja de estar pending.
+        deliveryStatus: "sent",
       } as Prisma.InputJsonObject,
     },
   });
