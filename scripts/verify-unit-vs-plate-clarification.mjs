@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Bug 2026-08-10: "600-006" no es patente 600006.
- * Match en flota → resuelve; si no / dudoso → pregunta unidad vs patente.
+ * Match en flota → resuelve; código con guión que no está → no encontrado (no pregunta patente).
  */
 import assert from "node:assert/strict";
 import {
@@ -46,7 +46,9 @@ const missing = await resolveUnitQuery({
   units: fleet,
 });
 assert.equal(missing.intent, "need_clarification");
-assert.match(String(missing.clarificationQuestion), /unidad|patente/i);
+assert.match(String(missing.clarificationQuestion), /600-999/);
+assert.match(String(missing.clarificationQuestion), /no encontr/i);
+assert.doesNotMatch(String(missing.clarificationQuestion), /Respondé \*unidad\*/i);
 assert.doesNotMatch(String(missing.clarificationQuestion), /patente 600/i);
 
 const ask = buildUnitNameOrPlateClarificationReply("600-006");

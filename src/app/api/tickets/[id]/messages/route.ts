@@ -2,14 +2,59 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
+import { extractBuilderBotOutboundMessageId } from "@/lib/builderbotSendResult";
 import { summarizeConversation } from "@/lib/openai";
 import { uploadFileToBlob } from "@/lib/blob";
-import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+import {
+  assertAdvisorCanAccessTicket,
+  claimConversationOnHumanReply,
+} from "@/lib/advisorDistribution";
+import { findRecentSameContentMessage } from "@/lib/outboundMessageDedup";
+import { pauseAtilioForCustomer } from "@/lib/atilioBotPause";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import type { TicketStatus } from "@/lib/types";
+import {
+  buildPanelHumanPendingPayload,
+  findPanelHumanAttemptById,
+  isAmbiguousProviderSendError,
+  isPanelAttemptExternalId,
+  messagePresentation,
+  panelAttemptAttachmentsKey,
+  panelAttemptContentMatches,
+  panelAttemptExternalId,
+  readPanelOutboundMeta,
+  updatePanelOutboundDelivery,
+  type PanelDeliveryStatus,
+} from "@/lib/panelHumanOutboundAttempt";
+
+function serializeMessage(m: {
+  id: string;
+  from: string;
+  direction: string;
+  text: string;
+  createdAt: Date;
+  attachments: unknown;
+  rawPayload?: unknown;
+  externalMessageId?: string | null;
+}) {
+  const presentation = messagePresentation(m.rawPayload);
+  return {
+    id: m.id,
+    from: m.from,
+    direction: m.direction,
+    text: m.text,
+    createdAt: m.createdAt.toISOString(),
+    attachments: m.attachments,
+    deliveryStatus: presentation.deliveryStatus,
+    authorship: presentation.authorship,
+    clientAttemptId: presentation.clientAttemptId,
+    externalMessageId: m.externalMessageId ?? null,
+  };
+}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
@@ -25,17 +70,44 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     select: {
       id: true,
       from: true,
+      direction: true,
       text: true,
       createdAt: true,
       attachments: true,
+      rawPayload: true,
+      externalMessageId: true,
+    },
+  });
+
+  // Snapshot liviano para que otras sesiones vean estado/pausa/asignación sin F5.
+  const ticketMeta = await prisma.ticket.findUnique({
+    where: { id },
+    select: {
+      status: true,
+      priority: true,
+      assignedToUserId: true,
+      assignedTo: { select: { id: true, name: true } },
+      customer: { select: { botPausedAt: true } },
     },
   });
 
   return NextResponse.json({
-    messages: messages.map((m) => ({
-      ...m,
-      createdAt: m.createdAt.toISOString(),
-    })),
+    messages: messages
+      .filter((m) => {
+        const status = readPanelOutboundMeta(m.rawPayload).deliveryStatus;
+        // Fallidos no se muestran como enviados; el borrador del asesor los reintenta.
+        return status !== "failed";
+      })
+      .map((m) => serializeMessage(m)),
+    ticket: ticketMeta
+      ? {
+          status: ticketMeta.status,
+          priority: ticketMeta.priority,
+          assignedToUserId: ticketMeta.assignedToUserId,
+          assignedTo: ticketMeta.assignedTo,
+          botPaused: Boolean(ticketMeta.customer?.botPausedAt),
+        }
+      : null,
   });
 }
 
@@ -44,6 +116,7 @@ const messageSchema = z.object({
   direction: z.enum(["INBOUND", "OUTBOUND", "INTERNAL_NOTE"]).default("OUTBOUND"),
   from: z.enum(["CUSTOMER", "BOT", "HUMAN"]).default("HUMAN"),
   rawPayload: z.record(z.string(), z.any()).optional(),
+  clientAttemptId: z.string().min(8).max(80).optional(),
 });
 
 function getMimeTypeLabel(mime: string): string {
@@ -52,6 +125,52 @@ function getMimeTypeLabel(mime: string): string {
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
   return "document";
+}
+
+async function refreshTicketSummary(ticketId: string): Promise<void> {
+  try {
+    const allMessages = await prisma.ticketMessage.findMany({
+      where: { ticketId },
+      orderBy: { createdAt: "asc" },
+    });
+    const conversationMessages = allMessages.map((msg) => ({
+      from: msg.from,
+      text: msg.text,
+      createdAt: msg.createdAt,
+    }));
+    const aiSummary = await summarizeConversation(conversationMessages);
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: { aiSummary },
+    });
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[Messages] ⚠️ Error al actualizar resumen:`, errMsg);
+  }
+}
+
+function deliveryResponse(params: {
+  message: ReturnType<typeof serializeMessage>;
+  deliveryStatus: PanelDeliveryStatus;
+  attemptId: string;
+  error?: string;
+  details?: string;
+  duplicate?: boolean;
+}) {
+  const ok =
+    params.deliveryStatus === "sent" || params.deliveryStatus === "confirmation_pending";
+  return NextResponse.json(
+    {
+      message: params.message,
+      sent: params.deliveryStatus === "sent",
+      deliveryStatus: params.deliveryStatus,
+      clientAttemptId: params.attemptId,
+      duplicate: params.duplicate === true,
+      ...(params.error ? { error: params.error } : {}),
+      ...(params.details ? { details: params.details } : {}),
+    },
+    { status: ok ? (params.deliveryStatus === "confirmation_pending" ? 202 : 200) : 422 },
+  );
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -64,6 +183,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let from: "CUSTOMER" | "BOT" | "HUMAN" = "HUMAN";
   let rawPayload: Record<string, unknown> = {};
   let attachments: { url: string; type: string; name: string }[] = [];
+  let clientAttemptId = "";
 
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data")) {
@@ -71,6 +191,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     text = (formData.get("text") as string)?.trim() || "";
     direction = (formData.get("direction") as typeof direction) || "OUTBOUND";
     from = (formData.get("from") as typeof from) || "HUMAN";
+    clientAttemptId = String(formData.get("clientAttemptId") || "").trim();
     const file = formData.get("file") as File | null;
     if (file && file.size > 0) {
       try {
@@ -80,10 +201,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           type: getMimeTypeLabel(file.type),
           name: file.name || "archivo",
         });
-      } catch (uploadErr: any) {
+      } catch (uploadErr: unknown) {
+        const details = uploadErr instanceof Error ? uploadErr.message : "Error de upload";
         return NextResponse.json(
-          { error: "No se pudo subir el archivo", details: uploadErr?.message || "Error de upload" },
-          { status: 500 }
+          { error: "No se pudo subir el archivo", details },
+          { status: 500 },
         );
       }
     }
@@ -97,6 +219,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     direction = parsed.data.direction;
     from = parsed.data.from;
     rawPayload = parsed.data.rawPayload || {};
+    clientAttemptId = String(parsed.data.clientAttemptId || "").trim();
   }
 
   const messageText = text.trim() || (attachments.length > 0 ? "[Archivo adjunto]" : "");
@@ -104,74 +227,354 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Escribe un mensaje o adjunta un archivo" }, { status: 400 });
   }
 
-  // Si es un mensaje OUTBOUND, enviarlo a BuilderBot primero
-  let ticketForStatus: { status: TicketStatus } | null = null;
-  if (direction === "OUTBOUND") {
-    // Obtener el teléfono del cliente del ticket
+  const allowed = await assertAdvisorCanAccessTicket(id, session.user);
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  // --- HUMAN OUTBOUND: intento pendiente → proveedor → estado ---
+  if (direction === "OUTBOUND" && from === "HUMAN") {
+    if (!clientAttemptId) clientAttemptId = randomUUID();
+
+    const existingAttempt = await findPanelHumanAttemptById(prisma, {
+      ticketId: id,
+      clientAttemptId,
+    });
+
+    if (existingAttempt) {
+      const meta = readPanelOutboundMeta(existingAttempt.rawPayload);
+      const nextAttachmentsKey = panelAttemptAttachmentsKey(attachments);
+      const storedAttachmentsKey =
+        meta.attemptAttachmentsKey ??
+        panelAttemptAttachmentsKey(
+          (existingAttempt.attachments as Array<{ url?: string; type?: string; name?: string }> | null) ||
+            [],
+        );
+      // Contenido distinto (texto o adjuntos) = otro intento.
+      if (
+        !panelAttemptContentMatches({
+          storedText: meta.attemptText ?? existingAttempt.text,
+          storedAttachmentsKey,
+          nextText: messageText,
+          nextAttachmentsKey,
+        })
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "El borrador o el adjunto cambió respecto del intento pendiente. Se necesita un nuevo envío.",
+            code: "ATTEMPT_CONTENT_MISMATCH",
+            clientAttemptId,
+          },
+          { status: 409 },
+        );
+      }
+
+      const alreadyConfirmed = !isPanelAttemptExternalId(existingAttempt.externalMessageId);
+
+      if (alreadyConfirmed || meta.deliveryStatus === "sent") {
+        if (meta.deliveryStatus !== "sent") {
+          await updatePanelOutboundDelivery(prisma, {
+            messageId: existingAttempt.id,
+            deliveryStatus: "sent",
+          });
+        }
+        const fresh = await prisma.ticketMessage.findUniqueOrThrow({
+          where: { id: existingAttempt.id },
+        });
+        return deliveryResponse({
+          message: serializeMessage(fresh),
+          deliveryStatus: "sent",
+          attemptId: clientAttemptId,
+          duplicate: true,
+        });
+      }
+
+      // Fallo definitivo primero (no confundir con confirmation_pending por bbcCalledAt).
+      if (meta.deliveryStatus === "failed") {
+        await updatePanelOutboundDelivery(prisma, {
+          messageId: existingAttempt.id,
+          deliveryStatus: "pending",
+          patch: {
+            lastRetryAt: new Date().toISOString(),
+            bbcCalledAt: null,
+          },
+        });
+      } else if (meta.deliveryStatus === "confirmation_pending") {
+        // Reintento del mismo intento pendiente de confirmación: no volver a llamar al proveedor.
+        return deliveryResponse({
+          message: serializeMessage(existingAttempt),
+          deliveryStatus: "confirmation_pending",
+          attemptId: clientAttemptId,
+          duplicate: true,
+        });
+      } else if (meta.deliveryStatus === "pending" && meta.bbcCalledAt) {
+        // Ya se llamó a BBC y aún no hay veredicto → confirmación pendiente.
+        return deliveryResponse({
+          message: serializeMessage(existingAttempt),
+          deliveryStatus: "confirmation_pending",
+          attemptId: clientAttemptId,
+          duplicate: true,
+        });
+      }
+      // pending sin bbcCalledAt: continuar y llamar al proveedor.
+    }
+
+    // Dedup por contenido solo como respaldo corto y solo si ya está confirmado/pendiente.
+    if (!existingAttempt) {
+      const recentHuman = await findRecentSameContentMessage(prisma, {
+        ticketId: id,
+        direction: "OUTBOUND",
+        from: "HUMAN",
+        text: messageText,
+        windowMs: 8_000,
+      });
+      if (recentHuman) {
+        const recentMeta = readPanelOutboundMeta(recentHuman.rawPayload);
+        if (
+          recentMeta.deliveryStatus === "sent" ||
+          recentMeta.deliveryStatus === "confirmation_pending" ||
+          !isPanelAttemptExternalId(recentHuman.externalMessageId)
+        ) {
+          return deliveryResponse({
+            message: serializeMessage(recentHuman),
+            deliveryStatus:
+              recentMeta.deliveryStatus === "confirmation_pending"
+                ? "confirmation_pending"
+                : "sent",
+            attemptId: recentMeta.clientAttemptId || clientAttemptId,
+            duplicate: true,
+          });
+        }
+      }
+    }
+
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: { customer: true },
     });
-    ticketForStatus = ticket;
-
     if (!ticket) {
       return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
     }
-
     if (!ticket.customer?.phone) {
       return NextResponse.json({ error: "Cliente sin teléfono registrado" }, { status: 400 });
     }
 
-    // Enviar mensaje a BuilderBot → WhatsApp
-    try {
-      await sendWhatsAppMessage({
-        number: ticket.customer.phone,
-        message: text.trim() || " ",
-        mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
+    const ticketForStatus = {
+      status: ticket.status as TicketStatus,
+      customerId: ticket.customerId,
+    };
+
+    let message =
+      existingAttempt ||
+      (await prisma.ticketMessage.create({
+        data: {
+          ticketId: id,
+          direction: "OUTBOUND",
+          from: "HUMAN",
+          text: messageText,
+          attachments: attachments.length > 0 ? (attachments as object) : undefined,
+          externalMessageId: panelAttemptExternalId(clientAttemptId),
+          rawPayload: buildPanelHumanPendingPayload({
+            clientAttemptId,
+            advisorUserId: session.user.id,
+            attemptText: messageText,
+            attemptAttachmentsKey: panelAttemptAttachmentsKey(attachments),
+          }),
+        },
+      }));
+
+    // Takeover al registrar el intento (aunque la confirmación BBC falle después).
+    await pauseAtilioForCustomer(
+      ticketForStatus.customerId,
+      prisma,
+      "human_outbound_takeover",
+    ).catch((e) => console.error("[Messages] pauseAtilio takeover:", e));
+    await claimConversationOnHumanReply(id, session.user.id).catch((e) =>
+      console.error("[Messages] claimConversation:", e),
+    );
+
+    const labSuppress =
+      process.env.WARA_V2_LAB_MODE === "true" || process.env.DELIVERY_ENABLED === "false";
+
+    let deliveryStatus: PanelDeliveryStatus = "pending";
+    let sendError: string | undefined;
+
+    if (labSuppress) {
+      console.log(`[Messages] LAB: mensaje humano simulado (sin WhatsApp) → ${ticket.customer.phone}`);
+      deliveryStatus = "sent";
+      await updatePanelOutboundDelivery(prisma, {
+        messageId: message.id,
+        deliveryStatus: "sent",
+        patch: { labSuppress: true, bbcCalledAt: new Date().toISOString() },
       });
-      console.log(`[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`);
-    } catch (error: any) {
-      console.error(`[Messages] ❌ Error al enviar mensaje:`, error);
-      return NextResponse.json({ 
-        error: "No se pudo enviar el mensaje al cliente", 
-        details: error.message 
-      }, { status: 500 });
+    } else {
+      await updatePanelOutboundDelivery(prisma, {
+        messageId: message.id,
+        deliveryStatus: "pending",
+        patch: { bbcCalledAt: new Date().toISOString() },
+      });
+      try {
+        const providerRes = await sendWhatsAppMessage({
+          number: ticket.customer.phone,
+          message: text.trim() || " ",
+          mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
+        });
+        const providerMessageId = extractBuilderBotOutboundMessageId(providerRes);
+        console.log(
+          `[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`,
+        );
+
+        // ¿El webhook ya confirmó mientras esperábamos?
+        const after = await prisma.ticketMessage.findUniqueOrThrow({ where: { id: message.id } });
+        if (!isPanelAttemptExternalId(after.externalMessageId)) {
+          deliveryStatus = "sent";
+          await updatePanelOutboundDelivery(prisma, {
+            messageId: message.id,
+            deliveryStatus: "sent",
+            patch: {
+              providerHttpOk: true,
+              ...(providerMessageId ? { providerMessageId } : {}),
+            },
+            ...(providerMessageId ? { externalMessageId: providerMessageId } : {}),
+          });
+        } else {
+          deliveryStatus = "sent";
+          await updatePanelOutboundDelivery(prisma, {
+            messageId: message.id,
+            deliveryStatus: "sent",
+            patch: {
+              providerHttpOk: true,
+              ...(providerMessageId ? { providerMessageId } : {}),
+            },
+            ...(providerMessageId ? { externalMessageId: providerMessageId } : {}),
+          });
+        }
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[Messages] ❌ Error al enviar mensaje:`, error);
+        sendError = errMsg;
+
+        const after = await prisma.ticketMessage.findUniqueOrThrow({ where: { id: message.id } });
+        if (!isPanelAttemptExternalId(after.externalMessageId)) {
+          // Webhook confirmó a pesar del error HTTP → éxito.
+          deliveryStatus = "sent";
+          await updatePanelOutboundDelivery(prisma, {
+            messageId: message.id,
+            deliveryStatus: "sent",
+            patch: { providerHttpErrorButWebhookConfirmed: true, lastError: errMsg },
+          });
+        } else if (isAmbiguousProviderSendError(error)) {
+          deliveryStatus = "confirmation_pending";
+          await updatePanelOutboundDelivery(prisma, {
+            messageId: message.id,
+            deliveryStatus: "confirmation_pending",
+            patch: { lastError: errMsg, ambiguousError: true },
+          });
+        } else {
+          deliveryStatus = "failed";
+          await updatePanelOutboundDelivery(prisma, {
+            messageId: message.id,
+            deliveryStatus: "failed",
+            patch: { lastError: errMsg },
+          });
+        }
+      }
+    }
+
+    // Solo limpia ecos BOT "sin confirmar" con texto exacto (no inclusión / no borrar envíos legítimos).
+    if (deliveryStatus === "sent" || deliveryStatus === "confirmation_pending") {
+      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+      const normalized = (messageText || "").trim().replace(/\s+/g, " ");
+      const botDuplicates = await prisma.ticketMessage.findMany({
+        where: {
+          ticketId: id,
+          from: "BOT",
+          direction: "OUTBOUND",
+          createdAt: { gte: twoMinAgo },
+          id: { not: message.id },
+        },
+      });
+      for (const botMsg of botDuplicates) {
+        const botMeta = readPanelOutboundMeta(botMsg.rawPayload);
+        if (botMeta.authorship !== "unconfirmed") continue;
+        const botText = (botMsg.text || "").trim().replace(/\s+/g, " ");
+        if (botText === normalized) {
+          await prisma.ticketMessage.delete({ where: { id: botMsg.id } });
+          break;
+        }
+      }
+
+      await prisma.ticket.update({
+        where: { id },
+        data: {
+          lastMessageAt: new Date(),
+          status: statusAfterOutboundMessage(ticketForStatus.status),
+        },
+      });
+      void refreshTicketSummary(id);
+    }
+
+    message = await prisma.ticketMessage.findUniqueOrThrow({ where: { id: message.id } });
+    return deliveryResponse({
+      message: serializeMessage(message),
+      deliveryStatus,
+      attemptId: clientAttemptId,
+      error:
+        deliveryStatus === "failed"
+          ? "No se pudo enviar el mensaje al cliente"
+          : deliveryStatus === "confirmation_pending"
+            ? "Envío aceptado con confirmación pendiente"
+            : undefined,
+      details: sendError,
+    });
+  }
+
+  // --- INTERNAL_NOTE / otros caminos no-human-outbound ---
+  let ticketForStatus: { status: TicketStatus; customerId: string } | null = null;
+  if (direction === "OUTBOUND") {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      include: { customer: true },
+    });
+    ticketForStatus = ticket
+      ? { status: ticket.status as TicketStatus, customerId: ticket.customerId }
+      : null;
+
+    if (!ticket) {
+      return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    }
+    if (!ticket.customer?.phone) {
+      return NextResponse.json({ error: "Cliente sin teléfono registrado" }, { status: 400 });
+    }
+
+    const labSuppress =
+      process.env.WARA_V2_LAB_MODE === "true" || process.env.DELIVERY_ENABLED === "false";
+    if (!labSuppress) {
+      try {
+        await sendWhatsAppMessage({
+          number: ticket.customer.phone,
+          message: text.trim() || " ",
+          mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
+        });
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        return NextResponse.json(
+          { error: "No se pudo enviar el mensaje al cliente", details: errMsg },
+          { status: 500 },
+        );
+      }
     }
   }
 
-  // Guardar el mensaje en la base de datos
   const message = await prisma.ticketMessage.create({
     data: {
       ticketId: id,
       direction,
       from,
       text: messageText,
-      attachments: attachments.length > 0 ? (attachments as any) : undefined,
-      rawPayload: (rawPayload || {}) as any,
+      attachments: attachments.length > 0 ? (attachments as object) : undefined,
+      rawPayload: (rawPayload || {}) as object,
     },
   });
-
-  // Si ya se guardó el mismo mensaje saliente como BOT por webhook, eliminar duplicado.
-  if (direction === "OUTBOUND" && from === "HUMAN") {
-    const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
-    const normalized = (messageText || "").trim().replace(/\s+/g, " ");
-    const botDuplicates = await prisma.ticketMessage.findMany({
-      where: {
-        ticketId: id,
-        from: "BOT",
-        direction: "OUTBOUND",
-        createdAt: { gte: twoMinAgo },
-        id: { not: message.id },
-      },
-    });
-    for (const botMsg of botDuplicates) {
-      const botText = (botMsg.text || "").trim().replace(/\s+/g, " ");
-      if (botText === normalized || botText.includes(normalized) || normalized.includes(botText)) {
-        await prisma.ticketMessage.delete({ where: { id: botMsg.id } });
-        break;
-      }
-    }
-  }
 
   await prisma.ticket.update({
     where: { id },
@@ -183,31 +586,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     },
   });
 
-  // Actualizar resumen con IA después de agregar el mensaje
-  try {
-    const allMessages = await prisma.ticketMessage.findMany({
-      where: { ticketId: id },
-      orderBy: { createdAt: "asc" },
-    });
-
-    const conversationMessages = allMessages.map((msg) => ({
-      from: msg.from,
-      text: msg.text,
-      createdAt: msg.createdAt,
-    }));
-
-    const aiSummary = await summarizeConversation(conversationMessages);
-
-    await prisma.ticket.update({
-      where: { id },
-      data: { aiSummary },
-    });
-
-    console.log(`[Messages] ✅ Resumen actualizado para ticket ${id}`);
-  } catch (error: any) {
-    console.error(`[Messages] ⚠️ Error al actualizar resumen:`, error.message);
-    // No fallar si el resumen falla, el mensaje ya se guardó
-  }
-
-  return NextResponse.json({ message, sent: direction === "OUTBOUND" });
+  void refreshTicketSummary(id);
+  return NextResponse.json({ message: serializeMessage(message), sent: direction === "OUTBOUND" });
 }

@@ -1,0 +1,348 @@
+/**
+ * Assessment GPS determinístico (portado puro de V1 waraGpsAssessment.ts + template lab).
+ *
+ * Criterio operativo (GPRS/SIM ~10 min): si ignición está encendida y no hay
+ * reporte+posición dentro de ese ciclo → falta de reporte. No usar 1 h.
+ */
+import type { WaraUnidadEstado } from "./wara-types.js";
+import { formatUnitLabel } from "./unit-fleet.js";
+
+/** Ciclo GPRS: sin reporte/posición dentro de 10 min = falta de reporte. */
+export const MISSING_REPORT_TICKET_THRESHOLD_SECONDS = 10 * 60;
+/** Reporte y posición tienen que ir juntos (mismo ciclo). */
+export const POSITION_REPORT_DRIFT_SECONDS = 10 * 60;
+/** Paquete reporte/posición/ignición alineado (unidad detenida). */
+export const TELEMETRY_BUNDLE_ALIGN_SECONDS = 10 * 60;
+export const COHERENT_PAUSE_TICKET_THRESHOLD_SECONDS = 24 * 60 * 60;
+
+export type GpsAssessment =
+  | { status: "ok"; reportElapsed: number; positionElapsed: number | null; ignitionElapsed: number | null }
+  | { status: "coherent_pause"; reportElapsed: number; positionElapsed: number; ignitionElapsed: number }
+  | { status: "ignition_failure"; reportElapsed: number; positionElapsed: number; ignitionElapsed: number | null }
+  | { status: "missing_report"; reportElapsed: number; positionElapsed: number | null; ignitionElapsed: number | null }
+  | { status: "stale_position"; reportElapsed: number; positionElapsed: number | null; reason: string };
+
+function telemetryElapsedSeconds(value: number | undefined | null): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function parseIgnitionEstado(value: unknown): boolean | null {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  if (typeof value === "string") {
+    const t = value.trim().toLowerCase();
+    if (["si", "sí", "yes", "on", "true", "1", "encendida", "activa"].includes(t)) return true;
+    if (["no", "off", "false", "0", "apagada", "inactiva"].includes(t)) return false;
+  }
+  return null;
+}
+
+function reportElapsedSeconds(unit: WaraUnidadEstado): number | null {
+  return telemetryElapsedSeconds(unit.ultimo_reporte?.hace_segundos);
+}
+
+function isReportUpdated(reportElapsed: number): boolean {
+  return reportElapsed < MISSING_REPORT_TICKET_THRESHOLD_SECONDS;
+}
+
+function isPositionUpdating(reportElapsed: number, positionElapsed: number | null): boolean {
+  if (positionElapsed == null) return false;
+  return positionElapsed <= reportElapsed + POSITION_REPORT_DRIFT_SECONDS;
+}
+
+function isIgnitionUpdating(
+  reportElapsed: number,
+  positionElapsed: number,
+  ignitionElapsed: number | null,
+  ignitionOn: boolean,
+): boolean {
+  if (ignitionOn) return true;
+  if (ignitionElapsed == null) return false;
+  if (ignitionElapsed > reportElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
+  if (ignitionElapsed > positionElapsed + POSITION_REPORT_DRIFT_SECONDS) return false;
+  return true;
+}
+
+function telemetryAligned(a: number, b: number, margin = TELEMETRY_BUNDLE_ALIGN_SECONDS): boolean {
+  return Math.abs(a - b) <= margin;
+}
+
+function allTelemetryAligned(reportElapsed: number, positionElapsed: number, ignitionElapsed: number): boolean {
+  return (
+    telemetryAligned(reportElapsed, positionElapsed) &&
+    telemetryAligned(reportElapsed, ignitionElapsed) &&
+    telemetryAligned(positionElapsed, ignitionElapsed)
+  );
+}
+
+export function formatMinutesAgo(seconds: number | undefined | null): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "sin dato";
+  if (seconds < 90) return "menos de 2 minutos";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes} minutos`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} horas`;
+  return `${Math.round(hours / 24)} días`;
+}
+
+export function ignitionLabel(unit: WaraUnidadEstado): string {
+  const parsed = parseIgnitionEstado(unit.ultima_ignicion?.estado);
+  if (parsed === true) return "encendida";
+  if (parsed === false) return "apagada";
+  return "sin dato";
+}
+
+export function assessUnitReporting(unit: WaraUnidadEstado): GpsAssessment | null {
+  const reportElapsed = reportElapsedSeconds(unit);
+  if (reportElapsed == null) return null;
+
+  const positionElapsed = telemetryElapsedSeconds(unit.ultima_posicion?.hace_segundos);
+  const ignitionElapsed = telemetryElapsedSeconds(unit.ultima_ignicion?.hace_segundos);
+  const ignitionParsed = parseIgnitionEstado(unit.ultima_ignicion?.estado);
+  const ignitionOn = ignitionParsed === true;
+  const ignitionOff = ignitionParsed === false;
+
+  if (!isReportUpdated(reportElapsed)) {
+    if (ignitionOn) {
+      return { status: "missing_report", reportElapsed, positionElapsed, ignitionElapsed };
+    }
+    if (
+      positionElapsed != null &&
+      ignitionElapsed != null &&
+      allTelemetryAligned(reportElapsed, positionElapsed, ignitionElapsed) &&
+      ignitionOff &&
+      reportElapsed < COHERENT_PAUSE_TICKET_THRESHOLD_SECONDS
+    ) {
+      return { status: "coherent_pause", reportElapsed, positionElapsed, ignitionElapsed };
+    }
+    return { status: "missing_report", reportElapsed, positionElapsed, ignitionElapsed };
+  }
+
+  if (!isPositionUpdating(reportElapsed, positionElapsed)) {
+    // Ignición ON: reporte sin posición al día = falta de reporte (van juntos).
+    if (ignitionOn) {
+      return { status: "missing_report", reportElapsed, positionElapsed, ignitionElapsed };
+    }
+    const posElapsed = positionElapsed;
+    if (
+      posElapsed != null &&
+      ignitionElapsed != null &&
+      !ignitionOn &&
+      ignitionElapsed > posElapsed + POSITION_REPORT_DRIFT_SECONDS
+    ) {
+      return { status: "ignition_failure", reportElapsed, positionElapsed: posElapsed, ignitionElapsed };
+    }
+    if (
+      ignitionOff &&
+      posElapsed != null &&
+      ((ignitionElapsed != null && telemetryAligned(posElapsed, ignitionElapsed)) ||
+        (ignitionElapsed == null && !isPositionUpdating(reportElapsed, posElapsed)))
+    ) {
+      return {
+        status: "coherent_pause",
+        reportElapsed,
+        positionElapsed: posElapsed,
+        ignitionElapsed: ignitionElapsed ?? posElapsed,
+      };
+    }
+    const reason =
+      posElapsed == null
+        ? "pérdida de señal satelital: no figura última posición en Wara"
+        : `pérdida de señal satelital: el reporte es reciente pero la posición no se actualiza (posición hace ${formatMinutesAgo(posElapsed)}, reporte hace ${formatMinutesAgo(reportElapsed)})`;
+    return { status: "stale_position", reportElapsed, positionElapsed: posElapsed, reason };
+  }
+
+  const posElapsed = positionElapsed as number;
+  if (!isIgnitionUpdating(reportElapsed, posElapsed, ignitionElapsed, ignitionOn)) {
+    return { status: "ignition_failure", reportElapsed, positionElapsed: posElapsed, ignitionElapsed };
+  }
+
+  return { status: "ok", reportElapsed, positionElapsed: posElapsed, ignitionElapsed };
+}
+
+export function buildGpsLabSummary(unit: WaraUnidadEstado, assessment: GpsAssessment): string {
+  const label = formatUnitLabel(unit);
+  const maps = mapsLinkForUnit(unit);
+  const mapsLine = maps ? `\n🗺️ ${maps}` : "";
+
+  if (assessment.status === "ok") {
+    const ign = ignitionLabel(unit);
+    const ignLine =
+      ign === "encendida"
+        ? "🔑 Ignición: *encendida*"
+        : ign === "apagada"
+          ? "🔑 Ignición: *apagada*"
+          : "🔑 Ignición: sin dato claro";
+    return [
+      "✅ *Funcionamiento normal*",
+      `🚗 Unidad: *${label}*`,
+      "📡 Envía reporte y posición actualizados.",
+      ignLine,
+      `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (assessment.status === "coherent_pause") {
+    return [
+      "⏸ *Unidad detenida*",
+      `🚗 Unidad: *${label}*`,
+      "🔑 Ignición: *apagada*",
+      `⏱ Reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      "Es normal que no actualice posición mientras está parada.",
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (assessment.status === "missing_report") {
+    const ign = ignitionLabel(unit);
+    const ignLine =
+      ign === "encendida"
+        ? "🔑 Ignición: *encendida*"
+        : ign === "apagada"
+          ? "🔑 Ignición: *apagada*"
+          : "🔑 Ignición: sin dato claro";
+    return [
+      "⚠️ *Falta de reporte*",
+      `🚗 Unidad: *${label}*`,
+      ignLine,
+      `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      "No está enviando reporte y posición al día.",
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (assessment.status === "ignition_failure") {
+    return [
+      "⚠️ *Falla de ignición*",
+      `🚗 Unidad: *${label}*`,
+      `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+      `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+      `🔑 Última ignición: hace ${formatMinutesAgo(assessment.ignitionElapsed)} (${ignitionLabel(unit)})`,
+      "El reporte y la posición van al día, pero la ignición no acompaña.",
+      mapsLine.trim() ? mapsLine.trimStart() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  return [
+    "⚠️ *Pérdida de señal satelital*",
+    `🚗 Unidad: *${label}*`,
+    `⏱ Último reporte: hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+    `📍 Posición: hace ${formatMinutesAgo(assessment.positionElapsed)}`,
+    assessment.reason,
+    mapsLine.trim() ? mapsLine.trimStart() : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function mapsLinkForUnit(unit: WaraUnidadEstado): string | null {
+  const lat = unit.ultima_posicion?.lat;
+  const lon = unit.ultima_posicion?.lon;
+  const latN = typeof lat === "number" ? lat : typeof lat === "string" ? Number(String(lat).trim().replace(",", ".")) : NaN;
+  const lonN = typeof lon === "number" ? lon : typeof lon === "string" ? Number(String(lon).trim().replace(",", ".")) : NaN;
+  if (!Number.isFinite(latN) || !Number.isFinite(lonN)) return null;
+  if (latN < -90 || latN > 90 || lonN < -180 || lonN > 180) return null;
+  // %2C: WhatsApp corta URLs en la coma y el preview cae en homepage (mapa por IP del crawler).
+  return `https://www.google.com/maps?q=${latN}%2C${lonN}`;
+}
+
+export type GpsTicketStatus =
+  | "missing_report"
+  | "ignition_failure"
+  | "stale_position"
+  | "no_equipment";
+
+export type GpsTicketPolicy =
+  | { action: "observation"; status: "ok" | "coherent_pause" }
+  | {
+      action: "ticket";
+      status: GpsTicketStatus;
+      titleSuffix: string;
+      issueDetail: string;
+    };
+
+function hasTelemetry(unit: WaraUnidadEstado): boolean {
+  return (
+    unit.ultimo_reporte != null ||
+    unit.ultima_posicion != null ||
+    unit.ultima_ignicion != null
+  );
+}
+
+/**
+ * Contrato V1 unidades: ok/detenida = observación; falta de reporte /
+ * ignición / señal / sin equipo = abrir caso Odoo en el mismo turno.
+ * Sale del assessment estructurado, no del texto del usuario.
+ */
+export function gpsTicketPolicy(unit: WaraUnidadEstado): GpsTicketPolicy | null {
+  if (!hasTelemetry(unit)) {
+    return {
+      action: "ticket",
+      status: "no_equipment",
+      titleSuffix: "Sin equipo instalado",
+      issueDetail: "sin equipo GPS instalado (no genera telemetría)",
+    };
+  }
+  const assessment = assessUnitReporting(unit);
+  if (!assessment) return null;
+  if (assessment.status === "ok" || assessment.status === "coherent_pause") {
+    return { action: "observation", status: assessment.status };
+  }
+  if (assessment.status === "missing_report") {
+    return {
+      action: "ticket",
+      status: "missing_report",
+      titleSuffix: "Falta de reporte",
+      issueDetail: `falta de reporte: el GPS no envía datos hace ${formatMinutesAgo(assessment.reportElapsed)}`,
+    };
+  }
+  if (assessment.status === "ignition_failure") {
+    const ignText =
+      assessment.ignitionElapsed != null
+        ? `hace ${formatMinutesAgo(assessment.ignitionElapsed)}`
+        : "sin dato reciente";
+    return {
+      action: "ticket",
+      status: "ignition_failure",
+      titleSuffix: "Falla de ignición",
+      issueDetail: `falla de ignición: reporte y posición al día pero la ignición no acompaña (última ignición ${ignText}, ${ignitionLabel(unit)})`,
+    };
+  }
+  return {
+    action: "ticket",
+    status: "stale_position",
+    titleSuffix: "Pérdida de señal satelital",
+    issueDetail: assessment.reason,
+  };
+}
+
+export function buildGpsReportForUnit(unit: WaraUnidadEstado): string {
+  const hasAnyTelemetry =
+    unit.ultimo_reporte != null ||
+    unit.ultima_posicion != null ||
+    unit.ultima_ignicion != null;
+
+  if (!hasAnyTelemetry) {
+    return (
+      `La unidad ${formatUnitLabel(unit)} no tiene equipo GPS / telemetría cargada en WARA ` +
+      `(sin reporte, posición ni ignición). No puedo afirmar ubicación.`
+    );
+  }
+
+  const assessment = assessUnitReporting(unit);
+  if (!assessment) {
+    return (
+      `No tengo datos de telemetría recientes para ${formatUnitLabel(unit)} en WARA. ` +
+      `No puedo afirmar posición ni ignición.`
+    );
+  }
+  return buildGpsLabSummary(unit, assessment);
+}

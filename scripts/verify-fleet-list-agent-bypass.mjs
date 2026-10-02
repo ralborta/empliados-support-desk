@@ -26,7 +26,8 @@ for (const msg of [
   "Pásame la lista de flota",
   "Necesito la lista de las unidades",
   "listado de mis unidades",
-  "pasame el listado de unidades",
+  "Listame las unidades de el cacique",
+  "Dame el listado de mis unidades",
   "Me pasas mi lista?",
   "Pasame mi lista",
 ]) {
@@ -56,8 +57,12 @@ for (const msg of ["Todo", "No tengo idea", "Necesito la lista de las unidades",
 
 console.log("\n— Router clásico sigue yendo a unidades —");
 check(
-  'classifyTurnExecutor("Pásame la lista de flota") === "unidades"',
-  classifyTurnExecutor("Pásame la lista de flota", "") === "unidades",
+  'classifyTurnExecutor("Listame las unidades de el cacique") === "unidades"',
+  classifyTurnExecutor("Listame las unidades de el cacique", "") === "unidades",
+);
+check(
+  'classifyTurnExecutor("Dame el listado de mis unidades") === "unidades"',
+  classifyTurnExecutor("Dame el listado de mis unidades", "") === "unidades",
 );
 
 console.log("\n— Patente concreta NO es continuación de listado —");

@@ -74,7 +74,7 @@ assert(
   resolvePendingConfirmationExecutor(maintSummary, "Confirmo") === "mantenimiento",
   "confirm maint",
 );
-assert(turnRoute("Confirmo", maintSummary) === "mantenimiento", "turn Confirmo maint");
+assert(turnRoute("Confirmo", maintSummary) === "info_guides", "turn Confirmo maint → guía app");
 
 console.log("— Cambio de tema tras mantenimiento pendiente —");
 assert(
@@ -100,7 +100,7 @@ const crossTenant = [
   maintSummary,
 ].join("\n");
 assert(hasPendingMantenimientoConfirmation(threadTextSinceCompanySelection(crossTenant)), "maint post-empresa");
-assert(turnRoute("Confirmo", crossTenant) === "mantenimiento", "Confirmo post cambio empresa");
+assert(turnRoute("Confirmo", crossTenant) === "info_guides", "Confirmo post cambio empresa → guía app");
 
 console.log("— Hilo contaminado (mantenimiento viejo + GPS/ignición) —");
 const pollutedMaintThread = [

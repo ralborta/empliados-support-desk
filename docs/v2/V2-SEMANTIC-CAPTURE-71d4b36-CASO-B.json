@@ -1,0 +1,66 @@
+{
+  "title": "Fixture exacto — captura humana caso B (commit 71d4b36)",
+  "purpose": "Reproducir la condición observada en lab, no el replay local post-0efd7f0.",
+  "observed_in_lab": {
+    "deployed_commit": "71d4b36",
+    "brain": "legacy_rules_plus_looksLike_handlers",
+    "unified_semantic_brain": false,
+    "user_message": "no quiero certificado",
+    "v2_reply": "Cancelé el trámite de certificado.",
+    "note": "El trámite pendiente real era GPS (gps_report), no certificado. La frase ambigua fue malinterpretada por looksLikeCertificate + cancel en handlers."
+  },
+  "why_legacy_replay_did_not_match": {
+    "primary_cause": "commit_desplegado_diferente",
+    "detail": "El comparativo local usó código post-0efd7f0 (TurnDecision por reglas + clarify) con WARA_V2_UNIFIED_SEMANTIC_BRAIN=false. Ese código ya aclara y conserva gps_report. La captura humana fue contra 71d4b36, donde certificate-core/handlers cancelaban al detectar 'certificado' en el texto.",
+    "not_valid_as_bug_reproduction": true,
+    "secondary_factors_checked": [
+      "estado_o_fixture_diferente: parcialmente — el pending GPS sí, pero el código de decisión no era el mismo",
+      "codigo_local_posterior: sí — 0efd7f0 y working tree Etapa 2",
+      "pregunta_pendiente_diferente: no — ambas con gps_report pendiente",
+      "normalizacion_diferente: no es la causa principal"
+    ]
+  },
+  "fixture_state_before_user_turn": {
+    "tenantId": "tenant_internal_ops",
+    "phone": "+5491100000CAP",
+    "companySelected": true,
+    "companyName": "El Cacique",
+    "selectedUnit": {
+      "movilId": 137,
+      "patente": "AD307VS",
+      "label": "AD307VS · M900-137"
+    },
+    "activeTramite": "await_confirm",
+    "step": "confirm_gps",
+    "pendingConfirmation": {
+      "action": "gps_report",
+      "unit": {
+        "movilId": 137,
+        "patente": "AD307VS",
+        "label": "AD307VS · M900-137"
+      },
+      "question": "¿Querés el reporte GPS de AD307VS · M900-137?"
+    },
+    "certificateDraft": null,
+    "odometerDraft": null,
+    "lastAgentQuestion": "¿Querés el reporte GPS de AD307VS · M900-137?"
+  },
+  "sequence": [
+    {
+      "role": "user",
+      "text": "no quiero certificado"
+    },
+    {
+      "role": "assistant_observed_71d4b36",
+      "text": "Cancelé el trámite de certificado.",
+      "expected_pending_after": null,
+      "bug": "canceló un trámite de certificado que no existía; no aclaró ni conservó gps_report"
+    },
+    {
+      "role": "assistant_expected_unified_or_0efd7f0",
+      "behavior": "clarify AMBIGUOUS_NEGATION",
+      "pending_preserved": "gps_report"
+    }
+  ],
+  "valid_comparison_rule": "Solo declarar comparación válida si el SHA desplegado y el fixture_state_before_user_turn coinciden con la captura."
+}

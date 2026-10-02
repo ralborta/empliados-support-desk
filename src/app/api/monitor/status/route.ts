@@ -4,6 +4,7 @@ import { ADVISOR_PRESENCE_TIMEOUT_MS, isAdvisorPresentlyOnline } from "@/lib/adv
 import { getMonitorRecentActivity } from "@/lib/monitorActivity";
 import { getPanelScreenLabel } from "@/lib/panelScreenLabels";
 import { checkWaraApiHealth } from "@/lib/waraHealthCheck";
+import { getBbcRuntimeStatus } from "@/lib/bbcRuntimeMonitor";
 
 /**
  * Pantalla externa de monitoreo (fuera del login normal del panel): quién está
@@ -62,6 +63,7 @@ export async function GET(req: NextRequest) {
 
   const activity = await getMonitorRecentActivity();
   const wara = await checkWaraApiHealth();
+  const bbc = await getBbcRuntimeStatus();
 
   return NextResponse.json({
     ok: true,
@@ -70,5 +72,6 @@ export async function GET(req: NextRequest) {
     agents: rows,
     activity,
     wara,
+    bbc,
   });
 }

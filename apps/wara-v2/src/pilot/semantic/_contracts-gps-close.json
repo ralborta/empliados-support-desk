@@ -1,0 +1,72 @@
+{
+  "contracts": [
+    {
+      "id": "A_gps_reporte",
+      "userScenario": "Idle con empresa; usuario pide reporte GPS sin unidad",
+      "stateBefore": { "activeTramite": "none", "selectedUnit": null },
+      "expectedTurnDecision": {
+        "action": "start_intent",
+        "intent": "gps",
+        "currentTramiteDisposition": "keep",
+        "reasoningCode": "NEW_EXPLICIT_INTENT"
+      },
+      "expectedTransition": { "expectation": "ask_unit_or_expectedField_unit" },
+      "expectedAction": { "handler": "gps", "purpose": "ask_missing_field" },
+      "expectedStateAfter": { "activeTramite": "none_or_search_unit", "emptyReply": false },
+      "expectedReplyPurpose": "ask_missing_field",
+      "writeRisk": "none",
+      "acceptanceTextsAsTestsOnly": ["GPS reporte"]
+    },
+    {
+      "id": "B_cierra_caso",
+      "userScenario": "Idle; usuario pide cerrar el caso/conversación de soporte",
+      "stateBefore": { "activeTramite": "none", "pendingConfirmation": null },
+      "expectedTurnDecision": {
+        "action": "start_intent",
+        "intent": "ticket",
+        "fields": { "ticketAction": "close" },
+        "currentTramiteDisposition": "keep",
+        "disposition": "close",
+        "reasoningCode": "NEW_EXPLICIT_INTENT"
+      },
+      "expectedTransition": {
+        "pendingConfirmation": "customer_case_close",
+        "expectedAnswerType": "confirmation"
+      },
+      "expectedAction": { "handler": "case_close", "purpose": "confirm_write" },
+      "expectedStateAfter": {
+        "pendingConfirmation.action": "customer_case_close",
+        "not": ["domain_knowledge", "cancel_active", "odoo_ticket_create"]
+      },
+      "expectedReplyPurpose": "confirm_write",
+      "writeRisk": "write",
+      "acceptanceTextsAsTestsOnly": ["Si x favor cierra", "cerrar el caso", "resolvé la conversación"]
+    },
+    {
+      "id": "C_como_cierro_alarma",
+      "userScenario": "Consulta informativa sobre cerrar/apagar una alarma en el panel",
+      "stateBefore": { "activeTramite": "none" },
+      "expectedTurnDecision": {
+        "action": "answer_domain_question",
+        "intent": "domain_knowledge",
+        "domainQuestion": { "topic": "platform_opciones", "questionType": "how_it_works" },
+        "currentTramiteDisposition": "keep"
+      },
+      "expectedTransition": { "no_pending_case_close": true },
+      "expectedAction": { "handler": "domain_knowledge" },
+      "expectedStateAfter": { "pendingConfirmation": null },
+      "expectedReplyPurpose": "inform",
+      "writeRisk": "none",
+      "acceptanceTextsAsTestsOnly": ["Cómo cierro una alarma"]
+    }
+  ],
+  "antiSilence": {
+    "invariant": "Toda decisión válida produce reply no vacío vía ResponsePlan / ensureNonEmptyReply",
+    "writeRisk": "none"
+  },
+  "notes": {
+    "rootCauseA": "Comprobado en live: V2 ya clasifica GPS reporte → start_intent gps (hipótesis V1 looksLike queda fuera de alcance)",
+    "rootCauseB": "Comprobado en live: LLM → general+cancel → reducer cancel_active sin trámite; conflate cierre de caso con cancel/farewell",
+    "rootCauseC": "Comprobado en live: domain_knowledge OK; preservar contra ticketAction=close"
+  }
+}

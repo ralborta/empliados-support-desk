@@ -3,6 +3,14 @@
     {
       "path": "/api/cron/wara-health",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/bbc-health",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/idle-conversation",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

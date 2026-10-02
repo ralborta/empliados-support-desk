@@ -13,6 +13,24 @@ export function normalizeWhatsAppPhone(raw: string): string {
 }
 
 /**
+ * Candidatos para ObtenerContactosPorNumero. WhatsApp manda 549…; Wara a veces
+ * guarda el mismo móvil como 54… (sin el 9). El primer valor es el canónico.
+ */
+export function waraPhoneLookupCandidates(rawPhone: string): string[] {
+  const normalized = normalizeWhatsAppPhone(rawPhone);
+  const out: string[] = [];
+  const add = (value: string) => {
+    if (value.length >= 8 && !out.includes(value)) out.push(value);
+  };
+  add(normalized);
+  if (/^549\d{10}$/.test(normalized)) add(`54${normalized.slice(3)}`);
+  if (/^54\d{10}$/.test(normalized) && !normalized.startsWith("549")) {
+    add(`549${normalized.slice(2)}`);
+  }
+  return out;
+}
+
+/**
  * True si el remitente NO es una persona/cliente real: canales (newsletter),
  * listas de difusión, grupos, estados, o IDs imposibles para un número telefónico.
  *

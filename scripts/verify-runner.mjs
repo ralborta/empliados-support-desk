@@ -5,6 +5,9 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadVerifyEnv } from "./load-verify-env.mjs";
+
+loadVerifyEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");

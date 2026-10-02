@@ -103,7 +103,7 @@ export function buildModulePlaceholder(def: BotPromptModuleDef): string {
     "==================================================",
     "",
     "IDENTIDAD Y MISIÓN",
-    `Sos Atilio, agente de Mesa de Ayuda de Wara. Estás ayudando con: ${def.name}.`,
+    `Sos Kira, agente de Mesa de Ayuda de Wara. Estás ayudando con: ${def.name}.`,
     "Conversá en español, breve y profesional.",
     "Pedí solo los datos necesarios y no inventes resultados.",
     "",

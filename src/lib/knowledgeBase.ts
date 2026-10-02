@@ -191,3 +191,15 @@ Resumen de accesos rápidos:
 - Crear un nuevo grupo: pie del panel → botón "Crear Grupo".
 - Mover unidades entre grupos: pie del panel → botón "Mover unidades".
 `.trim();
+
+/**
+ * @deprecated Sustituido por artículos `mt-*` en `@/lib/mantenimientoKnowledge`.
+ * No usar como fuente de hechos: contradice el relevamiento 09/09/2026
+ * (Utilidades = solo catálogos; operación en Unidades/Paneles/Informes).
+ * Se mantiene export vacío mínimo por compatibilidad de imports legacy / V2 shadow.
+ */
+export const MANTENIMIENTO_KNOWLEDGE_BASE = `
+Módulo Mantenimiento — DEPRECADO.
+Fuente de verdad: src/lib/mantenimientoKnowledge.ts (artículos mt-*).
+Utilidades → Mantenimiento = solo catálogos. Operación: Unidades (asignar) + Paneles + Informes.
+`.trim();

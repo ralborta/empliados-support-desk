@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { usePollWhenVisible } from "@/lib/hooks/usePollWhenVisible";
+import { dispatchPanelInboxChanged } from "@/lib/panelLiveEvents";
 
 type PanelLiveSyncProps = {
   userRole?: string | null;
@@ -9,9 +10,14 @@ type PanelLiveSyncProps = {
 
 /**
  * Heartbeat de presencia (soporte + admin, para el monitor externo) + refresh suave de
- * listas del panel. El heartbeat en sí sigue siendo SUPPORT-only para el reparto de
- * casos (ver advisorHeartbeat en @/lib/advisorDistribution); para ADMIN solo actualiza
+ * listas del panel. El heartbeat sigue mientras Kira esté abierta, aunque la pestaña
+ * no esté visible. El refresh de listas sí espera a que esté en pantalla.
+ * El heartbeat en sí sigue siendo SUPPORT-only para el reparto de casos
+ * (ver advisorHeartbeat en @/lib/advisorDistribution); para ADMIN solo actualiza
  * presencia (recordAdminPresence), sin tocar nada de cola/asignación.
+ *
+ * También avisa al sidebar para refrescar contadores (Esperando cliente, etc.) —
+ * el fetch one-shot previo dejaba el menú stale si el asesor no navegaba.
  */
 export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
   const router = useRouter();
@@ -27,18 +33,36 @@ export function PanelLiveSync({ userRole }: PanelLiveSyncProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPage: pathname }),
+        keepalive: true,
       }).catch(() => undefined);
     },
     30_000,
     tracksPresence,
+    false,
   );
+
+  const ticketListSlugs = new Set([
+    "abiertos",
+    "en-progreso",
+    "esperando-cliente",
+    "resueltos",
+    "cerrados",
+    "urgentes",
+    "alta",
+    "normal",
+    "baja",
+  ]);
+  const pathParts = pathname.split("/").filter(Boolean);
+  const isTicketDetail =
+    pathParts[0] === "tickets" && pathParts.length === 2 && !ticketListSlugs.has(pathParts[1] ?? "");
 
   usePollWhenVisible(
     () => {
+      dispatchPanelInboxChanged();
       router.refresh();
     },
     15_000,
-    true,
+    !isTicketDetail,
   );
 
   return null;

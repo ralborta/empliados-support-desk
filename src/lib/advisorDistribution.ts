@@ -69,6 +69,12 @@ async function expireStaleAdvisorSessions(): Promise<number> {
   return stale.length;
 }
 
+/** Hay al menos un SUPPORT con sesión activa y heartbeat vigente. */
+export async function hasConnectedSupportAdvisor(): Promise<boolean> {
+  const ids = await getActiveSupportAdvisorIds();
+  return ids.length > 0;
+}
+
 async function getActiveSupportAdvisorIds(): Promise<string[]> {
   await expireStaleAdvisorSessions();
 
@@ -267,6 +273,30 @@ async function assignTicketInternal(
   }
 }
 
+/**
+ * El asesor responde en un caso sin dueño → se lo queda.
+ * No pisa a otro asesor que ya lo tenga asignado.
+ */
+export async function claimConversationOnHumanReply(
+  ticketId: string,
+  agentUserId: string,
+): Promise<boolean> {
+  if (!isDbAgentUserId(agentUserId)) return false;
+
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: { customerId: true, status: true, assignedToUserId: true },
+  });
+  if (!ticket || !ADVISOR_ACTIVE_TICKET_STATUSES.includes(ticket.status)) return false;
+  if (ticket.assignedToUserId) return ticket.assignedToUserId === agentUserId;
+
+  await assignConversationToAdvisor(ticket.customerId, agentUserId, "ASSIGNED");
+  console.log(
+    `[advisorDistribution] Conversación ${ticket.customerId} → asesor ${agentUserId} (respuesta humana)`,
+  );
+  return true;
+}
+
 /** Todos los tickets abiertos del cliente → mismo asesor (una conversación). */
 async function assignConversationToAdvisor(
   customerId: string,
@@ -392,8 +422,8 @@ async function filterOutBotResolvedTickets<
 }
 
 /**
- * Reparte equitativamente casos activos (cola + asignados a asesores activos)
- * entre todos los asesores SUPPORT conectados.
+ * Reparte solo la cola (casos SIN asignar) entre asesores SUPPORT conectados.
+ * No mueve un caso que ya tiene dueño: un heartbeat o reconexión no se lo saca.
  */
 export async function rebalanceAmongActiveAdvisors(options?: {
   skipReleaseProcessing?: boolean;
@@ -420,7 +450,7 @@ export async function rebalanceAmongActiveAdvisors(options?: {
   const poolTickets = await prisma.ticket.findMany({
     where: {
       status: { in: ADVISOR_ACTIVE_TICKET_STATUSES },
-      OR: [{ assignedToUserId: null }, { assignedToUserId: { in: activeIds } }],
+      assignedToUserId: null,
     },
     select: {
       id: true,
@@ -439,7 +469,7 @@ export async function rebalanceAmongActiveAdvisors(options?: {
   const freshPoolRaw = await prisma.ticket.findMany({
     where: {
       status: { in: ADVISOR_ACTIVE_TICKET_STATUSES },
-      OR: [{ assignedToUserId: null }, { assignedToUserId: { in: activeIds } }],
+      assignedToUserId: null,
     },
     select: {
       id: true,
@@ -470,27 +500,28 @@ export async function rebalanceAmongActiveAdvisors(options?: {
       return b.best.lastMessageAt.getTime() - a.best.lastMessageAt.getTime();
     });
 
-  const loads = new Map<string, number>(activeIds.map((id) => [id, 0]));
+  const loads = new Map<string, number>();
+  for (const id of activeIds) {
+    loads.set(id, await countActiveTickets(id));
+  }
 
   let changes = 0;
   for (const unit of conversationUnits) {
-    const targetId = [...loads.entries()].sort((a, b) => a[1] - b[1])[0]![0];
-
-    for (const ticket of unit.tickets) {
-      if (ticket.assignedToUserId !== targetId) {
-        await assignTicketInternal(ticket.id, targetId, {
-          notificationType: ticket.assignedToUserId ? "REASSIGNED" : "ASSIGNED",
-        });
-        changes++;
-      }
+    const alreadyOwned = await findConversationAdvisorId(prisma, unit.customerId);
+    if (alreadyOwned) {
+      await assignConversationToAdvisor(unit.customerId, alreadyOwned, "ASSIGNED");
+      continue;
     }
 
+    const targetId = [...loads.entries()].sort((a, b) => a[1] - b[1])[0]![0];
+    await assignConversationToAdvisor(unit.customerId, targetId, "ASSIGNED");
+    changes += unit.tickets.length;
     loads.set(targetId, (loads.get(targetId) ?? 0) + 1);
   }
 
   if (changes > 0) {
     console.log(
-      `[advisorDistribution] Rebalanceo (${conversationUnits.length} conversación(es), ${activeIds.length} asesor(es)): ${changes} movimiento(s)`,
+      `[advisorDistribution] Cola (${conversationUnits.length} conversación(es), ${activeIds.length} asesor(es)): ${changes} alta(s)`,
     );
   }
 
@@ -687,7 +718,8 @@ export async function getUnreadNotificationCount(agentUserId: string): Promise<n
 }
 
 /**
- * Ping desde el panel: mantiene al asesor como conectado mientras la pestaña esté abierta.
+ * Ping desde el panel: mantiene al asesor como conectado mientras Kira esté abierta,
+ * aunque la pestaña no esté visible. Se corta al cerrar pestaña/navegador (sin pings).
  *
  * Si el asesor NO estaba presente (sesión nueva, o venía de un timeout por inactividad),
  * el heartbeat también dispara un reparto de la cola. Esto cubre el caso de una sesión de

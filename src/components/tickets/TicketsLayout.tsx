@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Ticket,
@@ -17,6 +17,8 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { PanelLiveSync } from "@/components/layout/PanelLiveSync";
 import { AgentAvatar } from "@/components/ui/AgentAvatar";
+import { usePollWhenVisible } from "@/lib/hooks/usePollWhenVisible";
+import { subscribePanelInboxChanged } from "@/lib/panelLiveEvents";
 
 type SessionUser = {
   name: string;
@@ -54,7 +56,7 @@ export function TicketsLayout({
       <PanelLiveSync userRole={user?.role} />
       <TicketsSidebar user={user} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <main className="flex-1 overflow-y-auto p-5 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-5">
           {showHeader ? (
             <PageHeader
               userName={user?.name || user?.email}
@@ -62,7 +64,7 @@ export function TicketsLayout({
               subtitle={headerSubtitle}
             />
           ) : (
-            <div className="mb-5 flex justify-end">
+            <div className="mb-3 flex justify-end">
               <NotificationBell />
             </div>
           )}
@@ -79,12 +81,20 @@ function TicketsSidebar({ user }: { user: SessionUser | null }) {
   const [counts, setCounts] = useState<NavCounts | null>(null);
   const isAdmin = user?.role === "ADMIN";
 
-  useEffect(() => {
-    fetch("/api/nav/counts")
+  const refreshCounts = useCallback(() => {
+    void fetch("/api/nav/counts")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setCounts(d))
-      .catch(() => setCounts(null));
+      .then((d) => {
+        if (d) setCounts(d);
+      })
+      .catch(() => undefined);
   }, []);
+
+  // Contadores del menú: poll mientras la pestaña esté visible + inmediato ante ticket nuevo.
+  // Bug real 2026-09-30: con el asesor quieto solo llegaba el push; "Esperando cliente" no subía.
+  usePollWhenVisible(refreshCounts, 15_000, true);
+
+  useEffect(() => subscribePanelInboxChanged(refreshCounts), [refreshCounts]);
 
   async function handleLogout() {
     setLoggingOut(true);
