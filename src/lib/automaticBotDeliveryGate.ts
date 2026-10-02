@@ -6,7 +6,7 @@ import type { WhatsAppApiSendResult } from "@/lib/builderbotSendResult";
 
 /**
  * Autorización única para envíos automáticos de Kira (texto, media, errores).
- * Relee botPausedAt inmediatamente antes de llamar al proveedor.
+ * Relee botPausedAt inmediatamente antes de cada llamada al proveedor.
  * Los envíos del asesor (panel HUMAN) NO usan este helper.
  */
 export async function assertAutomaticBotMayDeliver(rawPhone: string): Promise<{
@@ -24,19 +24,34 @@ export async function sendAutomaticBotTextWithOptionalMedia(params: {
   message: string;
   mediaUrl?: string;
   source: string;
-}): Promise<WhatsAppApiSendResult | { skipped: true; reason: "human_takeover_paused" }> {
-  const gate = await assertAutomaticBotMayDeliver(params.number);
-  if (!gate.allowed) {
-    console.log(
-      `[autoBotDelivery] bloqueado (${gate.reason}) source=${params.source} phone=${params.number.slice(0, 6)}…`,
-    );
-    return { skipped: true, reason: "human_takeover_paused" };
-  }
-  return sendWhatsAppTextWithOptionalMedia({
+}): Promise<
+  | WhatsAppApiSendResult
+  | { skipped: true; reason: "human_takeover_paused"; providerMessageId?: string }
+> {
+  const result = await sendWhatsAppTextWithOptionalMedia({
     number: params.number,
     message: params.message,
     mediaUrl: params.mediaUrl,
+    beforeEachProviderCall: async () => {
+      const gate = await assertAutomaticBotMayDeliver(params.number);
+      if (!gate.allowed) {
+        console.log(
+          `[autoBotDelivery] bloqueado (${gate.reason}) source=${params.source} phone=${params.number.slice(0, 6)}…`,
+        );
+        return false;
+      }
+      return true;
+    },
   });
+
+  if ("skipped" in result && result.skipped) {
+    return {
+      skipped: true,
+      reason: "human_takeover_paused",
+      providerMessageId: result.providerMessageId,
+    };
+  }
+  return result;
 }
 
 /** Último recurso de error del bot: también respeta la pausa humana. */

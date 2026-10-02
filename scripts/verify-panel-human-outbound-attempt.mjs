@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   isAmbiguousProviderSendError,
   isPanelAttemptExternalId,
+  panelAttemptAttachmentsKey,
+  panelAttemptContentMatches,
   panelAttemptExternalId,
   parsePanelAttemptExternalId,
   readPanelOutboundMeta,
@@ -41,6 +43,29 @@ assert.equal(meta.deliveryStatus, "confirmation_pending");
 assert.equal(meta.authorship, "human");
 assert.equal(meta.attemptText, "Hola");
 assert.equal(meta.providerMessageId, "wamid.x");
+
+assert.equal(
+  panelAttemptAttachmentsKey([{ url: "https://a", name: "a.pdf", type: "document" }]),
+  "https://a|document|a.pdf",
+);
+assert.equal(
+  panelAttemptContentMatches({
+    storedText: "Hola",
+    storedAttachmentsKey: "https://a|document|a.pdf",
+    nextText: "Hola",
+    nextAttachmentsKey: "https://a|document|a.pdf",
+  }),
+  true,
+);
+assert.equal(
+  panelAttemptContentMatches({
+    storedText: "Hola",
+    storedAttachmentsKey: "https://a|document|a.pdf",
+    nextText: "Hola",
+    nextAttachmentsKey: "https://b|document|b.pdf",
+  }),
+  false,
+);
 
 const payload = buildPanelHumanPendingPayload({
   clientAttemptId: "att-2",

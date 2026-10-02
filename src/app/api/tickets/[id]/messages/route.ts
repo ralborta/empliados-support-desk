@@ -23,6 +23,8 @@ import {
   isAmbiguousProviderSendError,
   isPanelAttemptExternalId,
   messagePresentation,
+  panelAttemptAttachmentsKey,
+  panelAttemptContentMatches,
   panelAttemptExternalId,
   readPanelOutboundMeta,
   updatePanelOutboundDelivery,
@@ -239,13 +241,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     if (existingAttempt) {
       const meta = readPanelOutboundMeta(existingAttempt.rawPayload);
-      const immutableText = meta.attemptText ?? existingAttempt.text;
-      // Contenido distinto = otro intento (el cliente debe generar nuevo attemptId).
-      if (immutableText.trim() !== messageText.trim()) {
+      const nextAttachmentsKey = panelAttemptAttachmentsKey(attachments);
+      const storedAttachmentsKey =
+        meta.attemptAttachmentsKey ??
+        panelAttemptAttachmentsKey(
+          (existingAttempt.attachments as Array<{ url?: string; type?: string; name?: string }> | null) ||
+            [],
+        );
+      // Contenido distinto (texto o adjuntos) = otro intento.
+      if (
+        !panelAttemptContentMatches({
+          storedText: meta.attemptText ?? existingAttempt.text,
+          storedAttachmentsKey,
+          nextText: messageText,
+          nextAttachmentsKey,
+        })
+      ) {
         return NextResponse.json(
           {
             error:
-              "El borrador cambió respecto del intento pendiente. Se necesita un nuevo envío.",
+              "El borrador o el adjunto cambió respecto del intento pendiente. Se necesita un nuevo envío.",
             code: "ATTEMPT_CONTENT_MISMATCH",
             clientAttemptId,
           },
@@ -362,6 +377,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             clientAttemptId,
             advisorUserId: session.user.id,
             attemptText: messageText,
+            attemptAttachmentsKey: panelAttemptAttachmentsKey(attachments),
           }),
         },
       }));

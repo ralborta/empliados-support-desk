@@ -37,6 +37,7 @@ export function readPanelOutboundMeta(rawPayload: unknown): {
   source: string | null;
   bbcCalledAt: string | null;
   attemptText: string | null;
+  attemptAttachmentsKey: string | null;
   providerMessageId: string | null;
 } {
   if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
@@ -47,6 +48,7 @@ export function readPanelOutboundMeta(rawPayload: unknown): {
       source: null,
       bbcCalledAt: null,
       attemptText: null,
+      attemptAttachmentsKey: null,
       providerMessageId: null,
     };
   }
@@ -69,14 +71,40 @@ export function readPanelOutboundMeta(rawPayload: unknown): {
     source: typeof p.source === "string" ? p.source : null,
     bbcCalledAt: typeof p.bbcCalledAt === "string" ? p.bbcCalledAt : null,
     attemptText: typeof p.attemptText === "string" ? p.attemptText : null,
+    attemptAttachmentsKey:
+      typeof p.attemptAttachmentsKey === "string" ? p.attemptAttachmentsKey : null,
     providerMessageId: typeof p.providerMessageId === "string" ? p.providerMessageId : null,
   };
+}
+
+/** Identidad inmutable del intento: texto + adjuntos. */
+export function panelAttemptAttachmentsKey(
+  attachments: Array<{ url?: string; type?: string; name?: string }> | null | undefined,
+): string {
+  if (!attachments || attachments.length === 0) return "";
+  return attachments
+    .map((a) => `${String(a.url ?? "").trim()}|${String(a.type ?? "").trim()}|${String(a.name ?? "").trim()}`)
+    .sort()
+    .join(";");
+}
+
+export function panelAttemptContentMatches(params: {
+  storedText: string | null | undefined;
+  storedAttachmentsKey: string | null | undefined;
+  nextText: string;
+  nextAttachmentsKey: string;
+}): boolean {
+  return (
+    String(params.storedText ?? "").trim() === params.nextText.trim() &&
+    String(params.storedAttachmentsKey ?? "") === params.nextAttachmentsKey
+  );
 }
 
 export function buildPanelHumanPendingPayload(params: {
   clientAttemptId: string;
   advisorUserId: string;
   attemptText: string;
+  attemptAttachmentsKey?: string;
   prior?: Record<string, unknown>;
 }): Prisma.InputJsonObject {
   return {
@@ -85,6 +113,7 @@ export function buildPanelHumanPendingPayload(params: {
     authorship: "human",
     clientAttemptId: params.clientAttemptId,
     attemptText: params.attemptText,
+    attemptAttachmentsKey: params.attemptAttachmentsKey ?? "",
     deliveryStatus: "pending",
     advisorUserId: params.advisorUserId,
   };

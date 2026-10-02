@@ -82,6 +82,10 @@ export function MessageComposer({
   const [statusHint, setStatusHint] = useState<string | null>(null);
   const attemptIdRef = useRef<string | null>(null);
   const sentTextRef = useRef<string>("");
+  const sentFileKeyRef = useRef<string>("");
+
+  const fileKey = (f: File | null) =>
+    f ? `${f.name}|${f.size}|${f.lastModified}|${f.type}` : "";
 
   useEffect(() => {
     setText(readDraft(ticketId));
@@ -90,20 +94,30 @@ export function MessageComposer({
     setStatusHint(null);
   }, [ticketId]);
 
-  const updateText = (value: string) => {
-    setText(value);
-    writeDraft(ticketId, value);
-    // Cambiar el borrador invalida el intento anterior (contenido inmutable).
+  const invalidateAttemptIfContentChanged = (nextText: string, nextFile: File | null) => {
+    if (!attemptIdRef.current) return;
+    if (!sentTextRef.current && !sentFileKeyRef.current) return;
     if (
-      attemptIdRef.current &&
-      sentTextRef.current &&
-      value.trim() !== sentTextRef.current.trim()
+      nextText.trim() !== sentTextRef.current.trim() ||
+      fileKey(nextFile) !== sentFileKeyRef.current
     ) {
       attemptIdRef.current = null;
       writeStoredAttemptId(ticketId, null);
       sentTextRef.current = "";
+      sentFileKeyRef.current = "";
       setStatusHint(null);
     }
+  };
+
+  const updateText = (value: string) => {
+    setText(value);
+    writeDraft(ticketId, value);
+    invalidateAttemptIfContentChanged(value, file);
+  };
+
+  const updateFile = (next: File | null) => {
+    setFile(next);
+    invalidateAttemptIfContentChanged(text, next);
   };
 
   const clearDraftIfUnchanged = (sentText: string) => {
@@ -167,6 +181,7 @@ export function MessageComposer({
 
     const outboundText = text;
     sentTextRef.current = outboundText;
+    sentFileKeyRef.current = fileKey(file);
 
     if (direction === "OUTBOUND") {
       if (!attemptIdRef.current) {
@@ -201,6 +216,8 @@ export function MessageComposer({
           clearDraftIfUnchanged(outboundText);
           attemptIdRef.current = null;
           writeStoredAttemptId(ticketId, null);
+          sentTextRef.current = "";
+          sentFileKeyRef.current = "";
           setFile(null);
           setStatusHint(null);
         } else if (deliveryStatus === "confirmation_pending" || res.status === 202) {
@@ -211,15 +228,18 @@ export function MessageComposer({
           if (data.code === "ATTEMPT_CONTENT_MISMATCH") {
             attemptIdRef.current = null;
             writeStoredAttemptId(ticketId, null);
-            setError("El texto cambió: se enviará como un mensaje nuevo.");
+            sentTextRef.current = "";
+            sentFileKeyRef.current = "";
+            setError("El texto o el adjunto cambió: se enviará como un mensaje nuevo.");
           } else {
             setError(data.error || "No se pudo enviar el mensaje al cliente");
           }
-          // Conserva attemptId + borrador para reintento seguro (mismo id) si el contenido no cambió.
         } else {
           clearDraftIfUnchanged(outboundText);
           attemptIdRef.current = null;
           writeStoredAttemptId(ticketId, null);
+          sentTextRef.current = "";
+          sentFileKeyRef.current = "";
           setFile(null);
         }
       } else if (!res.ok) {
@@ -280,7 +300,7 @@ export function MessageComposer({
             <input
               type="file"
               className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              onChange={(e) => updateFile(e.target.files?.[0] || null)}
             />
           </label>
           <button

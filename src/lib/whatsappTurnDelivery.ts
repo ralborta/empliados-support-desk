@@ -361,10 +361,47 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
     };
 
     try {
-      const sendResult = await deps.sendWhatsApp({ number: rawPhone, message, mediaUrl });
+      const sendResult = await deps.sendWhatsApp({
+        number: rawPhone,
+        message,
+        mediaUrl,
+        beforeEachProviderCall: async () => {
+          const pausedCheck = deps.isBotPausedForPhone ?? isBotPausedForPhone;
+          return !(await pausedCheck(rawPhone, deps.prisma));
+        },
+      });
 
-      if (sendResult.skippedDuplicate) {
-        const providerId = String(sendResult.providerMessageId ?? "").trim();
+      if ("skipped" in sendResult && sendResult.skipped) {
+        console.log(
+          `[whatsappTurn] Entrega abortada mid-send: Kira pausada phone=${rawPhone.slice(0, 6)}…`,
+        );
+        return {
+          ...payload,
+          message: "",
+          summaryText: "",
+          mediaUrl: "",
+          mediaUrl_s: "",
+          skipResponse_s: "true",
+          nextFlow: "ignore",
+          nextFlow_s: "ignore",
+          waDelivery: "human_takeover_paused",
+          waDelivery_s: "human_takeover_paused",
+          executor: "human_takeover",
+          executor_s: "human_takeover",
+          ...(sendResult.providerMessageId
+            ? { waOutboundProviderId: sendResult.providerMessageId }
+            : {}),
+        };
+      }
+
+      const delivered = sendResult as {
+        skippedDuplicate?: boolean;
+        providerMessageId?: string;
+        rawResponse?: unknown;
+      };
+
+      if (delivered.skippedDuplicate) {
+        const providerId = String(delivered.providerMessageId ?? "").trim();
         if (!providerId) {
           return {
             ...payload,
@@ -382,7 +419,7 @@ export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
         return await finishBackendDelivery(providerId, "backend");
       }
 
-      const explicitProviderId = String(sendResult.providerMessageId ?? "").trim();
+      const explicitProviderId = String(delivered.providerMessageId ?? "").trim();
       const providerId =
         explicitProviderId ||
         `builderbot-accepted:${inboundDeliveryKey ?? turnMessageId ?? randomUUID()}`;

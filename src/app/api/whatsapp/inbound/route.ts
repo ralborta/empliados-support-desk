@@ -907,13 +907,28 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
   });
   const mergeableHuman = recentHumanCandidates.find((m) => {
     const meta = readPanelOutboundMeta(m.rawPayload);
+    // Mismo ID de proveedor → idempotencia.
     if (meta.providerMessageId && meta.providerMessageId === messageId) return true;
-    if (isPanelAttemptExternalId(m.externalMessageId)) return true;
-    return (
-      meta.deliveryStatus === "pending" ||
-      meta.deliveryStatus === "confirmation_pending" ||
-      meta.source === "panel_human"
-    );
+    if (m.externalMessageId && m.externalMessageId === messageId) return true;
+
+    // Ya tiene otro ID de proveedor distinto → envío distinto; no fusionar.
+    if (meta.providerMessageId && meta.providerMessageId !== messageId) return false;
+    if (
+      m.externalMessageId &&
+      !isPanelAttemptExternalId(m.externalMessageId) &&
+      m.externalMessageId !== messageId
+    ) {
+      return false;
+    }
+
+    // Solo intentos abiertos (pending / confirmation_pending) o aún con attempt: sin confirmar.
+    const open =
+      meta.deliveryStatus === "pending" || meta.deliveryStatus === "confirmation_pending";
+    if (open) return true;
+    if (isPanelAttemptExternalId(m.externalMessageId) && meta.deliveryStatus !== "failed") {
+      return true;
+    }
+    return false;
   });
   if (mergeableHuman) {
     await mergeWebhookIntoPlatformOutbound(prisma, {
