@@ -36,6 +36,8 @@ export function readPanelOutboundMeta(rawPayload: unknown): {
   authorship: PanelAuthorship | null;
   source: string | null;
   bbcCalledAt: string | null;
+  attemptText: string | null;
+  providerMessageId: string | null;
 } {
   if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
     return {
@@ -44,6 +46,8 @@ export function readPanelOutboundMeta(rawPayload: unknown): {
       authorship: null,
       source: null,
       bbcCalledAt: null,
+      attemptText: null,
+      providerMessageId: null,
     };
   }
   const p = rawPayload as Record<string, unknown>;
@@ -64,12 +68,15 @@ export function readPanelOutboundMeta(rawPayload: unknown): {
         : null,
     source: typeof p.source === "string" ? p.source : null,
     bbcCalledAt: typeof p.bbcCalledAt === "string" ? p.bbcCalledAt : null,
+    attemptText: typeof p.attemptText === "string" ? p.attemptText : null,
+    providerMessageId: typeof p.providerMessageId === "string" ? p.providerMessageId : null,
   };
 }
 
 export function buildPanelHumanPendingPayload(params: {
   clientAttemptId: string;
   advisorUserId: string;
+  attemptText: string;
   prior?: Record<string, unknown>;
 }): Prisma.InputJsonObject {
   return {
@@ -77,6 +84,7 @@ export function buildPanelHumanPendingPayload(params: {
     source: "panel_human",
     authorship: "human",
     clientAttemptId: params.clientAttemptId,
+    attemptText: params.attemptText,
     deliveryStatus: "pending",
     advisorUserId: params.advisorUserId,
   };

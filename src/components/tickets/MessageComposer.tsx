@@ -93,6 +93,17 @@ export function MessageComposer({
   const updateText = (value: string) => {
     setText(value);
     writeDraft(ticketId, value);
+    // Cambiar el borrador invalida el intento anterior (contenido inmutable).
+    if (
+      attemptIdRef.current &&
+      sentTextRef.current &&
+      value.trim() !== sentTextRef.current.trim()
+    ) {
+      attemptIdRef.current = null;
+      writeStoredAttemptId(ticketId, null);
+      sentTextRef.current = "";
+      setStatusHint(null);
+    }
   };
 
   const clearDraftIfUnchanged = (sentText: string) => {
@@ -197,8 +208,14 @@ export function MessageComposer({
           setFile(null);
           void waitForAttemptConfirmation(attemptIdRef.current || "", outboundText);
         } else if (deliveryStatus === "failed" || res.status === 422 || !res.ok) {
-          setError(data.error || "No se pudo enviar el mensaje al cliente");
-          // Conserva attemptId + borrador para reintento seguro (mismo id).
+          if (data.code === "ATTEMPT_CONTENT_MISMATCH") {
+            attemptIdRef.current = null;
+            writeStoredAttemptId(ticketId, null);
+            setError("El texto cambió: se enviará como un mensaje nuevo.");
+          } else {
+            setError(data.error || "No se pudo enviar el mensaje al cliente");
+          }
+          // Conserva attemptId + borrador para reintento seguro (mismo id) si el contenido no cambió.
         } else {
           clearDraftIfUnchanged(outboundText);
           attemptIdRef.current = null;

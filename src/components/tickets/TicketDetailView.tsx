@@ -56,6 +56,9 @@ interface TicketDetailViewProps {
       createdAt: string;
       direction?: string;
       attachments: unknown;
+      deliveryStatus?: string | null;
+      authorship?: string | null;
+      clientAttemptId?: string | null;
     }>;
   };
   agentes: Array<{ id: string; name: string; email: string }>;
@@ -97,6 +100,9 @@ export function TicketDetailView({
     (ticket.messages || []).map((m) => ({
       ...m,
       direction: m.direction,
+      deliveryStatus: m.deliveryStatus,
+      authorship: m.authorship,
+      clientAttemptId: m.clientAttemptId,
     })),
   );
   const [botPaused, setBotPaused] = useState(!!ticket.botPaused);

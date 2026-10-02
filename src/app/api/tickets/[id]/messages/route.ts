@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
 import { sendWhatsAppMessage } from "@/lib/builderbot";
+import { extractBuilderBotOutboundMessageId } from "@/lib/builderbotSendResult";
 import { summarizeConversation } from "@/lib/openai";
 import { uploadFileToBlob } from "@/lib/blob";
 import {
@@ -238,6 +239,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     if (existingAttempt) {
       const meta = readPanelOutboundMeta(existingAttempt.rawPayload);
+      const immutableText = meta.attemptText ?? existingAttempt.text;
+      // Contenido distinto = otro intento (el cliente debe generar nuevo attemptId).
+      if (immutableText.trim() !== messageText.trim()) {
+        return NextResponse.json(
+          {
+            error:
+              "El borrador cambió respecto del intento pendiente. Se necesita un nuevo envío.",
+            code: "ATTEMPT_CONTENT_MISMATCH",
+            clientAttemptId,
+          },
+          { status: 409 },
+        );
+      }
+
       const alreadyConfirmed = !isPanelAttemptExternalId(existingAttempt.externalMessageId);
 
       if (alreadyConfirmed || meta.deliveryStatus === "sent") {
@@ -258,8 +273,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
       }
 
-      if (meta.deliveryStatus === "confirmation_pending" || meta.bbcCalledAt) {
-        // Reintento del mismo intento: no volver a llamar al proveedor.
+      // Fallo definitivo primero (no confundir con confirmation_pending por bbcCalledAt).
+      if (meta.deliveryStatus === "failed") {
+        await updatePanelOutboundDelivery(prisma, {
+          messageId: existingAttempt.id,
+          deliveryStatus: "pending",
+          patch: {
+            lastRetryAt: new Date().toISOString(),
+            bbcCalledAt: null,
+          },
+        });
+      } else if (meta.deliveryStatus === "confirmation_pending") {
+        // Reintento del mismo intento pendiente de confirmación: no volver a llamar al proveedor.
+        return deliveryResponse({
+          message: serializeMessage(existingAttempt),
+          deliveryStatus: "confirmation_pending",
+          attemptId: clientAttemptId,
+          duplicate: true,
+        });
+      } else if (meta.deliveryStatus === "pending" && meta.bbcCalledAt) {
+        // Ya se llamó a BBC y aún no hay veredicto → confirmación pendiente.
         return deliveryResponse({
           message: serializeMessage(existingAttempt),
           deliveryStatus: "confirmation_pending",
@@ -267,19 +300,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           duplicate: true,
         });
       }
-
-      if (meta.deliveryStatus === "pending" && !meta.bbcCalledAt) {
-        // Quedó pending sin llamada (crash previo): seguir con esta fila.
-      } else if (meta.deliveryStatus === "failed") {
-        await updatePanelOutboundDelivery(prisma, {
-          messageId: existingAttempt.id,
-          deliveryStatus: "pending",
-          patch: { lastRetryAt: new Date().toISOString() },
-        });
-      }
+      // pending sin bbcCalledAt: continuar y llamar al proveedor.
     }
 
-    // Dedup por contenido solo si ya hay un envío confirmado/pendiente de confirmación (no failed).
+    // Dedup por contenido solo como respaldo corto y solo si ya está confirmado/pendiente.
     if (!existingAttempt) {
       const recentHuman = await findRecentSameContentMessage(prisma, {
         ticketId: id,
@@ -337,6 +361,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           rawPayload: buildPanelHumanPendingPayload({
             clientAttemptId,
             advisorUserId: session.user.id,
+            attemptText: messageText,
           }),
         },
       }));
@@ -372,11 +397,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         patch: { bbcCalledAt: new Date().toISOString() },
       });
       try {
-        await sendWhatsAppMessage({
+        const providerRes = await sendWhatsAppMessage({
           number: ticket.customer.phone,
           message: text.trim() || " ",
           mediaUrl: attachments.length > 0 ? attachments[0].url : undefined,
         });
+        const providerMessageId = extractBuilderBotOutboundMessageId(providerRes);
         console.log(
           `[Messages] ✅ Mensaje enviado a ${ticket.customer.phone}${attachments.length > 0 ? " (con adjunto)" : ""}`,
         );
@@ -388,14 +414,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           await updatePanelOutboundDelivery(prisma, {
             messageId: message.id,
             deliveryStatus: "sent",
+            patch: {
+              providerHttpOk: true,
+              ...(providerMessageId ? { providerMessageId } : {}),
+            },
+            ...(providerMessageId ? { externalMessageId: providerMessageId } : {}),
           });
         } else {
-          // HTTP OK = aceptado por proveedor; webhook puede llegar después.
           deliveryStatus = "sent";
           await updatePanelOutboundDelivery(prisma, {
             messageId: message.id,
             deliveryStatus: "sent",
-            patch: { providerHttpOk: true },
+            patch: {
+              providerHttpOk: true,
+              ...(providerMessageId ? { providerMessageId } : {}),
+            },
+            ...(providerMessageId ? { externalMessageId: providerMessageId } : {}),
           });
         }
       } catch (error: unknown) {
@@ -430,7 +464,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
     }
 
-    // Si el webhook guardó una copia BOT del mismo texto, eliminarla (autoría = HUMAN del intento).
+    // Solo limpia ecos BOT "sin confirmar" con texto exacto (no inclusión / no borrar envíos legítimos).
     if (deliveryStatus === "sent" || deliveryStatus === "confirmation_pending") {
       const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
       const normalized = (messageText || "").trim().replace(/\s+/g, " ");
@@ -444,8 +478,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         },
       });
       for (const botMsg of botDuplicates) {
+        const botMeta = readPanelOutboundMeta(botMsg.rawPayload);
+        if (botMeta.authorship !== "unconfirmed") continue;
         const botText = (botMsg.text || "").trim().replace(/\s+/g, " ");
-        if (botText === normalized || botText.includes(normalized) || normalized.includes(botText)) {
+        if (botText === normalized) {
           await prisma.ticketMessage.delete({ where: { id: botMsg.id } });
           break;
         }

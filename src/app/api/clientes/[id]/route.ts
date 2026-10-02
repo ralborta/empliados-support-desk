@@ -102,18 +102,49 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         });
 
     if (botPaused === true) {
-      await pauseAtilioForCustomer(customer.id, prisma, "panel:bot-paused-toggle");
-    } else if (botPaused === false) {
-      await reactivateAtilioForCustomer(customer.id, prisma, "panel:bot-paused-toggle");
-    }
-
-    if (botPaused !== undefined) {
+      const channelSyncOk = await pauseAtilioForCustomer(
+        customer.id,
+        prisma,
+        "panel:bot-paused-toggle",
+      );
       customer = await prisma.customer.findUniqueOrThrow({
         where: { id },
         include: {
           _count: {
             select: { tickets: true },
           },
+        },
+      });
+      return NextResponse.json({
+        customer,
+        humanControl: {
+          registered: true,
+          botPaused: true,
+          channelSyncOk,
+          syncStatus: channelSyncOk ? "synced" : "pending",
+        },
+      });
+    } else if (botPaused === false) {
+      const channelSyncOk = await reactivateAtilioForCustomer(
+        customer.id,
+        prisma,
+        "panel:bot-paused-toggle",
+      );
+      customer = await prisma.customer.findUniqueOrThrow({
+        where: { id },
+        include: {
+          _count: {
+            select: { tickets: true },
+          },
+        },
+      });
+      return NextResponse.json({
+        customer,
+        humanControl: {
+          registered: true,
+          botPaused: false,
+          channelSyncOk,
+          syncStatus: channelSyncOk ? "synced" : "pending",
         },
       });
     }

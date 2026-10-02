@@ -39,6 +39,10 @@ import {
   mergeWebhookIntoPlatformOutbound,
   normalizeOutboundDedupText,
 } from "@/lib/outboundMessageDedup";
+import {
+  isPanelAttemptExternalId,
+  readPanelOutboundMeta,
+} from "@/lib/panelHumanOutboundAttempt";
 import { allowPhoneRequest } from "@/lib/phoneRateLimit";
 import {
   isWaraInboundAuditOnly,
@@ -888,32 +892,49 @@ async function processOutgoingMessage({ eventName, data }: { eventName: string; 
 
   const normalizedOutboundText = normalizeOutboundDedupText(messageText);
 
-  // Pre-guardado del backend (turn/unidades/certificados) + intento humano panel:
-  // fusionar en la fila existente en vez de duplicar en el panel.
-  const recentHumanOutbound = await findRecentSameContentMessage(prisma, {
-    ticketId: targetTicket.id,
-    direction: "OUTBOUND",
-    from: "HUMAN",
-    text: normalizedOutboundText,
-    windowMs: 2 * 60 * 1000,
+  // 1) Vínculo fuerte: humano panel pendiente / confirmation_pending con mismo texto
+  //    (solo estados abiertos; no fusionar dos envíos HUMAN ya confirmados con IDs distintos).
+  const recentHumanCandidates = await prisma.ticketMessage.findMany({
+    where: {
+      ticketId: targetTicket.id,
+      direction: "OUTBOUND",
+      from: "HUMAN",
+      text: normalizedOutboundText,
+      createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
   });
-  if (recentHumanOutbound) {
+  const mergeableHuman = recentHumanCandidates.find((m) => {
+    const meta = readPanelOutboundMeta(m.rawPayload);
+    if (meta.providerMessageId && meta.providerMessageId === messageId) return true;
+    if (isPanelAttemptExternalId(m.externalMessageId)) return true;
+    return (
+      meta.deliveryStatus === "pending" ||
+      meta.deliveryStatus === "confirmation_pending" ||
+      meta.source === "panel_human"
+    );
+  });
+  if (mergeableHuman) {
     await mergeWebhookIntoPlatformOutbound(prisma, {
-      messageId: recentHumanOutbound.id,
+      messageId: mergeableHuman.id,
       externalMessageId: messageId,
       webhookRawPayload: { eventName, data } as Prisma.InputJsonObject,
     });
     console.log(
-      `ℹ️ Mensaje saliente fusionado con respuesta humana (${recentHumanOutbound.id})`,
+      `ℹ️ Mensaje saliente fusionado con intento humano (${mergeableHuman.id})`,
     );
     return NextResponse.json({
       ok: true,
       ticketId: targetTicket.id,
       ticketCode: targetTicket.code,
       merged: true,
-      existingMessageId: recentHumanOutbound.id,
+      existingMessageId: mergeableHuman.id,
     });
   }
+
+  // Sin intento humano mergeable: no fusionar por texto solo (dos envíos legítimos iguales).
+  // Sigue el pre-guardado BOT / platform más abajo.
 
   const platformPresave = await findPlatformPresavedOutboundDuplicate(prisma, {
     ticketId: targetTicket.id,

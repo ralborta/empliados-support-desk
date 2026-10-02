@@ -6,6 +6,7 @@ import { TicketsLayout } from "@/components/tickets/TicketsLayout";
 import { TicketDetailView } from "@/components/tickets/TicketDetailView";
 import { waraIncidentLabels, type WaraIncidentType } from "@/lib/wara";
 import { assertAdvisorCanAccessTicket } from "@/lib/advisorDistribution";
+import { messagePresentation } from "@/lib/panelHumanOutboundAttempt";
 
 export default async function TicketDetail({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -83,14 +84,25 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
               }
             : null,
           assignedTo: ticket.assignedTo,
-          messages: conversation.map((msg) => ({
-            id: msg.id,
-            from: msg.from,
-            direction: msg.direction,
-            text: msg.text,
-            createdAt: msg.createdAt.toISOString(),
-            attachments: msg.attachments ? JSON.parse(JSON.stringify(msg.attachments)) : null,
-          })),
+          messages: conversation
+            .filter((msg) => {
+              const status = messagePresentation(msg.rawPayload).deliveryStatus;
+              return status !== "failed";
+            })
+            .map((msg) => {
+              const presentation = messagePresentation(msg.rawPayload);
+              return {
+                id: msg.id,
+                from: msg.from,
+                direction: msg.direction,
+                text: msg.text,
+                createdAt: msg.createdAt.toISOString(),
+                attachments: msg.attachments ? JSON.parse(JSON.stringify(msg.attachments)) : null,
+                deliveryStatus: presentation.deliveryStatus,
+                authorship: presentation.authorship,
+                clientAttemptId: presentation.clientAttemptId,
+              };
+            }),
         }}
         agentes={agentes}
         wara={wara ?? null}

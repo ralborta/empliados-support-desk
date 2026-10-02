@@ -7,7 +7,10 @@ import {
 } from "@/lib/builderbotCustomerContext";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { runTurnExecutorPhase } from "@/lib/whatsappTurnExecutor";
-import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
+import {
+  sendAutomaticBotErrorFallback,
+  sendAutomaticBotTextWithOptionalMedia,
+} from "@/lib/automaticBotDeliveryGate";
 
 export const maxDuration = 120;
 
@@ -79,11 +82,23 @@ export async function POST(req: NextRequest) {
       apiKey: apiKey ?? "",
     });
     if (result.message || result.mediaUrl) {
-      await sendWhatsAppTextWithOptionalMedia({
+      const sent = await sendAutomaticBotTextWithOptionalMedia({
         number: rawPhone,
         message: result.message,
         mediaUrl: result.mediaUrl,
+        source: "whatsapp_turn_execute",
       });
+      if ("skipped" in sent && sent.skipped) {
+        return NextResponse.json({
+          ok: true,
+          ok_s: "true",
+          executor: "human_takeover",
+          executor_s: "human_takeover",
+          message: "",
+          waDelivery: "human_takeover_paused",
+          skipped: true,
+        });
+      }
       if (result.message) {
         await persistCustomerBotReply(rawPhone, result.message, {
           source: "whatsapp_turn_execute",
@@ -102,6 +117,12 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("[whatsappTurn/execute]", detail);
+    await sendAutomaticBotErrorFallback({
+      number: rawPhone,
+      message:
+        "Tuve un problema procesando la consulta. Intentá de nuevo en un momento o escribí la patente/unidad con más detalle.",
+      source: "whatsapp_turn_execute_error",
+    });
     return NextResponse.json({ ok: false, error: detail }, { status: 500 });
   }
 }

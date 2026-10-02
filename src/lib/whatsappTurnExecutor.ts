@@ -159,10 +159,8 @@ import {
   looksLikePlatformUnitVisibilityComplaint,
 } from "@/lib/waraUnitIntent";
 import { waitUntil } from "@vercel/functions";
-import { sendWhatsAppMessage } from "@/lib/builderbot";
 import { persistCustomerBotReply } from "@/lib/customerTicketInquiry";
 import { extractMediaUrlAndCleanText } from "@/lib/mediaUrlMarker";
-import { sendWhatsAppTextWithOptionalMedia } from "@/lib/whatsappMediaDelivery";
 import { shouldDeliverWhatsAppToProtectedClient } from "@/lib/waraTurnDeliveryGuard";
 import {
   getPendingAction,
@@ -728,11 +726,22 @@ export function scheduleDeferredTurnExecutor(params: {
           );
           return;
         }
-        await sendWhatsAppTextWithOptionalMedia({
+        const { sendAutomaticBotTextWithOptionalMedia } = await import(
+          "@/lib/automaticBotDeliveryGate"
+        );
+        const sent = await sendAutomaticBotTextWithOptionalMedia({
           number: params.rawPhone,
           message: result.message,
           mediaUrl: result.mediaUrl,
+          source: "whatsapp_turn_deferred",
         });
+        if ("skipped" in sent && sent.skipped) {
+          console.log(
+            "[whatsappTurn] deferred delivery skipped: human takeover paused",
+            params.rawPhone.slice(0, 6),
+          );
+          return;
+        }
         await persistCustomerBotReply(params.rawPhone, result.message, {
           source: "whatsapp_turn_execute",
           executor: result.executor,
@@ -740,15 +749,13 @@ export function scheduleDeferredTurnExecutor(params: {
         }).catch(() => undefined);
       } catch (err) {
         console.error("[whatsappTurn] deferred execute failed:", err);
-        try {
-          await sendWhatsAppMessage({
-            number: params.rawPhone,
-            message:
-              "Tuve un problema procesando la consulta. Intentá de nuevo en un momento o escribí la patente/unidad con más detalle.",
-          });
-        } catch {
-          /* último recurso */
-        }
+        const { sendAutomaticBotErrorFallback } = await import("@/lib/automaticBotDeliveryGate");
+        await sendAutomaticBotErrorFallback({
+          number: params.rawPhone,
+          message:
+            "Tuve un problema procesando la consulta. Intentá de nuevo en un momento o escribí la patente/unidad con más detalle.",
+          source: "whatsapp_turn_deferred_error",
+        });
       }
     })(),
   );
