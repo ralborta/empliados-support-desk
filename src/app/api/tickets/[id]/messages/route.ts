@@ -37,11 +37,33 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     },
   });
 
+  // Snapshot liviano para que otras sesiones vean estado/pausa/asignación sin F5.
+  // Bug real 2026-10-02: el poll solo traía messages; status y botPaused quedaban stale.
+  const ticketMeta = await prisma.ticket.findUnique({
+    where: { id },
+    select: {
+      status: true,
+      priority: true,
+      assignedToUserId: true,
+      assignedTo: { select: { id: true, name: true } },
+      customer: { select: { botPausedAt: true } },
+    },
+  });
+
   return NextResponse.json({
     messages: messages.map((m) => ({
       ...m,
       createdAt: m.createdAt.toISOString(),
     })),
+    ticket: ticketMeta
+      ? {
+          status: ticketMeta.status,
+          priority: ticketMeta.priority,
+          assignedToUserId: ticketMeta.assignedToUserId,
+          assignedTo: ticketMeta.assignedTo,
+          botPaused: Boolean(ticketMeta.customer?.botPausedAt),
+        }
+      : null,
   });
 }
 

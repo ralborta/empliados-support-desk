@@ -100,26 +100,80 @@ export function TicketDetailView({
     })),
   );
   const [botPaused, setBotPaused] = useState(!!ticket.botPaused);
+  const [liveStatus, setLiveStatus] = useState(ticket.status);
+  const [livePriority, setLivePriority] = useState(ticket.priority);
+  const [liveAssignedTo, setLiveAssignedTo] = useState(ticket.assignedTo);
+  const [liveAssignedToUserId, setLiveAssignedToUserId] = useState(ticket.assignedToUserId);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const refreshSeqRef = useRef(0);
+  const localPauseAtRef = useRef(0);
 
   useEffect(() => {
     setBotPaused(!!ticket.botPaused);
-  }, [ticket.botPaused, ticket.id]);
+    setLiveStatus(ticket.status);
+    setLivePriority(ticket.priority);
+    setLiveAssignedTo(ticket.assignedTo);
+    setLiveAssignedToUserId(ticket.assignedToUserId);
+  }, [ticket.botPaused, ticket.status, ticket.priority, ticket.assignedTo, ticket.assignedToUserId, ticket.id]);
+
+  useEffect(() => {
+    setConversation(
+      (ticket.messages || []).map((m) => ({
+        ...m,
+        direction: m.direction,
+      })),
+    );
+    refreshSeqRef.current += 1;
+  }, [ticket.id]); // eslint-disable-line react-hooks/exhaustive-deps -- solo al cambiar de ticket
+
+  const applyBotPausedFromServer = useCallback((next: boolean) => {
+    // Evita que un poll atrasado pise una pausa/reactivación local reciente (<3s).
+    if (Date.now() - localPauseAtRef.current < 3000) return;
+    setBotPaused(next);
+  }, []);
+
+  const setBotPausedLocal = useCallback((next: boolean) => {
+    localPauseAtRef.current = Date.now();
+    setBotPaused(next);
+  }, []);
 
   const refreshMessages = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
     try {
       const res = await fetch(`/api/tickets/${ticket.id}/messages`);
       if (!res.ok) return;
       const data = await res.json();
+      if (seq !== refreshSeqRef.current) return;
       if (Array.isArray(data.messages)) {
         setConversation(data.messages);
+      }
+      const meta = data.ticket;
+      if (meta && typeof meta === "object") {
+        if (typeof meta.status === "string") setLiveStatus(meta.status);
+        if (typeof meta.priority === "string") setLivePriority(meta.priority);
+        if ("assignedToUserId" in meta) {
+          setLiveAssignedToUserId(
+            meta.assignedToUserId == null ? null : String(meta.assignedToUserId),
+          );
+        }
+        if ("assignedTo" in meta) {
+          setLiveAssignedTo(
+            meta.assignedTo && typeof meta.assignedTo === "object" && "name" in meta.assignedTo
+              ? (meta.assignedTo as { name: string })
+              : null,
+          );
+        }
+        if (typeof meta.botPaused === "boolean") {
+          applyBotPausedFromServer(meta.botPaused);
+        }
       }
     } catch {
       /* ignore */
     }
-  }, [ticket.id]);
+  }, [ticket.id, applyBotPausedFromServer]);
 
-  usePollWhenVisible(refreshMessages, 5000, tab === "conversacion");
+  // Poll mientras el ticket está abierto (cualquier pestaña); al volver a visible también corre.
+  usePollWhenVisible(refreshMessages, 5000, true);
 
   useEffect(() => {
     const el = chatScrollRef.current;
@@ -163,19 +217,19 @@ export function TicketDetailView({
             <p className="mt-0.5 text-sm text-slate-600">{companyName}</p>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <span
-                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${statusBadgeClass(ticket.status as TicketStatus)}`}
+                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${statusBadgeClass(liveStatus as TicketStatus)}`}
               >
-                {statusLabels[ticket.status as TicketStatus]}
+                {statusLabels[liveStatus as TicketStatus]}
               </span>
               <span
-                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${priorityBadgeClass(ticket.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT")}`}
+                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${priorityBadgeClass(livePriority as "LOW" | "NORMAL" | "HIGH" | "URGENT")}`}
               >
-                {priorityLabels[ticket.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT"]}
+                {priorityLabels[livePriority as "LOW" | "NORMAL" | "HIGH" | "URGENT"]}
               </span>
-              {ticket.assignedTo ? (
+              {liveAssignedTo ? (
                 <span className="inline-flex items-center gap-1 text-[11px] text-slate-600">
-                  <AgentAvatar name={ticket.assignedTo.name} size="sm" />
-                  {ticket.assignedTo.name.split(" ")[0]}
+                  <AgentAvatar name={liveAssignedTo.name} size="sm" />
+                  {liveAssignedTo.name.split(" ")[0]}
                 </span>
               ) : (
                 <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${waraAccent.chipMuted}`}>
@@ -224,7 +278,7 @@ export function TicketDetailView({
                 ticketId={ticket.id}
                 customerId={ticket.customerId}
                 botPaused={botPaused}
-                onBotPausedChange={setBotPaused}
+                onBotPausedChange={setBotPausedLocal}
                 onSent={refreshMessages}
                 embedded
               />
@@ -236,7 +290,7 @@ export function TicketDetailView({
               {isAdmin ? (
                 <AssignAgentDropdown
                   ticketId={ticket.id}
-                  currentAgentId={ticket.assignedToUserId}
+                  currentAgentId={liveAssignedToUserId}
                   agentes={agentes}
                 />
               ) : (
@@ -244,10 +298,10 @@ export function TicketDetailView({
                   <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                     Asignado a
                   </p>
-                  {ticket.assignedTo ? (
+                  {liveAssignedTo ? (
                     <div className="flex items-center gap-2 text-sm text-slate-800">
-                      <AgentAvatar name={ticket.assignedTo.name} size="sm" />
-                      {ticket.assignedTo.name}
+                      <AgentAvatar name={liveAssignedTo.name} size="sm" />
+                      {liveAssignedTo.name}
                     </div>
                   ) : (
                     <p className="text-sm text-slate-500">Sin asignar (en cola)</p>
@@ -261,12 +315,12 @@ export function TicketDetailView({
               incidentLabel={incidentTypeLabel}
               plate={plate}
               company={companyName}
-              priority={ticket.priority}
+              priority={livePriority}
             />
             <QuickActionsPanel ticketId={ticket.id} labMode={labMode} />
             <TicketPriorityPanel
               ticketId={ticket.id}
-              currentPriority={ticket.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT"}
+              currentPriority={livePriority as "LOW" | "NORMAL" | "HIGH" | "URGENT"}
             />
             <V2OperationPanel ticketId={ticket.id} botPaused={botPaused} />
           </aside>
