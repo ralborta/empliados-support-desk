@@ -58,9 +58,8 @@ assert.ok(
 );
 
 const pauseLib = readFileSync(join(root, "../src/lib/atilioBotPause.ts"), "utf8");
-assert.ok(pauseLib.includes("setBuilderBotCloudBlacklist"), "pause debe blacklist BBC");
+assert.ok(pauseLib.includes("ensureBuilderBotContactPaused"), "pause debe reconciliar mute+blacklist");
 assert.ok(pauseLib.includes("setBotBlacklist"), "pause debe blacklist self-hosted");
-assert.ok(pauseLib.includes("setBuilderBotContactMute"), "pause/reactivate debe tocar /mute BBC");
 assert.ok(
   pauseLib.includes("ensureBuilderBotContactActive"),
   "reactivate debe reconciliar mute=false + blacklist=remove",
@@ -82,6 +81,14 @@ assert.ok(
 assert.ok(
   /setBuilderBotCloudBlacklist[\s\S]*Promise<boolean>/.test(bbc),
   "blacklist BBC debe reportar éxito/fallo",
+);
+assert.ok(
+  bbc.includes("ensureBuilderBotContactPaused"),
+  "debe existir reconcile de pausa (mute+blacklist add)",
+);
+assert.ok(
+  /Cloud mute attempt/.test(bbc),
+  "mute BBC debe reintentar ante fallos transitorios",
 );
 
 const turn = readFileSync(join(root, "../src/lib/whatsappTurn.ts"), "utf8");
