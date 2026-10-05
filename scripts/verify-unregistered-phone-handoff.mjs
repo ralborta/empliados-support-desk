@@ -23,6 +23,7 @@ import {
   unregisteredPhoneGuidePdfUrl,
 } from "../src/lib/unregisteredPhoneHandoff.ts";
 import { waraPhoneLookupCandidates } from "../src/lib/whatsappPhone.ts";
+import { isUsableLocalWaraCompany } from "../src/lib/waraApi.ts";
 import { extractMediaUrlAndCleanText } from "../src/lib/mediaUrlMarker.ts";
 
 assert.equal(
@@ -150,10 +151,30 @@ assert.doesNotMatch(recheck.text, /gu[ií]a/i, "no pide de nuevo la guía");
 assert.deepEqual(waraPhoneLookupCandidates("5492617172616"), [
   "5492617172616",
   "542617172616",
+  "2617172616",
 ]);
 assert.deepEqual(waraPhoneLookupCandidates("+54 261 717-2616"), [
   "542617172616",
   "5492617172616",
+  "2617172616",
 ]);
+// Bug 2026-10-05: Wara tenía el contacto como nacional sin 54/549
+assert.deepEqual(waraPhoneLookupCandidates("5492612732306"), [
+  "5492612732306",
+  "542612732306",
+  "2612732306",
+]);
+assert.deepEqual(waraPhoneLookupCandidates("2612732306"), [
+  "2612732306",
+  "542612732306",
+  "5492612732306",
+]);
+
+assert.equal(
+  isUsableLocalWaraCompany("Autotransportes Presidente Alvear S.A."),
+  true,
+);
+assert.equal(isUsableLocalWaraCompany("No registrado en Wara"), false);
+assert.equal(isUsableLocalWaraCompany(""), false);
 
 console.log("OK verify-unregistered-phone-handoff");

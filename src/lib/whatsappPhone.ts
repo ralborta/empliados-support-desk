@@ -14,7 +14,12 @@ export function normalizeWhatsAppPhone(raw: string): string {
 
 /**
  * Candidatos para ObtenerContactosPorNumero. WhatsApp manda 549…; Wara a veces
- * guarda el mismo móvil como 54… (sin el 9). El primer valor es el canónico.
+ * guarda el mismo móvil como 54… (sin el 9) o solo el nacional (área+número,
+ * p.ej. 2612732306). El primer valor es el canónico de WhatsApp.
+ *
+ * Bug real 2026-10-05 (5492612732306 / Presidente Alvear): con solo 549/54 Wara
+ * no devolvía contacto (“no registrado” + guía) aunque el número estaba cargado
+ * como 2612732306 y el desk ya tenía historial/empresa.
  */
 export function waraPhoneLookupCandidates(rawPhone: string): string[] {
   const normalized = normalizeWhatsAppPhone(rawPhone);
@@ -23,9 +28,20 @@ export function waraPhoneLookupCandidates(rawPhone: string): string[] {
     if (value.length >= 8 && !out.includes(value)) out.push(value);
   };
   add(normalized);
-  if (/^549\d{10}$/.test(normalized)) add(`54${normalized.slice(3)}`);
+  // WA móvil AR: 549 + 10 dígitos nacionales
+  if (/^549\d{10}$/.test(normalized)) {
+    add(`54${normalized.slice(3)}`); // sin el 9 de móvil
+    add(normalized.slice(3)); // solo nacional (área+número)
+  }
+  // 54 + 10 dígitos (sin 9)
   if (/^54\d{10}$/.test(normalized) && !normalized.startsWith("549")) {
     add(`549${normalized.slice(2)}`);
+    add(normalized.slice(2));
+  }
+  // Nacional 10 dígitos → variantes con país (lookup inverso)
+  if (/^\d{10}$/.test(normalized) && !normalized.startsWith("54")) {
+    add(`54${normalized}`);
+    add(`549${normalized}`);
   }
   return out;
 }

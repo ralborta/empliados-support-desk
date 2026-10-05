@@ -3277,6 +3277,13 @@ function normalizeContact(raw: unknown): WaraEmpresaContact | null {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Empresa local usable (no placeholders del handoff de no registrado). */
+export function isUsableLocalWaraCompany(companyName: string | null | undefined): boolean {
+  const n = String(companyName ?? "").trim();
+  if (n.length < 2) return false;
+  return !/no registrado|sin empresa|desconocido/i.test(n);
+}
+
 /**
  * Wara (sobre todo staging) es intermitente: para el MISMO número, una llamada puede
  * devolver un `200` vacío (`encontrado:false`, 0 contactos) o un 5xx, y la siguiente
@@ -3329,6 +3336,20 @@ export async function obtenerEmpresaPorNumero(rawPhone: string): Promise<WaraEmp
       }
 
       if (!result.configured || (result.status === undefined && !result.ok)) return result;
+
+      // Error duro de Wara para este formato (p.ej. 549… → "Su contraseña ha caducado"):
+      // no quemar reintentos; probar el siguiente candidato de teléfono.
+      const hardFormatError =
+        !result.ok &&
+        typeof result.error === "string" &&
+        /contrase[nñ]a ha caducado/i.test(result.error);
+      if (hardFormatError) {
+        console.warn(
+          `[WaraAPI] ObtenerContactosPorNumero candidato=${candidate} error duro ` +
+            `(${result.error}); paso al siguiente formato`,
+        );
+        break;
+      }
 
       if (attempt < maxAttempts) {
         console.warn(
@@ -4477,6 +4498,23 @@ export async function resolveCustomerByWaraPhone(
   }
 
   if (!lookup.encontrado || lookup.contactos.length === 0) {
+    // Bug real 2026-10-05: Wara devolvía vacío por formato de teléfono y el desk
+    // ya tenía al cliente con empresa real (historial). No tratarlo como "no registrado".
+    const localCompany = local?.companyName?.trim() || "";
+    if (local && isUsableLocalWaraCompany(localCompany)) {
+      console.warn(
+        `[WaraAPI] ObtenerContactosPorNumero sin contactos para ${normalized}; ` +
+          `uso empresa local «${localCompany}» (local_fallback)`,
+      );
+      return {
+        customer: local,
+        registered: true,
+        source: "local_fallback",
+        lookup,
+        requiresCompanySelection: false,
+        selectedCompanyName: localCompany,
+      };
+    }
     return {
       customer: null,
       registered: false,
