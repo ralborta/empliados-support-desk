@@ -4,7 +4,7 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import { pauseAtilioForCustomer, reactivateAtilioForCustomer } from "@/lib/atilioBotPause";
+import { pauseAtilioForCustomerDetailed, reactivateAtilioForCustomerDetailed } from "@/lib/atilioBotPause";
 import { ensureBuilderBotContactActive, setBotBlacklist } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
@@ -102,7 +102,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         });
 
     if (botPaused === true) {
-      const channelSyncOk = await pauseAtilioForCustomer(
+      const sync = await pauseAtilioForCustomerDetailed(
         customer.id,
         prisma,
         "panel:bot-paused-toggle",
@@ -118,14 +118,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({
         customer,
         humanControl: {
-          registered: true,
+          registered: sync.registered,
           botPaused: true,
-          channelSyncOk,
-          syncStatus: channelSyncOk ? "synced" : "pending",
+          channelSyncOk: sync.channelSyncOk,
+          muteOk: sync.muteOk,
+          blacklistOk: sync.blacklistOk,
+          syncStatus: sync.channelSyncOk ? "synced" : "pending",
         },
       });
     } else if (botPaused === false) {
-      const channelSyncOk = await reactivateAtilioForCustomer(
+      const sync = await reactivateAtilioForCustomerDetailed(
         customer.id,
         prisma,
         "panel:bot-paused-toggle",
@@ -141,10 +143,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({
         customer,
         humanControl: {
-          registered: true,
+          registered: sync.registered,
           botPaused: false,
-          channelSyncOk,
-          syncStatus: channelSyncOk ? "synced" : "pending",
+          channelSyncOk: sync.channelSyncOk,
+          muteOk: sync.muteOk,
+          blacklistOk: sync.blacklistOk,
+          syncStatus: sync.channelSyncOk ? "synced" : "pending",
         },
       });
     }

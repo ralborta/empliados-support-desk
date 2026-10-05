@@ -130,6 +130,7 @@ export type BuilderBotChannelReconcile = {
  * Desmutear / mutear un contacto en BuilderBot Cloud (plugin add_mute del runtime).
  * POST /api/v2/{botId}/mute con { number, status: boolean }.
  * Distinto de /blacklist: hay que tocar las dos APIs para dejar el canal usable.
+ * Reintenta como blacklist: en prod el mute a veces falla al primer intento.
  */
 export async function setBuilderBotContactMute(
   number: string,
@@ -143,26 +144,40 @@ export async function setBuilderBotContactMute(
   if (normalizedNumber.length < 9) return false;
 
   const url = `${BUILDERBOT_BASE_URL.replace(/\/$/, "")}/api/v2/${BOT_ID}/mute`;
-  try {
-    const response = await axios.post(
-      url,
-      { number: normalizedNumber, status: muted },
-      {
-        headers: { "Content-Type": "application/json", "x-api-builderbot": API_KEY },
-        timeout: 15000,
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-builderbot": API_KEY,
+  };
+  const body = { number: normalizedNumber, status: muted };
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= BLACKLIST_RETRIES; attempt++) {
+    try {
+      const response = await axios.post(url, body, { headers, timeout: 15000 });
+      console.log("[BuilderBot] Cloud mute OK", muted, normalizedNumber, response.data);
+      await sleep(BLACKLIST_SETTLE_MS);
+      return true;
+    } catch (error: unknown) {
+      lastError = error;
+      const err = error as { response?: { status?: number; data?: unknown }; message?: string };
+      console.error(
+        `[BuilderBot] Cloud mute attempt ${attempt}/${BLACKLIST_RETRIES}`,
+        muted,
+        normalizedNumber,
+        { status: err.response?.status, data: err.response?.data, message: err?.message },
+      );
+      if (attempt < BLACKLIST_RETRIES) {
+        await sleep(BLACKLIST_DELAY_MS);
       }
-    );
-    console.log("[BuilderBot] Cloud mute OK", muted, normalizedNumber, response.data);
-    return true;
-  } catch (error: unknown) {
-    const err = error as { response?: { status?: number; data?: unknown }; message?: string };
-    console.error("[BuilderBot] Cloud mute falló", muted, normalizedNumber, {
-      status: err.response?.status,
-      data: err.response?.data,
-      message: err?.message,
-    });
-    return false;
+    }
   }
+  console.error(
+    "[BuilderBot] Cloud mute falló tras reintentos",
+    muted,
+    normalizedNumber,
+    (lastError as { response?: { data?: unknown } })?.response?.data ?? lastError,
+  );
+  return false;
 }
 
 /**
@@ -176,7 +191,26 @@ export async function ensureBuilderBotContactActive(
   const blacklistOk = await setBuilderBotCloudBlacklist(number, "remove");
   const ok = muteOk && blacklistOk;
   if (!ok) {
-    console.error("[BuilderBot] Reconciliación mute/blacklist incompleta", {
+    console.error("[BuilderBot] Reconciliación mute/blacklist incompleta (active)", {
+      muteOk,
+      blacklistOk,
+    });
+  }
+  return { muteOk, blacklistOk, ok };
+}
+
+/**
+ * Silencia el contacto en Cloud para takeover humano: mute=true + blacklist=add.
+ * Misma política de reintentos que la reactivación.
+ */
+export async function ensureBuilderBotContactPaused(
+  number: string
+): Promise<BuilderBotChannelReconcile> {
+  const muteOk = await setBuilderBotContactMute(number, true);
+  const blacklistOk = await setBuilderBotCloudBlacklist(number, "add");
+  const ok = muteOk && blacklistOk;
+  if (!ok) {
+    console.error("[BuilderBot] Reconciliación mute/blacklist incompleta (paused)", {
       muteOk,
       blacklistOk,
     });

@@ -14,7 +14,7 @@ import {
   claimConversationOnHumanReply,
 } from "@/lib/advisorDistribution";
 import { findRecentSameContentMessage } from "@/lib/outboundMessageDedup";
-import { pauseAtilioForCustomer } from "@/lib/atilioBotPause";
+import { pauseAtilioForCustomerDetailed } from "@/lib/atilioBotPause";
 import { statusAfterOutboundMessage } from "@/lib/ticketStatusAfterMessage";
 import type { TicketStatus } from "@/lib/types";
 import {
@@ -156,6 +156,9 @@ function deliveryResponse(params: {
   error?: string;
   details?: string;
   duplicate?: boolean;
+  channelSyncOk?: boolean;
+  muteOk?: boolean;
+  blacklistOk?: boolean;
 }) {
   const ok =
     params.deliveryStatus === "sent" || params.deliveryStatus === "confirmation_pending";
@@ -168,6 +171,18 @@ function deliveryResponse(params: {
       duplicate: params.duplicate === true,
       ...(params.error ? { error: params.error } : {}),
       ...(params.details ? { details: params.details } : {}),
+      ...(params.channelSyncOk !== undefined
+        ? {
+            humanControl: {
+              registered: true,
+              botPaused: true,
+              channelSyncOk: params.channelSyncOk,
+              muteOk: params.muteOk ?? params.channelSyncOk,
+              blacklistOk: params.blacklistOk ?? params.channelSyncOk,
+              syncStatus: params.channelSyncOk ? "synced" : "pending",
+            },
+          }
+        : {}),
     },
     { status: ok ? (params.deliveryStatus === "confirmation_pending" ? 202 : 200) : 422 },
   );
@@ -383,11 +398,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }));
 
     // Takeover al registrar el intento (aunque la confirmación BBC falle después).
-    await pauseAtilioForCustomer(
+    const pauseSync = await pauseAtilioForCustomerDetailed(
       ticketForStatus.customerId,
       prisma,
       "human_outbound_takeover",
-    ).catch((e) => console.error("[Messages] pauseAtilio takeover:", e));
+    ).catch((e) => {
+      console.error("[Messages] pauseAtilio takeover:", e);
+      return {
+        registered: false,
+        channelSyncOk: false,
+        muteOk: false,
+        blacklistOk: false,
+      };
+    });
     await claimConversationOnHumanReply(id, session.user.id).catch((e) =>
       console.error("[Messages] claimConversation:", e),
     );
@@ -525,6 +548,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             ? "Envío aceptado con confirmación pendiente"
             : undefined,
       details: sendError,
+      channelSyncOk: pauseSync.channelSyncOk,
+      muteOk: pauseSync.muteOk,
+      blacklistOk: pauseSync.blacklistOk,
     });
   }
 

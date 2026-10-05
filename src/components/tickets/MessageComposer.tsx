@@ -80,6 +80,7 @@ export function MessageComposer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusHint, setStatusHint] = useState<string | null>(null);
+  const [channelSyncPending, setChannelSyncPending] = useState(false);
   const attemptIdRef = useRef<string | null>(null);
   const sentTextRef = useRef<string>("");
   const sentFileKeyRef = useRef<string>("");
@@ -211,6 +212,12 @@ export function MessageComposer({
         // Takeover local aunque la confirmación del proveedor esté pendiente.
         onBotPausedChange?.(true);
         onSent?.();
+        const humanControl = data.humanControl as { channelSyncOk?: boolean } | undefined;
+        if (humanControl && humanControl.channelSyncOk === false) {
+          setChannelSyncPending(true);
+        } else if (humanControl && humanControl.channelSyncOk === true) {
+          setChannelSyncPending(false);
+        }
 
         if (deliveryStatus === "sent" || (res.ok && !deliveryStatus && res.status === 200)) {
           clearDraftIfUnchanged(outboundText);
@@ -335,7 +342,11 @@ export function MessageComposer({
             <BotPausedToggle
               customerId={customerId}
               paused={botPaused}
-              onPausedChange={onBotPausedChange}
+              onPausedChange={(next) => {
+                onBotPausedChange?.(next);
+                if (!next) setChannelSyncPending(false);
+              }}
+              externalSyncPending={channelSyncPending}
             />
           ) : null}
           <button
