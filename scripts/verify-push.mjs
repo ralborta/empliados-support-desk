@@ -42,6 +42,7 @@ const PUSH_SUITES = [
   "verify-odometer-interno-900117-e2e.mjs",
   "verify-odometer-action-choice-continuity.mjs",
   "verify-odometer-action-choice-route-e2e.mjs",
+  "verify-odometer-corregir-not-vague-issue.mjs",
   "verify-odometer-live-pending-over-cert-history.mjs",
   "verify-odometer-live-pending-over-cert-history-e2e.mjs",
   "verify-fleet-query-kind.mjs",
