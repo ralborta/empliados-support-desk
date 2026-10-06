@@ -49,8 +49,22 @@ function normActionChoiceText(text: string): string {
 export function parseOdometerActionChoice(text: string): OdometerActionChoice | null {
   const t = normActionChoiceText(text);
   if (!t) return null;
-  if (/^actualizar(\s+(el\s+)?(kilometraje|km))?\.?$/.test(t)) return "actualizar";
-  if (/^corregir(\s+(el\s+)?(kilometraje|km))?\.?$/.test(t)) return "corregir";
+  const meter = "(kilometraje|km|odometro|horometro)";
+  if (new RegExp(`^actualizar(\\s+(el\\s+)?${meter})?(\\s+(de|del|en)\\s+.+)?$`).test(t)) {
+    return "actualizar";
+  }
+  if (
+    new RegExp(`^(corregir|arreglar)(\\s+(el\\s+)?${meter})?(\\s+(de|del|en)\\s+.+)?$`).test(t)
+  ) {
+    return "corregir";
+  }
+  // «800-027 CORREGIR ODOMETRO» / «corregir odometro 800-027»
+  if (/\b(correg\w*|arregl\w*)\b/.test(t) && new RegExp(`\\b${meter}\\b`).test(t)) {
+    return "corregir";
+  }
+  if (/\bactualiz\w*\b/.test(t) && new RegExp(`\\b${meter}\\b`).test(t)) {
+    return "actualizar";
+  }
   return null;
 }
 

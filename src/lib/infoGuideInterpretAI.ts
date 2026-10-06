@@ -121,7 +121,11 @@ import {
   resolveExplicitPlatformGuideModule,
   type InfoGuideModulePick,
 } from "@/lib/waraApi";
-import { detectAllPlates, formatPlateWithSpaces } from "@/lib/wara";
+import {
+  detectAllPlates,
+  formatPlateWithSpaces,
+  looksLikeExplicitOdometerUpdateRequest,
+} from "@/lib/wara";
 import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import {
   looksLikeOdometerActionChoiceReply,
@@ -3228,6 +3232,7 @@ function normalizeAmbiguousIssueWithoutExplicitModule(
   if (looksLikeAllGoodResolutionAck(selectionText)) return interpret;
   // Dato de odómetro/horómetro en curso — no reinventar «inconveniente de la unidad».
   if (isOperationalMeterCollectionMessage(selectionText, threadText)) return interpret;
+  if (looksLikeExplicitOdometerUpdateRequest(selectionText)) return interpret;
   // «Actualizar»/«Corregir» del menú de odómetro — no clarify de inconveniente.
   if (
     looksLikeOdometerActionChoiceReply(selectionText) &&

@@ -1595,7 +1595,7 @@ export function looksLikeOdometerIntentStart(text: string | undefined | null): b
     // berlingo pañol" no tenía "cargar" en los verbos. "necesito"+"unidad" lo mandaba
     // a consulta GPS en vivo (looksLikeLiveUnitConsultIntent) y respondía estado
     // AH 755 DI en vez de arrancar el trámite de odómetro.
-    /\b(actualizar|cambiar|cambio de|correg\w*|modificar|ajust\w*|registrar|realizar|carg(ar|arle|ame|alo|ala|á))\b/.test(t) &&
+    /\b(actualizar|cambiar|cambio de|correg\w*|arregl\w*|modificar|ajust\w*|registrar|realizar|carg(ar|arle|ame|alo|ala|á))\b/.test(t) &&
     /\b(od[oó]metro|hor[oó]metro|kilometraje|kil[oó]metros)\b/.test(t)
   );
 }
@@ -1763,6 +1763,15 @@ export function looksLikeOdometerProblemReport(text: string | undefined | null):
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (!/\b(od[oó]metro|hor[oó]metro|kilometraje)\b/.test(t)) return false;
+  // «arreglar/corregir odómetro» es trámite de km, no falla de hardware (prod 2026-10-06).
+  const correctionVerb = /\b(arregl\w*|correg\w*|actualiz\w*|cambi(ar|o de)|modific\w*|carg(ar|arle))\b/.test(
+    t,
+  );
+  const hardwareFail =
+    /\b(no marca|no marcan|marcando mal|marca mal|no est[aá] marcando|incorrecto|desfasado|no coincide|no funciona|falla|aver[ií]a|roto)\b/.test(
+      t,
+    );
+  if (correctionVerb && !hardwareFail) return false;
   if (
     /\b(actualizar|cambiar|cambio de|registrar|nuevo od[oó]metro|confirmo)\b/.test(t) &&
     !/\b(problema|problemas|no marca|marcando|incorrecto|falla|mal)\b/.test(t)
@@ -1770,7 +1779,7 @@ export function looksLikeOdometerProblemReport(text: string | undefined | null):
     return false;
   }
   return (
-    /\b(problema|problemas|no marca|no marcan|marcando mal|marca mal|no est[aá] marcando|incorrecto|desfasado|no coincide|no funciona|falla|aver[ií]a|revisar|arreglar)\b/.test(
+    /\b(problema|problemas|no marca|no marcan|marcando mal|marca mal|no est[aá] marcando|incorrecto|desfasado|no coincide|no funciona|falla|aver[ií]a|revisar)\b/.test(
       t,
     ) || /\btengo un problema\b/.test(t)
   );

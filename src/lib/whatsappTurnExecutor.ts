@@ -2905,6 +2905,8 @@ export async function runTurnExecutorPhase(params: {
   // No pisar trámites operativos que las reglas ya resolvieron (cert/odo/asesor).
   if (
     !isOperationalMeterCollectionMessage(selectionText, threadCtx.classificationThread) &&
+    !looksLikeExplicitOdometerUpdateRequest(selectionText) &&
+    !looksLikeHorometerOnlyIntent(selectionText) &&
     !looksLikeOdometerActionChoiceInContext(
       selectionText,
       threadCtx.classificationThread,

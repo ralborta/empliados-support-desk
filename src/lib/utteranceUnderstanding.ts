@@ -14,6 +14,9 @@ import { OPENAI_DEFAULT_TIMEOUT_MS, withOpenAiTimeout } from "@/lib/openaiTimeou
 import {
   hasPendingCertificateUnitRequest,
   hasPendingMaintenancePlateRequest,
+  looksLikeExplicitOdometerUpdateRequest,
+  looksLikeHorometerOnlyIntent,
+  looksLikeOdometerIntentStart,
   threadHasActiveOdometerFlow,
 } from "@/lib/wara";
 import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
@@ -175,6 +178,15 @@ export function shouldInterpretAmbiguousUtterance(
   if (text.length > MAX_INTERPRET_CHARS) return false;
 
   if (looksLikeExplicitCapabilityMenuRequest(text)) return false;
+  // Bug real 2026-10-06: «Corregir odometro» / «800-027 CORREGIR ODOMETRO» caía al
+  // intérprete (GPS activo / inconveniente vago) y no arrancaba el trámite.
+  if (
+    looksLikeExplicitOdometerUpdateRequest(text) ||
+    looksLikeHorometerOnlyIntent(text) ||
+    looksLikeOdometerIntentStart(text)
+  ) {
+    return false;
+  }
   if (classifyFleetQueryKind(text).kind === "aggregate_comparison") return false;
   if (classifyFleetQueryKind(text).kind === "fleet_list") return false;
 

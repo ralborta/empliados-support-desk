@@ -83,6 +83,7 @@ import {
   looksLikeBareAffirmationToOdometerActionChoice,
   looksLikeOdometerActionChoiceReply,
   looksLikeOdometerActionChoiceUnitContinuation,
+  messageHasOdometerActionChoiceUnitRef,
   ODOMETER_ACTION_CHOICE_STAGE,
   parseOdometerActionChoice,
   shouldSupersedeOdometerActionChoice,
@@ -665,11 +666,38 @@ export async function POST(req: NextRequest) {
       if (choice) {
         const preliminaryThread = await recentThreadText(rawPhone);
         const activeUnitForChoice = await getActiveUnit(prisma, rawPhone);
-        const patente =
+        let patente =
           String(preliminaryPendingAction?.payload?.patente ?? "").trim() ||
           activeUnitForChoice?.plate ||
           extractLastPlateFromThread(preliminaryThread) ||
           "";
+        if (messageHasOdometerActionChoiceUnitRef(rawText)) {
+          const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+          if (session.ok && session.sessionToken) {
+            const fleet = await consultarEstadoUnidades(session.sessionToken, []);
+            if (fleet.ok && fleet.unidades.length > 0) {
+              const plateInMsg = detectLoosePlate(rawText);
+              if (plateInMsg) {
+                const want = normalizePlate(plateInMsg);
+                const hit = fleet.unidades.find(
+                  (u) => normalizePlate(u.patente || "") === want,
+                );
+                if (hit) patente = normalizePlate(hit.patente || "") || patente;
+              }
+              if (!plateInMsg || !patente) {
+                const codes = extractUnitCodeNumbersFromMessage(rawText, {
+                  expectedField: "unit",
+                });
+                const matches = fleet.unidades.filter((u) =>
+                  codes.some((c) => Number(u.movil_id) === c),
+                );
+                if (matches.length === 1) {
+                  patente = normalizePlate(matches[0].patente || "") || patente;
+                }
+              }
+            }
+          }
+        }
         return await resumeOdometerAfterActionChoice({
           rawPhone,
           rawText,
