@@ -58,6 +58,7 @@ import {
 } from "@/lib/wara";
 import {
   extractExplicitUnitNameFromText,
+  filterUnitsByUnitName,
   looksLikeFleetUnitSearchInput,
   looksLikeUnitNameInMessage,
   looksLikeVagueUnitReference,
@@ -79,6 +80,7 @@ import {
 } from "@/lib/odometerPendingAuthority";
 import { readTurnLayer } from "@/lib/turnLayerContract";
 import {
+  extractLastHyphenUnitCodeFromThread,
   hasPendingOdometerActionChoice,
   looksLikeBareAffirmationToOdometerActionChoice,
   looksLikeOdometerActionChoiceReply,
@@ -87,6 +89,7 @@ import {
   ODOMETER_ACTION_CHOICE_STAGE,
   parseOdometerActionChoice,
   shouldSupersedeOdometerActionChoice,
+  threadHasRecentOdometerCorrectionIntent,
 } from "@/lib/odometerActionChoice";
 import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
@@ -522,6 +525,51 @@ async function resolvePatenteFromFleetForMeterTramite(params: {
   return { kind: "not_found" };
 }
 
+async function resolvePatenteFromUnitNameCode(
+  rawPhone: string,
+  code: string,
+): Promise<string> {
+  const unitName = String(code ?? "").trim();
+  if (!unitName) return "";
+  const session = await resolveWaraSessionByPhone(prisma, rawPhone);
+  if (!session.ok || !session.sessionToken) return "";
+  const fleet = await consultarEstadoUnidades(session.sessionToken, []);
+  if (!fleet.ok || fleet.unidades.length === 0) return "";
+  const byName = filterUnitsByUnitName(fleet.unidades, unitName);
+  if (byName.length === 1) {
+    return normalizePlate(byName[0].patente || "") || "";
+  }
+  const codes = extractUnitCodeNumbersFromMessage(unitName, { expectedField: "unit" });
+  const byMovil = fleet.unidades.filter((u) =>
+    codes.some((c) => Number(u.movil_id) === c),
+  );
+  if (byMovil.length === 1) {
+    return normalizePlate(byMovil[0].patente || "") || "";
+  }
+  return "";
+}
+
+async function resolveOdometerConversationPatente(params: {
+  rawPhone: string;
+  rawText: string;
+  threadText: string;
+  pendingPatente?: string | null;
+}): Promise<string> {
+  const pending = normalizePlate(String(params.pendingPatente ?? "").trim());
+  if (pending) return pending;
+  const code =
+    extractExplicitUnitNameFromText(params.rawText) ||
+    extractLastHyphenUnitCodeFromThread(params.threadText);
+  if (code) {
+    const fromCode = await resolvePatenteFromUnitNameCode(params.rawPhone, code);
+    if (fromCode) return fromCode;
+  }
+  const fromPlate = normalizePlate(extractLastPlateFromThread(params.threadText) || "");
+  if (fromPlate) return fromPlate;
+  const activeUnit = await getActiveUnit(prisma, params.rawPhone);
+  return normalizePlate(activeUnit?.plate || "");
+}
+
 /** Retoma trámite tras consumir expectativa odometer_action_choice.
  * `choice` es opcional: corregir/actualizar no cambia la API Wara; si el cliente
  * pasó unidad sin elegir, avanzamos a pedir km+fecha sin inventar la opción.
@@ -665,38 +713,23 @@ export async function POST(req: NextRequest) {
       const choice = parseOdometerActionChoice(rawText);
       if (choice) {
         const preliminaryThread = await recentThreadText(rawPhone);
-        const activeUnitForChoice = await getActiveUnit(prisma, rawPhone);
-        let patente =
-          String(preliminaryPendingAction?.payload?.patente ?? "").trim() ||
-          activeUnitForChoice?.plate ||
-          extractLastPlateFromThread(preliminaryThread) ||
-          "";
-        if (messageHasOdometerActionChoiceUnitRef(rawText)) {
-          const session = await resolveWaraSessionByPhone(prisma, rawPhone);
-          if (session.ok && session.sessionToken) {
-            const fleet = await consultarEstadoUnidades(session.sessionToken, []);
-            if (fleet.ok && fleet.unidades.length > 0) {
-              const plateInMsg = detectLoosePlate(rawText);
-              if (plateInMsg) {
-                const want = normalizePlate(plateInMsg);
-                const hit = fleet.unidades.find(
-                  (u) => normalizePlate(u.patente || "") === want,
-                );
-                if (hit) patente = normalizePlate(hit.patente || "") || patente;
-              }
-              if (!plateInMsg || !patente) {
-                const codes = extractUnitCodeNumbersFromMessage(rawText, {
-                  expectedField: "unit",
-                });
-                const matches = fleet.unidades.filter((u) =>
-                  codes.some((c) => Number(u.movil_id) === c),
-                );
-                if (matches.length === 1) {
-                  patente = normalizePlate(matches[0].patente || "") || patente;
-                }
-              }
-            }
-          }
+        const pendingUnitName = String(
+          preliminaryPendingAction?.payload?.unitNameCode ??
+            preliminaryPendingAction?.payload?.unitLabel ??
+            "",
+        ).trim();
+        let patente = await resolveOdometerConversationPatente({
+          rawPhone,
+          rawText,
+          threadText: preliminaryThread,
+          pendingPatente: String(preliminaryPendingAction?.payload?.patente ?? "").trim(),
+        });
+        if (!patente && pendingUnitName) {
+          patente = await resolvePatenteFromUnitNameCode(rawPhone, pendingUnitName);
+        }
+        if (!patente && messageHasOdometerActionChoiceUnitRef(rawText)) {
+          const named = extractExplicitUnitNameFromText(rawText);
+          if (named) patente = await resolvePatenteFromUnitNameCode(rawPhone, named);
         }
         return await resumeOdometerAfterActionChoice({
           rawPhone,
@@ -711,9 +744,12 @@ export async function POST(req: NextRequest) {
       // Resolución determinística del mensaje actual (interno/patente) — sin IA ni
       // activeUnit/hilo: si el interno explícito no está en flota, se informa y basta.
       const preliminaryThread = await recentThreadText(rawPhone);
+      const named = extractExplicitUnitNameFromText(rawText);
+      let resolvedPatente = named
+        ? await resolvePatenteFromUnitNameCode(rawPhone, named)
+        : "";
       const session = await resolveWaraSessionByPhone(prisma, rawPhone);
-      let resolvedPatente = "";
-      if (session.ok && session.sessionToken) {
+      if (!resolvedPatente && session.ok && session.sessionToken) {
         const fleet = await consultarEstadoUnidades(session.sessionToken, []);
         if (fleet.ok && fleet.unidades.length > 0) {
           const plateInMsg = detectLoosePlate(rawText);
@@ -996,7 +1032,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Solo dijo "odómetro" / "ODOMETRO" sin verbo y SIN trámite vivo del mismo kind:
-  // preguntar qué quiere hacer (bug 2026-08-07).
+  // preguntar qué quiere hacer (bug 2026-08-07). Si el hilo ya tiene interno +
+  // «corregir», no repreguntar ni pedir patente de cero (bug 2026-10-06).
   if (bareOdometerTopic) {
     const preliminaryForClarify = await recentThreadText(rawPhone);
     if (!hasPendingOdometerConfirmation(preliminaryForClarify)) {
@@ -1006,9 +1043,30 @@ export async function POST(req: NextRequest) {
     if (priorBare?.type === "odometro" && priorMeter === "odometro") {
       // Continuar más abajo (no debería llegar: early return arriba).
     } else {
+    const hyphenFromThread = extractLastHyphenUnitCodeFromThread(preliminaryForClarify);
+    const patenteForChoice = await resolveOdometerConversationPatente({
+      rawPhone,
+      rawText,
+      threadText: preliminaryForClarify,
+      pendingPatente: String(priorBare?.payload?.patente ?? "").trim(),
+    });
     const unitHint =
+      formatPlateWithSpaces(patenteForChoice) ||
+      hyphenFromThread ||
       formatPlateWithSpaces(extractLastPlateFromThread(preliminaryForClarify) ?? "") ||
       extractLastPlateFromThread(preliminaryForClarify);
+    if (priorBare?.type === "odometro" && priorMeter && priorMeter !== "odometro") {
+      await clearPendingAction(prisma, rawPhone);
+    }
+    if (patenteForChoice && threadHasRecentOdometerCorrectionIntent(preliminaryForClarify)) {
+      return await resumeOdometerAfterActionChoice({
+        rawPhone,
+        rawText,
+        patente: patenteForChoice,
+        flowThreadText: preliminaryForClarify,
+        choice: "corregir",
+      });
+    }
     const fallbackTemplate = unitHint
       ? `Sobre ${unitHint}: ¿qué necesitás con el odómetro? ¿Corregir o actualizar el kilometraje, o es otra consulta?`
       : `¿Qué necesitás con el odómetro: corregir o actualizar el kilometraje, o es otra consulta?`;
@@ -1019,12 +1077,6 @@ export async function POST(req: NextRequest) {
       fieldHint: "odometro",
       fallbackTemplate,
     });
-    const activeUnitForClarify = await getActiveUnit(prisma, rawPhone);
-    const plateFromThread = extractLastPlateFromThread(preliminaryForClarify);
-    const patenteForChoice = activeUnitForClarify?.plate ?? plateFromThread;
-    if (priorBare?.type === "odometro" && priorMeter && priorMeter !== "odometro") {
-      await clearPendingAction(prisma, rawPhone);
-    }
     const persisted = await persistOdometerPendingState({
       prisma,
       phone: rawPhone,
@@ -1032,6 +1084,7 @@ export async function POST(req: NextRequest) {
       payloadPatch: {
         patente: patenteForChoice ? normalizePlate(patenteForChoice) : undefined,
         unitLabel: unitHint || undefined,
+        unitNameCode: hyphenFromThread || undefined,
         clarifyStage: "clarify_odometer_intent",
       },
       meterType: "odometro",

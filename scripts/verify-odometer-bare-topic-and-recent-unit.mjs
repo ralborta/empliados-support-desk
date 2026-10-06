@@ -14,6 +14,10 @@ import {
 } from "../src/lib/wara.ts";
 import { isOdometerPlateSelectionMessage } from "../src/lib/waraUnitIntent.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
+import {
+  extractLastHyphenUnitCodeFromThread,
+  threadHasRecentOdometerCorrectionIntent,
+} from "../src/lib/odometerActionChoice.ts";
 
 assert.equal(looksLikeBareOdometerTopicMention("ODOMETRO"), true);
 assert.equal(looksLikeBareOdometerTopicMention("odómetro"), true);
@@ -48,4 +52,17 @@ assert.equal(classifyTurnExecutor("ODOMETRO", thread), "odometro");
 assert.equal(classifyTurnExecutor("CORREGIR ODOMETRO", thread), "odometro");
 assert.equal(classifyTurnExecutor("NECESITO CORREGIR ODOMETRO", thread), "odometro");
 
-console.log("OK — ODOMETRO aclara intención; CORREGIR usa unidad reciente");
+const hyphenThread = [
+  "Cliente: arreglar odometro de 800-027",
+  "Kira: Disculpame, ¿en qué puedo ayudarte específicamente con el odómetro?",
+  "Cliente: 800-027 CORREGIR ODOMETRO",
+  "Kira: ¿Qué inconveniente se está repitiendo y con qué unidad?",
+].join("\n");
+
+assert.equal(extractLastHyphenUnitCodeFromThread(hyphenThread), "800-027");
+assert.equal(extractLastPlateFromThread(hyphenThread), null);
+assert.equal(threadHasRecentOdometerCorrectionIntent(hyphenThread), true);
+assert.equal(looksLikeBareOdometerTopicMention("Odómetro"), true);
+assert.equal(looksLikeBareOdometerTopicMention("Corregir"), false);
+
+console.log("OK — ODOMETRO aclara intención; CORREGIR usa unidad reciente; 800-027 se conserva del hilo");

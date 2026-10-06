@@ -6,6 +6,8 @@ import type { PendingActionRecord } from "@/lib/pendingAction";
 import {
   detectLoosePlate,
   extractUnitCodeNumbersFromMessage,
+  lineLooksLikeBotMissingPlatePrompt,
+  lineLooksLikeBotUnitListExample,
   looksLikeBareOdometerTopicMention,
   looksLikeCertificateKeyword,
   looksLikeExplicitOdometerUpdateRequest,
@@ -115,6 +117,39 @@ export function looksLikeBareAffirmationToOdometerActionChoice(text: string): bo
   const t = normActionChoiceText(text);
   if (!t) return false;
   return /^(si|sip|sep|dale|ok|okay|va|claro)s?$/.test(t);
+}
+
+const HYPHEN_UNIT_CODE = /\b(M?\d{3}-\d{2,3})\b/gi;
+
+/**
+ * Último interno con guión del hilo (800-027 / M800-027).
+ * No es patente: extractLastPlateFromThread lo ignora y el trámite pedía matrícula de cero.
+ */
+export function extractLastHyphenUnitCodeFromThread(text: string | undefined | null): string | null {
+  if (!text?.trim()) return null;
+  const lines = text.split("\n");
+  for (let li = lines.length - 1; li >= 0; li--) {
+    const line = lines[li];
+    if (lineLooksLikeBotUnitListExample(line)) continue;
+    if (lineLooksLikeBotMissingPlatePrompt(line)) continue;
+    const matches = [...line.matchAll(HYPHEN_UNIT_CODE)];
+    if (!matches.length) continue;
+    return String(matches[matches.length - 1][1] ?? "")
+      .replace(/\s+/g, "")
+      .toUpperCase();
+  }
+  return null;
+}
+
+/** El hilo ya pidió corregir/arreglar odómetro: no hace falta el menú otra vez. */
+export function threadHasRecentOdometerCorrectionIntent(threadText: string | undefined | null): boolean {
+  const tail = String(threadText ?? "")
+    .slice(-3500)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!tail.trim()) return false;
+  return /\b(correg\w*|arregl\w*)\b/.test(tail) && /\b(odometro|kilometraje)\b/.test(tail);
 }
 
 /** ¿El mensaje trae un interno/código/patente usable como unidad? */
