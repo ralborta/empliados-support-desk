@@ -567,7 +567,7 @@ async function resolveOdometerConversationPatente(params: {
   const fromPlate = normalizePlate(extractLastPlateFromThread(params.threadText) || "");
   if (fromPlate) return fromPlate;
   const activeUnit = await getActiveUnit(prisma, params.rawPhone);
-  return normalizePlate(activeUnit?.plate || "");
+  return normalizePlate(activeUnit?.plate || "") || "";
 }
 
 /** Retoma trámite tras consumir expectativa odometer_action_choice.
