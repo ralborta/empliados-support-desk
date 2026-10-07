@@ -77,6 +77,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (rest.status && currentTicket.status !== rest.status && ticket) {
     if (rest.status === "IN_PROGRESS" && ticket.customerId) {
       // Asesor marca "En análisis" → toma la comunicación (pausa Atilio).
+      // Pausa automática (En análisis) — Resolver puede levantarla.
       await pauseAtilioForCustomer(ticket.customerId, prisma, "panel:status-in-progress").catch(
         (e) => console.error("[tickets PATCH] pauseAtilio:", e),
       );

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Contrato 2026-10-01 — autoridad humana sobre Kira:
- * - Solo «Reactivar Kira» (panel:bot-paused-toggle) limpia botPausedAt.
- * - Cerrar/resolver / handoffs NO reactivan.
+ * Contrato 2026-10-07 — autoridad humana sobre Kira:
+ * - Botón «Reactivar Kira» siempre puede limpiar botPausedAt.
+ * - Resolver/cerrar reactiva solo pausa auto (vía reactivateAtilioAfterTicketClosed).
+ * - Handoffs / reasons arbitrarios NO reactivan directo.
  * - Entrega de /turn no envía texto ni PDF si hay pausa.
  *
  * Uso: npx tsx scripts/verify-kira-human-pause-authority.mjs
@@ -13,6 +14,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   EXPLICIT_KIRA_REACTIVATE_REASON,
+  RESOLVE_AUTO_REACTIVATE_REASON,
+  isAllowedKiraReactivateReason,
   isExplicitKiraReactivateReason,
   isTerminalTicketStatus,
   reactivateAtilioAfterTicketClosed,
@@ -26,25 +29,32 @@ const root = path.resolve(__dirname, "..");
 assert.equal(isTerminalTicketStatus("RESOLVED"), true);
 assert.equal(isTerminalTicketStatus("OPEN"), false);
 assert.equal(isExplicitKiraReactivateReason(EXPLICIT_KIRA_REACTIVATE_REASON), true);
+assert.equal(isAllowedKiraReactivateReason(RESOLVE_AUTO_REACTIVATE_REASON), true);
 assert.equal(isExplicitKiraReactivateReason("unregistered_phone_handoff_keep_active"), false);
-assert.equal(isExplicitKiraReactivateReason("advisor_handoff_keep_active"), false);
-assert.equal(isExplicitKiraReactivateReason("panel:patch-status"), false);
+assert.equal(isAllowedKiraReactivateReason("advisor_handoff_keep_active"), false);
+assert.equal(isAllowedKiraReactivateReason("panel:patch-status"), false);
 
 const blocked = await reactivateAtilioForCustomer(
   "nonexistent-customer-id-pause-authority",
   undefined,
   "unregistered_phone_handoff_keep_active",
 );
-assert.equal(blocked, false, "reactivación no explícita → false");
+assert.equal(blocked, false, "reactivación no autorizada → false");
 
-const closed = await reactivateAtilioAfterTicketClosed({
-  customerId: "cust-1",
-  ticketId: "t-1",
-  previousStatus: "OPEN",
-  newStatus: "RESOLVED",
-  reason: "panel:patch-status",
-});
-assert.equal(closed, false, "cierre NO reactiva");
+const closedMissing = await reactivateAtilioAfterTicketClosed(
+  {
+    customerId: "cust-missing-pause-authority",
+    ticketId: "t-1",
+    previousStatus: "OPEN",
+    newStatus: "RESOLVED",
+    reason: "panel:patch-status",
+  },
+  {
+    customer: { findUnique: async () => null },
+    ticket: { count: async () => 0 },
+  },
+);
+assert.equal(closedMissing, false, "cierre sin customer → false");
 
 const unreg = fs.readFileSync(path.join(root, "src/lib/unregisteredPhoneHandoff.ts"), "utf8");
 assert.equal(
@@ -66,6 +76,11 @@ const messages = fs.readFileSync(
   "utf8",
 );
 assert.match(messages, /human_outbound_takeover/, "OUTBOUND HUMAN pausa");
+assert.match(messages, /pauseSource:\s*"auto"/, "takeover marca pausa auto");
+
+const clientes = fs.readFileSync(path.join(root, "src/app/api/clientes/[id]/route.ts"), "utf8");
+assert.match(clientes, /panel:bot-paused-toggle/, "panel Reactivar Kira usa razón explícita");
+assert.match(clientes, /pauseSource:\s*"manual"/, "botón Pausar marca manual");
 
 const turn = fs.readFileSync(path.join(root, "src/lib/whatsappTurn.ts"), "utf8");
 assert.match(
@@ -76,7 +91,7 @@ assert.match(
 
 let sendCalls = 0;
 const deliver = createDeliverTurnToWhatsApp({
-  prisma: {} ,
+  prisma: {},
   sendWhatsApp: async () => {
     sendCalls++;
     return { providerMessageId: "x" };
@@ -99,12 +114,5 @@ assert.equal(blockedDelivery.skipResponse_s, "true");
 assert.equal(blockedDelivery.waDelivery_s, "human_takeover_paused");
 assert.equal(String(blockedDelivery.message ?? ""), "");
 assert.equal(String(blockedDelivery.mediaUrl ?? ""), "");
-
-const clientes = fs.readFileSync(path.join(root, "src/app/api/clientes/[id]/route.ts"), "utf8");
-assert.match(
-  clientes,
-  /panel:bot-paused-toggle/,
-  "panel Reactivar Kira usa razón explícita",
-);
 
 console.log("OK verify-kira-human-pause-authority");

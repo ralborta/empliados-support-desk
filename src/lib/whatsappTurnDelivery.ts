@@ -42,8 +42,8 @@ const defaultDeps: TurnDeliveryDeps = {
  * Idempotencia por inbound wamid o `inbound:<ticketMessageId>` — nunca por texto.
  * Presave del executor ≠ entregado: solo `delivered` tras API OK con id del proveedor.
  *
- * Contrato 2026-10-01: si botPausedAt, no envía texto/PDF/media (ni fallback BBC).
- * Solo «Reactivar Kira» levanta esa barrera.
+ * Si botPausedAt, no envía texto/PDF/media (ni fallback BBC).
+ * La pausa se levanta con «Reactivar Kira» o al Resolver/Cerrar si fue pausa auto.
  */
 export function createDeliverTurnToWhatsApp(deps: TurnDeliveryDeps) {
   return async function deliverTurnToWhatsApp(

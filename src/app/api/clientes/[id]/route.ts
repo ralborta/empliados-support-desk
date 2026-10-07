@@ -110,6 +110,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           ? await pauseAtilioForCustomerDetailed(customer.id, prisma, "panel:bot-paused-toggle", {
               awaitChannelSync: false,
               forceChannelSync: forceChannelSync === true,
+              pauseSource: "manual",
             })
           : await reactivateAtilioForCustomerDetailed(
               customer.id,
@@ -133,6 +134,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           registered: sync.registered,
           botPaused: sync.localPaused,
           localPaused: sync.localPaused,
+          pauseSource: sync.pauseSource,
           channelSyncOk: sync.channelSyncOk,
           muteOk: sync.muteOk,
           blacklistOk: sync.blacklistOk,

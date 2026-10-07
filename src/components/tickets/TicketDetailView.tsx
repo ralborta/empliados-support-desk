@@ -42,6 +42,7 @@ interface TicketDetailViewProps {
     assignedToUserId: string | null;
     customerId: string | null;
     botPaused?: boolean;
+    botPausedSource?: string | null;
     channelSyncStatus?: string | null;
     customer: {
       name: string | null;
@@ -110,6 +111,9 @@ export function TicketDetailView({
   const [channelSyncStatus, setChannelSyncStatus] = useState(
     ticket.channelSyncStatus ?? "idle",
   );
+  const [pauseSource, setPauseSource] = useState<string | null>(
+    ticket.botPausedSource ?? null,
+  );
   const [liveStatus, setLiveStatus] = useState(ticket.status);
   const [livePriority, setLivePriority] = useState(ticket.priority);
   const [liveAssignedTo, setLiveAssignedTo] = useState(ticket.assignedTo);
@@ -121,11 +125,12 @@ export function TicketDetailView({
   useEffect(() => {
     setBotPaused(!!ticket.botPaused);
     setChannelSyncStatus(ticket.channelSyncStatus ?? "idle");
+    setPauseSource(ticket.botPausedSource ?? null);
     setLiveStatus(ticket.status);
     setLivePriority(ticket.priority);
     setLiveAssignedTo(ticket.assignedTo);
     setLiveAssignedToUserId(ticket.assignedToUserId);
-  }, [ticket.botPaused, ticket.channelSyncStatus, ticket.status, ticket.priority, ticket.assignedTo, ticket.assignedToUserId, ticket.id]);
+  }, [ticket.botPaused, ticket.botPausedSource, ticket.channelSyncStatus, ticket.status, ticket.priority, ticket.assignedTo, ticket.assignedToUserId, ticket.id]);
 
   useEffect(() => {
     setConversation(
@@ -179,6 +184,11 @@ export function TicketDetailView({
         }
         if (typeof meta.channelSyncStatus === "string") {
           setChannelSyncStatus(meta.channelSyncStatus);
+        }
+        if ("botPausedSource" in meta) {
+          setPauseSource(
+            meta.botPausedSource == null ? null : String(meta.botPausedSource),
+          );
         }
       }
     } catch {
@@ -293,8 +303,10 @@ export function TicketDetailView({
                 customerId={ticket.customerId}
                 botPaused={botPaused}
                 channelSyncStatus={channelSyncStatus}
+                pauseSource={pauseSource}
                 onBotPausedChange={setBotPausedLocal}
                 onChannelSyncStatusChange={setChannelSyncStatus}
+                onPauseSourceChange={setPauseSource}
                 onSent={refreshMessages}
                 embedded
               />

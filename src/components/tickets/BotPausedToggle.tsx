@@ -10,6 +10,8 @@ type Props = {
   paused: boolean;
   /** Sync canal desde servidor (poll). */
   channelSyncStatus?: SyncStatus | string | null;
+  /** auto = takeover; manual = botón Pausar Kira. */
+  pauseSource?: "auto" | "manual" | string | null;
   /** Tras toggle exitoso o para sincronizar UI sin F5. */
   onPausedChange?: (paused: boolean) => void;
   onSyncStatusChange?: (status: SyncStatus) => void;
@@ -36,6 +38,7 @@ export function BotPausedToggle({
   customerId,
   paused,
   channelSyncStatus = null,
+  pauseSource = null,
   onPausedChange,
   onSyncStatusChange,
   externalSyncPending = false,
@@ -122,7 +125,13 @@ export function BotPausedToggle({
         type="button"
         onClick={toggle}
         disabled={loading || reconciling}
-        title={shown ? "Kira pausada — respondés vos" : "Kira activa en este chat"}
+        title={
+          shown
+            ? pauseSource === "manual"
+              ? "Kira pausada manualmente — solo se reactiva con este botón"
+              : "Kira pausada por atención humana — Resolver puede reactivarla"
+            : "Kira activa en este chat"
+        }
         className={`rounded-lg border px-3 py-2 text-xs font-semibold shadow-sm transition active:scale-[0.98] disabled:opacity-50 ${
           shown
             ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
@@ -131,6 +140,9 @@ export function BotPausedToggle({
       >
         {loading ? "…" : shown ? "Reactivar Kira" : "Pausar Kira"}
       </button>
+      {shown && pauseSource === "manual" && !syncHint ? (
+        <span className="text-right text-[10px] leading-snug text-amber-700">Pausa manual</span>
+      ) : null}
       {syncHint ? (
         <div className="flex max-w-[16rem] flex-col items-end gap-0.5">
           <span className="text-right text-[10px] leading-snug text-amber-700">{syncHint}</span>

@@ -86,6 +86,9 @@ model Customer {
   licensePlate             String?
   /// Si está seteado, Atilio no envía auto-respuestas; el agente responde manual por el panel/WhatsApp
   botPausedAt              DateTime?
+  /// Origen de la pausa: auto (respuesta/takeover humano) | manual (botón Pausar Kira).
+  /// Resolver/cerrar solo reactiva si es auto y no quedan tickets abiertos del cliente.
+  botPausedSource          String?
   /// Estado de sync mute/blacklist con BuilderBot: idle | pending | synced | error
   botChannelSyncStatus     String    @default("idle")
   /// Objetivo del último intent local: paused | active (null = sin intent)

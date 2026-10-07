@@ -63,8 +63,10 @@ export function MessageComposer({
   customerId,
   botPaused = false,
   channelSyncStatus = null,
+  pauseSource = null,
   onBotPausedChange,
   onChannelSyncStatusChange,
+  onPauseSourceChange,
   onSent,
   embedded = false,
 }: {
@@ -72,9 +74,11 @@ export function MessageComposer({
   customerId?: string | null;
   botPaused?: boolean;
   channelSyncStatus?: string | null;
+  pauseSource?: string | null;
   /** Actualiza el badge/botón en el ticket sin F5 (pausa automática al enviar). */
   onBotPausedChange?: (paused: boolean) => void;
   onChannelSyncStatusChange?: (status: string) => void;
+  onPauseSourceChange?: (source: string | null) => void;
   onSent?: () => void;
   embedded?: boolean;
 }) {
@@ -219,8 +223,12 @@ export function MessageComposer({
         const humanControl = data.humanControl as {
           channelSyncOk?: boolean;
           syncStatus?: string;
+          pauseSource?: string | null;
         } | undefined;
         const syncStatus = humanControl?.syncStatus;
+        if (humanControl?.pauseSource !== undefined) {
+          onPauseSourceChange?.(humanControl.pauseSource ?? "auto");
+        }
         if (syncStatus) {
           onChannelSyncStatusChange?.(syncStatus);
           setChannelSyncPending(syncStatus === "pending" || syncStatus === "error");
@@ -356,9 +364,15 @@ export function MessageComposer({
               customerId={customerId}
               paused={botPaused}
               channelSyncStatus={channelSyncStatus}
+              pauseSource={pauseSource}
               onPausedChange={(next) => {
                 onBotPausedChange?.(next);
-                if (!next) setChannelSyncPending(false);
+                if (!next) {
+                  setChannelSyncPending(false);
+                  onPauseSourceChange?.(null);
+                } else {
+                  onPauseSourceChange?.("manual");
+                }
               }}
               onSyncStatusChange={(status) => {
                 onChannelSyncStatusChange?.(status);

@@ -90,6 +90,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       customer: {
         select: {
           botPausedAt: true,
+          botPausedSource: true,
           botChannelSyncStatus: true,
           botChannelSyncTarget: true,
           botChannelSyncGeneration: true,
@@ -113,6 +114,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
           assignedToUserId: ticketMeta.assignedToUserId,
           assignedTo: ticketMeta.assignedTo,
           botPaused: Boolean(ticketMeta.customer?.botPausedAt),
+          botPausedSource: ticketMeta.customer?.botPausedSource ?? null,
           channelSyncStatus: ticketMeta.customer?.botChannelSyncStatus ?? "idle",
           channelSyncTarget: ticketMeta.customer?.botChannelSyncTarget ?? null,
           channelSyncGeneration: ticketMeta.customer?.botChannelSyncGeneration ?? 0,
@@ -172,6 +174,7 @@ function deliveryResponse(params: {
   syncStatus?: string;
   syncTarget?: string | null;
   syncGeneration?: number;
+  pauseSource?: string | null;
   timing?: { dbMs: number; waMs: number; totalMs: number };
 }) {
   const ok =
@@ -198,6 +201,7 @@ function deliveryResponse(params: {
               syncStatus: params.syncStatus ?? (params.channelSyncOk ? "synced" : "pending"),
               syncTarget: params.syncTarget ?? "paused",
               syncGeneration: params.syncGeneration ?? 0,
+              pauseSource: params.pauseSource ?? "auto",
             },
           }
         : {}),
@@ -421,7 +425,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       ticketForStatus.customerId,
       prisma,
       "human_outbound_takeover",
-      { awaitChannelSync: false, skipChannelIfAlreadyPaused: true },
+      {
+        awaitChannelSync: false,
+        skipChannelIfAlreadyPaused: true,
+        pauseSource: "auto",
+      },
     ).catch((e) => {
       console.error("[Messages] pauseAtilio takeover:", e);
       return {
@@ -433,6 +441,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         syncTarget: "paused" as const,
         syncGeneration: 0,
         localPaused: true,
+        pauseSource: "auto" as const,
       };
     });
     const dbMs = Date.now() - tOutbound0;
@@ -585,6 +594,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       syncStatus: pauseSync.syncStatus,
       syncTarget: pauseSync.syncTarget,
       syncGeneration: pauseSync.syncGeneration,
+      pauseSource: pauseSync.pauseSource,
       timing: { dbMs, waMs, totalMs },
     });
   }
