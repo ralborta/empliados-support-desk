@@ -21,6 +21,20 @@ export type AtilioChannelSyncResult = {
   blacklistOk: boolean;
 };
 
+export type AtilioPauseOptions = {
+  /**
+   * Si false: escribe botPausedAt y dispara mute/blacklist en background.
+   * El envío humano del panel no debe esperar a BuilderBot.
+   * Default true.
+   */
+  awaitChannelSync?: boolean;
+  /**
+   * Si ya estaba pausado, no vuelve a pegarle a Cloud (cada mensaje humano
+   * re-sincronizaba mute+blacklist y dejaba el panel en «ENVIANDO…»).
+   */
+  skipChannelIfAlreadyPaused?: boolean;
+};
+
 export function isTerminalTicketStatus(status: string): boolean {
   return (TERMINAL_TICKET_STATUSES as readonly string[]).includes(status);
 }
@@ -29,10 +43,45 @@ export function isExplicitKiraReactivateReason(reason: string | undefined | null
   return String(reason ?? "").trim() === EXPLICIT_KIRA_REACTIVATE_REASON;
 }
 
+async function syncPauseChannel(
+  phone: string,
+): Promise<Pick<AtilioChannelSyncResult, "muteOk" | "blacklistOk" | "channelSyncOk">> {
+  const channel = await ensureBuilderBotContactPaused(phone);
+  // Self-hosted es best-effort; no alarga el camino crítico del panel.
+  void setBotBlacklist(phone, "add").catch((err: unknown) => {
+    console.error(
+      "[atilio] Error al agregar blacklist self-hosted:",
+      err instanceof Error ? err.message : err,
+    );
+  });
+  return {
+    muteOk: channel.muteOk,
+    blacklistOk: channel.blacklistOk,
+    channelSyncOk: channel.muteOk && channel.blacklistOk,
+  };
+}
+
+async function syncActiveChannel(
+  phone: string,
+): Promise<Pick<AtilioChannelSyncResult, "muteOk" | "blacklistOk" | "channelSyncOk">> {
+  const channel = await ensureBuilderBotContactActive(phone);
+  void setBotBlacklist(phone, "remove").catch((err: unknown) => {
+    console.error(
+      "[atilio] Error al quitar blacklist self-hosted:",
+      err instanceof Error ? err.message : err,
+    );
+  });
+  return {
+    muteOk: channel.muteOk,
+    blacklistOk: channel.blacklistOk,
+    channelSyncOk: channel.muteOk && channel.blacklistOk,
+  };
+}
+
 /**
  * Pausa Atilio/Kira: botPausedAt + mute=true + blacklist=add.
  * Idempotente: si ya estaba pausado en DB, igual reconcilia BuilderBot
- * (sirve para «reintentar sync» desde el panel).
+ * (sirve para «reintentar sync» desde el panel), salvo skipChannelIfAlreadyPaused.
  */
 export async function pauseAtilioForCustomer(
   customerId: string,
@@ -47,7 +96,11 @@ export async function pauseAtilioForCustomerDetailed(
   customerId: string,
   client: PrismaClient = prisma,
   reason?: string,
+  opts?: AtilioPauseOptions,
 ): Promise<AtilioChannelSyncResult> {
+  const awaitChannelSync = opts?.awaitChannelSync !== false;
+  const skipIfPaused = opts?.skipChannelIfAlreadyPaused === true;
+
   const customer = await client.customer.findUnique({
     where: { id: customerId },
     select: { id: true, phone: true, botPausedAt: true },
@@ -56,32 +109,49 @@ export async function pauseAtilioForCustomerDetailed(
     return { registered: false, channelSyncOk: false, muteOk: false, blacklistOk: false };
   }
 
-  if (!customer.botPausedAt) {
+  const alreadyPaused = Boolean(customer.botPausedAt);
+  if (!alreadyPaused) {
     await client.customer.update({
       where: { id: customerId },
       data: { botPausedAt: new Date() },
     });
   }
 
-  let muteOk = true;
-  let blacklistOk = true;
-  if (customer.phone) {
-    const channel = await ensureBuilderBotContactPaused(customer.phone);
-    muteOk = channel.muteOk;
-    blacklistOk = channel.blacklistOk;
-    await setBotBlacklist(customer.phone, "add").catch((err: unknown) => {
-      console.error(
-        "[atilio] Error al agregar blacklist self-hosted:",
-        err instanceof Error ? err.message : err,
-      );
-    });
+  if (skipIfPaused && alreadyPaused) {
+    console.log(
+      `[atilio] Pausado (ya activo) para cliente ${customerId}${reason ? ` (${reason})` : ""} — skip canal`,
+    );
+    return { registered: true, channelSyncOk: true, muteOk: true, blacklistOk: true };
   }
 
-  const channelSyncOk = muteOk && blacklistOk;
+  if (!customer.phone) {
+    return { registered: true, channelSyncOk: true, muteOk: true, blacklistOk: true };
+  }
+
+  if (!awaitChannelSync) {
+    void syncPauseChannel(customer.phone)
+      .then((r) => {
+        console.log(
+          `[atilio] Sync canal (bg) pause ${customerId} muteOk=${r.muteOk} blacklistOk=${r.blacklistOk}`,
+        );
+      })
+      .catch((err: unknown) => {
+        console.error(
+          "[atilio] Sync canal (bg) pause falló:",
+          err instanceof Error ? err.message : err,
+        );
+      });
+    console.log(
+      `[atilio] Pausado local para cliente ${customerId}${reason ? ` (${reason})` : ""} — canal en background`,
+    );
+    return { registered: true, channelSyncOk: false, muteOk: false, blacklistOk: false };
+  }
+
+  const channel = await syncPauseChannel(customer.phone);
   console.log(
-    `[atilio] Pausado para cliente ${customerId}${reason ? ` (${reason})` : ""} muteOk=${muteOk} blacklistOk=${blacklistOk}`,
+    `[atilio] Pausado para cliente ${customerId}${reason ? ` (${reason})` : ""} muteOk=${channel.muteOk} blacklistOk=${channel.blacklistOk}`,
   );
-  return { registered: true, channelSyncOk, muteOk, blacklistOk };
+  return { registered: true, ...channel };
 }
 
 /** ¿Kira está bajo control humano persistente para este teléfono? */
@@ -111,6 +181,7 @@ export async function reactivateAtilioForCustomerDetailed(
   customerId: string,
   client: PrismaClient = prisma,
   reason?: string,
+  opts?: { awaitChannelSync?: boolean },
 ): Promise<AtilioChannelSyncResult> {
   if (!isExplicitKiraReactivateReason(reason)) {
     console.warn(
@@ -119,6 +190,8 @@ export async function reactivateAtilioForCustomerDetailed(
     );
     return { registered: false, channelSyncOk: false, muteOk: false, blacklistOk: false };
   }
+
+  const awaitChannelSync = opts?.awaitChannelSync !== false;
 
   const customer = await client.customer.findUnique({
     where: { id: customerId },
@@ -136,25 +209,34 @@ export async function reactivateAtilioForCustomerDetailed(
     });
   }
 
-  let muteOk = true;
-  let blacklistOk = true;
-  if (customer.phone) {
-    const channel = await ensureBuilderBotContactActive(customer.phone);
-    muteOk = channel.muteOk;
-    blacklistOk = channel.blacklistOk;
-    await setBotBlacklist(customer.phone, "remove").catch((err: unknown) => {
-      console.error(
-        "[atilio] Error al quitar blacklist self-hosted:",
-        err instanceof Error ? err.message : err,
-      );
-    });
+  if (!customer.phone) {
+    return { registered: true, channelSyncOk: true, muteOk: true, blacklistOk: true };
   }
 
-  const channelSyncOk = muteOk && blacklistOk;
+  if (!awaitChannelSync) {
+    void syncActiveChannel(customer.phone)
+      .then((r) => {
+        console.log(
+          `[atilio] Sync canal (bg) reactivate ${customerId} muteOk=${r.muteOk} blacklistOk=${r.blacklistOk}`,
+        );
+      })
+      .catch((err: unknown) => {
+        console.error(
+          "[atilio] Sync canal (bg) reactivate falló:",
+          err instanceof Error ? err.message : err,
+        );
+      });
+    console.log(
+      `[atilio] Reactivado local para cliente ${customerId} (${reason}) localWasPaused=${localWasPaused} — canal en background`,
+    );
+    return { registered: true, channelSyncOk: false, muteOk: false, blacklistOk: false };
+  }
+
+  const channel = await syncActiveChannel(customer.phone);
   console.log(
-    `[atilio] Reactivado para cliente ${customerId} (${reason}) localWasPaused=${localWasPaused} muteOk=${muteOk} blacklistOk=${blacklistOk}`,
+    `[atilio] Reactivado para cliente ${customerId} (${reason}) localWasPaused=${localWasPaused} muteOk=${channel.muteOk} blacklistOk=${channel.blacklistOk}`,
   );
-  return { registered: true, channelSyncOk, muteOk, blacklistOk };
+  return { registered: true, ...channel };
 }
 
 /**

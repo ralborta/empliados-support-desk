@@ -23,6 +23,11 @@ assert.ok(
   messages.includes("human_outbound_takeover"),
   "messages debe marcar reason human_outbound_takeover",
 );
+assert.ok(
+  messages.includes("awaitChannelSync: false") &&
+    messages.includes("skipChannelIfAlreadyPaused: true"),
+  "messages no debe bloquear el envío WA esperando mute/blacklist BBC",
+);
 
 const ticketPatch = readFileSync(join(root, "../src/app/api/tickets/[id]/route.ts"), "utf8");
 assert.ok(

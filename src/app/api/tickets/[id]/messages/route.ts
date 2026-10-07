@@ -397,11 +397,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         },
       }));
 
-    // Takeover al registrar el intento (aunque la confirmación BBC falle después).
+    // Takeover local inmediato; mute/blacklist BBC en background.
+    // Antes se esperaba Cloud (mute+blacklist+settles) ANTES de WhatsApp → «ENVIANDO…» eterno.
     const pauseSync = await pauseAtilioForCustomerDetailed(
       ticketForStatus.customerId,
       prisma,
       "human_outbound_takeover",
+      { awaitChannelSync: false, skipChannelIfAlreadyPaused: true },
     ).catch((e) => {
       console.error("[Messages] pauseAtilio takeover:", e);
       return {
@@ -411,7 +413,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         blacklistOk: false,
       };
     });
-    await claimConversationOnHumanReply(id, session.user.id).catch((e) =>
+    void claimConversationOnHumanReply(id, session.user.id).catch((e) =>
       console.error("[Messages] claimConversation:", e),
     );
 

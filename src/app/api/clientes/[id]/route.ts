@@ -101,12 +101,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           },
         });
 
-    if (botPaused === true) {
-      const sync = await pauseAtilioForCustomerDetailed(
-        customer.id,
-        prisma,
-        "panel:bot-paused-toggle",
-      );
+    if (botPaused === true || botPaused === false) {
+      // Local inmediato; Cloud con tope 2s para no trabar el botón Pausar/Reactivar.
+      const syncPromise =
+        botPaused === true
+          ? pauseAtilioForCustomerDetailed(customer.id, prisma, "panel:bot-paused-toggle")
+          : reactivateAtilioForCustomerDetailed(customer.id, prisma, "panel:bot-paused-toggle");
+
+      const raced = await Promise.race([
+        syncPromise.then((s) => ({ kind: "ok" as const, s })),
+        new Promise<{ kind: "timeout" }>((resolve) =>
+          setTimeout(() => resolve({ kind: "timeout" }), 2000),
+        ),
+      ]);
+      // Si hubo timeout, el syncPromise sigue en background.
+
       customer = await prisma.customer.findUniqueOrThrow({
         where: { id },
         include: {
@@ -115,36 +124,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           },
         },
       });
+
+      const sync =
+        raced.kind === "ok"
+          ? raced.s
+          : {
+              registered: true,
+              channelSyncOk: false,
+              muteOk: false,
+              blacklistOk: false,
+            };
+
       return NextResponse.json({
         customer,
         humanControl: {
           registered: sync.registered,
-          botPaused: true,
-          channelSyncOk: sync.channelSyncOk,
-          muteOk: sync.muteOk,
-          blacklistOk: sync.blacklistOk,
-          syncStatus: sync.channelSyncOk ? "synced" : "pending",
-        },
-      });
-    } else if (botPaused === false) {
-      const sync = await reactivateAtilioForCustomerDetailed(
-        customer.id,
-        prisma,
-        "panel:bot-paused-toggle",
-      );
-      customer = await prisma.customer.findUniqueOrThrow({
-        where: { id },
-        include: {
-          _count: {
-            select: { tickets: true },
-          },
-        },
-      });
-      return NextResponse.json({
-        customer,
-        humanControl: {
-          registered: sync.registered,
-          botPaused: false,
+          botPaused,
           channelSyncOk: sync.channelSyncOk,
           muteOk: sync.muteOk,
           blacklistOk: sync.blacklistOk,

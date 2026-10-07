@@ -118,7 +118,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const BLACKLIST_RETRIES = 3;
 const BLACKLIST_DELAY_MS = 1500;
-const BLACKLIST_SETTLE_MS = 800;
+/** Pausa corta post-OK: antes 800ms×2 sumaba ~1.6s artificial al panel. */
+const BLACKLIST_SETTLE_MS = 120;
 
 export type BuilderBotChannelReconcile = {
   muteOk: boolean;
@@ -182,13 +183,15 @@ export async function setBuilderBotContactMute(
 
 /**
  * Deja el contacto hablable en Cloud: mute=false + blacklist=remove.
- * Espera ambas operaciones y reporta si alguna falló.
+ * Mute y blacklist van en paralelo (no hay dependencia entre APIs).
  */
 export async function ensureBuilderBotContactActive(
   number: string
 ): Promise<BuilderBotChannelReconcile> {
-  const muteOk = await setBuilderBotContactMute(number, false);
-  const blacklistOk = await setBuilderBotCloudBlacklist(number, "remove");
+  const [muteOk, blacklistOk] = await Promise.all([
+    setBuilderBotContactMute(number, false),
+    setBuilderBotCloudBlacklist(number, "remove"),
+  ]);
   const ok = muteOk && blacklistOk;
   if (!ok) {
     console.error("[BuilderBot] Reconciliación mute/blacklist incompleta (active)", {
@@ -201,13 +204,15 @@ export async function ensureBuilderBotContactActive(
 
 /**
  * Silencia el contacto en Cloud para takeover humano: mute=true + blacklist=add.
- * Misma política de reintentos que la reactivación.
+ * Misma política de reintentos que la reactivación; mute+blacklist en paralelo.
  */
 export async function ensureBuilderBotContactPaused(
   number: string
 ): Promise<BuilderBotChannelReconcile> {
-  const muteOk = await setBuilderBotContactMute(number, true);
-  const blacklistOk = await setBuilderBotCloudBlacklist(number, "add");
+  const [muteOk, blacklistOk] = await Promise.all([
+    setBuilderBotContactMute(number, true),
+    setBuilderBotCloudBlacklist(number, "add"),
+  ]);
   const ok = muteOk && blacklistOk;
   if (!ok) {
     console.error("[BuilderBot] Reconciliación mute/blacklist incompleta (paused)", {
