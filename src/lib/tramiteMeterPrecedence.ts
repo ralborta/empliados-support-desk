@@ -6,6 +6,7 @@ import type { NumericExpectedField } from "@/lib/unitReferenceParser";
 import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
 import {
   looksLikeBareMeterValue,
+  looksLikeMeterValueUpdatePhrase,
   looksLikeMeterValueWithFechaHora,
   threadAwaitingOdometerKmValue,
   threadAwaitingHorometerKmValue,
@@ -20,6 +21,7 @@ import {
 import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeVehicleBrandOrUnitSearch,
 } from "@/lib/waraApi";
 
 /** Consulta explícita de estado GPS / unidad (no dato de medidor). */
@@ -52,10 +54,12 @@ export function isOperationalMeterCollectionMessage(text: string, threadText: st
     return true;
   }
   if (
-    looksLikeBareMeterValue(text) &&
+    (looksLikeBareMeterValue(text) || looksLikeMeterValueUpdatePhrase(text)) &&
     (threadHasActiveMeterValueRequest(threadText) ||
       threadAwaitingOdometerKmValue(threadText) ||
-      threadAwaitingHorometerKmValue(threadText))
+      threadAwaitingHorometerKmValue(threadText) ||
+      threadAwaitingOdometerPlate(threadText) ||
+      threadAwaitingHorometerPlate(threadText))
   ) {
     return true;
   }
@@ -69,5 +73,13 @@ export function isOperationalMeterCollectionMessage(text: string, threadText: st
   if (extractUnitCodeNumbersFromMessage(text, { expectedField }).length > 0) return true;
   const plate = detectLoosePlate(text);
   if (plate && isPlausibleVehiclePlate(normalizePlate(plate))) return true;
+  // Marca/nombre mientras el bot pide unidad del medidor (bug 2026-10-07 FIAT JUVIAR 27).
+  // Solo catálogo de marca acá (sin importar waraUnitIntent → evita ciclo con este módulo).
+  if (
+    (threadAwaitingOdometerPlate(threadText) || threadAwaitingHorometerPlate(threadText)) &&
+    looksLikeVehicleBrandOrUnitSearch(text)
+  ) {
+    return true;
+  }
   return false;
 }

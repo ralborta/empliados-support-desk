@@ -1154,7 +1154,13 @@ export function threadAwaitingOdometerPlate(threadText: string): boolean {
   // Si el bot acaba de pedir patente/km para odómetro, el trámite sigue activo aunque
   // antes en el hilo hubo listado de flota o consulta GPS (bug 2026-07-27: "Pásame la
   // lista de mi flota" + cambio de odómetro + "La Ad 626 UG" caía a estado GPS).
+  // formatAskUnit (odómetro/horómetro): «¿De qué unidad? Pasame la *patente*…»
+  const formatAskUnitPlate =
+    /de qu[eé] unidad\?/.test(tail) &&
+    /pasame la \*?patente\*?/.test(tail) &&
+    /(?:od[oó]metro|hor[oó]metro)/i.test(tail);
   const botAwaitingOdometerData =
+    formatAskUnitPlate ||
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
     /perfecto, tomo .+ pasame el nuevo hor[oó]metro/i.test(tail) ||
     /cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
@@ -1375,6 +1381,12 @@ export function threadAwaitingHorometerPlate(threadText: string): boolean {
   const scoped = threadTailSinceFleetUnitSearch(threadText);
   const tail = scoped.slice(-2500).toLowerCase();
   if (hasPendingOdometerConfirmation(threadText)) return false;
+  // formatAskUnit hourmeter: título Horómetro justo antes de «¿De qué unidad?»
+  const askIdx = Math.max(tail.lastIndexOf("de que unidad"), tail.lastIndexOf("de qué unidad"));
+  if (askIdx >= 0 && /pasame la \*?patente\*?/.test(tail.slice(askIdx, askIdx + 120))) {
+    const window = tail.slice(Math.max(0, askIdx - 100), askIdx);
+    if (/hor[oó]metro/.test(window)) return true;
+  }
   return (
     /para registrar el cambio de hor[oó]metro necesito la patente/i.test(tail) ||
     /perfecto, tomo .+ cu[aá]l es el nuevo hor[oó]metro/i.test(tail) ||
@@ -2548,10 +2560,34 @@ function normThreadText(text: string): string {
 
 /** Valor numérico solo (km u horas) durante trámite de odómetro/horómetro. */
 export function looksLikeBareMeterValue(text: string | undefined | null): boolean {
-  const t = String(text ?? "").trim();
+  const t = String(text ?? "")
+    .trim()
+    .replace(/^[«»"'“”]+|[«»"'“”]+$/g, "");
   if (/^\d{1,7}$/.test(t)) return true;
   // "260486 km" / "168 hs" — mismo dato con unidad explícita.
-  return /^\d{1,7}\s*(?:km|k|hs?|horas?)$/i.test(t);
+  if (/^\d{1,7}\s*(?:km|k|hs?|horas?)$/i.test(t)) return true;
+  // Miles AR: «28.789» / «28,789» (bug 2026-10-07 Gin Cotton horómetro).
+  if (/^\d{1,3}(?:[.,]\d{3}){1,2}$/.test(t)) return true;
+  return /^\d{1,3}(?:[.,]\d{3}){1,2}\s*(?:km|k|hs?|horas?)$/i.test(t);
+}
+
+/** «Actualizar 28.789» / «corregir a 28789» como lectura de medidor (no búsqueda de unidad). */
+export function looksLikeMeterValueUpdatePhrase(text: string | undefined | null): boolean {
+  const raw = String(text ?? "").trim();
+  if (!raw || raw.length > 80) return false;
+  if (looksLikeBareMeterValue(raw)) return true;
+  const t = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[«»"'“”]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const m = t.match(
+    /^(?:actualizar|corregir|cargar|poner|dejar(?:lo|la)?(?:\s+en)?|cargar(?:le|lo)?)\s+(?:a\s+|en\s+|el\s+)?(.+)$/i,
+  );
+  if (!m?.[1]) return false;
+  return looksLikeBareMeterValue(m[1].trim());
 }
 
 /**

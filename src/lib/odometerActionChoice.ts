@@ -8,11 +8,13 @@ import {
   extractUnitCodeNumbersFromMessage,
   lineLooksLikeBotMissingPlatePrompt,
   lineLooksLikeBotUnitListExample,
+  looksLikeBareMeterValue,
   looksLikeBareOdometerTopicMention,
   looksLikeCertificateKeyword,
   looksLikeExplicitOdometerUpdateRequest,
   looksLikeHorometerOnlyIntent,
   looksLikeMaintenanceKeyword,
+  looksLikeMeterValueUpdatePhrase,
   looksLikeOdometerInfoRequest,
 } from "@/lib/wara";
 import {
@@ -20,8 +22,13 @@ import {
   looksLikeSoftFlowRestart,
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
+  looksLikeVehicleBrandOrUnitSearch,
 } from "@/lib/waraApi";
 import { looksLikeExplicitOtherTramiteIntent } from "@/lib/turnLayerContract";
+import {
+  extractFreeTextUnitSearchCandidate,
+  looksLikeFleetUnitSearchInput,
+} from "@/lib/waraUnitIntent";
 
 export const ODOMETER_ACTION_CHOICE_STAGE = "odometer_action_choice";
 export const CLARIFY_ODOMETER_INTENT_STAGE = "clarify_odometer_intent";
@@ -223,6 +230,26 @@ export function isCompatibleLiveOdometerPendingReply(
       : null;
   const exp = String(layer?.activeExpectation ?? "").trim();
 
+  const awaitingUnit =
+    exp === "unit" ||
+    exp === "clarification" ||
+    stage === "missing_plate" ||
+    stage === ODOMETER_ACTION_CHOICE_STAGE;
+  const awaitingMeterValue =
+    exp === "km" || stage === "collecting" || stage === "missing_value_fecha_hora";
+
+  // Marca/nombre («FIAT JUVIAR 27») o búsqueda de flota — no solo patente/interno.
+  // Bug real 2026-10-07 Gin Cotton: pending horómetro + nombre → info_guides.
+  if (
+    awaitingUnit &&
+    (looksLikeVehicleBrandOrUnitSearch(text) ||
+      looksLikeFleetUnitSearchInput(text) ||
+      !!extractFreeTextUnitSearchCandidate(text) ||
+      messageHasOdometerActionChoiceUnitRef(text))
+  ) {
+    return true;
+  }
+
   if (messageHasOdometerActionChoiceUnitRef(text)) {
     // Unidad nueva / interno: compatible con pedir unidad o con pivot durante collecting.
     if (
@@ -239,8 +266,16 @@ export function isCompatibleLiveOdometerPendingReply(
     }
   }
 
+  // Lectura adelantada («Actualizar 28.789») o km/hs mientras pide unidad o valor.
+  if (
+    looksLikeMeterValueUpdatePhrase(text) ||
+    looksLikeBareMeterValue(text)
+  ) {
+    if (awaitingMeterValue || awaitingUnit || !exp) return true;
+  }
+
   const bare = /^\d{1,7}$/.test(String(text ?? "").trim());
-  if (bare && (exp === "km" || stage === "collecting" || stage === "missing_value_fecha_hora")) {
+  if (bare && awaitingMeterValue) {
     return true;
   }
 

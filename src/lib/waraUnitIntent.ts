@@ -1258,7 +1258,9 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
   if (looksLikeVagueUnitReference(raw)) return null;
 
   const cleaned = raw
+    .replace(/[«»"'“”]/g, " ")
     .replace(/^(?:perdon|perdón|disculpa|ok|dale|bueno)[,.\s!]+/i, "")
+    .replace(/\s+/g, " ")
     .trim();
 
   // Solo "estado/reporte de <Nombre>" (o similar), no "estado de reporte de la unidad…".
@@ -1279,10 +1281,10 @@ export function extractFreeTextUnitSearchCandidate(rawText: string): string | nu
     if (isPlausibleFreeTextUnitLabel(cand)) return cand;
   }
 
-  // Respuesta corta: solo el nombre propio ("Altamiranda", "Altamiranda Jose").
-  if (/^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúÑñ\s.'-]{2,40}$/.test(cleaned)) {
+  // Respuesta corta: solo el nombre propio ("Altamiranda", "Altamiranda Jose", "FIAT JUVIAR 27").
+  if (/^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúÑñ0-9\s.'-]{2,40}$/.test(cleaned)) {
     const cand = cleaned.replace(/\s+/g, " ").trim();
-    if (isPlausibleFreeTextUnitLabel(cand) && cand.split(/\s+/).length <= 3) return cand;
+    if (isPlausibleFreeTextUnitLabel(cand) && cand.split(/\s+/).length <= 4) return cand;
   }
   return null;
 }

@@ -488,7 +488,12 @@ const VEHICLE_BRAND_TOKENS = new Set([
 
 /** Marca o nombre corto de unidad — no es cambiar de empresa Wara. */
 export function looksLikeVehicleBrandOrUnitSearch(text: string | undefined | null): boolean {
-  const t = normCompanyToken(text ?? "");
+  // Bug real 2026-10-07: «"FIAT JUVIAR 27"» con comillas no matcheaba fiat en el catálogo.
+  const stripped = String(text ?? "")
+    .replace(/[«»"'“”]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const t = normCompanyToken(stripped);
   // Bug real, producción 2026-07-23: "Ok quiero saber si Nissan está marcando
   // posición?" (51 caracteres normalizados, 8 tokens) mencionaba la marca en la
   // PRIMERA pregunta, pero los topes de 48 caracteres / 6 tokens de abajo estaban
