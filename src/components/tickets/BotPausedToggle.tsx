@@ -105,12 +105,25 @@ export function BotPausedToggle({
     }
   };
 
-  /** Reaplica mute/blacklist con nueva generation (última acción gana). */
+  /** Reaplica mute/blacklist con nueva generation; no toca botPausedSource. */
   const retryChannelSync = async () => {
     setReconciling(true);
     setLocalSync("pending");
     try {
-      await putPaused(shown, true);
+      const res = await fetch(`/api/clientes/${customerId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ retryChannelSync: true }),
+      });
+      if (!res.ok) throw new Error("Error al reintentar sync");
+      const data = await res.json().catch(() => ({}));
+      const humanControl = data.humanControl as
+        | { syncStatus?: SyncStatus; channelSyncOk?: boolean }
+        | undefined;
+      const status = (humanControl?.syncStatus ??
+        (humanControl?.channelSyncOk === false ? "pending" : "synced")) as SyncStatus;
+      setLocalSync(status === "synced" ? null : status);
+      onSyncStatusChange?.(status);
     } catch (e) {
       console.error(e);
       setLocalSync("error");

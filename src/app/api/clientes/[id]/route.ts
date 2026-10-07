@@ -4,7 +4,11 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import { pauseAtilioForCustomerDetailed, reactivateAtilioForCustomerDetailed } from "@/lib/atilioBotPause";
+import {
+  pauseAtilioForCustomerDetailed,
+  reactivateAtilioForCustomerDetailed,
+  retryAtilioChannelSyncDetailed,
+} from "@/lib/atilioBotPause";
 import { ensureBuilderBotContactActive, setBotBlacklist } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
@@ -17,6 +21,11 @@ const updateCustomerSchema = z.object({
   botPaused: z.boolean().optional(),
   /** Reintento manual del sync canal (nueva generation). */
   forceChannelSync: z.boolean().optional(),
+  /**
+   * Solo reaplicar mute/unmute del canal; no muta botPausedAt ni botPausedSource.
+   * Evita que «Reintentar sync» convierta una pausa auto en manual.
+   */
+  retryChannelSync: z.boolean().optional(),
 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -64,7 +73,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { phone, name, companyName, licensePlate, botPaused, forceChannelSync } = parsed.data;
+  const {
+    phone,
+    name,
+    companyName,
+    licensePlate,
+    botPaused,
+    forceChannelSync,
+    retryChannelSync,
+  } = parsed.data;
 
   const updateData: Record<string, unknown> = {};
   if (phone !== undefined) {
@@ -102,6 +119,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             },
           },
         });
+
+    if (retryChannelSync === true) {
+      const sync = await retryAtilioChannelSyncDetailed(customer.id, prisma, {
+        awaitChannelSync: false,
+      });
+      customer = await prisma.customer.findUniqueOrThrow({
+        where: { id },
+        include: {
+          _count: {
+            select: { tickets: true },
+          },
+        },
+      });
+      return NextResponse.json({
+        customer,
+        humanControl: {
+          registered: sync.registered,
+          botPaused: sync.localPaused,
+          localPaused: sync.localPaused,
+          pauseSource: sync.pauseSource,
+          channelSyncOk: sync.channelSyncOk,
+          muteOk: sync.muteOk,
+          blacklistOk: sync.blacklistOk,
+          syncStatus: sync.syncStatus,
+          syncTarget: sync.syncTarget,
+          syncGeneration: sync.syncGeneration,
+        },
+      });
+    }
 
     if (botPaused === true || botPaused === false) {
       // Local inmediato; sync BBC vía waitUntil (no bloquea el botón).

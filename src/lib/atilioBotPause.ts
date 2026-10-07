@@ -41,6 +41,21 @@ export type AtilioPauseOptions = {
   forceChannelSync?: boolean;
   /** Default según reason: botón → manual; resto → auto. */
   pauseSource?: BotPausedSource;
+  /**
+   * No mutar botPausedSource (reintento de sync canal).
+   * Evita convertir una pausa auto en manual.
+   */
+  preservePauseSource?: boolean;
+};
+
+export type AtilioReactivateOptions = {
+  awaitChannelSync?: boolean;
+  forceChannelSync?: boolean;
+  /**
+   * Clear atómico: solo si botPausedSource es null|auto.
+   * Si entre el check y el UPDATE alguien puso manual, count=0 y no reactivamos.
+   */
+  onlyIfAutoSource?: boolean;
 };
 
 export function isTerminalTicketStatus(status: string): boolean {
@@ -171,6 +186,7 @@ export async function pauseAtilioForCustomerDetailed(
   const awaitChannelSync = opts?.awaitChannelSync !== false;
   const skipIfPaused = opts?.skipChannelIfAlreadyPaused === true;
   const force = opts?.forceChannelSync === true;
+  const preserveSource = opts?.preservePauseSource === true;
   const requestedSource = opts?.pauseSource ?? pauseSourceFromReason(reason);
 
   const customer = await client.customer.findUnique({
@@ -199,15 +215,20 @@ export async function pauseAtilioForCustomerDetailed(
     };
   }
 
-  const nextSource = mergePauseSource(customer.botPausedSource, requestedSource);
+  const nextSource = preserveSource
+    ? (asPauseSource(customer.botPausedSource) ??
+      (customer.botPausedAt ? ("auto" as BotPausedSource) : requestedSource))
+    : mergePauseSource(customer.botPausedSource, requestedSource);
   const alreadyPaused = Boolean(customer.botPausedAt);
 
   await client.customer.update({
     where: { id: customerId },
-    data: {
-      botPausedAt: customer.botPausedAt ?? new Date(),
-      botPausedSource: nextSource,
-    },
+    data: preserveSource
+      ? { botPausedAt: customer.botPausedAt ?? new Date() }
+      : {
+          botPausedAt: customer.botPausedAt ?? new Date(),
+          botPausedSource: nextSource,
+        },
   });
 
   const syncedPaused = isChannelSyncedForTarget(
@@ -284,6 +305,98 @@ export async function isBotPausedForPhone(
 }
 
 /**
+ * Limpia pausa solo si sigue siendo automática (null|auto).
+ * Atómico: una pausa manual concurrente hace count=0.
+ */
+export async function clearAutoBotPauseAtomic(
+  customerId: string,
+  client: PrismaClient = prisma,
+): Promise<boolean> {
+  const result = await client.customer.updateMany({
+    where: {
+      id: customerId,
+      botPausedAt: { not: null },
+      OR: [{ botPausedSource: null }, { botPausedSource: "auto" }],
+    },
+    data: { botPausedAt: null, botPausedSource: null },
+  });
+  return result.count > 0;
+}
+
+/**
+ * Reintento de sync canal sin mutar botPausedAt/source.
+ * Usa el estado local actual para elegir target paused|active.
+ */
+export async function retryAtilioChannelSyncDetailed(
+  customerId: string,
+  client: PrismaClient = prisma,
+  opts?: { awaitChannelSync?: boolean },
+): Promise<AtilioChannelSyncResult> {
+  const awaitChannelSync = opts?.awaitChannelSync !== false;
+  const customer = await client.customer.findUnique({
+    where: { id: customerId },
+    select: {
+      id: true,
+      phone: true,
+      botPausedAt: true,
+      botPausedSource: true,
+      botChannelSyncStatus: true,
+      botChannelSyncTarget: true,
+      botChannelSyncGeneration: true,
+    },
+  });
+  if (!customer) {
+    return {
+      registered: false,
+      channelSyncOk: false,
+      muteOk: false,
+      blacklistOk: false,
+      syncStatus: "idle",
+      syncTarget: null,
+      syncGeneration: 0,
+      localPaused: false,
+      pauseSource: null,
+    };
+  }
+
+  const target: BotChannelSyncTarget = customer.botPausedAt ? "paused" : "active";
+  const pauseSource = asPauseSource(customer.botPausedSource);
+
+  if (!customer.phone) {
+    await client.customer.update({
+      where: { id: customerId },
+      data: {
+        botChannelSyncStatus: "synced",
+        botChannelSyncTarget: target,
+        botChannelSyncError: null,
+        botChannelSyncAt: new Date(),
+      },
+    });
+    return {
+      registered: true,
+      channelSyncOk: true,
+      muteOk: true,
+      blacklistOk: true,
+      syncStatus: "synced",
+      syncTarget: target,
+      syncGeneration: customer.botChannelSyncGeneration,
+      localPaused: Boolean(customer.botPausedAt),
+      pauseSource,
+    };
+  }
+
+  const result = await bumpAndSchedule(client, customerId, target, { awaitChannelSync });
+  console.log(
+    `[atilio] Retry sync target=${target} customer=${customerId} source=${pauseSource ?? "null"} gen=${result.syncGeneration}`,
+  );
+  return {
+    ...result,
+    localPaused: Boolean(customer.botPausedAt),
+    pauseSource,
+  };
+}
+
+/**
  * Reactiva Kira: limpia botPausedAt/source + sync canal.
  * Razones permitidas: botón «Reactivar Kira» o resolve:auto-pause.
  */
@@ -300,7 +413,7 @@ export async function reactivateAtilioForCustomerDetailed(
   customerId: string,
   client: PrismaClient = prisma,
   reason?: string,
-  opts?: { awaitChannelSync?: boolean; forceChannelSync?: boolean },
+  opts?: AtilioReactivateOptions,
 ): Promise<AtilioChannelSyncResult> {
   if (!isAllowedKiraReactivateReason(reason)) {
     console.warn(
@@ -321,6 +434,7 @@ export async function reactivateAtilioForCustomerDetailed(
   }
 
   const awaitChannelSync = opts?.awaitChannelSync !== false;
+  const onlyIfAuto = opts?.onlyIfAutoSource === true;
 
   const customer = await client.customer.findUnique({
     where: { id: customerId },
@@ -330,6 +444,8 @@ export async function reactivateAtilioForCustomerDetailed(
       botPausedAt: true,
       botPausedSource: true,
       botChannelSyncGeneration: true,
+      botChannelSyncStatus: true,
+      botChannelSyncTarget: true,
     },
   });
   if (!customer) {
@@ -347,7 +463,42 @@ export async function reactivateAtilioForCustomerDetailed(
   }
 
   const localWasPaused = !!customer.botPausedAt;
-  if (localWasPaused || customer.botPausedSource) {
+
+  if (onlyIfAuto) {
+    const cleared = await clearAutoBotPauseAtomic(customerId, client);
+    if (!cleared) {
+      const fresh = await client.customer.findUnique({
+        where: { id: customerId },
+        select: {
+          botPausedAt: true,
+          botPausedSource: true,
+          botChannelSyncStatus: true,
+          botChannelSyncTarget: true,
+          botChannelSyncGeneration: true,
+        },
+      });
+      console.log(
+        `[atilio] Reactivación auto omitida (race/manual/ya limpia) customer=${customerId} (${reason})`,
+      );
+      if (!fresh) {
+        return {
+          registered: false,
+          channelSyncOk: false,
+          muteOk: false,
+          blacklistOk: false,
+          syncStatus: "idle",
+          syncTarget: null,
+          syncGeneration: 0,
+          localPaused: false,
+          pauseSource: null,
+        };
+      }
+      return {
+        ...humanControlFromRow(fresh),
+        registered: false,
+      };
+    }
+  } else if (localWasPaused || customer.botPausedSource) {
     await client.customer.update({
       where: { id: customerId },
       data: { botPausedAt: null, botPausedSource: null },
@@ -379,7 +530,7 @@ export async function reactivateAtilioForCustomerDetailed(
 
   const result = await bumpAndSchedule(client, customerId, "active", { awaitChannelSync });
   console.log(
-    `[atilio] Reactivado local customer=${customerId} (${reason}) localWasPaused=${localWasPaused} syncStatus=${result.syncStatus} gen=${result.syncGeneration}`,
+    `[atilio] Reactivado local customer=${customerId} (${reason}) localWasPaused=${localWasPaused} onlyIfAuto=${onlyIfAuto} syncStatus=${result.syncStatus} gen=${result.syncGeneration}`,
   );
   return { ...result, localPaused: false, pauseSource: null };
 }
@@ -448,11 +599,19 @@ export async function reactivateAtilioAfterTicketClosed(
     customerId,
     client,
     RESOLVE_AUTO_REACTIVATE_REASON,
-    { awaitChannelSync: false },
+    { awaitChannelSync: false, onlyIfAutoSource: true },
   );
+  if (!detail.registered) {
+    console.log(
+      `[atilio] Cierre ${ticketId} NO reactiva: clear atómico falló` +
+        ` (manual concurrente o ya limpia)${reason ? ` [${reason}]` : ""}` +
+        ` source=${detail.pauseSource ?? "null"}`,
+    );
+    return false;
+  }
   console.log(
     `[atilio] Cierre ${ticketId} (${previousStatus}→${newStatus}) reactiva pausa auto` +
       `${reason ? ` [${reason}]` : ""} syncStatus=${detail.syncStatus}`,
   );
-  return detail.registered;
+  return true;
 }

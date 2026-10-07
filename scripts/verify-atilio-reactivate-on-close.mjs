@@ -3,6 +3,8 @@
  * Contrato 2026-10-07:
  * - Resolver/cerrar reactiva solo pausa `auto` sin otros tickets abiertos.
  * - Pausa `manual` solo se levanta con «Reactivar Kira».
+ * - Clear de resolve es atómico (updateMany solo null|auto) para no borrar
+ *   una pausa manual aplicada en carrera.
  *
  * Uso: npx tsx scripts/verify-atilio-reactivate-on-close.mjs
  */
@@ -13,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import {
   EXPLICIT_KIRA_REACTIVATE_REASON,
   RESOLVE_AUTO_REACTIVATE_REASON,
+  clearAutoBotPauseAtomic,
   isAllowedKiraReactivateReason,
   isTerminalTicketStatus,
   mergePauseSource,
@@ -42,6 +45,9 @@ assert.match(pauseLib, /RESOLVE_AUTO_REACTIVATE_REASON/);
 assert.match(pauseLib, /botPausedSource/);
 assert.match(pauseLib, /pausa manual/);
 assert.match(pauseLib, /quedan .+ ticket/);
+assert.match(pauseLib, /onlyIfAutoSource:\s*true/);
+assert.match(pauseLib, /clearAutoBotPauseAtomic/);
+assert.match(pauseLib, /updateMany/);
 
 const mockDb = {
   customer: {
@@ -116,6 +122,73 @@ const keepOther = await reactivateAtilioAfterTicketClosed(
   mockOtherOpen,
 );
 assert.equal(keepOther, false, "otros tickets abiertos → no reactiva");
+
+// Clear atómico: si source ya es manual, updateMany → 0.
+let updateManyCalls = 0;
+const mockAtomicRace = {
+  customer: {
+    findUnique: async () => ({
+      id: "c-race",
+      botPausedAt: new Date(),
+      botPausedSource: "auto",
+      phone: null,
+      botChannelSyncGeneration: 1,
+      botChannelSyncStatus: "synced",
+      botChannelSyncTarget: "paused",
+    }),
+    updateMany: async () => {
+      updateManyCalls += 1;
+      return { count: 0 };
+    },
+  },
+  ticket: { count: async () => 0 },
+};
+const raceManual = await reactivateAtilioAfterTicketClosed(
+  {
+    customerId: "c-race",
+    ticketId: "t-race",
+    previousStatus: "OPEN",
+    newStatus: "RESOLVED",
+  },
+  mockAtomicRace,
+);
+assert.equal(raceManual, false, "clear atómico count=0 → no reactiva");
+assert.equal(updateManyCalls, 1, "resolve usa updateMany atómico");
+
+const cleared = await clearAutoBotPauseAtomic("c2", {
+  customer: {
+    updateMany: async ({ where }) => {
+      assert.ok(where.OR?.some((c) => c.botPausedSource === "auto"));
+      assert.ok(where.OR?.some((c) => c.botPausedSource === null));
+      return { count: 1 };
+    },
+  },
+});
+assert.equal(cleared, true, "clearAutoBotPauseAtomic count=1 → true");
+
+const toggle = fs.readFileSync(
+  path.join(root, "src/components/tickets/BotPausedToggle.tsx"),
+  "utf8",
+);
+assert.match(toggle, /retryChannelSync:\s*true/, "UI reintenta sin putPaused(manual)");
+assert.equal(
+  /putPaused\(shown,\s*true\)/.test(toggle),
+  false,
+  "retry no llama putPaused(shown,true)",
+);
+
+const clientes = fs.readFileSync(
+  path.join(root, "src/app/api/clientes/[id]/route.ts"),
+  "utf8",
+);
+assert.match(clientes, /retryAtilioChannelSyncDetailed/, "API retry dedicado");
+assert.match(clientes, /retryChannelSync/, "schema retryChannelSync");
+
+const migration = fs.readFileSync(
+  path.join(root, "prisma/migrations/20261007220000_customer_bot_paused_source/migration.sql"),
+  "utf8",
+);
+assert.match(migration, /Política de backfill/, "migración documenta backfill → auto");
 
 for (const rel of [
   "src/app/api/tickets/[id]/quick-action/route.ts",

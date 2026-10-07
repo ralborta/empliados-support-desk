@@ -81,6 +81,7 @@ assert.match(messages, /pauseSource:\s*"auto"/, "takeover marca pausa auto");
 const clientes = fs.readFileSync(path.join(root, "src/app/api/clientes/[id]/route.ts"), "utf8");
 assert.match(clientes, /panel:bot-paused-toggle/, "panel Reactivar Kira usa razón explícita");
 assert.match(clientes, /pauseSource:\s*"manual"/, "botón Pausar marca manual");
+assert.match(clientes, /retryAtilioChannelSyncDetailed/, "reintento sync no muta origen");
 
 const turn = fs.readFileSync(path.join(root, "src/lib/whatsappTurn.ts"), "utf8");
 assert.match(
