@@ -255,34 +255,153 @@ export function scheduleChannelSyncJob(params: {
   );
 }
 
-/**
- * Incrementa generation + setea target/status de forma atómica (RETURNING).
- * Evita que dos requests concurrentes lean el mismo N y escriban N+1.
- */
-export async function bumpChannelSyncGenerationAtomic(
-  client: PrismaClient,
-  customerId: string,
-  target: BotChannelSyncTarget,
-): Promise<{
+export type ChannelSyncBumpRow = {
   botChannelSyncGeneration: number;
   botPausedAt: Date | null;
   botPausedSource: string | null;
   botChannelSyncStatus: string;
   botChannelSyncTarget: string | null;
-} | null> {
-  const rows = await client.$queryRaw<
-    Array<{
-      botChannelSyncGeneration: number;
-      botPausedAt: Date | null;
-      botPausedSource: string | null;
-      botChannelSyncStatus: string;
-      botChannelSyncTarget: string | null;
-    }>
-  >`
+};
+
+/**
+ * Incrementa generation + setea target/status de forma atómica (RETURNING).
+ * Evita que dos requests concurrentes lean el mismo N y escriban N+1.
+ * Preferir commit* cuando el target deba acoplarse al estado local de pausa.
+ */
+export async function bumpChannelSyncGenerationAtomic(
+  client: PrismaClient,
+  customerId: string,
+  target: BotChannelSyncTarget,
+): Promise<ChannelSyncBumpRow | null> {
+  const rows = await client.$queryRaw<ChannelSyncBumpRow[]>`
     UPDATE "Customer"
     SET
       "botChannelSyncGeneration" = "botChannelSyncGeneration" + 1,
       "botChannelSyncTarget" = ${target},
+      "botChannelSyncStatus" = 'pending',
+      "botChannelSyncError" = NULL,
+      "botChannelSyncAttempts" = 0,
+      "botChannelSyncAt" = NULL
+    WHERE id = ${customerId}
+    RETURNING
+      "botChannelSyncGeneration",
+      "botPausedAt",
+      "botPausedSource",
+      "botChannelSyncStatus",
+      "botChannelSyncTarget"
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Pausa local + target=paused + generation en un solo UPDATE.
+ * Nunca degrada manual→auto. Con preserveSource no toca botPausedSource.
+ */
+export async function commitLocalPauseAndBumpAtomic(
+  client: PrismaClient,
+  customerId: string,
+  opts: { requestedSource: "auto" | "manual"; preserveSource?: boolean; pausedAt?: Date },
+): Promise<ChannelSyncBumpRow | null> {
+  const requestedSource = opts.requestedSource;
+  const preserveSource = opts.preserveSource === true;
+  const pausedAt = opts.pausedAt ?? new Date();
+  const rows = await client.$queryRaw<ChannelSyncBumpRow[]>`
+    UPDATE "Customer"
+    SET
+      "botPausedAt" = COALESCE("botPausedAt", ${pausedAt}),
+      "botPausedSource" = CASE
+        WHEN ${preserveSource} THEN "botPausedSource"
+        WHEN "botPausedSource" = 'manual' THEN 'manual'
+        ELSE ${requestedSource}
+      END,
+      "botChannelSyncGeneration" = "botChannelSyncGeneration" + 1,
+      "botChannelSyncTarget" = 'paused',
+      "botChannelSyncStatus" = 'pending',
+      "botChannelSyncError" = NULL,
+      "botChannelSyncAttempts" = 0,
+      "botChannelSyncAt" = NULL
+    WHERE id = ${customerId}
+    RETURNING
+      "botChannelSyncGeneration",
+      "botPausedAt",
+      "botPausedSource",
+      "botChannelSyncStatus",
+      "botChannelSyncTarget"
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Limpia pausa + target=active + generation en un solo UPDATE.
+ * onlyIfAuto: falla (0 rows) si ya es manual o no hay pausa — evita que Resolver
+ * programe "active" después de una pausa manual concurrente.
+ */
+export async function commitLocalClearAndBumpAtomic(
+  client: PrismaClient,
+  customerId: string,
+  opts?: { onlyIfAutoSource?: boolean },
+): Promise<ChannelSyncBumpRow | null> {
+  const onlyIfAuto = opts?.onlyIfAutoSource === true;
+  const rows = onlyIfAuto
+    ? await client.$queryRaw<ChannelSyncBumpRow[]>`
+        UPDATE "Customer"
+        SET
+          "botPausedAt" = NULL,
+          "botPausedSource" = NULL,
+          "botChannelSyncGeneration" = "botChannelSyncGeneration" + 1,
+          "botChannelSyncTarget" = 'active',
+          "botChannelSyncStatus" = 'pending',
+          "botChannelSyncError" = NULL,
+          "botChannelSyncAttempts" = 0,
+          "botChannelSyncAt" = NULL
+        WHERE id = ${customerId}
+          AND "botPausedAt" IS NOT NULL
+          AND ("botPausedSource" IS NULL OR "botPausedSource" = 'auto')
+        RETURNING
+          "botChannelSyncGeneration",
+          "botPausedAt",
+          "botPausedSource",
+          "botChannelSyncStatus",
+          "botChannelSyncTarget"
+      `
+    : await client.$queryRaw<ChannelSyncBumpRow[]>`
+        UPDATE "Customer"
+        SET
+          "botPausedAt" = NULL,
+          "botPausedSource" = NULL,
+          "botChannelSyncGeneration" = "botChannelSyncGeneration" + 1,
+          "botChannelSyncTarget" = 'active',
+          "botChannelSyncStatus" = 'pending',
+          "botChannelSyncError" = NULL,
+          "botChannelSyncAttempts" = 0,
+          "botChannelSyncAt" = NULL
+        WHERE id = ${customerId}
+        RETURNING
+          "botChannelSyncGeneration",
+          "botPausedAt",
+          "botPausedSource",
+          "botChannelSyncStatus",
+          "botChannelSyncTarget"
+      `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Reintento: generation + target derivado del botPausedAt vigente (mismo UPDATE).
+ * Evita publicar un target leído antes de una reactivación/pausa concurrente.
+ */
+export async function commitRetryBumpFromLocalPauseAtomic(
+  client: PrismaClient,
+  customerId: string,
+): Promise<ChannelSyncBumpRow | null> {
+  const rows = await client.$queryRaw<ChannelSyncBumpRow[]>`
+    UPDATE "Customer"
+    SET
+      "botChannelSyncGeneration" = "botChannelSyncGeneration" + 1,
+      "botChannelSyncTarget" = CASE
+        WHEN "botPausedAt" IS NOT NULL THEN 'paused'
+        ELSE 'active'
+      END,
       "botChannelSyncStatus" = 'pending',
       "botChannelSyncError" = NULL,
       "botChannelSyncAttempts" = 0,

@@ -1,11 +1,14 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
-  bumpChannelSyncGenerationAtomic,
+  commitLocalClearAndBumpAtomic,
+  commitLocalPauseAndBumpAtomic,
+  commitRetryBumpFromLocalPauseAtomic,
   isChannelSyncedForTarget,
   scheduleChannelSyncJob,
   type BotChannelSyncStatus,
   type BotChannelSyncTarget,
+  type ChannelSyncBumpRow,
 } from "@/lib/botChannelSync";
 import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
@@ -117,30 +120,20 @@ function humanControlFromRow(row: {
   };
 }
 
-async function bumpAndSchedule(
+function syncTargetFromRow(row: ChannelSyncBumpRow): BotChannelSyncTarget {
+  return row.botChannelSyncTarget === "paused" ? "paused" : "active";
+}
+
+/** Agenda BBC con generation/target ya fijados en el mismo UPDATE que el estado local. */
+async function scheduleFromBumpRow(
   client: PrismaClient,
   customerId: string,
-  target: BotChannelSyncTarget,
+  bumped: ChannelSyncBumpRow,
   opts: { awaitChannelSync: boolean },
 ): Promise<AtilioChannelSyncResult> {
   const t0 = Date.now();
-  // Generation+target atómicos: dos requests no pueden leer el mismo N.
-  const updated = await bumpChannelSyncGenerationAtomic(client, customerId, target);
-  if (!updated) {
-    return {
-      registered: false,
-      channelSyncOk: false,
-      muteOk: false,
-      blacklistOk: false,
-      syncStatus: "idle",
-      syncTarget: null,
-      syncGeneration: 0,
-      localPaused: false,
-      pauseSource: null,
-    };
-  }
-
-  const generation = updated.botChannelSyncGeneration;
+  const target = syncTargetFromRow(bumped);
+  const generation = bumped.botChannelSyncGeneration;
   console.log(
     `[atilio] sync scheduled target=${target} gen=${generation} customer=${customerId} dbMs=${Date.now() - t0}`,
   );
@@ -162,7 +155,7 @@ async function bumpAndSchedule(
   }
 
   scheduleChannelSyncJob({ customerId, generation, target });
-  return humanControlFromRow(updated);
+  return humanControlFromRow(bumped);
 }
 
 /**
@@ -215,21 +208,11 @@ export async function pauseAtilioForCustomerDetailed(
     };
   }
 
-  const nextSource = preserveSource
+  const nextSourcePreview = preserveSource
     ? (asPauseSource(customer.botPausedSource) ??
       (customer.botPausedAt ? ("auto" as BotPausedSource) : requestedSource))
     : mergePauseSource(customer.botPausedSource, requestedSource);
   const alreadyPaused = Boolean(customer.botPausedAt);
-
-  await client.customer.update({
-    where: { id: customerId },
-    data: preserveSource
-      ? { botPausedAt: customer.botPausedAt ?? new Date() }
-      : {
-          botPausedAt: customer.botPausedAt ?? new Date(),
-          botPausedSource: nextSource,
-        },
-  });
 
   const syncedPaused = isChannelSyncedForTarget(
     customer.botChannelSyncStatus,
@@ -242,11 +225,11 @@ export async function pauseAtilioForCustomerDetailed(
   if (skipIfPaused && alreadyPaused && !force) {
     if (syncedPaused) {
       console.log(
-        `[atilio] Pausado (ya synced) source=${nextSource} customer=${customerId}${reason ? ` (${reason})` : ""}`,
+        `[atilio] Pausado (ya synced) source=${nextSourcePreview} customer=${customerId}${reason ? ` (${reason})` : ""}`,
       );
       return humanControlFromRow({
         botPausedAt: customer.botPausedAt ?? new Date(),
-        botPausedSource: nextSource,
+        botPausedSource: nextSourcePreview,
         botChannelSyncStatus: "synced",
         botChannelSyncTarget: "paused",
         botChannelSyncGeneration: customer.botChannelSyncGeneration,
@@ -254,17 +237,38 @@ export async function pauseAtilioForCustomerDetailed(
     }
     if (pendingPaused) {
       console.log(
-        `[atilio] Pausado local source=${nextSource}; sync pending gen=${customer.botChannelSyncGeneration} customer=${customerId}`,
+        `[atilio] Pausado local source=${nextSourcePreview}; sync pending gen=${customer.botChannelSyncGeneration} customer=${customerId}`,
       );
       return humanControlFromRow({
         botPausedAt: customer.botPausedAt ?? new Date(),
-        botPausedSource: nextSource,
+        botPausedSource: nextSourcePreview,
         botChannelSyncStatus: "pending",
         botChannelSyncTarget: "paused",
         botChannelSyncGeneration: customer.botChannelSyncGeneration,
       });
     }
   }
+
+  // Estado local + target + generation en un solo UPDATE (sin gap TOCTOU).
+  const bumped = await commitLocalPauseAndBumpAtomic(client, customerId, {
+    requestedSource,
+    preserveSource,
+  });
+  if (!bumped) {
+    return {
+      registered: false,
+      channelSyncOk: false,
+      muteOk: false,
+      blacklistOk: false,
+      syncStatus: "idle",
+      syncTarget: null,
+      syncGeneration: 0,
+      localPaused: false,
+      pauseSource: null,
+    };
+  }
+
+  const nextSource = asPauseSource(bumped.botPausedSource) ?? nextSourcePreview;
 
   if (!customer.phone) {
     await client.customer.update({
@@ -283,13 +287,13 @@ export async function pauseAtilioForCustomerDetailed(
       blacklistOk: true,
       syncStatus: "synced",
       syncTarget: "paused",
-      syncGeneration: customer.botChannelSyncGeneration,
+      syncGeneration: bumped.botChannelSyncGeneration,
       localPaused: true,
       pauseSource: nextSource,
     };
   }
 
-  const result = await bumpAndSchedule(client, customerId, "paused", { awaitChannelSync });
+  const result = await scheduleFromBumpRow(client, customerId, bumped, { awaitChannelSync });
   console.log(
     `[atilio] Pausado local source=${nextSource} customer=${customerId}${reason ? ` (${reason})` : ""} syncStatus=${result.syncStatus} gen=${result.syncGeneration}`,
   );
@@ -325,7 +329,7 @@ export async function clearAutoBotPauseAtomic(
 
 /**
  * Reintento de sync canal sin mutar botPausedAt/source.
- * Usa el estado local actual para elegir target paused|active.
+ * Target se deriva de botPausedAt dentro del mismo UPDATE que sube generation.
  */
 export async function retryAtilioChannelSyncDetailed(
   customerId: string,
@@ -335,15 +339,7 @@ export async function retryAtilioChannelSyncDetailed(
   const awaitChannelSync = opts?.awaitChannelSync !== false;
   const customer = await client.customer.findUnique({
     where: { id: customerId },
-    select: {
-      id: true,
-      phone: true,
-      botPausedAt: true,
-      botPausedSource: true,
-      botChannelSyncStatus: true,
-      botChannelSyncTarget: true,
-      botChannelSyncGeneration: true,
-    },
+    select: { id: true, phone: true },
   });
   if (!customer) {
     return {
@@ -359,8 +355,23 @@ export async function retryAtilioChannelSyncDetailed(
     };
   }
 
-  const target: BotChannelSyncTarget = customer.botPausedAt ? "paused" : "active";
-  const pauseSource = asPauseSource(customer.botPausedSource);
+  const bumped = await commitRetryBumpFromLocalPauseAtomic(client, customerId);
+  if (!bumped) {
+    return {
+      registered: false,
+      channelSyncOk: false,
+      muteOk: false,
+      blacklistOk: false,
+      syncStatus: "idle",
+      syncTarget: null,
+      syncGeneration: 0,
+      localPaused: false,
+      pauseSource: null,
+    };
+  }
+
+  const target = syncTargetFromRow(bumped);
+  const pauseSource = asPauseSource(bumped.botPausedSource);
 
   if (!customer.phone) {
     await client.customer.update({
@@ -379,19 +390,19 @@ export async function retryAtilioChannelSyncDetailed(
       blacklistOk: true,
       syncStatus: "synced",
       syncTarget: target,
-      syncGeneration: customer.botChannelSyncGeneration,
-      localPaused: Boolean(customer.botPausedAt),
+      syncGeneration: bumped.botChannelSyncGeneration,
+      localPaused: Boolean(bumped.botPausedAt),
       pauseSource,
     };
   }
 
-  const result = await bumpAndSchedule(client, customerId, target, { awaitChannelSync });
+  const result = await scheduleFromBumpRow(client, customerId, bumped, { awaitChannelSync });
   console.log(
     `[atilio] Retry sync target=${target} customer=${customerId} source=${pauseSource ?? "null"} gen=${result.syncGeneration}`,
   );
   return {
     ...result,
-    localPaused: Boolean(customer.botPausedAt),
+    localPaused: Boolean(bumped.botPausedAt),
     pauseSource,
   };
 }
@@ -464,45 +475,42 @@ export async function reactivateAtilioForCustomerDetailed(
 
   const localWasPaused = !!customer.botPausedAt;
 
-  if (onlyIfAuto) {
-    const cleared = await clearAutoBotPauseAtomic(customerId, client);
-    if (!cleared) {
-      const fresh = await client.customer.findUnique({
-        where: { id: customerId },
-        select: {
-          botPausedAt: true,
-          botPausedSource: true,
-          botChannelSyncStatus: true,
-          botChannelSyncTarget: true,
-          botChannelSyncGeneration: true,
-        },
-      });
-      console.log(
-        `[atilio] Reactivación auto omitida (race/manual/ya limpia) customer=${customerId} (${reason})`,
-      );
-      if (!fresh) {
-        return {
-          registered: false,
-          channelSyncOk: false,
-          muteOk: false,
-          blacklistOk: false,
-          syncStatus: "idle",
-          syncTarget: null,
-          syncGeneration: 0,
-          localPaused: false,
-          pauseSource: null,
-        };
-      }
+  // Clear + target=active + generation atómicos. Con onlyIfAuto, una pausa
+  // manual concurrente deja count=0 y no se programa "active".
+  const bumped = await commitLocalClearAndBumpAtomic(client, customerId, {
+    onlyIfAutoSource: onlyIfAuto,
+  });
+  if (!bumped) {
+    const fresh = await client.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        botPausedAt: true,
+        botPausedSource: true,
+        botChannelSyncStatus: true,
+        botChannelSyncTarget: true,
+        botChannelSyncGeneration: true,
+      },
+    });
+    console.log(
+      `[atilio] Reactivación omitida (race/manual/ya limpia) customer=${customerId} (${reason}) onlyIfAuto=${onlyIfAuto}`,
+    );
+    if (!fresh) {
       return {
-        ...humanControlFromRow(fresh),
         registered: false,
+        channelSyncOk: false,
+        muteOk: false,
+        blacklistOk: false,
+        syncStatus: "idle",
+        syncTarget: null,
+        syncGeneration: 0,
+        localPaused: false,
+        pauseSource: null,
       };
     }
-  } else if (localWasPaused || customer.botPausedSource) {
-    await client.customer.update({
-      where: { id: customerId },
-      data: { botPausedAt: null, botPausedSource: null },
-    });
+    return {
+      ...humanControlFromRow(fresh),
+      registered: false,
+    };
   }
 
   if (!customer.phone) {
@@ -522,13 +530,13 @@ export async function reactivateAtilioForCustomerDetailed(
       blacklistOk: true,
       syncStatus: "synced",
       syncTarget: "active",
-      syncGeneration: customer.botChannelSyncGeneration,
+      syncGeneration: bumped.botChannelSyncGeneration,
       localPaused: false,
       pauseSource: null,
     };
   }
 
-  const result = await bumpAndSchedule(client, customerId, "active", { awaitChannelSync });
+  const result = await scheduleFromBumpRow(client, customerId, bumped, { awaitChannelSync });
   console.log(
     `[atilio] Reactivado local customer=${customerId} (${reason}) localWasPaused=${localWasPaused} onlyIfAuto=${onlyIfAuto} syncStatus=${result.syncStatus} gen=${result.syncGeneration}`,
   );

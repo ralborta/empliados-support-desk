@@ -2,6 +2,7 @@
 /**
  * Concurrencia del sync canal:
  * - bump atómico (SQL RETURNING)
+ * - commit local+target+generation en un solo UPDATE
  * - cola por cliente (pausa vieja no pisa unmute)
  * - reconcile si un job BBC termina tarde
  */
@@ -24,7 +25,16 @@ assert.match(syncSrc, /RETURNING/);
 assert.match(syncSrc, /enqueueCustomerChannelSync/);
 assert.match(syncSrc, /reconcileCurrentChannelIfNeeded|reconcile channel/);
 assert.match(syncSrc, /skip superseded before BBC|skip superseded pre-call/);
-assert.match(pauseSrc, /bumpChannelSyncGenerationAtomic/);
+assert.match(syncSrc, /commitLocalPauseAndBumpAtomic/);
+assert.match(syncSrc, /commitLocalClearAndBumpAtomic/);
+assert.match(syncSrc, /commitRetryBumpFromLocalPauseAtomic/);
+assert.match(
+  syncSrc,
+  /WHEN "botPausedAt" IS NOT NULL THEN 'paused'/,
+  "retry deriva target del estado vigente",
+);
+assert.match(pauseSrc, /commitLocalClearAndBumpAtomic/);
+assert.match(pauseSrc, /commitRetryBumpFromLocalPauseAtomic/);
 assert.match(pauseSrc, /RESOLVE_AUTO_REACTIVATE_REASON/, "Resolver→auto ya implementado");
 
 // Cola serial: B no arranca hasta que A termine.

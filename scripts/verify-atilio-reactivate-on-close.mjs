@@ -46,8 +46,9 @@ assert.match(pauseLib, /botPausedSource/);
 assert.match(pauseLib, /pausa manual/);
 assert.match(pauseLib, /quedan .+ ticket/);
 assert.match(pauseLib, /onlyIfAutoSource:\s*true/);
-assert.match(pauseLib, /clearAutoBotPauseAtomic/);
-assert.match(pauseLib, /updateMany/);
+assert.match(pauseLib, /commitLocalClearAndBumpAtomic/);
+assert.match(pauseLib, /commitRetryBumpFromLocalPauseAtomic/);
+assert.match(pauseLib, /commitLocalPauseAndBumpAtomic/);
 
 const mockDb = {
   customer: {
@@ -123,8 +124,8 @@ const keepOther = await reactivateAtilioAfterTicketClosed(
 );
 assert.equal(keepOther, false, "otros tickets abiertos → no reactiva");
 
-// Clear atómico: si source ya es manual, updateMany → 0.
-let updateManyCalls = 0;
+// Clear+bump atómico: $queryRaw sin rows → no programa active.
+let queryRawCalls = 0;
 const mockAtomicRace = {
   customer: {
     findUnique: async () => ({
@@ -136,12 +137,12 @@ const mockAtomicRace = {
       botChannelSyncStatus: "synced",
       botChannelSyncTarget: "paused",
     }),
-    updateMany: async () => {
-      updateManyCalls += 1;
-      return { count: 0 };
-    },
   },
   ticket: { count: async () => 0 },
+  $queryRaw: async () => {
+    queryRawCalls += 1;
+    return [];
+  },
 };
 const raceManual = await reactivateAtilioAfterTicketClosed(
   {
@@ -152,8 +153,8 @@ const raceManual = await reactivateAtilioAfterTicketClosed(
   },
   mockAtomicRace,
 );
-assert.equal(raceManual, false, "clear atómico count=0 → no reactiva");
-assert.equal(updateManyCalls, 1, "resolve usa updateMany atómico");
+assert.equal(raceManual, false, "clear+bump atómico 0 rows → no reactiva");
+assert.equal(queryRawCalls, 1, "resolve usa commit clear+bump atómico");
 
 const cleared = await clearAutoBotPauseAtomic("c2", {
   customer: {
