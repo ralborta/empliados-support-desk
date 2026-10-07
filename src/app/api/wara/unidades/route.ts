@@ -1395,12 +1395,22 @@ export async function POST(req: NextRequest) {
     const outageMsg =
       "Wara tiene una interrupción temporal y no pude consultar tus unidades en este momento. " +
       "Las guías de plataforma (Opciones, Unidades) siguen disponibles. Probá de nuevo en unos minutos.";
+    let companySelectMsg =
+      "Antes de consultar unidades necesito que elijas la empresa asociada a este número.";
+    if (session.requiresCompanySelection) {
+      const contacts = session.lookup?.contactos ?? [];
+      if (contacts.length > 0) {
+        const { formatContactsMenu, companySelectionMenuMessage } = await import("@/lib/waraApi");
+        const menu = formatContactsMenu(contacts);
+        companySelectMsg = companySelectionMenuMessage(menu);
+      }
+    }
     return NextResponse.json(
       {
         ok: false,
         error: session.error,
         summaryText: session.requiresCompanySelection
-          ? "Antes de consultar unidades necesito que elijas la empresa asociada a este número."
+          ? companySelectMsg
           : isOutage
             ? outageMsg
             : waraDetail

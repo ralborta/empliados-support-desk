@@ -2927,7 +2927,7 @@ export function buildAtilioHelpCapabilitiesReply(
   return lines.join("\n");
 }
 
-function companySelectionMenuMessage(
+export function companySelectionMenuMessage(
   menu: string,
   opts?: { unrecognized?: boolean }
 ): string {
@@ -2954,9 +2954,26 @@ function expandCompanyAliases(wanted: string): string[] {
     wara: ["wara"],
     cacique: ["el cacique", "cacique"],
     "el cacique": ["el cacique", "cacique"],
+    // Bug real 2026-10-07: «Poder Judicial» no matcheaba «SUPREMA CORTE DE JUSTICIA».
+    "poder judicial": [
+      "poder judicial",
+      "suprema corte",
+      "suprema corte de justicia",
+      "corte de justicia",
+    ],
+    "corte": ["suprema corte", "corte de justicia", "poder judicial"],
+    "justicia": ["suprema corte de justicia", "poder judicial", "corte de justicia"],
   };
   const base = aliases[n] ?? [n];
   return Array.from(new Set([n, ...base]));
+}
+
+/** ¿La elección del cliente (nombre/alias) corresponde a este contacto Wara? */
+export function contactMatchesCompanySelection(
+  contact: WaraEmpresaContact,
+  wantedRaw: string,
+): boolean {
+  return contactMatchesSelection(contact, normCompanyToken(wantedRaw));
 }
 
 function contactMatchesSelection(
@@ -2978,7 +2995,30 @@ function contactMatchesSelection(
     if (empresaFirst && wantedFirst && empresaFirst === wantedFirst) return true;
     if (empresa.startsWith(wanted) || wanted.startsWith(empresaFirst)) return true;
   }
+  // «Poder Judicial» ↔ empresa con corte/justicia (sin exigir igualdad literal).
+  if (
+    /\b(poder\s+judicial|corte|justicia)\b/.test(wantedNameNorm) &&
+    /\b(corte|justicia|judicial)\b/.test(empresa)
+  ) {
+    return true;
+  }
   return false;
+}
+
+/** Clave de empresa para deduplicar contactos Wara del mismo teléfono. */
+export function companyIdentityKey(contact: Pick<WaraEmpresaContact, "empresa" | "nombre">): string {
+  return normCompanyToken(contact.empresa || contact.nombre || "");
+}
+
+/** Contacto preferido cuando varios IDs apuntan a la misma empresa (persona vs razón social). */
+export function preferContactForSameCompany(contacts: WaraEmpresaContact[]): WaraEmpresaContact {
+  if (contacts.length === 1) return contacts[0];
+  const personal = contacts.find(
+    (c) =>
+      normCompanyToken(c.nombre) &&
+      normCompanyToken(c.nombre) !== normCompanyToken(c.empresa),
+  );
+  return personal ?? contacts[0];
 }
 
 export function isPhoneAllowedForTesting(rawPhone: string): boolean {
@@ -3730,13 +3770,22 @@ export async function buildCompanyMenuPayload(
   };
 }
 
-/** Hay que elegir cuando Wara devuelve más de un contacto para el mismo teléfono. */
+/**
+ * Hay que elegir solo si hay 2+ empresas distintas.
+ * Bug real 2026-10-07 (5492615199951 / Suprema Corte): Wara devolvía 2 contactos
+ * de la MISMA empresa (persona + razón social) y Kira pedía elegir sin listar opciones.
+ */
 export function waraRequiresCompanyConfirmation(allContacts: WaraEmpresaContact[]): boolean {
-  return allContacts.length > 1;
+  const keys = new Set(
+    allContacts.map((c) => companyIdentityKey(c)).filter((k) => k.length > 0),
+  );
+  return keys.size > 1;
 }
 
 export function waraCanAutoSelectCompany(allContacts: WaraEmpresaContact[]): boolean {
-  return allContacts.length === 1;
+  if (allContacts.length === 0) return false;
+  if (allContacts.length === 1) return true;
+  return !waraRequiresCompanyConfirmation(allContacts);
 }
 
 /** Limpia la empresa guardada y devuelve el menú Wara (usado por Cambiar empresa). */
@@ -4525,8 +4574,10 @@ export async function resolveCustomerByWaraPhone(
     };
   }
 
-  // Menú si Wara tiene 2+ contactos y falta elegir; auto-solo con 1 contacto en Wara.
-  const previouslySelected = local?.companyName?.trim() || null;
+  // Menú solo si hay 2+ empresas distintas; misma empresa con 2 contactos → autoelige.
+  const previouslySelected = isUsableLocalWaraCompany(local?.companyName)
+    ? local?.companyName?.trim() || null
+    : null;
   const storedContactId = local?.selectedCompanyContactId ?? null;
   let chosenCompany: string | null = null;
   let chosenContact: WaraEmpresaContact | null = null;
@@ -4547,7 +4598,7 @@ export async function resolveCustomerByWaraPhone(
   if (chosenContact) {
     chosenCompany = chosenContact.empresa || chosenContact.nombre;
   } else if (waraCanAutoSelectCompany(lookup.contactos)) {
-    chosenContact = lookup.contactos[0];
+    chosenContact = preferContactForSameCompany(lookup.contactos);
     chosenCompany = chosenContact.empresa || chosenContact.nombre;
   }
 

@@ -68,6 +68,8 @@ export function looksLikeJustRegisteredPhoneInWara(text: string | undefined | nu
     .toLowerCase();
   if (!t.trim()) return false;
   if (/\b(odometro|horometro|unidad|patente|interno)\b/.test(t)) return false;
+  // Bug real 2026-10-07: «Cargado» solo no disparaba reconsulta → pedía empresa sin menú.
+  if (/^(ya\s+)?(esta\s+)?(cargado|agendado|listo)[\s.!]*$/i.test(t)) return true;
   return (
     /\bacabo de cargar\b/.test(t) ||
     /\bya lo (acabo de )?(cargar|agendar|anotar|poner)\b/.test(t) ||

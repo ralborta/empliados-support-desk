@@ -98,6 +98,7 @@ const PUSH_SUITES = [
   "verify-int-unit-code-not-plate.mjs",
   "verify-test-whitelist-open.mjs",
   "verify-unregistered-phone-handoff.mjs",
+  "verify-same-company-multi-contact.mjs",
   "verify-transporte-publico-kb.mjs",
   "verify-tp-vuelta-planilla-not-issue-loop.mjs",
   "verify-certificate-definition-guide.mjs",
