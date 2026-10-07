@@ -87,7 +87,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       priority: true,
       assignedToUserId: true,
       assignedTo: { select: { id: true, name: true } },
-      customer: { select: { botPausedAt: true } },
+      customer: {
+        select: {
+          botPausedAt: true,
+          botChannelSyncStatus: true,
+          botChannelSyncTarget: true,
+          botChannelSyncGeneration: true,
+        },
+      },
     },
   });
 
@@ -106,6 +113,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
           assignedToUserId: ticketMeta.assignedToUserId,
           assignedTo: ticketMeta.assignedTo,
           botPaused: Boolean(ticketMeta.customer?.botPausedAt),
+          channelSyncStatus: ticketMeta.customer?.botChannelSyncStatus ?? "idle",
+          channelSyncTarget: ticketMeta.customer?.botChannelSyncTarget ?? null,
+          channelSyncGeneration: ticketMeta.customer?.botChannelSyncGeneration ?? 0,
         }
       : null,
   });
@@ -159,6 +169,10 @@ function deliveryResponse(params: {
   channelSyncOk?: boolean;
   muteOk?: boolean;
   blacklistOk?: boolean;
+  syncStatus?: string;
+  syncTarget?: string | null;
+  syncGeneration?: number;
+  timing?: { dbMs: number; waMs: number; totalMs: number };
 }) {
   const ok =
     params.deliveryStatus === "sent" || params.deliveryStatus === "confirmation_pending";
@@ -171,15 +185,19 @@ function deliveryResponse(params: {
       duplicate: params.duplicate === true,
       ...(params.error ? { error: params.error } : {}),
       ...(params.details ? { details: params.details } : {}),
+      ...(params.timing ? { timing: params.timing } : {}),
       ...(params.channelSyncOk !== undefined
         ? {
             humanControl: {
               registered: true,
               botPaused: true,
+              localPaused: true,
               channelSyncOk: params.channelSyncOk,
               muteOk: params.muteOk ?? params.channelSyncOk,
               blacklistOk: params.blacklistOk ?? params.channelSyncOk,
-              syncStatus: params.channelSyncOk ? "synced" : "pending",
+              syncStatus: params.syncStatus ?? (params.channelSyncOk ? "synced" : "pending"),
+              syncTarget: params.syncTarget ?? "paused",
+              syncGeneration: params.syncGeneration ?? 0,
             },
           }
         : {}),
@@ -397,8 +415,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         },
       }));
 
-    // Takeover local inmediato; mute/blacklist BBC en background.
-    // Antes se esperaba Cloud (mute+blacklist+settles) ANTES de WhatsApp → «ENVIANDO…» eterno.
+    // Takeover local inmediato; sync BBC con generation + waitUntil (no bloquea WA).
+    const tOutbound0 = Date.now();
     const pauseSync = await pauseAtilioForCustomerDetailed(
       ticketForStatus.customerId,
       prisma,
@@ -411,8 +429,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         channelSyncOk: false,
         muteOk: false,
         blacklistOk: false,
+        syncStatus: "error" as const,
+        syncTarget: "paused" as const,
+        syncGeneration: 0,
+        localPaused: true,
       };
     });
+    const dbMs = Date.now() - tOutbound0;
     void claimConversationOnHumanReply(id, session.user.id).catch((e) =>
       console.error("[Messages] claimConversation:", e),
     );
@@ -422,6 +445,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     let deliveryStatus: PanelDeliveryStatus = "pending";
     let sendError: string | undefined;
+    const tWa0 = Date.now();
 
     if (labSuppress) {
       console.log(`[Messages] LAB: mensaje humano simulado (sin WhatsApp) → ${ticket.customer.phone}`);
@@ -539,6 +563,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     message = await prisma.ticketMessage.findUniqueOrThrow({ where: { id: message.id } });
+    const waMs = Date.now() - tWa0;
+    const totalMs = Date.now() - tOutbound0;
+    console.log(
+      `[panelOutboundTiming] ticket=${id} dbMs=${dbMs} waMs=${waMs} totalMs=${totalMs} delivery=${deliveryStatus} syncStatus=${pauseSync.syncStatus}`,
+    );
     return deliveryResponse({
       message: serializeMessage(message),
       deliveryStatus,
@@ -553,6 +582,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       channelSyncOk: pauseSync.channelSyncOk,
       muteOk: pauseSync.muteOk,
       blacklistOk: pauseSync.blacklistOk,
+      syncStatus: pauseSync.syncStatus,
+      syncTarget: pauseSync.syncTarget,
+      syncGeneration: pauseSync.syncGeneration,
+      timing: { dbMs, waMs, totalMs },
     });
   }
 

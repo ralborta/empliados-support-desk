@@ -2,88 +2,115 @@
 
 import { useEffect, useState } from "react";
 
+type SyncStatus = "idle" | "pending" | "synced" | "error";
+
 type Props = {
   customerId: string;
-  /** Estado actual de pausa (controlado por el padre cuando es posible). */
+  /** Estado actual de pausa local (botPausedAt). */
   paused: boolean;
+  /** Sync canal desde servidor (poll). */
+  channelSyncStatus?: SyncStatus | string | null;
   /** Tras toggle exitoso o para sincronizar UI sin F5. */
   onPausedChange?: (paused: boolean) => void;
-  /** Aviso externo (p. ej. sync fallida tras envío humano). */
+  onSyncStatusChange?: (status: SyncStatus) => void;
+  /** Aviso externo (p. ej. sync pendiente tras envío humano). */
   externalSyncPending?: boolean;
 };
+
+function hintFor(paused: boolean, syncStatus: SyncStatus | null): string | null {
+  if (!syncStatus || syncStatus === "synced" || syncStatus === "idle") return null;
+  if (syncStatus === "pending") {
+    return paused
+      ? "Kira pausada acá; sincronización con el canal pendiente"
+      : "Reactivación registrada; sincronización con el canal pendiente";
+  }
+  if (syncStatus === "error") {
+    return paused
+      ? "Kira pausada acá; falló la sync con el canal"
+      : "Reactivación local OK; falló la sync con el canal";
+  }
+  return null;
+}
 
 export function BotPausedToggle({
   customerId,
   paused,
+  channelSyncStatus = null,
   onPausedChange,
+  onSyncStatusChange,
   externalSyncPending = false,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [reconciling, setReconciling] = useState(false);
-  // Eco local solo mientras el PUT está en vuelo; el padre es la fuente de verdad.
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
-  const [syncHint, setSyncHint] = useState<string | null>(null);
+  const [localSync, setLocalSync] = useState<SyncStatus | null>(null);
   const shown = optimistic ?? paused;
+  const effectiveSync: SyncStatus | null =
+    localSync ??
+    (typeof channelSyncStatus === "string" ? (channelSyncStatus as SyncStatus) : null) ??
+    (externalSyncPending ? "pending" : null);
+  const syncHint = hintFor(shown, effectiveSync);
 
   useEffect(() => {
     setOptimistic(null);
   }, [paused]);
 
   useEffect(() => {
-    if (externalSyncPending && shown) {
-      setSyncHint("Kira pausada acá; sincronización con el canal pendiente");
+    // El poll del padre es fuente de verdad cuando llega synced/error.
+    if (channelSyncStatus === "synced" || channelSyncStatus === "error") {
+      setLocalSync(null);
     }
-  }, [externalSyncPending, shown]);
+  }, [channelSyncStatus]);
 
-  const putPaused = async (next: boolean) => {
+  const putPaused = async (next: boolean, forceChannelSync = false) => {
     const res = await fetch(`/api/clientes/${customerId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ botPaused: next }),
+      body: JSON.stringify({ botPaused: next, forceChannelSync }),
     });
     if (!res.ok) throw new Error("Error al actualizar");
     const data = await res.json().catch(() => ({}));
     const humanControl = data.humanControl as
-      | { registered?: boolean; channelSyncOk?: boolean; syncStatus?: string }
+      | {
+          registered?: boolean;
+          channelSyncOk?: boolean;
+          syncStatus?: SyncStatus;
+          localPaused?: boolean;
+        }
       | undefined;
     onPausedChange?.(next);
-    if (humanControl && humanControl.channelSyncOk === false) {
-      setSyncHint(
-        next
-          ? "Kira pausada acá; sincronización con el canal pendiente"
-          : "Reactivación registrada; sincronización con el canal pendiente",
-      );
-      return false;
-    }
-    setSyncHint(null);
-    return true;
+    const status = (humanControl?.syncStatus ??
+      (humanControl?.channelSyncOk === false ? "pending" : "synced")) as SyncStatus;
+    setLocalSync(status === "synced" ? null : status);
+    onSyncStatusChange?.(status);
+    return status === "synced";
   };
 
   const toggle = async () => {
     setLoading(true);
     const next = !shown;
     setOptimistic(next);
-    setSyncHint(null);
+    setLocalSync("pending");
     try {
-      await putPaused(next);
+      await putPaused(next, false);
     } catch (e) {
       console.error(e);
       setOptimistic(null);
-      setSyncHint(null);
+      setLocalSync(null);
     } finally {
       setLoading(false);
     }
   };
 
-  /** Reaplica mute/blacklist sin cambiar el estado local de pausa. */
+  /** Reaplica mute/blacklist con nueva generation (última acción gana). */
   const retryChannelSync = async () => {
-    if (!shown) return;
     setReconciling(true);
+    setLocalSync("pending");
     try {
-      const ok = await putPaused(true);
-      if (ok) setSyncHint(null);
+      await putPaused(shown, true);
     } catch (e) {
       console.error(e);
+      setLocalSync("error");
     } finally {
       setReconciling(false);
     }
@@ -107,16 +134,14 @@ export function BotPausedToggle({
       {syncHint ? (
         <div className="flex max-w-[16rem] flex-col items-end gap-0.5">
           <span className="text-right text-[10px] leading-snug text-amber-700">{syncHint}</span>
-          {shown ? (
-            <button
-              type="button"
-              onClick={retryChannelSync}
-              disabled={reconciling || loading}
-              className="text-[10px] font-semibold text-[#4a0e1c] underline-offset-2 hover:underline disabled:opacity-50"
-            >
-              {reconciling ? "Reintentando…" : "Reintentar sync del canal"}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={retryChannelSync}
+            disabled={reconciling || loading}
+            className="text-[10px] font-semibold text-[#4a0e1c] underline-offset-2 hover:underline disabled:opacity-50"
+          >
+            {reconciling ? "Reintentando…" : "Reintentar sync del canal"}
+          </button>
         </div>
       ) : null}
     </div>

@@ -62,15 +62,19 @@ export function MessageComposer({
   ticketId,
   customerId,
   botPaused = false,
+  channelSyncStatus = null,
   onBotPausedChange,
+  onChannelSyncStatusChange,
   onSent,
   embedded = false,
 }: {
   ticketId: string;
   customerId?: string | null;
   botPaused?: boolean;
+  channelSyncStatus?: string | null;
   /** Actualiza el badge/botón en el ticket sin F5 (pausa automática al enviar). */
   onBotPausedChange?: (paused: boolean) => void;
+  onChannelSyncStatusChange?: (status: string) => void;
   onSent?: () => void;
   embedded?: boolean;
 }) {
@@ -212,11 +216,20 @@ export function MessageComposer({
         // Takeover local aunque la confirmación del proveedor esté pendiente.
         onBotPausedChange?.(true);
         onSent?.();
-        const humanControl = data.humanControl as { channelSyncOk?: boolean } | undefined;
-        if (humanControl && humanControl.channelSyncOk === false) {
+        const humanControl = data.humanControl as {
+          channelSyncOk?: boolean;
+          syncStatus?: string;
+        } | undefined;
+        const syncStatus = humanControl?.syncStatus;
+        if (syncStatus) {
+          onChannelSyncStatusChange?.(syncStatus);
+          setChannelSyncPending(syncStatus === "pending" || syncStatus === "error");
+        } else if (humanControl && humanControl.channelSyncOk === false) {
           setChannelSyncPending(true);
+          onChannelSyncStatusChange?.("pending");
         } else if (humanControl && humanControl.channelSyncOk === true) {
           setChannelSyncPending(false);
+          onChannelSyncStatusChange?.("synced");
         }
 
         if (deliveryStatus === "sent" || (res.ok && !deliveryStatus && res.status === 200)) {
@@ -342,9 +355,14 @@ export function MessageComposer({
             <BotPausedToggle
               customerId={customerId}
               paused={botPaused}
+              channelSyncStatus={channelSyncStatus}
               onPausedChange={(next) => {
                 onBotPausedChange?.(next);
                 if (!next) setChannelSyncPending(false);
+              }}
+              onSyncStatusChange={(status) => {
+                onChannelSyncStatusChange?.(status);
+                setChannelSyncPending(status === "pending" || status === "error");
               }}
               externalSyncPending={channelSyncPending}
             />

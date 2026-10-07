@@ -42,6 +42,7 @@ interface TicketDetailViewProps {
     assignedToUserId: string | null;
     customerId: string | null;
     botPaused?: boolean;
+    channelSyncStatus?: string | null;
     customer: {
       name: string | null;
       companyName: string | null;
@@ -106,6 +107,9 @@ export function TicketDetailView({
     })),
   );
   const [botPaused, setBotPaused] = useState(!!ticket.botPaused);
+  const [channelSyncStatus, setChannelSyncStatus] = useState(
+    ticket.channelSyncStatus ?? "idle",
+  );
   const [liveStatus, setLiveStatus] = useState(ticket.status);
   const [livePriority, setLivePriority] = useState(ticket.priority);
   const [liveAssignedTo, setLiveAssignedTo] = useState(ticket.assignedTo);
@@ -116,11 +120,12 @@ export function TicketDetailView({
 
   useEffect(() => {
     setBotPaused(!!ticket.botPaused);
+    setChannelSyncStatus(ticket.channelSyncStatus ?? "idle");
     setLiveStatus(ticket.status);
     setLivePriority(ticket.priority);
     setLiveAssignedTo(ticket.assignedTo);
     setLiveAssignedToUserId(ticket.assignedToUserId);
-  }, [ticket.botPaused, ticket.status, ticket.priority, ticket.assignedTo, ticket.assignedToUserId, ticket.id]);
+  }, [ticket.botPaused, ticket.channelSyncStatus, ticket.status, ticket.priority, ticket.assignedTo, ticket.assignedToUserId, ticket.id]);
 
   useEffect(() => {
     setConversation(
@@ -171,6 +176,9 @@ export function TicketDetailView({
         }
         if (typeof meta.botPaused === "boolean") {
           applyBotPausedFromServer(meta.botPaused);
+        }
+        if (typeof meta.channelSyncStatus === "string") {
+          setChannelSyncStatus(meta.channelSyncStatus);
         }
       }
     } catch {
@@ -284,7 +292,9 @@ export function TicketDetailView({
                 ticketId={ticket.id}
                 customerId={ticket.customerId}
                 botPaused={botPaused}
+                channelSyncStatus={channelSyncStatus}
                 onBotPausedChange={setBotPausedLocal}
+                onChannelSyncStatusChange={setChannelSyncStatus}
                 onSent={refreshMessages}
                 embedded
               />

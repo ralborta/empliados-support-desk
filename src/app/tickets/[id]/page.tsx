@@ -75,6 +75,7 @@ export default async function TicketDetail({ params }: { params: Promise<{ id: s
           assignedToUserId: ticket.assignedToUserId,
           customerId: ticket.customerId,
           botPaused: !!ticket.customer?.botPausedAt,
+          channelSyncStatus: ticket.customer?.botChannelSyncStatus ?? "idle",
           customer: ticket.customer
             ? {
                 name: ticket.customer.name,

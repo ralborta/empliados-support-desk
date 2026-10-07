@@ -63,12 +63,21 @@ assert.ok(
 );
 
 const pauseLib = readFileSync(join(root, "../src/lib/atilioBotPause.ts"), "utf8");
-assert.ok(pauseLib.includes("ensureBuilderBotContactPaused"), "pause debe reconciliar mute+blacklist");
-assert.ok(pauseLib.includes("setBotBlacklist"), "pause debe blacklist self-hosted");
+assert.ok(pauseLib.includes("scheduleChannelSyncJob"), "pause debe agendar sync canal");
 assert.ok(
-  pauseLib.includes("ensureBuilderBotContactActive"),
-  "reactivate debe reconciliar mute=false + blacklist=remove",
+  pauseLib.includes("forceChannelSync") || pauseLib.includes("skipChannelIfAlreadyPaused"),
+  "pause debe soportar skip/force de sync",
 );
+const channelSync = readFileSync(join(root, "../src/lib/botChannelSync.ts"), "utf8");
+assert.ok(
+  channelSync.includes("ensureBuilderBotContactPaused"),
+  "channel sync pause mute+blacklist",
+);
+assert.ok(
+  channelSync.includes("ensureBuilderBotContactActive"),
+  "channel sync reactivate mute=false + blacklist=remove",
+);
+assert.ok(channelSync.includes("setBotBlacklist"), "channel sync blacklist self-hosted");
 assert.ok(
   !/if\s*\(\s*!customer\?\.botPausedAt\s*\)\s*return\s+false/.test(pauseLib),
   "reactivate no debe salir si botPausedAt ya es null: hay que reconciliar BBC",

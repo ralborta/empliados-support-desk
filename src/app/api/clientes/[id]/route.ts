@@ -15,6 +15,8 @@ const updateCustomerSchema = z.object({
   licensePlate: z.string().optional().nullable(),
   /** true = pausar Kira para este cliente (agente responde manual), false = reactivar */
   botPaused: z.boolean().optional(),
+  /** Reintento manual del sync canal (nueva generation). */
+  forceChannelSync: z.boolean().optional(),
 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -62,7 +64,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { phone, name, companyName, licensePlate, botPaused } = parsed.data;
+  const { phone, name, companyName, licensePlate, botPaused, forceChannelSync } = parsed.data;
 
   const updateData: Record<string, unknown> = {};
   if (phone !== undefined) {
@@ -102,19 +104,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         });
 
     if (botPaused === true || botPaused === false) {
-      // Local inmediato; Cloud con tope 2s para no trabar el botón Pausar/Reactivar.
-      const syncPromise =
+      // Local inmediato; sync BBC vía waitUntil (no bloquea el botón).
+      const sync =
         botPaused === true
-          ? pauseAtilioForCustomerDetailed(customer.id, prisma, "panel:bot-paused-toggle")
-          : reactivateAtilioForCustomerDetailed(customer.id, prisma, "panel:bot-paused-toggle");
-
-      const raced = await Promise.race([
-        syncPromise.then((s) => ({ kind: "ok" as const, s })),
-        new Promise<{ kind: "timeout" }>((resolve) =>
-          setTimeout(() => resolve({ kind: "timeout" }), 2000),
-        ),
-      ]);
-      // Si hubo timeout, el syncPromise sigue en background.
+          ? await pauseAtilioForCustomerDetailed(customer.id, prisma, "panel:bot-paused-toggle", {
+              awaitChannelSync: false,
+              forceChannelSync: forceChannelSync === true,
+            })
+          : await reactivateAtilioForCustomerDetailed(
+              customer.id,
+              prisma,
+              "panel:bot-paused-toggle",
+              { awaitChannelSync: false, forceChannelSync: forceChannelSync === true },
+            );
 
       customer = await prisma.customer.findUniqueOrThrow({
         where: { id },
@@ -125,25 +127,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         },
       });
 
-      const sync =
-        raced.kind === "ok"
-          ? raced.s
-          : {
-              registered: true,
-              channelSyncOk: false,
-              muteOk: false,
-              blacklistOk: false,
-            };
-
       return NextResponse.json({
         customer,
         humanControl: {
           registered: sync.registered,
-          botPaused,
+          botPaused: sync.localPaused,
+          localPaused: sync.localPaused,
           channelSyncOk: sync.channelSyncOk,
           muteOk: sync.muteOk,
           blacklistOk: sync.blacklistOk,
-          syncStatus: sync.channelSyncOk ? "synced" : "pending",
+          syncStatus: sync.syncStatus,
+          syncTarget: sync.syncTarget,
+          syncGeneration: sync.syncGeneration,
         },
       });
     }
