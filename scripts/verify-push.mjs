@@ -93,6 +93,7 @@ const PUSH_SUITES = [
   "verify-advisor-derivation-flow.mjs",
   "verify-advisor-comm-takeover.mjs",
   "verify-bot-channel-sync.mjs",
+  "verify-channel-sync-concurrency.mjs",
   "verify-new-case-and-gps-etapas-advisor.mjs",
   "verify-gps-etapa-unit-routing.mjs",
   "verify-no-image-analysis.mjs",

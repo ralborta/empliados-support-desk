@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
+  bumpChannelSyncGenerationAtomic,
   isChannelSyncedForTarget,
   scheduleChannelSyncJob,
   type BotChannelSyncStatus,
@@ -108,15 +109,9 @@ async function bumpAndSchedule(
   opts: { awaitChannelSync: boolean },
 ): Promise<AtilioChannelSyncResult> {
   const t0 = Date.now();
-  const current = await client.customer.findUnique({
-    where: { id: customerId },
-    select: {
-      botChannelSyncGeneration: true,
-      botPausedAt: true,
-      botPausedSource: true,
-    },
-  });
-  if (!current) {
+  // Generation+target atómicos: dos requests no pueden leer el mismo N.
+  const updated = await bumpChannelSyncGenerationAtomic(client, customerId, target);
+  if (!updated) {
     return {
       registered: false,
       channelSyncOk: false,
@@ -130,25 +125,7 @@ async function bumpAndSchedule(
     };
   }
 
-  const generation = (current.botChannelSyncGeneration ?? 0) + 1;
-  const updated = await client.customer.update({
-    where: { id: customerId },
-    data: {
-      botChannelSyncGeneration: generation,
-      botChannelSyncTarget: target,
-      botChannelSyncStatus: "pending",
-      botChannelSyncError: null,
-      botChannelSyncAttempts: 0,
-      botChannelSyncAt: null,
-    },
-    select: {
-      botPausedAt: true,
-      botPausedSource: true,
-      botChannelSyncStatus: true,
-      botChannelSyncTarget: true,
-      botChannelSyncGeneration: true,
-    },
-  });
+  const generation = updated.botChannelSyncGeneration;
   console.log(
     `[atilio] sync scheduled target=${target} gen=${generation} customer=${customerId} dbMs=${Date.now() - t0}`,
   );

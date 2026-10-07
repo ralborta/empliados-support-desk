@@ -18,8 +18,10 @@ assert.ok(schema.includes("botChannelSyncTarget"), "schema: botChannelSyncTarget
 const sync = read("src/lib/botChannelSync.ts");
 assert.ok(sync.includes("waitUntil"), "botChannelSync usa waitUntil");
 assert.ok(sync.includes("botChannelSyncGeneration"), "job respeta generation");
-assert.ok(sync.includes("abort superseded") || sync.includes("superseded"), "descarta sync viejo");
+assert.ok(sync.includes("superseded"), "descarta sync viejo");
 assert.ok(sync.includes("CHANNEL_SYNC_MAX_ATTEMPTS"), "reintentos acotados");
+assert.ok(sync.includes("bumpChannelSyncGenerationAtomic") || sync.includes("RETURNING"), "bump atómico");
+assert.ok(sync.includes("enqueueCustomerChannelSync"), "cola por cliente");
 
 const pause = read("src/lib/atilioBotPause.ts");
 assert.ok(pause.includes("scheduleChannelSyncJob"), "pause agenda job");
