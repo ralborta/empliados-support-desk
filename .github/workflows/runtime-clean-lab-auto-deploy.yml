@@ -1,0 +1,164 @@
+name: Runtime Clean lab auto deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/wara-runtime-clean
+    paths:
+      - apps/wara-v2/src/conversation-runtime-clean/**
+      - apps/wara-v2/src/conversation-runtime-next/**
+      - apps/wara-v2/src/commander-v3/**
+      - apps/wara-v2/src/llm/**
+      - apps/wara-v2/package.json
+      - packages/**
+      - prisma/**
+      - scripts/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - docker/runtime-clean-lab.Dockerfile
+      - .dockerignore
+      - .github/workflows/runtime-clean-lab-auto-deploy.yml
+
+concurrency:
+  group: runtime-clean-lab-auto-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/ralborta/empliados-support-desk-runtime-clean
+  LAB_HEALTH_URL: https://wara-runtime-clean-lab.wd75db.easypanel.host/api/wara-clean-lab/health
+
+jobs:
+  validate-build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pushed commit
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck Runtime Clean
+        working-directory: apps/wara-v2
+        run: pnpm exec tsc -p src/conversation-runtime-clean/tsconfig.json --noEmit
+
+      - name: Test Runtime Clean without PostgreSQL
+        working-directory: apps/wara-v2
+        run: pnpm exec tsx --test --test-concurrency=1 $(find src/conversation-runtime-clean/tests -name '*.test.ts' ! -name '*.pg.test.ts' -print)
+
+      - name: Test Runtime Clean with embedded PostgreSQL
+        run: pnpm --filter @wara-v2/app test:runtime-clean-pg
+
+      - name: Audit semantic authority
+        run: bash .cursor/skills/wara-v2-conversational-engineer/scripts/audit-semantic-path.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build candidate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/runtime-clean-lab.Dockerfile
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:lab
+          build-args: |
+            GIT_COMMIT_SHA=${{ github.sha }}
+
+      - name: Validate candidate image
+        run: |
+          set -euo pipefail
+          IMAGE="${IMAGE_NAME}:${GITHUB_SHA}"
+          test "$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")" = "$GITHUB_SHA"
+          test "$(docker inspect --format='{{ index .Config.Labels "wara.runtime-clean.git-commit-sha" }}' "$IMAGE")" = "$GITHUB_SHA"
+          docker run --rm "$IMAGE" test -f /app/apps/wara-v2/src/conversation-runtime-clean/core/identity/stable-id.ts
+          docker run --rm "$IMAGE" sh -c '! find /app -type f \( -name ".env" -o -name ".env.local" -o -name ".env.production" \) -not -path "*/node_modules/*" | grep -q .'
+          docker run --rm -d --name runtime-clean-lab-probe \
+            -e WARA_CLEAN_RUNTIME_ENABLED=false \
+            -e WARA_CLEAN_BIND_HOST=0.0.0.0 \
+            -e WARA_CLEAN_LAB_API_KEY=probe-key \
+            -e WARA_CLEAN_LAB_TENANT_ALLOWLIST=tenant_probe \
+            -p 8788:8788 "$IMAGE"
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8788/api/wara-clean-lab/health >/tmp/runtime-clean-health.json; then
+              break
+            fi
+            sleep 2
+          done
+          test -s /tmp/runtime-clean-health.json
+          node -e 'const fs=require("fs"); const h=JSON.parse(fs.readFileSync("/tmp/runtime-clean-health.json","utf8")); if(h.runtime!=="clean" || h.commit!==process.env.GITHUB_SHA) process.exit(1)'
+          docker rm -f runtime-clean-lab-probe
+
+      - name: Publish immutable and lab tags
+        id: publish
+        run: |
+          docker push "${IMAGE_NAME}:${GITHUB_SHA}"
+          docker push "${IMAGE_NAME}:lab"
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE_NAME}:${GITHUB_SHA}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger EasyPanel lab deployment
+        env:
+          EASYPANEL_DEPLOY_URL: ${{ secrets.EASYPANEL_RUNTIME_CLEAN_DEPLOY_URL }}
+        run: |
+          test -n "$EASYPANEL_DEPLOY_URL"
+          curl --fail --silent --show-error "$EASYPANEL_DEPLOY_URL" >/dev/null
+
+      - name: Verify deployed commit
+        run: |
+          for attempt in $(seq 1 60); do
+            HEALTH="$(curl -fsS "$LAB_HEALTH_URL" || true)"
+            if node -e '
+              const h = JSON.parse(process.argv[1]);
+              const gatesClosed =
+                h.llmEnabled === false &&
+                h.externalReadsEnabled === false &&
+                h.externalWritesEnabled === false &&
+                h.deliveryEnabled === false &&
+                h.kb === "disabled";
+              process.exit(
+                h.runtime === "clean" &&
+                h.commit === process.env.GITHUB_SHA &&
+                gatesClosed ? 0 : 1
+              );
+            ' "$HEALTH"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Runtime Clean lab did not report commit ${GITHUB_SHA} with closed gates" >&2
+          exit 1
+
+      - name: Deployment summary
+        run: |
+          echo "## Runtime Clean lab deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- commit: \`${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- immutable image: \`${IMAGE_NAME}:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- digest: \`${{ steps.publish.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- moving lab tag: \`${IMAGE_NAME}:lab\`" >> "$GITHUB_STEP_SUMMARY"

@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ClipboardCopy,
+  Download,
   Layers,
   Loader2,
   Save,
@@ -30,7 +31,7 @@ function localBackupKey(moduleKey: string) {
   return `empliados-support-desk:module-prompt:${moduleKey}:v1`;
 }
 
-export default function ModulePromptsPanel() {
+export default function ModulePromptsPanel({ embedded = false }: { embedded?: boolean }) {
   const [modules, setModules] = useState<ModulePrompt[]>([]);
   const [drafts, setDrafts] = useState<Record<string, ModuleDraft>>({});
   const [selectedKey, setSelectedKey] = useState<string>("");
@@ -179,55 +180,49 @@ export default function ModulePromptsPanel() {
   };
 
   if (isLoading) {
+    if (embedded) {
+      return (
+        <div className="flex h-40 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-violet-600" />
+        </div>
+      );
+    }
     return (
       <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
-            <Layers className="w-5 h-5 text-violet-600" />
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100">
+            <Layers className="h-5 w-5 text-violet-600" />
           </div>
           <h2 className="text-xl font-bold text-slate-900">Prompts por trámite</h2>
         </div>
-        <div className="flex items-center justify-center h-40">
-          <Loader2 className="w-8 h-8 text-violet-600 animate-spin" />
+        <div className="flex h-40 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-violet-600" />
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-      <div className="flex items-start gap-3 mb-4">
-        <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
-          <Layers className="w-5 h-5 text-violet-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Prompts por trámite</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Cada trámite (odómetro, consulta, certificados, etc.) tiene su propio texto. Elegí cuál querés
-            editar.
-          </p>
-        </div>
-      </div>
-
+  const inner = (
+    <>
       {message && (
         <div
-          className={`mb-4 p-4 rounded-xl flex items-center gap-3 ${
+          className={`mb-4 flex items-center gap-3 rounded-xl p-4 ${
             message.type === "success"
-              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-              : "bg-red-50 text-red-700 border border-red-200"
+              ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border border-red-200 bg-red-50 text-red-700"
           }`}
         >
           {message.type === "success" ? (
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
           ) : (
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
           )}
           <span className="text-sm font-semibold">{message.text}</span>
         </div>
       )}
 
-      <label className="block mb-4">
-        <span className="text-sm font-semibold text-slate-800 mb-2 block">Trámite</span>
+      <label className="mb-4 block">
+        <span className="mb-2 block text-sm font-semibold text-slate-800">Trámite</span>
         <select
           value={selectedKey}
           onChange={(e) => handleSelectModule(e.target.value)}
@@ -243,14 +238,16 @@ export default function ModulePromptsPanel() {
       </label>
 
       {selectedModule && selectedDraft && (
-        <div className="rounded-xl border border-slate-200 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div className={embedded ? "" : "rounded-xl border border-slate-200 p-4"}>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-slate-900">{selectedModule.flowLabel}</p>
-              <p className="text-xs text-slate-600 mt-1">{selectedModule.description}</p>
+              <p className="text-sm font-semibold text-slate-900">
+                {embedded ? "Reglas del trámite" : selectedModule.flowLabel}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">{selectedModule.description}</p>
             </div>
             {selectedDraft.dirty && (
-              <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
                 Sin guardar
               </span>
             )}
@@ -260,7 +257,7 @@ export default function ModulePromptsPanel() {
             value={selectedDraft.content}
             onChange={(e) => updateDraft(selectedModule.key, e.target.value)}
             disabled={savingKey === selectedModule.key}
-            className="w-full h-80 p-4 border-2 border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 resize-y text-sm bg-slate-50/50 font-mono"
+            className="h-80 w-full resize-y rounded-xl border-2 border-slate-300 bg-slate-50/50 p-4 font-mono text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
           />
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -268,8 +265,9 @@ export default function ModulePromptsPanel() {
               <button
                 type="button"
                 onClick={() => handleDownload(selectedModule)}
-                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
+                <Download className="h-4 w-4" />
                 Descargar
               </button>
               <button
@@ -285,16 +283,16 @@ export default function ModulePromptsPanel() {
               type="button"
               onClick={() => handleSave(selectedModule.key)}
               disabled={savingKey === selectedModule.key || !selectedDraft.dirty}
-              className="inline-flex items-center gap-2 bg-violet-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-violet-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 font-semibold text-white transition-all hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {savingKey === selectedModule.key ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Guardando...
                 </>
               ) : (
                 <>
-                  <Save className="w-4 h-4" />
+                  <Save className="h-4 w-4" />
                   Guardar cambios
                 </>
               )}
@@ -315,6 +313,26 @@ export default function ModulePromptsPanel() {
         onConfirm={confirmSwitchModule}
         onCancel={() => setPendingModuleKey(null)}
       />
+    </>
+  );
+
+  if (embedded) return <div>{inner}</div>;
+
+  return (
+    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100">
+          <Layers className="h-5 w-5 text-violet-600" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Prompts por trámite</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Cada trámite (odómetro, consulta, certificados, etc.) tiene su propio texto. Elegí cuál querés
+            editar.
+          </p>
+        </div>
+      </div>
+      {inner}
     </div>
   );
 }

@@ -4,7 +4,12 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/auth";
-import { setBuilderBotCloudBlacklist, setBotBlacklist } from "@/lib/builderbot";
+import {
+  pauseAtilioForCustomerDetailed,
+  reactivateAtilioForCustomerDetailed,
+  retryAtilioChannelSyncDetailed,
+} from "@/lib/atilioBotPause";
+import { ensureBuilderBotContactActive, setBotBlacklist } from "@/lib/builderbot";
 import { normalizeWhatsAppPhone } from "@/lib/whatsappPhone";
 
 const updateCustomerSchema = z.object({
@@ -12,8 +17,15 @@ const updateCustomerSchema = z.object({
   name: z.string().optional().nullable(),
   companyName: z.string().optional().nullable(),
   licensePlate: z.string().optional().nullable(),
-  /** true = pausar Atilio para este cliente (agente responde manual), false = reactivar */
+  /** true = pausar Kira para este cliente (agente responde manual), false = reactivar */
   botPaused: z.boolean().optional(),
+  /** Reintento manual del sync canal (nueva generation). */
+  forceChannelSync: z.boolean().optional(),
+  /**
+   * Solo reaplicar mute/unmute del canal; no muta botPausedAt ni botPausedSource.
+   * Evita que «Reintentar sync» convierta una pausa auto en manual.
+   */
+  retryChannelSync: z.boolean().optional(),
 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -61,7 +73,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Formato inválido", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { phone, name, companyName, licensePlate, botPaused } = parsed.data;
+  const {
+    phone,
+    name,
+    companyName,
+    licensePlate,
+    botPaused,
+    forceChannelSync,
+    retryChannelSync,
+  } = parsed.data;
 
   const updateData: Record<string, unknown> = {};
   if (phone !== undefined) {
@@ -77,28 +97,97 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const p = licensePlate?.trim();
     updateData.licensePlate = p ? p.replace(/\s+/g, " ") : null;
   }
-  if (botPaused !== undefined) {
-    updateData.botPausedAt = botPaused ? new Date() : null;
-  }
+  // botPaused lo aplica pauseAtilio / reactivateAtilio (DB + blacklist BBC).
 
   try {
-    const customer = await prisma.customer.update({
-      where: { id },
-      data: updateData,
-      include: {
-        _count: {
-          select: { tickets: true },
-        },
-      },
-    });
+    const hasFieldUpdates = Object.keys(updateData).length > 0;
+    let customer = hasFieldUpdates
+      ? await prisma.customer.update({
+          where: { id },
+          data: updateData,
+          include: {
+            _count: {
+              select: { tickets: true },
+            },
+          },
+        })
+      : await prisma.customer.findUniqueOrThrow({
+          where: { id },
+          include: {
+            _count: {
+              select: { tickets: true },
+            },
+          },
+        });
 
-    if (botPaused !== undefined && customer.phone) {
-      const intent = botPaused ? "add" : "remove";
-      await setBuilderBotCloudBlacklist(customer.phone, intent).catch((err: unknown) => {
-        console.error("[Clientes] Blacklist Cloud:", err instanceof Error ? err.message : err);
+    if (retryChannelSync === true) {
+      const sync = await retryAtilioChannelSyncDetailed(customer.id, prisma, {
+        awaitChannelSync: false,
       });
-      await setBotBlacklist(customer.phone, intent).catch((err: unknown) => {
-        console.error("[Clientes] Blacklist self-hosted:", err instanceof Error ? err.message : err);
+      customer = await prisma.customer.findUniqueOrThrow({
+        where: { id },
+        include: {
+          _count: {
+            select: { tickets: true },
+          },
+        },
+      });
+      return NextResponse.json({
+        customer,
+        humanControl: {
+          registered: sync.registered,
+          botPaused: sync.localPaused,
+          localPaused: sync.localPaused,
+          pauseSource: sync.pauseSource,
+          channelSyncOk: sync.channelSyncOk,
+          muteOk: sync.muteOk,
+          blacklistOk: sync.blacklistOk,
+          syncStatus: sync.syncStatus,
+          syncTarget: sync.syncTarget,
+          syncGeneration: sync.syncGeneration,
+        },
+      });
+    }
+
+    if (botPaused === true || botPaused === false) {
+      // Local inmediato; sync BBC vía waitUntil (no bloquea el botón).
+      const sync =
+        botPaused === true
+          ? await pauseAtilioForCustomerDetailed(customer.id, prisma, "panel:bot-paused-toggle", {
+              awaitChannelSync: false,
+              forceChannelSync: forceChannelSync === true,
+              pauseSource: "manual",
+            })
+          : await reactivateAtilioForCustomerDetailed(
+              customer.id,
+              prisma,
+              "panel:bot-paused-toggle",
+              { awaitChannelSync: false, forceChannelSync: forceChannelSync === true },
+            );
+
+      customer = await prisma.customer.findUniqueOrThrow({
+        where: { id },
+        include: {
+          _count: {
+            select: { tickets: true },
+          },
+        },
+      });
+
+      return NextResponse.json({
+        customer,
+        humanControl: {
+          registered: sync.registered,
+          botPaused: sync.localPaused,
+          localPaused: sync.localPaused,
+          pauseSource: sync.pauseSource,
+          channelSyncOk: sync.channelSyncOk,
+          muteOk: sync.muteOk,
+          blacklistOk: sync.blacklistOk,
+          syncStatus: sync.syncStatus,
+          syncTarget: sync.syncTarget,
+          syncGeneration: sync.syncGeneration,
+        },
       });
     }
 
@@ -148,9 +237,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       { timeout: 120_000 }
     );
 
-    if (existing.botPausedAt && existing.phone) {
-      await setBuilderBotCloudBlacklist(existing.phone, "remove").catch((err: unknown) => {
-        console.error("[Clientes] Blacklist Cloud al borrar:", err instanceof Error ? err.message : err);
+    if (existing.phone) {
+      await ensureBuilderBotContactActive(existing.phone).catch((err: unknown) => {
+        console.error("[Clientes] Reconciliar canal BBC al borrar:", err instanceof Error ? err.message : err);
       });
       await setBotBlacklist(existing.phone, "remove").catch((err: unknown) => {
         console.error("[Clientes] Blacklist self-hosted al borrar:", err instanceof Error ? err.message : err);

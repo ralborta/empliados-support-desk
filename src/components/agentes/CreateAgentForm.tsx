@@ -2,12 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 
 export function CreateAgentForm() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -71,107 +74,172 @@ export function CreateAgentForm() {
     }
   };
 
+  const inputClass =
+    "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100";
+
   return (
     <div id="create-agent-form" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-1 text-lg font-semibold text-slate-900">Nuevo agente</h2>
+      <h2 className="text-lg font-semibold text-slate-900">Nuevo agente</h2>
       <p className="mb-4 text-xs text-slate-500">
-        Completá los datos y la contraseña inicial. El asesor ingresa al panel con su email.
+        El agente recibirá sus datos de acceso. Completá nombre, email y contraseña inicial.
       </p>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Nombre completo</label>
-          <input
-            type="text"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
-            placeholder="Ej: Juan Pérez"
-            required
-          />
-        </div>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <section>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Datos personales
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="agent-name">
+                Nombre completo
+              </label>
+              <input
+                id="agent-name"
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className={inputClass}
+                placeholder="Ej: Juan Pérez"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="agent-email">
+                Email
+              </label>
+              <input
+                id="agent-email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className={inputClass}
+                placeholder="Ej: juan@empresa.com"
+                required
+              />
+            </div>
+          </div>
+        </section>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
-          <input
-            type="email"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
-            placeholder="Ej: juan@empresa.com"
-            required
-          />
-        </div>
+        <section>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Credenciales
+          </p>
+          <div className="space-y-3">
+            <PasswordField
+              id="agent-password"
+              label="Contraseña inicial"
+              value={formData.password}
+              visible={showPassword}
+              onToggle={() => setShowPassword((v) => !v)}
+              onChange={(password) => setFormData({ ...formData, password })}
+              placeholder="Mínimo 8 caracteres"
+            />
+            <PasswordField
+              id="agent-password-confirm"
+              label="Confirmar contraseña"
+              value={formData.confirmPassword}
+              visible={showConfirm}
+              onToggle={() => setShowConfirm((v) => !v)}
+              onChange={(confirmPassword) => setFormData({ ...formData, confirmPassword })}
+              placeholder="Repetir contraseña"
+            />
+          </div>
+        </section>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">
-            Contraseña inicial <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={formData.password}
-            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
-            placeholder="Mínimo 8 caracteres"
-            required
-            minLength={8}
-          />
-        </div>
+        <section>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Información adicional
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="agent-phone">
+                Teléfono <span className="font-normal text-slate-400">(opcional)</span>
+              </label>
+              <input
+                id="agent-phone"
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className={inputClass}
+                placeholder="Referencia interna"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="agent-role">
+                Rol
+              </label>
+              <select
+                id="agent-role"
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as "ADMIN" | "SUPPORT" })}
+                className={inputClass}
+              >
+                <option value="SUPPORT">Soporte (recibe casos automáticos)</option>
+                <option value="ADMIN">Admin (ve todo, reasigna manualmente)</option>
+              </select>
+            </div>
+          </div>
+        </section>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Confirmar contraseña</label>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={formData.confirmPassword}
-            onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
-            placeholder="Repetir contraseña"
-            required
-            minLength={8}
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">
-            Teléfono <span className="font-normal text-slate-400">(opcional)</span>
-          </label>
-          <input
-            type="tel"
-            value={formData.phone}
-            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
-            placeholder="Referencia interna (no se usa para alertas)"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Rol</label>
-          <select
-            value={formData.role}
-            onChange={(e) => setFormData({ ...formData, role: e.target.value as "ADMIN" | "SUPPORT" })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
-          >
-            <option value="SUPPORT">Soporte (recibe casos automáticos)</option>
-            <option value="ADMIN">Admin (ve todo, reasigna manualmente)</option>
-          </select>
-        </div>
-
-        {error ? (
-          <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div>
-        ) : null}
-        {success ? (
-          <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{success}</div>
-        ) : null}
+        {error ? <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div> : null}
+        {success ? <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{success}</div> : null}
 
         <button
           type="submit"
           disabled={loading}
           className="w-full rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:opacity-60"
         >
-          {loading ? "Creando..." : "Guardar agente"}
+          {loading ? "Creando..." : "Crear agente"}
         </button>
       </form>
+    </div>
+  );
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  visible,
+  placeholder,
+  onToggle,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  visible: boolean;
+  placeholder: string;
+  onToggle: () => void;
+  onChange: (value: string) => void;
+}) {
+  const type = visible ? "text" : "password";
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor={id}>
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          type={type}
+          autoComplete="new-password"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 pr-10 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-100"
+          placeholder={placeholder}
+          required
+          minLength={8}
+        />
+        <button
+          type="button"
+          onClick={onToggle}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-700"
+          aria-label={visible ? "Ocultar contraseña" : "Mostrar contraseña"}
+        >
+          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
     </div>
   );
 }

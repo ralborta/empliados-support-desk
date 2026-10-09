@@ -15,6 +15,8 @@ import {
   looksLikeRepeatGreetingInSession,
 } from "../src/lib/waraApi.ts";
 import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
+import { shouldRouteTurnToOdometerExecutor } from "../src/lib/waraUnitIntent.ts";
+import { stripMeterValuesMatchingUnitReference } from "../src/lib/wara.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -51,22 +53,56 @@ assert(
 
 console.log("— Cuerpo vacío (bug BBC) no debe repetir saludo operativo —");
 assert(looksLikeGreeting(""), "documenta: texto vacío = saludo (por eso hay que tratarlo aparte)");
+assert(looksLikeGreeting("Buenas tardes?"), "saludo con interrogación");
+assert(looksLikeGreeting("Hola!"), "saludo con exclamación");
+assert(looksLikeGreeting("Buen dia"), "bug 2026-09-02: Buen dia (singular) es saludo");
+assert(looksLikeGreeting("Buen día"), "Buen día con tilde es saludo");
+assert(looksLikeGreeting("buen dia!!"), "Buen dia con exclamación");
+assert(looksLikeGreeting("Buenos dias"), "Buenos dias plural");
+assert(!looksLikeGreeting("Buenas tardes, quiero el certificado"), "saludo + trámite no es solo saludo");
+
+console.log("— saludo no reabre horómetro pendiente —");
+const horoThread = [
+  "Cliente: Horometro 900133",
+  "Atilio: Valor anotado. Me falta solo la fecha y hora.",
+].join("\n");
+assert(
+  !shouldRouteTurnToOdometerExecutor({
+    selectionText: "Buenas tardes?",
+    threadText: horoThread,
+    pendingActionType: "odometro",
+  }),
+  "Buenas tardes? no continúa odómetro con pending",
+);
+const stripped = stripMeterValuesMatchingUnitReference("Horometro 900133", {
+  horometro: 900133,
+});
+assert(stripped.horometro === undefined, "interno 900133 no es lectura de horómetro");
 assert(
   !looksLikeRepeatGreetingInSession(threadAfterGreeting, certMsg),
   "certificado concreto no es saludo repetido",
 );
 
-console.log("— needsCompanyMenu no bloquea trámites operativos —");
+console.log("— needsCompanyMenu BLOQUEA trámites hasta elegir empresa —");
 function nextFlowAfterCompanyMenu(selectionText, needsCompanyMenu, registered = true) {
+  // Alineado con builderbotCustomerContext (fix 2026-08-23):
+  // sin empresa no se ejecuta el trámite (evita menú + "unidad no encontrada").
+  if (needsCompanyMenu) return "reply";
   if (selectionText && looksLikeOperationalIntent(selectionText)) return "router";
-  if (needsCompanyMenu && selectionText && !looksLikeOperationalIntent(selectionText)) return "reply";
-  if (needsCompanyMenu && !selectionText.trim()) return "reply";
   if (registered && selectionText.trim()) return "router";
   return "reply";
 }
 assert(
-  nextFlowAfterCompanyMenu(certMsg, true) === "router",
-  "certificado con menú empresa pendiente va a router",
+  nextFlowAfterCompanyMenu(certMsg, true) === "reply",
+  "certificado con menú empresa pendiente se queda en reply (pedir empresa)",
+);
+assert(
+  nextFlowAfterCompanyMenu("Horometro 900133", true) === "reply",
+  "horómetro+interno con menú empresa pendiente pide empresa (no silencia ni busca unidad)",
+);
+assert(
+  nextFlowAfterCompanyMenu(certMsg, false) === "router",
+  "certificado con empresa ya elegida va a router",
 );
 assert(
   nextFlowAfterCompanyMenu("WARA", true) === "reply",

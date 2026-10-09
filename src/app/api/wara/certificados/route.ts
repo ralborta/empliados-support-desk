@@ -7,11 +7,14 @@ import {
   validateContextSecret,
 } from "@/lib/builderbotCustomerContext";
 import { clearPendingAction, getPendingAction, setPendingAction } from "@/lib/pendingAction";
-import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadTextSinceCompanySelection } from "@/lib/wara";
+import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
+import { detectPlate, detectLoosePlate, formatPlateWithSpaces, isExamplePlate, isPlausibleVehiclePlate, normalizePlate, resolveWaraPatenteForApi, extractPlateCorrectionHint, certificateFlowState, hasPendingCertificateConfirmation, looksLikeBriefConfirmation, looksLikeCertificateKeyword, looksLikeCertificateUnitReply, looksLikeExplicitCertificateResendRequest, threadHasRecentCertificateSuccess, threadTextSinceCompanySelection } from "@/lib/wara";
 import { recentThreadTextForPhone } from "@/lib/conversationThread";
 import {
   findFleetUnitByPlate,
   looksLikeCompanySelection,
+  looksLikeConversationAcknowledgement,
+  looksLikeColloquialGratitudeAck,
   looksLikeOpcionesInfoRequest,
   looksLikePlateCorrectionRequest,
   looksLikeUnidadesInfoRequest,
@@ -38,7 +41,12 @@ import {
   patchSessionNotebook,
   resolveContextUnitPlate,
 } from "@/lib/conversationNotebook";
-import { askCertificateUnitMessage, anchorToCertificateUnitFlow } from "@/lib/certificateFlowMessages";
+import { askCertificateUnitMessage, anchorToCertificateUnitFlow, looksLikeCertificateUnitPivot } from "@/lib/certificateFlowMessages";
+import {
+  formatCertificateAlreadySent,
+  formatCertificateConfirm,
+  formatFleetUnitLabel,
+} from "@/lib/waraWhatsAppFormat";
 
 const bodySchema = z
   .object({
@@ -74,41 +82,7 @@ function keyFromRequest(req: NextRequest, body: z.infer<typeof bodySchema>): str
 }
 
 function isConfirmed(value: string | undefined): boolean {
-  if (!value?.trim()) return false;
-  const t = value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z]/g, "");
-  if (!t) return false;
-  // Tolerante a errores de tipeo: cualquier "conf..." (confirmo, confirmado, confimado, conforme).
-  if (t.startsWith("conf")) return true;
-  return new Set([
-    "confirmo",
-    "confirmar",
-    "confirmado",
-    "confirma",
-    "siconfirmo",
-    "si",
-    "sii",
-    "sip",
-    "dale",
-    "dalesi",
-    "sidale",
-    "ok",
-    "oka",
-    "okey",
-    "okay",
-    "listo",
-    "correcto",
-    "deacuerdo",
-    "hacelo",
-    "adelante",
-    "avanza",
-    "vamos",
-    "perfecto",
-  ]).has(t);
+  return isConfirmedForPendingWrite(value);
 }
 
 function isExplicitCertificateResendRequest(value: string): boolean {
@@ -140,6 +114,7 @@ function isGenericCertificateRequest(text: string): boolean {
 
 function looksLikeCertificateUnitSelection(text: string, threadText = ""): boolean {
   return (
+    looksLikeCertificateUnitPivot(text) ||
     looksLikeCertificateUnitReply(text, threadText) ||
     looksLikePlateCorrectionRequest(text) ||
     looksLikeVehicleBrandOrUnitSearch(text)
@@ -512,7 +487,7 @@ async function escalateCertificateFailure(params: {
     dedupeKey: `wara_certificados:${params.plate}:${failureCategory}`,
     subject: title,
     description: [
-      `Certificado de cobertura no emitido (gestión vía Atilio / WhatsApp).`,
+      `Certificado de cobertura no emitido (gestión vía Kira / WhatsApp).`,
       `Empresa Wara: ${params.company}`,
       `Patente: ${params.plate}`,
       `Motivo: ${failureCategory}`,
@@ -646,6 +621,24 @@ export async function POST(req: NextRequest) {
 
   const threadText = await recentThreadText(rawPhone);
   const sessionNotebook = await getSessionNotebook(prisma, rawPhone);
+
+  if (
+    threadHasRecentCertificateSuccess(threadText) &&
+    (looksLikeConversationAcknowledgement(text) || looksLikeColloquialGratitudeAck(text))
+  ) {
+    const message = "De nada. ¿En qué más te ayudo?";
+    await appendOutboundBotMessage(rawPhone, message, {
+      source: "wara_certificados",
+      stage: "post_certificate_gratitude",
+    });
+    return NextResponse.json({
+      ok: true,
+      ok_s: "true",
+      flowComplete_s: "true",
+      message,
+    });
+  }
+
   const certState = certificateFlowState(threadText);
 
   if (
@@ -713,7 +706,9 @@ export async function POST(req: NextRequest) {
   if ((isConfirmed(text) || isConfirmed(confirmRaw)) && !pendingConfirm) {
     const tail = threadText.slice(-4000).toLowerCase();
     const summaryPending =
-      /voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail);
+      (/voy a generar el certificado de cobertura|confirmar certificado/.test(tail) &&
+        /respond[eé]\s+\*?confirmo/.test(tail)) ||
+      (/voy a generar el certificado de cobertura/.test(tail) && /responde\s+confirmo/.test(tail));
     const summaryPlate = extractPlateFromCertificateSummary(threadText);
     if (summaryPending && summaryPlate) {
       pendingConfirm = true;
@@ -763,12 +758,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (pendingConfirm && looksLikeCertificateUnitPivot(text)) {
+    await clearPendingAction(prisma, rawPhone);
+    pendingConfirm = false;
+  }
+
   if (
     pendingConfirm &&
     !isConfirmed(text) &&
     !isConfirmed(confirmRaw) &&
     !isCertificateCancellation(text) &&
-    !looksLikeExplicitCertificateResendRequest(text)
+    !looksLikeExplicitCertificateResendRequest(text) &&
+    !looksLikeCertificateUnitPivot(text)
   ) {
     const remindMessage =
       "Para generar el certificado respondé CONFIRMO. Si la unidad no es correcta, decime la patente o el nombre correcto.";
@@ -868,7 +869,7 @@ export async function POST(req: NextRequest) {
       if (generated) {
         const plateDisplay = formatPlateWithSpaces(plateHint) ?? plateHint;
         const company = resolution.selectedCompanyName || resolution.customer?.companyName || "tu empresa";
-        const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+        const message = formatCertificateAlreadySent({ unitLabel: plateDisplay });
         return NextResponse.json(
           {
             ok: true,
@@ -1008,7 +1009,7 @@ export async function POST(req: NextRequest) {
   if (wantsExplicitResend) {
     const resendCount = await countExplicitCertificateResends(rawPhone, plate);
     if (resendCount >= 3) {
-      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado varias veces en las últimas horas. Si seguís sin recibirlo, escribí "hablar con un asesor".`;
+      const message = formatCertificateAlreadySent({ unitLabel: plateDisplay, rateLimited: true });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_certificados",
         stage: "resend_limit_reached",
@@ -1045,7 +1046,7 @@ export async function POST(req: NextRequest) {
   if (isConfirmed(confirmation) && !wantsExplicitResend) {
     const generated = await findGeneratedCertificate(rawPhone, plate);
     if (generated) {
-      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+      const message = formatCertificateAlreadySent({ unitLabel: plateDisplay });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_certificados",
         stage: "already_generated",
@@ -1072,7 +1073,7 @@ export async function POST(req: NextRequest) {
   if (!isConfirmed(confirmation) && !wantsExplicitResend) {
     const generated = await findGeneratedCertificate(rawPhone, plate);
     if (generated) {
-      const message = `El certificado de cobertura para la patente ${plateDisplay} ya fue enviado. Si necesitás que lo reenvíe, pedímelo explícitamente.`;
+      const message = formatCertificateAlreadySent({ unitLabel: plateDisplay });
       await appendOutboundBotMessage(rawPhone, message, {
         source: "wara_certificados",
         stage: "already_generated",
@@ -1095,7 +1096,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const message = `Voy a generar el certificado de cobertura:\nPatente: ${plateDisplay}\nEmpresa: ${company}\n\nSi esta correcto, responde CONFIRMO para solicitarlo a Wara.`;
+    const message = formatCertificateConfirm({ unitLabel: plateDisplay, companyName: company });
     await appendOutboundBotMessage(rawPhone, message, {
       source: "wara_certificados",
       stage: "confirmation_required",
@@ -1105,7 +1106,12 @@ export async function POST(req: NextRequest) {
     });
     await setPendingAction(prisma, rawPhone, "certificados", {
       summary: message,
-      payload: { plate, companyName: company },
+      payload: {
+        stage: "confirmation_required",
+        plate,
+        companyName: company,
+        turnLayer: { activeExpectation: "confirmo" },
+      },
     });
     if (isConversationNotebookEnabled()) {
       await patchSessionNotebook(

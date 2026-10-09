@@ -1,0 +1,387 @@
+{
+  "generatedAt": "2026-08-12T21:24:41.233Z",
+  "note": "semanticInterpreterCalled = llamada OpenAI real. ruleSemanticCalled = decideTurn/interpretSemanticTurn (reglas).",
+  "stats": {
+    "turns": 6,
+    "llmTurns": 0,
+    "ruleOnlyTurns": 6,
+    "llmPercent": 0,
+    "llmCallsGlobal": 0
+  },
+  "cases": [
+    {
+      "caseId": "A_certificado_con_unidad_activa",
+      "turns": [
+        {
+          "text": "quiero un certificado",
+          "reply": "Puedo solicitar el certificado de cobertura de AD 307 VS (M900-137).\n¿Querés que lo genere?\n\nSi está correcto, respondé CONFIRMO.",
+          "trace": {
+            "message": "quiero un certificado",
+            "normalizedMessage": "quiero un certificado",
+            "activeTramite": "none",
+            "activeStep": "idle",
+            "lastQuestion": null,
+            "selectedUnit": "AD 307 VS",
+            "suspendedTramite": null,
+            "pendingAction": null,
+            "semanticInterpreterCalled": false,
+            "ruleSemanticCalled": true,
+            "model": null,
+            "llmCallSite": null,
+            "semanticInputSummary": {
+              "hasLastQuestion": false,
+              "hasActiveTramite": false,
+              "hasSelectedUnit": true,
+              "hasPendingAction": false,
+              "hasSuspended": false,
+              "recentTurnsProvided": 0
+            },
+            "turnDecision": {
+              "kind": "start_new_intent",
+              "intent": "certificate",
+              "suspendCurrent": false,
+              "confidence": 0.9
+            },
+            "semanticOutput": {
+              "intent": "certificate",
+              "confidence": 0.95,
+              "fields": {
+                "certificateType": "cobertura"
+              },
+              "references": {
+                "useActiveUnit": true
+              }
+            },
+            "deterministicRuleMatchedBeforeSemantic": "decideTurn:start_new_intent",
+            "handlerSelected": "certificate_handler",
+            "selectionReason": "early_certificate_path",
+            "replyKind": "reply",
+            "replyPreview": "Puedo solicitar el certificado de cobertura de AD 307 VS (M900-137).\n¿Querés que lo genere?\n\nSi está correcto, respondé CONFIRMO.",
+            "stateTransition": {
+              "from": "none|step=idle|pending=none|draft:none",
+              "to": "certificate_issue|step=idle|pending=certificate_issue|cert:await_confirm"
+            },
+            "llmCallsInTurn": 0
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "B_gps_no_quiero_certificado",
+      "turns": [
+        {
+          "text": "no quiero certificado",
+          "reply": "¿Querés cancelar el reporte GPS y solicitar el certificado de AD 307 VS (M900-137)?",
+          "trace": {
+            "message": "no quiero certificado",
+            "normalizedMessage": "no quiero certificado",
+            "activeTramite": "await_confirm",
+            "activeStep": "confirm_gps",
+            "lastQuestion": "¿Querés el reporte GPS de AD 307 VS (M900-137)?",
+            "selectedUnit": "AD 307 VS",
+            "suspendedTramite": null,
+            "pendingAction": "gps_report",
+            "semanticInterpreterCalled": false,
+            "ruleSemanticCalled": true,
+            "model": null,
+            "llmCallSite": null,
+            "semanticInputSummary": {
+              "hasLastQuestion": true,
+              "hasActiveTramite": true,
+              "hasSelectedUnit": true,
+              "hasPendingAction": true,
+              "hasSuspended": false,
+              "recentTurnsProvided": 0
+            },
+            "turnDecision": {
+              "kind": "clarify",
+              "candidates": [
+                {
+                  "meaning": "Cancelar el reporte GPS y pedir certificado",
+                  "intent": "certificate",
+                  "targetTramite": "gps_report"
+                },
+                {
+                  "meaning": "Rechazar solo el reporte GPS (sin iniciar certificado)",
+                  "targetTramite": "gps_report"
+                },
+                {
+                  "meaning": "Continuar el reporte GPS",
+                  "targetTramite": "gps_report"
+                }
+              ],
+              "question": "¿Querés cancelar el reporte GPS y solicitar el certificado de AD 307 VS (M900-137)?",
+              "confidence": 0.45
+            },
+            "semanticOutput": {
+              "intent": "certificate",
+              "confidence": 0.95,
+              "fields": {
+                "certificateType": "cobertura"
+              },
+              "references": {
+                "useActiveUnit": true
+              }
+            },
+            "deterministicRuleMatchedBeforeSemantic": "decideTurn:clarify",
+            "handlerSelected": "clarify",
+            "selectionReason": "turnDecision.clarify",
+            "replyKind": "reply",
+            "replyPreview": "¿Querés cancelar el reporte GPS y solicitar el certificado de AD 307 VS (M900-137)?",
+            "stateTransition": {
+              "from": "await_confirm|step=confirm_gps|pending=gps_report|draft:none",
+              "to": "await_confirm|step=confirm_gps|pending=gps_report|draft:none"
+            },
+            "llmCallsInTurn": 0
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "C_cert_no_quiero_cambiar_odometro",
+      "turns": [
+        {
+          "text": "no quiero cambiar el odómetro",
+          "reply": "¿Querés cancelar el certificado y solicitar el odómetro de AD 307 VS (M900-137)?",
+          "trace": {
+            "message": "no quiero cambiar el odómetro",
+            "normalizedMessage": "no quiero cambiar el odometro",
+            "activeTramite": "certificate_issue",
+            "activeStep": "await_confirm",
+            "lastQuestion": "Puedo solicitar el certificado de cobertura de AD 307 VS.\n¿Querés que lo genere?\n\nSi está correcto, respondé CONFIRMO.",
+            "selectedUnit": "AD 307 VS",
+            "suspendedTramite": null,
+            "pendingAction": "certificate_issue",
+            "semanticInterpreterCalled": false,
+            "ruleSemanticCalled": true,
+            "model": null,
+            "llmCallSite": null,
+            "semanticInputSummary": {
+              "hasLastQuestion": true,
+              "hasActiveTramite": true,
+              "hasSelectedUnit": true,
+              "hasPendingAction": true,
+              "hasSuspended": false,
+              "recentTurnsProvided": 0
+            },
+            "turnDecision": {
+              "kind": "clarify",
+              "candidates": [
+                {
+                  "meaning": "Cancelar el certificado y pedir odómetro",
+                  "intent": "odometer_update",
+                  "targetTramite": "certificate"
+                },
+                {
+                  "meaning": "Rechazar solo el certificado (sin iniciar odómetro)",
+                  "targetTramite": "certificate"
+                },
+                {
+                  "meaning": "Continuar el certificado",
+                  "targetTramite": "certificate"
+                }
+              ],
+              "question": "¿Querés cancelar el certificado y solicitar el odómetro de AD 307 VS (M900-137)?",
+              "confidence": 0.45
+            },
+            "semanticOutput": {
+              "intent": "odometer_update",
+              "confidence": 0.95,
+              "references": {
+                "useActiveUnit": true
+              }
+            },
+            "deterministicRuleMatchedBeforeSemantic": "decideTurn:clarify",
+            "handlerSelected": "clarify",
+            "selectionReason": "turnDecision.clarify",
+            "replyKind": "reply",
+            "replyPreview": "¿Querés cancelar el certificado y solicitar el odómetro de AD 307 VS (M900-137)?",
+            "stateTransition": {
+              "from": "certificate_issue|step=await_confirm|pending=certificate_issue|cert:await_confirm",
+              "to": "certificate_issue|step=await_confirm|pending=certificate_issue|cert:await_confirm"
+            },
+            "llmCallsInTurn": 0
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D_horometro_domingo_1130",
+      "turns": [
+        {
+          "text": "el domingo",
+          "reply": "Perfecto, domingo 9 de agosto. ¿A qué hora?",
+          "trace": {
+            "message": "el domingo",
+            "normalizedMessage": "el domingo",
+            "activeTramite": "odometer_update",
+            "activeStep": "await_fecha",
+            "lastQuestion": "¿Con qué fecha y hora es la lectura? (ej. 06/08/2026 15:50)",
+            "selectedUnit": "AD 307 VS",
+            "suspendedTramite": null,
+            "pendingAction": null,
+            "semanticInterpreterCalled": false,
+            "ruleSemanticCalled": true,
+            "model": null,
+            "llmCallSite": null,
+            "semanticInputSummary": {
+              "hasLastQuestion": true,
+              "hasActiveTramite": true,
+              "hasSelectedUnit": true,
+              "hasPendingAction": false,
+              "hasSuspended": false,
+              "recentTurnsProvided": 0
+            },
+            "turnDecision": {
+              "kind": "general",
+              "confidence": 0.5
+            },
+            "semanticOutput": {
+              "intent": "odometer_update",
+              "confidence": 0.9,
+              "fields": {
+                "date": "2026-08-09",
+                "timezone": "America/Argentina/Buenos_Aires"
+              },
+              "references": {
+                "usePendingTramite": true
+              },
+              "temporal": {
+                "raw": "el domingo",
+                "resolvedDate": "2026-08-09",
+                "resolution": "relative",
+                "ambiguous": false
+              }
+            },
+            "deterministicRuleMatchedBeforeSemantic": null,
+            "handlerSelected": "odometer_handler",
+            "selectionReason": "tryResolveOdometerTurn",
+            "replyKind": "reply",
+            "replyPreview": "Perfecto, domingo 9 de agosto. ¿A qué hora?",
+            "stateTransition": {
+              "from": "odometer_update|step=await_fecha|pending=none|odo:await_fecha",
+              "to": "odometer_update|step=await_fecha|pending=none|odo:await_fecha"
+            },
+            "llmCallsInTurn": 0
+          }
+        },
+        {
+          "text": "11:30",
+          "reply": "Voy a registrar en WARA:\n• AD 307 VS (M900-137)\n• Horómetro: 4550 hs\n• Anterior: 4500 hs\n• Fecha: 09/08/2026 11:30\nSi está correcto, respondé CONFIRMO.",
+          "trace": {
+            "message": "11:30",
+            "normalizedMessage": "11:30",
+            "activeTramite": "odometer_update",
+            "activeStep": "await_fecha",
+            "lastQuestion": "¿Con qué fecha y hora es la lectura? (ej. 06/08/2026 15:50)",
+            "selectedUnit": "AD 307 VS",
+            "suspendedTramite": null,
+            "pendingAction": null,
+            "semanticInterpreterCalled": false,
+            "ruleSemanticCalled": true,
+            "model": null,
+            "llmCallSite": null,
+            "semanticInputSummary": {
+              "hasLastQuestion": true,
+              "hasActiveTramite": true,
+              "hasSelectedUnit": true,
+              "hasPendingAction": false,
+              "hasSuspended": false,
+              "recentTurnsProvided": 0
+            },
+            "turnDecision": {
+              "kind": "general",
+              "confidence": 0.5
+            },
+            "semanticOutput": {
+              "intent": "odometer_update",
+              "confidence": 0.9,
+              "fields": {
+                "date": "2026-08-12",
+                "time": "11:30",
+                "timezone": "America/Argentina/Buenos_Aires"
+              },
+              "references": {
+                "usePendingTramite": true
+              },
+              "temporal": {
+                "raw": "11:30",
+                "resolvedDate": "2026-08-12",
+                "resolvedTime": "11:30",
+                "resolution": "exact",
+                "ambiguous": false
+              }
+            },
+            "deterministicRuleMatchedBeforeSemantic": null,
+            "handlerSelected": "odometer_handler",
+            "selectionReason": "tryResolveOdometerTurn",
+            "replyKind": "reply",
+            "replyPreview": "Voy a registrar en WARA:\n• AD 307 VS (M900-137)\n• Horómetro: 4550 hs\n• Anterior: 4500 hs\n• Fecha: 09/08/2026 11:30\nSi está correcto, respondé CONFIRMO.",
+            "stateTransition": {
+              "from": "odometer_update|step=await_fecha|pending=none|odo:await_fecha",
+              "to": "odometer_update|step=await_fecha|pending=odometer_write|odo:await_confirm"
+            },
+            "llmCallsInTurn": 0
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "E_patente_empieza_con_AD",
+      "turns": [
+        {
+          "text": "la patente que empieza con AD",
+          "reply": "Encontré 2 unidades para «AD» en El Cacique:\n\n1. AD 307 VS (M900-137)\n2. AD 356 UQ (M900-138)\n\nDecime el número o la patente/nombre de la unidad que querés consultar.",
+          "trace": {
+            "message": "la patente que empieza con AD",
+            "normalizedMessage": "la patente que empieza con ad",
+            "activeTramite": "none",
+            "activeStep": "idle",
+            "lastQuestion": null,
+            "selectedUnit": null,
+            "suspendedTramite": null,
+            "pendingAction": null,
+            "semanticInterpreterCalled": false,
+            "ruleSemanticCalled": true,
+            "model": null,
+            "llmCallSite": null,
+            "semanticInputSummary": {
+              "hasLastQuestion": false,
+              "hasActiveTramite": false,
+              "hasSelectedUnit": false,
+              "hasPendingAction": false,
+              "hasSuspended": false,
+              "recentTurnsProvided": 0
+            },
+            "turnDecision": {
+              "kind": "general",
+              "confidence": 0.5
+            },
+            "semanticOutput": {
+              "intent": "unit_search",
+              "confidence": 0.9,
+              "entity": {
+                "type": "license_plate",
+                "value": "AD",
+                "matchMode": "prefix"
+              },
+              "references": {
+                "usePreviousList": false
+              }
+            },
+            "deterministicRuleMatchedBeforeSemantic": null,
+            "handlerSelected": "unit_search",
+            "selectionReason": "resolveSemanticUnitSearch.listing;useLlm=false",
+            "replyKind": "reply",
+            "replyPreview": "Encontré 2 unidades para «AD» en El Cacique:\n\n1. AD 307 VS (M900-137)\n2. AD 356 UQ (M900-138)\n\nDecime el número o la patente/nombre de la unidad que querés consultar.",
+            "stateTransition": {
+              "from": "none|step=idle|pending=none|draft:none",
+              "to": "list_units|step=page_1|pending=none|draft:none"
+            },
+            "llmCallsInTurn": 0
+          }
+        }
+      ]
+    }
+  ]
+}
