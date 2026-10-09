@@ -86,8 +86,8 @@ assert.equal(
 );
 assert.equal(
   UNREGISTERED_PHONE_GUIDE_DOCUMENT_NAME,
-  "Como cargo mi numero en la plataforma Wara.pdf",
-  "nombre visible del documento, sin sufijo numérico",
+  "activacion.pdf",
+  "nombre visible del documento en WhatsApp",
 );
 
 const bundled = buildUnregisteredPhoneFirstHandoffMessage();

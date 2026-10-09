@@ -34,7 +34,7 @@ await sendWhatsAppMessage({
   message: "Guia",
   mediaUrl: "https://wara.nivel41.com/guides/como-cargo-mi-numero-en-wara.pdf",
 });
-assert.match(lastBody, /Como cargo mi numero en la plataforma Wara\.pdf/, "fileName limpio en BBC");
+assert.match(lastBody, /activacion\.pdf/, "fileName limpio en BBC (activacion.pdf)");
 assert.doesNotMatch(lastBody, /1790\d+|f86f1433c/, "sin sufijo numérico en fileName");
 
 setBuilderBotHttpPostForTests(null);

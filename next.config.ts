@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
-const GUIDE_PDF_FILENAME = "Como cargo mi numero en la plataforma Wara.pdf";
-const GUIDE_PDF_HEADER = `inline; filename="${GUIDE_PDF_FILENAME}"; filename*=UTF-8''Como%20cargo%20mi%20numero%20en%20la%20plataforma%20Wara.pdf`;
+const GUIDE_PDF_FILENAME = "activacion.pdf";
+const GUIDE_PDF_HEADER = `inline; filename="${GUIDE_PDF_FILENAME}"; filename*=UTF-8''activacion.pdf`;
 
 const nextConfig: NextConfig = {
   async headers() {

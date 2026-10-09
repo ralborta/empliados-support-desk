@@ -1,17 +1,8 @@
 import axios from 'axios';
-
-const UNREGISTERED_GUIDE_WHATSAPP_FILE_NAME =
-  "Como cargo mi numero en la plataforma Wara.pdf";
+import { fileNameForWhatsAppMediaUrl as guideFileNameForWhatsAppMediaUrl } from "@/lib/unregisteredPhoneHandoff";
 
 function fileNameForWhatsAppMediaUrl(mediaUrl: string | undefined): string | undefined {
-  if (!mediaUrl) return undefined;
-  if (
-    /como-cargo-mi-numero-en-wara/i.test(mediaUrl) ||
-    /Como cargo mi numero en la plataforma Wara/i.test(mediaUrl)
-  ) {
-    return UNREGISTERED_GUIDE_WHATSAPP_FILE_NAME;
-  }
-  return undefined;
+  return guideFileNameForWhatsAppMediaUrl(mediaUrl);
 }
 
 type AxiosPost = typeof axios.post;
