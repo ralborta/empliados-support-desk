@@ -94,4 +94,11 @@ describe("looksLikeGreeting", () => {
     assert.equal(looksLikeGreeting("Cómo te va?"), true);
     assert.equal(looksLikeGreeting("como te va"), true);
   });
+
+  it("acepta Hello! / hi como saludo", () => {
+    assert.equal(looksLikeGreeting("Hello!"), true);
+    assert.equal(looksLikeGreeting("hello"), true);
+    assert.equal(looksLikeGreeting("Hi"), true);
+    assert.equal(looksLikeGreeting("hello kira"), true);
+  });
 });

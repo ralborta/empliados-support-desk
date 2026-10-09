@@ -226,7 +226,9 @@ export function looksLikeGpsReportRequest(text: string): boolean {
 
 export function looksLikeGreetingOnly(text: string): boolean {
   const n = norm(text);
-  return /^(hola|buenas|buen\s+dia|buenos\s+dias|menu|ayuda)$/.test(n);
+  return /^(hola|hello|hi|buenas|buen\s+dia|buenos\s+dias|good\s*(morning|afternoon|evening|night)|menu|ayuda)(\s+(atilio|kira))?$/.test(
+    n,
+  );
 }
 
 export function looksLikeSideQueryDuringTramite(text: string): boolean {
