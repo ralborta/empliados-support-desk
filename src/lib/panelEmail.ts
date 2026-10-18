@@ -9,6 +9,7 @@
  *   RESEND_API_KEY    → API key de Resend (dominio remitente debe estar verificado ahí)
  *   PANEL_EMAIL_FROM  → ej. "Kira <notificaciones@nivel41.com>"
  *   PANEL_BASE_URL    → https://wara.nivel41.com
+ *   PANEL_EMAIL_BLOCKLIST → extras (coma) además de Lucas/Emiliano Wara
  *   SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_SECURE=true (fallback opcional)
  */
 
@@ -19,6 +20,25 @@ import type { WaraHealthStatus } from "@/lib/waraHealthCheck";
 import type { BbcRuntimeStatus, BbcStatusTransition } from "@/lib/bbcRuntimeMonitor";
 
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL?.trim() || "https://wara.nivel41.com";
+
+/** Personal Wara (Lucas / Emiliano): no reciben mails operativos del panel. */
+const DEFAULT_PANEL_EMAIL_BLOCKLIST = [
+  "lsalguero@waragps.com",
+  "elapaz@waragps.com",
+];
+
+function panelEmailBlocklist(): Set<string> {
+  const extra = process.env.PANEL_EMAIL_BLOCKLIST?.trim() ?? "";
+  return new Set(
+    [...DEFAULT_PANEL_EMAIL_BLOCKLIST, ...extra.split(/[,;\s]+/)]
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function isPanelEmailBlocked(to: string): boolean {
+  return panelEmailBlocklist().has(to.trim().toLowerCase());
+}
 
 type SmtpConfig = {
   host: string;
@@ -112,6 +132,10 @@ async function sendViaSmtp(to: string, subject: string, html: string): Promise<b
 
 async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
   if (!to.trim()) return false;
+  if (isPanelEmailBlocked(to)) {
+    console.log(`[panelEmail] Omitido (blocklist): ${to.trim()} — ${subject}`);
+    return false;
+  }
 
   if (process.env.RESEND_API_KEY?.trim()) {
     return sendViaResend(to, subject, html);
@@ -205,12 +229,18 @@ function opsAlertRecipients(): string[] {
     process.env.WARA_OPS_ALERT_EMAIL?.trim() ||
     process.env.PANEL_USER_ADMIN_EMAIL?.trim() ||
     "";
-  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s && !isPanelEmailBlocked(s));
 }
 
 function bbcAlertRecipients(): string[] {
   const raw = process.env.WARA_BBC_ALERT_EMAIL?.trim() || DEFAULT_BBC_ALERT_EMAIL;
-  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s && !isPanelEmailBlocked(s));
 }
 
 /** Email ops cuando Wara no responde (cron / monitor). Cooldown 30 min. */
