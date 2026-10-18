@@ -39,6 +39,7 @@ const KNOWN_ROUTES: Array<[string, string]> = [
   ["/tickets/urgentes", "Tickets urgentes"],
   ["/tickets", "Tickets"],
   ["/clientes", "Clientes"],
+  ["/feedback", "Feedback Kira"],
   ["/agentes", "Agentes"],
   ["/configuracion", "Configuración"],
   ["/login", "Login"],

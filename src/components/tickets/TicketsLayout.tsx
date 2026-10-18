@@ -12,6 +12,7 @@ import {
   UserCircle,
   LogOut,
   Circle,
+  MessageSquareHeart,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { NotificationBell } from "@/components/layout/NotificationBell";
@@ -155,6 +156,11 @@ function TicketsSidebar({ user }: { user: SessionUser | null }) {
           </>
         ) : null}
         <NavLink href="/clientes" icon={<UserCircle className="h-4 w-4" />} label="Clientes" />
+        <NavLink
+          href="/feedback"
+          icon={<MessageSquareHeart className="h-4 w-4" />}
+          label="Feedback Kira"
+        />
       </nav>
 
       <div className="border-t border-white/10 px-3 py-4">
