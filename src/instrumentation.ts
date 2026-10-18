@@ -11,4 +11,8 @@ export async function register(): Promise<void> {
     "@/lib/idleConversationFollowupInProcessCron"
   );
   startIdleFollowupInProcessCron();
+  const { startKiraFeedbackDailyInProcessCron } = await import(
+    "@/lib/kiraServiceFeedbackDailyInProcessCron"
+  );
+  startKiraFeedbackDailyInProcessCron();
 }

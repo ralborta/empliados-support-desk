@@ -9,7 +9,7 @@
  *   RESEND_API_KEY    → API key de Resend (dominio remitente debe estar verificado ahí)
  *   PANEL_EMAIL_FROM  → ej. "Kira <notificaciones@nivel41.com>"
  *   PANEL_BASE_URL    → https://wara.nivel41.com
- *   WARA_SERVICE_FEEDBACK_EMAIL → destinatarios encuesta (coma); default Lucas+Emiliano
+ *   WARA_SERVICE_FEEDBACK_EMAIL → destinatarios resumen diario encuesta (coma); default Lucas+Emiliano
  *   SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_SECURE=true (fallback opcional)
  */
 
@@ -137,49 +137,76 @@ function serviceFeedbackRecipients(): string[] {
   );
 }
 
-/** Aviso cuando un cliente deja nota 1–10 (y comentario opcional) al cerrar con Kira. */
-export async function sendServiceFeedbackEmail(params: {
+export type ServiceFeedbackSummaryRow = {
   ticketId: string;
   ticketCode: string;
-  companyName: string;
+  cliente: string | null;
   score: number | null;
   comment: string | null;
+};
+
+/** Resumen diario de encuestas Kira → Lucas / Emiliano (no por cliente). */
+export async function sendServiceFeedbackDailySummaryEmail(params: {
+  dayLabel: string;
+  avgScore: number | null;
+  countWithScore: number;
+  rows: ServiceFeedbackSummaryRow[];
 }): Promise<boolean> {
   const recipients = serviceFeedbackRecipients();
   if (!recipients.length) return false;
+  if (params.rows.length === 0) return false;
 
-  const scoreLabel = params.score != null ? String(params.score) : "—";
-  const commentHtml = params.comment
-    ? `<p><strong>Comentario:</strong> ${escapeHtml(params.comment)}</p>`
-    : `<p style="color:#64748b;">Sin comentario.</p>`;
-  const url = `${PANEL_BASE_URL}/tickets/${params.ticketId}`;
   const feedbackUrl = `${PANEL_BASE_URL}/feedback`;
+  const avgLabel = params.avgScore != null ? params.avgScore.toFixed(1) : "—";
+  const rowsHtml = params.rows
+    .slice(0, 40)
+    .map((r) => {
+      const score = r.score != null ? String(r.score) : "—";
+      const comment = r.comment ? escapeHtml(r.comment.slice(0, 200)) : "—";
+      const ticketUrl = `${PANEL_BASE_URL}/tickets/${r.ticketId}`;
+      return `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">
+          <a href="${ticketUrl}">${escapeHtml(r.ticketCode)}</a>
+        </td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${escapeHtml(r.cliente ?? "—")}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;">${escapeHtml(score)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${comment}</td>
+      </tr>`;
+    })
+    .join("");
+  const more =
+    params.rows.length > 40
+      ? `<p style="color:#64748b;font-size:12px;">…y ${params.rows.length - 40} más en el panel.</p>`
+      : "";
+
   const html = `
-    <p>Nueva respuesta de feedback de Kira:</p>
+    <p>Resumen diario de feedback Kira — <strong>${escapeHtml(params.dayLabel)}</strong></p>
     <ul>
-      <li><strong>Nota:</strong> ${escapeHtml(scoreLabel)} / 10</li>
-      <li><strong>Ticket:</strong> ${escapeHtml(params.ticketCode)}</li>
-      <li><strong>Cliente:</strong> ${escapeHtml(params.companyName)}</li>
+      <li><strong>Respuestas con nota:</strong> ${params.countWithScore}</li>
+      <li><strong>Promedio:</strong> ${escapeHtml(avgLabel)}</li>
     </ul>
-    ${commentHtml}
-    <p>
-      <a href="${url}">Abrir ticket</a>
-      ·
-      <a href="${feedbackUrl}">Ver Feedback Kira</a>
-    </p>
-    <p style="color:#64748b;font-size:12px;">Mensaje automático del panel Wara.</p>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-top:12px;">
+      <thead>
+        <tr style="background:#f8fafc;text-align:left;">
+          <th style="padding:6px 8px;">Ticket</th>
+          <th style="padding:6px 8px;">Cliente</th>
+          <th style="padding:6px 8px;">Nota</th>
+          <th style="padding:6px 8px;">Comentario</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    ${more}
+    <p style="margin-top:16px;"><a href="${feedbackUrl}">Ver Feedback Kira en el panel</a></p>
+    <p style="color:#64748b;font-size:12px;">Mensaje automático del panel Wara (1 vez al día).</p>
   `;
 
-  const subject =
-    params.score != null
-      ? `Feedback Kira ${params.score}/10 — ${params.ticketCode}`
-      : `Feedback Kira — ${params.ticketCode}`;
-
+  const subject = `Feedback Kira ${params.dayLabel} — ${params.countWithScore} resp. · prom. ${avgLabel}`;
   let sent = false;
   for (const to of recipients) {
     if (await sendEmail(to, subject, html)) {
       sent = true;
-      console.log(`[panelEmail] Feedback ${params.ticketCode} → ${to}`);
+      console.log(`[panelEmail] Resumen feedback ${params.dayLabel} → ${to}`);
     }
   }
   return sent;

@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/idle-conversation",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/service-feedback-daily",
+      "schedule": "0 11 * * *"
     }
   ]
 }
