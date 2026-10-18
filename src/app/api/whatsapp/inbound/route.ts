@@ -365,6 +365,25 @@ async function processIncomingMessage({ eventName, data }: { eventName: string; 
     }
   }
 
+  {
+    const { tryHandleKiraServiceFeedback } = await import("@/lib/kiraServiceFeedback");
+    const feedback = await tryHandleKiraServiceFeedback({
+      rawPhone: customerPhoneRaw,
+      messageText: actualMessage,
+    });
+    if (feedback.handled) {
+      return NextResponse.json({
+        ok: true,
+        serviceFeedback: true,
+        serviceFeedback_s: "true",
+        skipResponse_s: "true",
+        flowComplete_s: "true",
+        message: feedback.replyMessage,
+        ...builderBotRegistrationFields(registeredInPanel),
+      });
+    }
+  }
+
   if (looksLikeCustomerConversationCloseRequest(actualMessage)) {
     const closeResult = await handleCustomerConversationCloseRequest({
       rawPhone: customerPhoneRaw,

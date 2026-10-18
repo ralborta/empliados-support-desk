@@ -768,6 +768,18 @@ export async function runTurnExecutorPhase(params: {
 }): Promise<{ message: string; mediaUrl?: string; executor: TurnExecutorId; ok: boolean }> {
   const { rawPhone, selectionText, apiKey } = params;
 
+  // Encuesta post-cierre (nota 1–10 + comentario opcional): antes de cualquier trámite.
+  {
+    const { tryHandleKiraServiceFeedback } = await import("@/lib/kiraServiceFeedback");
+    const feedback = await tryHandleKiraServiceFeedback({
+      rawPhone,
+      messageText: selectionText,
+    });
+    if (feedback.handled) {
+      return { message: feedback.replyMessage, executor: "info_guides", ok: true };
+    }
+  }
+
   if (
     looksLikeChangeCompanyRequest(selectionText) ||
     (await looksLikeChangeCompanyRequestHybrid(selectionText))
@@ -913,10 +925,14 @@ export async function runTurnExecutorPhase(params: {
     const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
+    const { buildCloseMessageWithFeedbackAsk, isKiraServiceFeedbackEnabled } = await import(
+      "@/lib/kiraServiceFeedback"
+    );
+    const fallbackClose = isKiraServiceFeedbackEnabled()
+      ? buildCloseMessageWithFeedbackAsk()
+      : "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.";
     return {
-      message:
-        execMessage ||
-        "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.",
+      message: execMessage || fallbackClose,
       executor: "odoo_ticket",
       ok: execOk,
     };

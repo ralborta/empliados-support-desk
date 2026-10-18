@@ -9,6 +9,11 @@ import {
   CUSTOMER_CLOSE_SUCCESS_MESSAGE,
   looksLikeCustomerConversationCloseRequest,
 } from "@/lib/customerConversationCloseDetect";
+import {
+  buildCloseMessageWithFeedbackAsk,
+  isKiraServiceFeedbackEnabled,
+  markServiceFeedbackAwaitingScore,
+} from "@/lib/kiraServiceFeedback";
 
 export {
   CUSTOMER_CLOSE_SUCCESS_MESSAGE,
@@ -187,14 +192,22 @@ export async function handleCustomerConversationCloseRequest(params: {
     db,
   );
 
-  const replyMessage = CUSTOMER_CLOSE_SUCCESS_MESSAGE;
+  const feedbackOn = isKiraServiceFeedbackEnabled();
+  const replyMessage = feedbackOn
+    ? buildCloseMessageWithFeedbackAsk()
+    : CUSTOMER_CLOSE_SUCCESS_MESSAGE;
 
   await sendCloseReply({
     ticketId: openTicket.id,
     customerPhone: params.rawPhone,
     replyMessage,
     source: params.source ?? "customer_close",
+    feedbackAsk: feedbackOn,
   });
+
+  if (feedbackOn) {
+    await markServiceFeedbackAwaitingScore(openTicket.id, db);
+  }
 
   console.log(`[customerClose] Caso ${openTicket.code} cerrado por pedido del cliente (${params.rawPhone})`);
 
@@ -212,6 +225,7 @@ async function sendCloseReply(params: {
   customerPhone: string;
   replyMessage: string;
   source: string;
+  feedbackAsk?: boolean;
 }): Promise<void> {
   const deliverWa = shouldInboundSendWhatsAppToCustomer();
   if (!deliverWa) {
@@ -247,6 +261,7 @@ async function sendCloseReply(params: {
           autoReplyKind: "customer_requested_close",
           source: params.source,
           waSuppressed: false,
+          ...(params.feedbackAsk ? { serviceFeedbackAsk: true } : {}),
         },
       },
     });

@@ -684,6 +684,25 @@ export async function customerRegisteredContextResponse(
     }
   } else if (
     selectionText &&
+    (await (async () => {
+      const { tryHandleKiraServiceFeedback } = await import("@/lib/kiraServiceFeedback");
+      const feedback = await tryHandleKiraServiceFeedback({
+        rawPhone: trimmed,
+        messageText: selectionText,
+      });
+      if (!feedback.handled) return false;
+      nextFlow = "reply";
+      responseMessage = feedback.replyMessage;
+      await persistCustomerBotReply(trimmed, responseMessage, {
+        source: "builderbot_context",
+        stage: `service_feedback_${feedback.outcome}`,
+      });
+      return true;
+    })())
+  ) {
+    // Encuesta post-cierre ya respondida arriba.
+  } else if (
+    selectionText &&
     looksLikeCustomerConversationCloseRequest(selectionText)
   ) {
     const closeResult = await handleCustomerConversationCloseRequest({
