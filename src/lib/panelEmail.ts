@@ -9,7 +9,7 @@
  *   RESEND_API_KEY    → API key de Resend (dominio remitente debe estar verificado ahí)
  *   PANEL_EMAIL_FROM  → ej. "Kira <notificaciones@nivel41.com>"
  *   PANEL_BASE_URL    → https://wara.nivel41.com
- *   PANEL_EMAIL_BLOCKLIST → extras (coma) además de Lucas/Emiliano Wara
+ *   WARA_SERVICE_FEEDBACK_EMAIL → destinatarios encuesta (coma); default Lucas+Emiliano
  *   SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_SECURE=true (fallback opcional)
  */
 
@@ -21,24 +21,11 @@ import type { BbcRuntimeStatus, BbcStatusTransition } from "@/lib/bbcRuntimeMoni
 
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL?.trim() || "https://wara.nivel41.com";
 
-/** Personal Wara (Lucas / Emiliano): no reciben mails operativos del panel. */
-const DEFAULT_PANEL_EMAIL_BLOCKLIST = [
+/** Destinatarios por defecto del mail de encuesta (Lucas + Emiliano, Wara). */
+const DEFAULT_SERVICE_FEEDBACK_EMAILS = [
   "lsalguero@waragps.com",
   "elapaz@waragps.com",
 ];
-
-function panelEmailBlocklist(): Set<string> {
-  const extra = process.env.PANEL_EMAIL_BLOCKLIST?.trim() ?? "";
-  return new Set(
-    [...DEFAULT_PANEL_EMAIL_BLOCKLIST, ...extra.split(/[,;\s]+/)]
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
-function isPanelEmailBlocked(to: string): boolean {
-  return panelEmailBlocklist().has(to.trim().toLowerCase());
-}
 
 type SmtpConfig = {
   host: string;
@@ -132,15 +119,70 @@ async function sendViaSmtp(to: string, subject: string, html: string): Promise<b
 
 async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
   if (!to.trim()) return false;
-  if (isPanelEmailBlocked(to)) {
-    console.log(`[panelEmail] Omitido (blocklist): ${to.trim()} — ${subject}`);
-    return false;
-  }
 
   if (process.env.RESEND_API_KEY?.trim()) {
     return sendViaResend(to, subject, html);
   }
   return sendViaSmtp(to, subject, html);
+}
+
+function serviceFeedbackRecipients(): string[] {
+  const raw = process.env.WARA_SERVICE_FEEDBACK_EMAIL?.trim();
+  const list = (raw || DEFAULT_SERVICE_FEEDBACK_EMAILS.join(","))
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set(list.map((e) => e.toLowerCase()))].map(
+    (lower) => list.find((e) => e.toLowerCase() === lower)!,
+  );
+}
+
+/** Aviso cuando un cliente deja nota 1–10 (y comentario opcional) al cerrar con Kira. */
+export async function sendServiceFeedbackEmail(params: {
+  ticketId: string;
+  ticketCode: string;
+  companyName: string;
+  score: number | null;
+  comment: string | null;
+}): Promise<boolean> {
+  const recipients = serviceFeedbackRecipients();
+  if (!recipients.length) return false;
+
+  const scoreLabel = params.score != null ? String(params.score) : "—";
+  const commentHtml = params.comment
+    ? `<p><strong>Comentario:</strong> ${escapeHtml(params.comment)}</p>`
+    : `<p style="color:#64748b;">Sin comentario.</p>`;
+  const url = `${PANEL_BASE_URL}/tickets/${params.ticketId}`;
+  const feedbackUrl = `${PANEL_BASE_URL}/feedback`;
+  const html = `
+    <p>Nueva respuesta de feedback de Kira:</p>
+    <ul>
+      <li><strong>Nota:</strong> ${escapeHtml(scoreLabel)} / 10</li>
+      <li><strong>Ticket:</strong> ${escapeHtml(params.ticketCode)}</li>
+      <li><strong>Cliente:</strong> ${escapeHtml(params.companyName)}</li>
+    </ul>
+    ${commentHtml}
+    <p>
+      <a href="${url}">Abrir ticket</a>
+      ·
+      <a href="${feedbackUrl}">Ver Feedback Kira</a>
+    </p>
+    <p style="color:#64748b;font-size:12px;">Mensaje automático del panel Wara.</p>
+  `;
+
+  const subject =
+    params.score != null
+      ? `Feedback Kira ${params.score}/10 — ${params.ticketCode}`
+      : `Feedback Kira — ${params.ticketCode}`;
+
+  let sent = false;
+  for (const to of recipients) {
+    if (await sendEmail(to, subject, html)) {
+      sent = true;
+      console.log(`[panelEmail] Feedback ${params.ticketCode} → ${to}`);
+    }
+  }
+  return sent;
 }
 
 export async function sendAdvisorWelcomeEmail(params: {
@@ -229,18 +271,12 @@ function opsAlertRecipients(): string[] {
     process.env.WARA_OPS_ALERT_EMAIL?.trim() ||
     process.env.PANEL_USER_ADMIN_EMAIL?.trim() ||
     "";
-  return raw
-    .split(/[,;\s]+/)
-    .map((s) => s.trim())
-    .filter((s) => s && !isPanelEmailBlocked(s));
+  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
 }
 
 function bbcAlertRecipients(): string[] {
   const raw = process.env.WARA_BBC_ALERT_EMAIL?.trim() || DEFAULT_BBC_ALERT_EMAIL;
-  return raw
-    .split(/[,;\s]+/)
-    .map((s) => s.trim())
-    .filter((s) => s && !isPanelEmailBlocked(s));
+  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
 }
 
 /** Email ops cuando Wara no responde (cron / monitor). Cooldown 30 min. */

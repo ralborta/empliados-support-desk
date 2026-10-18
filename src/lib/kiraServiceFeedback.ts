@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { looksLikeGreeting } from "@/lib/waraApi";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationCloseDetect";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { sendServiceFeedbackEmail } from "@/lib/panelEmail";
 
 /** Opt-out: WARA_SERVICE_FEEDBACK_ENABLED=false */
 export function isKiraServiceFeedbackEnabled(): boolean {
@@ -186,6 +187,37 @@ async function appendFeedbackEvent(
   });
 }
 
+/** Mail a Lucas/Emiliano cuando la encuesta queda registrada (nota ± comentario). */
+function notifyServiceFeedbackRecorded(
+  ticketId: string,
+  score: number | null | undefined,
+  comment: string | null | undefined,
+  client: PrismaClient,
+): void {
+  void (async () => {
+    try {
+      const ticket = await client.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          code: true,
+          customer: { select: { companyName: true, name: true } },
+        },
+      });
+      if (!ticket) return;
+      await sendServiceFeedbackEmail({
+        ticketId: ticket.id,
+        ticketCode: ticket.code,
+        companyName: ticket.customer.companyName || ticket.customer.name || "Cliente",
+        score: typeof score === "number" ? score : null,
+        comment: comment?.trim() ? comment.trim() : null,
+      });
+    } catch (err) {
+      console.error("[kiraServiceFeedback] Email encuesta:", err);
+    }
+  })();
+}
+
 export type ServiceFeedbackTurnResult =
   | { handled: false }
   | { handled: true; replyMessage: string; outcome: "score" | "comment" | "skip" | "aborted" };
@@ -257,30 +289,34 @@ export async function tryHandleKiraServiceFeedback(params: {
 
   // awaiting_comment
   if (looksLikeFeedbackAbortToOps(text) && !looksLikeFeedbackSkip(text)) {
+    const score = pending.payload.score ?? null;
     await appendFeedbackEvent(
       pending.ticketId,
       {
         stage: "recorded",
-        score: pending.payload.score ?? null,
+        score,
         comment: null,
         reason: "ops_intent_after_score",
       },
       db,
     );
+    notifyServiceFeedbackRecorded(pending.ticketId, score, null, db);
     return { handled: false };
   }
 
   if (looksLikeFeedbackSkip(text)) {
+    const score = pending.payload.score ?? null;
     await appendFeedbackEvent(
       pending.ticketId,
       {
         stage: "recorded",
-        score: pending.payload.score ?? null,
+        score,
         comment: null,
         skippedComment: true,
       },
       db,
     );
+    notifyServiceFeedbackRecorded(pending.ticketId, score, null, db);
     return {
       handled: true,
       replyMessage: buildFeedbackThanksSkipComment(),
@@ -289,15 +325,17 @@ export async function tryHandleKiraServiceFeedback(params: {
   }
 
   const comment = text.slice(0, 800);
+  const score = pending.payload.score ?? null;
   await appendFeedbackEvent(
     pending.ticketId,
     {
       stage: "recorded",
-      score: pending.payload.score ?? null,
+      score,
       comment,
     },
     db,
   );
+  notifyServiceFeedbackRecorded(pending.ticketId, score, comment, db);
   return {
     handled: true,
     replyMessage: buildFeedbackThanksAfterComment(),
