@@ -399,7 +399,7 @@ describe("runIdleConversationFollowupCycle (mock DB+WA)", () => {
     );
   });
 
-  it("si falla el envío WA, no persiste ni cierra", async () => {
+  it("si falla el envío WA del nudge, no persiste el nudge", async () => {
     process.env.WARA_IDLE_FOLLOWUP_ENABLED = "true";
     const now = new Date("2026-08-26T15:00:00.000Z");
     const botAt = new Date(now.getTime() - NUDGE_MS);
@@ -430,5 +430,57 @@ describe("runIdleConversationFollowupCycle (mock DB+WA)", () => {
     assert.equal(result.nudged, 0);
     assert.equal(createdMessages.length, 0);
     assert.equal(ticketUpdates.length, 0);
+  });
+
+  it("si falla el envío WA del cierre, igual deja RESOLVED", async () => {
+    process.env.WARA_IDLE_FOLLOWUP_ENABLED = "true";
+    process.env.WARA_IDLE_NUDGE_MS = String(NUDGE_MS);
+    process.env.WARA_IDLE_CLOSE_MS = String(CLOSE_MS);
+
+    const now = new Date("2026-08-26T15:00:00.000Z");
+    const botAt = new Date(now.getTime() - CLOSE_MS);
+    const nudgeAt = new Date(now.getTime() - 15 * 60 * 1000);
+    const { db, ticketUpdates } = makeMockDb({
+      id: "t4",
+      code: "2608264",
+      status: "OPEN",
+      customerId: "c4",
+      phone: "5491100000004",
+      lastMessageAt: nudgeAt,
+      messages: [
+        {
+          direction: "OUTBOUND",
+          from: "BOT",
+          createdAt: nudgeAt,
+          rawPayload: { autoReplyKind: IDLE_NUDGE_KIND },
+        },
+        {
+          direction: "OUTBOUND",
+          from: "BOT",
+          createdAt: botAt,
+          rawPayload: { source: "whatsapp_turn" },
+        },
+      ],
+    });
+
+    const result = await runIdleConversationFollowupCycle({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client: db as any,
+      now,
+      deps: {
+        sendWhatsApp: async () => {
+          throw new Error("bbc down");
+        },
+        clearPending: async () => undefined,
+        reactivateAfterClose: async () => true,
+      },
+    });
+
+    assert.equal(result.closed, 1);
+    assert.ok(
+      ticketUpdates.some(
+        (u) => (u as { status?: string }).status === "RESOLVED",
+      ),
+    );
   });
 });

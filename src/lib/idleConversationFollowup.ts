@@ -210,17 +210,8 @@ async function closeTicketForIdle(params: {
     ? buildIdleCloseMessageWithFeedbackAsk(IDLE_CLOSE_MESSAGE)
     : IDLE_CLOSE_MESSAGE;
 
-  const sent = await sendAndPersistBotMessage({
-    db: params.db,
-    ticketId: params.ticket.id,
-    phone: params.ticket.customer.phone,
-    message: closeMessage,
-    kind: IDLE_CLOSE_KIND,
-    now: params.now,
-    deps: params.deps,
-  });
-  if (!sent) return false;
-
+  // RESOLVED primero: si WA/BBC falla a mitad, el caso no queda abierto con el texto
+  // de "cierro…" solo en el eco de message.outgoing (prod 2026-10-19, ticket 19102613).
   const previousStatus = params.ticket.status;
 
   await params.db.ticket.update({
@@ -264,6 +255,21 @@ async function closeTicketForIdle(params: {
     },
     params.db,
   );
+
+  const sent = await sendAndPersistBotMessage({
+    db: params.db,
+    ticketId: params.ticket.id,
+    phone: params.ticket.customer.phone,
+    message: closeMessage,
+    kind: IDLE_CLOSE_KIND,
+    now: params.now,
+    deps: params.deps,
+  });
+  if (!sent) {
+    console.error(
+      `[idleFollowup] ticket ${params.ticket.code} quedó RESOLVED pero falló el envío WA del cierre`,
+    );
+  }
 
   console.log(`[idleFollowup] cerrado por idle ${params.ticket.code}`);
   return true;

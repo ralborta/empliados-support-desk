@@ -1377,17 +1377,26 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  // Despedida / "No. Gracias." sin CONFIRMO pendiente → cierre, no búsqueda de flota.
+  // Despedida / "No. Gracias." sin CONFIRMO pendiente → cerrar caso + encuesta, no flota.
   // Bug real 2026-09-28: tras listado + nudge idle, «No. Gracias.» → Unidad no encontrada.
+  // Bug real 2026-10-19: soft bye sin RESOLVED ni nota 1–10.
   if (
     looksLikeConversationClosing(selectionText) &&
     !pendingKind &&
     !hasAnyPendingConfirmation(thread) &&
     !pendingAction?.payload
   ) {
+    const { handleCustomerConversationCloseRequest } = await import(
+      "@/lib/customerConversationClose"
+    );
+    const closeResult = await handleCustomerConversationCloseRequest({
+      rawPhone,
+      messageText: selectionText,
+      source: "whatsapp_turn_soft_close",
+    });
     return {
-      message: formatSoftClose("bye"),
-      executor: "info_guides",
+      message: closeResult.replyMessage || formatSoftClose("bye"),
+      executor: "odoo_ticket",
       ok: true,
     };
   }

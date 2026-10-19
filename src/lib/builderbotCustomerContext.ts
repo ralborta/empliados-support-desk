@@ -875,12 +875,16 @@ export async function customerRegisteredContextResponse(
       nextFlow = "router";
       responseMessage = "";
     } else {
-    // Despedida real ("adiós", "nada más gracias", "no gracias", "hasta luego"): cerrar
-    // la charla con calidez, SIN pregunta de seguimiento (evita el loop de "¿necesitás
-    // algo más?" repetido) y SIN caer al router (que reabría el último trámite operativo
-    // y repetía un reporte viejo — bug real, producción 2026-07-23).
+    // Despedida real ("adiós", "nada más gracias", "hasta luego"): cerrar ticket + encuesta.
+    // Antes solo decía chau y el caso quedaba abierto sin nota 1–10 (prod 2026-10-19).
+    const closeResult = await handleCustomerConversationCloseRequest({
+      rawPhone: trimmed,
+      messageText: selectionText,
+      source: "builderbot_context_soft_close",
+    });
     nextFlow = "reply";
-    if (!responseMessage) {
+    responseMessage = closeResult.replyMessage;
+    if (!closeResult.closed && !responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
       responseMessage = firstName
         ? `${formatSoftClose("bye")} ${firstName}.`
