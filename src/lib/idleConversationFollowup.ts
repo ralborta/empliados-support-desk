@@ -19,6 +19,11 @@ import {
   IDLE_NUDGE_KIND,
   IDLE_NUDGE_MESSAGE,
 } from "@/lib/idleFollowupMeta";
+import {
+  buildIdleCloseMessageWithFeedbackAsk,
+  isKiraServiceFeedbackEnabled,
+  markServiceFeedbackAwaitingScore,
+} from "@/lib/kiraServiceFeedback";
 
 const DEFAULT_NUDGE_MS = 15 * 60 * 1000;
 const DEFAULT_CLOSE_MS = 30 * 60 * 1000;
@@ -200,11 +205,16 @@ async function closeTicketForIdle(params: {
   now: Date;
   deps: IdleFollowupDeps;
 }): Promise<boolean> {
+  const feedbackOn = isKiraServiceFeedbackEnabled();
+  const closeMessage = feedbackOn
+    ? buildIdleCloseMessageWithFeedbackAsk(IDLE_CLOSE_MESSAGE)
+    : IDLE_CLOSE_MESSAGE;
+
   const sent = await sendAndPersistBotMessage({
     db: params.db,
     ticketId: params.ticket.id,
     phone: params.ticket.customer.phone,
-    message: IDLE_CLOSE_MESSAGE,
+    message: closeMessage,
     kind: IDLE_CLOSE_KIND,
     now: params.now,
     deps: params.deps,
@@ -233,9 +243,14 @@ async function closeTicketForIdle(params: {
         status: "RESOLVED",
         resolution: "IDLE_TIMEOUT",
         source: "idle_conversation_followup",
+        ...(feedbackOn ? { serviceFeedbackAsk: true } : {}),
       },
     },
   });
+
+  if (feedbackOn) {
+    await markServiceFeedbackAwaitingScore(params.ticket.id, params.db);
+  }
 
   await params.deps.clearPending(params.db, params.ticket.customer.phone);
 

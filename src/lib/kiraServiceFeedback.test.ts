@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildCloseMessageWithFeedbackAsk,
+  buildIdleCloseMessageWithFeedbackAsk,
   looksLikeFeedbackSkip,
   parseServiceFeedbackScore,
 } from "./kiraServiceFeedback";
@@ -26,5 +27,13 @@ describe("kiraServiceFeedback", () => {
     assert.match(msg, /1 al 10/i);
     assert.match(msg, /cerré tu consulta/i);
     assert.doesNotMatch(msg, /encuesta|califique el servicio|sugerencias tienen/i);
+  });
+
+  it("el cierre idle también pide la nota", () => {
+    const msg = buildIdleCloseMessageWithFeedbackAsk(
+      "Como no tuve respuesta, cierro esta consulta por ahora.",
+    );
+    assert.match(msg, /cierro esta consulta/i);
+    assert.match(msg, /1 al 10/i);
   });
 });

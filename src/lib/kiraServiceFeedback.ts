@@ -13,12 +13,22 @@ export function isKiraServiceFeedbackEnabled(): boolean {
 
 const FEEDBACK_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** Pedido de nota 1–10 (sin el “cerré…”): se concatena a cierres idle u otros. */
+export function buildServiceFeedbackScoreAsk(): string {
+  return "Antes de irme: del *1 al 10*, ¿qué tan bien te sirvió la ayuda de hoy?";
+}
+
 /** Cierre + pedido de nota (1–10). Tono corto; no suena a formulario. */
 export function buildCloseMessageWithFeedbackAsk(): string {
   return (
     "Listo, cerré tu consulta. Gracias por escribirnos.\n\n" +
-    "Antes de irme: del *1 al 10*, ¿qué tan bien te sirvió la ayuda de hoy?"
+    buildServiceFeedbackScoreAsk()
   );
+}
+
+/** Cierre por inactividad + misma encuesta (si no, el idle cerraba sin pedir nota). */
+export function buildIdleCloseMessageWithFeedbackAsk(idleCloseMessage: string): string {
+  return `${idleCloseMessage.trim()}\n\n${buildServiceFeedbackScoreAsk()}`;
 }
 
 export function buildFeedbackCommentAsk(score: number): string {
