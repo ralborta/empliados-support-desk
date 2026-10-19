@@ -925,14 +925,10 @@ export async function runTurnExecutorPhase(params: {
     const execResult = await invokeExecutor("odoo_ticket", rawPhone, selectionText, apiKey);
     const execMessage = messageFromPayload(execResult);
     const execOk = execResult.ok !== false && execResult.ok_s !== "false";
-    const { buildCloseMessageWithFeedbackAsk, isKiraServiceFeedbackEnabled } = await import(
-      "@/lib/kiraServiceFeedback"
-    );
-    const fallbackClose = isKiraServiceFeedbackEnabled()
-      ? buildCloseMessageWithFeedbackAsk()
-      : "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.";
     return {
-      message: execMessage || fallbackClose,
+      message:
+        execMessage ||
+        "Listo, cerré tu consulta. Gracias por escribirnos. Si necesitás algo más, quedo a disposición por este medio.",
       executor: "odoo_ticket",
       ok: execOk,
     };
@@ -1377,26 +1373,18 @@ export async function runTurnExecutorPhase(params: {
     };
   }
 
-  // Despedida / "No. Gracias." sin CONFIRMO pendiente → cerrar caso + encuesta, no flota.
+  // Despedida / "No. Gracias." sin CONFIRMO pendiente → cierre social, no búsqueda de flota.
   // Bug real 2026-09-28: tras listado + nudge idle, «No. Gracias.» → Unidad no encontrada.
-  // Bug real 2026-10-19: soft bye sin RESOLVED ni nota 1–10.
+  // Encuesta 1–10: al éxito del trámite, no en la despedida.
   if (
     looksLikeConversationClosing(selectionText) &&
     !pendingKind &&
     !hasAnyPendingConfirmation(thread) &&
     !pendingAction?.payload
   ) {
-    const { handleCustomerConversationCloseRequest } = await import(
-      "@/lib/customerConversationClose"
-    );
-    const closeResult = await handleCustomerConversationCloseRequest({
-      rawPhone,
-      messageText: selectionText,
-      source: "whatsapp_turn_soft_close",
-    });
     return {
-      message: closeResult.replyMessage || formatSoftClose("bye"),
-      executor: "odoo_ticket",
+      message: formatSoftClose("bye"),
+      executor: "info_guides",
       ok: true,
     };
   }

@@ -1197,7 +1197,17 @@ export async function POST(req: NextRequest) {
   }
 
   const baseResponse = `Perfecto, deje registrada tu solicitud de ${service.toLowerCase()} para ${company}, patente ${plate}. Un asesor de Atención al cliente la va a revisar. Te avisamos por este medio cualquier novedad.`;
-  const responseMessage = odooRef ? withOdooCaseAssignedSuffix(baseResponse, odooRef) : baseResponse;
+  let responseMessage = odooRef ? withOdooCaseAssignedSuffix(baseResponse, odooRef) : baseResponse;
+  {
+    const { appendServiceFeedbackAskAfterTramiteSuccess } = await import(
+      "@/lib/kiraServiceFeedback"
+    );
+    responseMessage = await appendServiceFeedbackAskAfterTramiteSuccess({
+      message: responseMessage,
+      rawPhone,
+      ticketId: ticket.id,
+    });
+  }
 
   await prisma.ticketMessage.create({
     data: {

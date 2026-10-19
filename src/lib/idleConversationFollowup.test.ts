@@ -385,8 +385,8 @@ describe("runIdleConversationFollowupCycle (mock DB+WA)", () => {
 
     assert.equal(result.closed, 1);
     assert.equal(result.nudged, 0);
-    assert.match(sent[0] ?? "", /cierro esta consulta por ahora/i);
-    assert.match(sent[0] ?? "", /1 al 10/i);
+    assert.equal(sent[0], IDLE_CLOSE_MESSAGE);
+    assert.doesNotMatch(sent[0] ?? "", /1 al 10/i);
     assert.equal(
       (createdMessages[0] as { rawPayload: { autoReplyKind: string } }).rawPayload.autoReplyKind,
       IDLE_CLOSE_KIND,

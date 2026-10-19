@@ -1284,9 +1284,19 @@ export async function POST(req: NextRequest) {
   }
 
   const certUrl = result.downloadUrl ?? result.url;
-  const responseMessage = certUrl
+  let responseMessage = certUrl
     ? `Perfecto, generé el certificado de cobertura para ${company}, patente ${plateDisplay}.\n${certUrl}`
     : `Perfecto, generé el certificado de cobertura para ${company}, patente ${plateDisplay}. ${result.message ?? "La solicitud fue procesada por Wara."}`;
+
+  {
+    const { appendServiceFeedbackAskAfterTramiteSuccess } = await import(
+      "@/lib/kiraServiceFeedback"
+    );
+    responseMessage = await appendServiceFeedbackAskAfterTramiteSuccess({
+      message: responseMessage,
+      rawPhone,
+    });
+  }
 
   if (isConversationNotebookEnabled()) {
     await clearSessionNotebook(prisma, rawPhone);

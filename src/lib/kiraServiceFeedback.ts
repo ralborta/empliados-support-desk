@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { looksLikeGreeting } from "@/lib/waraApi";
 import { looksLikeCustomerConversationCloseRequest } from "@/lib/customerConversationCloseDetect";
 import { findCustomerByWhatsAppNumber } from "@/lib/whatsappPhone";
+import { OPEN_TICKET_THREAD_STATUSES } from "@/lib/ticketThreading";
 
 /** Opt-out: WARA_SERVICE_FEEDBACK_ENABLED=false */
 export function isKiraServiceFeedbackEnabled(): boolean {
@@ -13,12 +14,12 @@ export function isKiraServiceFeedbackEnabled(): boolean {
 
 const FEEDBACK_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Pedido de nota 1–10 (sin el “cerré…”): se concatena a cierres idle u otros. */
+/** Pedido de nota 1–10 tras resolver un trámite (no al cerrar la charla). */
 export function buildServiceFeedbackScoreAsk(): string {
-  return "Antes de irme: del *1 al 10*, ¿qué tan bien te sirvió la ayuda de hoy?";
+  return "Del *1 al 10*, ¿qué tan bien te sirvió la ayuda de hoy?";
 }
 
-/** Cierre + pedido de nota (1–10). Tono corto; no suena a formulario. */
+/** @deprecated Preferí appendServiceFeedbackAskAfterTramiteSuccess en éxitos operativos. */
 export function buildCloseMessageWithFeedbackAsk(): string {
   return (
     "Listo, cerré tu consulta. Gracias por escribirnos.\n\n" +
@@ -26,9 +27,48 @@ export function buildCloseMessageWithFeedbackAsk(): string {
   );
 }
 
-/** Cierre por inactividad + misma encuesta (si no, el idle cerraba sin pedir nota). */
-export function buildIdleCloseMessageWithFeedbackAsk(idleCloseMessage: string): string {
-  return `${idleCloseMessage.trim()}\n\n${buildServiceFeedbackScoreAsk()}`;
+/**
+ * Tras odómetro/certificado/mantenimiento OK: pega la nota 1–10 al mensaje de éxito
+ * y deja la encuesta pendiente. No actúa en cierres idle/despedida.
+ */
+export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
+  message: string;
+  rawPhone: string;
+  ticketId?: string | null;
+  client?: PrismaClient;
+}): Promise<string> {
+  const base = params.message.trim();
+  if (!base || !isKiraServiceFeedbackEnabled()) return params.message;
+
+  const db = params.client ?? prisma;
+  const customer = await findCustomerByWhatsAppNumber(db, params.rawPhone);
+  if (!customer) return params.message;
+
+  const pending = await findOpenFeedbackPending(customer.id, db);
+  if (pending) return params.message;
+
+  let ticketId = params.ticketId?.trim() || null;
+  if (!ticketId) {
+    const open = await db.ticket.findFirst({
+      where: { customerId: customer.id, status: { in: OPEN_TICKET_THREAD_STATUSES } },
+      orderBy: { lastMessageAt: "desc" },
+      select: { id: true },
+    });
+    ticketId =
+      open?.id ??
+      (
+        await db.ticket.findFirst({
+          where: { customerId: customer.id },
+          orderBy: { lastMessageAt: "desc" },
+          select: { id: true },
+        })
+      )?.id ??
+      null;
+  }
+  if (!ticketId) return params.message;
+
+  await markServiceFeedbackAwaitingScore(ticketId, db);
+  return `${base}\n\n${buildServiceFeedbackScoreAsk()}`;
 }
 
 export function buildFeedbackCommentAsk(score: number): string {

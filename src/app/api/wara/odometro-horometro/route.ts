@@ -3133,6 +3133,15 @@ export async function POST(req: NextRequest) {
       ? "Confirmación de cambio de odómetro/horómetro registrado con éxito"
       : "Aviso de error al registrar el cambio de odómetro/horómetro",
   });
+  if (result.ok) {
+    const { appendServiceFeedbackAskAfterTramiteSuccess } = await import(
+      "@/lib/kiraServiceFeedback"
+    );
+    responseMessage = await appendServiceFeedbackAskAfterTramiteSuccess({
+      message: responseMessage,
+      rawPhone,
+    });
+  }
   await appendOutboundBotMessage(rawPhone, responseMessage, {
     source: "wara_odometro_response",
     ok: result.ok,

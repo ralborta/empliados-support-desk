@@ -19,12 +19,6 @@ import {
   IDLE_NUDGE_KIND,
   IDLE_NUDGE_MESSAGE,
 } from "@/lib/idleFollowupMeta";
-import {
-  buildIdleCloseMessageWithFeedbackAsk,
-  isKiraServiceFeedbackEnabled,
-  markServiceFeedbackAwaitingScore,
-} from "@/lib/kiraServiceFeedback";
-
 const DEFAULT_NUDGE_MS = 15 * 60 * 1000;
 const DEFAULT_CLOSE_MS = 30 * 60 * 1000;
 const DEFAULT_BATCH = 40;
@@ -205,13 +199,9 @@ async function closeTicketForIdle(params: {
   now: Date;
   deps: IdleFollowupDeps;
 }): Promise<boolean> {
-  const feedbackOn = isKiraServiceFeedbackEnabled();
-  const closeMessage = feedbackOn
-    ? buildIdleCloseMessageWithFeedbackAsk(IDLE_CLOSE_MESSAGE)
-    : IDLE_CLOSE_MESSAGE;
-
   // RESOLVED primero: si WA/BBC falla a mitad, el caso no queda abierto con el texto
   // de "cierro…" solo en el eco de message.outgoing (prod 2026-10-19, ticket 19102613).
+  // Encuesta 1–10: al éxito del trámite, no en este cierre idle.
   const previousStatus = params.ticket.status;
 
   await params.db.ticket.update({
@@ -234,14 +224,9 @@ async function closeTicketForIdle(params: {
         status: "RESOLVED",
         resolution: "IDLE_TIMEOUT",
         source: "idle_conversation_followup",
-        ...(feedbackOn ? { serviceFeedbackAsk: true } : {}),
       },
     },
   });
-
-  if (feedbackOn) {
-    await markServiceFeedbackAwaitingScore(params.ticket.id, params.db);
-  }
 
   await params.deps.clearPending(params.db, params.ticket.customer.phone);
 
@@ -260,7 +245,7 @@ async function closeTicketForIdle(params: {
     db: params.db,
     ticketId: params.ticket.id,
     phone: params.ticket.customer.phone,
-    message: closeMessage,
+    message: IDLE_CLOSE_MESSAGE,
     kind: IDLE_CLOSE_KIND,
     now: params.now,
     deps: params.deps,

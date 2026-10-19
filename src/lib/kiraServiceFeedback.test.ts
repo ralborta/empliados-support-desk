@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildCloseMessageWithFeedbackAsk,
-  buildIdleCloseMessageWithFeedbackAsk,
+  buildServiceFeedbackScoreAsk,
   looksLikeFeedbackSkip,
   parseServiceFeedbackScore,
 } from "./kiraServiceFeedback";
@@ -22,18 +22,11 @@ describe("kiraServiceFeedback", () => {
     assert.equal(looksLikeFeedbackSkip("podrían sumar alertas"), false);
   });
 
-  it("el cierre con ask pide 1–10 sin sonar a formulario rígido", () => {
-    const msg = buildCloseMessageWithFeedbackAsk();
-    assert.match(msg, /1 al 10/i);
-    assert.match(msg, /cerré tu consulta/i);
-    assert.doesNotMatch(msg, /encuesta|califique el servicio|sugerencias tienen/i);
-  });
-
-  it("el cierre idle también pide la nota", () => {
-    const msg = buildIdleCloseMessageWithFeedbackAsk(
-      "Como no tuve respuesta, cierro esta consulta por ahora.",
-    );
-    assert.match(msg, /cierro esta consulta/i);
-    assert.match(msg, /1 al 10/i);
+  it("el ask de nota pide 1–10 sin sonar a formulario rígido", () => {
+    const ask = buildServiceFeedbackScoreAsk();
+    assert.match(ask, /1 al 10/i);
+    assert.doesNotMatch(ask, /encuesta|califique el servicio|sugerencias tienen/i);
+    const legacy = buildCloseMessageWithFeedbackAsk();
+    assert.match(legacy, /1 al 10/i);
   });
 });

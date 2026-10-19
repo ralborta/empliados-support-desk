@@ -875,16 +875,9 @@ export async function customerRegisteredContextResponse(
       nextFlow = "router";
       responseMessage = "";
     } else {
-    // Despedida real ("adiós", "nada más gracias", "hasta luego"): cerrar ticket + encuesta.
-    // Antes solo decía chau y el caso quedaba abierto sin nota 1–10 (prod 2026-10-19).
-    const closeResult = await handleCustomerConversationCloseRequest({
-      rawPhone: trimmed,
-      messageText: selectionText,
-      source: "builderbot_context_soft_close",
-    });
+    // Despedida real: cierre cálido. La encuesta 1–10 va al éxito del trámite, no acá.
     nextFlow = "reply";
-    responseMessage = closeResult.replyMessage;
-    if (!closeResult.closed && !responseMessage) {
+    if (!responseMessage) {
       const firstName = customer?.name?.trim().split(/\s+/)[0];
       responseMessage = firstName
         ? `${formatSoftClose("bye")} ${firstName}.`
