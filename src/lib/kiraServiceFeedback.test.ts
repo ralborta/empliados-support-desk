@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildCloseMessageWithFeedbackAsk,
   buildServiceFeedbackScoreAsk,
+  looksLikeFeedbackAbortToOps,
   looksLikeFeedbackSkip,
   parseServiceFeedbackScore,
 } from "./kiraServiceFeedback";
@@ -20,6 +21,14 @@ describe("kiraServiceFeedback", () => {
     assert.equal(looksLikeFeedbackSkip("listo"), true);
     assert.equal(looksLikeFeedbackSkip("nada"), true);
     assert.equal(looksLikeFeedbackSkip("podrían sumar alertas"), false);
+  });
+
+  it("una consulta nueva (código de unidad / patente) aborta la encuesta", () => {
+    assert.equal(looksLikeFeedbackAbortToOps("900-014"), true);
+    assert.equal(looksLikeFeedbackAbortToOps("900-014 no reporta"), true);
+    assert.equal(looksLikeFeedbackAbortToOps("AI 391 SJ"), true);
+    assert.equal(looksLikeFeedbackAbortToOps("10"), false);
+    assert.equal(looksLikeFeedbackAbortToOps("listo"), false);
   });
 
   it("el ask de nota pide 1–10 sin sonar a formulario rígido", () => {

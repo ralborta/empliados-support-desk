@@ -29,8 +29,8 @@ export function buildCloseMessageWithFeedbackAsk(): string {
 
 /**
  * Tras resolver un tema (GPS, odómetro, certificado, mantenimiento): pega la nota
- * 1–10 al mensaje de respuesta y deja la encuesta pendiente. Una sola vez por ticket
- * (un ticket con 6 consultas GPS no pide la nota 6 veces). No actúa en cierres.
+ * 1–10 al mensaje de respuesta y deja la encuesta pendiente. Cada acción resuelta
+ * pide la nota (si ya hay una esperando respuesta, no apila otra). No actúa en cierres.
  */
 export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
   message: string;
@@ -67,17 +67,6 @@ export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
       null;
   }
   if (!ticketId) return params.message;
-
-  // Una encuesta por ticket: si ya se pidió/registró en este caso, no repetir.
-  const alreadyAsked = await db.ticketEvent.findFirst({
-    where: {
-      ticketId,
-      type: "AUTO_REPLY",
-      payload: { path: ["kind"], equals: "service_feedback" },
-    },
-    select: { id: true },
-  });
-  if (alreadyAsked) return params.message;
 
   await markServiceFeedbackAwaitingScore(ticketId, db);
   return `${base}\n\n${buildServiceFeedbackScoreAsk()}`;
@@ -157,12 +146,23 @@ export function looksLikeFeedbackAbortToOps(text: string | undefined | null): bo
   if (looksLikeCustomerConversationCloseRequest(t)) return true;
   if (t.length > 80) return true;
   if (
-    /\b(odometro|horometro|certificado|patente|unidad|gps|mantenimiento|asesor|ticket|caso)\b/i.test(
+    /\b(odometro|horometro|certificado|patente|unidad|gps|mantenimiento|asesor|ticket|caso|reporta|reporte|posicion|ubicacion|señal|senal)\b/i.test(
       t,
     )
   ) {
     return true;
   }
+  // Código interno de unidad ("900-014", "600182") o patente suelta ("AI 391 SJ"):
+  // es una consulta nueva, no la nota. Bug real 2026-10-20: "900-014" con encuesta
+  // pendiente recibía "Con un número del 1 al 10…" en vez del estado GPS.
+  const norm = t
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/^\d{3,4}[-\s]?\d{3}$/.test(norm)) return true;
+  if (/^[A-Z]{2,3}\s?\d{3}\s?[A-Z]{0,2}$/.test(norm)) return true;
   return false;
 }
 
