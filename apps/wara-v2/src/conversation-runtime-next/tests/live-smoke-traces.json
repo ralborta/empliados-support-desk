@@ -1,0 +1,617 @@
+{
+  "0": {
+    "scenario": "saludo_con_gps_pendiente",
+    "turnId": "s1",
+    "message": "¿Dónde está la unidad?",
+    "reply": "📍 *Estado de la unidad*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "start_task",
+    "task": "gps",
+    "authorizedCapabilities": [
+      "gps.get_status"
+    ],
+    "executedCapabilities": [
+      "gps.get_status"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "Ubicación GPS",
+      "requests": [
+        {
+          "serviceId": "gps.status",
+          "domain": "gps",
+          "goal": "ubicación",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "1": {
+    "scenario": "saludo_con_gps_pendiente",
+    "turnId": "s2",
+    "message": "Hola",
+    "reply": "👋 *Hola, soy Atilio*\nAsistente virtual de WARA.\n🏢 Seguimos con *Smoke Co*.\n📌 Tenemos pendiente el estado de la unidad.\n\n¿En qué te ayudo?\n• 🛣 Odómetro / ⏱ horómetro\n• 📋 Certificado\n• 📍 GPS / reporte\n• 🔧 Mantenimiento",
+    "action": "greet",
+    "task": null,
+    "authorizedCapabilities": [],
+    "executedCapabilities": [],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "greeting",
+      "relation": "pause",
+      "normalizedMeaning": "Saludo",
+      "requests": [],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.95
+    }
+  },
+  "2": {
+    "scenario": "pregunta_lateral_tarea_abierta",
+    "turnId": "l1",
+    "message": "gps de la unidad",
+    "reply": "📍 *Estado de la unidad*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "start_task",
+    "task": "gps",
+    "authorizedCapabilities": [
+      "gps.get_status"
+    ],
+    "executedCapabilities": [
+      "gps.get_status"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "GPS unidad",
+      "requests": [
+        {
+          "serviceId": "gps.status",
+          "domain": "gps",
+          "goal": "ubicación",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "3": {
+    "scenario": "pregunta_lateral_tarea_abierta",
+    "turnId": "l2",
+    "message": "¿cuál es mi empresa?",
+    "reply": "🏢 Empresa activa: *Smoke Co*.",
+    "action": "answer_lateral",
+    "task": null,
+    "authorizedCapabilities": [
+      "company.get_active"
+    ],
+    "executedCapabilities": [
+      "company.get_active"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "question",
+      "relation": "side_question",
+      "normalizedMeaning": "Empresa activa",
+      "requests": [
+        {
+          "serviceId": "company.active",
+          "domain": "company",
+          "goal": "empresa",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "4": {
+    "scenario": "cambio_explicito_odometro",
+    "turnId": "c1",
+    "message": "ubicación de la unidad",
+    "reply": "📍 *Estado de la unidad*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "start_task",
+    "task": "gps",
+    "authorizedCapabilities": [
+      "gps.get_status"
+    ],
+    "executedCapabilities": [
+      "gps.get_status"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "Ubicación",
+      "requests": [
+        {
+          "serviceId": "gps.status",
+          "domain": "gps",
+          "goal": "ubicación",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "5": {
+    "scenario": "cambio_explicito_odometro",
+    "turnId": "c2",
+    "message": "Dejá eso, mejor carguemos el kilometraje.",
+    "reply": "🛣 *Odómetro*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "switch_task",
+    "task": "odometer",
+    "authorizedCapabilities": [
+      "odometer.prepare"
+    ],
+    "executedCapabilities": [
+      "odometer.prepare"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "odometer",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "switch",
+      "normalizedMeaning": "Cambio a odómetro",
+      "requests": [
+        {
+          "serviceId": "odometer.prepare",
+          "domain": "odometer",
+          "goal": "kilometraje",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.92
+    }
+  },
+  "6": {
+    "scenario": "cambio_ambiguo_keep_or_close",
+    "turnId": "a1",
+    "message": "gps de la unidad",
+    "reply": "📍 *Estado de la unidad*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "start_task",
+    "task": "gps",
+    "authorizedCapabilities": [
+      "gps.get_status"
+    ],
+    "executedCapabilities": [
+      "gps.get_status"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "GPS",
+      "requests": [
+        {
+          "serviceId": "gps.status",
+          "domain": "gps",
+          "goal": "ubicación",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "7": {
+    "scenario": "cambio_ambiguo_keep_or_close",
+    "turnId": "a2",
+    "message": "quiero el certificado",
+    "reply": "Tenías pendiente estado de la unidad. ¿Seguimos con eso o preferís otra consulta?",
+    "action": "ask",
+    "task": null,
+    "authorizedCapabilities": [],
+    "executedCapabilities": [],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "Certificado sin abandono explícito",
+      "requests": [
+        {
+          "serviceId": "certificate.prepare",
+          "domain": "certificate",
+          "goal": "certificado",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.8
+    }
+  },
+  "8": {
+    "scenario": "correccion_antes_confirmar",
+    "turnId": "r2",
+    "message": "confirmo, pero con fecha 15/01",
+    "reply": "¿En qué te ayudo?",
+    "action": "continue_task",
+    "task": "certificate",
+    "authorizedCapabilities": [],
+    "executedCapabilities": [],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "certificate",
+    "activeTaskStatus": "awaiting_confirmation",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "correction",
+      "relation": "confirm",
+      "normalizedMeaning": "Confirma con corrección de fecha",
+      "requests": [],
+      "references": [],
+      "corrections": [
+        {
+          "field": "date",
+          "value": "2026-01-15"
+        }
+      ],
+      "answersExpectedField": false,
+      "confidence": 0.9,
+      "confirmation": {
+        "intended": true,
+        "containsCorrections": true
+      }
+    }
+  },
+  "9": {
+    "scenario": "confirmo_sin_operacion",
+    "turnId": "p1",
+    "message": "CONFIRMO",
+    "reply": "No tengo ninguna operación pendiente para confirmar.",
+    "action": "ask",
+    "task": null,
+    "authorizedCapabilities": [],
+    "executedCapabilities": [],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "confirmation",
+      "relation": "confirm",
+      "normalizedMeaning": "Confirma sin pending",
+      "requests": [],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "10": {
+    "scenario": "referencia_la_segunda",
+    "turnId": "seg1",
+    "message": "la segunda",
+    "reply": "¿En qué te ayudo?",
+    "action": "continue_task",
+    "task": null,
+    "authorizedCapabilities": [],
+    "executedCapabilities": [],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "answer",
+      "relation": "answer_expected",
+      "normalizedMeaning": "Segunda unidad del listado",
+      "requests": [],
+      "references": [
+        {
+          "type": "index",
+          "expression": "2",
+          "index": 2,
+          "source": "last_presented"
+        }
+      ],
+      "corrections": [],
+      "answersExpectedField": true,
+      "confidence": 0.9
+    }
+  },
+  "11": {
+    "scenario": "referencia_la_misma",
+    "turnId": "mis1",
+    "message": "gps de la misma",
+    "reply": "📍 *Estado de la unidad*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "start_task",
+    "task": "gps",
+    "authorizedCapabilities": [
+      "gps.get_status"
+    ],
+    "executedCapabilities": [
+      "gps.get_status"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "continue",
+      "normalizedMeaning": "GPS de la misma unidad",
+      "requests": [
+        {
+          "serviceId": "gps.status",
+          "domain": "gps",
+          "goal": "ubicación",
+          "entities": {}
+        }
+      ],
+      "references": [
+        {
+          "type": "unit",
+          "expression": "la misma",
+          "source": "active"
+        }
+      ],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.85
+    }
+  },
+  "12": {
+    "scenario": "dos_solicitudes_un_mensaje",
+    "turnId": "d1",
+    "message": "gps y certificado de la 431",
+    "reply": "¿Primero el GPS o el certificado de la 431?",
+    "action": "ask",
+    "task": null,
+    "authorizedCapabilities": [],
+    "executedCapabilities": [],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "GPS y certificado de la 431",
+      "requests": [
+        {
+          "serviceId": "gps.status",
+          "domain": "gps",
+          "goal": "ubicación",
+          "entities": {}
+        },
+        {
+          "serviceId": "certificate.prepare",
+          "domain": "certificate",
+          "goal": "certificado",
+          "entities": {
+            "plate": "431"
+          }
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.75,
+      "ambiguity": {
+        "reason": "Dos trámites en un mensaje",
+        "alternatives": [
+          "gps",
+          "certificate"
+        ],
+        "clarificationQuestion": "¿Primero el GPS o el certificado de la 431?"
+      }
+    }
+  },
+  "13": {
+    "scenario": "consulta_general_tarea_abierta",
+    "turnId": "g1",
+    "message": "gps de la unidad",
+    "reply": "📍 *Estado de la unidad*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "start_task",
+    "task": "gps",
+    "authorizedCapabilities": [
+      "gps.get_status"
+    ],
+    "executedCapabilities": [
+      "gps.get_status"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "GPS",
+      "requests": [
+        {
+          "serviceId": "gps.status",
+          "domain": "gps",
+          "goal": "ubicación",
+          "entities": {}
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "14": {
+    "scenario": "consulta_general_tarea_abierta",
+    "turnId": "g2",
+    "message": "¿cómo funciona el certificado?",
+    "reply": "El certificado de cobertura acredita la unidad ante controles. Se emite sobre una patente concreta.",
+    "action": "answer_lateral",
+    "task": null,
+    "authorizedCapabilities": [
+      "domain.answer"
+    ],
+    "executedCapabilities": [
+      "domain.answer"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "gps",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "question",
+      "relation": "side_question",
+      "normalizedMeaning": "Consulta general sobre certificado",
+      "requests": [
+        {
+          "serviceId": "domain.answer",
+          "domain": "knowledge",
+          "goal": "explicar certificado",
+          "entities": {
+            "topic": "certificate"
+          }
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.85
+    }
+  },
+  "15": {
+    "scenario": "servicio_mantenimiento",
+    "turnId": "m1",
+    "message": "registrar mantenimiento de la 431",
+    "reply": "🔧 *Mantenimiento*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "start_task",
+    "task": "maintenance",
+    "authorizedCapabilities": [
+      "maintenance.prepare"
+    ],
+    "executedCapabilities": [
+      "maintenance.prepare"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "maintenance",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "standalone",
+      "normalizedMeaning": "Registrar mantenimiento",
+      "requests": [
+        {
+          "serviceId": "maintenance.prepare",
+          "domain": "maintenance",
+          "goal": "mantenimiento",
+          "entities": {
+            "plate": "431"
+          }
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  },
+  "16": {
+    "scenario": "colloquial_typos",
+    "turnId": "t1",
+    "message": "dejá eso mejor cargemos el kilometraje de la 431",
+    "reply": "🛣 *Odómetro*\n\n¿De qué unidad? Pasame la *patente* o el código (ej. M900-071).",
+    "action": "switch_task",
+    "task": "odometer",
+    "authorizedCapabilities": [
+      "odometer.prepare"
+    ],
+    "executedCapabilities": [
+      "odometer.prepare"
+    ],
+    "capViolation": null,
+    "writeAttempt": false,
+    "writeExecuted": false,
+    "activeTask": "odometer",
+    "activeTaskStatus": "collecting",
+    "validationOk": true,
+    "interpretation": {
+      "userAct": "request",
+      "relation": "switch",
+      "normalizedMeaning": "Abandona GPS y carga odómetro 431",
+      "requests": [
+        {
+          "serviceId": "odometer.prepare",
+          "domain": "odometer",
+          "goal": "cargar kilometraje",
+          "entities": {
+            "plate": "431"
+          }
+        }
+      ],
+      "references": [],
+      "corrections": [],
+      "answersExpectedField": false,
+      "confidence": 0.9
+    }
+  }
+}

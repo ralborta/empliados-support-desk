@@ -12,3 +12,11 @@ export type ResolutionMode =
   | "TECH_ESCALATED"
   | "CLOSED_NO_ACTION";
 
+export const resolutionModeLabels: Record<ResolutionMode, string> = {
+  CHAT_RESOLVED: "Resuelto en chat",
+  PENDING_VALIDATION: "Pendiente de validación",
+  BACKOFFICE_DERIVED: "Derivado a backoffice",
+  TECH_ESCALATED: "Escalado técnico",
+  CLOSED_NO_ACTION: "Cerrado sin acción",
+};
+

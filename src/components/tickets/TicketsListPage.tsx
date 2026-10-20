@@ -117,7 +117,7 @@ export async function TicketsListPage({
 
   return (
     <TicketsLayout showHeader={false}>
-      <div className="w-full space-y-5">
+      <div className="w-full space-y-3">
         {showToolbar ? (
           <Suspense fallback={null}>
             <TicketsPageToolbar
@@ -126,6 +126,7 @@ export async function TicketsListPage({
               basePath={basePath}
               agentes={agentes}
               isAdmin={session.user?.role === "ADMIN"}
+              showMergeButton={showMergeButton}
             />
           </Suspense>
         ) : (
@@ -142,7 +143,7 @@ export async function TicketsListPage({
           </Suspense>
         )}
 
-        {showMergeButton ? (
+        {showMergeButton && !showToolbar ? (
           <div className="flex justify-end">
             <MergeDuplicateOpenTicketsButton visible={session.user?.role === "ADMIN"} />
           </div>
@@ -155,16 +156,16 @@ export async function TicketsListPage({
             {summaryCards.map((card) => (
               <div
                 key={card.label}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+                className="rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm"
               >
-                <p className="text-xs font-medium text-slate-500">{card.label}</p>
-                <p className={`mt-0.5 text-2xl font-bold ${card.color}`}>{card.value}</p>
+                <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{card.label}</p>
+                <p className={`text-lg font-bold tabular-nums leading-tight ${card.color}`}>{card.value}</p>
               </div>
             ))}
           </div>
         ) : null}
 
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm">
           <TicketsTable
             compact
             tickets={tickets.map((t) => ({

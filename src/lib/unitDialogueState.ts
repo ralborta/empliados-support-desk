@@ -209,7 +209,8 @@ export function buildGpsAssessmentDialogueState(params: {
       hechos.push("No corresponde abrir ticket por este estado.");
     }
   } else if (params.assessment.status === "ignition_failure") {
-    hechos.push(`Reporte al día (hace ${elapsed}) pero hay inconsistencia de ignición.`);
+    hechos.push(`Reporte al día (hace ${elapsed}) pero el dato de ignición no llegó completo.`);
+    hechos.push("No es por sí solo una falla de la unidad; no corresponde ticket automático.");
     if (params.ticketIssueDetail) hechos.push(params.ticketIssueDetail);
   } else if (params.assessment.status === "stale_position") {
     hechos.push(`Pérdida de señal satelital: ${params.assessment.reason}`);

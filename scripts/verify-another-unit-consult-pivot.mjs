@@ -29,6 +29,10 @@ const pivotPhrases = [
   "tengo otros vehiculos también",
   "Puedes pasarme el estado de otra unidad",
   "pasame el estado de otra unidad",
+  "otra unidad",
+  "la otra unidad",
+  "cambiar de unidad",
+  "simplemente quiero consultar por otra unidad",
 ];
 
 console.log("— Pivot a otra unidad (no es rechazo) —");
@@ -46,6 +50,10 @@ for (const text of ["No quiero ver esa es otra", "no es esa", "es otra unidad"])
   assert(!looksLikeAnotherUnitConsultRequest(text), `looksLikeAnotherUnitConsultRequest("${text}") === false`);
   assert(looksLikeUnitRejection(text), `looksLikeUnitRejection("${text}")`);
 }
+
+console.log("\n— 'otra unidad' suelta es pivot (no rechazo) —");
+assert(looksLikeAnotherUnitConsultRequest("otra unidad"), 'pivot "otra unidad"');
+assert(!looksLikeUnitRejection("otra unidad"), 'rejection "otra unidad" === false');
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);

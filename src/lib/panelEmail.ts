@@ -7,8 +7,9 @@
  *
  * Variables:
  *   RESEND_API_KEY    → API key de Resend (dominio remitente debe estar verificado ahí)
- *   PANEL_EMAIL_FROM  → ej. "Atilio <notificaciones@nivel41.com>"
+ *   PANEL_EMAIL_FROM  → ej. "Kira <notificaciones@nivel41.com>"
  *   PANEL_BASE_URL    → https://wara.nivel41.com
+ *   WARA_SERVICE_FEEDBACK_EMAIL → destinatarios resumen diario encuesta (coma); default Lucas+Emiliano
  *   SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_SECURE=true (fallback opcional)
  */
 
@@ -16,8 +17,15 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { Resend } from "resend";
 import type { WaraHealthStatus } from "@/lib/waraHealthCheck";
+import type { BbcRuntimeStatus, BbcStatusTransition } from "@/lib/bbcRuntimeMonitor";
 
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL?.trim() || "https://wara.nivel41.com";
+
+/** Destinatarios por defecto del mail de encuesta (Lucas + Emiliano, Wara). */
+const DEFAULT_SERVICE_FEEDBACK_EMAILS = [
+  "lsalguero@waragps.com",
+  "elapaz@waragps.com",
+];
 
 type SmtpConfig = {
   host: string;
@@ -118,6 +126,92 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
   return sendViaSmtp(to, subject, html);
 }
 
+function serviceFeedbackRecipients(): string[] {
+  const raw = process.env.WARA_SERVICE_FEEDBACK_EMAIL?.trim();
+  const list = (raw || DEFAULT_SERVICE_FEEDBACK_EMAILS.join(","))
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set(list.map((e) => e.toLowerCase()))].map(
+    (lower) => list.find((e) => e.toLowerCase() === lower)!,
+  );
+}
+
+export type ServiceFeedbackSummaryRow = {
+  ticketId: string;
+  ticketCode: string;
+  cliente: string | null;
+  score: number | null;
+  comment: string | null;
+};
+
+/** Resumen diario de encuestas Kira → Lucas / Emiliano (no por cliente). */
+export async function sendServiceFeedbackDailySummaryEmail(params: {
+  dayLabel: string;
+  avgScore: number | null;
+  countWithScore: number;
+  rows: ServiceFeedbackSummaryRow[];
+}): Promise<boolean> {
+  const recipients = serviceFeedbackRecipients();
+  if (!recipients.length) return false;
+  if (params.rows.length === 0) return false;
+
+  const feedbackUrl = `${PANEL_BASE_URL}/feedback`;
+  const avgLabel = params.avgScore != null ? params.avgScore.toFixed(1) : "—";
+  const rowsHtml = params.rows
+    .slice(0, 40)
+    .map((r) => {
+      const score = r.score != null ? String(r.score) : "—";
+      const comment = r.comment ? escapeHtml(r.comment.slice(0, 200)) : "—";
+      const ticketUrl = `${PANEL_BASE_URL}/tickets/${r.ticketId}`;
+      return `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">
+          <a href="${ticketUrl}">${escapeHtml(r.ticketCode)}</a>
+        </td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${escapeHtml(r.cliente ?? "—")}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;">${escapeHtml(score)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${comment}</td>
+      </tr>`;
+    })
+    .join("");
+  const more =
+    params.rows.length > 40
+      ? `<p style="color:#64748b;font-size:12px;">…y ${params.rows.length - 40} más en el panel.</p>`
+      : "";
+
+  const html = `
+    <p>Resumen diario de feedback Kira — <strong>${escapeHtml(params.dayLabel)}</strong></p>
+    <ul>
+      <li><strong>Respuestas con nota:</strong> ${params.countWithScore}</li>
+      <li><strong>Promedio:</strong> ${escapeHtml(avgLabel)}</li>
+    </ul>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin-top:12px;">
+      <thead>
+        <tr style="background:#f8fafc;text-align:left;">
+          <th style="padding:6px 8px;">Ticket</th>
+          <th style="padding:6px 8px;">Cliente</th>
+          <th style="padding:6px 8px;">Nota</th>
+          <th style="padding:6px 8px;">Comentario</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    ${more}
+    <p style="margin-top:16px;"><a href="${feedbackUrl}">Ver Feedback Kira en el panel</a></p>
+    <p style="color:#64748b;font-size:12px;">Mensaje automático del panel Wara (1 vez al día).</p>
+  `;
+
+  const subject = `Feedback Kira ${params.dayLabel} — ${params.countWithScore} resp. · prom. ${avgLabel}`;
+  let sent = false;
+  for (const to of recipients) {
+    if (await sendEmail(to, subject, html)) {
+      sent = true;
+      console.log(`[panelEmail] Resumen feedback ${params.dayLabel} → ${to}`);
+    }
+  }
+  return sent;
+}
+
 export async function sendAdvisorWelcomeEmail(params: {
   to: string;
   name: string;
@@ -126,13 +220,13 @@ export async function sendAdvisorWelcomeEmail(params: {
   const roleLabel = params.role === "ADMIN" ? "Administrador" : "Asesor de soporte";
   const html = `
     <p>Hola ${escapeHtml(params.name)},</p>
-    <p>Te crearon una cuenta en el panel de Atilio con rol <strong>${roleLabel}</strong>.</p>
+    <p>Te crearon una cuenta en el panel de Kira con rol <strong>${roleLabel}</strong>.</p>
     <p>Ingresá acá: <a href="${PANEL_BASE_URL}/login">${PANEL_BASE_URL}/login</a></p>
     <p>Usá el email <strong>${escapeHtml(params.to)}</strong> y la contraseña que te compartió el administrador.</p>
     <p style="color:#64748b;font-size:12px;">Este es un mensaje automático del panel Wara.</p>
   `;
 
-  const ok = await sendEmail(params.to, "Tu acceso al panel Atilio", html);
+  const ok = await sendEmail(params.to, "Tu acceso al panel Kira", html);
   if (ok) console.log(`[panelEmail] Bienvenida enviada a ${params.to}`);
 }
 
@@ -149,7 +243,7 @@ export async function sendTicketAssignedEmail(params: {
   const url = `${PANEL_BASE_URL}/tickets/${params.ticketId}`;
   const html = `
     <p>Hola ${escapeHtml(params.agentName)},</p>
-    <p>${action} un caso en el panel Atilio:</p>
+    <p>${action} un caso en el panel Kira:</p>
     <ul>
       <li><strong>${escapeHtml(params.ticketCode)}</strong> — ${escapeHtml(params.ticketTitle)}</li>
       <li>Empresa: ${escapeHtml(params.companyName)}</li>
@@ -177,7 +271,7 @@ export async function sendUnassignedTicketAlertEmail(params: {
   const url = `${PANEL_BASE_URL}/tickets/${params.ticketId}`;
   const html = `
     <p>Hola ${escapeHtml(params.adminName)},</p>
-    <p>Llegó un caso nuevo y <strong>no hay ningún asesor conectado</strong> en el panel Atilio para asignarlo automáticamente:</p>
+    <p>Llegó un caso nuevo y <strong>no hay ningún asesor conectado</strong> en el panel Kira para asignarlo automáticamente:</p>
     <ul>
       <li><strong>${escapeHtml(params.ticketCode)}</strong> — ${escapeHtml(params.ticketTitle)}</li>
       <li>Empresa: ${escapeHtml(params.companyName)}</li>
@@ -197,10 +291,24 @@ export async function sendUnassignedTicketAlertEmail(params: {
 let lastWaraHealthAlertAt = 0;
 const WARA_HEALTH_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 
+const DEFAULT_BBC_ALERT_EMAIL = "ralborta@empliados.net";
+
+function opsAlertRecipients(): string[] {
+  const raw =
+    process.env.WARA_OPS_ALERT_EMAIL?.trim() ||
+    process.env.PANEL_USER_ADMIN_EMAIL?.trim() ||
+    "";
+  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+function bbcAlertRecipients(): string[] {
+  const raw = process.env.WARA_BBC_ALERT_EMAIL?.trim() || DEFAULT_BBC_ALERT_EMAIL;
+  return raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
 /** Email ops cuando Wara no responde (cron / monitor). Cooldown 30 min. */
 export async function sendWaraHealthAlertEmail(health: WaraHealthStatus): Promise<boolean> {
-  const raw = process.env.WARA_OPS_ALERT_EMAIL?.trim() || "";
-  const recipients = raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  const recipients = opsAlertRecipients();
   if (!recipients.length) return false;
 
   const now = Date.now();
@@ -227,6 +335,123 @@ export async function sendWaraHealthAlertEmail(health: WaraHealthStatus): Promis
     console.log("[panelEmail] Alerta Wara health enviada");
   }
   return sent;
+}
+
+function formatIso(iso: string | null | undefined): string {
+  return iso ? escapeHtml(iso) : "—";
+}
+
+/** Email ops en transición de estado BBC (cron / webhook). Cooldown persistido en DB. */
+export async function sendBbcTransitionAlertEmail(params: {
+  bbc: BbcRuntimeStatus;
+  transition: BbcStatusTransition;
+  probeMessage?: string;
+}): Promise<boolean> {
+  const recipients = bbcAlertRecipients();
+  if (!recipients.length) return false;
+
+  const { bbc, transition } = params;
+  const probeLine = params.probeMessage
+    ? `<li>Sonda cron: ${escapeHtml(params.probeMessage)}</li>`
+    : "";
+
+  let title: string;
+  let headline: string;
+
+  switch (transition.alertKind) {
+    case "recovery":
+      title = "[BBC] Runtime recuperado — ONLINE";
+      headline = "El runtime BBC volvió a ONLINE";
+      break;
+    case "offline":
+      title = `[BBC] Runtime OFFLINE / sesión caída`;
+      headline = "El runtime BBC (Meta) no está ONLINE";
+      break;
+    case "config_error":
+      title = "[BBC] Error de configuración";
+      headline = "BBC con error de configuración (credenciales o env vars) — no se hace reboot automático";
+      break;
+    case "degraded":
+      title = "[BBC] Runtime degradado";
+      headline = "El runtime BBC está DEGRADED";
+      break;
+    case "restart":
+      title = "[BBC] Runtime reiniciado";
+      headline = "El runtime BBC se reinició y volvió ONLINE";
+      break;
+    case "silence":
+      title = "[BBC] Silencio funcional — inbound sin respuesta";
+      headline = "Hay mensajes de clientes sin respuesta del bot (posible runtime zombie)";
+      break;
+    case "auto_reboot":
+      title = "[BBC] Auto-reboot ejecutado";
+      headline = "Se solicitó reboot automático del runtime BBC (Meta)";
+      break;
+    default:
+      return false;
+  }
+
+  const silenceLine =
+    bbc.silenceDetected || transition.alertKind === "silence"
+      ? `<li>Silencio funcional: ${escapeHtml(bbc.silenceDetail || "detectado")}</li>`
+      : "";
+  const deployLine = bbc.deployProbeMessage
+    ? `<li>Deploy/Meta: ${escapeHtml(bbc.deployProbeMessage)}${bbc.deployStatus ? ` (${escapeHtml(bbc.deployStatus)})` : ""}</li>`
+    : "";
+  const rebootLine = bbc.lastAutoRebootAt
+    ? `<li>Último auto-reboot: ${formatIso(bbc.lastAutoRebootAt)}</li>`
+    : "";
+
+  const html = `
+    <p><strong>${escapeHtml(headline)}</strong></p>
+    <p>Esto es el <strong>agente BuilderBot Cloud (WhatsApp/Meta)</strong>, no la API de Wara.</p>
+    <ul>
+      <li>Estado anterior: ${escapeHtml(transition.previousStatus || "—")}</li>
+      <li>Estado actual: ${escapeHtml(bbc.status)}${bbc.healthy ? " (healthy)" : " (no healthy)"}</li>
+      <li>Reinicios acumulados: ${bbc.restartCount}</li>
+      <li>Host: ${escapeHtml(bbc.host || "—")}</li>
+      <li>Último evento: ${formatIso(bbc.lastEventAt)}</li>
+      <li>Último ONLINE: ${formatIso(bbc.lastOnlineAt)}</li>
+      ${deployLine}
+      ${silenceLine}
+      ${rebootLine}
+      ${probeLine}
+      <li>Fuente: ${escapeHtml(bbc.source || "—")}</li>
+    </ul>
+    <p>Revisá <a href="${PANEL_BASE_URL}/monitor">monitor de operaciones</a> o la consola BBC (Session Status).</p>
+  `;
+
+
+  let sent = false;
+  for (const to of recipients) {
+    if (await sendEmail(to, title, html)) sent = true;
+  }
+  if (sent) {
+    console.log("[panelEmail] Alerta BBC transición enviada:", transition.alertKind);
+  }
+  return sent;
+}
+
+/** @deprecated Usar sendBbcTransitionAlertEmail con transición explícita. */
+export async function sendBbcRuntimeAlertEmail(
+  bbc: BbcRuntimeStatus,
+): Promise<boolean> {
+  const transition: BbcStatusTransition = {
+    previousStatus: null,
+    nextStatus: bbc.status,
+    changed: true,
+    alertKind: bbc.restarted
+      ? "restart"
+      : bbc.healthy
+        ? null
+        : bbc.status === "CONFIG_ERROR"
+          ? "config_error"
+          : bbc.status === "DEGRADED"
+            ? "degraded"
+            : "offline",
+  };
+  if (!transition.alertKind) return false;
+  return sendBbcTransitionAlertEmail({ bbc, transition });
 }
 
 function escapeHtml(value: string): string {

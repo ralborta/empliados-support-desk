@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * Listado de flota: señal amplia + reglas estrictas (no depender de frase literal).
+ * Listado de flota: señal amplia que siempre requiere decisión semántica.
  */
 import {
   looksLikePossibleFleetListRequest,
   isFleetListIntentAiEnabled,
 } from "../src/lib/fleetListIntentAI.ts";
-import { looksLikeUnitListRequest } from "../src/lib/waraUnitIntent.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -42,8 +41,16 @@ assert(
   "consulta marca no es listado ambiguo",
 );
 
-console.log("\n— Reglas estrictas siguen siendo el primer gate —");
-assert(looksLikeUnitListRequest("Me pasas mi lista?"), "regex estricto también matchea");
+console.log("\n— Colisiones que deben llegar al veto semántico —");
+for (const msg of [
+  "Listame todos los informes disponibles de la plataforma Wara",
+  "Indicame como consultar por el informe de resumen de flota",
+]) {
+  assert(
+    looksLikePossibleFleetListRequest(msg),
+    `la señal amplia no decide por sí sola: "${msg}"`,
+  );
+}
 
 console.log("\n— IA habilitada si hay API key (salvo opt-out) —");
 assert(

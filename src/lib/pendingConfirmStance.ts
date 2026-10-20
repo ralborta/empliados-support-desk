@@ -17,7 +17,28 @@ import {
   hasPendingOdometerConfirmation,
   looksLikeBareNegativeResponse,
   looksLikeUnitRejection,
+  threadAwaitingHorometerKmValue,
+  threadAwaitingOdometerKmValue,
+  threadAwaitingOdometerPlate,
+  threadAwaitingHorometerPlate,
+  detectLoosePlate,
+  extractUnitCodeNumbersFromMessage,
+  isPlausibleVehiclePlate,
+  looksLikeBareMeterValue,
+  looksLikeBareOdometerTopicMention,
+  looksLikeBareHorometerTopicMention,
+  looksLikeHorometerOnlyIntent,
+  looksLikeOdometerHelpRequest,
+  looksLikeOdometerInfoRequest,
+  looksLikePendingConfirmHelpOrConfusion,
+  normalizePlate,
+  threadHasActiveMeterValueRequest,
+  threadHasActiveOdometerFlow,
+  threadOdometerRegistrationCompleted,
 } from "@/lib/wara";
+import { looksLikeExplicitOtherTramiteIntent } from "@/lib/turnLayerContract";
+import { looksLikeFechaHoraLecturaMessage } from "@/lib/odometroFecha";
+import { isOperationalMeterCollectionMessage } from "@/lib/tramiteMeterPrecedence";
 import {
   looksLikeGpsOrUnitStatusQuestion,
   looksLikeLiveUnitConsultIntent,
@@ -189,7 +210,7 @@ export async function reasonPendingConfirmationRejection(params: {
   const detalle =
     kind === "mantenimiento" ? extractPendingMaintenanceDetalle(threadText) : null;
 
-  const system = `Sos Atilio, agente de Wara. Hay un resumen pendiente de CONFIRMO (el bot pidió confirmar un trámite).
+  const system = `Sos Kira, agente de Wara. Hay un resumen pendiente de CONFIRMO (el bot pidió confirmar un trámite).
 El cliente acaba de responder. Tu trabajo es RAZONAR la intención — no inventes datos.
 
 Trámite pendiente: ${kind}
@@ -274,4 +295,192 @@ export function buildPendingConfirmStillWaitingReminder(kind: PendingConfirmKind
     return "El certificado sigue pendiente: cuando quieras, respondé CONFIRMO, o decime qué corregir.";
   }
   return "El mantenimiento del resumen sigue pendiente: cuando quieras, respondé CONFIRMO, o decime qué corregir.";
+}
+
+/** Explica el paso CONFIRMO/CANCELAR sin pisar el detalle del resumen. */
+export function buildPendingConfirmHelpReply(kind: PendingConfirmKind): string {
+  const common = [
+    "Para *registrarlo* respondé *CONFIRMO*.",
+    "Si no querés cargarlo, respondé *CANCELAR*.",
+    "Si algún dato está mal, decime qué corregir.",
+  ];
+  if (kind === "mantenimiento") {
+    return [
+      "Tranqui: ya armé el resumen de la tarea de mantenimiento.",
+      ...common,
+    ].join("\n");
+  }
+  if (kind === "odometro") {
+    return [
+      "Tranqui: ya armé el resumen del odómetro/horómetro.",
+      ...common,
+    ].join("\n");
+  }
+  return [
+    "Tranqui: ya armé el resumen del certificado.",
+    ...common,
+  ].join("\n");
+}
+
+export type OdometerFlowSideQuestionKind = "info" | "help";
+
+function normOdometerSideText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,;:]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function isOperationalOdometerFlowMessage(text: string, threadText: string): boolean {
+  return isOperationalMeterCollectionMessage(text, threadText);
+}
+
+function isHorometerSideContext(threadText: string): boolean {
+  if (threadAwaitingHorometerPlate(threadText) || threadAwaitingHorometerKmValue(threadText)) {
+    return true;
+  }
+  const tail = threadText.slice(-2000).toLowerCase();
+  return /\bhor[oó]metro\b/.test(tail) && !/\bod[oó]metro\b/.test(tail.slice(-800));
+}
+
+/** ¿Consulta lateral (no dato operativo) con odómetro/horómetro en curso? */
+export function classifyOdometerFlowSideQuestion(
+  text: string,
+  threadText: string,
+): OdometerFlowSideQuestionKind | null {
+  if (!threadHasActiveOdometerFlow(threadText)) return null;
+  if (threadOdometerRegistrationCompleted(threadText)) return null;
+  if (!text.trim()) return null;
+  if (isOperationalOdometerFlowMessage(text, threadText)) return null;
+  if (looksLikeExplicitOtherTramiteIntent(text)) return "help";
+
+  // Otro medidor distinto al del CONFIRMO pendiente → fork, no clarify del mismo.
+  if (hasPendingOdometerConfirmation(threadText)) {
+    const pendingHoro =
+      /\bconfirmar hor[oó]metro\b/i.test(threadText.slice(-2500)) &&
+      !/\bconfirmar od[oó]metro\b/i.test(threadText.slice(-1200));
+    const asksHoro = looksLikeHorometerOnlyIntent(text) || looksLikeBareHorometerTopicMention(text);
+    const asksOdo = looksLikeBareOdometerTopicMention(text);
+    if ((asksHoro && !pendingHoro) || (asksOdo && pendingHoro)) return "help";
+  }
+
+  const t = normOdometerSideText(text);
+  if (
+    /\b(como funciona|como es|que es|que significa|para que sirve|para q sirve|me explicas|explicame|explic[aá]me)\b/.test(
+      t,
+    )
+  ) {
+    return "info";
+  }
+  if (looksLikeOdometerInfoRequest(text) || looksLikeOdometerHelpRequest(text)) {
+    return "info";
+  }
+  if (looksLikePendingConfirmHelpOrConfusion(text)) {
+    return "help";
+  }
+  return null;
+}
+
+function buildOdometerSideExplanationText(customerText: string, isHoro: boolean): string {
+  const t = normOdometerSideText(customerText);
+  const horoInText =
+    /\b(hor[oó]metro|horas)\b/.test(t) && !/\b(od[oó]metro|kilometraje)\b/.test(t);
+  if (isHoro || horoInText) {
+    return [
+      "El cambio de horómetro en Wara sirve para actualizar las horas de motor cuando el GPS no coincide con el real (service, cambio de equipo o corrección).",
+      "",
+      "Así los planes por horas y los reportes quedan alineados con la unidad.",
+    ].join("\n");
+  }
+  return [
+    "El cambio de odómetro registra el kilometraje real cuando no coincide con lo que muestra el GPS (cambio físico, service o corrección).",
+    "",
+    "No es un mantenimiento: es actualizar el dato para que alertas, planes y reportes usen el km correcto.",
+  ].join("\n");
+}
+
+export function buildOdometerFlowSideInfoReply(threadText: string, customerText: string): string {
+  const isHoro = isHorometerSideContext(threadText);
+  const topic = isHoro ? "horómetro" : "odómetro";
+  const mentionsTopic = /\b(od[oó]metro|hor[oó]metro|kilometraje)\b/i.test(customerText);
+  const explanation = buildOdometerSideExplanationText(customerText, isHoro);
+  const lines: string[] = [];
+  if (!mentionsTopic) {
+    lines.push(`¿Te referís al *${topic}*?`, "");
+  }
+  lines.push(explanation, "", "Cuando quieras seguimos con el cambio que empezamos.");
+  return lines.join("\n");
+}
+
+export function buildOdometerFlowSideHelpReply(threadText: string): string {
+  const isHoro = isHorometerSideContext(threadText);
+  const topic = isHoro ? "horómetro" : "odómetro";
+  return `Te puedo ayudar. Pero antes: ¿seguimos con el *cambio de ${topic}* que tenemos en curso, o preferís *cambiar de requerimiento*?`;
+}
+
+/**
+ * Odómetro en CONFIRMO y el cliente pide horómetro (o al revés).
+ * Bug 2026-08-23: "Horometro" con resumen estructurado pendiente caía a
+ * "qué necesitás con el odómetro" en vez de ofrecer concluir o cambiar.
+ */
+export function buildMeterCrossSwitchWhileConfirmReply(params: {
+  pendingIsHorometer: boolean;
+  askedHorometer: boolean;
+}): string {
+  const pending = params.pendingIsHorometer ? "horómetro" : "odómetro";
+  const asked = params.askedHorometer ? "horómetro" : "odómetro";
+  if (pending === asked) {
+    return buildOdometerFlowSideHelpReply(
+      params.pendingIsHorometer ? "horómetro CONFIRMO" : "odómetro CONFIRMO",
+    );
+  }
+  return [
+    `Todavía tengo pendiente confirmar el *cambio de ${pending}*.`,
+    "",
+    `¿Seguimos con eso (*CONFIRMO* / *CANCELAR*) o preferís *cambiar* y arrancar el *${asked}*?`,
+  ].join("\n");
+}
+
+export function buildOdometerFlowSideQuestionReply(
+  kind: OdometerFlowSideQuestionKind,
+  threadText: string,
+  customerText: string,
+): string {
+  const other = looksLikeExplicitOtherTramiteIntent(customerText);
+  if (hasPendingOdometerConfirmation(threadText)) {
+    const pendingHoro =
+      /\bconfirmar hor[oó]metro\b/i.test(threadText.slice(-2500)) &&
+      !/\bconfirmar od[oó]metro\b/i.test(threadText.slice(-1200));
+    const asksHoro =
+      looksLikeHorometerOnlyIntent(customerText) || looksLikeBareHorometerTopicMention(customerText);
+    const asksOdo = looksLikeBareOdometerTopicMention(customerText);
+    if ((asksHoro && !pendingHoro) || (asksOdo && pendingHoro)) {
+      return buildMeterCrossSwitchWhileConfirmReply({
+        pendingIsHorometer: pendingHoro,
+        askedHorometer: asksHoro,
+      });
+    }
+  }
+  const base =
+    kind === "info"
+      ? buildOdometerFlowSideInfoReply(threadText, customerText)
+      : buildOdometerFlowSideHelpReply(threadText);
+  if (other === "mantenimiento" && kind === "help") {
+    return [
+      "El *mantenimiento* (preventivo o correctivo) es otro trámite en Wara, distinto del cambio de odómetro/horómetro.",
+      "",
+      base,
+    ].join("\n");
+  }
+  if (other === "certificados" && kind === "help") {
+    return [
+      "El *certificado de cobertura* es otro trámite, distinto del cambio de odómetro/horómetro.",
+      "",
+      base,
+    ].join("\n");
+  }
+  return base;
 }

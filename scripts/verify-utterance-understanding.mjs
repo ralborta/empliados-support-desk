@@ -36,13 +36,18 @@ for (const s of [
   "pasame la patente",
   "pantentee",
   "empieza con NRO",
-  "Quiero hacer un cambio de odómetro",
   "AG 562 SP",
   "cual es el nro de ticket que esta generado por esto?",
   "necesto ayuda",
 ]) {
   assert(shouldInterpretAmbiguousUtterance(s), `${JSON.stringify(s)} → IA`);
 }
+
+// Pedido explícito de odómetro arranca trámite por reglas (no intérprete).
+assert(
+  !shouldInterpretAmbiguousUtterance("Quiero hacer un cambio de odómetro"),
+  `"Quiero hacer un cambio de odómetro" → no IA (trámite)`,
+);
 
 assert(!shouldInterpretAmbiguousUtterance(""), "vacío → no");
 assert(!shouldInterpretAmbiguousUtterance("x".repeat(300)), "demasiado largo → no");

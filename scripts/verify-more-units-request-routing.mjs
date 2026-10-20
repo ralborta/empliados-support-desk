@@ -14,8 +14,8 @@
  * con lo que pidió el cliente — el bot pasaba directo a "Voy a generar el certificado
  * de cobertura... Patente: GP30... Respondé CONFIRMO" sobre una unidad que nadie pidió.
  */
-import { classifyTurnExecutor } from "../src/lib/whatsappTurnRouter.ts";
 import { looksLikeUnitListRequest } from "../src/lib/waraUnitIntent.ts";
+import { shouldRouteTurnToFleetListExecutorHybrid } from "../src/lib/fleetListIntentAI.ts";
 
 let failed = 0;
 function assert(cond, label) {
@@ -45,7 +45,7 @@ console.log("\n— No confundir con una selección real de unidad —");
 assert(!looksLikeUnitListRequest("NKL 952"), "patente concreta NO es pedido de listado");
 assert(!looksLikeUnitListRequest("la Nissan"), "marca concreta NO es pedido de listado");
 
-console.log("\n— Router: 'mas unidades' tras listado en flujo de certificado va a 'unidades', no a 'certificados' —");
+console.log("\n— Gate del ejecutor: 'mas unidades' continúa el listado antes de certificados —");
 const threadTrasListado = [
   "Cliente: genera un certificado para la MYQ",
   "Atilio: No hay ninguna unidad en la flota de tu empresa con patente que empiece con MYQ. Ese prefijo no está en tu flota. Pasame la matrícula completa (ej. NKL 952) o escribí «listado de mis unidades». Para el certificado de cobertura necesito la unidad: decime la patente completa, el nombre/marca o un prefijo válido.",
@@ -53,10 +53,17 @@ const threadTrasListado = [
   "Atilio: Tenés 73 unidades en WARA. Te muestro 8 como referencia: AB006EXCANBUS, Alarma 1er Piso, ALARMA2DOPISO, ALARMAPB, ALEJANDROPICÓN, HEJ (nombre Alex Lima), I864520060172172 (nombre Alex Lima), LWK 7902 (nombre BRtestes) y 65 más. Por WhatsApp no puedo enviar las 73 de una sola vez — decime matrícula, nombre de unidad (ej. M600-157) o marca para buscar una en particular.",
 ].join("\n");
 
+const previousAiFlag = process.env.WARA_FLEET_LIST_INTENT_AI;
+process.env.WARA_FLEET_LIST_INTENT_AI = "false";
 assert(
-  classifyTurnExecutor("mas unidades", threadTrasListado) === "unidades",
-  "router → unidades (no certificados) tras 'mas unidades'",
+  await shouldRouteTurnToFleetListExecutorHybrid({
+    selectionText: "mas unidades",
+    threadText: threadTrasListado,
+  }),
+  "gate → listado de unidades (no certificados)",
 );
+if (previousAiFlag === undefined) delete process.env.WARA_FLEET_LIST_INTENT_AI;
+else process.env.WARA_FLEET_LIST_INTENT_AI = previousAiFlag;
 
 if (failed > 0) {
   console.error(`\n✗ ${failed} fallo(s)`);
