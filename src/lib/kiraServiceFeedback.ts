@@ -28,8 +28,9 @@ export function buildCloseMessageWithFeedbackAsk(): string {
 }
 
 /**
- * Tras odómetro/certificado/mantenimiento OK: pega la nota 1–10 al mensaje de éxito
- * y deja la encuesta pendiente. No actúa en cierres idle/despedida.
+ * Tras resolver un tema (GPS, odómetro, certificado, mantenimiento): pega la nota
+ * 1–10 al mensaje de respuesta y deja la encuesta pendiente. Una sola vez por ticket
+ * (un ticket con 6 consultas GPS no pide la nota 6 veces). No actúa en cierres.
  */
 export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
   message: string;
@@ -66,6 +67,17 @@ export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
       null;
   }
   if (!ticketId) return params.message;
+
+  // Una encuesta por ticket: si ya se pidió/registró en este caso, no repetir.
+  const alreadyAsked = await db.ticketEvent.findFirst({
+    where: {
+      ticketId,
+      type: "AUTO_REPLY",
+      payload: { path: ["kind"], equals: "service_feedback" },
+    },
+    select: { id: true },
+  });
+  if (alreadyAsked) return params.message;
 
   await markServiceFeedbackAwaitingScore(ticketId, db);
   return `${base}\n\n${buildServiceFeedbackScoreAsk()}`;

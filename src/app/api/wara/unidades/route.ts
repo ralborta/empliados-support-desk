@@ -2047,6 +2047,22 @@ export async function POST(req: NextRequest) {
   summaryText = outbound.text;
   const headerMediaUrl = outbound.mediaUrl;
 
+  // Tema resuelto (respuesta GPS estructurada) → encuesta 1–10, una vez por ticket.
+  // No en "unidad no encontrada" ni en lecturas efímeras/shadow.
+  if (
+    !skipConversationalMutation &&
+    summaryText.trim() &&
+    isStructuredGpsWhatsAppSummary(summaryText)
+  ) {
+    const { appendServiceFeedbackAskAfterTramiteSuccess } = await import(
+      "@/lib/kiraServiceFeedback"
+    );
+    summaryText = await appendServiceFeedbackAskAfterTramiteSuccess({
+      message: summaryText,
+      rawPhone,
+    });
+  }
+
   if (!composePayload.agent_compose_s && summaryText.trim()) {
     await appendOutboundBotMessage(rawPhone, summaryText, {
       source: "wara_unidades_response",
