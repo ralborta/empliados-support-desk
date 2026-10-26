@@ -16,15 +16,23 @@ describe("quickActions", () => {
     assert.equal(buildQuickActionCustomerMessage("internal_note"), null);
     assert.match(
       buildQuickActionCustomerMessage("note_admin") ?? "",
-      /Administración/i,
+      /Administracion:/i,
+    );
+    assert.match(
+      buildQuickActionCustomerMessage("note_admin") ?? "",
+      /5492615256758/,
     );
     assert.match(
       buildQuickActionCustomerMessage("note_billing") ?? "",
-      /Facturación/i,
+      /5492615256758/,
     );
     assert.match(
       buildQuickActionCustomerMessage("note_collections") ?? "",
-      /Cobranza/i,
+      /Cobranzas:/i,
+    );
+    assert.match(
+      buildQuickActionCustomerMessage("note_collections") ?? "",
+      /5492617222296/,
     );
   });
 

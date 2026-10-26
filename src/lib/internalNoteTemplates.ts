@@ -1,6 +1,7 @@
 /**
  * Plantillas de nota interna / cierre L1 (Ola 3).
- * Mesa: administración, cobranza y facturación sin tipear a mano.
+ * Speach oficial Mesa (2026-10-26): Administración + Cobranzas con números WA.
+ * Facturación usa el speach de Administración (incluye facturación en el texto).
  */
 
 export type InternalNoteTemplateId = "admin" | "billing" | "collections";
@@ -15,6 +16,24 @@ export type InternalNoteTemplate = {
   customerMessage: string;
 };
 
+/** Speach Mesa → Administración (+ facturación / altas / bajas / docs). */
+export const ADMIN_L1_CUSTOMER_MESSAGE =
+  "Administracion: ¡Hola! 😊 Gracias por comunicarte con Wara.\n\n" +
+  "Este canal está destinado exclusivamente a la Mesa de Ayuda (soporte técnico de la plataforma y los equipos GPS).\n\n" +
+  "Para consultas administrativas (facturación, altas, bajas, modificaciones de servicio o documentación), te pedimos que te comuniques al siguiente número:\n\n" +
+  "📞 +54 9 2615 25-6758\n" +
+  "👉 wa.me/5492615256758\n\n" +
+  "Allí te van a atender con gusto. ¡Que tengas un excelente día!";
+
+/** Speach Mesa → Cobranzas. */
+export const COLLECTIONS_L1_CUSTOMER_MESSAGE =
+  "Cobranzas: ¡Hola! 😊 Gracias por comunicarte con Wara.\n\n" +
+  "Este canal está destinado exclusivamente a la Mesa de Ayuda (soporte técnico de la plataforma y los equipos GPS).\n\n" +
+  "Para consultas sobre Cobranzas (pagos, saldos, comprobantes, vencimientos o medios de pago), te pedimos que te comuniques al siguiente número:\n\n" +
+  "📞 +54 9 2617 22-2296\n" +
+  "👉 wa.me/5492617222296\n\n" +
+  "El equipo te va a ayudar a resolverlo. ¡Muchas gracias por tu paciencia!";
+
 export const INTERNAL_NOTE_TEMPLATES: Record<
   InternalNoteTemplateId,
   InternalNoteTemplate
@@ -23,34 +42,26 @@ export const INTERNAL_NOTE_TEMPLATES: Record<
     id: "admin",
     label: "Administración",
     internalNote:
-      "[Derivación L1] Administración — el cliente consultó un tema administrativo. " +
-      "Cerrado en primer nivel; no corresponde a soporte técnico Kira. Seguimiento: área Administración.",
-    customerMessage:
-      "Tu consulta es de *Administración*. Desde soporte no la gestionamos nosotros: " +
-      "quedó derivada al área correspondiente y cerramos este chat. " +
-      "Si necesitás algo técnico de unidades/GPS, escribinos de nuevo. ¡Gracias!",
+      "[Derivación L1] Administración — speach oficial enviado (+54 9 2615 25-6758). " +
+      "Cerrado en primer nivel. Seguimiento: área Administración.",
+    customerMessage: ADMIN_L1_CUSTOMER_MESSAGE,
   },
   billing: {
     id: "billing",
     label: "Facturación",
     internalNote:
-      "[Derivación L1] Facturación — consulta de facturas / comprobantes / datos fiscales. " +
-      "Cerrado en primer nivel. Seguimiento: área Facturación.",
-    customerMessage:
-      "Tu consulta es de *Facturación*. Desde soporte no emitimos ni modificamos facturas: " +
-      "quedó derivada al área de Facturación y cerramos este chat. " +
-      "Ante un tema de unidades/GPS, escribinos cuando quieras. ¡Gracias!",
+      "[Derivación L1] Facturación — speach Administración/facturación enviado (+54 9 2615 25-6758). " +
+      "Cerrado en primer nivel. Seguimiento: área Facturación / Administración.",
+    // Mismo speach que Administración (incluye facturación en el texto oficial).
+    customerMessage: ADMIN_L1_CUSTOMER_MESSAGE,
   },
   collections: {
     id: "collections",
     label: "Cobranza",
     internalNote:
-      "[Derivación L1] Cobranza / pagos — el cliente consultó pagos, deuda o medios de pago. " +
-      "Cerrado en primer nivel. Seguimiento: área Cobranza.",
-    customerMessage:
-      "Tu consulta es de *Cobranza / pagos*. Desde soporte no gestionamos cobros: " +
-      "quedó derivada al área de Cobranza y cerramos este chat. " +
-      "Si es por una unidad o el GPS, escribinos de nuevo. ¡Gracias!",
+      "[Derivación L1] Cobranzas — speach oficial enviado (+54 9 2617 22-2296). " +
+      "Cerrado en primer nivel. Seguimiento: área Cobranzas.",
+    customerMessage: COLLECTIONS_L1_CUSTOMER_MESSAGE,
   },
 };
 
