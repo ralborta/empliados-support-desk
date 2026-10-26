@@ -7,6 +7,7 @@ import { Bell } from "lucide-react";
 import { AgentAssignmentToastStack, type AssignmentToastItem } from "@/components/layout/AgentAssignmentToast";
 import { priorityLabels } from "@/lib/tickets";
 import { priorityBadgeClass } from "@/lib/ui/badges";
+import { dispatchPanelInboxChanged } from "@/lib/panelLiveEvents";
 
 type NotificationItem = AssignmentToastItem & {
   readAt: string | null;
@@ -120,12 +121,15 @@ export function NotificationBell() {
             notifyDesktopFallback(n);
             seenIdsRef.current!.add(n.id);
           });
+          // Contadores del sidebar + listas RSC sin forzar F5 / navegación.
+          dispatchPanelInboxChanged();
+          router.refresh();
         }
       }
     } catch {
       /* ignore */
     }
-  }, [pushToast]);
+  }, [pushToast, router]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {

@@ -1,4 +1,17 @@
 import axios from 'axios';
+import { fileNameForWhatsAppMediaUrl as guideFileNameForWhatsAppMediaUrl } from "@/lib/unregisteredPhoneHandoff";
+
+function fileNameForWhatsAppMediaUrl(mediaUrl: string | undefined): string | undefined {
+  return guideFileNameForWhatsAppMediaUrl(mediaUrl);
+}
+
+type AxiosPost = typeof axios.post;
+let httpPost: AxiosPost = axios.post.bind(axios);
+
+/** Solo scripts de verificación: evita HTTP real y valida comportamiento del sender. */
+export function setBuilderBotHttpPostForTests(post: AxiosPost | null): void {
+  httpPost = post ?? axios.post.bind(axios);
+}
 
 const BUILDERBOT_BASE_URL =
   process.env.BUILDERBOT_BASE_URL || 'https://app.builderbot.cloud';
@@ -7,14 +20,28 @@ export interface SendWhatsAppOptions {
   number: string; // número en formato internacional (ej: 5491112345678)
   message: string; // contenido del mensaje
   mediaUrl?: string; // opcional
+  /** Nombre del documento en WhatsApp (PDF). Evita el sufijo numérico del CDN. */
+  fileName?: string;
   checkIfExists?: boolean; // default false
 }
 
 /**
  * Envía un mensaje de WhatsApp vía BuilderBot Cloud (API v2).
+ *
+ * Idempotencia externa: BuilderBot v2 `/messages` no expone clave de idempotencia
+ * por request (solo `checkIfExists`, no reenvío seguro). Política WARA ante POST
+ * ambiguo (timeout/red sin body): priorizar evitar duplicados — no reenviar si el
+ * ledger inbound ya tiene `waOutboundProviderId`; devolver `delivery_persist_failed`
+ * sin BBC fallback. Ver `ensureInboundWaProviderIdStashed` y turnWhatsAppDeliveryLedger.
  */
 export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
-  const { number, message, mediaUrl, checkIfExists = false } = options;
+  const { message, mediaUrl, checkIfExists = false } = options;
+  const fileName =
+    String(options.fileName ?? "").trim() || fileNameForWhatsAppMediaUrl(mediaUrl);
+  const number = String(options.number ?? "").replace(/\D/g, "");
+  if (number.length < 8) {
+    throw new Error("Número de WhatsApp inválido");
+  }
 
   const BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
   const API_KEY = process.env.BUILDERBOT_API_KEY || '';
@@ -27,21 +54,24 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
 
   const url = `${BUILDERBOT_BASE_URL}/api/v2/${BOT_ID}/messages`;
 
-  const body: Record<string, any> = {
+  const body: Record<string, unknown> = {
     messages: {
       content: message,
+      ...(mediaUrl ? { mediaUrl } : {}),
+      ...(mediaUrl && fileName ? { fileName, filename: fileName } : {}),
     },
     number,
     checkIfExists,
   };
 
-  if (mediaUrl) {
-    body.messages.mediaUrl = mediaUrl;
-  }
+  // Serializar a Buffer UTF-8 explícito: evita mojibake (Ã©/Ã³) si algún
+  // intermediario interpreta el body JSON como Latin-1.
+  const payload = Buffer.from(JSON.stringify(body), "utf8");
 
   const headers = {
-    'Content-Type': 'application/json',
-    'x-api-builderbot': API_KEY,
+    "Content-Type": "application/json; charset=utf-8",
+    "x-api-builderbot": API_KEY,
+    "Content-Length": String(payload.length),
   };
 
   console.log('[BuilderBot] Enviando mensaje:', {
@@ -52,7 +82,11 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
   });
 
   try {
-    const response = await axios.post(url, body, { headers, timeout: 30000 });
+    const response = await httpPost(url, payload, {
+      headers,
+      timeout: 30000,
+      transformRequest: [(data) => data],
+    });
     console.log('[BuilderBot] ✅ Mensaje enviado exitosamente');
     return response.data;
   } catch (error: any) {
@@ -61,9 +95,13 @@ export async function sendWhatsAppMessage(options: SendWhatsAppOptions) {
       status: error.response?.status,
       data: error.response?.data,
     });
-    throw new Error(
+    const wrapped = new Error(
       `Error al enviar mensaje a BuilderBot: ${error.message}`
-    );
+    ) as Error & { code?: string; response?: unknown; cause?: unknown };
+    wrapped.code = error.code;
+    wrapped.response = error.response;
+    wrapped.cause = error;
+    throw wrapped;
   }
 }
 
@@ -71,64 +109,125 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const BLACKLIST_RETRIES = 3;
 const BLACKLIST_DELAY_MS = 1500;
-const BLACKLIST_SETTLE_MS = 800;
+/** Pausa corta post-OK: antes 800ms×2 sumaba ~1.6s artificial al panel. */
+const BLACKLIST_SETTLE_MS = 120;
+
+export type BuilderBotChannelReconcile = {
+  muteOk: boolean;
+  blacklistOk: boolean;
+  ok: boolean;
+};
+
+/**
+ * Desmutear / mutear un contacto en BuilderBot Cloud (plugin add_mute del runtime).
+ * POST /api/v2/{botId}/mute con { number, status: boolean }.
+ * Distinto de /blacklist: hay que tocar las dos APIs para dejar el canal usable.
+ * Reintenta como blacklist: en prod el mute a veces falla al primer intento.
+ */
+export async function setBuilderBotContactMute(
+  number: string,
+  muted: boolean
+): Promise<boolean> {
+  const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
+  const API_KEY = process.env.BUILDERBOT_API_KEY || "";
+  if (!BOT_ID || !API_KEY) return true;
+
+  const normalizedNumber = String(number).replace(/\D/g, "");
+  if (normalizedNumber.length < 9) return false;
+
+  const url = `${BUILDERBOT_BASE_URL.replace(/\/$/, "")}/api/v2/${BOT_ID}/mute`;
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-builderbot": API_KEY,
+  };
+  const body = { number: normalizedNumber, status: muted };
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= BLACKLIST_RETRIES; attempt++) {
+    try {
+      const response = await axios.post(url, body, { headers, timeout: 15000 });
+      console.log("[BuilderBot] Cloud mute OK", muted, normalizedNumber, response.data);
+      await sleep(BLACKLIST_SETTLE_MS);
+      return true;
+    } catch (error: unknown) {
+      lastError = error;
+      const err = error as { response?: { status?: number; data?: unknown }; message?: string };
+      console.error(
+        `[BuilderBot] Cloud mute attempt ${attempt}/${BLACKLIST_RETRIES}`,
+        muted,
+        normalizedNumber,
+        { status: err.response?.status, data: err.response?.data, message: err?.message },
+      );
+      if (attempt < BLACKLIST_RETRIES) {
+        await sleep(BLACKLIST_DELAY_MS);
+      }
+    }
+  }
+  console.error(
+    "[BuilderBot] Cloud mute falló tras reintentos",
+    muted,
+    normalizedNumber,
+    (lastError as { response?: { data?: unknown } })?.response?.data ?? lastError,
+  );
+  return false;
+}
+
+/**
+ * Deja el contacto hablable en Cloud: mute=false + blacklist=remove.
+ * Mute y blacklist van en paralelo (no hay dependencia entre APIs).
+ */
+export async function ensureBuilderBotContactActive(
+  number: string
+): Promise<BuilderBotChannelReconcile> {
+  const [muteOk, blacklistOk] = await Promise.all([
+    setBuilderBotContactMute(number, false),
+    setBuilderBotCloudBlacklist(number, "remove"),
+  ]);
+  const ok = muteOk && blacklistOk;
+  if (!ok) {
+    console.error("[BuilderBot] Reconciliación mute/blacklist incompleta (active)", {
+      muteOk,
+      blacklistOk,
+    });
+  }
+  return { muteOk, blacklistOk, ok };
+}
+
+/**
+ * Silencia el contacto en Cloud para takeover humano: mute=true + blacklist=add.
+ * Misma política de reintentos que la reactivación; mute+blacklist en paralelo.
+ */
+export async function ensureBuilderBotContactPaused(
+  number: string
+): Promise<BuilderBotChannelReconcile> {
+  const [muteOk, blacklistOk] = await Promise.all([
+    setBuilderBotContactMute(number, true),
+    setBuilderBotCloudBlacklist(number, "add"),
+  ]);
+  const ok = muteOk && blacklistOk;
+  if (!ok) {
+    console.error("[BuilderBot] Reconciliación mute/blacklist incompleta (paused)", {
+      muteOk,
+      blacklistOk,
+    });
+  }
+  return { muteOk, blacklistOk, ok };
+}
 
 /**
  * Pausa o reactiva el flujo del bot para un número vía BuilderBot Cloud API v2.
  * POST /api/v2/{botId}/blacklist con { number, intent: "add" | "remove" }.
  */
-/**
- * Desmutear / mutear un contacto en BuilderBot Cloud (plugin add_mute del runtime).
- * POST /api/v2/{botId}/mute con { number, status: boolean }.
- */
-export async function setBuilderBotContactMute(
-  number: string,
-  muted: boolean
-): Promise<void> {
-  const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
-  const API_KEY = process.env.BUILDERBOT_API_KEY || "";
-  if (!BOT_ID || !API_KEY) return;
-
-  const normalizedNumber = String(number).replace(/\D/g, "");
-  if (normalizedNumber.length < 9) return;
-
-  const url = `${BUILDERBOT_BASE_URL.replace(/\/$/, "")}/api/v2/${BOT_ID}/mute`;
-  try {
-    const response = await axios.post(
-      url,
-      { number: normalizedNumber, status: muted },
-      {
-        headers: { "Content-Type": "application/json", "x-api-builderbot": API_KEY },
-        timeout: 15000,
-      }
-    );
-    console.log("[BuilderBot] Cloud mute OK", muted, normalizedNumber, response.data);
-  } catch (error: unknown) {
-    const err = error as { response?: { status?: number; data?: unknown }; message?: string };
-    console.error("[BuilderBot] Cloud mute falló", muted, normalizedNumber, {
-      status: err.response?.status,
-      data: err.response?.data,
-      message: err?.message,
-    });
-  }
-}
-
-/** Desmutear contacto en Cloud (mute + blacklist). Llamar al inicio de cada turno válido. */
-export async function ensureBuilderBotContactActive(number: string): Promise<void> {
-  await setBuilderBotContactMute(number, false);
-  await setBuilderBotCloudBlacklist(number, "remove");
-}
-
 export async function setBuilderBotCloudBlacklist(
   number: string,
   intent: "add" | "remove"
-): Promise<void> {
+): Promise<boolean> {
   const BOT_ID = process.env.BUILDERBOT_BOT_ID || "";
   const API_KEY = process.env.BUILDERBOT_API_KEY || "";
-  if (!BOT_ID || !API_KEY) return;
+  if (!BOT_ID || !API_KEY) return true;
 
   const normalizedNumber = String(number).replace(/\D/g, "");
-  if (normalizedNumber.length < 9) return;
+  if (normalizedNumber.length < 9) return false;
 
   const url = `${BUILDERBOT_BASE_URL.replace(/\/$/, "")}/api/v2/${BOT_ID}/blacklist`;
   const headers = {
@@ -143,7 +242,7 @@ export async function setBuilderBotCloudBlacklist(
       const response = await axios.post(url, body, { headers, timeout: 15000 });
       console.log("[BuilderBot] Cloud blacklist OK", intent, normalizedNumber, response.data);
       await sleep(BLACKLIST_SETTLE_MS);
-      return;
+      return true;
     } catch (error: unknown) {
       lastError = error;
       const err = error as { response?: { status?: number; data?: unknown }; message?: string };
@@ -164,6 +263,7 @@ export async function setBuilderBotCloudBlacklist(
     normalizedNumber,
     (lastError as { response?: { data?: unknown } })?.response?.data ?? lastError
   );
+  return false;
 }
 
 const BUILDERBOT_BOT_URL = process.env.BUILDERBOT_BOT_URL || "";

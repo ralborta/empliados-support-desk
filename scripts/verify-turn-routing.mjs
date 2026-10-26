@@ -84,7 +84,7 @@ const cases = [
     name: "maint operativo",
     text: "quiero programar mantenimiento preventivo",
     thread: "",
-    expect: "mantenimiento",
+    expect: "info_guides",
   },
   {
     name: "maint info guia",

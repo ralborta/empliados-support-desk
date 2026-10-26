@@ -16,6 +16,10 @@ import {
 
 assert.equal(looksLikeExplicitCapabilityMenuRequest("qué gestiones puedo hacer con vos"), true);
 assert.equal(looksLikeExplicitCapabilityMenuRequest("qué puedo gestionar"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("QUE MAS PODES HACER"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué más podés hacer"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué cosas podés hacer"), true);
+assert.equal(looksLikeExplicitCapabilityMenuRequest("qué servicios tenés"), true);
 assert.equal(
   looksLikeExplicitCapabilityMenuRequest("Quiero hacer otra consulta"),
   false,
@@ -28,6 +32,11 @@ assert.equal(looksLikeFlowControlCommand("reiniciar"), true);
 assert.equal(looksLikeFlowControlCommand("cancelar"), false, "cancelar → IA, no hard reset");
 assert.equal(looksLikeFlowControlCommand("inicio"), false);
 assert.equal(looksLikeSoftFlowRestart("inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("Volvamos al inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("volver al inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("Te pedí volver al inicio"), true);
+assert.equal(looksLikeSoftFlowRestart("volvamos al menu"), true);
+assert.equal(looksLikeSoftFlowRestart("Indícame el reporte de la nissan"), false);
 
 assert.equal(looksLikeThanksOnlyAcknowledgement("gracias"), true);
 assert.equal(looksLikeThanksOnlyAcknowledgement("ok"), false);

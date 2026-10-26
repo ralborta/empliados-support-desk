@@ -1,16 +1,107 @@
 import {
+  looksLikeMaintenanceAppGuideRequest,
+  looksLikeMaintenanceDomainTermQuestion,
   looksLikeMaintenanceExplorationRequest,
+  looksLikeMaintenanceGuideContextInThread,
   looksLikeMaintenanceInfoRequest,
+  looksLikeMaintenanceStepByStepOnlyRequest,
   looksLikeOpcionesInfoRequest,
   looksLikeTicketCreationInfoQuestion,
   looksLikeTurnoOrAgendaQuestion,
   looksLikeUnidadesInfoRequest,
   buildTicketCreationInfoReply,
+  parseInfoGuideModulePick,
 } from "@/lib/waraApi";
 import { looksLikeOdometerInfoRequest } from "@/lib/wara";
 import { answerFromKnowledgeBase } from "@/lib/knowledgeBaseAI";
+import type { InfoGuideNeed, PlatformKnowledgeInterpret } from "@/lib/infoGuideInterpretAI";
+import {
+  buildPlatformGuideClarifyOrLimitMessage,
+  interpretPlatformKnowledgeTurn,
+  isAssistantIdentityInterpret,
+  isFailClosedPlatformInterpret,
+  platformGuideNeedsSemanticDetailRefine,
+  refinePlatformKnowledgeDetailIfNeeded,
+} from "@/lib/infoGuideInterpretAI";
+import { buildAssistantIdentityReply, looksLikeAssistantIdentityQuestion } from "@/lib/assistantIdentity";
+import { CERTIFICATE_DEFINITION_REPLY } from "@/lib/certificateDefinitionGuide";
+import { isCisternasKbEnabled } from "@/lib/cisternasKnowledge";
+import { isCombustibleKbEnabled } from "@/lib/combustibleKnowledge";
+import {
+  isHojasRutaKbEnabled,
+  buildHojasRutaDisabledChannelReply,
+} from "@/lib/hojasRutaKnowledge";
+import {
+  buildArticulosModuleUnsupportedReply,
+  looksLikeArticulosModuleUnsupportedQuery,
+} from "@/lib/articulosModuleUnsupported";
+import {
+  isPuntosInteresKbEnabled,
+  buildPuntosInteresDisabledChannelReply,
+} from "@/lib/puntosInteresKnowledge";
+import { isUtilidadesBloque2KbEnabled } from "@/lib/utilidadesBloque2Knowledge";
+import {
+  isInformesKbEnabled,
+  isInformesSectionEnabled,
+  buildInformesDisabledChannelReply,
+  buildInformesSectionDisabledReply,
+} from "@/lib/informesKnowledge";
+import {
+  isAlertasKbEnabled,
+  buildAlertasDisabledChannelReply,
+} from "@/lib/alertasKnowledge";
+import {
+  isPanelesKbEnabled,
+  buildPanelesDisabledChannelReply,
+} from "@/lib/panelesKnowledge";
+import {
+  isOpcionesKbV2Enabled,
+  isOpcionesSectionEnabled,
+  buildOpcionesSectionDisabledReply,
+} from "@/lib/opcionesKnowledgeV2";
 
-export type InfoGuideKind = "opciones" | "unidades" | "mantenimiento";
+export type InfoGuideKind =
+  | "opciones"
+  | "unidades"
+  | "mantenimiento"
+  | "transporte_publico"
+  | "cisternas"
+  | "combustible"
+  | "hojas_de_ruta"
+  | "puntos_de_interes"
+  | "utilidades_bloque_2"
+  | "informes"
+  | "alertas"
+  | "paneles";
+
+export type InfoGuideFallback =
+  | null
+  | "clarify_question"
+  | "clarify_or_limit"
+  | "static_kind"
+  | "repeat"
+  | "cisternas_flag_off"
+  | "combustible_flag_off"
+  | "hojas_ruta_flag_off"
+  | "puntos_interes_flag_off"
+  | "utilidades_bloque2_flag_off"
+  | "informes_flag_off"
+  | "informes_section_off"
+  | "alertas_flag_off"
+  | "paneles_flag_off"
+  | "opciones_section_off"
+  | "articulos_module_unsupported";
+
+function sanitizeOptInGuideKind(
+  kind: InfoGuideKind | null | undefined,
+): InfoGuideKind | null {
+  if (!kind) return null;
+  if (kind === "cisternas" && !isCisternasKbEnabled()) return null;
+  if (kind === "combustible" && !isCombustibleKbEnabled()) return null;
+  if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) return null;
+  // hojas_de_ruta / puntos_de_interes / informes / alertas / paneles: reconocer aunque corpus off.
+  return kind;
+}
 
 export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   const text = rawText.trim();
@@ -34,34 +125,149 @@ export function detectInfoGuideKind(rawText: string): InfoGuideKind | null {
   ) {
     return "mantenimiento";
   }
+  if (
+    pick === "transporte" ||
+    pick === "transporte publico" ||
+    pick === "transporte de pasajeros" ||
+    pick === "modulo transporte" ||
+    pick === "modulo de transporte" ||
+    pick === "modulo de transporte publico" ||
+    pick === "modulo de transporte de pasajeros"
+  ) {
+    return "transporte_publico";
+  }
+  // Cisternas / Combustible: solo con flag on — elección explícita de módulo.
+  if (
+    isCisternasKbEnabled() &&
+    (pick === "cisternas" ||
+      pick === "cisterna" ||
+      pick === "modulo cisternas" ||
+      pick === "modulo de cisternas" ||
+      pick === "modulo cisterna")
+  ) {
+    return "cisternas";
+  }
+  if (
+    isCombustibleKbEnabled() &&
+    (pick === "combustible" ||
+      pick === "modulo combustible" ||
+      pick === "modulo de combustible")
+  ) {
+    return "combustible";
+  }
+  if (
+    pick === "hojas de ruta" ||
+    pick === "hoja de ruta" ||
+    pick === "modulo hojas de ruta" ||
+    pick === "modulo de hojas de ruta" ||
+    pick === "modulo hoja de ruta"
+  ) {
+    return "hojas_de_ruta";
+  }
+  if (
+    pick === "puntos de interes" ||
+    pick === "punto de interes" ||
+    pick === "modulo puntos de interes" ||
+    pick === "modulo de puntos de interes" ||
+    pick === "modulo punto de interes"
+  ) {
+    return "puntos_de_interes";
+  }
+  if (
+    pick === "informes" ||
+    pick === "informe" ||
+    pick === "menu informes" ||
+    pick === "modulo informes" ||
+    pick === "modulo de informes" ||
+    pick === "modulo informe"
+  ) {
+    return "informes";
+  }
+  if (
+    pick === "alertas" ||
+    pick === "alerta" ||
+    pick === "menu alertas" ||
+    pick === "modulo alertas" ||
+    pick === "modulo de alertas" ||
+    pick === "modulo alerta"
+  ) {
+    return "alertas";
+  }
+  if (
+    pick === "paneles" ||
+    pick === "panel" ||
+    pick === "menu paneles" ||
+    pick === "modulo paneles" ||
+    pick === "modulo de paneles" ||
+    pick === "modulo panel"
+  ) {
+    return "paneles";
+  }
+  if (
+    isUtilidadesBloque2KbEnabled() &&
+    /^(?:modulo(?: de)? |utilidades )?(?:acoplados|auditoria|calculador de recorridos|comunicador|comunicados|compartir posicion|cuestionarios|novedades|remitos|remitos hormigonera)$/.test(
+      pick,
+    )
+  ) {
+    return "utilidades_bloque_2";
+  }
+  const modulePick = parseInfoGuideModulePick(text);
+  if (modulePick) return modulePick;
+  // Informes: antes de heurísticas MT (p. ej. “cargas” no debe robar “informe de cargas”).
+  const nEarly = pick;
+  if (
+    /\binforme(s)?\s+(de|del|sobre|para|historico|histórico)\b/.test(nEarly) ||
+    /\bmenu\s+informes\b/.test(nEarly) ||
+    /\bmodulo\s+(de\s+)?informes\b/.test(nEarly) ||
+    (/\b(como|donde)\s+(veo|consulto|abro|encuentro)\b/.test(nEarly) &&
+      /\binforme/.test(nEarly))
+  ) {
+    return "informes";
+  }
   if (looksLikeOpcionesInfoRequest(text) || looksLikeTurnoOrAgendaQuestion(text)) {
     return "opciones";
   }
   if (looksLikeUnidadesInfoRequest(text)) return "unidades";
-  if (looksLikeMaintenanceInfoRequest(text) || looksLikeMaintenanceExplorationRequest(text)) {
+  if (
+    looksLikeMaintenanceAppGuideRequest(text) ||
+    looksLikeMaintenanceExplorationRequest(text) ||
+    looksLikeMaintenanceDomainTermQuestion(text)
+  ) {
     return "mantenimiento";
+  }
+  // Fallback léxico claro (si el intérprete LLM no corre o falla): no inventar "sin info".
+  const n = pick;
+  if (
+    /\btransporte\s+(public|de\s+pasajer)/.test(n) ||
+    /\b(hoja(s)?\s+de\s+turno|excepciones?\s+de\s+transporte)\b/.test(n) ||
+    (/\bmodulo\b/.test(n) && /\btransporte\b/.test(n))
+  ) {
+    return "transporte_publico";
   }
   return null;
 }
 
-function odometerInfoReply(rawText: string): string {
+export function buildOdometerInfoExplanation(
+  rawText: string,
+  opts?: { omitRegistrationCta?: boolean },
+): string {
   const t = norm(rawText);
+  let body: string;
   if (/\b(hor[oó]metro|horas)\b/.test(t) && !/\b(od[oó]metro|kilometraje)\b/.test(t)) {
-    return [
+    body = [
       "El cambio de horómetro en Wara sirve para actualizar las horas de motor de una unidad cuando el valor del GPS no coincide con el real (por ejemplo, después de un service o un cambio de equipo).",
       "",
       "Así los planes de mantenimiento por horas y los reportes quedan alineados con la realidad de la unidad.",
+    ].join("\n");
+  } else {
+    body = [
+      "El cambio de odómetro en Wara sirve para registrar el kilometraje real de una unidad cuando el valor que muestra el GPS no coincide (por ejemplo, después de cambiar el odómetro físico, un service o una corrección).",
       "",
-      "Si querés registrarlo por acá, decime la patente y el horómetro nuevo.",
+      "No es un mantenimiento en sí: es una actualización del dato para que alertas, planes preventivos y reportes usen el km correcto.",
     ].join("\n");
   }
-  return [
-    "El cambio de odómetro en Wara sirve para registrar el kilometraje real de una unidad cuando el valor que muestra el GPS no coincide (por ejemplo, después de cambiar el odómetro físico, un service o una corrección).",
-    "",
-    "No es un mantenimiento en sí: es una actualización del dato para que alertas, planes preventivos y reportes usen el km correcto.",
-    "",
-    "Si querés hacer el registro por WhatsApp, decime la patente y el odómetro nuevo en km.",
-  ].join("\n");
+  if (opts?.omitRegistrationCta) return body;
+  return `${body}\n\nSi querés hacer el registro por WhatsApp, decime la patente y el ${/\bhor/.test(t) ? "horómetro" : "odómetro"} nuevo en ${/\bhor/.test(t) ? "hs" : "km"}.`;
 }
 
 function norm(text: string): string {
@@ -137,6 +343,17 @@ function opcionesReply(rawText: string): string {
   ].join("\n");
 }
 
+function unidadesGroupsReply(): string {
+  return [
+    "Para trabajar con grupos en el módulo Unidades:",
+    "",
+    "1. Entrá al módulo Unidades desde la barra lateral.",
+    "2. En el pie del panel usá «Crear grupo» para armar uno nuevo (por zona, tipo de vehículo, etc.).",
+    "3. «Mover unidades» te permite reasignar unidades entre grupos.",
+    "4. Mostrá u ocultá grupos con las acciones del encabezado del panel.",
+  ].join("\n");
+}
+
 function unidadesReply(rawText: string): string {
   const t = norm(rawText);
   if (/\b(atajo|atajos|historial|compartir|orden de trabajo)\b/.test(t)) {
@@ -150,14 +367,7 @@ function unidadesReply(rawText: string): string {
     ].join("\n");
   }
   if (/\b(grupo|crear grupo|mover unidad)\b/.test(t)) {
-    return [
-      "Para trabajar con grupos en el módulo Unidades:",
-      "",
-      "1. Entrá al módulo Unidades desde la barra lateral.",
-      "2. En el pie del panel usá «Crear grupo» para armar uno nuevo (por zona, tipo de vehículo, etc.).",
-      "3. «Mover unidades» te permite reasignar unidades entre grupos.",
-      "4. Mostrá u ocultá grupos con las acciones del encabezado del panel.",
-    ].join("\n");
+    return unidadesGroupsReply();
   }
   if (/\b(punto|color|rojo|verde|azul|alarma)\b/.test(t)) {
     return [
@@ -182,40 +392,75 @@ function unidadesReply(rawText: string): string {
   ].join("\n");
 }
 
+function looksLikeMaintenanceLoadTrouble(rawText: string): boolean {
+  const t = norm(rawText);
+  return /\b(no pude|no puedo|no me deja|no me dejo|error|falla al|problema al|no carga|no carg|no funciona|trabe|trab[eé]|no guarda|no guardar)\b/.test(
+    t,
+  );
+}
+
+function mantenimientoTroubleshootingReply(): string {
+  return [
+    "Si no pudiste avanzar con Mantenimiento en Wara, revisá esto:",
+    "",
+    "1. Separá configuración de operación: Utilidades → Mantenimiento es solo catálogos (planes / correctivo / toma y deje).",
+    "2. Para asignar un plan a una unidad: Unidades → (unidad) → MIS ATAJOS → TAREAS.",
+    "3. Para ver/confirmar tareas u OT: Paneles → Tareas de mantenimiento u Órdenes de trabajo.",
+    "4. Completá campos obligatorios y, si el sistema pide odómetro/horómetro, actualizalo antes (otro trámite).",
+    "5. Si sigue fallando, anotá el mensaje de error o una captura y pedí ayuda a tu administrador Wara.",
+    "",
+    "Por este chat no registro ni abro ticket automático solo por preguntar: primero te ayudo a resolverlo en la app.",
+  ].join("\n");
+}
+
 function mantenimientoReply(rawText: string): string {
   const t = norm(rawText);
-  if (/\b(preventiv|plan)\b/.test(t)) {
+  if (looksLikeMaintenanceLoadTrouble(rawText)) {
+    return mantenimientoTroubleshootingReply();
+  }
+  if (/\b(preventiv\w*|plan)\b/.test(t) && !/\bcorrectiv/.test(t)) {
     return [
-      "Para planes y tareas preventivas en el módulo Mantenimiento:",
+      "Plan preventivo en Wara (configuración + asignación):",
       "",
-      "1. Entrá a Utilidades → Mantenimiento.",
-      "2. Creá o seleccioná un plan preventivo.",
-      "3. Asociá las unidades que correspondan.",
-      "4. Definí periodicidad y responsables si el módulo lo permite.",
-      "5. Hacé seguimiento del estado hasta el cierre.",
+      "1. Catálogo: Utilidades → Mantenimiento → Plan de mantenimiento (crear plan y tareas con un solo criterio: km, horas o fecha).",
+      "2. Asignar a la unidad: Unidades → (unidad) → MIS ATAJOS → TAREAS → elegir plan o tarea.",
+      "3. Seguimiento: Paneles → Tareas de mantenimiento (estados, confirmar, administrar).",
       "",
-      "Si preferís, yo puedo registrar un mantenimiento preventivo por WhatsApp: decime la patente.",
+      "Utilidades no es donde se opera el día a día: ahí solo se arman los catálogos.",
     ].join("\n");
   }
-  if (/\b(correctiv|averia|falla)\b/.test(t)) {
+  if (/\b(correctiv\w*|averia|falla|orden(?:es)? de trabajo)\b/.test(t)) {
     return [
-      "Para una tarea correctiva en Mantenimiento:",
+      "Correctivo / orden de trabajo en Wara:",
       "",
-      "1. Entrá a Utilidades → Mantenimiento.",
-      "2. Creá una tarea u orden correctiva.",
-      "3. Seleccioná la unidad afectada.",
-      "4. Describí la falla o trabajo a realizar.",
-      "5. Guardá y hacé seguimiento hasta el cierre.",
+      "1. Catálogo (opcional): Utilidades → Mantenimiento → Plan correctivo (planes y tareas correctivas).",
+      "2. Operación: Paneles → Tareas de mantenimiento o Paneles → Órdenes de trabajo (alta, edición, seguimiento).",
+      "3. Desde una novedad de inspección: Paneles → Toma y deje → solucionar o convertir a tarea correctiva.",
+      "",
+      "No confundas con odómetro/horómetro (otro trámite).",
     ].join("\n");
   }
+  if (/\b(toma\s*y\s*deje|inspecci[oó]n)\b/.test(t)) {
+    return [
+      "Toma y deje en Wara:",
+      "",
+      "1. Conceptos (catálogo): Utilidades → Mantenimiento → Conceptos toma y deje.",
+      "2. Operación: Paneles → Toma y deje (novedades; solucionar o convertir a correctivo).",
+    ].join("\n");
+  }
+  // «Mantenimiento» genérico: mapa real, no menú ni “todo en Utilidades”.
   return [
-    "El módulo de mantenimiento sirve para gestionar tareas preventivas y correctivas:",
+    "Así está armado Mantenimiento en Wara:",
     "",
-    "1. Preventivo: planes periódicos asociados a unidades.",
-    "2. Correctivo: órdenes por falla o reparación puntual.",
-    "3. Desde WhatsApp puedo registrar o programar un mantenimiento si me pasás la patente.",
+    "Configuración (catálogos): Utilidades → Mantenimiento → Plan de mantenimiento / Plan correctivo / Conceptos toma y deje.",
+    "Operación diaria:",
+    "1. Asignar plan/tarea a una unidad: Unidades → (unidad) → MIS ATAJOS → TAREAS.",
+    "2. Gestionar tareas y OT: Paneles → Tareas de mantenimiento / Órdenes de trabajo.",
+    "3. Inspecciones: Paneles → Toma y deje.",
+    "4. Seguimiento: Informes → Mantenimiento y depósito.",
     "",
-    "¿Querés el paso a paso de preventivo, correctivo, o preferís que lo registre yo?",
+    "Preventivo = plan programado. Correctivo = falla o reparación puntual.",
+    "Por este chat te explico el uso; no programo mantenimientos en tu cuenta.",
   ].join("\n");
 }
 
@@ -241,8 +486,62 @@ function buildRepeatFallback(detected: InfoGuideKind | null): string {
   }
   if (detected === "mantenimiento") {
     return [
-      "Ya te pasé ese paso a paso de Mantenimiento. Contame si tu duda es sobre preventivo o correctivo,",
-      "o si preferís que lo registre yo por acá (pasame la patente).",
+      "Ya te pasé el mapa de Mantenimiento (catálogos en Utilidades vs operación en Unidades/Paneles).",
+      "Decime qué punto puntual: asignar plan, panel de tareas, OT, toma y deje, o un error de pantalla.",
+    ].join("\n");
+  }
+  if (detected === "transporte_publico") {
+    return [
+      "Ya te pasé esa parte de Transporte Público.",
+      "Decime qué punto puntual necesitás: concepto, un paso del procedimiento, o el error que ves en pantalla.",
+    ].join("\n");
+  }
+  if (detected === "cisternas") {
+    return [
+      "Ya te pasé esa parte de Cisternas.",
+      "Decime qué punto puntual necesitás: alta, carga, medición, informes o tickets de combustible.",
+    ].join("\n");
+  }
+  if (detected === "combustible") {
+    return [
+      "Ya te pasé esa parte de Combustible.",
+      "Decime qué punto puntual necesitás: tickets, validación, panel, informes o permisos.",
+    ].join("\n");
+  }
+  if (detected === "hojas_de_ruta") {
+    return [
+      "Ya te pasé esa parte de Hojas de ruta.",
+      "Decime qué punto puntual: alta, predefinida, puntos, calendario, cargas/descargas o un error de pantalla.",
+    ].join("\n");
+  }
+  if (detected === "puntos_de_interes") {
+    return [
+      "Ya te pasé esa parte de Puntos de interés.",
+      "Decime qué punto puntual: alta, grupos, forma, eventos, import/export o el depósito.",
+    ].join("\n");
+  }
+  if (detected === "informes") {
+    return [
+      "Ya te pasé esa parte de Informes.",
+      "Decime qué categoría o informe puntual necesitás.",
+    ].join("\n");
+  }
+  if (detected === "alertas") {
+    return [
+      "Ya te pasé esa parte de Alertas.",
+      "Decime qué tipo de alerta querés consultar (pánico, zonas, RTO, etc.).",
+    ].join("\n");
+  }
+  if (detected === "paneles") {
+    return [
+      "Ya te pasé esa parte de Paneles.",
+      "Decime qué vista querés (Alarmas, Notificaciones, Turnos, etc.).",
+    ].join("\n");
+  }
+  if (detected === "utilidades_bloque_2") {
+    return [
+      "Ya te pasé esa parte de Utilidades.",
+      "Decime qué punto puntual: Acoplados, Auditoría, recorridos, Comunicador, links de posición, Cuestionarios, Novedades o Remitos.",
     ].join("\n");
   }
   return "Contame con más detalle qué necesitás y te ayudo con eso puntualmente.";
@@ -252,17 +551,92 @@ export function buildInfoGuideReply(
   rawText: string,
   kind?: InfoGuideKind | null,
   lastBotMessage?: string | null,
+  threadText?: string | null,
 ): string {
-  const detected = kind ?? detectInfoGuideKind(rawText);
+  let detected = kind ?? detectInfoGuideKind(rawText);
+  if (detected === "cisternas" && !isCisternasKbEnabled()) detected = null;
+  if (detected === "combustible" && !isCombustibleKbEnabled()) detected = null;
+  if (detected === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) detected = null;
+  if (detected === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    return buildHojasRutaDisabledChannelReply();
+  }
+  if (detected === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return buildPuntosInteresDisabledChannelReply();
+  }
+  if (detected === "informes" && !isInformesKbEnabled()) {
+    return buildInformesDisabledChannelReply();
+  }
+  if (detected === "alertas" && !isAlertasKbEnabled()) {
+    return buildAlertasDisabledChannelReply();
+  }
+  if (detected === "paneles" && !isPanelesKbEnabled()) {
+    return buildPanelesDisabledChannelReply();
+  }
   let message: string;
   if (looksLikeTicketCreationInfoQuestion(rawText)) message = buildTicketCreationInfoReply();
-  else if (looksLikeOdometerInfoRequest(rawText)) message = odometerInfoReply(rawText);
-  else if (detected === "opciones") message = opcionesReply(rawText);
+  else if (looksLikeOdometerInfoRequest(rawText)) message = buildOdometerInfoExplanation(rawText);
+  else if (
+    looksLikeMaintenanceLoadTrouble(rawText) &&
+    (detected === "mantenimiento" ||
+      looksLikeMaintenanceAppGuideRequest(rawText, threadText ?? "") ||
+      looksLikeMaintenanceGuideContextInThread(threadText ?? ""))
+  ) {
+    message = mantenimientoTroubleshootingReply();
+  } else if (detected === "opciones") message = opcionesReply(rawText);
   else if (detected === "unidades") message = unidadesReply(rawText);
   else if (detected === "mantenimiento") message = mantenimientoReply(rawText);
+  else if (detected === "transporte_publico")
+    message = [
+      "Puedo ayudarte con Transporte Público: conceptos, servicios/POI, paradas, turnos, hojas de turno, excepciones, monitoreo o errores frecuentes.",
+      "Decime qué necesitás en una frase (sin asumir causas).",
+    ].join("\n");
+  else if (detected === "cisternas")
+    message = [
+      "Te puedo orientar con el módulo Cisternas: qué es, alta, carga, medición, informes o tickets de combustible.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "Si preguntás por editar/eliminar o columnas exactas de un informe, el manual aún no lo confirma con datos reales.",
+    ].join("\n");
+  else if (detected === "combustible")
+    message = [
+      "Te puedo orientar con el módulo Combustible: tickets, pegado masivo, validación de cargas, panel, informes o permisos.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "No confundas Combustible (unidad/tickets) con Cisternas (tanque de depósito).",
+    ].join("\n");
+  else if (detected === "hojas_de_ruta")
+    message = [
+      "Te puedo orientar con Hojas de ruta: listado, alta, predefinidas, puntos/traza, calendario o cargas/descargas de viaje.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "No confundas hoja de ruta con hoja de turno (Transporte de Pasajeros).",
+    ].join("\n");
+  else if (detected === "puntos_de_interes")
+    message = [
+      "Te puedo orientar con Puntos de interés: grupos, alta/edición de geocercas/POI, eventos, import/export o el vínculo Depósito↔Artículos.",
+      "Decime en una frase qué necesitás y te detallo ese punto.",
+      "Si es una etapa dentro de un servicio de Transporte, o una parada de pasajeros, decime y te oriento con eso.",
+    ].join("\n");
+  else if (detected === "informes")
+    message = [
+      "Te puedo orientar con el menú Informes: categorías (Combustible, Choferes, Hojas de ruta, Mantenimiento y depósito, Puntos, Transporte de pasajeros) e informes generales.",
+      "Decime qué informe querés ver. Ojo: ver un informe ≠ crear/cargar en el módulo operativo.",
+    ].join("\n");
+  else if (detected === "alertas")
+    message = [
+      "Te puedo orientar con el módulo Alertas: listado de eventos por tipo (pánico, zonas, RTO, etc.).",
+      "Decime qué tipo querés consultar. No es gestionar alarmas en Paneles ni configurar protocolos en Opciones.",
+    ].join("\n");
+  else if (detected === "paneles")
+    message = [
+      "Te puedo orientar con el módulo Paneles: vistas de monitoreo (Alarmas, Notificaciones, Turnos, etc.).",
+      "Decime qué panel querés. Alarmas ≠ Alertas ≠ Notificaciones ≠ Informes ≠ Protocolos.",
+    ].join("\n");
+  else if (detected === "utilidades_bloque_2")
+    message = [
+      "Te puedo orientar con Utilidades: Acoplados, Auditoría, Calculador de recorridos, Comunicador, Compartir posición, Cuestionarios, Novedades y Remitos.",
+      "Decime cuál de esas secciones necesitás y qué querés hacer.",
+    ].join("\n");
   else
     message = [
-      "Puedo guiarte sobre los módulos Opciones, Unidades o Mantenimiento de Wara.",
+      "Puedo guiarte sobre los módulos Opciones, Unidades, Mantenimiento o Transporte Público de Wara.",
       "Decime cuál te interesa o qué querés configurar.",
     ].join("\n");
 
@@ -273,32 +647,1151 @@ export function buildInfoGuideReply(
 }
 
 /**
- * Igual que `buildInfoGuideReply`, pero para "opciones" y "unidades" intenta primero
- * responder con IA anclada al manual real de Wara (`@/lib/knowledgeBaseAI`) en vez de la
- * plantilla fija por palabra clave — así preguntas puntuales ("qué es un perfil", "cómo
- * registro un contacto") se contestan con precisión real y no con el bloque genérico del
- * módulo. Si la IA no está disponible o falla, cae al comportamiento estático de siempre
- * (nunca deja al cliente sin respuesta). "mantenimiento" no tiene manual cargado todavía,
- * así que sigue usando solo las plantillas estáticas.
+ * Igual que `buildInfoGuideReply`, pero intenta primero responder con IA anclada al
+ * manual/KB de Wara (`@/lib/knowledgeBaseAI`) en vez de la plantilla fija — así
+ * preguntas puntuales se contestan con el procedimiento real. Si la IA no está
+ * disponible o falla, cae al comportamiento estático (nunca deja al cliente sin respuesta).
  */
+/** IA que solo pregunta (menú) en vez de dar el procedimiento → inválida; usamos plantilla KB. */
+function looksLikeWeakMaintenanceGuideAnswer(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  const hasNumberedSteps = /\n\s*1[\).\]]/.test(`\n${t}`) || /^\s*1[\).\]]/.test(t);
+  const hasAppPath =
+    /Utilidades\s*[→\-]\s*Mantenimiento/i.test(t) ||
+    /Paneles\s*[→\-]\s*(Tareas|[ÓO]rdenes|Toma)/i.test(t) ||
+    /MIS\s+ATAJOS\s*[→\-]\s*TAREAS/i.test(t) ||
+    /Unidades\s*[→\-].{0,40}TAREAS/i.test(t);
+  if (hasNumberedSteps || hasAppPath) return false;
+  return (
+    /preventivo o (de )?correctivo/i.test(t) ||
+    /quer[eé]s (el paso a paso|configurar|que te (explique|pase))/i.test(t) ||
+    /decime si quer[eé]s/i.test(t) ||
+    /\?\s*$/.test(t)
+  );
+}
+
 export async function buildGroundedInfoGuideReply(
   rawText: string,
   kind?: InfoGuideKind | null,
   lastBotMessage?: string | null,
   threadText?: string,
+  interpret?: PlatformKnowledgeInterpret | null,
 ): Promise<string> {
-  const detected = kind ?? detectInfoGuideKind(rawText);
-  const fallback = () => buildInfoGuideReply(rawText, detected, lastBotMessage);
+  const { message } = await buildGroundedInfoGuideReplyWithMeta(
+    rawText,
+    kind,
+    lastBotMessage,
+    threadText,
+    interpret,
+  );
+  return message;
+}
 
-  if (detected !== "opciones" && detected !== "unidades") {
-    return fallback();
+/** Resultado expuesto para evidencia / persistencia / log único. */
+export async function buildGroundedInfoGuideReplyWithMeta(
+  rawText: string,
+  kind?: InfoGuideKind | null,
+  lastBotMessage?: string | null,
+  threadText?: string,
+  interpret?: PlatformKnowledgeInterpret | null,
+): Promise<{
+  message: string;
+  guideKind: InfoGuideKind | null;
+  interpret: PlatformKnowledgeInterpret | null;
+  fallback: InfoGuideFallback;
+}> {
+  let activeInterpret = interpret ?? null;
+
+  if (activeInterpret?.normalTarget === "certificate_definition") {
+    return {
+      message: CERTIFICATE_DEFINITION_REPLY,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: null,
+    };
   }
 
-  const grounded = await answerFromKnowledgeBase(detected, rawText, threadText);
-  if (!grounded) return fallback();
-
-  if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
-    return buildRepeatFallback(detected);
+  // Respuesta social estructurada: no detectar módulos ni consultar corpus.
+  if (activeInterpret && isAssistantIdentityInterpret(activeInterpret)) {
+    if (!looksLikeAssistantIdentityQuestion(rawText)) {
+      // Interpret sucio: no devolver «Soy Kira» ante ingreso/cargar número.
+      const prev = activeInterpret;
+      activeInterpret = {
+        ...prev,
+        route: prev.route ?? "continue_normal",
+        normalTarget: null,
+        reason: `${prev.reason || "interpret"}|identity_rejected_non_social`,
+      };
+    } else {
+      return {
+        message: buildAssistantIdentityReply(),
+        guideKind: null,
+        interpret: activeInterpret,
+        fallback: null,
+      };
+    }
   }
-  return grounded;
+
+  // Fail-closed del intérprete: respuesta neutra inmediata, sin guards/refine/detect/corpus.
+  if (isFailClosedPlatformInterpret(activeInterpret)) {
+    const message =
+      activeInterpret!.clarifyQuestion?.trim() ||
+      "No pude interpretar bien tu consulta ahora. ¿Podés reformularla en una frase?";
+    return {
+      message,
+      guideKind: null,
+      interpret: {
+        ...activeInterpret!,
+        guideKind: null,
+        articleIds: [],
+        clarifyQuestion: message,
+      },
+      fallback: "clarify_question",
+    };
+  }
+
+  if (
+    activeInterpret?.guideKind === "unidades" &&
+    activeInterpret.reportId === "unidades_grupos"
+  ) {
+    return {
+      message: unidadesGroupsReply(),
+      guideKind: "unidades",
+      interpret: activeInterpret,
+      fallback: null,
+    };
+  }
+
+  let detected = sanitizeOptInGuideKind(kind ?? null);
+  let articleIds = activeInterpret?.articleIds ?? [];
+  let need: InfoGuideNeed | null = activeInterpret?.need ?? null;
+  let fallback: InfoGuideFallback = null;
+
+  const disabledHrReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message = buildHojasRutaDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "hojas_de_ruta",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("hojas_ruta_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|hojas_ruta_module_disabled`
+          : "hojas_ruta_module_disabled",
+    };
+    return {
+      message,
+      guideKind: "hojas_de_ruta",
+      interpret: disabledInterpret,
+      fallback: "hojas_ruta_flag_off",
+    };
+  };
+
+  const disabledPiReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message = buildPuntosInteresDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "puntos_de_interes",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("puntos_interes_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|puntos_interes_module_disabled`
+          : "puntos_interes_module_disabled",
+    };
+    return {
+      message,
+      guideKind: "puntos_de_interes",
+      interpret: disabledInterpret,
+      fallback: "puntos_interes_flag_off",
+    };
+  };
+
+  const disabledInformesReply = (section?: string | null): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const sectionOff =
+      Boolean(section) &&
+      section !== "mapa" &&
+      section !== "shared" &&
+      isInformesKbEnabled() &&
+      !isInformesSectionEnabled(section);
+    const message = sectionOff
+      ? buildInformesSectionDisabledReply(section!)
+      : buildInformesDisabledChannelReply();
+    const reason = sectionOff
+      ? "informes_section_disabled"
+      : "informes_module_disabled";
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "informes",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes(reason)
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|${reason}`
+          : reason,
+      category: section ?? activeInterpret?.category ?? null,
+      reportId: activeInterpret?.reportId ?? null,
+    };
+    return {
+      message,
+      guideKind: "informes",
+      interpret: disabledInterpret,
+      fallback: sectionOff ? "informes_section_off" : "informes_flag_off",
+    };
+  };
+
+  const disabledAlertasReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message = buildAlertasDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "alertas",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("alertas_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|alertas_module_disabled`
+          : "alertas_module_disabled",
+      reportId: activeInterpret?.reportId ?? null,
+    };
+    return {
+      message,
+      guideKind: "alertas",
+      interpret: disabledInterpret,
+      fallback: "alertas_flag_off",
+    };
+  };
+
+  const disabledPanelesReply = (): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message = buildPanelesDisabledChannelReply();
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "paneles",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("paneles_module_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|paneles_module_disabled`
+          : "paneles_module_disabled",
+      reportId: activeInterpret?.reportId ?? null,
+    };
+    return {
+      message,
+      guideKind: "paneles",
+      interpret: disabledInterpret,
+      fallback: "paneles_flag_off",
+    };
+  };
+
+  const disabledOpcionesSectionReply = (
+    section: string | null | undefined,
+  ): {
+    message: string;
+    guideKind: InfoGuideKind;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const sec = section?.trim() || "opciones";
+    const message = buildOpcionesSectionDisabledReply(sec);
+    const disabledInterpret: PlatformKnowledgeInterpret = {
+      route: "info_guides",
+      guideKind: "opciones",
+      need: "ambiguous",
+      articleIds: [],
+      clarifyQuestion: message,
+      executionRequest: false,
+      confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+      reason: activeInterpret?.reason?.includes("opciones_section_disabled")
+        ? activeInterpret.reason
+        : activeInterpret?.reason
+          ? `${activeInterpret.reason}|opciones_section_disabled`
+          : "opciones_section_disabled",
+      category: section ?? activeInterpret?.category ?? null,
+      reportId: activeInterpret?.reportId ?? null,
+    };
+    return {
+      message,
+      guideKind: "opciones",
+      interpret: disabledInterpret,
+      fallback: "opciones_section_off",
+    };
+  };
+
+  if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "cisternas_flag_off",
+    };
+    articleIds = [];
+    fallback = "cisternas_flag_off";
+  }
+  if (activeInterpret?.guideKind === "combustible" && !isCombustibleKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "combustible_flag_off",
+    };
+    articleIds = [];
+    fallback = "combustible_flag_off";
+  }
+  if (
+    activeInterpret?.guideKind === "utilidades_bloque_2" &&
+    !isUtilidadesBloque2KbEnabled()
+  ) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: activeInterpret.reason || "utilidades_bloque2_flag_off",
+    };
+    articleIds = [];
+    fallback = "utilidades_bloque2_flag_off";
+  }
+  if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    return disabledHrReply();
+  }
+  if (activeInterpret?.guideKind === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return disabledPiReply();
+  }
+  if (activeInterpret?.guideKind === "informes") {
+    if (!isInformesKbEnabled()) return disabledInformesReply(activeInterpret.category);
+    if (
+      activeInterpret.category &&
+      activeInterpret.category !== "mapa" &&
+      activeInterpret.category !== "shared" &&
+      !isInformesSectionEnabled(activeInterpret.category)
+    ) {
+      return disabledInformesReply(activeInterpret.category);
+    }
+    if (activeInterpret.reason?.includes("informes_module_disabled")) {
+      return disabledInformesReply(activeInterpret.category);
+    }
+    if (activeInterpret.reason?.includes("informes_section_disabled")) {
+      return disabledInformesReply(activeInterpret.category);
+    }
+  }
+  if (activeInterpret?.guideKind === "alertas") {
+    if (!isAlertasKbEnabled()) return disabledAlertasReply();
+    if (activeInterpret.reason?.includes("alertas_module_disabled")) {
+      return disabledAlertasReply();
+    }
+  }
+  if (activeInterpret?.guideKind === "paneles") {
+    if (!isPanelesKbEnabled()) return disabledPanelesReply();
+    if (activeInterpret.reason?.includes("paneles_module_disabled")) {
+      return disabledPanelesReply();
+    }
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.category &&
+    activeInterpret.category !== "mapa" &&
+    activeInterpret.category !== "shared" &&
+    !isOpcionesSectionEnabled(activeInterpret.category)
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.reason?.includes("opciones_section_disabled")
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
+
+  const articulosUnsupportedReply = (): {
+    message: string;
+    guideKind: null;
+    interpret: PlatformKnowledgeInterpret;
+    fallback: InfoGuideFallback;
+  } => {
+    const message =
+      activeInterpret?.clarifyQuestion?.includes("Artículos")
+        ? activeInterpret.clarifyQuestion
+        : buildArticulosModuleUnsupportedReply();
+    return {
+      message,
+      guideKind: null,
+      interpret: {
+        route: "info_guides",
+        guideKind: null,
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion: message,
+        executionRequest: false,
+        confidence: Math.max(activeInterpret?.confidence ?? 0.95, 0.95),
+        reason: activeInterpret?.reason?.includes("articulos_module_unsupported")
+          ? activeInterpret.reason
+          : activeInterpret?.reason
+            ? `${activeInterpret.reason}|articulos_module_unsupported`
+            : "articulos_module_unsupported",
+      },
+      fallback: "articulos_module_unsupported",
+    };
+  };
+
+  if (looksLikeArticulosModuleUnsupportedQuery(rawText)) {
+    return articulosUnsupportedReply();
+  }
+
+  if (!activeInterpret) {
+    activeInterpret = await interpretPlatformKnowledgeTurn({
+      selectionText: rawText,
+      threadText,
+    });
+    // Un reintento si el 1er interpret falló (timeout/rate-limit): evita caer al blob Opciones.
+    if (!activeInterpret) {
+      activeInterpret = await interpretPlatformKnowledgeTurn({
+        selectionText: rawText,
+        threadText,
+      });
+    }
+  }
+  if (activeInterpret) {
+    const { applyPlatformGuideInterpretGuards } = await import(
+      "@/lib/infoGuideInterpretAI"
+    );
+    // Reaplicar: p. ej. kind/seed contaminado por MT + consulta HR.
+    activeInterpret = applyPlatformGuideInterpretGuards(
+      activeInterpret,
+      rawText,
+      threadText ?? "",
+    );
+    if (platformGuideNeedsSemanticDetailRefine(activeInterpret)) {
+      activeInterpret = await refinePlatformKnowledgeDetailIfNeeded({
+        selectionText: rawText,
+        threadText: threadText ?? "",
+        interpret: activeInterpret,
+      });
+    }
+  } else {
+    const { applyPlatformGuideInterpretGuards } = await import(
+      "@/lib/infoGuideInterpretAI"
+    );
+    const offlineGuarded = applyPlatformGuideInterpretGuards(
+      {
+        route: "continue_normal",
+        guideKind: detected ?? null,
+        need: "ambiguous",
+        articleIds: [],
+        clarifyQuestion: null,
+        executionRequest: false,
+        confidence: 0.5,
+        reason: "grounded_offline_seed",
+      },
+      rawText,
+      threadText ?? "",
+    );
+    if (
+      offlineGuarded.route === "info_guides" &&
+      (offlineGuarded.guideKind ||
+        offlineGuarded.reason?.includes("articulos_module_unsupported") ||
+        offlineGuarded.reason?.includes("ambiguous_carga_guard"))
+    ) {
+      activeInterpret = offlineGuarded;
+    }
+  }
+
+  if (activeInterpret?.reason?.includes("articulos_module_unsupported")) {
+    return articulosUnsupportedReply();
+  }
+
+  if (activeInterpret?.guideKind === "cisternas" && !isCisternasKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: "cisternas_flag_off",
+    };
+    fallback = "cisternas_flag_off";
+  }
+  if (activeInterpret?.guideKind === "combustible" && !isCombustibleKbEnabled()) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: "combustible_flag_off",
+    };
+    fallback = "combustible_flag_off";
+  }
+  if (
+    activeInterpret?.guideKind === "utilidades_bloque_2" &&
+    !isUtilidadesBloque2KbEnabled()
+  ) {
+    activeInterpret = {
+      ...activeInterpret,
+      guideKind: null,
+      articleIds: [],
+      route: "continue_normal",
+      reason: "utilidades_bloque2_flag_off",
+    };
+    articleIds = [];
+    fallback = "utilidades_bloque2_flag_off";
+  }
+  if (activeInterpret?.guideKind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    return disabledHrReply();
+  }
+  if (activeInterpret?.guideKind === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return disabledPiReply();
+  }
+  if (activeInterpret?.guideKind === "informes") {
+    if (!isInformesKbEnabled()) return disabledInformesReply(activeInterpret.category);
+    if (
+      activeInterpret.category &&
+      activeInterpret.category !== "mapa" &&
+      activeInterpret.category !== "shared" &&
+      !isInformesSectionEnabled(activeInterpret.category)
+    ) {
+      return disabledInformesReply(activeInterpret.category);
+    }
+    if (activeInterpret.reason?.includes("informes_module_disabled")) {
+      return disabledInformesReply(activeInterpret.category);
+    }
+    if (activeInterpret.reason?.includes("informes_section_disabled")) {
+      return disabledInformesReply(activeInterpret.category);
+    }
+  }
+  if (activeInterpret?.guideKind === "alertas") {
+    if (!isAlertasKbEnabled()) return disabledAlertasReply();
+    if (activeInterpret.reason?.includes("alertas_module_disabled")) {
+      return disabledAlertasReply();
+    }
+  }
+  if (activeInterpret?.guideKind === "paneles") {
+    if (!isPanelesKbEnabled()) return disabledPanelesReply();
+    if (activeInterpret.reason?.includes("paneles_module_disabled")) {
+      return disabledPanelesReply();
+    }
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.category &&
+    activeInterpret.category !== "mapa" &&
+    activeInterpret.category !== "shared" &&
+    !isOpcionesSectionEnabled(activeInterpret.category)
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
+  if (
+    activeInterpret?.guideKind === "opciones" &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret.reason?.includes("opciones_section_disabled")
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
+
+  if (!detected) {
+    // Preferir guideKind del intérprete; no reintroducir blob Opciones vía detectInfoGuideKind
+    // cuando ya hay un módulo estructural (alertas/paneles/informes/opciones V2).
+    detected = sanitizeOptInGuideKind(activeInterpret?.guideKind ?? null);
+  }
+  if (!detected && !activeInterpret) {
+    detected = sanitizeOptInGuideKind(detectInfoGuideKind(rawText));
+  }
+  if (activeInterpret?.guideKind && sanitizeOptInGuideKind(activeInterpret.guideKind)) {
+    articleIds = activeInterpret.articleIds;
+    need = activeInterpret.need;
+    if (!kind) detected = activeInterpret.guideKind;
+  }
+
+  if (kind === "cisternas" && !isCisternasKbEnabled()) {
+    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
+    return {
+      message,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: "cisternas_flag_off",
+    };
+  }
+  if (kind === "combustible" && !isCombustibleKbEnabled()) {
+    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
+    return {
+      message,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: "combustible_flag_off",
+    };
+  }
+  if (kind === "hojas_de_ruta" && !isHojasRutaKbEnabled()) {
+    return disabledHrReply();
+  }
+  if (kind === "puntos_de_interes" && !isPuntosInteresKbEnabled()) {
+    return disabledPiReply();
+  }
+  if (kind === "informes" && !isInformesKbEnabled()) {
+    return disabledInformesReply(activeInterpret?.category);
+  }
+  if (
+    kind === "informes" &&
+    activeInterpret?.category &&
+    activeInterpret.category !== "mapa" &&
+    activeInterpret.category !== "shared" &&
+    !isInformesSectionEnabled(activeInterpret.category)
+  ) {
+    return disabledInformesReply(activeInterpret.category);
+  }
+  // kind forzado O detect explícito (p. ej. "alertas" / "modulo alertas").
+  if (
+    (kind === "alertas" || detected === "alertas") &&
+    !isAlertasKbEnabled()
+  ) {
+    return disabledAlertasReply();
+  }
+  if (
+    (kind === "paneles" || detected === "paneles") &&
+    !isPanelesKbEnabled()
+  ) {
+    return disabledPanelesReply();
+  }
+  if (
+    (kind === "opciones" || detected === "opciones") &&
+    isOpcionesKbV2Enabled() &&
+    activeInterpret?.category &&
+    activeInterpret.category !== "mapa" &&
+    activeInterpret.category !== "shared" &&
+    !isOpcionesSectionEnabled(activeInterpret.category)
+  ) {
+    return disabledOpcionesSectionReply(activeInterpret.category);
+  }
+
+  if (kind === "utilidades_bloque_2" && !isUtilidadesBloque2KbEnabled()) {
+    const message = buildInfoGuideReply(rawText, null, lastBotMessage, threadText);
+    return {
+      message,
+      guideKind: null,
+      interpret: activeInterpret,
+      fallback: "utilidades_bloque2_flag_off",
+    };
+  }
+
+  if (activeInterpret?.need === "ambiguous" && activeInterpret.clarifyQuestion) {
+    return {
+      message: activeInterpret.clarifyQuestion,
+      guideKind: sanitizeOptInGuideKind(detected ?? activeInterpret.guideKind),
+      interpret: activeInterpret,
+      fallback: "clarify_question",
+    };
+  }
+
+  if (
+    activeInterpret?.executionRequest &&
+    (detected === "transporte_publico" ||
+      activeInterpret.guideKind === "transporte_publico" ||
+      detected === "cisternas" ||
+      activeInterpret.guideKind === "cisternas" ||
+      detected === "combustible" ||
+      activeInterpret.guideKind === "combustible" ||
+      detected === "hojas_de_ruta" ||
+      activeInterpret.guideKind === "hojas_de_ruta" ||
+      detected === "puntos_de_interes" ||
+      activeInterpret.guideKind === "puntos_de_interes" ||
+      detected === "informes" ||
+      activeInterpret.guideKind === "informes" ||
+      detected === "alertas" ||
+      activeInterpret.guideKind === "alertas" ||
+      detected === "paneles" ||
+      activeInterpret.guideKind === "paneles" ||
+      detected === "utilidades_bloque_2" ||
+      activeInterpret.guideKind === "utilidades_bloque_2" ||
+      detected === "mantenimiento" ||
+      activeInterpret.guideKind === "mantenimiento" ||
+      (detected === "opciones" &&
+        isOpcionesKbV2Enabled() &&
+        (articleIds.length > 0 || activeInterpret.guideKind === "opciones")) ||
+      (activeInterpret.guideKind === "opciones" &&
+        isOpcionesKbV2Enabled() &&
+        articleIds.length > 0))
+  ) {
+    if (detected === "cisternas" || activeInterpret.guideKind === "cisternas") {
+      if (!isCisternasKbEnabled()) {
+        return {
+          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
+          guideKind: null,
+          interpret: activeInterpret,
+          fallback: "cisternas_flag_off",
+        };
+      }
+      detected = "cisternas";
+      const execIds = articleIds.length ? articleIds : ["cs-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("cisternas", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "cisternas",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "cisternas",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (detected === "combustible" || activeInterpret.guideKind === "combustible") {
+      if (!isCombustibleKbEnabled()) {
+        return {
+          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
+          guideKind: null,
+          interpret: activeInterpret,
+          fallback: "combustible_flag_off",
+        };
+      }
+      detected = "combustible";
+      const execIds = articleIds.length ? articleIds : ["cb-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("combustible", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "combustible",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "combustible",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (detected === "hojas_de_ruta" || activeInterpret.guideKind === "hojas_de_ruta") {
+      if (!isHojasRutaKbEnabled()) {
+        return disabledHrReply();
+      }
+      detected = "hojas_de_ruta";
+      const execIds = articleIds.length ? articleIds : ["hr-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("hojas_de_ruta", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "hojas_de_ruta",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "hojas_de_ruta",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (detected === "puntos_de_interes" || activeInterpret.guideKind === "puntos_de_interes") {
+      if (!isPuntosInteresKbEnabled()) {
+        return disabledPiReply();
+      }
+      detected = "puntos_de_interes";
+      const execIds = articleIds.length ? articleIds : ["pi-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("puntos_de_interes", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "puntos_de_interes",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "puntos_de_interes",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (detected === "informes" || activeInterpret.guideKind === "informes") {
+      if (!isInformesKbEnabled()) {
+        return disabledInformesReply(activeInterpret?.category);
+      }
+      if (
+        activeInterpret?.category &&
+        activeInterpret.category !== "mapa" &&
+        activeInterpret.category !== "shared" &&
+        !isInformesSectionEnabled(activeInterpret.category)
+      ) {
+        return disabledInformesReply(activeInterpret.category);
+      }
+      detected = "informes";
+      const execIds = articleIds.length ? articleIds : ["inf-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("informes", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "informes",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "informes",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (detected === "alertas" || activeInterpret.guideKind === "alertas") {
+      if (!isAlertasKbEnabled()) {
+        return disabledAlertasReply();
+      }
+      detected = "alertas";
+      const execIds = articleIds.length ? articleIds : ["al-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("alertas", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "alertas",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "alertas",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (detected === "paneles" || activeInterpret.guideKind === "paneles") {
+      if (!isPanelesKbEnabled()) {
+        return disabledPanelesReply();
+      }
+      detected = "paneles";
+      const execIds = articleIds.length ? articleIds : ["pn-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("paneles", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "paneles",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "paneles",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (
+      (detected === "opciones" || activeInterpret.guideKind === "opciones") &&
+      isOpcionesKbV2Enabled()
+    ) {
+      if (
+        activeInterpret?.category &&
+        activeInterpret.category !== "mapa" &&
+        activeInterpret.category !== "shared" &&
+        !isOpcionesSectionEnabled(activeInterpret.category)
+      ) {
+        return disabledOpcionesSectionReply(activeInterpret.category);
+      }
+      detected = "opciones";
+      const execIds = articleIds.length ? articleIds : ["op-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("opciones", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "opciones",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "opciones",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (
+      detected === "utilidades_bloque_2" ||
+      activeInterpret.guideKind === "utilidades_bloque_2"
+    ) {
+      if (!isUtilidadesBloque2KbEnabled()) {
+        return {
+          message: buildInfoGuideReply(rawText, null, lastBotMessage, threadText),
+          guideKind: null,
+          interpret: activeInterpret,
+          fallback: "utilidades_bloque2_flag_off",
+        };
+      }
+      detected = "utilidades_bloque_2";
+      const execIds = articleIds.length ? articleIds : ["u2-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase(
+        "utilidades_bloque_2",
+        rawText,
+        threadText,
+        {
+          articleIds: execIds,
+          need: "execute",
+        },
+      );
+      if (execLimit) {
+        return {
+          message: execLimit,
+          guideKind: "utilidades_bloque_2",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "utilidades_bloque_2",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    if (detected === "mantenimiento" || activeInterpret.guideKind === "mantenimiento") {
+      detected = "mantenimiento";
+      const execIds = articleIds.length ? articleIds : ["mt-ejecucion-no-disponible"];
+      const execLimit = await answerFromKnowledgeBase("mantenimiento", rawText, threadText, {
+        articleIds: execIds,
+        need: "execute",
+      });
+      if (execLimit && !looksLikeWeakMaintenanceGuideAnswer(execLimit)) {
+        return {
+          message: execLimit,
+          guideKind: "mantenimiento",
+          interpret: activeInterpret,
+          fallback: null,
+        };
+      }
+      return {
+        message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+        guideKind: "mantenimiento",
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    detected = "transporte_publico";
+    const execLimit = await answerFromKnowledgeBase("transporte_publico", rawText, threadText, {
+      articleIds: articleIds.length ? articleIds : ["tp-ejecucion-no-disponible"],
+      need: "execute",
+    });
+    if (execLimit) {
+      return {
+        message: execLimit,
+        guideKind: "transporte_publico",
+        interpret: activeInterpret,
+        fallback: null,
+      };
+    }
+    return {
+      message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+      guideKind: "transporte_publico",
+      interpret: activeInterpret,
+      fallback: "clarify_or_limit",
+    };
+  }
+
+  if (
+    detected === "opciones" ||
+    detected === "unidades" ||
+    detected === "mantenimiento" ||
+    detected === "transporte_publico" ||
+    (detected === "cisternas" && isCisternasKbEnabled()) ||
+    (detected === "combustible" && isCombustibleKbEnabled()) ||
+    (detected === "hojas_de_ruta" && isHojasRutaKbEnabled()) ||
+    (detected === "puntos_de_interes" && isPuntosInteresKbEnabled()) ||
+    (detected === "informes" &&
+      isInformesKbEnabled() &&
+      (!activeInterpret?.category ||
+        activeInterpret.category === "mapa" ||
+        activeInterpret.category === "shared" ||
+        isInformesSectionEnabled(activeInterpret.category))) ||
+    (detected === "alertas" && isAlertasKbEnabled()) ||
+    (detected === "paneles" && isPanelesKbEnabled()) ||
+    (detected === "utilidades_bloque_2" && isUtilidadesBloque2KbEnabled())
+  ) {
+    // Sin detalle entregable: no corpus completo ni blob legacy de Opciones.
+    const structuralEmptyDetail =
+      (detected === "alertas" && articleIds.length === 0) ||
+      (detected === "paneles" && articleIds.length === 0) ||
+      (detected === "informes" && articleIds.length === 0) ||
+      (detected === "opciones" &&
+        isOpcionesKbV2Enabled() &&
+        articleIds.length === 0);
+    if (structuralEmptyDetail && activeInterpret) {
+      return {
+        message:
+          activeInterpret.clarifyQuestion?.trim() ||
+          buildPlatformGuideClarifyOrLimitMessage(activeInterpret) ||
+          buildInfoGuideReply(rawText, detected, lastBotMessage, threadText),
+        guideKind: detected,
+        interpret: activeInterpret,
+        fallback: "clarify_or_limit",
+      };
+    }
+    const grounded = await answerFromKnowledgeBase(detected, rawText, threadText, {
+      articleIds:
+        detected === "transporte_publico" ||
+        detected === "cisternas" ||
+        detected === "combustible" ||
+        detected === "hojas_de_ruta" ||
+        detected === "puntos_de_interes" ||
+        detected === "informes" ||
+        detected === "alertas" ||
+        detected === "paneles" ||
+        detected === "utilidades_bloque_2" ||
+        detected === "mantenimiento" ||
+        (detected === "opciones" &&
+          isOpcionesKbV2Enabled() &&
+          articleIds.length > 0)
+          ? articleIds
+          : undefined,
+      need,
+    });
+    if (
+      grounded &&
+      !(detected === "mantenimiento" && looksLikeWeakMaintenanceGuideAnswer(grounded))
+    ) {
+      if (lastBotMessage?.trim() && grounded.trim() === lastBotMessage.trim()) {
+        return {
+          message: buildRepeatFallback(detected),
+          guideKind: detected,
+          interpret: activeInterpret,
+          fallback: "repeat",
+        };
+      }
+      return {
+        message: grounded,
+        guideKind: detected,
+        interpret: activeInterpret,
+        fallback: null,
+      };
+    }
+    if (
+      (detected === "transporte_publico" ||
+        detected === "cisternas" ||
+        detected === "combustible" ||
+        detected === "hojas_de_ruta" ||
+        detected === "puntos_de_interes" ||
+        detected === "informes" ||
+        detected === "alertas" ||
+        detected === "paneles" ||
+        detected === "utilidades_bloque_2" ||
+        detected === "mantenimiento" ||
+        (detected === "opciones" &&
+          isOpcionesKbV2Enabled() &&
+          articleIds.length > 0)) &&
+      !grounded
+    ) {
+      if (activeInterpret && (activeInterpret.articleIds.length > 0 || activeInterpret.need)) {
+        return {
+          message: buildPlatformGuideClarifyOrLimitMessage(activeInterpret),
+          guideKind: detected,
+          interpret: activeInterpret,
+          fallback: "clarify_or_limit",
+        };
+      }
+      fallback = "static_kind";
+    }
+  }
+
+  // Nunca reintroducir blob Opciones si el intérprete ya fijó alertas/paneles/informes.
+  if (
+    activeInterpret?.guideKind === "alertas" ||
+    activeInterpret?.guideKind === "paneles" ||
+    activeInterpret?.guideKind === "informes" ||
+    (activeInterpret?.guideKind === "opciones" && isOpcionesKbV2Enabled())
+  ) {
+    const safeKind = activeInterpret.guideKind;
+    return {
+      message:
+        activeInterpret.clarifyQuestion?.trim() ||
+        buildPlatformGuideClarifyOrLimitMessage(activeInterpret) ||
+        buildInfoGuideReply(rawText, safeKind, lastBotMessage, threadText),
+      guideKind: safeKind,
+      interpret: activeInterpret,
+      fallback: fallback ?? "clarify_or_limit",
+    };
+  }
+
+  const message = buildInfoGuideReply(rawText, detected, lastBotMessage, threadText);
+  return {
+    message,
+    guideKind: sanitizeOptInGuideKind(detected),
+    interpret: activeInterpret,
+    fallback: fallback ?? (detected ? "static_kind" : null),
+  };
 }
