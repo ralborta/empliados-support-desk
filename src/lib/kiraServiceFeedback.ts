@@ -28,14 +28,15 @@ export function buildCloseMessageWithFeedbackAsk(): string {
 }
 
 /**
- * Tras resolver un tema (GPS, odómetro, certificado, mantenimiento): pega la nota
- * 1–10 al mensaje de respuesta y deja la encuesta pendiente. Cada acción resuelta
- * pide la nota (si ya hay una esperando respuesta, no apila otra). No actúa en cierres.
+ * Tras resolver un tema (GPS, odómetro, certificado, mantenimiento).
+ * Con encuesta por link (Ola 2, default): solo deja evidencia de trámite;
+ * el link se ofrece al cierre. Sin link: pega la nota 1–10 en chat (legado).
  */
 export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
   message: string;
   rawPhone: string;
   ticketId?: string | null;
+  tramite?: string;
   client?: PrismaClient;
 }): Promise<string> {
   const base = params.message.trim();
@@ -44,9 +45,6 @@ export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
   const db = params.client ?? prisma;
   const customer = await findCustomerByWhatsAppNumber(db, params.rawPhone);
   if (!customer) return params.message;
-
-  const pending = await findOpenFeedbackPending(customer.id, db);
-  if (pending) return params.message;
 
   let ticketId = params.ticketId?.trim() || null;
   if (!ticketId) {
@@ -67,6 +65,21 @@ export async function appendServiceFeedbackAskAfterTramiteSuccess(params: {
       null;
   }
   if (!ticketId) return params.message;
+
+  const { isServiceFeedbackLinkEnabled, markTramiteSuccessEvidence } = await import(
+    "@/lib/serviceFeedbackSurvey"
+  );
+  if (isServiceFeedbackLinkEnabled()) {
+    await markTramiteSuccessEvidence({
+      ticketId,
+      tramite: params.tramite?.trim() || "tramite",
+      client: db,
+    });
+    return params.message;
+  }
+
+  const pending = await findOpenFeedbackPending(customer.id, db);
+  if (pending) return params.message;
 
   await markServiceFeedbackAwaitingScore(ticketId, db);
   return `${base}\n\n${buildServiceFeedbackScoreAsk()}`;

@@ -187,7 +187,6 @@ export async function handleCustomerConversationCloseRequest(params: {
     db,
   );
 
-  // La encuesta 1–10 va al éxito del trámite, no al cierre de conversación.
   const replyMessage = CUSTOMER_CLOSE_SUCCESS_MESSAGE;
 
   await sendCloseReply({
@@ -196,6 +195,20 @@ export async function handleCustomerConversationCloseRequest(params: {
     replyMessage,
     source: params.source ?? "customer_close",
   });
+
+  try {
+    const { offerServiceFeedbackSurveyOnClose } = await import(
+      "@/lib/serviceFeedbackSurvey"
+    );
+    await offerServiceFeedbackSurveyOnClose({
+      ticketId: openTicket.id,
+      customerPhone: params.rawPhone,
+      source: "customer_whatsapp_close",
+      client: db,
+    });
+  } catch (e) {
+    console.error(`[customerClose] survey offer falló ${openTicket.code}:`, e);
+  }
 
   console.log(`[customerClose] Caso ${openTicket.code} cerrado por pedido del cliente (${params.rawPhone})`);
 

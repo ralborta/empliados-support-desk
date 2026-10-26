@@ -204,14 +204,15 @@ async function closeTicketForIdle(params: {
   // Encuesta 1–10: al éxito del trámite, no en este cierre idle.
   const previousStatus = params.ticket.status;
 
+  // Ola 2: silencio = resultado desconocido. IDLE_TIMEOUT no implica éxito de Kira.
   await params.db.ticket.update({
     where: { id: params.ticket.id },
     data: {
       status: "RESOLVED",
       resolution: "IDLE_TIMEOUT",
-      resolvedByAI: true,
+      resolvedByAI: false,
       aiSummary:
-        "Cierre automático por inactividad del cliente (sin respuesta tras mensajes de Kira).",
+        "Cierre automático por inactividad del cliente (sin respuesta tras mensajes de Kira). Resultado no confirmado.",
       lastMessageAt: params.now,
     },
   });
@@ -254,6 +255,20 @@ async function closeTicketForIdle(params: {
     console.error(
       `[idleFollowup] ticket ${params.ticket.code} quedó RESOLVED pero falló el envío WA del cierre`,
     );
+  }
+
+  try {
+    const { offerServiceFeedbackSurveyOnClose } = await import(
+      "@/lib/serviceFeedbackSurvey"
+    );
+    await offerServiceFeedbackSurveyOnClose({
+      ticketId: params.ticket.id,
+      customerPhone: params.ticket.customer.phone,
+      source: "idle_timeout_close",
+      client: params.db,
+    });
+  } catch (e) {
+    console.error(`[idleFollowup] survey offer falló ${params.ticket.code}:`, e);
   }
 
   console.log(`[idleFollowup] cerrado por idle ${params.ticket.code}`);

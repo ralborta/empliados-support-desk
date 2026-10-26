@@ -93,6 +93,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       where: { id },
       include: { customer: true, assignedTo: true },
     });
+    if (
+      (rest.status === "RESOLVED" || rest.status === "CLOSED") &&
+      ticket?.customer?.phone
+    ) {
+      try {
+        const { offerServiceFeedbackSurveyOnClose } = await import(
+          "@/lib/serviceFeedbackSurvey"
+        );
+        await offerServiceFeedbackSurveyOnClose({
+          ticketId: id,
+          customerPhone: ticket.customer.phone,
+          source: "panel:patch-status",
+        });
+      } catch (e) {
+        console.error("[tickets PATCH] survey offer:", e);
+      }
+    }
   }
 
   return NextResponse.json({ ticket });

@@ -3177,12 +3177,37 @@ export async function POST(req: NextRequest) {
       : "Aviso de error al registrar el cambio de odómetro/horómetro",
   });
   if (result.ok) {
+    const meterKind = writeGate.kind;
+    const incidentType =
+      meterKind === "horometro" ? "HOROMETER_CHANGE" : "ODOMETER_CHANGE";
+    try {
+      const customer = await findCustomerByWhatsAppNumber(prisma, rawPhone);
+      if (customer) {
+        const openTicket = await prisma.ticket.findFirst({
+          where: {
+            customerId: customer.id,
+            status: { in: OPEN_TICKET_THREAD_STATUSES },
+          },
+          orderBy: { lastMessageAt: "desc" },
+          select: { id: true },
+        });
+        if (openTicket) {
+          await prisma.ticket.update({
+            where: { id: openTicket.id },
+            data: { incidentType },
+          });
+        }
+      }
+    } catch (e) {
+      console.error("[odometro-horometro] incidentType update:", e);
+    }
     const { appendServiceFeedbackAskAfterTramiteSuccess } = await import(
       "@/lib/kiraServiceFeedback"
     );
     responseMessage = await appendServiceFeedbackAskAfterTramiteSuccess({
       message: responseMessage,
       rawPhone,
+      tramite: incidentType,
     });
   }
   await appendOutboundBotMessage(rawPhone, responseMessage, {

@@ -86,6 +86,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       newStatus: patch.status,
       reason: `quick-action:${action}`,
     });
+    if (
+      (patch.status === "RESOLVED" || patch.status === "CLOSED") &&
+      ticket.customer?.phone
+    ) {
+      try {
+        const { offerServiceFeedbackSurveyOnClose } = await import(
+          "@/lib/serviceFeedbackSurvey"
+        );
+        await offerServiceFeedbackSurveyOnClose({
+          ticketId: id,
+          customerPhone: ticket.customer.phone,
+          source: `quick-action:${action}`,
+        });
+      } catch (e) {
+        console.error("[quick-action] survey offer:", e);
+      }
+    }
   }
 
   let whatsappSent = false;
