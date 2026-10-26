@@ -188,7 +188,7 @@ export default async function DashboardPage() {
           spark={sparkData}
         />
         <StatCard
-          label="En Progreso"
+          label="En análisis"
           value={stats.inProgressCount}
           delta={`${stats.inProgressCount} en curso`}
           sparkColor="#f59e0b"

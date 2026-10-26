@@ -47,12 +47,25 @@ export async function allocateTicketCode(
   return `${dayKey}${row.lastSeq}`;
 }
 
+/**
+ * Etiquetas canónicas de estado (tabla, filtros, badges).
+ * Deben coincidir con el menú lateral (Ola 3 / pedido mesa ~2 meses).
+ */
 export const statusLabels: Record<TicketStatus, string> = {
-  OPEN: "Nuevo",
+  OPEN: "Abierto",
   IN_PROGRESS: "En análisis",
   WAITING_CUSTOMER: "Esperando cliente",
   RESOLVED: "Resuelto",
   CLOSED: "Cerrado",
+};
+
+/** Plurales del menú «Por Estado» — misma semántica que statusLabels. */
+export const statusNavLabels: Record<TicketStatus, string> = {
+  OPEN: "Abiertos",
+  IN_PROGRESS: "En análisis",
+  WAITING_CUSTOMER: "Esperando cliente",
+  RESOLVED: "Resueltos",
+  CLOSED: "Cerrados",
 };
 
 export const priorityLabels: Record<TicketPriority, string> = {

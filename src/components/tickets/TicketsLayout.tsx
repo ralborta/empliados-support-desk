@@ -137,7 +137,7 @@ function TicketsSidebar({ user }: { user: SessionUser | null }) {
 
         <SectionTitle>Por Estado</SectionTitle>
         <NavLink href="/tickets/abiertos" label="Abiertos" count={s.OPEN} />
-        <NavLink href="/tickets/en-progreso" label="En Progreso" count={s.IN_PROGRESS} />
+        <NavLink href="/tickets/en-progreso" label="En análisis" count={s.IN_PROGRESS} />
         <NavLink href="/tickets/esperando-cliente" label="Esperando cliente" count={s.WAITING_CUSTOMER} />
         <NavLink href="/tickets/resueltos" label="Resueltos" count={s.RESOLVED} />
         <NavLink href="/tickets/cerrados" label="Cerrados" count={s.CLOSED} />

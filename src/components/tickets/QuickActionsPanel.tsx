@@ -4,16 +4,15 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { waraAccent } from "@/lib/ui/waraTheme";
+import type { QuickAction } from "@/lib/quickActions";
 
-type QuickAction =
-  | "request_data"
-  | "in_analysis"
-  | "derive"
-  | "resolve"
-  | "close"
-  | "internal_note";
-
-const IRREVERSIBLE: QuickAction[] = ["resolve", "close"];
+const IRREVERSIBLE: QuickAction[] = [
+  "resolve",
+  "close",
+  "note_admin",
+  "note_billing",
+  "note_collections",
+];
 
 const quickActionItems: {
   action: QuickAction;
@@ -23,9 +22,17 @@ const quickActionItems: {
   { action: "resolve", label: "Resolver", variant: "primary" },
   { action: "in_analysis", label: "Marcar en análisis", variant: "secondary" },
   { action: "request_data", label: "Solicitar más datos", variant: "secondary" },
-  { action: "derive", label: "Derivar", variant: "secondary" },
   { action: "close", label: "Cerrar", variant: "destructive" },
   { action: "internal_note", label: "Nota interna", variant: "note" },
+];
+
+const l1DeriveItems: {
+  action: QuickAction;
+  label: string;
+}[] = [
+  { action: "note_admin", label: "Administración" },
+  { action: "note_billing", label: "Facturación" },
+  { action: "note_collections", label: "Cobranza" },
 ];
 
 function btnClass(variant: (typeof quickActionItems)[number]["variant"]): string {
@@ -108,11 +115,31 @@ export function QuickActionsPanel({
       description: "El ticket se cerrará definitivamente. Esta acción es difícil de revertir.",
       label: "Cerrar ticket",
     },
+    note_admin: {
+      title: "Derivar a Administración",
+      description:
+        "Se guarda una nota interna, se avisa al cliente y se cierra el caso en primer nivel.",
+      label: "Derivar y cerrar",
+    },
+    note_billing: {
+      title: "Derivar a Facturación",
+      description:
+        "Se guarda una nota interna, se avisa al cliente y se cierra el caso en primer nivel.",
+      label: "Derivar y cerrar",
+    },
+    note_collections: {
+      title: "Derivar a Cobranza",
+      description:
+        "Se guarda una nota interna, se avisa al cliente y se cierra el caso en primer nivel.",
+      label: "Derivar y cerrar",
+    },
   };
 
   return (
     <div className="rounded-lg border border-slate-200/90 bg-white p-3 shadow-sm">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Acciones rápidas</p>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Acciones rápidas
+      </p>
       <p className="mb-2.5 text-[11px] leading-snug text-slate-500">
         {labMode
           ? "Actualizan el estado y registran mensaje (lab: sin WhatsApp real)."
@@ -134,6 +161,23 @@ export function QuickActionsPanel({
             key={action}
             type="button"
             className={btnClass(variant)}
+            disabled={isPending}
+            onClick={() => handleClick(action)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <p className="mb-1.5 mt-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        Derivación L1 (cierra el caso)
+      </p>
+      <div className="grid grid-cols-3 gap-1.5">
+        {l1DeriveItems.map(({ action, label }) => (
+          <button
+            key={action}
+            type="button"
+            className={btnClass("note")}
             disabled={isPending}
             onClick={() => handleClick(action)}
           >

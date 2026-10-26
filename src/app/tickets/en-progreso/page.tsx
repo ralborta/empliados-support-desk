@@ -9,11 +9,11 @@ export default async function TicketsEnProgresoPage({
   return (
     <TicketsListPage
       basePath="/tickets/en-progreso"
-      title="Tickets En Progreso"
+      title="Tickets en análisis"
       subtitle="Casos siendo atendidos actualmente"
       searchParams={await searchParams}
       fixedFilter={{ status: "IN_PROGRESS" }}
-      highlightStat={{ label: "En Progreso", color: "text-amber-600" }}
+      highlightStat={{ label: "En análisis", color: "text-amber-600" }}
     />
   );
 }

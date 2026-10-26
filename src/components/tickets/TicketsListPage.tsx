@@ -101,9 +101,9 @@ export async function TicketsListPage({
   const summaryCards: StatCard[] = showToolbar
     ? [
         { label: "Abiertos", value: statusCountMap.OPEN || 0, color: "text-blue-600" },
-        { label: "En Progreso", value: statusCountMap.IN_PROGRESS || 0, color: "text-amber-600" },
+        { label: "En análisis", value: statusCountMap.IN_PROGRESS || 0, color: "text-amber-600" },
         {
-          label: "Esperando Cliente",
+          label: "Esperando cliente",
           value: statusCountMap.WAITING_CUSTOMER || 0,
           color: "text-emerald-600",
         },

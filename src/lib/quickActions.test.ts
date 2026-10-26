@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildQuickActionCustomerMessage,
+  isL1AdminDerivationAction,
   quickActionTicketPatch,
 } from "./quickActions";
 
@@ -13,6 +14,18 @@ describe("quickActions", () => {
     assert.ok(buildQuickActionCustomerMessage("resolve")?.includes("resuelta"));
     assert.ok(buildQuickActionCustomerMessage("close")?.includes("Cerramos"));
     assert.equal(buildQuickActionCustomerMessage("internal_note"), null);
+    assert.match(
+      buildQuickActionCustomerMessage("note_admin") ?? "",
+      /Administración/i,
+    );
+    assert.match(
+      buildQuickActionCustomerMessage("note_billing") ?? "",
+      /Facturación/i,
+    );
+    assert.match(
+      buildQuickActionCustomerMessage("note_collections") ?? "",
+      /Cobranza/i,
+    );
   });
 
   it("cambia estado del ticket según la acción", () => {
@@ -31,5 +44,12 @@ describe("quickActions", () => {
       resolution: "CLOSED_NO_ACTION",
     });
     assert.deepEqual(quickActionTicketPatch("internal_note"), {});
+    assert.deepEqual(quickActionTicketPatch("note_admin"), {
+      status: "RESOLVED",
+      resolution: "ADMIN_DERIVATION_L1",
+      incidentType: "ADMIN_DERIVATION",
+    });
+    assert.equal(isL1AdminDerivationAction("note_collections"), true);
+    assert.equal(isL1AdminDerivationAction("resolve"), false);
   });
 });
