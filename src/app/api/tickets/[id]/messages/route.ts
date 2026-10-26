@@ -421,6 +421,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // Takeover local inmediato; sync BBC con generation + waitUntil (no bloquea WA).
     const tOutbound0 = Date.now();
+    // Ola 1 (call 2026-10-22): intervención del asesor = pausa manual sticky.
+    // No se auto-reactiva al responder el cliente ni al Resolver; solo «Reactivar Kira».
     const pauseSync = await pauseAtilioForCustomerDetailed(
       ticketForStatus.customerId,
       prisma,
@@ -428,7 +430,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       {
         awaitChannelSync: false,
         skipChannelIfAlreadyPaused: true,
-        pauseSource: "auto",
+        pauseSource: "manual",
       },
     ).catch((e) => {
       console.error("[Messages] pauseAtilio takeover:", e);
@@ -441,7 +443,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         syncTarget: "paused" as const,
         syncGeneration: 0,
         localPaused: true,
-        pauseSource: "auto" as const,
+        pauseSource: "manual" as const,
       };
     });
     const dbMs = Date.now() - tOutbound0;

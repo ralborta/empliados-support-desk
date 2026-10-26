@@ -272,13 +272,28 @@ export async function tryHandleKiraServiceFeedback(params: {
 
   const text = params.messageText.trim();
 
-  if (looksLikeFeedbackAbortToOps(text) && pending.payload.stage === "awaiting_score") {
-    // Score pending + mensaje operativo: soltamos la encuesta y dejamos seguir el router.
-    await appendFeedbackEvent(
-      pending.ticketId,
-      { stage: "aborted", reason: "ops_intent", priorStage: pending.payload.stage },
-      db,
-    );
+  // Saludo / consulta nueva / cierre: soltar encuesta en CUALQUIER etapa.
+  // Bug real (call 2026-10-22): "hola" con encuesta pendiente devolvía el 1–10
+  // en vez de dejar seguir el flujo de atención.
+  if (looksLikeFeedbackAbortToOps(text)) {
+    if (pending.payload.stage === "awaiting_score") {
+      await appendFeedbackEvent(
+        pending.ticketId,
+        { stage: "aborted", reason: "ops_intent", priorStage: pending.payload.stage },
+        db,
+      );
+    } else {
+      await appendFeedbackEvent(
+        pending.ticketId,
+        {
+          stage: "recorded",
+          score: pending.payload.score ?? null,
+          comment: null,
+          reason: "ops_intent_after_score",
+        },
+        db,
+      );
+    }
     return { handled: false };
   }
 
@@ -318,20 +333,6 @@ export async function tryHandleKiraServiceFeedback(params: {
   }
 
   // awaiting_comment
-  if (looksLikeFeedbackAbortToOps(text) && !looksLikeFeedbackSkip(text)) {
-    await appendFeedbackEvent(
-      pending.ticketId,
-      {
-        stage: "recorded",
-        score: pending.payload.score ?? null,
-        comment: null,
-        reason: "ops_intent_after_score",
-      },
-      db,
-    );
-    return { handled: false };
-  }
-
   if (looksLikeFeedbackSkip(text)) {
     await appendFeedbackEvent(
       pending.ticketId,

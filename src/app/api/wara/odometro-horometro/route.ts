@@ -92,6 +92,7 @@ import {
   threadHasRecentOdometerCorrectionIntent,
 } from "@/lib/odometerActionChoice";
 import { isConfirmedForPendingWrite } from "@/lib/pendingWriteIntent";
+import { assessMeterWrite, meterResultLooksCorrupt } from "@/lib/meterWriteGuard";
 import { humanizeBotReply } from "@/lib/botReplyHumanizer";
 import {
   formatAskUnit,
@@ -3095,15 +3096,57 @@ export async function POST(req: NextRequest) {
   const fleetUnit = await findFleetUnitByPlate(session.sessionToken, patente);
   const patenteParaWara = resolveWaraPatenteForApi(patente, fleetUnit);
 
+  const writeGate = assessMeterWrite({
+    meterKind: resolveTurnMeterType(),
+    odometro,
+    horometro,
+  });
+  if (!writeGate.ok) {
+    console.warn("[odometro-horometro] write blocked by meterWriteGuard", {
+      code: writeGate.code,
+      patente: patenteParaWara,
+      meterKind: resolveTurnMeterType(),
+      odometro,
+      horometro,
+    });
+    await appendOutboundBotMessage(rawPhone, writeGate.clientMessage, {
+      source: "wara_odometro_response",
+      stage: "meter_write_guard_blocked",
+      code: writeGate.code,
+      patente: patenteParaWara,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        ok_s: "false",
+        error: writeGate.code,
+        message: writeGate.clientMessage,
+        patente,
+        patenteRegistrada: patenteParaWara,
+      },
+      { status: BB_STATUS },
+    );
+  }
+
   const result = await registrarCambioOdometroHorometro(session.sessionToken, {
     patente: patenteParaWara,
     // Cliente habla en hora AR; la API Wara espera UTC (bug 2026-08-07: 09:43 → 06:43).
     fecha: fechaLocalNaiveToWaraUtc(fecha, customerTz),
-    ...(typeof odometro === "number" && Number.isFinite(odometro) ? { odometro } : {}),
-    ...(typeof horometro === "number" && Number.isFinite(horometro) ? { horometro } : {}),
+    ...(typeof writeGate.odometro === "number" ? { odometro: writeGate.odometro } : {}),
+    ...(typeof writeGate.horometro === "number" ? { horometro: writeGate.horometro } : {}),
   });
 
   let responseMessage = formatSuccessMessage(result, patente, fechaDisplay);
+  if (result.ok && meterResultLooksCorrupt(result)) {
+    console.error("[odometro-horometro] Wara devolvió valor negativo tras registro", {
+      patente: patenteParaWara,
+      odometro: result.odometro,
+      horometro: result.horometro,
+    });
+    responseMessage =
+      `${responseMessage} Ojo: la plataforma devolvió un valor raro (negativo). ` +
+      `Avisá a un asesor para revisarlo antes de seguir.`;
+  }
   // Si Wara no encontró la unidad y el cliente tiene más de una empresa, avisamos
   // en cuál estamos buscando y sugerimos cambiar de empresa (la patente puede ser de otra).
   if (!result.ok) {

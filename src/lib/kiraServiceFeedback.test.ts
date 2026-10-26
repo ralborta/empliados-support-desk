@@ -31,6 +31,12 @@ describe("kiraServiceFeedback", () => {
     assert.equal(looksLikeFeedbackAbortToOps("listo"), false);
   });
 
+  it("un saludo aborta la encuesta (no re-pide el 1–10)", () => {
+    assert.equal(looksLikeFeedbackAbortToOps("hola"), true);
+    assert.equal(looksLikeFeedbackAbortToOps("Buen dia"), true);
+    assert.equal(looksLikeFeedbackAbortToOps("hello"), true);
+  });
+
   it("el ask de nota pide 1–10 sin sonar a formulario rígido", () => {
     const ask = buildServiceFeedbackScoreAsk();
     assert.match(ask, /1 al 10/i);
