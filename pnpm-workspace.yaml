@@ -1,3 +1,23 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Trusted dependencies allowed to run install/build scripts (pnpm v10 gates these
+# by default). Without this, `pnpm install` exits non-zero with ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  '@embedded-postgres/linux-x64': set this to true or false
+  '@prisma/client': set this to true or false
+  '@prisma/engines': set this to true or false
+  esbuild: set this to true or false
+  prisma: set this to true or false
+  sharp: set this to true or false
+  unrs-resolver: set this to true or false
+
+onlyBuiltDependencies:
+  - "@embedded-postgres/linux-x64"
+  - "@prisma/client"
+  - "@prisma/engines"
+  - "esbuild"
+  - "prisma"
+  - "sharp"
+  - "unrs-resolver"
