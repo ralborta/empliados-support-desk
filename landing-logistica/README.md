@@ -24,8 +24,11 @@ Acceder en: http://localhost:8080
 El sitio funciona tanto en la raíz (`/`) como bajo cualquier sub-ruta (ej: `/borrador-web/`):
 
 - **Rutas relativas**: Todos los assets (CSS, JS, imágenes) usan rutas relativas sin `/` inicial
+- **Archivos duplicados**: Los archivos estáticos se copian en ambas ubicaciones (`/` y `/borrador-web/`)
 - **nginx configurado**: El servidor maneja correctamente requests bajo sub-paths
 - **Anchor links**: Los links internos (#solucion, #agentes, etc.) funcionan correctamente
+
+**Cómo funciona**: El Dockerfile copia los archivos estáticos tanto en `/usr/share/nginx/html/` (para acceso desde `/`) como en `/usr/share/nginx/html/borrador-web/` (para acceso desde `/borrador-web/`). Esto asegura que cuando Traefik envía requests con el prefijo completo (sin stripping), nginx encuentra los archivos en la ubicación esperada.
 
 Ejemplo de acceso bajo sub-path:
 ```
