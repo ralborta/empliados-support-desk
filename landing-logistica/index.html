@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html class="scroll-smooth" lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Empliados.net | Plataforma SOL - Orquestación Operativa del Transporte</title>
+  <meta name="description" content="SOL conecta choferes, clientes y mesa operativa con agentes de inteligencia artificial que planifican, siguen y documentan cada viaje. Su equipo mantiene el control; SOL se ocupa del resto.">
+  <meta name="robots" content="noindex">
+  
+  <!-- Open Graph -->
+  <meta property="og:title" content="Empliados.net | Plataforma SOL - Orquestación Operativa del Transporte">
+  <meta property="og:description" content="Toda su operación de transporte, coordinada en un solo lugar con agentes de inteligencia artificial.">
+  <meta property="og:type" content="website">
+  
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚚</text></svg>">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Sticky Navbar -->
+  <header id="navbar">
+    <div class="container">
+      <a href="#" class="brand">
+        <span class="brand-text">Empliad<span class="brand-accent">o</span>s.net</span>
+        <span class="brand-badge">SOL PLATFORM</span>
+      </a>
+      
+      <nav id="desktop-nav">
+        <a href="#solucion" class="nav-link active">Solución</a>
+        <a href="#como-funciona" class="nav-link">Cómo funciona</a>
+        <a href="#agentes" class="nav-link">Agentes</a>
+        <a href="#mesa-operativa" class="nav-link">Mesa Operativa</a>
+        <a href="#beneficios" class="nav-link">Beneficios</a>
+        <a href="#contacto" class="nav-link">Contacto</a>
+      </nav>
+      
+      <div class="nav-actions">
+        <!-- mailto placeholder - Raul confirmará el email real -->
+        <a href="mailto:contacto@empliados.net" class="btn-primary">Solicitar demo</a>
+        <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menú">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Mobile Menu -->
+    <nav id="mobile-nav" class="mobile-nav">
+      <a href="#solucion" class="nav-link">Solución</a>
+      <a href="#como-funciona" class="nav-link">Cómo funciona</a>
+      <a href="#agentes" class="nav-link">Agentes</a>
+      <a href="#mesa-operativa" class="nav-link">Mesa Operativa</a>
+      <a href="#beneficios" class="nav-link">Beneficios</a>
+      <a href="#contacto" class="nav-link">Contacto</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="container">
+        <div class="hero-content">
+          <div class="badge-pill">
+            <span class="badge-dot"></span>
+            <span>SOL · Orquestación operativa del transporte</span>
+          </div>
+          
+          <h1>Toda su operación de transporte, coordinada en un solo lugar</h1>
+          
+          <p class="subtitle">
+            SOL conecta choferes, clientes y mesa operativa con agentes de inteligencia artificial que planifican, 
+            siguen y documentan cada viaje. Su equipo mantiene el control; SOL se ocupa del resto.
+          </p>
+          
+          <div class="cta-group">
+            <a href="mailto:contacto@empliados.net" class="btn-primary btn-lg">
+              <span>Solicitar demo</span>
+              <span class="material-symbols-outlined">arrow_forward</span>
+            </a>
+            <a href="#como-funciona" class="btn-secondary btn-lg">
+              <span class="material-symbols-outlined">play_circle</span>
+              <span>Ver cómo funciona</span>
+            </a>
+          </div>
+          
+          <div class="check-points">
+            <div class="check-point">
+              <span class="material-symbols-outlined">check_circle</span>
+              <span>Planificación y asignación</span>
+            </div>
+            <div class="check-point">
+              <span class="material-symbols-outlined">check_circle</span>
+              <span>Tracking en ruta</span>
+            </div>
+            <div class="check-point">
+              <span class="material-symbols-outlined">check_circle</span>
+              <span>Entrega con evidencia</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Hero Visual -->
+        <div class="hero-visual">
+          <img src="assets/hero-camiones.jpg" alt="Flota de transporte carretero de carga pesada operando con precisión">
+          <div class="hero-overlay">
+            <div class="hero-card">
+              <div class="hero-card-header">
+                <span class="hero-card-badge">
+                  <span class="material-symbols-outlined">psychology</span>
+                  Agente de IA · Monitoreo activo
+                </span>
+                <span class="hero-card-time">en tiempo real</span>
+              </div>
+              <p class="hero-card-text">
+                Sistema autónomo de planificación y seguimiento continuo con validación humana garantizada.
+              </p>
+              <div class="hero-card-footer">
+                <span>Supervisado por Mesa Operativa</span>
+                <span class="hero-card-status">● Activo</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: Los cuellos de botella -->
+    <section id="solucion" class="section section-light">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill badge-error">
+            <span class="material-symbols-outlined">warning</span>
+            <span>DIAGNÓSTICO SECTORIAL</span>
+          </div>
+          <h2>Los cuellos de botella críticos en la logística terrestre moderna</h2>
+          <p class="section-subtitle">
+            La complejidad operativa fragmenta la comunicación y diluye el control de la flota.
+          </p>
+        </div>
+        
+        <div class="grid-4">
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">alt_route</span>
+            </div>
+            <h3>Planificación dispersa</h3>
+            <p>
+              Coordinación manual a través de múltiples canales, planillas y llamadas que generan retrasos 
+              en la asignación de viajes.
+            </p>
+          </div>
+          
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">visibility_off</span>
+            </div>
+            <h3>Poca visibilidad en ruta</h3>
+            <p>
+              Falta de seguimiento unificado en tiempo real y desconocimiento del estado real del viaje 
+              entre el origen y el destino.
+            </p>
+          </div>
+          
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">description</span>
+            </div>
+            <h3>Documentación fragmentada</h3>
+            <p>
+              Remitos físicos extraviados, demoras en la digitalización de comprobantes y rendiciones 
+              incompletas al cierre de ruta.
+            </p>
+          </div>
+          
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">rule</span>
+            </div>
+            <h3>Reclamos sin contexto</h3>
+            <p>
+              Dificultad para auditar y responder controversias por falta de trazabilidad y evidencia 
+              histórica precisa durante la entrega.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: Qué es SOL -->
+    <section class="section section-purple-light">
+      <div class="container">
+        <div class="grid-2-cols">
+          <div class="visual-frame">
+            <img src="assets/centro-control.jpg" alt="Centro de comando logístico con operadores y tableros inteligentes">
+            <div class="visual-overlay">
+              <div class="visual-tag">
+                <div class="visual-tag-header">
+                  <span class="material-symbols-outlined">hub</span>
+                  <span>Mesa de Control SOL</span>
+                </div>
+                <p>Monitoreo activo sincronizado con choferes y agentes autónomos.</p>
+              </div>
+            </div>
+          </div>
+          
+          <div class="content-col">
+            <div class="badge-pill">
+              <span class="material-symbols-outlined">account_tree</span>
+              <span>Arquitectura Operativa · SOL</span>
+            </div>
+            <h2>
+              La capa inteligente que coordina agentes de IA y conecta choferes, clientes y su mesa 
+              operativa en un ecosistema fluido.
+            </h2>
+            <p class="large-text">
+              SOL opera de manera transversal sobre su infraestructura actual, permitiendo que la 
+              inteligencia artificial procese la fricción diaria mientras los decisores retienen el criterio final.
+            </p>
+            
+            <div class="features-list">
+              <div class="feature-item">
+                <div class="feature-icon">
+                  <span class="material-symbols-outlined">dataset</span>
+                </div>
+                <div>
+                  <h4>Leen y registran</h4>
+                  <p>Capturan datos de telemetría, mensajes y documentos sin fricción.</p>
+                </div>
+              </div>
+              
+              <div class="feature-item">
+                <div class="feature-icon">
+                  <span class="material-symbols-outlined">insights</span>
+                </div>
+                <div>
+                  <h4>Proponen</h4>
+                  <p>Sugieren asignaciones, rutas y respuestas con base en el contexto operativo.</p>
+                </div>
+              </div>
+              
+              <div class="feature-item">
+                <div class="feature-icon">
+                  <span class="material-symbols-outlined">notification_important</span>
+                </div>
+                <div>
+                  <h4>Detectan y alertan</h4>
+                  <p>Identifican desvíos, demoras en ruta y riesgos potenciales de forma preventiva.</p>
+                </div>
+              </div>
+              
+              <div class="feature-item">
+                <div class="feature-icon">
+                  <span class="material-symbols-outlined">verified_user</span>
+                </div>
+                <div>
+                  <h4>Las personas validan y deciden</h4>
+                  <p>Su equipo aprueba las acciones críticas manteniendo siempre el criterio humano.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: Cómo funciona (10 pasos) -->
+    <section id="como-funciona" class="section section-light">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill">
+            <span class="material-symbols-outlined">timeline</span>
+            <span>TRAZABILIDAD INTEGRAL</span>
+          </div>
+          <h2>Un flujo continuo desde la carga hasta el cierre documentado</h2>
+          <p class="section-subtitle">
+            Diez instancias orquestadas para garantizar visibilidad total en cada kilómetro.
+          </p>
+        </div>
+        
+        <div class="grid-5">
+          <div class="step-card">
+            <span class="step-number">01</span>
+            <h4>Gestión de viajes</h4>
+            <p>Recepción de pedidos y generación del servicio de transporte.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">02</span>
+            <h4>Destinos</h4>
+            <p>Parametrización y validación de puntos de carga, paradas y descarga.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">03</span>
+            <h4>Tracking express</h4>
+            <p>Monitoreo geográfico continuo y telemetría de la unidad.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">04</span>
+            <h4>POP (Proof of Pickup)</h4>
+            <p>Constancia fotográfica y digital de la carga efectiva en dársena.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">05</span>
+            <h4>Remitos</h4>
+            <p>Control y digitalización inmediata de la documentación de tránsito.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">06</span>
+            <h4>ETA Dinámico</h4>
+            <p>Estimación dinámica del tiempo estimado de arribo con actualización constante.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">07</span>
+            <h4>Incidencias</h4>
+            <p>Registro, categorización y resolución de contingencias en ruta.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">08</span>
+            <h4>Rendición</h4>
+            <p>Balance y cierre operativo de gastos y combustible por tramo.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">09</span>
+            <h4>POD (Proof of Delivery)</h4>
+            <p>Certificación de entrega con firma, foto y coordenadas GPS.</p>
+          </div>
+          
+          <div class="step-card">
+            <span class="step-number">10</span>
+            <h4>Reclamos</h4>
+            <p>Gestión estructurada de reclamos respaldada con evidencia auditable.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: Agentes IA (fondo oscuro) -->
+    <section id="agentes" class="section section-dark">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill badge-dark">
+            <span class="material-symbols-outlined">smart_toy</span>
+            <span>AGENTES ESPECIALIZADOS SOL</span>
+          </div>
+          <h2>Agentes especializados para cada etapa del circuito operativo</h2>
+          <p class="section-subtitle">
+            Cada agente cumple una función precisa, coordinado por la plataforma SOL y supervisado 
+            en todo momento por su mesa operativa.
+          </p>
+        </div>
+        
+        <div class="grid-5">
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">local_shipping</span>
+              </span>
+              <span class="agent-badge">AG-01</span>
+            </div>
+            <h4>Agente de Viajes</h4>
+            <p>Estructura la orden de transporte y consolida requisitos iniciales.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">pin_drop</span>
+              </span>
+              <span class="agent-badge">AG-02</span>
+            </div>
+            <h4>Agente de Destinos</h4>
+            <p>Valida direcciones, ventanas horarias y restricciones de acceso vehicular.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">radar</span>
+              </span>
+              <span class="agent-badge">AG-03</span>
+            </div>
+            <h4>Agente de Tracking</h4>
+            <p>Supervisa el avance geográfico continuo y reporta desvíos de trayecto.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">fact_check</span>
+              </span>
+              <span class="agent-badge">AG-04</span>
+            </div>
+            <h4>Agente POP</h4>
+            <p>Valida la documentación y fotos del retiro de carga en origen.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">document_scanner</span>
+              </span>
+              <span class="agent-badge">AG-05</span>
+            </div>
+            <h4>Agente de Remitos</h4>
+            <p>Extrae y coteja datos de remitos físicos mediante visión artificial.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">schedule</span>
+              </span>
+              <span class="agent-badge">AG-06</span>
+            </div>
+            <h4>Agente de ETA</h4>
+            <p>Recalcula tiempos de llegada según tráfico, clima y detenciones en ruta.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">emergency</span>
+              </span>
+              <span class="agent-badge">AG-07</span>
+            </div>
+            <h4>Agente Incidencias</h4>
+            <p>Clasifica eventos mecánicos o de ruta y alerta a la mesa operativa.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">receipt_long</span>
+              </span>
+              <span class="agent-badge">AG-08</span>
+            </div>
+            <h4>Agente de Rendición</h4>
+            <p>Audita comprobantes de peaje, combustible y viáticos con soporte fotográfico.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">draw</span>
+              </span>
+              <span class="agent-badge">AG-09</span>
+            </div>
+            <h4>Agente POD</h4>
+            <p>Verifica la conformidad de entrega y registra la firma del receptor final.</p>
+          </div>
+          
+          <div class="agent-card">
+            <div class="agent-header">
+              <span class="agent-icon">
+                <span class="material-symbols-outlined">gavel</span>
+              </span>
+              <span class="agent-badge">AG-10</span>
+            </div>
+            <h4>Agente de Reclamos</h4>
+            <p>Cruza evidencia documental y cronológica para auditar disputas al instante.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: Mesa Operativa -->
+    <section id="mesa-operativa" class="section section-light">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill">
+            <span class="material-symbols-outlined">supervised_user_circle</span>
+            <span>CRITERIO HUMANO GARANTIZADO</span>
+          </div>
+          <h2>La IA propone. Su equipo decide.</h2>
+          <p class="section-subtitle">
+            Tecnología al servicio del operador, no para reemplazar su criterio ni su experiencia.
+          </p>
+        </div>
+        
+        <div class="grid-3">
+          <div class="card card-large">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">support_agent</span>
+            </div>
+            <h3>Operador</h3>
+            <p>
+              Gestiona el día a día, valida alertas operativas en curso y coordina con los choferes 
+              en tiempo real a través de los canales integrados.
+            </p>
+          </div>
+          
+          <div class="card card-large">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">shield_person</span>
+            </div>
+            <h3>Supervisor</h3>
+            <p>
+              Monitorea el cumplimiento de ANS de clientes, resuelve excepciones complejas y balancea 
+              recursos entre zonas y depósitos.
+            </p>
+          </div>
+          
+          <div class="card card-large">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">admin_panel_settings</span>
+            </div>
+            <h3>Administrador</h3>
+            <p>
+              Configura parámetros de negocio, esquemas de permisos, políticas de asignación automática 
+              y auditoría de gobierno integral.
+            </p>
+          </div>
+        </div>
+        
+        <!-- Flujo Human-in-the-loop -->
+        <div class="flow-box">
+          <div class="flow-header">
+            <span class="flow-label">FLUJO HUMAN-IN-THE-LOOP</span>
+            <h4>Lógica de decisión coordinada</h4>
+          </div>
+          <div class="grid-4">
+            <div class="flow-step">
+              <div class="flow-number">1</div>
+              <h5>Agente lee</h5>
+              <p>Captura telemetría y mensajes de campo</p>
+            </div>
+            <div class="flow-step">
+              <div class="flow-number">2</div>
+              <h5>Agente propone</h5>
+              <p>Calcula la alternativa o respuesta óptima</p>
+            </div>
+            <div class="flow-step flow-step-highlight">
+              <div class="flow-number">3</div>
+              <h5>Mesa valida</h5>
+              <p>El operador aprueba o corrige con 1 clic</p>
+            </div>
+            <div class="flow-step">
+              <div class="flow-number">4</div>
+              <h5>SOL registra</h5>
+              <p>Ejecuta la acción y deja registro auditable</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: Capas transversales -->
+    <section class="section section-white">
+      <div class="container">
+        <div class="section-header">
+          <div class="badge-pill">
+            <span class="material-symbols-outlined">layers</span>
+            <span>INFRAESTRUCTURA BASE</span>
+          </div>
+          <h2>Cimientos tecnológicos transversales a toda la plataforma</h2>
+        </div>
+        
+        <div class="grid-4">
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">chat</span>
+            </div>
+            <h3>WhatsApp Operativo</h3>
+            <p>
+              Comunicación bidireccional nativa con choferes sin requerir la instalación de apps 
+              adicionales ni capacitación técnica compleja.
+            </p>
+          </div>
+          
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">forum</span>
+            </div>
+            <h3>Chat Central</h3>
+            <p>
+              Interfaz unificada para la mesa operativa donde convergen todas las conversaciones, 
+              alertas críticas y notificaciones de clientes.
+            </p>
+          </div>
+          
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">bar_chart</span>
+            </div>
+            <h3>Analítica</h3>
+            <p>
+              Métricas de puntualidad, cumplimiento de viajes, tiempos en andén y consumos en tableros 
+              consolidados para dirección logística.
+            </p>
+          </div>
+          
+          <div class="card">
+            <div class="card-icon">
+              <span class="material-symbols-outlined">history_edu</span>
+            </div>
+            <h3>Gobierno y trazabilidad</h3>
+            <p>
+              Registro inmutable de cada interacción, validación y cambio de estado para auditorías 
+              estrictas y certificaciones internacionales.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: Beneficios -->
+    <section id="beneficios" class="section section-light">
+      <div class="container">
+        <div class="grid-2-cols">
+          <div class="content-col">
+            <div class="badge-pill">
+              <span class="material-symbols-outlined">trending_up</span>
+              <span>IMPACTO OPERACIONAL</span>
+            </div>
+            <h2>Beneficios medibles para la operación</h2>
+            <p class="large-text">
+              Mejoras directas en tiempos de respuesta, exactitud documental y reducción de 
+              contingencias no previstas.
+            </p>
+            
+            <div class="benefits-list">
+              <div class="benefit-item">
+                <span class="material-symbols-outlined">timeline</span>
+                <div>
+                  <h4>Más trazabilidad</h4>
+                  <p>Control minuto a minuto de todo el ecosistema de transporte.</p>
+                </div>
+              </div>
+              
+              <div class="benefit-item">
+                <span class="material-symbols-outlined">check_box</span>
+                <div>
+                  <h4>Menos errores operativos</h4>
+                  <p>Eliminación de desajustes en la carga de datos y transcripción manual.</p>
+                </div>
+              </div>
+              
+              <div class="benefit-item">
+                <span class="material-symbols-outlined">visibility</span>
+                <div>
+                  <h4>Más visibilidad</h4>
+                  <p>Información unificada y transparente para su equipo y sus clientes.</p>
+                </div>
+              </div>
+              
+              <div class="benefit-item">
+                <span class="material-symbols-outlined">photo_camera</span>
+                <div>
+                  <h4>Más evidencia</h4>
+                  <p>Respaldo digital fotográfico y documental en cada hito del viaje.</p>
+                </div>
+              </div>
+              
+              <div class="benefit-item">
+                <span class="material-symbols-outlined">speed</span>
+                <div>
+                  <h4>Más productividad</h4>
+                  <p>Menor tiempo administrativo por viaje despachado y entregado.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="content-col">
+            <div class="badge-pill badge-secondary">
+              <span class="material-symbols-outlined">corporate_fare</span>
+              <span>PERFIL DE EMPRESA</span>
+            </div>
+            <h2>Pensado para operaciones que no admiten desvíos</h2>
+            <p class="large-text">
+              Adaptable a organizaciones con flotas propias, contratadas o modelos mixtos de alta demanda.
+            </p>
+            
+            <div class="target-list">
+              <div class="target-item">
+                <div class="target-number">1</div>
+                <div>
+                  <h4>Transportistas medianos</h4>
+                  <p>
+                    Que buscan profesionalizar su gestión y responder a exigencias de grandes dadores 
+                    de carga con estándares multinacionales de auditoría.
+                  </p>
+                </div>
+              </div>
+              
+              <div class="target-item">
+                <div class="target-number">2</div>
+                <div>
+                  <h4>Operadores logísticos</h4>
+                  <p>
+                    Que coordinan múltiples flotas, subcontratistas y canales de distribución complejos 
+                    que demandan interoperabilidad continua.
+                  </p>
+                </div>
+              </div>
+              
+              <div class="target-item">
+                <div class="target-number">3</div>
+                <div>
+                  <h4>Empresas con distribución propia</h4>
+                  <p>
+                    Que necesitan optimizar sus entregas directas, asegurar el cumplimiento de promesas 
+                    comerciales y reducir fricción con el cliente final.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Final -->
+    <section id="contacto" class="section section-cta">
+      <div class="container container-narrow">
+        <div class="cta-box">
+          <div class="badge-pill badge-light">
+            Atención ejecutiva para flotas de carga
+          </div>
+          <h2>Coordine su operación logística con el estándar que exige su negocio</h2>
+          <p class="cta-text">
+            Descubra cómo SOL y los agentes de IA optimizan la gestión de sus viajes manteniendo 
+            el control en manos de su equipo.
+          </p>
+          <div class="cta-form">
+            <!-- mailto placeholder - Raul confirmará el email real -->
+            <a href="mailto:contacto@empliados.net?subject=Solicitud%20de%20demo%20SOL" class="btn-dark btn-lg btn-block">
+              Solicitar demo
+            </a>
+          </div>
+          <p class="cta-note">
+            Respuesta en menos de 24 horas hábiles. Presentación técnica personalizada según su volumen de viajes.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-col footer-brand">
+          <a href="#" class="brand">
+            <span class="brand-text">Empliad<span class="brand-accent">o</span>s.net</span>
+          </a>
+          <p class="footer-desc">
+            Plataforma SOL · Orquestación operativa del transporte con agentes de inteligencia 
+            artificial y supervisión humana centralizada.
+          </p>
+          <div class="footer-badge">
+            <span class="material-symbols-outlined">lock</span>
+            <span>Seguridad de datos ISO 27001</span>
+          </div>
+        </div>
+        
+        <div class="footer-col">
+          <h5>Plataforma</h5>
+          <ul>
+            <li><a href="#solucion">Solución</a></li>
+            <li><a href="#como-funciona">Cómo funciona</a></li>
+            <li><a href="#agentes">Agentes</a></li>
+            <li><a href="#mesa-operativa">Mesa Operativa</a></li>
+          </ul>
+        </div>
+        
+        <div class="footer-col">
+          <h5>Segmentos</h5>
+          <ul>
+            <li><a href="#beneficios">Transportistas medianos</a></li>
+            <li><a href="#beneficios">Operadores logísticos</a></li>
+            <li><a href="#beneficios">Distribución propia</a></li>
+            <li><a href="#beneficios">Beneficios operativos</a></li>
+          </ul>
+        </div>
+        
+        <div class="footer-col">
+          <h5>Gobierno &amp; Soporte</h5>
+          <ul>
+            <li><a href="#contacto">Privacidad</a></li>
+            <li><a href="#contacto">Términos de servicio</a></li>
+            <li><a href="#contacto">Seguridad de datos ISO 27001</a></li>
+            <li><a href="#contacto">Soporte 24/7</a></li>
+            <li><a href="mailto:contacto@empliados.net">Contacto</a></li>
+          </ul>
+        </div>
+      </div>
+      
+      <div class="footer-bottom">
+        <p>&copy; 2025 Empliados.net. Plataforma SOL. Todos los derechos reservados.</p>
+        <div class="footer-meta">
+          <span>Infraestructura Enterprise</span>
+          <span>●</span>
+          <span>99.98% Disponibilidad SLA</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
