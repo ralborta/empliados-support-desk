@@ -49,3 +49,26 @@ function highlightNavOnScroll() {
 
 window.addEventListener('scroll', highlightNavOnScroll);
 highlightNavOnScroll(); // Run on load
+
+// FAQ Accordion
+const faqQuestions = document.querySelectorAll('.faq-question');
+
+faqQuestions.forEach(question => {
+  question.addEventListener('click', () => {
+    const faqItem = question.parentElement;
+    const isActive = faqItem.classList.contains('active');
+    
+    // Close all other FAQ items
+    document.querySelectorAll('.faq-item').forEach(item => {
+      item.classList.remove('active');
+      const btn = item.querySelector('.faq-question');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    });
+    
+    // Toggle current item
+    if (!isActive) {
+      faqItem.classList.add('active');
+      question.setAttribute('aria-expanded', 'true');
+    }
+  });
+});
