@@ -125,6 +125,24 @@
             </div>
           </div>
         </div>
+        
+        <!-- Vista de la plataforma -->
+        <div class="platform-preview">
+          <div class="browser-frame">
+            <div class="browser-header">
+              <div class="browser-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <div class="browser-title">Torre de Control - Empliados</div>
+            </div>
+            <picture>
+              <source srcset="assets/torre-control.webp" type="image/webp">
+              <img src="assets/torre-control.jpg" alt="Torre de Control de Empliados: operación logística en tiempo real" class="platform-image">
+            </picture>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -731,124 +749,171 @@
           <h2>Preguntas frecuentes sobre automatización logística con IA</h2>
         </div>
         
-        <div class="faq-list">
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Qué es Empliados y cómo ayuda a una empresa de logística?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>Empliados es una plataforma de inteligencia artificial que automatiza la gestión de operaciones de transporte. Coordina choferes, clientes y su mesa operativa con agentes de IA especializados que gestionan seguimiento de flota, digitalización de remitos, atención al cliente por WhatsApp y documentación de entregas. Su equipo mantiene el control final mientras la IA procesa la operación rutinaria.</p>
+        <div class="faq-layout">
+          <div class="faq-grid">
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">smart_toy</span>
+                </span>
+                <span class="faq-question-text">¿Qué es Empliados y cómo ayuda a una empresa de logística?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>Empliados es una plataforma de inteligencia artificial que automatiza la gestión de operaciones de transporte. Coordina choferes, clientes y su mesa operativa con agentes de IA especializados que gestionan seguimiento de flota, digitalización de remitos, atención al cliente por WhatsApp y documentación de entregas. Su equipo mantiene el control final mientras la IA procesa la operación rutinaria.</p>
+              </div>
+            </div>
+          
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">document_scanner</span>
+                </span>
+                <span class="faq-question-text">¿Cómo digitaliza Empliados los remitos y las guías de entrega?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>Los choferes toman fotos de los remitos por WhatsApp y los agentes de IA especializados extraen los datos automáticamente mediante visión artificial. La información se valida y registra en el sistema de forma inmediata, eliminando la transcripción manual y los errores asociados. Todo queda documentado con timestamp y coordenadas GPS.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">draw</span>
+                </span>
+                <span class="faq-question-text">¿Cómo se registra la prueba de entrega (foto, firma, ubicación)?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>El agente POD (Proof of Delivery) procesa las fotos de la entrega, registra la firma digital del receptor y valida automáticamente las coordenadas GPS del punto de entrega. Todo genera un registro inmutable con evidencia completa y auditable que queda disponible de inmediato para su equipo y sus clientes.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">map</span>
+                </span>
+                <span class="faq-question-text">¿Puedo seguir mi flota y mis entregas en tiempo real?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>Sí. El agente de Tracking monitorea geográficamente la ubicación continua de cada unidad y reporta desvíos de trayecto. El agente de ETA recalcula dinámicamente los tiempos de llegada según tráfico, clima y detenciones. Su mesa operativa tiene visibilidad completa del estado de cada viaje en tiempo real.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">chat</span>
+                </span>
+                <span class="faq-question-text">¿Cómo informan los choferes novedades e incidencias por WhatsApp?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>Los choferes envían mensajes, fotos o su ubicación por WhatsApp directamente a la mesa operativa, sin instalar aplicaciones adicionales. El agente de Incidencias clasifica automáticamente los eventos mecánicos o de ruta, extrae la información relevante y alerta a su equipo para que puedan responder según la prioridad de cada caso.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">notifications_active</span>
+                </span>
+                <span class="faq-question-text">¿Cómo se entera mi cliente del estado de su envío?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>Su mesa operativa cuenta con información actualizada en tiempo real que puede compartir con sus clientes según su política de comunicación. Los detalles específicos de notificaciones automáticas y consultas de tracking los definimos juntos durante la implementación según sus necesidades comerciales.</p>
+              </div>
+            </div>
+          
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">integration_instructions</span>
+                </span>
+                <span class="faq-question-text">¿Se integra con mi sistema de gestión o ERP actual?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>Empliados opera de manera transversal sobre su infraestructura actual sin requerir reemplazo de sistemas existentes. Las opciones de integración con su ERP o TMS las evaluamos en la demo según su arquitectura particular. En muchos casos la integración se realiza de forma gradual durante la implementación.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">schedule</span>
+                </span>
+                <span class="faq-question-text">¿En cuánto tiempo se implementa y cómo pido una demo?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>Los tiempos de implementación dependen del alcance y complejidad de su operación, lo definimos juntos en la demo. Para solicitar una presentación, contáctenos por email o el formulario de esta página. Respondemos en menos de 24 horas hábiles con una propuesta personalizada según su volumen de viajes.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">error</span>
+                </span>
+                <span class="faq-question-text">¿Qué pasa si una entrega falla o el cliente no está?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>El agente de Incidencias registra la novedad con evidencia fotográfica, ubicación y timestamp. Su mesa operativa recibe la alerta de inmediato y puede coordinar con el cliente o reprogramar según su protocolo. Todo queda documentado para auditoría y el chofer recibe instrucciones claras sobre cómo proceder.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">receipt_long</span>
+                </span>
+                <span class="faq-question-text">¿Cómo se controlan los costos y la rendición de gastos de los viajes?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>El agente de Rendición audita comprobantes de peaje, combustible y viáticos mediante visión artificial sobre las fotos enviadas por los choferes. Valida los gastos contra el recorrido GPS documentado y genera el balance de cierre operativo por tramo, facilitando la conciliación contable y detectando desvíos.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">bar_chart</span>
+                </span>
+                <span class="faq-question-text">¿Qué reportes e indicadores de la operación me da Empliados?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>La plataforma consolida métricas de puntualidad, cumplimiento de viajes, tiempos en andén y consumos en tableros para dirección logística. Los reportes específicos y KPIs que necesita su operación los configuramos durante la implementación según sus prioridades de gestión y los estándares de servicio que debe cumplir.</p>
+              </div>
+            </div>
+            
+            <div class="faq-item">
+              <button class="faq-question" aria-expanded="false">
+                <span class="faq-question-icon">
+                  <span class="material-symbols-outlined">security</span>
+                </span>
+                <span class="faq-question-text">¿Mis datos y los de mis clientes están seguros?</span>
+                <span class="material-symbols-outlined faq-expand-icon">expand_more</span>
+              </button>
+              <div class="faq-answer">
+                <p>La plataforma implementa estándares de seguridad ISO 27001 con registro inmutable de cada interacción, validación y cambio de estado. Los detalles técnicos de infraestructura, encriptación y cumplimiento normativo los revisamos en la demo, adaptándonos a los requisitos de auditoría y certificaciones que su operación requiera.</p>
+              </div>
             </div>
           </div>
           
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Cómo digitaliza Empliados los remitos y las guías de entrega?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>Los choferes toman fotos de los remitos por WhatsApp y los agentes de IA especializados extraen los datos automáticamente mediante visión artificial. La información se valida y registra en el sistema de forma inmediata, eliminando la transcripción manual y los errores asociados. Todo queda documentado con timestamp y coordenadas GPS.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Cómo se registra la prueba de entrega (foto, firma, ubicación)?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>El agente POD (Proof of Delivery) procesa las fotos de la entrega, registra la firma digital del receptor y valida automáticamente las coordenadas GPS del punto de entrega. Todo genera un registro inmutable con evidencia completa y auditable que queda disponible de inmediato para su equipo y sus clientes.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Puedo seguir mi flota y mis entregas en tiempo real?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>Sí. El agente de Tracking monitorea geográficamente la ubicación continua de cada unidad y reporta desvíos de trayecto. El agente de ETA recalcula dinámicamente los tiempos de llegada según tráfico, clima y detenciones. Su mesa operativa tiene visibilidad completa del estado de cada viaje en tiempo real.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Cómo informan los choferes novedades e incidencias por WhatsApp?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>Los choferes envían mensajes, fotos o su ubicación por WhatsApp directamente a la mesa operativa, sin instalar aplicaciones adicionales. El agente de Incidencias clasifica automáticamente los eventos mecánicos o de ruta, extrae la información relevante y alerta a su equipo para que puedan responder según la prioridad de cada caso.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Cómo se entera mi cliente del estado de su envío?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>Su mesa operativa cuenta con información actualizada en tiempo real que puede compartir con sus clientes según su política de comunicación. Los detalles específicos de notificaciones automáticas y consultas de tracking los definimos juntos durante la implementación según sus necesidades comerciales.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Se integra con mi sistema de gestión o ERP actual?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>Empliados opera de manera transversal sobre su infraestructura actual sin requerir reemplazo de sistemas existentes. Las opciones de integración con su ERP o TMS las evaluamos en la demo según su arquitectura particular. En muchos casos la integración se realiza de forma gradual durante la implementación.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿En cuánto tiempo se implementa y cómo pido una demo?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>Los tiempos de implementación dependen del alcance y complejidad de su operación, lo definimos juntos en la demo. Para solicitar una presentación, contáctenos por email o el formulario de esta página. Respondemos en menos de 24 horas hábiles con una propuesta personalizada según su volumen de viajes.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Qué pasa si una entrega falla o el cliente no está?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>El agente de Incidencias registra la novedad con evidencia fotográfica, ubicación y timestamp. Su mesa operativa recibe la alerta de inmediato y puede coordinar con el cliente o reprogramar según su protocolo. Todo queda documentado para auditoría y el chofer recibe instrucciones claras sobre cómo proceder.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Cómo se controlan los costos y la rendición de gastos de los viajes?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>El agente de Rendición audita comprobantes de peaje, combustible y viáticos mediante visión artificial sobre las fotos enviadas por los choferes. Valida los gastos contra el recorrido GPS documentado y genera el balance de cierre operativo por tramo, facilitando la conciliación contable y detectando desvíos.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Qué reportes e indicadores de la operación me da Empliados?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>La plataforma consolida métricas de puntualidad, cumplimiento de viajes, tiempos en andén y consumos en tableros para dirección logística. Los reportes específicos y KPIs que necesita su operación los configuramos durante la implementación según sus prioridades de gestión y los estándares de servicio que debe cumplir.</p>
-            </div>
-          </div>
-          
-          <div class="faq-item">
-            <button class="faq-question" aria-expanded="false">
-              <span>¿Mis datos y los de mis clientes están seguros?</span>
-              <span class="material-symbols-outlined faq-icon">expand_more</span>
-            </button>
-            <div class="faq-answer">
-              <p>La plataforma implementa estándares de seguridad ISO 27001 con registro inmutable de cada interacción, validación y cambio de estado. Los detalles técnicos de infraestructura, encriptación y cumplimiento normativo los revisamos en la demo, adaptándonos a los requisitos de auditoría y certificaciones que su operación requiera.</p>
+          <div class="faq-cta">
+            <div class="faq-cta-content">
+              <span class="material-symbols-outlined">help_outline</span>
+              <h3>¿No encontrás tu respuesta?</h3>
+              <p>Consultanos directamente y te respondemos en menos de 24 horas con información personalizada.</p>
+              <a href="#contacto" class="btn-primary">Solicitar demo</a>
             </div>
           </div>
         </div>

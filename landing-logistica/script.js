@@ -72,3 +72,37 @@ faqQuestions.forEach(question => {
     }
   });
 });
+
+// Fix for anchor navigation: reveal sections immediately when in viewport on load or hashchange
+function revealVisibleSections() {
+  const sections = document.querySelectorAll('section');
+  const viewportHeight = window.innerHeight;
+  
+  sections.forEach(section => {
+    const rect = section.getBoundingClientRect();
+    // Check if section is in viewport (with some margin)
+    if (rect.top < viewportHeight && rect.bottom > 0) {
+      section.style.opacity = '1';
+      section.style.visibility = 'visible';
+      section.style.transform = 'none';
+    }
+  });
+}
+
+// Run on page load
+window.addEventListener('load', () => {
+  revealVisibleSections();
+  
+  // Also run after a short delay to ensure everything is ready
+  setTimeout(revealVisibleSections, 100);
+});
+
+// Run on hash change (when clicking anchor links)
+window.addEventListener('hashchange', () => {
+  setTimeout(revealVisibleSections, 50);
+});
+
+// Run immediately if hash is present in URL
+if (window.location.hash) {
+  setTimeout(revealVisibleSections, 100);
+}
