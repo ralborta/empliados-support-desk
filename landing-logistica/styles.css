@@ -784,7 +784,7 @@ p {
   margin-bottom: 0.5rem;
 }
 
-.step-card h4 {
+.step-card h3 {
   font-size: 14px;
   margin-bottom: 0.5rem;
 }
@@ -841,7 +841,7 @@ p {
   font-weight: 700;
 }
 
-.agent-card h4 {
+.agent-card h3 {
   font-size: 14px;
   font-weight: 700;
   color: white;
@@ -955,7 +955,7 @@ p {
   font-size: 20px;
 }
 
-.feature-item h4 {
+.feature-item h3 {
   font-size: 16px;
   margin-bottom: 0.25rem;
 }
@@ -987,7 +987,7 @@ p {
   flex-shrink: 0;
 }
 
-.benefit-item h4 {
+.benefit-item h3 {
   font-size: 14px;
   margin-bottom: 0.125rem;
 }
@@ -1027,7 +1027,7 @@ p {
   font-size: 14px;
 }
 
-.target-item h4 {
+.target-item h3 {
   font-size: 18px;
   margin-bottom: 0.5rem;
 }
@@ -1380,6 +1380,16 @@ p {
   .faq-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.faq-heading {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  color: inherit;
 }
 
 .faq-item {

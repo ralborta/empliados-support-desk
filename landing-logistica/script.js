@@ -55,7 +55,8 @@ const faqQuestions = document.querySelectorAll('.faq-question');
 
 faqQuestions.forEach(question => {
   question.addEventListener('click', () => {
-    const faqItem = question.parentElement;
+    const faqItem = question.closest('.faq-item');
+    if (!faqItem) return;
     const isActive = faqItem.classList.contains('active');
     
     // Close all other FAQ items
